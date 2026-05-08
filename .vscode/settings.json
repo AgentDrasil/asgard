@@ -1,0 +1,6 @@
+{
+  "gopls": {
+    "ui.formatting.local": "github.com/AgentDrasil/asgard"
+  },
+  "go.formatTool": "goimports"
+}
