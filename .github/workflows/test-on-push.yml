@@ -1,0 +1,29 @@
+name: Test on Push
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  GO_VERSION: 1.26
+  GOLANGCI_LINT_VERSION: latest
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run linter
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+    - name: Run tests
+      run: |
+        go test -v ./...
