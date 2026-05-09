@@ -8,10 +8,9 @@ Based on the Product Requirements Document (`MVP-PRD.md`), the MVP development i
 * [Done] **Task 1.1: Project Setup**
   * Project already initialized with `cmd` and `lib`.
   * Continue setting up lib directory structure (`lib/db`, `lib/telegram`, `lib/aiagents`, `lib/api`).
-* [IN PROGRESS] **Task 1.2: Configuration Management**
+* [Done] **Task 1.2: Configuration Management**
   * `lib/config/config.go` already implements basic Telegram config loading.
-  * **To Do:** Add `database_path` and `agent_dir` to `Config` struct.
-  * **To Do:** Implement validation for these new fields.
+  * Add `db`, `dsn` and `agent_dir` to `Config` struct. And implement validation for these new fields.
 * **Task 1.3: Database Implementation**
   * Use **GORM** for ORM.
   * Support **pure Go SQLite** (for local/test) and **PostgreSQL** (for prod/containerized).
