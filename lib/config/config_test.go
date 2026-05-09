@@ -21,6 +21,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
+				Debug:    true,
 				DB:       "sqlite",
 				DSN:      "test.db",
 				AgentDir: "./agents",

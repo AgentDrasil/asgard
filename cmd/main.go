@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
 	"os"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/telegram"
@@ -23,19 +26,26 @@ var (
 	configPathFlag = flag.String("config", defaultConfigPath(), "path to config file")
 )
 
+func setupLogger(conf *config.Config) {
+	if conf.Debug {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
+		log.Warn().Msg("Debug mode is enabled")
+	}
+}
+
 func main() {
 	flag.Parse()
 
-	log.Printf("Start Asgard with config: %s", *configPathFlag)
-
 	conf, err := config.LoadConfig(*configPathFlag)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatal().Err(err).Msg("Failed to load config")
 	}
+
+	setupLogger(conf)
 
 	if len(conf.Telegram.AllowedSenders) == 0 {
 		if err := telegram.StartHelper(context.Background(), conf.Telegram.BotToken); err != nil {
-			log.Fatalf("Failed to start helper bot: %v", err)
+			log.Fatal().Err(err).Msg("Failed to start helper bot")
 		}
 	}
 }

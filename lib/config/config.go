@@ -21,6 +21,7 @@ func (s Telegram) validate() error {
 }
 
 type Config struct {
+	Debug    bool     `yaml:"debug"`
 	DB       string   `yaml:"db"`
 	DSN      string   `yaml:"dsn"`
 	AgentDir string   `yaml:"agent_dir"`
