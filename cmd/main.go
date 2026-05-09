@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/config"
+	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/telegram"
 )
 
@@ -47,5 +48,10 @@ func main() {
 		if err := telegram.StartHelper(context.Background(), conf.Telegram.BotToken); err != nil {
 			log.Fatal().Err(err).Msg("Failed to start helper bot")
 		}
+	}
+
+	_, err = db.NewDB(conf)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
 }
