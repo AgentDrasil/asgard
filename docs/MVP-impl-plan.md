@@ -22,7 +22,7 @@ Based on the Product Requirements Document (`MVP-PRD.md`), the MVP development i
 ## Phase 2: Agent Execution Engine
 **Goal:** Build the engine capable of loading, configuring, and executing underlying CLI agents (specifically `gemini-cli`).
 
-* **Task 2.1: Agent Configuration Management**
+* [Done] **Task 2.1: Agent Configuration Management**
   * Define Go structs for Agent `config.yaml` (`name`, `cli`, `args`, `description`, `run_dirs`, `allow_dirs`).
   * Implement the Agent Loader to scan `$AGENT_DIR/agents/` and parse all configurations.
 * **Task 2.2: CLI Execution Wrapper**
