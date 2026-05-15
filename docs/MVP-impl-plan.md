@@ -11,12 +11,12 @@ Based on the Product Requirements Document (`MVP-PRD.md`), the MVP development i
 * [Done] **Task 1.2: Configuration Management**
   * `lib/config/config.go` already implements basic Telegram config loading.
   * Add `db`, `dsn` and `agent_dir` to `Config` struct. And implement validation for these new fields.
-* **Task 1.3: Database Implementation**
+* [Done] **Task 1.3: Database Implementation**
   * Use **GORM** for ORM.
   * Support **pure Go SQLite** (for local/test) and **PostgreSQL** (for prod/containerized).
   * Implement table schema: `topic_id` (Primary Key), `agent_name`, `session_id`.
   * Create repository interfaces and CRUD methods for Topic mapping.
-* **Task 1.4: Startup Checks (CUJ 1)**
+* [Done] **Task 1.4: Startup Checks (CUJ 1)**
   * Implement the sequence of health checks on startup: Config validation, DB connection test, Telegram config presence (`AllowedSenders` check or helper bot startup), core directory (`$AGENT_DIR` and `auths`) validation.
 
 ## Phase 2: Agent Execution Engine
