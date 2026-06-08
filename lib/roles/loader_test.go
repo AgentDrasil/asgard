@@ -1,4 +1,4 @@
-package aiagents
+package roles
 
 import (
 	"os"
