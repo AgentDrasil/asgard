@@ -1,4 +1,4 @@
-package aiagents
+package roles
 
 type Agent struct {
 	Config AgentConfig

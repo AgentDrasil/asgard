@@ -1,4 +1,4 @@
-package aiagents
+package roles
 
 // ExecutionResult represents the output of an agent execution.
 type ExecutionResult struct {

@@ -1,4 +1,4 @@
-package aiagents
+package roles
 
 type AgentConfig struct {
 	Name        string   `yaml:"name"`
