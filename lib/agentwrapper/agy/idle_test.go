@@ -28,32 +28,32 @@ func TestIsIdle(t *testing.T) {
 	}{
 		{
 			name:    "fully idle",
-			payload: `{"agent_state": "idle", "background_tasks": [], "subagents": []}`,
+			payload: `{"agent_state": "idle", "task_count": 0, "subagents": []}`,
 			want:    true,
 		},
 		{
 			name:    "non-idle state",
-			payload: `{"agent_state": "thinking", "background_tasks": [], "subagents": []}`,
+			payload: `{"agent_state": "thinking", "task_count": 0, "subagents": []}`,
 			want:    false,
 		},
 		{
-			name:    "tasks not empty",
-			payload: `{"agent_state": "idle", "background_tasks": [{"name": "task1", "status": "running"}], "subagents": []}`,
+			name:    "task count greater than zero",
+			payload: `{"agent_state": "idle", "task_count": 1, "subagents": []}`,
 			want:    false,
 		},
 		{
 			name:    "subagents not idle",
-			payload: `{"agent_state": "idle", "background_tasks": [], "subagents": [{"name": "sub1", "status": "running"}]}`,
+			payload: `{"agent_state": "idle", "task_count": 0, "subagents": [{"name": "sub1", "status": "running"}]}`,
 			want:    false,
 		},
 		{
 			name:    "subagents all idle",
-			payload: `{"agent_state": "idle", "background_tasks": [], "subagents": [{"name": "sub1", "status": "idle"}]}`,
+			payload: `{"agent_state": "idle", "task_count": 0, "subagents": [{"name": "sub1", "status": "idle"}]}`,
 			want:    true,
 		},
 		{
 			name:    "case insensitive state and subagent status",
-			payload: `{"agent_state": "IDLE", "background_tasks": [], "subagents": [{"name": "sub1", "status": "IDLE"}]}`,
+			payload: `{"agent_state": "IDLE", "task_count": 0, "subagents": [{"name": "sub1", "status": "IDLE"}]}`,
 			want:    true,
 		},
 		{
