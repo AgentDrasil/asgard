@@ -1,4 +1,4 @@
-package main
+package agystatusline
 
 import (
 	"encoding/json"
@@ -173,7 +173,7 @@ func TestRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, _, err := run([]byte(tt.input))
+			got, _, err := Run([]byte(tt.input))
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -214,7 +214,7 @@ func TestRemainingColor(t *testing.T) {
 func TestPayloadSessionID(t *testing.T) {
 	t.Parallel()
 	input := `{"session_id": "test-session-123", "agent_state": "idle"}`
-	var p payload
+	var p Payload
 	err := json.Unmarshal([]byte(input), &p)
 	require.NoError(t, err)
 	assert.Equal(t, "test-session-123", p.SessionID)
