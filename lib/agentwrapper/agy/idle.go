@@ -25,12 +25,6 @@ func isIdle(sessionID string) bool {
 		return false
 	}
 
-	type backgroundTask struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
-		Index  int    `json:"index"`
-	}
-
 	type subagent struct {
 		Name   string `json:"name"`
 		Role   string `json:"role"`
@@ -38,9 +32,9 @@ func isIdle(sessionID string) bool {
 	}
 
 	type payload struct {
-		AgentState      string           `json:"agent_state"`
-		BackgroundTasks []backgroundTask `json:"background_tasks"`
-		Subagents       []subagent       `json:"subagents"`
+		AgentState string     `json:"agent_state"`
+		Subagents  []subagent `json:"subagents"`
+		TaskCount  int        `json:"task_count"`
 	}
 
 	var p payload
@@ -52,7 +46,7 @@ func isIdle(sessionID string) bool {
 		return false
 	}
 
-	if len(p.BackgroundTasks) > 0 {
+	if p.TaskCount > 0 {
 		return false
 	}
 
