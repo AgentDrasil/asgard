@@ -27,6 +27,11 @@ import (
 	"strings"
 )
 
+const (
+	k = 1024
+	m = k * k
+)
+
 // payload is the subset of the JSON document we care about.
 type payload struct {
 	SessionID       string           `json:"session_id"`
@@ -94,10 +99,10 @@ func run(data []byte) (string, payload, error) {
 
 	stateUpper := strings.ToUpper(p.AgentState)
 
-	res := fmt.Sprintf("%s | %d/%d (%s%.0f%%%s)",
+	res := fmt.Sprintf("%s | %s/%s (%s%.0f%%%s)",
 		stateUpper,
-		p.ContextWindow.TotalInputTokens,
-		p.ContextWindow.ContextWindowSize,
+		formatTokens(p.ContextWindow.TotalInputTokens),
+		formatTokens(p.ContextWindow.ContextWindowSize),
 		color,
 		p.ContextWindow.RemainingPercentage,
 		ansiReset,
@@ -106,6 +111,16 @@ func run(data []byte) (string, payload, error) {
 		res += fmt.Sprintf(" | %s", modelName)
 	}
 	return res, p, nil
+}
+
+func formatTokens(v int) string {
+	if v >= m {
+		return fmt.Sprintf("%dM", v/m)
+	}
+	if v >= k {
+		return fmt.Sprintf("%dK", v/k)
+	}
+	return fmt.Sprintf("%d", v)
 }
 
 func main() {

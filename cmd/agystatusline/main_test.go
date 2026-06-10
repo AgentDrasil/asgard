@@ -28,7 +28,7 @@ func TestRun(t *testing.T) {
 					"remaining_percentage": 91.58
 				}
 			}`,
-			wantContain: []string{"IDLE | 88244/200000 (", "92%", ansiGreen},
+			wantContain: []string{"IDLE | 86K/195K (", "92%", ansiGreen},
 		},
 		{
 			name: "thinking with medium remaining (yellow)",
@@ -40,7 +40,7 @@ func TestRun(t *testing.T) {
 					"remaining_percentage": 52.0
 				}
 			}`,
-			wantContain: []string{"THINKING | 500000/1000000 (", "52%", ansiYellow},
+			wantContain: []string{"THINKING | 488K/976K (", "52%", ansiYellow},
 		},
 		{
 			name: "working with low remaining (red)",
@@ -52,7 +52,7 @@ func TestRun(t *testing.T) {
 					"remaining_percentage": 5.5
 				}
 			}`,
-			wantContain: []string{"WORKING | 990000/1048576 (", "6%", ansiRed},
+			wantContain: []string{"WORKING | 966K/1M (", "6%", ansiRed},
 		},
 		{
 			name: "exactly 80 percent remaining (green)",
@@ -64,7 +64,7 @@ func TestRun(t *testing.T) {
 					"remaining_percentage": 80.0
 				}
 			}`,
-			wantContain: []string{"TOOL_USE | 200000/250000 (", "80%", ansiGreen},
+			wantContain: []string{"TOOL_USE | 195K/244K (", "80%", ansiGreen},
 		},
 		{
 			name: "exactly 50 percent remaining (yellow)",
@@ -76,7 +76,7 @@ func TestRun(t *testing.T) {
 					"remaining_percentage": 50.0
 				}
 			}`,
-			wantContain: []string{"INITIALIZING | 524288/1048576 (", "50%", ansiYellow},
+			wantContain: []string{"INITIALIZING | 512K/1M (", "50%", ansiYellow},
 		},
 		{
 			name: "working with background tasks",
@@ -92,7 +92,7 @@ func TestRun(t *testing.T) {
 					{"name": "test",  "status": "running", "index": 2}
 				]
 			}`,
-			wantContain: []string{"WORKING | 100000/1048576 (", "90%"},
+			wantContain: []string{"WORKING | 97K/1M (", "90%"},
 		},
 		{
 			name: "thinking with active subagents",
@@ -108,7 +108,7 @@ func TestRun(t *testing.T) {
 					{"name": "coder",    "role": "Coder",      "status": "idle"}
 				]
 			}`,
-			wantContain: []string{"THINKING | 100000/1048576 (", "90%"},
+			wantContain: []string{"THINKING | 97K/1M (", "90%"},
 		},
 		{
 			name: "idle with all subagents idle",
@@ -124,7 +124,7 @@ func TestRun(t *testing.T) {
 					{"name": "coder",    "role": "Coder",      "status": "idle"}
 				]
 			}`,
-			wantContain: []string{"IDLE | 100000/1048576 (", "90%"},
+			wantContain: []string{"IDLE | 97K/1M (", "90%"},
 		},
 		{
 			name: "idle with model display name",
@@ -140,7 +140,7 @@ func TestRun(t *testing.T) {
 					"display_name": "Gemini 1.5 Pro"
 				}
 			}`,
-			wantContain: []string{"IDLE | 100000/1048576 (", "90%", "Gemini 1.5 Pro"},
+			wantContain: []string{"IDLE | 97K/1M (", "90%", "Gemini 1.5 Pro"},
 		},
 		{
 			name: "idle with model id only",
@@ -155,7 +155,7 @@ func TestRun(t *testing.T) {
 					"id": "gemini-1.5-flash"
 				}
 			}`,
-			wantContain: []string{"IDLE | 100000/1048576 (", "90%", "gemini-1.5-flash"},
+			wantContain: []string{"IDLE | 97K/1M (", "90%", "gemini-1.5-flash"},
 		},
 		{
 			name:    "invalid JSON",
@@ -218,4 +218,33 @@ func TestPayloadSessionID(t *testing.T) {
 	err := json.Unmarshal([]byte(input), &p)
 	require.NoError(t, err)
 	assert.Equal(t, "test-session-123", p.SessionID)
+}
+
+func TestFormatTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		val  int
+		want string
+	}{
+		{0, "0"},
+		{500, "500"},
+		{1023, "1023"},
+		{1024, "1K"},
+		{1500, "1K"},
+		{88244, "86K"},
+		{200000, "195K"},
+		{524288, "512K"},
+		{1048576, "1M"},
+		{1572864, "1M"},
+		{2097152, "2M"},
+		{-5, "-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d", tt.val), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, formatTokens(tt.val))
+		})
+	}
 }
