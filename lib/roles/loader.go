@@ -49,7 +49,7 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			return nil, fmt.Errorf("failed to parse config for agent %s: %w", entry.Name(), err)
 		}
 
-		// Validation: Name in config should match directory name? 
+		// Validation: Name in config should match directory name?
 		// Or just use the name in config. Let's use the name in config.
 		if cfg.Name == "" {
 			cfg.Name = entry.Name()

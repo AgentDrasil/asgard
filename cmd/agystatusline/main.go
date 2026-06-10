@@ -15,6 +15,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -24,13 +25,21 @@ import (
 )
 
 func main() {
+	icon := flag.String("icon", "", "style of icons: nf (nerdfont) or emoji")
+	flag.Parse()
+
+	if *icon != "" && *icon != "nf" && *icon != "emoji" {
+		fmt.Fprintf(os.Stderr, "agystatusline: invalid --icon value %q. Must be 'nf', 'emoji', or empty.\n", *icon)
+		os.Exit(1)
+	}
+
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agystatusline: reading stdin: %v\n", err)
 		os.Exit(1)
 	}
 
-	line, _, err := agystatusline.Run(data)
+	line, _, err := agystatusline.Run(data, *icon)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agystatusline: %v\n", err)
 		os.Exit(1)

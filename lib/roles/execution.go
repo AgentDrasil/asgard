@@ -2,10 +2,10 @@ package roles
 
 // ExecutionResult represents the output of an agent execution.
 type ExecutionResult struct {
-	SessionID string     `json:"session_id"`
-	Response  string     `json:"response"`
-	Stats     Stats      `json:"stats"`
-	RawOutput []byte     `json:"-"`
+	SessionID string `json:"session_id"`
+	Response  string `json:"response"`
+	Stats     Stats  `json:"stats"`
+	RawOutput []byte `json:"-"`
 }
 
 // Stats contains various performance metrics.

@@ -3,7 +3,6 @@ package agystatusline
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 const (
@@ -13,12 +12,13 @@ const (
 
 // Payload is the subset of the JSON document we care about.
 type Payload struct {
-	SessionID       string           `json:"session_id"`
-	AgentState      string           `json:"agent_state"`
-	ContextWindow   ContextWindow    `json:"context_window"`
-	BackgroundTasks []BackgroundTask `json:"background_tasks"`
-	Subagents       []Subagent       `json:"subagents"`
-	Model           ModelInfo        `json:"model"`
+	SessionID     string        `json:"session_id"`
+	AgentState    string        `json:"agent_state"`
+	ContextWindow ContextWindow `json:"context_window"`
+	Subagents     []Subagent    `json:"subagents"`
+	Model         ModelInfo     `json:"model"`
+	TaskCount     int           `json:"task_count"`
+	TerminalWidth int           `json:"terminal_width"`
 }
 
 type ModelInfo struct {
@@ -30,12 +30,7 @@ type ContextWindow struct {
 	TotalInputTokens    int     `json:"total_input_tokens"`
 	ContextWindowSize   int     `json:"context_window_size"`
 	RemainingPercentage float64 `json:"remaining_percentage"`
-}
-
-type BackgroundTask struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Index  int    `json:"index"`
+	UsedPercentage      float64 `json:"used_percentage"`
 }
 
 type Subagent struct {
@@ -43,14 +38,6 @@ type Subagent struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
 }
-
-// ANSI colour helpers.
-const (
-	ansiReset  = "\033[0m"
-	ansiRed    = "\033[31m"
-	ansiYellow = "\033[33m"
-	ansiGreen  = "\033[32m"
-)
 
 func remainingColor(pct float64) string {
 	switch {
@@ -63,32 +50,30 @@ func remainingColor(pct float64) string {
 	}
 }
 
-func Run(data []byte) (string, Payload, error) {
+type iconMode int
+
+const (
+	simple iconMode = iota
+	nf
+	emoji
+)
+
+func Run(data []byte, icon string) (string, Payload, error) {
 	var p Payload
 	if err := json.Unmarshal(data, &p); err != nil {
 		return "", p, fmt.Errorf("parsing JSON: %w", err)
 	}
 
-	color := remainingColor(p.ContextWindow.RemainingPercentage)
-
-	modelName := p.Model.DisplayName
-	if modelName == "" {
-		modelName = p.Model.ID
+	var res string
+	switch icon {
+	case "nf":
+		res = renderIcon(p, nf)
+	case "emoji":
+		res = renderIcon(p, emoji)
+	default:
+		res = renderSimple(p)
 	}
 
-	stateUpper := strings.ToUpper(p.AgentState)
-
-	res := fmt.Sprintf("%s | %s/%s (%s%.0f%%%s)",
-		stateUpper,
-		formatTokens(p.ContextWindow.TotalInputTokens),
-		formatTokens(p.ContextWindow.ContextWindowSize),
-		color,
-		p.ContextWindow.RemainingPercentage,
-		ansiReset,
-	)
-	if modelName != "" {
-		res += fmt.Sprintf(" | %s", modelName)
-	}
 	return res, p, nil
 }
 
