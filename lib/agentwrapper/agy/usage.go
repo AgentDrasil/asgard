@@ -2,8 +2,15 @@
 package agy
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,18 +26,116 @@ const (
 	termRows uint16 = 50
 )
 
-// Usage launches agy in a headless terminal, sends the "/usage" command,
-// parses the output, exits cleanly, and returns the captured quota entries.
+type QuotaEntry struct {
+	RemainingFraction float64 `json:"remaining_fraction"`
+	ResetTime         string  `json:"reset_time"`
+	ResetInSeconds    int     `json:"reset_in_seconds"`
+}
+
+type StatuslineQuota struct {
+	Quota map[string]QuotaEntry `json:"quota"`
+}
+
+func fetchAvailableModels(ctx context.Context, dir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "agy", "models")
+	cmd.Dir = dir
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("running agy models: %w", err)
+	}
+	var models []string
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			models = append(models, line)
+		}
+	}
+	return models, nil
+}
+
+func getModelQuota(modelName string, quota map[string]QuotaEntry) (remaining float64, refreshDate int64) {
+	remaining = 1.0
+	refreshDate = 0
+
+	isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "gemini")
+	var q5h, qWeekly QuotaEntry
+	var has5h, hasWeekly bool
+
+	if isGemini {
+		q5h, has5h = quota["gemini-5h"]
+		qWeekly, hasWeekly = quota["gemini-weekly"]
+	} else {
+		q5h, has5h = quota["3p-5h"]
+		qWeekly, hasWeekly = quota["3p-weekly"]
+	}
+
+	if has5h && hasWeekly {
+		if q5h.RemainingFraction < qWeekly.RemainingFraction {
+			remaining = q5h.RemainingFraction
+			refreshDate = parseResetTime(q5h.ResetTime)
+		} else if qWeekly.RemainingFraction < q5h.RemainingFraction {
+			remaining = qWeekly.RemainingFraction
+			refreshDate = parseResetTime(qWeekly.ResetTime)
+		} else {
+			remaining = q5h.RemainingFraction
+			if remaining < 1.0 {
+				t5h := parseResetTime(q5h.ResetTime)
+				tWeekly := parseResetTime(qWeekly.ResetTime)
+				if t5h > 0 {
+					refreshDate = t5h
+				} else {
+					refreshDate = tWeekly
+				}
+			} else {
+				refreshDate = 0
+			}
+		}
+	} else if has5h {
+		remaining = q5h.RemainingFraction
+		if remaining < 1.0 {
+			refreshDate = parseResetTime(q5h.ResetTime)
+		}
+	} else if hasWeekly {
+		remaining = qWeekly.RemainingFraction
+		if remaining < 1.0 {
+			refreshDate = parseResetTime(qWeekly.ResetTime)
+		}
+	}
+
+	return remaining, refreshDate
+}
+
+func parseResetTime(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return 0
+	}
+	return t.Unix()
+}
+
+// Usage launches agy in a headless terminal, retrieves available models via agy models,
+// waits for the statusline JSON to report idle, and parses the quota mapping.
 //
 // The sequence performed is:
-//  1. Open a headless PTY-backed terminal (220×50).
-//  2. Launch `agy`.
-//  3. Poll the statusline JSON every 200 ms until the statusbar last line's first
+//  1. Run `agy models` to fetch the list of available models.
+//  2. Open a headless PTY-backed terminal (220×50).
+//  3. Launch `agy`.
+//  4. Poll the statusline JSON every 200 ms until the statusbar last line's first
 //     token is "idle" (or StartupDelay elapses).
-//  4. Send "/usage\r" and wait for the response to render.
-//  5. Press Esc, then Ctrl-D twice to exit.
-//  6. Parse and return the scrollback as []agents.ModelUsage.
+//  5. Read the statusline JSON and parse the model quota info.
+//  6. Press Esc, then Ctrl-D twice to exit cleanly.
+//  7. Map each model to its corresponding quota group (gemini or 3p) and return.
 func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.ModelUsage, error) {
+	models, err := fetchAvailableModels(ctx, opts.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("fetching available models: %w", err)
+	}
+
 	t := term.NewTerm(termCols, termRows)
 	defer t.Close()
 
@@ -62,28 +167,33 @@ func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.
 		log.Debug().Msg("agy/usage: state=idle")
 	}
 
-	// Send the /usage command followed by Enter.
-	if err := t.SendString("/usage"); err != nil {
-		return nil, handleErr(fmt.Errorf("sending /usage: %w", err))
+	filePath := filepath.Join("/tmp/agystatusline", awSessionID+".json")
+	var quota map[string]QuotaEntry
+	jsonData, err := os.ReadFile(filePath)
+	if err == nil {
+		var sq StatuslineQuota
+		if err := json.Unmarshal(jsonData, &sq); err == nil {
+			quota = sq.Quota
+		} else {
+			log.Warn().Err(err).Msg("failed to parse statusline JSON for quota")
+		}
+	} else {
+		log.Warn().Err(err).Msg("failed to read statusline JSON for quota")
 	}
-	if err := t.SendKeys(term.KeyEnter); err != nil {
-		return nil, handleErr(fmt.Errorf("sending Enter: %w", err))
-	}
-
-	// Wait for the response to render.
-	select {
-	case <-time.After(opts.ResponseDelayOrDefault()):
-	case <-ctx.Done():
-		return nil, handleErr(ctx.Err())
-	case err := <-done:
-		return nil, fmt.Errorf("agy exited unexpectedly waiting for /usage response: %w", err)
-	}
-
-	lines := t.Scrollback()
-	log.Debug().Msg("agy/usage: got usage")
 
 	// Exit: Esc, then Ctrl-D twice.
 	CleanExit(t, done)
 
-	return parseUsage(lines, time.Now())
+	var result []agentwrapper.ModelUsage
+	for _, mName := range models {
+		rem, ref := getModelQuota(mName, quota)
+		result = append(result, agentwrapper.ModelUsage{
+			Model:       mName,
+			Remaining:   rem,
+			RefreshDate: ref,
+		})
+	}
+
+	return result, nil
 }
+
