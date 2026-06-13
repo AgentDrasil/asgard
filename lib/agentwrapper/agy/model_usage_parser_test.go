@@ -210,3 +210,65 @@ func TestParseUsage_RemainingFraction(t *testing.T) {
 		})
 	}
 }
+
+func TestGetModelQuota(t *testing.T) {
+	t.Parallel()
+
+	quota := map[string]QuotaEntry{
+		"gemini-5h": {
+			RemainingFraction: 0.9,
+			ResetTime:         "2026-06-13T21:00:00Z",
+			ResetInSeconds:    3600,
+		},
+		"gemini-weekly": {
+			RemainingFraction: 0.95,
+			ResetTime:         "2026-06-20T21:00:00Z",
+			ResetInSeconds:    608400,
+		},
+		"3p-5h": {
+			RemainingFraction: 0.8,
+			ResetTime:         "2026-06-13T22:00:00Z",
+			ResetInSeconds:    7200,
+		},
+		"3p-weekly": {
+			RemainingFraction: 0.7,
+			ResetTime:         "2026-06-20T22:00:00Z",
+			ResetInSeconds:    612000,
+		},
+	}
+
+	tests := []struct {
+		modelName     string
+		wantRemaining float64
+		wantReset     int64
+	}{
+		{
+			modelName:     "Gemini 3.5 Flash (Low)",
+			wantRemaining: 0.9,
+			wantReset:     parseResetTime("2026-06-13T21:00:00Z"),
+		},
+		{
+			modelName:     "Claude Sonnet 4.6 (Thinking)",
+			wantRemaining: 0.7,
+			wantReset:     parseResetTime("2026-06-20T22:00:00Z"),
+		},
+		{
+			modelName:     "GPT-OSS 120B (Medium)",
+			wantRemaining: 0.7,
+			wantReset:     parseResetTime("2026-06-20T22:00:00Z"),
+		},
+		{
+			modelName:     "Unknown Model",
+			wantRemaining: 0.7,
+			wantReset:     parseResetTime("2026-06-20T22:00:00Z"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelName, func(t *testing.T) {
+			rem, ref := getModelQuota(tt.modelName, quota)
+			assert.InDelta(t, tt.wantRemaining, rem, 1e-9)
+			assert.Equal(t, tt.wantReset, ref)
+		})
+	}
+}
