@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 	agy "github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
 )
 
@@ -62,11 +62,11 @@ var agyCmd = &cobra.Command{
 		}
 
 		if agyUsage {
-			entries, err := agy.Usage(ctx, agentwrapper.UsageOptions{Dir: dir})
+			entries, err := agy.Usage(ctx, types.UsageOptions{Dir: dir})
 			if err != nil {
 				return fmt.Errorf("fetching usage: %w", err)
 			}
-			var filtered []agentwrapper.ModelUsage
+			var filtered []types.ModelUsage
 			for _, entry := range entries {
 				if GlobalConfig.IsModelAllowed("agy", entry.Model) {
 					filtered = append(filtered, entry)
@@ -86,7 +86,7 @@ var agyCmd = &cobra.Command{
 			}
 		}
 
-		result, err := agy.Prompt(ctx, prompt, agentwrapper.PromptOptions{
+		result, err := agy.Prompt(ctx, prompt, types.PromptOptions{
 			Dir:       dir,
 			SessionID: agySession,
 			Model:     agyModel,

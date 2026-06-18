@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 
 	"github.com/AgentDrasil/asgard/lib/term"
 )
@@ -36,9 +36,9 @@ type StatuslineQuota struct {
 	Quota map[string]QuotaEntry `json:"quota"`
 }
 
-func fetchAvailableModels(ctx context.Context, dir string) ([]string, error) {
+func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "agy", "models")
-	cmd.Dir = dir
+	cmd.Dir = opts.Dir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -130,8 +130,8 @@ func parseResetTime(s string) int64 {
 //  5. Read the statusline JSON and parse the model quota info.
 //  6. Press Esc, then Ctrl-D twice to exit cleanly.
 //  7. Map each model to its corresponding quota group (gemini or 3p) and return.
-func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.ModelUsage, error) {
-	models, err := fetchAvailableModels(ctx, opts.Dir)
+func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+	models, err := Models(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("fetching available models: %w", err)
 	}
@@ -184,10 +184,10 @@ func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.
 	// Exit: Esc, then Ctrl-D twice.
 	CleanExit(t, done)
 
-	var result []agentwrapper.ModelUsage
+	var result []types.ModelUsage
 	for _, mName := range models {
 		rem, ref := getModelQuota(mName, quota)
-		result = append(result, agentwrapper.ModelUsage{
+		result = append(result, types.ModelUsage{
 			Model:       mName,
 			Remaining:   rem,
 			RefreshDate: ref,

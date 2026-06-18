@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 var (
@@ -58,10 +58,10 @@ func parseDuration(s string) (time.Duration, error) {
 //	<Model Name>
 //	███ … 100%
 //	Quota available
-func parseUsage(lines []string, now time.Time) ([]agentwrapper.ModelUsage, error) {
+func parseUsage(lines []string, now time.Time) ([]types.ModelUsage, error) {
 	blocks := splitBlocks(lines)
 
-	var result []agentwrapper.ModelUsage
+	var result []types.ModelUsage
 	for _, block := range blocks {
 		entry, ok := parseBlock(block, now)
 		if !ok {
@@ -96,15 +96,15 @@ func splitBlocks(lines []string) [][]string {
 // parseBlock attempts to extract a ModelUsage from a single line-block.
 // Returns (entry, true) on success or (zero, false) if the block doesn't look
 // like a usage entry.
-func parseBlock(block []string, now time.Time) (agentwrapper.ModelUsage, bool) {
+func parseBlock(block []string, now time.Time) (types.ModelUsage, bool) {
 	if len(block) < 2 {
-		return agentwrapper.ModelUsage{}, false
+		return types.ModelUsage{}, false
 	}
 
 	// The first line is the model name; it must not contain a progress bar.
 	model := block[0]
 	if reBarLine.MatchString(model) {
-		return agentwrapper.ModelUsage{}, false
+		return types.ModelUsage{}, false
 	}
 
 	// Find the progress-bar line and extract the percentage.
@@ -125,7 +125,7 @@ func parseBlock(block []string, now time.Time) (agentwrapper.ModelUsage, bool) {
 		break
 	}
 	if remaining == -1.0 {
-		return agentwrapper.ModelUsage{}, false
+		return types.ModelUsage{}, false
 	}
 
 	// Find the status line for the refresh time.
@@ -145,7 +145,7 @@ func parseBlock(block []string, now time.Time) (agentwrapper.ModelUsage, bool) {
 		}
 	}
 
-	return agentwrapper.ModelUsage{
+	return types.ModelUsage{
 		Model:       model,
 		Remaining:   remaining,
 		RefreshDate: refreshDate,

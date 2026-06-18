@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 // usageOutput mirrors the real /usage scrollback, using actual Unicode
@@ -88,7 +88,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
 		name        string
 		input       string
 		wantLen     int
-		wantEntries []agentwrapper.ModelUsage
+		wantEntries []types.ModelUsage
 	}{
 		{
 			name: "single fully available model",
@@ -98,7 +98,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
   Quota available
 `,
 			wantLen: 1,
-			wantEntries: []agentwrapper.ModelUsage{
+			wantEntries: []types.ModelUsage{
 				{Model: "My Model A", Remaining: 1.0},
 			},
 		},
@@ -110,7 +110,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
   80% remaining · Refreshes in 2h 5m
 `,
 			wantLen: 1,
-			wantEntries: []agentwrapper.ModelUsage{
+			wantEntries: []types.ModelUsage{
 				{Model: "My Model B", Remaining: 0.8, RefreshDate: baseTime.Add(2*time.Hour + 5*time.Minute).Unix()},
 			},
 		},
@@ -122,7 +122,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
   0% remaining · Refreshes in 59m
 `,
 			wantLen: 1,
-			wantEntries: []agentwrapper.ModelUsage{
+			wantEntries: []types.ModelUsage{
 				{Model: "Exhausted Model", Remaining: 0.0, RefreshDate: baseTime.Add(59 * time.Minute).Unix()},
 			},
 		},
@@ -138,7 +138,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
   50% remaining · Refreshes in 30m
 `,
 			wantLen: 2,
-			wantEntries: []agentwrapper.ModelUsage{
+			wantEntries: []types.ModelUsage{
 				{Model: "Full Model", Remaining: 1.0},
 				{Model: "Half Model", Remaining: 0.5, RefreshDate: baseTime.Add(30 * time.Minute).Unix()},
 			},
@@ -159,7 +159,7 @@ func TestParseUsage_TableDriven(t *testing.T) {
   Quota available
 `,
 			wantLen: 1,
-			wantEntries: []agentwrapper.ModelUsage{
+			wantEntries: []types.ModelUsage{
 				{Model: "Model With Bar", Remaining: 1.0},
 			},
 		},

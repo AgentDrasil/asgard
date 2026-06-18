@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 type opencodeLine struct {
@@ -26,7 +26,7 @@ type opencodeLine struct {
 }
 
 // Prompt sends a prompt to opencode and parses its JSONL output.
-func Prompt(ctx context.Context, prompt string, opts agentwrapper.PromptOptions) (*agentwrapper.PromptResult, error) {
+func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	argv := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	if opts.SessionID != "" {
 		argv = append(argv, "--session", opts.SessionID)
@@ -110,7 +110,7 @@ func Prompt(ctx context.Context, prompt string, opts agentwrapper.PromptOptions)
 		}
 	}
 
-	return &agentwrapper.PromptResult{
+	return &types.PromptResult{
 		SessionID:   sessionID,
 		InputTokens: inputTokens,
 		MaxTokens:   maxTokens,

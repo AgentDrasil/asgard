@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 
 	"github.com/AgentDrasil/asgard/lib/term"
 )
@@ -34,7 +34,7 @@ import (
 //  7. Exit agy cleanly (Esc, Ctrl-D, Ctrl-D).
 //  8. Read the last line of ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl.
 //  9. Parse the statusline for token metadata and return a PromptResult.
-func Prompt(ctx context.Context, prompt string, opts agentwrapper.PromptOptions) (*agentwrapper.PromptResult, error) {
+func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	sessionID := opts.SessionID
 	isNewSession := sessionID == ""
 
@@ -141,7 +141,7 @@ func Prompt(ctx context.Context, prompt string, opts agentwrapper.PromptOptions)
 		lastContent = ""
 	}
 
-	return &agentwrapper.PromptResult{
+	return &types.PromptResult{
 		SessionID:   sessionID,
 		InputTokens: inputTokens,
 		MaxTokens:   maxTokens,

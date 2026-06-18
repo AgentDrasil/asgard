@@ -14,7 +14,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 type zaiQuotaResponse struct {
@@ -64,8 +64,8 @@ func loadZaiToken() string {
 	return auth.ZaiCodingPlan.Key
 }
 
-// Usage runs "opencode models", parses the list of models, and returns a ModelUsage list with Remaining = 1.0.
-func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.ModelUsage, error) {
+// Models runs "opencode models", parses the list of models, and returns them.
+func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "opencode", "models")
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
@@ -77,15 +77,29 @@ func Usage(ctx context.Context, opts agentwrapper.UsageOptions) ([]agentwrapper.
 		return nil, fmt.Errorf("running opencode models: %w", err)
 	}
 
-	var result []agentwrapper.ModelUsage
+	var result []string
 	lines := strings.Split(out.String(), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		result = append(result, agentwrapper.ModelUsage{
-			Model:     trimmed,
+		result = append(result, trimmed)
+	}
+	return result, nil
+}
+
+// Usage runs "opencode models", parses the list of models, and returns a ModelUsage list with Remaining = 1.0.
+func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+	models, err := Models(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []types.ModelUsage
+	for _, m := range models {
+		result = append(result, types.ModelUsage{
+			Model:     m,
 			Remaining: 1.0,
 		})
 	}

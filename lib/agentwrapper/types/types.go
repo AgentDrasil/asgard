@@ -1,6 +1,16 @@
-package agentwrapper
+package types
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// CLIClient defines the interface that all CLI agents must implement.
+type CLIClient interface {
+	Usage(ctx context.Context, opts UsageOptions) ([]ModelUsage, error)
+	Models(ctx context.Context, opts UsageOptions) ([]string, error)
+	Prompt(ctx context.Context, prompt string, opts PromptOptions) (*PromptResult, error)
+}
 
 // ModelUsage represents the quota status for a single model.
 type ModelUsage struct {

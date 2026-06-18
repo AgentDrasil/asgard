@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 func skipIfNotE2E(t *testing.T) {
@@ -27,7 +27,7 @@ func TestCompatibility_Usage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	usageList, err := Usage(ctx, agentwrapper.UsageOptions{Dir: tempDir})
+	usageList, err := Usage(ctx, types.UsageOptions{Dir: tempDir})
 	require.NoError(t, err)
 	assert.NotEmpty(t, usageList)
 }
@@ -39,7 +39,7 @@ func TestCompatibility_Prompt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	promptResult, err := Prompt(ctx, "hello, respond back with exactly 'hello'", agentwrapper.PromptOptions{
+	promptResult, err := Prompt(ctx, "hello, respond back with exactly 'hello'", types.PromptOptions{
 		Dir: tempDir,
 	})
 	require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestCompatibility_PromptWithModel(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Fetch models first
-	usageList, err := Usage(ctx, agentwrapper.UsageOptions{Dir: tempDir})
+	usageList, err := Usage(ctx, types.UsageOptions{Dir: tempDir})
 	require.NoError(t, err)
 	require.NotEmpty(t, usageList)
 
@@ -68,7 +68,7 @@ func TestCompatibility_PromptWithModel(t *testing.T) {
 	}
 	require.NotEmpty(t, modelToUse, "No model found in usage to test prompt with model")
 
-	promptWithModelResult, err := Prompt(ctx, "hello, respond back with 'world'", agentwrapper.PromptOptions{
+	promptWithModelResult, err := Prompt(ctx, "hello, respond back with 'world'", types.PromptOptions{
 		Dir:   tempDir,
 		Model: modelToUse,
 	})
@@ -85,7 +85,7 @@ func TestCompatibility_PromptResume(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// 1. Start a session by prompting the agent to remember a word
-	promptResult, err := Prompt(ctx, "remember this word: banana", agentwrapper.PromptOptions{
+	promptResult, err := Prompt(ctx, "remember this word: banana", types.PromptOptions{
 		Dir: tempDir,
 	})
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestCompatibility_PromptResume(t *testing.T) {
 	require.NotEmpty(t, promptResult.LastContent)
 
 	// 2. Resume session by passing the SessionID and asking what the word was
-	resumeResult, err := Prompt(ctx, "what word did I ask you to remember?", agentwrapper.PromptOptions{
+	resumeResult, err := Prompt(ctx, "what word did I ask you to remember?", types.PromptOptions{
 		Dir:       tempDir,
 		SessionID: promptResult.SessionID,
 	})
