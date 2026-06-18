@@ -55,6 +55,10 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			cfg.Name = entry.Name()
 		}
 
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid config for agent %s: %w", entry.Name(), err)
+		}
+
 		agents = append(agents, &Agent{
 			Config: cfg,
 			Path:   agentPath,
