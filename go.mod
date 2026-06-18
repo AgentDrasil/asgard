@@ -6,7 +6,6 @@ require github.com/goccy/go-yaml v1.19.2
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-telegram/bot v1.21.0
 	github.com/google/uuid v1.6.0
 	github.com/libtnb/sqlite v1.1.2
 	github.com/rcarmo/go-te v0.1.0

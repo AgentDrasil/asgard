@@ -25,9 +25,6 @@ func TestConfig_Validate(t *testing.T) {
 				DB:       "sqlite",
 				DSN:      "test.db",
 				AgentDir: "./agents",
-				Telegram: Telegram{
-					BotToken: "token",
-				},
 			},
 			wantErr: false,
 		},
@@ -37,9 +34,6 @@ func TestConfig_Validate(t *testing.T) {
 				DB:       "mysql",
 				DSN:      "test.db",
 				AgentDir: "./agents",
-				Telegram: Telegram{
-					BotToken: "token",
-				},
 			},
 			wantErr: true,
 			errMsg:  "invalid db: mysql",
@@ -49,9 +43,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: Config{
 				DSN:      "test.db",
 				AgentDir: "./agents",
-				Telegram: Telegram{
-					BotToken: "token",
-				},
 			},
 			wantErr: true,
 			errMsg:  "invalid db: , must be 'pg' or 'sqlite'",
@@ -61,9 +52,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: Config{
 				DB:       "pg",
 				AgentDir: "./agents",
-				Telegram: Telegram{
-					BotToken: "token",
-				},
 			},
 			wantErr: true,
 			errMsg:  "missing dsn",
@@ -73,23 +61,9 @@ func TestConfig_Validate(t *testing.T) {
 			config: Config{
 				DB:  "sqlite",
 				DSN: "test.db",
-				Telegram: Telegram{
-					BotToken: "token",
-				},
 			},
 			wantErr: true,
 			errMsg:  "missing agent_dir",
-		},
-		{
-			name: "missing bot_token",
-			config: Config{
-				DB:       "sqlite",
-				DSN:      "test.db",
-				AgentDir: "./agents",
-				Telegram: Telegram{},
-			},
-			wantErr: true,
-			errMsg:  "missing bot_token",
 		},
 	}
 

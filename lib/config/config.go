@@ -7,25 +7,11 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-type Telegram struct {
-	BotToken       string `yaml:"bot_token"`
-	AllowedSenders []int  `yaml:"allowed_senders"`
-}
-
-func (s Telegram) validate() error {
-	if s.BotToken == "" {
-		return fmt.Errorf("missing bot_token")
-	}
-
-	return nil
-}
-
 type Config struct {
 	Debug    bool     `yaml:"debug"`
 	DB       string   `yaml:"db"`
 	DSN      string   `yaml:"dsn"`
 	AgentDir string   `yaml:"agent_dir"`
-	Telegram Telegram `yaml:"telegram"`
 }
 
 func (c Config) validate() error {
@@ -37,9 +23,6 @@ func (c Config) validate() error {
 	}
 	if c.AgentDir == "" {
 		return fmt.Errorf("missing agent_dir")
-	}
-	if err := c.Telegram.validate(); err != nil {
-		return err
 	}
 
 	return nil

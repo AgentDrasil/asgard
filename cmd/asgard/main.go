@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
 	"time"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
-	"github.com/AgentDrasil/asgard/lib/telegram"
 )
 
 func defaultConfigPath() string {
@@ -43,12 +41,6 @@ func main() {
 	}
 
 	setupLogger(conf)
-
-	if len(conf.Telegram.AllowedSenders) == 0 {
-		if err := telegram.StartHelper(context.Background(), conf.Telegram.BotToken); err != nil {
-			log.Fatal().Err(err).Msg("Failed to start helper bot")
-		}
-	}
 
 	_, err = db.NewDB(conf)
 	if err != nil {
