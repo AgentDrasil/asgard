@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/goccy/go-yaml"
 )
@@ -15,7 +16,7 @@ type Config struct {
 	Port     int      `yaml:"port"`
 }
 
-func (c Config) validate() error {
+func (c *Config) validate() error {
 	if c.DB != "pg" && c.DB != "sqlite" {
 		return fmt.Errorf("invalid db: %s, must be 'pg' or 'sqlite'", c.DB)
 	}
@@ -25,6 +26,12 @@ func (c Config) validate() error {
 	if c.AgentDir == "" {
 		return fmt.Errorf("missing agent_dir")
 	}
+
+	absDir, err := filepath.Abs(c.AgentDir)
+	if err != nil {
+		return fmt.Errorf("failed to make agent_dir absolute: %w", err)
+	}
+	c.AgentDir = absDir
 
 	return nil
 }

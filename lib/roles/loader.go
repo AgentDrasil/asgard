@@ -20,10 +20,22 @@ func NewLoader(agentsDir string) *Loader {
 
 // LoadAll scans the AgentsDir/agents/ directory for agent configurations.
 func (l *Loader) LoadAll() ([]*Agent, error) {
+	return l.loadAll(false)
+}
+
+func (l *Loader) loadAll(alreadyInitialized bool) ([]*Agent, error) {
 	agentsPath := filepath.Join(l.AgentsDir, "agents")
 	entries, err := os.ReadDir(agentsPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read agents directory: %w", err)
+		if os.IsNotExist(err) && !alreadyInitialized {
+			if err := l.initializeDefaultRolesIfMissingAgentFather(l.AgentsDir); err != nil {
+				return nil, fmt.Errorf("failed to initialize default roles: %w", err)
+			}
+			return l.loadAll(true)
+		}
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read agents directory: %w", err)
+		}
 	}
 
 	var agents []*Agent
@@ -63,6 +75,21 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			Config: cfg,
 			Path:   agentPath,
 		})
+	}
+
+	hasAgentFather := false
+	for _, a := range agents {
+		if a.Config.ID == "agentfather" {
+			hasAgentFather = true
+			break
+		}
+	}
+
+	if !hasAgentFather && !alreadyInitialized {
+		if err := l.initializeDefaultRolesIfMissingAgentFather(l.AgentsDir); err != nil {
+			return nil, fmt.Errorf("failed to initialize default roles: %w", err)
+		}
+		return l.loadAll(true)
 	}
 
 	return agents, nil

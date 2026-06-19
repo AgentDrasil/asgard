@@ -36,7 +36,7 @@ func (m *mockClient) Prompt(ctx context.Context, prompt string, opts types.Promp
 func TestLoader_LoadAll(t *testing.T) {
 	// Setup mock clients to make tests independent of installed CLIs
 	mockClients := map[string]types.CLIClient{
-		"agy":      &mockClient{models: []string{"gemini-2.5-flash"}},
+		"agy":      &mockClient{models: []string{"gemini-2.5-flash", "Gemini 3.5 Flash (Low)"}},
 		"opencode": &mockClient{models: []string{"deepseek-chat"}},
 	}
 	agentwrapper.SetClients(mockClients)
@@ -119,7 +119,17 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Len(t, agents, len(tests))
+		assert.Len(t, agents, len(tests)+1)
+
+		// Assert agentfather is present
+		var hasAgentFather bool
+		for _, a := range agents {
+			if a.Config.ID == "agentfather" {
+				hasAgentFather = true
+				break
+			}
+		}
+		assert.True(t, hasAgentFather, "agentfather should be auto-initialized and found")
 
 		for _, tt := range tests {
 			var found *Agent
@@ -149,7 +159,8 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Empty(t, agents)
+		assert.Len(t, agents, 1)
+		assert.Equal(t, "agentfather", agents[0].Config.ID)
 	})
 
 	t.Run("skip directories without config.yaml", func(t *testing.T) {
@@ -167,7 +178,24 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Empty(t, agents)
+		assert.Len(t, agents, 1)
+		assert.Equal(t, "agentfather", agents[0].Config.ID)
+	})
+
+	t.Run("auto-initialize when directory does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+
+		loader := NewLoader(tmpDir)
+		agents, err := loader.LoadAll()
+
+		require.NoError(t, err)
+		assert.Len(t, agents, 1)
+		assert.Equal(t, "agentfather", agents[0].Config.ID)
+
+		configPath := filepath.Join(tmpDir, "agents", "agentfather", "config.yaml")
+		assert.FileExists(t, configPath)
 	})
 }
 
@@ -289,6 +317,49 @@ func TestAgentConfig_Validate(t *testing.T) {
 				Description: "Test Agent 1",
 				CLI: []CLITarget{
 					{CLI: "agy", Model: ""},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "relative run directory",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"relative/path"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "relative mount readonly directory",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				MountDirs: MountConfig{
+					ReadOnly: []string{"relative/path"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "relative mount readwrite directory",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				MountDirs: MountConfig{
+					ReadWrite: []string{"relative/path"},
 				},
 			},
 			wantErr: true,

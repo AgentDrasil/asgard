@@ -78,6 +78,7 @@ func TestConfig_Validate(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+			assert.True(t, filepath.IsAbs(tt.config.AgentDir))
 		})
 	}
 }

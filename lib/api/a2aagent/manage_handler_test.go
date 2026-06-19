@@ -38,6 +38,7 @@ func (m *mockClient) Prompt(ctx context.Context, prompt string, opts types.Promp
 func TestServerReload(t *testing.T) {
 	// Setup mock clients to make tests independent of installed CLIs
 	mockClients := map[string]types.CLIClient{
+		"agy":      &mockClient{models: []string{"Gemini 3.5 Flash (Low)"}},
 		"opencode": &mockClient{models: []string{"gemini-2.5-flash"}},
 	}
 	agentwrapper.SetClients(mockClients)
@@ -65,7 +66,9 @@ func TestServerReload(t *testing.T) {
 	// Create Server
 	srv, err := New(conf)
 	assert.NoError(t, err)
-	assert.Len(t, srv.agents, 0)
+	// Server starts with 1 agent: agentfather (auto-initialized)
+	assert.Len(t, srv.agents, 1)
+	assert.Equal(t, "agentfather", srv.agents[0].Config.ID)
 
 	// Create a new agent configuration file dynamically
 	agentDir := filepath.Join(tmpDir, "agents", "my-agent")
@@ -91,9 +94,10 @@ cli:
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"status":"success"`)
 
-	// Verify that the new agent is loaded
+	// Verify that the new agent is loaded (total of 2 agents: agentfather + my-agent)
 	srv.mu.RLock()
 	defer srv.mu.RUnlock()
-	assert.Len(t, srv.agents, 1)
-	assert.Equal(t, "My Agent", srv.agents[0].Config.Name)
+	assert.Len(t, srv.agents, 2)
+	assert.Equal(t, "agentfather", srv.agents[0].Config.ID)
+	assert.Equal(t, "My Agent", srv.agents[1].Config.Name)
 }

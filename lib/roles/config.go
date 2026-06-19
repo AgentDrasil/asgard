@@ -2,6 +2,7 @@ package roles
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
@@ -81,6 +82,24 @@ func (cfg *AgentConfig) Validate() error {
 			if !modelSupported {
 				return fmt.Errorf("model %q is not supported by cli %q", target.Model, target.CLI)
 			}
+		}
+	}
+
+	for _, dir := range cfg.RunDirs {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("run directory must be an absolute path: %q", dir)
+		}
+	}
+
+	for _, dir := range cfg.MountDirs.ReadOnly {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("mount readonly directory must be an absolute path: %q", dir)
+		}
+	}
+
+	for _, dir := range cfg.MountDirs.ReadWrite {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("mount readwrite directory must be an absolute path: %q", dir)
 		}
 	}
 
