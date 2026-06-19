@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/lib/api/a2aagent"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 )
@@ -45,5 +46,14 @@ func main() {
 	_, err = db.NewDB(conf)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+
+	srv, err := a2aagent.New(conf)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize agents server")
+	}
+
+	if err := srv.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start A2A HTTP server")
 	}
 }

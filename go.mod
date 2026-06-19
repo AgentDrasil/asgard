@@ -5,6 +5,7 @@ go 1.26.4
 require github.com/goccy/go-yaml v1.19.2
 
 require (
+	github.com/a2aproject/a2a-go/v2 v2.3.1
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/libtnb/sqlite v1.1.2

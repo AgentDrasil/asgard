@@ -12,6 +12,7 @@ type Config struct {
 	DB       string   `yaml:"db"`
 	DSN      string   `yaml:"dsn"`
 	AgentDir string   `yaml:"agent_dir"`
+	Port     int      `yaml:"port"`
 }
 
 func (c Config) validate() error {
@@ -62,6 +63,10 @@ func LoadConfig(path string) (*Config, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
+	}
+
+	if cfg.Port <= 0 {
+		cfg.Port = 8080
 	}
 
 	if err := cfg.verifyDirs(); err != nil {
