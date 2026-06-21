@@ -54,8 +54,6 @@ func TestServerReload(t *testing.T) {
 	// Create subdirectories for loader verification
 	err = os.MkdirAll(filepath.Join(tmpDir, "agents"), 0755)
 	assert.NoError(t, err)
-	err = os.MkdirAll(filepath.Join(tmpDir, "auths"), 0755)
-	assert.NoError(t, err)
 
 	// Set up config
 	conf := &config.Config{

@@ -108,24 +108,11 @@ func TestConfig_VerifyDirs(t *testing.T) {
 		assert.ErrorContains(t, err, "directory verification failed")
 	})
 
-	t.Run("agents subdir exists but auths missing", func(t *testing.T) {
+	t.Run("required dirs exist", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		agentDir := filepath.Join(tempDir, "agent_root")
 		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
-
-		cfg := Config{DB: "sqlite", AgentDir: agentDir}
-		err := cfg.verifyDirs()
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "directory verification failed")
-	})
-
-	t.Run("all dirs exist", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		agentDir := filepath.Join(tempDir, "agent_root")
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "auths"), 0755))
 
 		cfg := Config{DB: "sqlite", AgentDir: agentDir}
 		require.NoError(t, cfg.verifyDirs())

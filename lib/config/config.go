@@ -40,7 +40,6 @@ func (c Config) verifyDirs() error {
 	dirs := []string{
 		c.AgentDir,
 		fmt.Sprintf("%s/agents", c.AgentDir),
-		fmt.Sprintf("%s/auths", c.AgentDir),
 	}
 
 	for _, d := range dirs {
