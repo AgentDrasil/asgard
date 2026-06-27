@@ -1,0 +1,12 @@
+services:
+  asgard:
+    container_name: asgard
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    volumes:
+      - ./tmp/docker/home:/home/user
+    privileged: true
+    ports:
+      - "8080:8080"
