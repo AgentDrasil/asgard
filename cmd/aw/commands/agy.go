@@ -12,8 +12,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 	agy "github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 	agySession          string
 	agyUsage            bool
 	agyModel            string
-	supportedAgyVersion = "1.0.9"
+	supportedAgyVersion = "1.0.13"
 )
 
 var agyCmd = &cobra.Command{

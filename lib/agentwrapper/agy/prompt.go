@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +34,22 @@ import (
 //  8. Read the last line of ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl.
 //  9. Parse the statusline for token metadata and return a PromptResult.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
+	runDir := opts.Dir
+	if runDir == "" {
+		var err error
+		runDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("getting current working directory: %w", err)
+		}
+	}
+	trusted, err := isWorkspaceTrusted(runDir)
+	if err != nil {
+		return nil, fmt.Errorf("checking trusted workspaces: %w", err)
+	}
+	if !trusted {
+		return nil, fmt.Errorf("workspace directory %q is not trusted in ~/.gemini/antigravity-cli/settings.json", runDir)
+	}
+
 	sessionID := opts.SessionID
 	isNewSession := sessionID == ""
 
@@ -57,7 +72,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		awSessionID = uuid.NewString()
 	}
 
-	done, err := t.RunCommandInDir(context.Background(), argv, opts.Dir, []string{"AW_SESSION_ID=" + awSessionID})
+	done, err := t.RunCommandInDir(context.Background(), argv, runDir, []string{"AW_SESSION_ID=" + awSessionID})
 	if err != nil {
 		return nil, fmt.Errorf("launching agy: %w", err)
 	}
@@ -118,20 +133,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	// ── exit agy cleanly ─────────────────────────────────────────────────────
 	CleanExit(t, done)
 
-	// ── if new session, extract session ID from scrollback after exit ───────
-	if isNewSession {
-		postExitLines := t.Scrollback()
-		foundID := extractSessionID(postExitLines)
-		if foundID != "" {
-			sessionID = foundID
-			log.Debug().Str("extracted_session_id", sessionID).Msg("agy/prompt: new session ID identified")
-		} else {
-			log.Warn().Msg("agy/prompt: could not find session ID in exit scrollback")
-		}
-	}
-
 	// ── parse statusline for token metadata ───────────────────────────────────
-	inputTokens, maxTokens, remaining := parseStatusLineFromSession(awSessionID)
+	parsedSessionID, inputTokens, maxTokens, remaining := parseStatusLineFromSession(awSessionID)
+	if parsedSessionID != "" {
+		sessionID = parsedSessionID
+	}
 
 	// ── read the last transcript line ─────────────────────────────────────────
 	lastContent, err := readLastTranscriptContent(sessionID)
@@ -152,12 +158,13 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 
 // transcriptLine is the minimal shape we need from each JSONL line.
 type transcriptLine struct {
+	Type    string `json:"type"`
 	Content string `json:"content"`
 }
 
 // readLastTranscriptContent reads the last line of
 // ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl
-// and returns the "content" field.
+// that is not of type CHECKPOINT, and returns its "content" field.
 func readLastTranscriptContent(sessionID string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -172,43 +179,58 @@ func readLastTranscriptContent(sessionID string) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	var lastLine string
+	var lastContent string
 	scanner := bufio.NewScanner(f)
 	// Use a large buffer for potentially long lines.
 	buf := make([]byte, 4*1024*1024)
 	scanner.Buffer(buf, len(buf))
 	for scanner.Scan() {
-		if l := scanner.Text(); strings.TrimSpace(l) != "" {
-			lastLine = l
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry transcriptLine
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return "", fmt.Errorf("parsing transcript JSON: %w", err)
+		}
+		if entry.Type != "CHECKPOINT" {
+			lastContent = entry.Content
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("reading transcript: %w", err)
 	}
-	if lastLine == "" {
-		return "", nil
-	}
-
-	var entry transcriptLine
-	if err := json.Unmarshal([]byte(lastLine), &entry); err != nil {
-		return "", fmt.Errorf("parsing transcript JSON: %w", err)
-	}
-	return entry.Content, nil
+	return lastContent, nil
 }
 
-var reResumeConversation = regexp.MustCompile(`--conversation=([a-f0-9-]+)`)
+func isWorkspaceTrusted(dir string) (bool, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false, fmt.Errorf("resolving absolute path for %q: %w", dir, err)
+	}
+	absDir = filepath.Clean(absDir)
 
-// extractSessionID searches bottom-up through the scrollback lines for the
-// agy resume instruction (--conversation=...) printed on terminal exit.
-func extractSessionID(lines []string) string {
-	for i := len(lines) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" {
-			continue
-		}
-		if m := reResumeConversation.FindStringSubmatch(trimmed); m != nil {
-			return m[1]
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("determining home directory: %w", err)
+	}
+	settingsPath := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false, fmt.Errorf("reading settings file %s: %w", settingsPath, err)
+	}
+
+	var config struct {
+		TrustedWorkspaces []string `json:"trustedWorkspaces"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return false, fmt.Errorf("parsing settings JSON: %w", err)
+	}
+
+	for _, ws := range config.TrustedWorkspaces {
+		if filepath.Clean(ws) == absDir {
+			return true, nil
 		}
 	}
-	return ""
+	return false, nil
 }

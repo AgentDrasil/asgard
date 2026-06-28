@@ -21,6 +21,7 @@ func TestParseStatusLineFromSession(t *testing.T) {
 	filePath := filepath.Join("/tmp/agystatusline", sessionID+".json")
 
 	content := `{
+		"session_id": "real-session-xyz",
 		"context_window": {
 			"total_input_tokens": 12345,
 			"context_window_size": 100000,
@@ -34,55 +35,9 @@ func TestParseStatusLineFromSession(t *testing.T) {
 		_ = os.Remove(filePath)
 	})
 
-	gotInput, gotMax, gotRemaining := parseStatusLineFromSession(sessionID)
+	gotSession, gotInput, gotMax, gotRemaining := parseStatusLineFromSession(sessionID)
+	assert.Equal(t, "real-session-xyz", gotSession)
 	assert.Equal(t, 12345, gotInput)
 	assert.Equal(t, 100000, gotMax)
 	assert.InDelta(t, 0.87654, gotRemaining, 1e-9)
-}
-
-func TestExtractSessionID(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		lines []string
-		want  string
-	}{
-		{
-			name: "standard exit instruction",
-			lines: []string{
-				"Exiting...",
-				"Resume: agy --conversation=94f0e306-4718-4c38-8883-4f2982f20176 (or -c)",
-			},
-			want: "94f0e306-4718-4c38-8883-4f2982f20176",
-		},
-		{
-			name: "exit instruction with terminal padding",
-			lines: []string{
-				"Resume: agy --conversation=abcd-1234-efab (or -c)",
-				"  ",
-				"",
-			},
-			want: "abcd-1234-efab",
-		},
-		{
-			name: "no exit instruction",
-			lines: []string{
-				"Process terminated cleanly",
-			},
-			want: "",
-		},
-		{
-			name:  "empty lines",
-			lines: []string{},
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, extractSessionID(tt.lines))
-		})
-	}
 }
