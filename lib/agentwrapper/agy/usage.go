@@ -196,4 +196,3 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	return result, nil
 }
-

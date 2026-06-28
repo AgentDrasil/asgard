@@ -49,7 +49,9 @@ func TestServerReload(t *testing.T) {
 	// Create a temporary agents directory
 	tmpDir, err := os.MkdirTemp("", "asgard-test-agents")
 	assert.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 
 	// Create subdirectories for loader verification
 	err = os.MkdirAll(filepath.Join(tmpDir, "agents"), 0755)

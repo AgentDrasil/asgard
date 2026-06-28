@@ -30,7 +30,7 @@ func (l *Loader) initializeDefaultRolesIfMissingAgentFather(agentsDir string) er
 	}
 
 	agentCfg := defaultRoleAgentFatherWithDir(absAgentsDir)
-	
+
 	absLoaderAgentsDir, err := filepath.Abs(l.AgentsDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve absolute path of l.AgentsDir: %w", err)

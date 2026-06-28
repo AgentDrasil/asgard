@@ -78,7 +78,7 @@ mount_dirs:
 					CLI: []CLITarget{
 						{CLI: "agy", Model: "gemini-2.5-flash"},
 					},
-					RunDirs:     []string{"/tmp/run"},
+					RunDirs: []string{"/tmp/run"},
 					MountDirs: MountConfig{
 						ReadOnly:  []string{"/tmp/allow"},
 						ReadWrite: []string{"/tmp/rw"},
@@ -379,4 +379,3 @@ func TestAgentConfig_Validate(t *testing.T) {
 		})
 	}
 }
-

@@ -9,11 +9,11 @@ import (
 )
 
 type Config struct {
-	Debug    bool     `yaml:"debug"`
-	DB       string   `yaml:"db"`
-	DSN      string   `yaml:"dsn"`
-	AgentDir string   `yaml:"agent_dir"`
-	Port     int      `yaml:"port"`
+	Debug    bool   `yaml:"debug"`
+	DB       string `yaml:"db"`
+	DSN      string `yaml:"dsn"`
+	AgentDir string `yaml:"agent_dir"`
+	Port     int    `yaml:"port"`
 }
 
 func (c *Config) validate() error {

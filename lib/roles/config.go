@@ -70,7 +70,7 @@ func (cfg *AgentConfig) Validate() error {
 		if target.Model == "" {
 			return fmt.Errorf("model for cli %q cannot be empty", target.CLI)
 		}
-		
+
 		if len(models) > 0 {
 			modelSupported := false
 			for _, m := range models {
