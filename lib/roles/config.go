@@ -29,10 +29,10 @@ type AgentConfig struct {
 	// typically ordered by preference to support quota-based fallbacks.
 	CLI []CLITarget `yaml:"cli"`
 
-	// Allow to start agents in these directories.
+	// Allow to start agents in these directories. Will mount as rw.
 	RunDirs []string `yaml:"run_dirs"`
 
-	// MountDirs configures directories to mount into the sandbox.
+	// MountDirs configures additional directories to mount into the sandbox.
 	MountDirs MountConfig `yaml:"mount_dirs"`
 }
 

@@ -9,6 +9,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/libtnb/sqlite v1.1.2
+	github.com/moznion/go-optional v0.13.0
 	github.com/rcarmo/go-te v0.1.0
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
