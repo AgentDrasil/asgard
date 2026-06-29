@@ -42,12 +42,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			return nil, fmt.Errorf("getting current working directory: %w", err)
 		}
 	}
-	trusted, err := isWorkspaceTrusted(runDir)
-	if err != nil {
-		return nil, fmt.Errorf("checking trusted workspaces: %w", err)
-	}
-	if !trusted {
-		return nil, fmt.Errorf("workspace directory %q is not trusted in ~/.gemini/antigravity-cli/settings.json", runDir)
+	if err := ensureWorkspaceTrusted(runDir); err != nil {
+		return nil, fmt.Errorf("ensuring workspace is trusted: %w", err)
 	}
 
 	sessionID := opts.SessionID
@@ -203,34 +199,61 @@ func readLastTranscriptContent(sessionID string) (string, error) {
 	return lastContent, nil
 }
 
-func isWorkspaceTrusted(dir string) (bool, error) {
+func ensureWorkspaceTrusted(dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		return false, fmt.Errorf("resolving absolute path for %q: %w", dir, err)
+		return fmt.Errorf("resolving absolute path for %q: %w", dir, err)
 	}
 	absDir = filepath.Clean(absDir)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return false, fmt.Errorf("determining home directory: %w", err)
+		return fmt.Errorf("determining home directory: %w", err)
 	}
 	settingsPath := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return false, fmt.Errorf("reading settings file %s: %w", settingsPath, err)
+		return fmt.Errorf("reading settings file %s: %w", settingsPath, err)
 	}
 
 	var config struct {
 		TrustedWorkspaces []string `json:"trustedWorkspaces"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
-		return false, fmt.Errorf("parsing settings JSON: %w", err)
+		return fmt.Errorf("parsing settings JSON: %w", err)
 	}
 
 	for _, ws := range config.TrustedWorkspaces {
 		if filepath.Clean(ws) == absDir {
-			return true, nil
+			return nil
 		}
 	}
-	return false, nil
+
+	// Read settings as map to preserve other keys.
+	var settingsMap map[string]any
+	if err := json.Unmarshal(data, &settingsMap); err != nil {
+		return fmt.Errorf("parsing settings JSON for update: %w", err)
+	}
+
+	var trustedWorkspaces []any
+	if tw, ok := settingsMap["trustedWorkspaces"]; ok {
+		if arr, ok := tw.([]any); ok {
+			trustedWorkspaces = arr
+		}
+	}
+
+	trustedWorkspaces = append(trustedWorkspaces, absDir)
+	settingsMap["trustedWorkspaces"] = trustedWorkspaces
+
+	newData, err := json.MarshalIndent(settingsMap, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling updated settings: %w", err)
+	}
+
+	log.Info().Str("path", absDir).Msg("Adding directory to trusted workspaces in settings.json")
+	if err := os.WriteFile(settingsPath, newData, 0644); err != nil {
+		return fmt.Errorf("writing updated settings file: %w", err)
+	}
+
+	return nil
 }
