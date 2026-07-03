@@ -83,8 +83,8 @@ func buildArgsForAgent(cfg *roles.AgentConfig, target roles.CLITarget, prompt st
 	switch target.CLI {
 	case "agy":
 		geminiDir := filepath.Join(home, ".gemini")
-		if err := os.MkdirAll(geminiDir, 0755); err != nil {
-			return nil, fmt.Errorf("creating .gemini directory: %w", err)
+		if _, err := os.Stat(geminiDir); err != nil {
+			return nil, fmt.Errorf("gemini directory %q does not exist: %w", geminiDir, err)
 		}
 		args = append(args, "--bind", geminiDir, geminiDir)
 	case "opencode":
@@ -94,8 +94,8 @@ func buildArgsForAgent(cfg *roles.AgentConfig, target roles.CLITarget, prompt st
 			filepath.Join(home, ".local"),
 		}
 		for _, dir := range dirs {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return nil, fmt.Errorf("creating directory %q: %w", dir, err)
+			if _, err := os.Stat(dir); err != nil {
+				return nil, fmt.Errorf("directory %q does not exist: %w", dir, err)
 			}
 			args = append(args, "--bind", dir, dir)
 		}

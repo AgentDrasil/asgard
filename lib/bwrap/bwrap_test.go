@@ -40,9 +40,14 @@ func TestBuildArgs(t *testing.T) {
 		},
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("getting home dir: %v", err)
+	t.Setenv("HOME", tmpDir)
+	home := tmpDir
+
+	// Create directories that buildArgsForAgent expects to exist under HOME
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local"} {
+		if err := os.MkdirAll(filepath.Join(home, subDir), 0755); err != nil {
+			t.Fatalf("failed to create %s dir: %v", subDir, err)
+		}
 	}
 
 	// Test case 1: agy CLITarget with session
