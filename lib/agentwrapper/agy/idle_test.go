@@ -14,12 +14,11 @@ import (
 )
 
 func TestIsIdle(t *testing.T) {
-	t.Parallel()
-
-	// Ensure the directory exists
-	dir := "/tmp/agystatusline"
-	err := os.MkdirAll(dir, 0755)
-	require.NoError(t, err)
+	oldDir := statuslineDir
+	statuslineDir = t.TempDir()
+	t.Cleanup(func() {
+		statuslineDir = oldDir
+	})
 
 	tests := []struct {
 		name    string
@@ -65,17 +64,11 @@ func TestIsIdle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
 			sessionID := uuid.NewString()
-			filePath := filepath.Join(dir, sessionID+".json")
+			filePath := filepath.Join(statuslineDir, sessionID+".json")
 
 			err := os.WriteFile(filePath, []byte(tt.payload), 0644)
 			require.NoError(t, err)
-
-			t.Cleanup(func() {
-				_ = os.Remove(filePath)
-			})
 
 			got := isIdle(sessionID)
 			assert.Equal(t, tt.want, got)
@@ -84,30 +77,29 @@ func TestIsIdle(t *testing.T) {
 }
 
 func TestIsIdle_NoFile(t *testing.T) {
-	t.Parallel()
+	oldDir := statuslineDir
+	statuslineDir = t.TempDir()
+	t.Cleanup(func() {
+		statuslineDir = oldDir
+	})
 	assert.False(t, isIdle(uuid.NewString()))
 	assert.False(t, isIdle(""))
 }
 
 func TestPollUntilIdle(t *testing.T) {
-	t.Parallel()
-
-	dir := "/tmp/agystatusline"
-	err := os.MkdirAll(dir, 0755)
-	require.NoError(t, err)
+	oldDir := statuslineDir
+	statuslineDir = t.TempDir()
+	t.Cleanup(func() {
+		statuslineDir = oldDir
+	})
 
 	t.Run("success", func(t *testing.T) {
-		t.Parallel()
 		sessionID := uuid.NewString()
-		filePath := filepath.Join(dir, sessionID+".json")
+		filePath := filepath.Join(statuslineDir, sessionID+".json")
 
 		// Write non-idle payload first
 		err := os.WriteFile(filePath, []byte(`{"agent_state": "thinking"}`), 0644)
 		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			_ = os.Remove(filePath)
-		})
 
 		// After 100ms, write idle payload
 		go func() {
@@ -122,16 +114,11 @@ func TestPollUntilIdle(t *testing.T) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		t.Parallel()
 		sessionID := uuid.NewString()
-		filePath := filepath.Join(dir, sessionID+".json")
+		filePath := filepath.Join(statuslineDir, sessionID+".json")
 
 		err := os.WriteFile(filePath, []byte(`{"agent_state": "thinking"}`), 0644)
 		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			_ = os.Remove(filePath)
-		})
 
 		done := make(chan error, 1)
 		timedOut, err := pollUntilIdle(context.Background(), sessionID, done, 100*time.Millisecond)
@@ -140,7 +127,6 @@ func TestPollUntilIdle(t *testing.T) {
 	})
 
 	t.Run("context cancelled", func(t *testing.T) {
-		t.Parallel()
 		sessionID := uuid.NewString()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -152,7 +138,6 @@ func TestPollUntilIdle(t *testing.T) {
 	})
 
 	t.Run("unexpected exit", func(t *testing.T) {
-		t.Parallel()
 		sessionID := uuid.NewString()
 
 		done := make(chan error, 1)

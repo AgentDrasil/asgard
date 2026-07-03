@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	agy "github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 

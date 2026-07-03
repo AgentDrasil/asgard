@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 )
 
+var statuslineDir = "/tmp/agystatusline"
+
 // parseStatusLineFromSession reads the statusline JSON for the given session ID from
-// /tmp/agystatusline/<sessionID>.json, extracts the session_id, inputTokens, maxTokens, and remaining.
+// statuslineDir/<sessionID>.json, extracts the session_id, inputTokens, maxTokens, and remaining.
 func parseStatusLineFromSession(awSessionID string) (sessionID string, inputTokens, maxTokens int, remaining float64) {
 	if awSessionID == "" {
 		return
 	}
-	filePath := filepath.Join("/tmp/agystatusline", awSessionID+".json")
+	filePath := filepath.Join(statuslineDir, awSessionID+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return

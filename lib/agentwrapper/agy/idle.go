@@ -13,13 +13,13 @@ import (
 const pollInterval time.Duration = 200 * time.Millisecond
 
 // isIdle reads the statusline JSON for the given session ID from
-// /tmp/agystatusline/<sessionID>.json, and returns true if the agent state
+// statuslineDir/<sessionID>.json, and returns true if the agent state
 // is idle, background tasks are empty, and all subagents are idle.
 func isIdle(sessionID string) bool {
 	if sessionID == "" {
 		return false
 	}
-	filePath := filepath.Join("/tmp/agystatusline", sessionID+".json")
+	filePath := filepath.Join(statuslineDir, sessionID+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return false

@@ -167,7 +167,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 		log.Debug().Msg("agy/usage: state=idle")
 	}
 
-	filePath := filepath.Join("/tmp/agystatusline", awSessionID+".json")
+	filePath := filepath.Join(statuslineDir, awSessionID+".json")
 	var quota map[string]QuotaEntry
 	jsonData, err := os.ReadFile(filePath)
 	if err == nil {

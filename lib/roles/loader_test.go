@@ -45,7 +45,6 @@ func TestLoader_LoadAll(t *testing.T) {
 	})
 
 	t.Run("successfully load agents", func(t *testing.T) {
-
 		tmpDir := t.TempDir()
 		agentsDir := filepath.Join(tmpDir, "agents")
 		err := os.Mkdir(agentsDir, 0755)

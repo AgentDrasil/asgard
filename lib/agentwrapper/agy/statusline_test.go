@@ -10,15 +10,14 @@ import (
 )
 
 func TestParseStatusLineFromSession(t *testing.T) {
-	t.Parallel()
-	// Create mock files in the /tmp/agystatusline equivalent structure or override it.
-	// Since parseStatusLineFromSession is hardcoded to /tmp/agystatusline, let's write to it.
-	// Or we can mock the environment/filepath if needed. Let's write to /tmp/agystatusline for real.
-	err := os.MkdirAll("/tmp/agystatusline", 0755)
-	require.NoError(t, err)
+	oldDir := statuslineDir
+	statuslineDir = t.TempDir()
+	t.Cleanup(func() {
+		statuslineDir = oldDir
+	})
 
 	sessionID := "test-session-statusline-parse"
-	filePath := filepath.Join("/tmp/agystatusline", sessionID+".json")
+	filePath := filepath.Join(statuslineDir, sessionID+".json")
 
 	content := `{
 		"session_id": "real-session-xyz",
@@ -29,11 +28,8 @@ func TestParseStatusLineFromSession(t *testing.T) {
 		}
 	}`
 
-	err = os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0644)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.Remove(filePath)
-	})
 
 	gotSession, gotInput, gotMax, gotRemaining := parseStatusLineFromSession(sessionID)
 	assert.Equal(t, "real-session-xyz", gotSession)

@@ -6,17 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
 	"github.com/moznion/go-optional"
+
+	"github.com/AgentDrasil/asgard/lib/roles"
 )
 
 func TestBuildArgs(t *testing.T) {
-	// Create some temp directories to use in config
-	tmpDir, err := os.MkdirTemp("", "bwrap-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	runDir := filepath.Join(tmpDir, "rundir")
 	if err := os.MkdirAll(runDir, 0755); err != nil {
