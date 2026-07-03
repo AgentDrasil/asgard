@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/api/a2aagent"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
@@ -34,6 +35,13 @@ func setupLogger(conf *config.Config) {
 }
 
 func main() {
+	if err := agentwrapper.ValidateAgySetup(); err != nil {
+		log.Fatal().Err(err).Msg("Agy agent setup validation failed")
+	}
+	if err := agentwrapper.ValidateOpencodeSetup(); err != nil {
+		log.Fatal().Err(err).Msg("Opencode agent setup validation failed")
+	}
+
 	flag.Parse()
 
 	conf, err := config.LoadConfig(*configPathFlag)
