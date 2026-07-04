@@ -8,11 +8,11 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 type todoExecutor struct {
-	agent *roles.Agent
+	agent *agents.Agent
 }
 
 // Execute handles the agent execution.
@@ -41,7 +41,7 @@ func (e *todoExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorConte
 }
 
 // NewAgentHandler creates the A2A HTTP REST handler and the AgentCard for the given agent.
-func NewAgentHandler(agent *roles.Agent) (http.Handler, *a2a.AgentCard) {
+func NewAgentHandler(agent *agents.Agent) (http.Handler, *a2a.AgentCard) {
 	executor := &todoExecutor{agent: agent}
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)

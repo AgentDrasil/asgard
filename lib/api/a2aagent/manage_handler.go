@@ -6,12 +6,12 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
-	loader := roles.NewLoader(s.conf.AgentDir)
+	loader := agents.NewLoader(s.conf.AgentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return err

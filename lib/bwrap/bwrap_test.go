@@ -8,7 +8,7 @@ import (
 
 	"github.com/moznion/go-optional"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 func TestBuildArgs(t *testing.T) {
@@ -29,12 +29,12 @@ func TestBuildArgs(t *testing.T) {
 		t.Fatalf("failed to create rwdir: %v", err)
 	}
 
-	cfg := &roles.AgentConfig{
+	cfg := &agents.AgentConfig{
 		ID:          "test-agent",
 		Name:        "Test Agent",
 		Description: "A test agent",
 		RunDirs:     []string{runDir},
-		MountDirs: roles.MountConfig{
+		MountDirs: agents.MountConfig{
 			ReadOnly:  []string{roDir},
 			ReadWrite: []string{rwDir},
 		},
@@ -51,7 +51,7 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	// Test case 1: agy CLITarget with session
-	targetAgy := roles.CLITarget{
+	targetAgy := agents.CLITarget{
 		CLI:   "agy",
 		Model: "some-model",
 	}
@@ -93,7 +93,7 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	// Test case 2: opencode CLITarget without session (None)
-	targetOpencode := roles.CLITarget{
+	targetOpencode := agents.CLITarget{
 		CLI:   "opencode",
 		Model: "another-model",
 	}

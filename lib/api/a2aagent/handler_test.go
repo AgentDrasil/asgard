@@ -7,12 +7,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 func TestNewAgentHandler(t *testing.T) {
-	agent := &roles.Agent{
-		Config: roles.AgentConfig{
+	agent := &agents.Agent{
+		Config: agents.AgentConfig{
 			ID:          "test-agent",
 			Name:        "Test Agent",
 			Description: "A test agent for testing A2A integration",

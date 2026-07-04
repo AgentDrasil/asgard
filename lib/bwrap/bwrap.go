@@ -6,13 +6,13 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/moznion/go-optional"
 )
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, and optional session.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *roles.AgentConfig, target roles.CLITarget, prompt string, session optional.Option[string]) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string]) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -122,7 +122,7 @@ func buildArgsForAgent(cfg *roles.AgentConfig, target roles.CLITarget, prompt st
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *roles.AgentConfig, target roles.CLITarget, prompt string, session optional.Option[string]) (*exec.Cmd, error) {
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string]) (*exec.Cmd, error) {
 	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session)
 	if err != nil {
 		return nil, err

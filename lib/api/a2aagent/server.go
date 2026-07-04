@@ -15,20 +15,20 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/config"
-	"github.com/AgentDrasil/asgard/lib/roles"
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 // Server manages the HTTP server hosting A2A agents.
 type Server struct {
 	conf   *config.Config
 	mu     sync.RWMutex
-	agents []*roles.Agent
+	agents []*agents.Agent
 	mux    *http.ServeMux
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
 func New(conf *config.Config) (*Server, error) {
-	loader := roles.NewLoader(conf.AgentDir)
+	loader := agents.NewLoader(conf.AgentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load agents: %w", err)
