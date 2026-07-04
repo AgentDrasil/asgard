@@ -1,19 +1,47 @@
 package dbmodels
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 
 	"gorm.io/gorm"
 )
 
+type Agents []Agent
+
+// Value implements driver.Valuer
+func (a Agents) Value() (driver.Value, error) {
+	if len(a) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(a)
+}
+
+// Scan implements sql.Scanner
+func (a *Agents) Scan(value interface{}) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to scan Agents: unsupported type %T", value)
+	}
+	return json.Unmarshal(bytes, a)
+}
+
 type Session struct {
 	ChatID string `gorm:"primaryKey"`
 	// name of current agent.
 	CurrentAgent string
 	// map of agents in json format.
-	// TODO: make this a struct.
-	Agents string
+	Agents Agents `gorm:"type:text"`
 	// Dir agent running on
 	RunDir string
 }
@@ -64,35 +92,22 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		}
 	}
 
-	var agents []Agent
-	if session.Agents != "" {
-		if err := json.Unmarshal([]byte(session.Agents), &agents); err != nil {
-			return fmt.Errorf("failed to unmarshal agents: %w", err)
-		}
-	}
-
 	found := false
-	for i, a := range agents {
+	for i, a := range session.Agents {
 		if a.Name == agentName {
-			agents[i].SessionID = sessionID
+			session.Agents[i].SessionID = sessionID
 			found = true
 			break
 		}
 	}
 
 	if !found {
-		agents = append(agents, Agent{
+		session.Agents = append(session.Agents, Agent{
 			Name:      agentName,
 			SessionID: sessionID,
 		})
 	}
 
-	agentsJSON, err := json.Marshal(agents)
-	if err != nil {
-		return fmt.Errorf("failed to marshal agents: %w", err)
-	}
-
-	session.Agents = string(agentsJSON)
 	session.CurrentAgent = agentName
 
 	return r.SaveSession(session)

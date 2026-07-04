@@ -2,7 +2,6 @@ package a2aagent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"iter"
 	"net/http"
@@ -41,16 +40,13 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				return
 			}
 
-			if session != nil && session.Agents != "" {
-				var dbAgents []dbmodels.Agent
-				if err := json.Unmarshal([]byte(session.Agents), &dbAgents); err == nil {
-					for _, dbAgent := range dbAgents {
-						if dbAgent.Name == e.agent.Config.Name {
-							if dbAgent.SessionID != "" {
-								agentSessionID = optional.Some(dbAgent.SessionID)
-							}
-							break
+			if session != nil {
+				for _, dbAgent := range session.Agents {
+					if dbAgent.Name == e.agent.Config.Name {
+						if dbAgent.SessionID != "" {
+							agentSessionID = optional.Some(dbAgent.SessionID)
 						}
+						break
 					}
 				}
 			}

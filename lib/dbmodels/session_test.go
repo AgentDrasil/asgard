@@ -1,0 +1,67 @@
+package dbmodels
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/lib/db"
+)
+
+func TestSessionRepository(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+
+	// Migrate the Session model
+	err := testDB.AutoMigrate(&Session{})
+	require.NoError(t, err)
+
+	repo := NewSessionRepository(testDB)
+
+	chatID := "test-chat-id"
+
+	// 1. GetSession of non-existent session should return nil, nil
+	sess, err := repo.GetSession(chatID)
+	assert.NoError(t, err)
+	assert.Nil(t, sess)
+
+	// 2. UpdateAgentSession should create a session and save the agent
+	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1")
+	assert.NoError(t, err)
+
+	// Verify session was created
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.Equal(t, chatID, sess.ChatID)
+	assert.Equal(t, "agent-1", sess.CurrentAgent)
+	require.Len(t, sess.Agents, 1)
+	assert.Equal(t, "agent-1", sess.Agents[0].Name)
+	assert.Equal(t, "session-1", sess.Agents[0].SessionID)
+
+	// 3. UpdateAgentSession for the same agent should update the session ID
+	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1-updated")
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.Equal(t, "agent-1", sess.CurrentAgent)
+	require.Len(t, sess.Agents, 1)
+	assert.Equal(t, "agent-1", sess.Agents[0].Name)
+	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
+
+	// 4. UpdateAgentSession for a different agent should append to the list
+	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2")
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.Equal(t, "agent-2", sess.CurrentAgent)
+	require.Len(t, sess.Agents, 2)
+	assert.Equal(t, "agent-1", sess.Agents[0].Name)
+	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
+	assert.Equal(t, "agent-2", sess.Agents[1].Name)
+	assert.Equal(t, "session-2", sess.Agents[1].SessionID)
+}
