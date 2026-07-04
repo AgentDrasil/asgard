@@ -13,6 +13,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/lib/config"
+	"github.com/AgentDrasil/asgard/lib/db"
 )
 
 type mockClient struct {
@@ -59,8 +60,10 @@ func TestServerReload(t *testing.T) {
 		Port:     8080,
 	}
 
+	testDB := db.NewDBForTest(t)
+
 	// Create Server
-	srv, err := New(conf)
+	srv, err := New(conf, testDB)
 	assert.NoError(t, err)
 	// Server starts with 1 agent: agentfather (auto-initialized)
 	assert.Len(t, srv.agents, 1)

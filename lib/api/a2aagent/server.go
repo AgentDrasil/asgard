@@ -13,9 +13,11 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
 
-	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/config"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
 // Server manages the HTTP server hosting A2A agents.
@@ -24,19 +26,26 @@ type Server struct {
 	mu     sync.RWMutex
 	agents []*agents.Agent
 	mux    *http.ServeMux
+	repo   *dbmodels.SessionRepository
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
-func New(conf *config.Config) (*Server, error) {
+func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 	loader := agents.NewLoader(conf.AgentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
+	var repo *dbmodels.SessionRepository
+	if dbConn != nil {
+		repo = dbmodels.NewSessionRepository(dbConn)
+	}
+
 	s := &Server{
 		conf:   conf,
 		agents: agents,
+		repo:   repo,
 	}
 	s.mux = s.buildMuxLocked()
 	return s, nil
@@ -54,7 +63,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	for _, agent := range s.agents {
-		restHandler, card := NewAgentHandler(agent)
+		restHandler, card := NewAgentHandler(agent, s.repo)
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
 		mux.Handle(prefix, http.StripPrefix(fmt.Sprintf("/agents/%s", agent.Config.ID), restHandler))

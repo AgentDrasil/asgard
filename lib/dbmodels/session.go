@@ -8,8 +8,7 @@ import (
 )
 
 type Session struct {
-	// group_id/topic_id
-	TopicID string `gorm:"primaryKey"`
+	ChatID string `gorm:"primaryKey"`
 	// name of current agent.
 	CurrentAgent string
 	// map of agents in json format.
@@ -32,10 +31,10 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
-// GetSession retrieves the session for a given topic ID.
-func (r *SessionRepository) GetSession(topicID string) (*Session, error) {
+// GetSession retrieves the session for a given chat ID.
+func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
 	var session Session
-	err := r.db.First(&session, "topic_id = ?", topicID).Error
+	err := r.db.First(&session, "chat_id = ?", chatID).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -51,8 +50,8 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 }
 
 // UpdateAgentSession updates the session ID for a specific agent in a topic.
-func (r *SessionRepository) UpdateAgentSession(topicID string, agentName string, sessionID string) error {
-	session, err := r.GetSession(topicID)
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, sessionID string) error {
+	session, err := r.GetSession(chatID)
 	if err != nil {
 		return err
 	}
@@ -60,7 +59,7 @@ func (r *SessionRepository) UpdateAgentSession(topicID string, agentName string,
 	if session == nil {
 		// Create new session if it doesn't exist
 		session = &Session{
-			TopicID:      topicID,
+			ChatID:       chatID,
 			CurrentAgent: agentName,
 		}
 	}

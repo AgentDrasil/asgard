@@ -8,9 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/db"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
 func TestNewAgentHandler(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	repo := dbmodels.NewSessionRepository(testDB)
+
 	agent := &agents.Agent{
 		Config: agents.AgentConfig{
 			ID:          "test-agent",
@@ -20,7 +25,7 @@ func TestNewAgentHandler(t *testing.T) {
 		Path: "/dummy/path",
 	}
 
-	handler, card := NewAgentHandler(agent)
+	handler, card := NewAgentHandler(agent, repo)
 	assert.NotNil(t, handler)
 	assert.NotNil(t, card)
 	assert.Equal(t, "Test Agent", card.Name)

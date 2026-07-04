@@ -2,21 +2,28 @@ package a2aagent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"iter"
 	"net/http"
+	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/agents/run"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
-type todoExecutor struct {
+type agentExecutor struct {
 	agent *agents.Agent
+	repo  *dbmodels.SessionRepository
 }
 
 // Execute handles the agent execution.
-func (e *todoExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) {
 		if execCtx.StoredTask == nil {
 			if !yield(a2a.NewSubmittedTask(execCtx, nil), nil) {
@@ -24,16 +31,59 @@ func (e *todoExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCont
 			}
 		}
 
-		// TODO: Implement agent execution logic here.
+		chatID := execCtx.ContextID
 
-		if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, nil), nil) {
+		agentSessionID := optional.None[string]()
+		if e.repo != nil {
+			session, err := e.repo.GetSession(chatID)
+			if err != nil {
+				yield(nil, fmt.Errorf("failed to get session: %w", err))
+				return
+			}
+
+			if session != nil && session.Agents != "" {
+				var dbAgents []dbmodels.Agent
+				if err := json.Unmarshal([]byte(session.Agents), &dbAgents); err == nil {
+					for _, dbAgent := range dbAgents {
+						if dbAgent.Name == e.agent.Config.Name {
+							if dbAgent.SessionID != "" {
+								agentSessionID = optional.Some(dbAgent.SessionID)
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+
+		var promptBuilder strings.Builder
+		if execCtx.Message != nil {
+			for _, part := range execCtx.Message.Parts {
+				if part != nil && part.Text() != "" {
+					if promptBuilder.Len() > 0 {
+						promptBuilder.WriteString("\n")
+					}
+					promptBuilder.WriteString(part.Text())
+				}
+			}
+		}
+		prompt := promptBuilder.String()
+
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID)
+		if err != nil {
+			yield(nil, fmt.Errorf("failed to run agent: %w", err))
+			return
+		}
+
+		respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(string(out)))
+		if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil) {
 			return
 		}
 	}
 }
 
 // Cancel handles canceling an execution.
-func (e *todoExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+func (e *agentExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) {
 		// Emit TaskStatusUpdateEvent with TaskStateCanceled.
 		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, nil), nil)
@@ -41,8 +91,8 @@ func (e *todoExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorConte
 }
 
 // NewAgentHandler creates the A2A HTTP REST handler and the AgentCard for the given agent.
-func NewAgentHandler(agent *agents.Agent) (http.Handler, *a2a.AgentCard) {
-	executor := &todoExecutor{agent: agent}
+func NewAgentHandler(agent *agents.Agent, repo *dbmodels.SessionRepository) (http.Handler, *a2a.AgentCard) {
+	executor := &agentExecutor{agent: agent, repo: repo}
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)
 

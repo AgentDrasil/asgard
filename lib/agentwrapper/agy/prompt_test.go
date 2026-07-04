@@ -99,4 +99,3 @@ func TestEnsureWorkspaceTrusted(t *testing.T) {
 	assert.Contains(t, config.TrustedWorkspaces, "/some/trusted/path")
 	assert.Contains(t, config.TrustedWorkspaces, untrustedPath)
 }
-

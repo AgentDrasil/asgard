@@ -51,12 +51,12 @@ func main() {
 
 	setupLogger(conf)
 
-	_, err = db.NewDB(conf)
+	database, err := db.NewDB(conf)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
 
-	srv, err := a2aagent.New(conf)
+	srv, err := a2aagent.New(conf, database)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agents server")
 	}
