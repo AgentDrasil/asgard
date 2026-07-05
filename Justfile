@@ -27,3 +27,11 @@ install-agent-validate:
 start:
     docker compose down
     docker compose up -d --build
+
+# Stop asgard docker compose
+stop:
+    docker compose down
+
+# Logs of asgard docker compose
+logs:
+    docker compose logs asgard -f
