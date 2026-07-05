@@ -125,7 +125,7 @@ func TestRun(t *testing.T) {
 
 	// 4. Test case: runDir is a valid subdirectory
 	validSubDir := filepath.Join(tmpDir, "some-allowed-dir", "subdir1")
-	out, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir))
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir))
 	if err != nil {
 		t.Fatalf("unexpected error with valid subdirectory: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRun(t *testing.T) {
 			},
 		},
 	}
-	out, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string]())
+	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string]())
 	if err != nil {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}
