@@ -122,7 +122,6 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 	defer func() {
 		if cmdExec.Process != nil {
-			_ = cmdExec.Process.Kill()
 			_, _ = cmdExec.Process.Wait()
 		}
 	}()
@@ -135,9 +134,6 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 			case <-ctx.Done():
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
-				}
-				if cmdExec.Process != nil {
-					_ = cmdExec.Process.Kill()
 				}
 			case <-done:
 			}
@@ -154,5 +150,6 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 
 	return out, nil
 }
+
 
 
