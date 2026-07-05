@@ -2,6 +2,7 @@ package a2aagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"net/http"
@@ -78,7 +79,29 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			return
 		}
 
-		respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(string(out)))
+		type promptResult struct {
+			SessionID   string  `json:"session_id"`
+			InputTokens int     `json:"input_tokens"`
+			MaxTokens   int     `json:"max_tokens"`
+			Remaining   float64 `json:"remaining"`
+			LastContent string  `json:"last_content"`
+		}
+
+		var result promptResult
+		var respText string
+		if err := json.Unmarshal(out, &result); err == nil {
+			respText = result.LastContent
+			if e.repo != nil && result.SessionID != "" {
+				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID); err != nil {
+					yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+					return
+				}
+			}
+		} else {
+			respText = string(out)
+		}
+
+		respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
 		if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil) {
 			return
 		}
