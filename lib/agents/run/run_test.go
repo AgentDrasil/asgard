@@ -17,6 +17,23 @@ import (
 func TestRun(t *testing.T) {
 	// Set up temporary home and required bwrap directories
 	tmpDir := t.TempDir()
+
+	// Preserve GOPATH and GOCACHE to avoid permission issues during cleanup and speed up go build
+	origHome := os.Getenv("HOME")
+	origGopath := os.Getenv("GOPATH")
+	origGocache := os.Getenv("GOCACHE")
+
+	if origGopath != "" {
+		t.Setenv("GOPATH", origGopath)
+	} else if origHome != "" {
+		t.Setenv("GOPATH", filepath.Join(origHome, "go"))
+	}
+	if origGocache != "" {
+		t.Setenv("GOCACHE", origGocache)
+	} else if origHome != "" {
+		t.Setenv("GOCACHE", filepath.Join(origHome, ".cache", "go-build"))
+	}
+
 	t.Setenv("HOME", tmpDir)
 
 	for _, subDir := range []string{".gemini", ".cache", ".config", ".local"} {
@@ -24,6 +41,7 @@ func TestRun(t *testing.T) {
 			t.Fatalf("failed to create %s dir: %v", subDir, err)
 		}
 	}
+
 
 	// Create a mock bwrap executable shell script
 	mockBwrapPath := filepath.Join(tmpDir, "bwrap")

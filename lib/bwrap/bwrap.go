@@ -13,7 +13,7 @@ import (
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, fakebashPath string, hasSocket bool) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -28,6 +28,10 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
+	if hasSocket {
+		args = append(args, "--pass-fd", "3")
+	}
+
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")
 
@@ -36,6 +40,14 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	for _, p := range systemROPaths {
 		if _, err := os.Stat(p); err == nil {
 			args = append(args, "--ro-bind", p, p)
+		}
+	}
+
+	if fakebashPath != "" {
+		for _, p := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"} {
+			if _, err := os.Stat(p); err == nil {
+				args = append(args, "--ro-bind", fakebashPath, p)
+			}
 		}
 	}
 
@@ -112,10 +124,9 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	switch target.CLI {
 	case "agy":
 		geminiDir := filepath.Join(home, ".gemini")
-		if _, err := os.Stat(geminiDir); err != nil {
-			return nil, fmt.Errorf("gemini directory %q does not exist: %w", geminiDir, err)
+		if _, err := os.Stat(geminiDir); err == nil {
+			args = append(args, "--bind", geminiDir, geminiDir)
 		}
-		args = append(args, "--bind", geminiDir, geminiDir)
 	case "opencode":
 		dirs := []string{
 			filepath.Join(home, ".cache"),
@@ -123,10 +134,9 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 			filepath.Join(home, ".local"),
 		}
 		for _, dir := range dirs {
-			if _, err := os.Stat(dir); err != nil {
-				return nil, fmt.Errorf("directory %q does not exist: %w", dir, err)
+			if _, err := os.Stat(dir); err == nil {
+				args = append(args, "--bind", dir, dir)
 			}
-			args = append(args, "--bind", dir, dir)
 		}
 	}
 
@@ -151,17 +161,20 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir)
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, fakebashPath string, socketFile *os.File) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, fakebashPath, socketFile != nil)
 	if err != nil {
 		return nil, err
 	}
 	cmd := exec.Command("bwrap", bwrapArgs...)
+	if socketFile != nil {
+		cmd.ExtraFiles = []*os.File{socketFile}
+	}
 	return cmd, nil
 }
 
-// CommandForCommandExec creates an exec.Cmd initialized to run sleep infinity inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string) (*exec.Cmd, error) {
+// CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
+func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.File) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -175,6 +188,10 @@ func CommandForCommandExec(runDir string) (*exec.Cmd, error) {
 	args = append(args, "--unshare-ipc")
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
+
+	if socketFile != nil {
+		args = append(args, "--pass-fd", "3")
+	}
 
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")
@@ -226,9 +243,17 @@ func CommandForCommandExec(runDir string) (*exec.Cmd, error) {
 	}
 
 	args = append(args, "--")
-	args = append(args, "sleep", "infinity")
+	if fakebashdPath != "" {
+		args = append(args, fakebashdPath)
+	} else {
+		args = append(args, "sleep", "infinity")
+	}
 
 	cmd := exec.Command("bwrap", args...)
+	if socketFile != nil {
+		cmd.ExtraFiles = []*os.File{socketFile}
+	}
 	return cmd, nil
 }
+
 

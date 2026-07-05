@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
@@ -81,13 +83,37 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	cmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir)
+	// Compile fakebash and fakebashd to runDir
+	fakebashPath := filepath.Join(runDir, "fakebash")
+	fakebashdPath := filepath.Join(runDir, "fakebashd")
+
+	buildCmd1 := exec.Command("go", "build", "-o", fakebashPath, "github.com/AgentDrasil/asgard/cmd/fakebash")
+	if out, err := buildCmd1.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("failed to compile fakebash: %w (output: %q)", err, string(out))
+	}
+
+	buildCmd2 := exec.Command("go", "build", "-o", fakebashdPath, "github.com/AgentDrasil/asgard/cmd/fakebashd")
+	if out, err := buildCmd2.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("failed to compile fakebashd: %w (output: %q)", err, string(out))
+	}
+
+	// Create Socketpair for communicating between agent sandbox and command sandbox
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return nil, fmt.Errorf("creating socketpair: %w", err)
+	}
+	agentSocket := os.NewFile(uintptr(fds[0]), "agent-socket")
+	commandSocket := os.NewFile(uintptr(fds[1]), "command-socket")
+	defer agentSocket.Close()
+	defer commandSocket.Close()
+
+	cmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, fakebashPath, agentSocket)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
 	// Start the command execution sandbox
-	cmdExec, err := bwrap.CommandForCommandExec(runDir)
+	cmdExec, err := bwrap.CommandForCommandExec(runDir, fakebashdPath, commandSocket)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
@@ -128,4 +154,5 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 
 	return out, nil
 }
+
 

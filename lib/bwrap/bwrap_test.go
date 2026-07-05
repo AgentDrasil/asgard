@@ -56,7 +56,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "some-model",
 	}
 
-	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir)
+	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "", false)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir)
+	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir, "", false)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runDir)
+	cmd, err := CommandForCommandExec(runDir, "", nil)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
@@ -181,4 +181,5 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
 	}
 }
+
 
