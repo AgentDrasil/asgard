@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
@@ -48,11 +50,12 @@ func CheckQuota(cli string, model string) float64 {
 		return 0.0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	usages, err := client.Usage(ctx, types.UsageOptions{})
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to check quota")
 		return 0.0
 	}
 

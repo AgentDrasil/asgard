@@ -70,10 +70,14 @@ func TestRun(t *testing.T) {
 				{CLI: "agy", Model: "agy-model-high"},           // 50% quota (should be chosen)
 				{CLI: "opencode", Model: "opencode-model-high"}, // 80% quota (not reached because we pick first > 20%)
 			},
+			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
 		},
 	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "some-allowed-dir"), 0755); err != nil {
+		t.Fatalf("failed to create run dir: %v", err)
+	}
 
-	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"))
+	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string]())
 	if err != nil {
 		t.Fatalf("unexpected error running agent: %v", err)
 	}
@@ -100,13 +104,57 @@ func TestRun(t *testing.T) {
 			CLI: []agents.CLITarget{
 				{CLI: "agy", Model: "agy-model-low"},
 			},
+			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
 		},
 	}
 
-	_, err = Run(context.Background(), lowQuotaAgent, "hello", optional.None[string]())
+	_, err = Run(context.Background(), lowQuotaAgent, "hello", optional.None[string](), optional.None[string]())
 	if err == nil {
 		t.Error("expected error due to insufficient quota, but got nil")
 	} else if !strings.Contains(err.Error(), "no CLI target with more than 20% quota") {
 		t.Errorf("expected quota limit error message, got: %v", err)
+	}
+
+	// 3. Test case: runDir is not allowed
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")))
+	if err == nil {
+		t.Error("expected error due to disallowed run directory, but got nil")
+	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
+		t.Errorf("expected disallowed run dir error message, got: %v", err)
+	}
+
+	// 4. Test case: runDir is a valid subdirectory
+	validSubDir := filepath.Join(tmpDir, "some-allowed-dir", "subdir1")
+	out, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir))
+	if err != nil {
+		t.Fatalf("unexpected error with valid subdirectory: %v", err)
+	}
+	if _, err := os.Stat(validSubDir); os.IsNotExist(err) {
+		t.Errorf("expected subdirectory %s to be created, but it does not exist", validSubDir)
+	}
+
+	// 5. Test case: fallback to creating $HOME/tmp/$uuid
+	agentWithoutRunDirs := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:          "no-rundirs-agent",
+			Name:        "No RunDirs Agent",
+			Description: "An agent with no run dirs config",
+			CLI: []agents.CLITarget{
+				{CLI: "agy", Model: "agy-model-high"},
+			},
+		},
+	}
+	out, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string]())
+	if err != nil {
+		t.Fatalf("unexpected error with fallback runDir: %v", err)
+	}
+	// Verify that the run directory was created inside $HOME/tmp (which is tmpDir/tmp in our test env)
+	tmpPath := filepath.Join(tmpDir, "tmp")
+	files, err := os.ReadDir(tmpPath)
+	if err != nil {
+		t.Fatalf("failed to read tmp dir: %v", err)
+	}
+	if len(files) == 0 {
+		t.Error("expected uuid subdirectory to be created in tmp, but it was empty")
 	}
 }

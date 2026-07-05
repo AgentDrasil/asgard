@@ -11,9 +11,9 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
-// buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, and optional session.
+// buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string]) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -77,6 +77,34 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		}
 	}
 
+	// Ensure runDir is mounted as read-write
+	runDirMounted := false
+	if cfg != nil {
+		for _, dir := range cfg.RunDirs {
+			if dir == runDir {
+				runDirMounted = true
+				break
+			}
+		}
+		if !runDirMounted {
+			for _, dir := range cfg.MountDirs.ReadWrite {
+				if dir == runDir {
+					runDirMounted = true
+					break
+				}
+			}
+		}
+	}
+	if !runDirMounted {
+		if _, err := os.Stat(runDir); err != nil {
+			return nil, fmt.Errorf("run directory %q does not exist: %w", runDir, err)
+		}
+		args = append(args, "--bind", runDir, runDir)
+	}
+
+	// Change working directory to runDir in the sandbox
+	args = append(args, "--chdir", runDir)
+
 	// Set HOME env
 	args = append(args, "--setenv", "HOME", home)
 
@@ -123,8 +151,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string]) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session)
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir)
 	if err != nil {
 		return nil, err
 	}

@@ -25,7 +25,7 @@ type agentExecutor struct {
 func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) {
 		if execCtx.StoredTask == nil {
-			if !yield(a2a.NewSubmittedTask(execCtx, nil), nil) {
+			if !yield(a2a.NewSubmittedTask(execCtx, execCtx.Message), nil) {
 				return
 			}
 		}
@@ -65,7 +65,14 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 		prompt := promptBuilder.String()
 
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID)
+		runDirOpt := optional.None[string]()
+		if execCtx.Metadata != nil {
+			if rd, ok := execCtx.Metadata["run_dir"].(string); ok && rd != "" {
+				runDirOpt = optional.Some(rd)
+			}
+		}
+
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to run agent: %w", err))
 			return

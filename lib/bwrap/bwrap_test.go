@@ -56,7 +56,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "some-model",
 	}
 
-	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"))
+	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -72,6 +72,9 @@ func TestBuildArgs(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
 		t.Errorf("expected run_dirs bind mount, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--chdir "+runDir) {
+		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)
 	}
 	if !strings.Contains(argStr, "--ro-bind "+roDir+" "+roDir) {
 		t.Errorf("expected mount_dirs readonly mount, got: %s", argStr)
@@ -98,7 +101,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string]())
+	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -117,6 +120,9 @@ func TestBuildArgs(t *testing.T) {
 	}
 	if !strings.Contains(argStrOpencode, "--bind "+localDir+" "+localDir) {
 		t.Errorf("expected opencode .local bind mount, got: %s", argStrOpencode)
+	}
+	if !strings.Contains(argStrOpencode, "--chdir "+runDir) {
+		t.Errorf("expected '--chdir %s' in argsOpencode, got: %s", runDir, argStrOpencode)
 	}
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
