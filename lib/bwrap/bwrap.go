@@ -159,3 +159,76 @@ func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt st
 	cmd := exec.Command("bwrap", bwrapArgs...)
 	return cmd, nil
 }
+
+// CommandForCommandExec creates an exec.Cmd initialized to run sleep infinity inside a bubblewrap sandbox.
+func CommandForCommandExec(runDir string) (*exec.Cmd, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting user home directory: %w", err)
+	}
+
+	var args []string
+
+	// Basic safety isolation flags
+	args = append(args, "--die-with-parent")
+	args = append(args, "--unshare-pid")
+	args = append(args, "--unshare-ipc")
+	args = append(args, "--unshare-uts")
+	args = append(args, "--unshare-cgroup")
+
+	// Mount tmpfs for /tmp
+	args = append(args, "--tmpfs", "/tmp")
+
+	// Mount system paths as read-only
+	systemROPaths := []string{"/bin", "/usr/bin", "/usr/local/bin"}
+	for _, p := range systemROPaths {
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+
+	// Mount library/etc/proc/dev paths
+	extraROPaths := []string{"/lib", "/lib64", "/etc"}
+	for _, p := range extraROPaths {
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+	if _, err := os.Stat("/proc"); err == nil {
+		args = append(args, "--proc", "/proc")
+	}
+	if _, err := os.Stat("/dev"); err == nil {
+		args = append(args, "--dev", "/dev")
+	}
+
+	// Bind HOME
+	args = append(args, "--bind", home, home)
+
+	// Ignore auth dir for agy and opencode
+	agyAuthDir := filepath.Join(home, ".gemini")
+	if _, err := os.Stat(agyAuthDir); err == nil {
+		args = append(args, "--tmpfs", agyAuthDir)
+	}
+	opencodeAuthDir := filepath.Join(home, ".local", "share", "opencode")
+	if _, err := os.Stat(opencodeAuthDir); err == nil {
+		args = append(args, "--tmpfs", opencodeAuthDir)
+	}
+
+	if runDir != "" {
+		if _, err := os.Stat(runDir); err == nil {
+			args = append(args, "--bind", runDir, runDir)
+			args = append(args, "--chdir", runDir)
+		} else {
+			args = append(args, "--chdir", home)
+		}
+	} else {
+		args = append(args, "--chdir", home)
+	}
+
+	args = append(args, "--")
+	args = append(args, "sleep", "infinity")
+
+	cmd := exec.Command("bwrap", args...)
+	return cmd, nil
+}
+

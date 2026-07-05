@@ -86,6 +86,21 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
+	// Start the command execution sandbox
+	cmdExec, err := bwrap.CommandForCommandExec(runDir)
+	if err != nil {
+		return nil, fmt.Errorf("creating command for command exec: %w", err)
+	}
+	if err := cmdExec.Start(); err != nil {
+		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
+	}
+	defer func() {
+		if cmdExec.Process != nil {
+			_ = cmdExec.Process.Kill()
+			_, _ = cmdExec.Process.Wait()
+		}
+	}()
+
 	if ctx.Done() != nil {
 		done := make(chan struct{})
 		defer close(done)
@@ -94,6 +109,9 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 			case <-ctx.Done():
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
+				}
+				if cmdExec.Process != nil {
+					_ = cmdExec.Process.Kill()
 				}
 			case <-done:
 			}
@@ -110,3 +128,4 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 
 	return out, nil
 }
+

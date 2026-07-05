@@ -130,3 +130,55 @@ func TestBuildArgs(t *testing.T) {
 		t.Errorf("expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 	}
 }
+
+func TestCommandForCommandExec(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create simulated auth dirs to make sure they get masked
+	agyAuthDir := filepath.Join(tmpDir, ".gemini")
+	if err := os.MkdirAll(agyAuthDir, 0755); err != nil {
+		t.Fatalf("failed to create agy auth dir: %v", err)
+	}
+	opencodeAuthDir := filepath.Join(tmpDir, ".local", "share", "opencode")
+	if err := os.MkdirAll(opencodeAuthDir, 0755); err != nil {
+		t.Fatalf("failed to create opencode auth dir: %v", err)
+	}
+
+	runDir := filepath.Join(tmpDir, "rundir")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatalf("failed to create rundir: %v", err)
+	}
+
+	cmd, err := CommandForCommandExec(runDir)
+	if err != nil {
+		t.Fatalf("CommandForCommandExec error: %v", err)
+	}
+
+	argStr := strings.Join(cmd.Args, " ")
+
+	if !strings.Contains(argStr, "--tmpfs /tmp") {
+		t.Errorf("expected '--tmpfs /tmp' in args, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--bind "+tmpDir+" "+tmpDir) {
+		t.Errorf("expected home bind mount, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--tmpfs "+agyAuthDir) {
+		t.Errorf("expected agy auth dir masking, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--tmpfs "+opencodeAuthDir) {
+		t.Errorf("expected opencode auth dir masking, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
+		t.Errorf("expected runDir bind mount, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--chdir "+runDir) {
+		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)
+	}
+
+	expectedEnd := "-- sleep infinity"
+	if !strings.HasSuffix(argStr, expectedEnd) {
+		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
+	}
+}
+
