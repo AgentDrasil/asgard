@@ -24,10 +24,6 @@ RUN chmod +x /tmp/install-agy.sh && /tmp/install-agy.sh --dir /bin && rm /tmp/in
 COPY docker-scripts/install-opencode.sh /tmp/install-opencode.sh
 RUN chmod +x /tmp/install-opencode.sh && /tmp/install-opencode.sh --dir /bin && rm /tmp/install-opencode.sh
 
-# Create group and user with UID/GID 1000
-RUN groupadd -g 1000 user && \
-    useradd -u 1000 -g user -m -s /bin/bash user
-
 # Stage 2: base_devtool
 FROM base AS base_devtool
 
@@ -45,9 +41,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get update && apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Set default user and working directory
-USER user
-WORKDIR /home/user
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /workspace
 
 # Run infinitely loop
 CMD ["tail", "-f", "/dev/null"]
