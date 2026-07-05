@@ -14,9 +14,13 @@ type Config struct {
 	DSN      string `yaml:"dsn"`
 	AgentDir string `yaml:"agent_dir"`
 	Port     int    `yaml:"port"`
+	Host     string `yaml:"host"`
 }
 
 func (c *Config) validate() error {
+	if c.Host == "" {
+		return fmt.Errorf("missing host")
+	}
 	if c.DB != "pg" && c.DB != "sqlite" {
 		return fmt.Errorf("invalid db: %s, must be 'pg' or 'sqlite'", c.DB)
 	}

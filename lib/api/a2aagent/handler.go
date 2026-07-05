@@ -87,7 +87,7 @@ func (e *agentExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorCont
 }
 
 // NewAgentHandler creates the A2A HTTP REST handler and the AgentCard for the given agent.
-func NewAgentHandler(agent *agents.Agent, repo *dbmodels.SessionRepository) (http.Handler, *a2a.AgentCard) {
+func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRepository) (http.Handler, *a2a.AgentCard) {
 	executor := &agentExecutor{agent: agent, repo: repo}
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)
@@ -96,6 +96,11 @@ func NewAgentHandler(agent *agents.Agent, repo *dbmodels.SessionRepository) (htt
 		Name:        agent.Config.Name,
 		Description: agent.Config.Description,
 		Version:     "1.0.0",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", host, agent.Config.ID), a2a.TransportProtocolHTTPJSON),
+		},
+		DefaultInputModes:  []string{"text"},
+		DefaultOutputModes: []string{"text"},
 	}
 
 	return restHandler, card

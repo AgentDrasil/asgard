@@ -25,6 +25,7 @@ func TestConfig_Validate(t *testing.T) {
 				DB:       "sqlite",
 				DSN:      "test.db",
 				AgentDir: "./agents",
+				Host:     "127.0.0.1",
 			},
 			wantErr: false,
 		},
@@ -34,6 +35,7 @@ func TestConfig_Validate(t *testing.T) {
 				DB:       "mysql",
 				DSN:      "test.db",
 				AgentDir: "./agents",
+				Host:     "127.0.0.1",
 			},
 			wantErr: true,
 			errMsg:  "invalid db: mysql",
@@ -43,6 +45,7 @@ func TestConfig_Validate(t *testing.T) {
 			config: Config{
 				DSN:      "test.db",
 				AgentDir: "./agents",
+				Host:     "127.0.0.1",
 			},
 			wantErr: true,
 			errMsg:  "invalid db: , must be 'pg' or 'sqlite'",
@@ -52,6 +55,7 @@ func TestConfig_Validate(t *testing.T) {
 			config: Config{
 				DB:       "pg",
 				AgentDir: "./agents",
+				Host:     "127.0.0.1",
 			},
 			wantErr: true,
 			errMsg:  "missing dsn",
@@ -59,11 +63,22 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "missing agent_dir",
 			config: Config{
-				DB:  "sqlite",
-				DSN: "test.db",
+				DB:   "sqlite",
+				DSN:  "test.db",
+				Host: "127.0.0.1",
 			},
 			wantErr: true,
 			errMsg:  "missing agent_dir",
+		},
+		{
+			name: "missing host",
+			config: Config{
+				DB:       "sqlite",
+				DSN:      "test.db",
+				AgentDir: "./agents",
+			},
+			wantErr: true,
+			errMsg:  "missing host",
 		},
 	}
 

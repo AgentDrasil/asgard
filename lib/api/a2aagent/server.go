@@ -60,7 +60,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	for _, agent := range s.agents {
-		restHandler, card := NewAgentHandler(agent, s.repo)
+		restHandler, card := NewAgentHandler(agent, s.conf.Host, s.repo)
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
 		mux.Handle(prefix, http.StripPrefix(fmt.Sprintf("/agents/%s", agent.Config.ID), restHandler))
