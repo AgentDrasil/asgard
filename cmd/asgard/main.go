@@ -12,6 +12,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/api/a2aagent"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
 func defaultConfigPath() string {
@@ -54,6 +55,10 @@ func main() {
 	database, err := db.NewDB(conf)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+
+	if err := dbmodels.AutoMigrate(database); err != nil {
+		log.Fatal().Err(err).Msg("Failed to migrate database")
 	}
 
 	srv, err := a2aagent.New(conf, database)

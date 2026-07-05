@@ -19,5 +19,11 @@ install-aw:
     go install ./cmd/aw
     go install ./cmd/agystatusline
 
+# Install agent-validate binary
 install-agent-validate:
     go install ./cmd/agent-validate
+
+# Start asgard with docker compose
+start:
+    docker compose down
+    docker compose up -d --build
