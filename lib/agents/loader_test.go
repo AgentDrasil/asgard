@@ -118,17 +118,7 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Len(t, agents, len(tests)+1)
-
-		// Assert agentfather is present
-		var hasAgentFather bool
-		for _, a := range agents {
-			if a.Config.ID == "agentfather" {
-				hasAgentFather = true
-				break
-			}
-		}
-		assert.True(t, hasAgentFather, "agentfather should be auto-initialized and found")
+		assert.Len(t, agents, len(tests))
 
 		for _, tt := range tests {
 			var found *Agent
@@ -158,8 +148,7 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Len(t, agents, 1)
-		assert.Equal(t, "agentfather", agents[0].Config.ID)
+		assert.Len(t, agents, 0)
 	})
 
 	t.Run("skip directories without config.yaml", func(t *testing.T) {
@@ -177,11 +166,10 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Len(t, agents, 1)
-		assert.Equal(t, "agentfather", agents[0].Config.ID)
+		assert.Len(t, agents, 0)
 	})
 
-	t.Run("auto-initialize when directory does not exist", func(t *testing.T) {
+	t.Run("returns empty slice when directory does not exist", func(t *testing.T) {
 		t.Parallel()
 
 		tmpDir := t.TempDir()
@@ -190,11 +178,10 @@ cli:
 		agents, err := loader.LoadAll()
 
 		require.NoError(t, err)
-		assert.Len(t, agents, 1)
-		assert.Equal(t, "agentfather", agents[0].Config.ID)
+		assert.Empty(t, agents)
 
 		configPath := filepath.Join(tmpDir, "agents", "agentfather", "config.yaml")
-		assert.FileExists(t, configPath)
+		assert.NoFileExists(t, configPath)
 	})
 }
 

@@ -2,6 +2,7 @@ package a2aagent
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
@@ -9,12 +10,25 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
+const agentFatherID = "agent_father"
+
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
 	loader := agents.NewLoader(s.conf.AgentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return err
+	}
+
+	hasAgentFather := false
+	for _, a := range agents {
+		if a.Config.ID == agentFatherID {
+			hasAgentFather = true
+			break
+		}
+	}
+	if !hasAgentFather {
+		return fmt.Errorf("default agent config %s not found", agentFatherID)
 	}
 
 	s.mu.Lock()

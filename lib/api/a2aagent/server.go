@@ -37,6 +37,17 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
+	hasAgentFather := false
+	for _, a := range agents {
+		if a.Config.ID == "agentfather" {
+			hasAgentFather = true
+			break
+		}
+	}
+	if !hasAgentFather {
+		return nil, fmt.Errorf("agentfather agent config not found")
+	}
+
 	var repo *dbmodels.SessionRepository
 	if dbConn != nil {
 		repo = dbmodels.NewSessionRepository(dbConn)

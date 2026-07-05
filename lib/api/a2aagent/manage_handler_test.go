@@ -54,6 +54,22 @@ func TestServerReload(t *testing.T) {
 	err := os.MkdirAll(filepath.Join(tmpDir, "agents"), 0755)
 	assert.NoError(t, err)
 
+	// Create agentfather config explicitly since auto-initialization was removed
+	fatherDir := filepath.Join(tmpDir, "agents", "agentfather")
+	err = os.MkdirAll(fatherDir, 0755)
+	assert.NoError(t, err)
+
+	fatherYaml := `
+id: "agentfather"
+name: "Agent Father"
+description: "The agent creates other agents."
+cli:
+  - cli: "agy"
+    model: "Gemini 3.5 Flash (Low)"
+`
+	err = os.WriteFile(filepath.Join(fatherDir, "config.yaml"), []byte(fatherYaml), 0644)
+	assert.NoError(t, err)
+
 	// Set up config
 	conf := &config.Config{
 		AgentDir: tmpDir,
@@ -65,7 +81,7 @@ func TestServerReload(t *testing.T) {
 	// Create Server
 	srv, err := New(conf, testDB)
 	assert.NoError(t, err)
-	// Server starts with 1 agent: agentfather (auto-initialized)
+	// Server starts with 1 agent: agentfather
 	assert.Len(t, srv.agents, 1)
 	assert.Equal(t, "agentfather", srv.agents[0].Config.ID)
 
