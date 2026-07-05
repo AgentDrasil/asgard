@@ -18,3 +18,6 @@ e2e-test:
 install-aw:
     go install ./cmd/aw
     go install ./cmd/agystatusline
+
+install-agent-validate:
+    go install ./cmd/agent-validate
