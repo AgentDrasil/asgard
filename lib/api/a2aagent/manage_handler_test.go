@@ -55,12 +55,12 @@ func TestServerReload(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create agentfather config explicitly since auto-initialization was removed
-	fatherDir := filepath.Join(tmpDir, "agents", "agentfather")
+	fatherDir := filepath.Join(tmpDir, "agents", "agent_father")
 	err = os.MkdirAll(fatherDir, 0755)
 	assert.NoError(t, err)
 
 	fatherYaml := `
-id: "agentfather"
+id: "agent_father"
 name: "Agent Father"
 description: "The agent creates other agents."
 cli:
@@ -81,9 +81,9 @@ cli:
 	// Create Server
 	srv, err := New(conf, testDB)
 	assert.NoError(t, err)
-	// Server starts with 1 agent: agentfather
+	// Server starts with 1 agent: agent_father
 	assert.Len(t, srv.agents, 1)
-	assert.Equal(t, "agentfather", srv.agents[0].Config.ID)
+	assert.Equal(t, "agent_father", srv.agents[0].Config.ID)
 
 	// Create a new agent configuration file dynamically
 	agentDir := filepath.Join(tmpDir, "agents", "my-agent")
@@ -109,10 +109,10 @@ cli:
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"status":"success"`)
 
-	// Verify that the new agent is loaded (total of 2 agents: agentfather + my-agent)
+	// Verify that the new agent is loaded (total of 2 agents: agent_father + my-agent)
 	srv.mu.RLock()
 	defer srv.mu.RUnlock()
 	assert.Len(t, srv.agents, 2)
-	assert.Equal(t, "agentfather", srv.agents[0].Config.ID)
+	assert.Equal(t, "agent_father", srv.agents[0].Config.ID)
 	assert.Equal(t, "My Agent", srv.agents[1].Config.Name)
 }

@@ -31,34 +31,20 @@ type Server struct {
 
 // New creates a new Server instance, loading all agents from the configured directory.
 func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
-	loader := agents.NewLoader(conf.AgentDir)
-	agents, err := loader.LoadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load agents: %w", err)
-	}
-
-	hasAgentFather := false
-	for _, a := range agents {
-		if a.Config.ID == "agentfather" {
-			hasAgentFather = true
-			break
-		}
-	}
-	if !hasAgentFather {
-		return nil, fmt.Errorf("agentfather agent config not found")
-	}
-
 	var repo *dbmodels.SessionRepository
 	if dbConn != nil {
 		repo = dbmodels.NewSessionRepository(dbConn)
 	}
 
 	s := &Server{
-		conf:   conf,
-		agents: agents,
-		repo:   repo,
+		conf: conf,
+		repo: repo,
 	}
-	s.mux = s.buildMuxLocked()
+
+	if err := s.reload(); err != nil {
+		return nil, fmt.Errorf("failed to load agents: %w", err)
+	}
+
 	return s, nil
 }
 
