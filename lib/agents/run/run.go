@@ -89,6 +89,8 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	if err != nil {
 		return nil, fmt.Errorf("creating socketpair: %w", err)
 	}
+	syscall.CloseOnExec(fds[0])
+	syscall.CloseOnExec(fds[1])
 	agentSocket := os.NewFile(uintptr(fds[0]), "agent-socket")
 	commandSocket := os.NewFile(uintptr(fds[1]), "command-socket")
 	defer func() { _ = agentSocket.Close() }()
@@ -104,9 +106,11 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
+
 	if err := cmdExec.Start(); err != nil {
 		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
 	}
+
 	// Close parent's references to the sockets so they are only held by the child sandboxes.
 	// This ensures fakebashd gets io.EOF and exits cleanly when the agent wrapper terminates.
 	_ = agentSocket.Close()

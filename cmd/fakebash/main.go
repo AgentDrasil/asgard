@@ -7,8 +7,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -25,6 +27,43 @@ const (
 )
 
 func main() {
+	isStatusline := false
+	for _, arg := range os.Args {
+		if strings.Contains(arg, "agystatusline") {
+			isStatusline = true
+			break
+		}
+	}
+
+	if isStatusline {
+		var cmdArgs []string
+		if len(os.Args) >= 3 && os.Args[1] == "-c" {
+			fields := strings.Fields(os.Args[2])
+			if len(fields) > 0 {
+				cmdArgs = fields
+			}
+		} else {
+			cmdArgs = os.Args[1:]
+		}
+
+		if len(cmdArgs) > 0 {
+			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Env = os.Environ()
+			err := cmd.Run()
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					os.Exit(exitErr.ExitCode())
+				}
+				fmt.Fprintf(os.Stderr, "fakebash run statusline error: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
 	fd, err := findSocketFD()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fakebash error: %v\n", err)
