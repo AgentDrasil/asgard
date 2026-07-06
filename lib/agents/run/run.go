@@ -107,6 +107,9 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
 
+	cmdExec.Stdout = os.Stdout
+	cmdExec.Stderr = os.Stderr
+
 	if err := cmdExec.Start(); err != nil {
 		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
 	}

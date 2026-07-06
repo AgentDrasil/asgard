@@ -42,7 +42,6 @@ func TestRun(t *testing.T) {
 		}
 	}
 
-
 	// Create a mock bwrap executable shell script
 	mockBwrapPath := filepath.Join(tmpDir, "bwrap")
 	scriptContent := "#!/bin/sh\nfor arg in \"$@\"; do\n  echo \"$arg\"\ndone\necho \"mock bwrap execution succeeded\"\n"

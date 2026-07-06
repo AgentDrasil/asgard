@@ -28,8 +28,6 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-
-
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")
 
@@ -187,8 +185,6 @@ func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.F
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-
-
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")
 
@@ -251,5 +247,3 @@ func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.F
 	}
 	return cmd, nil
 }
-
-

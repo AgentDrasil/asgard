@@ -181,5 +181,3 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
 	}
 }
-
-

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/goccy/go-yaml"
+
+	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
 func main() {

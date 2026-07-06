@@ -11,9 +11,13 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/creack/pty"
+	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type Request struct {
@@ -43,24 +47,59 @@ func writeFrame(w io.Writer, msgType byte, payload []byte) error {
 	return nil
 }
 
+func isDebugEnabled() bool {
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		if _, err := os.Stat("/home/user/config.yaml"); err == nil {
+			configPath = "/home/user/config.yaml"
+		} else {
+			configPath = "config.yaml"
+		}
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		Debug bool `yaml:"debug"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	return cfg.Debug
+}
+
+func setupLogger() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	if isDebugEnabled() {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.Warn().Msg("Debug mode is enabled in fakebashd")
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
+}
+
 func main() {
+	setupLogger()
+	log.Info().Msg("fakebashd: started main")
 	file := os.NewFile(3, "socket")
 	conn, err := net.FileConn(file)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakebashd FileConn error: %v\n", err)
+		log.Error().Err(err).Msg("fakebashd FileConn error")
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	shellCmd := exec.Command("bash")
 	shellCmd.Env = os.Environ()
 
 	ptyFile, err := pty.Start(shellCmd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakebashd failed to start shell in PTY: %v\n", err)
+		log.Error().Err(err).Msg("fakebashd failed to start shell in PTY")
 		os.Exit(1)
 	}
-	defer ptyFile.Close()
+	defer func() { _ = ptyFile.Close() }()
 
 	lengthBuf := make([]byte, 4)
 	for {
@@ -68,19 +107,19 @@ func main() {
 			if err == io.EOF {
 				break
 			}
-			fmt.Fprintf(os.Stderr, "fakebashd read length error: %v\n", err)
+			log.Error().Err(err).Msg("fakebashd read length error")
 			break
 		}
 		length := binary.BigEndian.Uint32(lengthBuf)
 		reqBytes := make([]byte, length)
 		if _, err := io.ReadFull(conn, reqBytes); err != nil {
-			fmt.Fprintf(os.Stderr, "fakebashd read request error: %v\n", err)
+			log.Error().Err(err).Msg("fakebashd read request error")
 			break
 		}
 
 		var req Request
 		if err := json.Unmarshal(reqBytes, &req); err != nil {
-			fmt.Fprintf(os.Stderr, "fakebashd unmarshal error: %v\n", err)
+			log.Error().Err(err).Msg("fakebashd unmarshal error")
 			continue
 		}
 
@@ -95,8 +134,12 @@ func main() {
 			}
 		}
 
+		log.Info().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd: command requested")
+
 		if cmdStr == "" {
-			writeFrame(conn, TypeExit, []byte("0"))
+			if err := writeFrame(conn, TypeExit, []byte("0")); err != nil {
+				log.Error().Err(err).Msg("fakebashd write exit frame error")
+			}
 			continue
 		}
 
@@ -118,8 +161,10 @@ func main() {
 		)
 
 		if _, err := ptyFile.Write([]byte(compositeCmd)); err != nil {
-			fmt.Fprintf(os.Stderr, "fakebashd failed to write to PTY: %v\n", err)
-			writeFrame(conn, TypeExit, []byte("1"))
+			log.Error().Err(err).Msg("fakebashd failed to write to PTY")
+			if err := writeFrame(conn, TypeExit, []byte("1")); err != nil {
+				log.Error().Err(err).Msg("fakebashd write exit frame error")
+			}
 			continue
 		}
 
@@ -139,7 +184,9 @@ func main() {
 				before := data[:idx]
 				before = bytes.TrimRight(before, "\r\n")
 				if len(before) > 0 {
-					writeFrame(conn, TypeStdout, before)
+					if err := writeFrame(conn, TypeStdout, before); err != nil {
+						log.Error().Err(err).Msg("fakebashd write stdout frame error")
+					}
 				}
 
 				after := data[idx+len(sentinelBytes):]
@@ -153,7 +200,9 @@ func main() {
 			} else {
 				keep := len(sentinelBytes)
 				if len(data) > keep {
-					writeFrame(conn, TypeStdout, data[:len(data)-keep])
+					if err := writeFrame(conn, TypeStdout, data[:len(data)-keep]); err != nil {
+						log.Error().Err(err).Msg("fakebashd write stdout frame error")
+					}
 					pending = data[len(data)-keep:]
 				} else {
 					pending = data
@@ -161,6 +210,8 @@ func main() {
 			}
 		}
 
-		writeFrame(conn, TypeExit, []byte(strconv.Itoa(exitCode)))
+		if err := writeFrame(conn, TypeExit, []byte(strconv.Itoa(exitCode))); err != nil {
+			log.Error().Err(err).Msg("fakebashd write exit frame error")
+		}
 	}
 }

@@ -12,6 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/goccy/go-yaml"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type Request struct {
@@ -26,7 +31,43 @@ const (
 	TypeExit   = 3
 )
 
+func isDebugEnabled() bool {
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		if _, err := os.Stat("/home/user/config.yaml"); err == nil {
+			configPath = "/home/user/config.yaml"
+		} else {
+			configPath = "config.yaml"
+		}
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		Debug bool `yaml:"debug"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	return cfg.Debug
+}
+
+func setupLogger() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	if isDebugEnabled() {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.Warn().Msg("Debug mode is enabled in fakebash")
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
+}
+
 func main() {
+	setupLogger()
+	log.Debug().Interface("args", os.Args).Msg("fakebash: command requested")
+
 	isStatusline := false
 	for _, arg := range os.Args {
 		if strings.Contains(arg, "agystatusline") {
@@ -57,7 +98,7 @@ func main() {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					os.Exit(exitErr.ExitCode())
 				}
-				fmt.Fprintf(os.Stderr, "fakebash run statusline error: %v\n", err)
+				log.Error().Err(err).Msg("fakebash run statusline error")
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -66,17 +107,17 @@ func main() {
 
 	fd, err := findSocketFD()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakebash error: %v\n", err)
+		log.Error().Err(err).Msg("fakebash error")
 		os.Exit(1)
 	}
 
 	file := os.NewFile(uintptr(fd), "socket")
 	conn, err := net.FileConn(file)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakebash FileConn error: %v\n", err)
+		log.Error().Err(err).Msg("fakebash FileConn error")
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	cwd, _ := os.Getwd()
 	env := os.Environ()
@@ -89,25 +130,25 @@ func main() {
 
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakebash marshal error: %v\n", err)
+		log.Error().Err(err).Msg("fakebash marshal error")
 		os.Exit(1)
 	}
 
 	lengthBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lengthBuf, uint32(len(reqBytes)))
 	if _, err := conn.Write(lengthBuf); err != nil {
-		fmt.Fprintf(os.Stderr, "fakebash write length error: %v\n", err)
+		log.Error().Err(err).Msg("fakebash write length error")
 		os.Exit(1)
 	}
 	if _, err := conn.Write(reqBytes); err != nil {
-		fmt.Fprintf(os.Stderr, "fakebash write request error: %v\n", err)
+		log.Error().Err(err).Msg("fakebash write request error")
 		os.Exit(1)
 	}
 
 	header := make([]byte, 5)
 	for {
 		if _, err := io.ReadFull(conn, header); err != nil {
-			fmt.Fprintf(os.Stderr, "fakebash read frame header error: %v\n", err)
+			log.Error().Err(err).Msg("fakebash read frame header error")
 			os.Exit(1)
 		}
 		msgType := header[0]
@@ -115,16 +156,16 @@ func main() {
 		payload := make([]byte, length)
 		if length > 0 {
 			if _, err := io.ReadFull(conn, payload); err != nil {
-				fmt.Fprintf(os.Stderr, "fakebash read frame payload error: %v\n", err)
+				log.Error().Err(err).Msg("fakebash read frame payload error")
 				os.Exit(1)
 			}
 		}
 
 		switch msgType {
 		case TypeStdout:
-			os.Stdout.Write(payload)
+			_, _ = os.Stdout.Write(payload)
 		case TypeStderr:
-			os.Stderr.Write(payload)
+			_, _ = os.Stderr.Write(payload)
 		case TypeExit:
 			if len(payload) > 0 {
 				code, _ := strconv.Atoi(string(payload))

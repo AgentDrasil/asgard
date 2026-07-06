@@ -30,6 +30,7 @@ var (
 
 func setupLogger(conf *config.Config) {
 	if conf.Debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
 		log.Warn().Msg("Debug mode is enabled")
 	}
