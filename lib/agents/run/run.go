@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -82,8 +83,6 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	fakebashdPath := "/bin/fakebashd"
-
 	// Create Socketpair for communicating between agent sandbox and command sandbox
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
@@ -96,22 +95,30 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	defer func() { _ = agentSocket.Close() }()
 	defer func() { _ = commandSocket.Close() }()
 
-	cmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
 	// Start the command execution sandbox
-	cmdExec, err := bwrap.CommandForCommandExec(runDir, fakebashdPath, commandSocket)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, commandSocket)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
 
-	cmdExec.Stdout = os.Stdout
-	cmdExec.Stderr = os.Stderr
+	cmdSandboxCmd.Stdout = os.Stdout
+	cmdSandboxCmd.Stderr = os.Stderr
 
-	if err := cmdExec.Start(); err != nil {
+	if err := cmdSandboxCmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
+	}
+
+	var stdoutBuf bytes.Buffer
+	agentSandboxCmd.Stdout = &stdoutBuf
+	agentSandboxCmd.Stderr = os.Stderr
+
+	if err := agentSandboxCmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting agent sandbox command: %w", err)
 	}
 
 	// Close parent's references to the sockets so they are only held by the child sandboxes.
@@ -120,8 +127,8 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	_ = commandSocket.Close()
 
 	defer func() {
-		if cmdExec.Process != nil {
-			_, _ = cmdExec.Process.Wait()
+		if cmdSandboxCmd.Process != nil {
+			_, _ = cmdSandboxCmd.Process.Wait()
 		}
 	}()
 
@@ -131,15 +138,16 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		go func() {
 			select {
 			case <-ctx.Done():
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
+				if agentSandboxCmd.Process != nil {
+					_ = agentSandboxCmd.Process.Kill()
 				}
 			case <-done:
 			}
 		}()
 	}
 
-	out, err := cmd.CombinedOutput()
+	err = agentSandboxCmd.Wait()
+	out := stdoutBuf.Bytes()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

@@ -150,7 +150,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runDir, "", nil)
+	cmd, err := CommandForCommandExec(runDir, nil)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)
 	}
 
-	expectedEnd := "-- sleep infinity"
+	expectedEnd := "-- /bin/fakebashd"
 	if !strings.HasSuffix(argStr, expectedEnd) {
 		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
 	}

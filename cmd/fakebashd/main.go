@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -70,7 +71,17 @@ func isDebugEnabled() bool {
 }
 
 func setupLogger() {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	home, err := os.UserHomeDir()
+	var logDest io.Writer = os.Stderr
+	if err == nil {
+		logDir := filepath.Join(home, "logs")
+		_ = os.MkdirAll(logDir, 0755)
+		logFile, err := os.OpenFile(filepath.Join(logDir, "fakebashd.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			logDest = logFile
+		}
+	}
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: logDest, TimeFormat: time.RFC3339})
 
 	if isDebugEnabled() {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
@@ -134,7 +145,7 @@ func main() {
 			}
 		}
 
-		log.Info().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd: command requested")
+		log.Debug().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd: command requested")
 
 		if cmdStr == "" {
 			if err := writeFrame(conn, TypeExit, []byte("0")); err != nil {

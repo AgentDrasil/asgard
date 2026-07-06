@@ -39,14 +39,6 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		}
 	}
 
-	if _, err := os.Stat("/bin/fakebash"); err == nil {
-		for _, p := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"} {
-			if _, err := os.Stat(p); err == nil {
-				args = append(args, "--ro-bind", "/bin/fakebash", p)
-			}
-		}
-	}
-
 	// Mount library/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility
 	extraROPaths := []string{"/lib", "/lib64", "/etc"}
 	for _, p := range extraROPaths {
@@ -110,6 +102,15 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		args = append(args, "--bind", runDir, runDir)
 	}
 
+	// Bind logs directory
+	logDir := filepath.Join(home, "logs")
+	if err := os.MkdirAll(logDir, 0755); err == nil {
+		args = append(args, "--bind", logDir, logDir)
+	}
+
+	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/bash")
+	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/bash")
+
 	// Change working directory to runDir in the sandbox
 	args = append(args, "--chdir", runDir)
 
@@ -170,7 +171,7 @@ func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt st
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.File) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, socketFile *os.File) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -235,11 +236,7 @@ func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.F
 	}
 
 	args = append(args, "--")
-	if fakebashdPath != "" {
-		args = append(args, fakebashdPath)
-	} else {
-		args = append(args, "sleep", "infinity")
-	}
+	args = append(args, "/bin/fakebashd")
 
 	cmd := exec.Command("bwrap", args...)
 	if socketFile != nil {
