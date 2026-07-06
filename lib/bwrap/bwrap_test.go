@@ -56,7 +56,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "some-model",
 	}
 
-	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "", false)
+	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, false)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir, "", false)
+	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir, false)
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}

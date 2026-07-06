@@ -13,7 +13,7 @@ import (
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, fakebashPath string, hasSocket bool) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, hasSocket bool) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -28,9 +28,7 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-	if hasSocket {
-		args = append(args, "--pass-fd", "3")
-	}
+
 
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")
@@ -43,10 +41,10 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		}
 	}
 
-	if fakebashPath != "" {
+	if _, err := os.Stat("/bin/fakebash"); err == nil {
 		for _, p := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"} {
 			if _, err := os.Stat(p); err == nil {
-				args = append(args, "--ro-bind", fakebashPath, p)
+				args = append(args, "--ro-bind", "/bin/fakebash", p)
 			}
 		}
 	}
@@ -161,8 +159,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, fakebashPath string, socketFile *os.File) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, fakebashPath, socketFile != nil)
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, socketFile *os.File) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, socketFile != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -189,9 +187,7 @@ func CommandForCommandExec(runDir string, fakebashdPath string, socketFile *os.F
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-	if socketFile != nil {
-		args = append(args, "--pass-fd", "3")
-	}
+
 
 	// Mount tmpfs for /tmp
 	args = append(args, "--tmpfs", "/tmp")

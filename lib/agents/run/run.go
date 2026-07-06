@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -83,19 +82,7 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	// Compile fakebash and fakebashd to runDir
-	fakebashPath := filepath.Join(runDir, "fakebash")
-	fakebashdPath := filepath.Join(runDir, "fakebashd")
-
-	buildCmd1 := exec.Command("go", "build", "-o", fakebashPath, "github.com/AgentDrasil/asgard/cmd/fakebash")
-	if out, err := buildCmd1.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to compile fakebash: %w (output: %q)", err, string(out))
-	}
-
-	buildCmd2 := exec.Command("go", "build", "-o", fakebashdPath, "github.com/AgentDrasil/asgard/cmd/fakebashd")
-	if out, err := buildCmd2.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to compile fakebashd: %w (output: %q)", err, string(out))
-	}
+	fakebashdPath := "/bin/fakebashd"
 
 	// Create Socketpair for communicating between agent sandbox and command sandbox
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
@@ -104,10 +91,10 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 	agentSocket := os.NewFile(uintptr(fds[0]), "agent-socket")
 	commandSocket := os.NewFile(uintptr(fds[1]), "command-socket")
-	defer agentSocket.Close()
-	defer commandSocket.Close()
+	defer func() { _ = agentSocket.Close() }()
+	defer func() { _ = commandSocket.Close() }()
 
-	cmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, fakebashPath, agentSocket)
+	cmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
@@ -120,6 +107,11 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	if err := cmdExec.Start(); err != nil {
 		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
 	}
+	// Close parent's references to the sockets so they are only held by the child sandboxes.
+	// This ensures fakebashd gets io.EOF and exits cleanly when the agent wrapper terminates.
+	_ = agentSocket.Close()
+	_ = commandSocket.Close()
+
 	defer func() {
 		if cmdExec.Process != nil {
 			_, _ = cmdExec.Process.Wait()
@@ -150,6 +142,3 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 
 	return out, nil
 }
-
-
-
