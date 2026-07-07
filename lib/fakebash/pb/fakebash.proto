@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package fakebash;
+
+option go_package = "github.com/AgentDrasil/asgard/lib/fakebash/pb";
+
+service FakebashService {
+  rpc RunCommand(CommandRequest) returns (stream CommandResponse);
+}
+
+message CommandRequest {
+  repeated string args = 1;
+  string cwd = 2;
+  repeated string env = 3;
+}
+
+message CommandResponse {
+  enum Type {
+    STDOUT = 0;
+    STDERR = 1;
+    EXIT = 2;
+  }
+  Type type = 1;
+  bytes payload = 2;
+}

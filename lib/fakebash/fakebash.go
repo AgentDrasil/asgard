@@ -2,8 +2,7 @@ package fakebash
 
 import (
 	"bytes"
-	"encoding/binary"
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,13 +20,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-)
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
-type Request struct {
-	Args []string `json:"args"`
-	Cwd  string   `json:"cwd"`
-	Env  []string `json:"env"`
-}
+	"github.com/AgentDrasil/asgard/lib/fakebash/pb"
+)
 
 const (
 	TypeStdout = 1
@@ -175,70 +173,257 @@ func RunClient(args []string) error {
 	}
 	defer func() { _ = conn.Close() }()
 
+	var once sync.Once
+	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+		var c net.Conn
+		once.Do(func() {
+			c = conn
+		})
+		if c == nil {
+			return nil, io.EOF
+		}
+		return c, nil
+	}
+
+	grpcConn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("grpc dial error: %w", err)
+	}
+	defer func() { _ = grpcConn.Close() }()
+
+	client := pb.NewFakebashServiceClient(grpcConn)
+
 	cwd, _ := os.Getwd()
 	env := os.Environ()
 
-	req := Request{
+	stream, err := client.RunCommand(context.Background(), &pb.CommandRequest{
 		Args: args[1:],
 		Cwd:  cwd,
 		Env:  env,
-	}
-
-	reqBytes, err := json.Marshal(req)
+	})
 	if err != nil {
-		return fmt.Errorf("fakebash marshal error: %w", err)
+		return fmt.Errorf("run command stream error: %w", err)
 	}
 
-	lengthBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(lengthBuf, uint32(len(reqBytes)))
-	if _, err := conn.Write(lengthBuf); err != nil {
-		return fmt.Errorf("fakebash write length error: %w", err)
-	}
-	if _, err := conn.Write(reqBytes); err != nil {
-		return fmt.Errorf("fakebash write request error: %w", err)
-	}
-
-	header := make([]byte, 5)
 	for {
-		if _, err := io.ReadFull(conn, header); err != nil {
-			return fmt.Errorf("fakebash read frame header error: %w", err)
-		}
-		msgType := header[0]
-		length := binary.BigEndian.Uint32(header[1:5])
-		payload := make([]byte, length)
-		if length > 0 {
-			if _, err := io.ReadFull(conn, payload); err != nil {
-				return fmt.Errorf("fakebash read frame payload error: %w", err)
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
+			return fmt.Errorf("stream recv error: %w", err)
 		}
 
-		switch msgType {
-		case TypeStdout:
-			_, _ = os.Stdout.Write(payload)
-		case TypeStderr:
-			_, _ = os.Stderr.Write(payload)
-		case TypeExit:
-			if len(payload) > 0 {
-				code, _ := strconv.Atoi(string(payload))
+		switch resp.Type {
+		case pb.CommandResponse_STDOUT:
+			_, _ = os.Stdout.Write(resp.Payload)
+		case pb.CommandResponse_STDERR:
+			_, _ = os.Stderr.Write(resp.Payload)
+		case pb.CommandResponse_EXIT:
+			if len(resp.Payload) > 0 {
+				code, _ := strconv.Atoi(string(resp.Payload))
 				os.Exit(code)
 			}
 			os.Exit(0)
 		}
 	}
+	return nil
 }
 
-func writeFrame(w io.Writer, msgType byte, payload []byte) error {
-	header := make([]byte, 5)
-	header[0] = msgType
-	binary.BigEndian.PutUint32(header[1:5], uint32(len(payload)))
-	if _, err := w.Write(header); err != nil {
-		return err
+type SingleConnListener struct {
+	conn     net.Conn
+	done     chan struct{}
+	accepted bool
+	closed   bool
+	mu       sync.Mutex
+}
+
+func NewSingleConnListener(c net.Conn) *SingleConnListener {
+	return &SingleConnListener{
+		conn: c,
+		done: make(chan struct{}),
 	}
-	if len(payload) > 0 {
-		if _, err := w.Write(payload); err != nil {
-			return err
+}
+
+func (l *SingleConnListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return nil, io.EOF
+	}
+	if l.accepted {
+		l.mu.Unlock()
+		<-l.done
+		return nil, io.EOF
+	}
+	c := l.conn
+	l.conn = nil
+	l.accepted = true
+	l.mu.Unlock()
+
+	return c, nil
+}
+
+func (l *SingleConnListener) Close() error {
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return nil
+	}
+	l.closed = true
+	if l.conn != nil {
+		_ = l.conn.Close()
+		l.conn = nil
+	}
+	close(l.done)
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *SingleConnListener) Addr() net.Addr {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn != nil {
+		return l.conn.LocalAddr()
+	}
+	return &net.UnixAddr{Name: "single-conn", Net: "unix"}
+}
+
+type fakebashServer struct {
+	pb.UnimplementedFakebashServiceServer
+	mu       sync.Mutex
+	ptyFile  *os.File
+	shellCmd *exec.Cmd
+}
+
+func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashService_RunCommandServer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var cmdStr string
+	if len(req.Args) > 0 {
+		if req.Args[0] == "-c" {
+			if len(req.Args) > 1 {
+				cmdStr = strings.Join(req.Args[1:], " ")
+			}
+		} else {
+			cmdStr = strings.Join(req.Args, " ")
 		}
 	}
+
+	log.Debug().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd gRPC: command requested")
+
+	if cmdStr == "" {
+		if err := stream.Send(&pb.CommandResponse{
+			Type:    pb.CommandResponse_EXIT,
+			Payload: []byte("0"),
+		}); err != nil {
+			log.Error().Err(err).Msg("fakebashd write exit frame error")
+		}
+		return nil
+	}
+
+	if s.ptyFile == nil {
+		s.shellCmd = exec.Command("bash")
+		s.shellCmd.Env = os.Environ()
+
+		ptyFile, err := pty.Start(s.shellCmd)
+		if err != nil {
+			return fmt.Errorf("fakebashd failed to start shell in PTY: %w", err)
+		}
+		s.ptyFile = ptyFile
+	}
+
+	token := uuid.NewString()
+	sentinel := "FAKEBASH_DONE_" + token
+
+	var envExports []string
+	for _, e := range req.Env {
+		if !strings.HasPrefix(e, "_=") && !strings.HasPrefix(e, "SHLVL=") {
+			envExports = append(envExports, "export "+e)
+		}
+	}
+
+	compositeCmd := fmt.Sprintf("(cd %s && %s && %s); echo; echo \"%s:$?\"\n",
+		strconv.Quote(req.Cwd),
+		strings.Join(envExports, " && "),
+		cmdStr,
+		sentinel,
+	)
+
+	if _, err := s.ptyFile.Write([]byte(compositeCmd)); err != nil {
+		log.Error().Err(err).Msg("fakebashd failed to write to PTY")
+		if err := stream.Send(&pb.CommandResponse{
+			Type:    pb.CommandResponse_EXIT,
+			Payload: []byte("1"),
+		}); err != nil {
+			log.Error().Err(err).Msg("fakebashd write exit frame error")
+		}
+		return nil
+	}
+
+	sentinelBytes := []byte(sentinel)
+	buf := make([]byte, 4096)
+	var pending []byte
+	exitCode := 0
+
+	for {
+		n, err := s.ptyFile.Read(buf)
+		if err != nil {
+			// If PTY is closed/broken, reset PTY so next command starts a new shell
+			_ = s.ptyFile.Close()
+			s.ptyFile = nil
+			s.shellCmd = nil
+			break
+		}
+		data := append(pending, buf[:n]...)
+		idx := bytes.Index(data, sentinelBytes)
+		if idx != -1 {
+			before := data[:idx]
+			before = bytes.TrimRight(before, "\r\n")
+			if len(before) > 0 {
+				if err := stream.Send(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDOUT,
+					Payload: before,
+				}); err != nil {
+					log.Error().Err(err).Msg("fakebashd write stdout frame error")
+				}
+			}
+
+			after := data[idx+len(sentinelBytes):]
+			afterStr := string(after)
+			parts := strings.Split(afterStr, "\n")
+			codeStr := strings.TrimSpace(strings.TrimPrefix(parts[0], ":"))
+			if code, err := strconv.Atoi(codeStr); err == nil {
+				exitCode = code
+			}
+			break
+		} else {
+			keep := len(sentinelBytes)
+			if len(data) > keep {
+				if err := stream.Send(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDOUT,
+					Payload: data[:len(data)-keep],
+				}); err != nil {
+					log.Error().Err(err).Msg("fakebashd write stdout frame error")
+				}
+				pending = data[len(data)-keep:]
+			} else {
+				pending = data
+			}
+		}
+	}
+
+	if err := stream.Send(&pb.CommandResponse{
+		Type:    pb.CommandResponse_EXIT,
+		Payload: []byte(strconv.Itoa(exitCode)),
+	}); err != nil {
+		log.Error().Err(err).Msg("fakebashd write exit frame error")
+	}
+
 	return nil
 }
 
@@ -250,125 +435,20 @@ func RunDaemon() error {
 	}
 	defer func() { _ = conn.Close() }()
 
-	shellCmd := exec.Command("bash")
-	shellCmd.Env = os.Environ()
+	listener := NewSingleConnListener(conn)
+	defer func() { _ = listener.Close() }()
 
-	ptyFile, err := pty.Start(shellCmd)
-	if err != nil {
-		return fmt.Errorf("fakebashd failed to start shell in PTY: %w", err)
-	}
-	defer func() { _ = ptyFile.Close() }()
-
-	lengthBuf := make([]byte, 4)
-	for {
-		if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("fakebashd read length error: %w", err)
+	grpcServer := grpc.NewServer()
+	srv := &fakebashServer{}
+	defer func() {
+		if srv.ptyFile != nil {
+			_ = srv.ptyFile.Close()
 		}
-		length := binary.BigEndian.Uint32(lengthBuf)
-		reqBytes := make([]byte, length)
-		if _, err := io.ReadFull(conn, reqBytes); err != nil {
-			return fmt.Errorf("fakebashd read request error: %w", err)
-		}
+	}()
+	pb.RegisterFakebashServiceServer(grpcServer, srv)
 
-		var req Request
-		if err := json.Unmarshal(reqBytes, &req); err != nil {
-			log.Error().Err(err).Msg("fakebashd unmarshal error")
-			continue
-		}
-
-		var cmdStr string
-		if len(req.Args) > 0 {
-			if req.Args[0] == "-c" {
-				if len(req.Args) > 1 {
-					cmdStr = strings.Join(req.Args[1:], " ")
-				}
-			} else {
-				cmdStr = strings.Join(req.Args, " ")
-			}
-		}
-
-		log.Debug().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd: command requested")
-
-		if cmdStr == "" {
-			if err := writeFrame(conn, TypeExit, []byte("0")); err != nil {
-				log.Error().Err(err).Msg("fakebashd write exit frame error")
-			}
-			continue
-		}
-
-		token := uuid.NewString()
-		sentinel := "FAKEBASH_DONE_" + token
-
-		var envExports []string
-		for _, e := range req.Env {
-			if !strings.HasPrefix(e, "_=") && !strings.HasPrefix(e, "SHLVL=") {
-				envExports = append(envExports, "export "+e)
-			}
-		}
-
-		compositeCmd := fmt.Sprintf("(cd %s && %s && %s); echo; echo \"%s:$?\"\n",
-			strconv.Quote(req.Cwd),
-			strings.Join(envExports, " && "),
-			cmdStr,
-			sentinel,
-		)
-
-		if _, err := ptyFile.Write([]byte(compositeCmd)); err != nil {
-			log.Error().Err(err).Msg("fakebashd failed to write to PTY")
-			if err := writeFrame(conn, TypeExit, []byte("1")); err != nil {
-				log.Error().Err(err).Msg("fakebashd write exit frame error")
-			}
-			continue
-		}
-
-		sentinelBytes := []byte(sentinel)
-		buf := make([]byte, 4096)
-		var pending []byte
-		exitCode := 0
-
-		for {
-			n, err := ptyFile.Read(buf)
-			if err != nil {
-				break
-			}
-			data := append(pending, buf[:n]...)
-			idx := bytes.Index(data, sentinelBytes)
-			if idx != -1 {
-				before := data[:idx]
-				before = bytes.TrimRight(before, "\r\n")
-				if len(before) > 0 {
-					if err := writeFrame(conn, TypeStdout, before); err != nil {
-						log.Error().Err(err).Msg("fakebashd write stdout frame error")
-					}
-				}
-
-				after := data[idx+len(sentinelBytes):]
-				afterStr := string(after)
-				parts := strings.Split(afterStr, "\n")
-				codeStr := strings.TrimSpace(strings.TrimPrefix(parts[0], ":"))
-				if code, err := strconv.Atoi(codeStr); err == nil {
-					exitCode = code
-				}
-				break
-			} else {
-				keep := len(sentinelBytes)
-				if len(data) > keep {
-					if err := writeFrame(conn, TypeStdout, data[:len(data)-keep]); err != nil {
-						log.Error().Err(err).Msg("fakebashd write stdout frame error")
-					}
-					pending = data[len(data)-keep:]
-				} else {
-					pending = data
-				}
-			}
-		}
-
-		if err := writeFrame(conn, TypeExit, []byte(strconv.Itoa(exitCode))); err != nil {
-			log.Error().Err(err).Msg("fakebashd write exit frame error")
-		}
+	if err := grpcServer.Serve(listener); err != nil {
+		return fmt.Errorf("grpc server error: %w", err)
 	}
 	return nil
 }

@@ -23,6 +23,11 @@ install-aw:
 install-agent-validate:
     go install ./cmd/agent-validate
 
+# Compile protobuf and gRPC definitions for fakebash
+compile-proto:
+    PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative lib/fakebash/pb/fakebash.proto
+
+
 # Start asgard with docker compose
 start:
     docker compose down
