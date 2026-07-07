@@ -128,6 +128,7 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 
 	defer func() {
 		if cmdSandboxCmd.Process != nil {
+			_ = cmdSandboxCmd.Process.Kill()
 			_, _ = cmdSandboxCmd.Process.Wait()
 		}
 	}()
@@ -140,6 +141,9 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 			case <-ctx.Done():
 				if agentSandboxCmd.Process != nil {
 					_ = agentSandboxCmd.Process.Kill()
+				}
+				if cmdSandboxCmd.Process != nil {
+					_ = cmdSandboxCmd.Process.Kill()
 				}
 			case <-done:
 			}
