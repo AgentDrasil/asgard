@@ -78,7 +78,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			runDirOpt = optional.Some(session.RunDir)
 		}
 
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt)
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to run agent: %w", err))
 			return

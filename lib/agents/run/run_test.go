@@ -94,7 +94,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("failed to create run dir: %v", err)
 	}
 
-	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string]())
+	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string](), "test-chat")
 	if err != nil {
 		t.Fatalf("unexpected error running agent: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestRun(t *testing.T) {
 		},
 	}
 
-	_, err = Run(context.Background(), lowQuotaAgent, "hello", optional.None[string](), optional.None[string]())
+	_, err = Run(context.Background(), lowQuotaAgent, "hello", optional.None[string](), optional.None[string](), "test-chat")
 	if err == nil {
 		t.Error("expected error due to insufficient quota, but got nil")
 	} else if !strings.Contains(err.Error(), "no CLI target with more than 20% quota") {
@@ -133,7 +133,7 @@ func TestRun(t *testing.T) {
 	}
 
 	// 3. Test case: runDir is not allowed
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")))
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")), "test-chat")
 	if err == nil {
 		t.Error("expected error due to disallowed run directory, but got nil")
 	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
@@ -142,7 +142,7 @@ func TestRun(t *testing.T) {
 
 	// 4. Test case: runDir is a valid subdirectory
 	validSubDir := filepath.Join(tmpDir, "some-allowed-dir", "subdir1")
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir))
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir), "test-chat")
 	if err != nil {
 		t.Fatalf("unexpected error with valid subdirectory: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestRun(t *testing.T) {
 			},
 		},
 	}
-	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string]())
+	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string](), "test-chat")
 	if err != nil {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}

@@ -35,7 +35,7 @@ func isAllowedDir(path string, allowedDirs []string) bool {
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the first target that has more than 20% quota remaining.
 // If no targets have more than 20% quota remaining, it returns an error.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string]) ([]byte, error) {
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
@@ -95,7 +95,7 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	defer func() { _ = agentSocket.Close() }()
 	defer func() { _ = commandSocket.Close() }()
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
@@ -105,6 +105,9 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
+
+	agentSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
+	cmdSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
 
 	cmdSandboxCmd.Stdout = os.Stdout
 	cmdSandboxCmd.Stderr = os.Stderr

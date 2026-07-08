@@ -6,10 +6,11 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/fakebash"
+	"github.com/AgentDrasil/asgard/lib/logger"
 )
 
 func main() {
-	fakebash.SetupLogger("fakebash")
+	logger.SetupLogger("fakebash")
 	log.Debug().Interface("args", os.Args).Msg("fakebash: command requested")
 
 	if err := fakebash.RunClient(os.Args); err != nil {

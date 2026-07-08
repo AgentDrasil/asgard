@@ -13,7 +13,7 @@ import (
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, hasSocket bool) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, hasSocket bool, chatID string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -117,6 +117,10 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 	// Set HOME env
 	args = append(args, "--setenv", "HOME", home)
 
+	if chatID != "" {
+		args = append(args, "--setenv", "ASGARD_CHAT_ID", chatID)
+	}
+
 	// Target-specific mounts
 	switch target.CLI {
 	case "agy":
@@ -158,8 +162,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, socketFile *os.File) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, socketFile != nil)
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, socketFile *os.File, chatID string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, socketFile != nil, chatID)
 	if err != nil {
 		return nil, err
 	}
