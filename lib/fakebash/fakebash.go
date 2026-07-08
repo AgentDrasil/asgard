@@ -26,11 +26,9 @@ import (
 	"github.com/AgentDrasil/asgard/lib/fakebash/pb"
 )
 
-const (
-	TypeStdout = 1
-	TypeStderr = 2
-	TypeExit   = 3
-)
+var allowlist = map[string]struct{}{
+	"agystatusline": {},
+}
 
 func IsDebugEnabled() bool {
 	configPath := os.Getenv("CONFIG_PATH")
@@ -124,15 +122,19 @@ func FindSocketFD() (int, error) {
 }
 
 func RunClient(args []string) error {
-	isStatusline := false
+	isAllowlisted := false
 	for _, arg := range args {
-		if strings.Contains(arg, "agystatusline") {
-			isStatusline = true
+		if _, ok := allowlist[arg]; ok {
+			isAllowlisted = true
+			break
+		}
+		if _, ok := allowlist[filepath.Base(arg)]; ok {
+			isAllowlisted = true
 			break
 		}
 	}
 
-	if isStatusline {
+	if isAllowlisted {
 		var cmdArgs []string
 		if len(args) >= 3 && args[1] == "-c" {
 			fields := strings.Fields(args[2])
@@ -154,7 +156,7 @@ func RunClient(args []string) error {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					os.Exit(exitErr.ExitCode())
 				}
-				log.Error().Err(err).Msg("fakebash run statusline error")
+				log.Error().Err(err).Msg("fakebash run allowlisted command error")
 				os.Exit(1)
 			}
 			os.Exit(0)
