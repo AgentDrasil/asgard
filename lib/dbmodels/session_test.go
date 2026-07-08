@@ -3,6 +3,7 @@ package dbmodels
 import (
 	"testing"
 
+	"github.com/moznion/go-optional"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +27,7 @@ func TestSessionRepository(t *testing.T) {
 	assert.Nil(t, sess)
 
 	// 2. UpdateAgentSession should create a session and save the agent
-	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1")
+	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1", optional.None[string]())
 	assert.NoError(t, err)
 
 	// Verify session was created
@@ -40,7 +41,7 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "session-1", sess.Agents[0].SessionID)
 
 	// 3. UpdateAgentSession for the same agent should update the session ID
-	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1-updated")
+	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1-updated", optional.None[string]())
 	assert.NoError(t, err)
 
 	sess, err = repo.GetSession(chatID)
@@ -52,7 +53,7 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
 
 	// 4. UpdateAgentSession for a different agent should append to the list
-	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2")
+	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2", optional.None[string]())
 	assert.NoError(t, err)
 
 	sess, err = repo.GetSession(chatID)
@@ -64,4 +65,13 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
 	assert.Equal(t, "agent-2", sess.Agents[1].Name)
 	assert.Equal(t, "session-2", sess.Agents[1].SessionID)
+
+	// 5. UpdateAgentSession should update RunDir
+	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2", optional.Some("/some/run/dir"))
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.Equal(t, "/some/run/dir", sess.RunDir)
 }

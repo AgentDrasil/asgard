@@ -33,9 +33,11 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 
 		chatID := execCtx.ContextID
 
+		var session *dbmodels.Session
 		agentSessionID := optional.None[string]()
 		if e.repo != nil {
-			session, err := e.repo.GetSession(chatID)
+			var err error
+			session, err = e.repo.GetSession(chatID)
 			if err != nil {
 				yield(nil, fmt.Errorf("failed to get session: %w", err))
 				return
@@ -72,6 +74,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				runDirOpt = optional.Some(rd)
 			}
 		}
+		if runDirOpt.IsNone() && session != nil && session.RunDir != "" {
+			runDirOpt = optional.Some(session.RunDir)
+		}
 
 		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt)
 		if err != nil {
@@ -91,14 +96,20 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		var respText string
 		if err := json.Unmarshal(out, &result); err == nil {
 			respText = result.LastContent
-			if e.repo != nil && result.SessionID != "" {
-				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID); err != nil {
+			if e.repo != nil && (result.SessionID != "" || runDirOpt.IsSome()) {
+				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID, runDirOpt); err != nil {
 					yield(nil, fmt.Errorf("failed to update agent session: %w", err))
 					return
 				}
 			}
 		} else {
 			respText = string(out)
+			if e.repo != nil && runDirOpt.IsSome() {
+				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
+					yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+					return
+				}
+			}
 		}
 
 		respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))

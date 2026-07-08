@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/moznion/go-optional"
 	"gorm.io/gorm"
 )
 
@@ -77,8 +78,8 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 	return r.db.Save(session).Error
 }
 
-// UpdateAgentSession updates the session ID for a specific agent in a topic.
-func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, sessionID string) error {
+// UpdateAgentSession updates the session ID for a specific agent in a topic and optionally updates the run directory.
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, sessionID string, runDirOpt optional.Option[string]) error {
 	session, err := r.GetSession(chatID)
 	if err != nil {
 		return err
@@ -92,10 +93,16 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		}
 	}
 
+	if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
+		session.RunDir = runDirOpt.Unwrap()
+	}
+
 	found := false
 	for i, a := range session.Agents {
 		if a.Name == agentName {
-			session.Agents[i].SessionID = sessionID
+			if sessionID != "" {
+				session.Agents[i].SessionID = sessionID
+			}
 			found = true
 			break
 		}
