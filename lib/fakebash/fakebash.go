@@ -28,41 +28,21 @@ var allowlist = map[string]struct{}{
 	"call-peer":     {},
 }
 
-// TODO: need a robust parser of command.
 func RunClient(args []string) error {
-	isAllowlisted := false
 	if len(args) > 1 {
-		var targetCmd string
-		if len(args) >= 3 && args[1] == "-c" {
-			fields := strings.Fields(args[2])
-			if len(fields) > 0 {
-				targetCmd = fields[0]
-			}
-		} else {
-			targetCmd = args[1]
-		}
-
-		if targetCmd != "" {
-			if _, ok := allowlist[targetCmd]; ok {
-				isAllowlisted = true
-			} else if _, ok := allowlist[filepath.Base(targetCmd)]; ok {
-				isAllowlisted = true
-			}
-		}
-	}
-
-	if isAllowlisted {
 		var cmdArgs []string
-		if len(args) >= 3 && args[1] == "-c" {
-			fields := strings.Fields(args[2])
-			if len(fields) > 0 {
-				cmdArgs = fields
-			}
+		var ok bool
+		if strings.HasPrefix(args[1], "-") {
+			cmdArgs, ok = unpackCommand(append([]string{"bash"}, args[1:]...))
 		} else {
-			cmdArgs = args[1:]
+			cmdArgs, ok = unpackCommand(args[1:])
 		}
 
-		if len(cmdArgs) > 0 {
+		if ok {
+			if len(cmdArgs) == 0 {
+				os.Exit(0)
+			}
+
 			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
@@ -285,4 +265,177 @@ func RunDaemon() error {
 		return fmt.Errorf("grpc server error: %w", err)
 	}
 	return nil
+}
+
+func splitCommandString(cmdStr string) ([][]string, error) {
+	var commands [][]string
+	var currentCmd []string
+	var currentWord strings.Builder
+
+	inSingleQuote := false
+	inDoubleQuote := false
+	escaped := false
+	wordStarted := false
+
+	emitWord := func() {
+		if wordStarted {
+			currentCmd = append(currentCmd, currentWord.String())
+			currentWord.Reset()
+			wordStarted = false
+		}
+	}
+
+	emitCommand := func() {
+		emitWord()
+		if len(currentCmd) > 0 {
+			commands = append(commands, currentCmd)
+			currentCmd = nil
+		}
+	}
+
+	for i := 0; i < len(cmdStr); i++ {
+		c := cmdStr[i]
+
+		if escaped {
+			currentWord.WriteByte(c)
+			wordStarted = true
+			escaped = false
+			continue
+		}
+
+		if inSingleQuote {
+			if c == '\'' {
+				inSingleQuote = false
+			} else {
+				currentWord.WriteByte(c)
+				wordStarted = true
+			}
+			continue
+		}
+
+		if inDoubleQuote {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inDoubleQuote = false
+			default:
+				currentWord.WriteByte(c)
+				wordStarted = true
+			}
+			continue
+		}
+
+		// Not in quotes
+		switch c {
+		case '\\':
+			escaped = true
+		case '\'':
+			inSingleQuote = true
+			wordStarted = true
+		case '"':
+			inDoubleQuote = true
+			wordStarted = true
+		case ';', '\n':
+			emitCommand()
+		case '&', '|':
+			emitCommand()
+			if i+1 < len(cmdStr) && cmdStr[i+1] == c {
+				i++
+			}
+		case ' ', '\t', '\r':
+			emitWord()
+		default:
+			currentWord.WriteByte(c)
+			wordStarted = true
+		}
+	}
+
+	emitCommand()
+
+	return commands, nil
+}
+
+func isNoOpCommand(name string) bool {
+	base := filepath.Base(name)
+	switch base {
+	case "shopt", "true", "false", "colon", ":":
+		return true
+	}
+	return false
+}
+
+func unpackCommand(cmd []string) ([]string, bool) {
+	if len(cmd) == 0 {
+		return nil, true
+	}
+
+	first := cmd[0]
+	base := filepath.Base(first)
+
+	if base == "exec" {
+		return unpackCommand(cmd[1:])
+	}
+
+	if isNoOpCommand(first) {
+		return nil, true
+	}
+
+	if base == "bash" || base == "sh" {
+		cIdx := -1
+		for i := 1; i < len(cmd); i++ {
+			arg := cmd[i]
+			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+				if strings.Contains(arg, "c") {
+					cIdx = i
+					break
+				}
+			}
+		}
+
+		if cIdx != -1 {
+			var innerCmdStr string
+			for i := cIdx + 1; i < len(cmd); i++ {
+				arg := cmd[i]
+				if strings.HasPrefix(arg, "-") {
+					continue
+				}
+				innerCmdStr = arg
+				break
+			}
+
+			if innerCmdStr != "" {
+				innerCmds, err := splitCommandString(innerCmdStr)
+				if err != nil {
+					return nil, false
+				}
+
+				var finalCmd []string
+				for _, innerCmd := range innerCmds {
+					unpacked, ok := unpackCommand(innerCmd)
+					if !ok {
+						return nil, false
+					}
+					if len(unpacked) > 0 {
+						if len(finalCmd) > 0 {
+							return nil, false
+						}
+						finalCmd = unpacked
+					}
+				}
+				return finalCmd, true
+			}
+		}
+
+		return nil, false
+	}
+
+	if _, ok := allowlist[first]; ok {
+		return cmd, true
+	}
+	if _, ok := allowlist[base]; ok {
+		return cmd, true
+	}
+
+	return nil, false
 }
