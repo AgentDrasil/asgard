@@ -1,4 +1,4 @@
-package a2aagent
+package api
 
 import (
 	"encoding/json"

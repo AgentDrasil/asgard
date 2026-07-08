@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
-	"github.com/AgentDrasil/asgard/lib/api/a2aagent"
+	"github.com/AgentDrasil/asgard/lib/api"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
@@ -62,7 +62,7 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to migrate database")
 	}
 
-	srv, err := a2aagent.New(conf, database)
+	srv, err := api.New(conf, database)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agents server")
 	}
