@@ -18,6 +18,10 @@ func NewLoader(agentsDir string) *Loader {
 	}
 }
 
+type teamsConfig struct {
+	Teams []string `yaml:"teams"`
+}
+
 // LoadAll scans the AgentsDir/agents/ directory for agent configurations.
 func (l *Loader) LoadAll() ([]*Agent, error) {
 	agentsPath := filepath.Join(l.AgentsDir, "agents")
@@ -27,6 +31,29 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to read agents directory: %w", err)
+	}
+
+	teamsPath := filepath.Join(l.AgentsDir, "teams.yaml")
+	teamsData, err := os.ReadFile(teamsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read teams.yaml: %w", err)
+	}
+
+	var tCfg teamsConfig
+	if err := yaml.Unmarshal(teamsData, &tCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse teams.yaml: %w", err)
+	}
+
+	if len(tCfg.Teams) == 0 {
+		var teamsList []string
+		if err := yaml.Unmarshal(teamsData, &teamsList); err == nil && len(teamsList) > 0 {
+			tCfg.Teams = teamsList
+		}
+	}
+
+	validTeams := make(map[string]bool)
+	for _, t := range tCfg.Teams {
+		validTeams[t] = true
 	}
 
 	var agents []*Agent
@@ -60,6 +87,10 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 
 		if err := cfg.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid config for agent %s: %w", entry.Name(), err)
+		}
+
+		if cfg.Team != "" && !validTeams[cfg.Team] {
+			return nil, fmt.Errorf("team %q for agent %s is not defined in teams.yaml", cfg.Team, entry.Name())
 		}
 
 		agents = append(agents, &Agent{

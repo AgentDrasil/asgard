@@ -24,6 +24,7 @@ type AgentConfig struct {
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	Team        string `yaml:"team"`
 
 	// CLI is a list of CLI targets (CLI name and model) that can be used,
 	// typically ordered by preference to support quota-based fallbacks.

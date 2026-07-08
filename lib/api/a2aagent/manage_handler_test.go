@@ -54,6 +54,14 @@ func TestServerReload(t *testing.T) {
 	err := os.MkdirAll(filepath.Join(tmpDir, "agents"), 0755)
 	assert.NoError(t, err)
 
+	// Write teams.yaml
+	teamsYaml := `
+teams:
+  - my-team
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+	assert.NoError(t, err)
+
 	// Create agentfather config explicitly since auto-initialization was removed
 	fatherDir := filepath.Join(tmpDir, "agents", "agent_father")
 	err = os.MkdirAll(fatherDir, 0755)
@@ -63,6 +71,7 @@ func TestServerReload(t *testing.T) {
 id: "agent_father"
 name: "Agent Father"
 description: "The agent creates other agents."
+team: "my-team"
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"
@@ -94,6 +103,7 @@ cli:
 id: "my-agent"
 name: "My Agent"
 description: "Dynamically added agent"
+team: "my-team"
 cli:
   - cli: "opencode"
     model: "gemini-2.5-flash"

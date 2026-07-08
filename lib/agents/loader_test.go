@@ -50,6 +50,15 @@ func TestLoader_LoadAll(t *testing.T) {
 		err := os.Mkdir(agentsDir, 0755)
 		require.NoError(t, err)
 
+		// Write teams.yaml
+		teamsYaml := `
+teams:
+  - team-a
+  - team-b
+`
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+		require.NoError(t, err)
+
 		tests := []struct {
 			name     string
 			config   string
@@ -61,6 +70,7 @@ func TestLoader_LoadAll(t *testing.T) {
 id: agent-one
 name: agent1
 description: Test Agent 1
+team: team-a
 cli:
   - cli: agy
     model: gemini-2.5-flash
@@ -74,6 +84,7 @@ mount_dirs:
 					ID:          "agent-one",
 					Name:        "agent1",
 					Description: "Test Agent 1",
+					Team:        "team-a",
 					CLI: []CLITarget{
 						{CLI: "agy", Model: "gemini-2.5-flash"},
 					},
@@ -90,6 +101,7 @@ mount_dirs:
 id: agent-two
 name: agent2
 description: Test Agent 2
+team: team-b
 cli:
   - cli: opencode
     model: deepseek-chat
@@ -98,6 +110,7 @@ cli:
 					ID:          "agent-two",
 					Name:        "agent2",
 					Description: "Test Agent 2",
+					Team:        "team-b",
 					CLI: []CLITarget{
 						{CLI: "opencode", Model: "deepseek-chat"},
 					},
@@ -141,6 +154,10 @@ cli:
 		err := os.Mkdir(agentsDir, 0755)
 		require.NoError(t, err)
 
+		// Write teams.yaml
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - team-a"), 0644)
+		require.NoError(t, err)
+
 		err = os.WriteFile(filepath.Join(agentsDir, "not-a-dir"), []byte("data"), 0644)
 		require.NoError(t, err)
 
@@ -157,6 +174,10 @@ cli:
 		tmpDir := t.TempDir()
 		agentsDir := filepath.Join(tmpDir, "agents")
 		err := os.Mkdir(agentsDir, 0755)
+		require.NoError(t, err)
+
+		// Write teams.yaml
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - team-a"), 0644)
 		require.NoError(t, err)
 
 		err = os.Mkdir(filepath.Join(agentsDir, "no-config"), 0755)
@@ -182,6 +203,106 @@ cli:
 
 		configPath := filepath.Join(tmpDir, "agents", "agentfather", "config.yaml")
 		assert.NoFileExists(t, configPath)
+	})
+
+	t.Run("missing teams.yaml should fail", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		agentsDir := filepath.Join(tmpDir, "agents")
+		err := os.Mkdir(agentsDir, 0755)
+		require.NoError(t, err)
+
+		// Create an agent config
+		agentPath := filepath.Join(agentsDir, "agent1")
+		err = os.Mkdir(agentPath, 0755)
+		require.NoError(t, err)
+
+		config := `
+id: agent-one
+name: agent1
+description: Test Agent 1
+cli:
+  - cli: agy
+    model: gemini-2.5-flash
+`
+		err = os.WriteFile(filepath.Join(agentPath, "config.yaml"), []byte(config), 0644)
+		require.NoError(t, err)
+
+		loader := NewLoader(tmpDir)
+		_, err = loader.LoadAll()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read teams.yaml")
+	})
+
+	t.Run("invalid team in agent config should fail", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		agentsDir := filepath.Join(tmpDir, "agents")
+		err := os.Mkdir(agentsDir, 0755)
+		require.NoError(t, err)
+
+		// Write teams.yaml without team-b
+		teamsYaml := `
+teams:
+  - team-a
+`
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+		require.NoError(t, err)
+
+		agentPath := filepath.Join(agentsDir, "agent1")
+		err = os.Mkdir(agentPath, 0755)
+		require.NoError(t, err)
+
+		config := `
+id: agent-one
+name: agent1
+description: Test Agent 1
+team: team-b
+cli:
+  - cli: agy
+    model: gemini-2.5-flash
+`
+		err = os.WriteFile(filepath.Join(agentPath, "config.yaml"), []byte(config), 0644)
+		require.NoError(t, err)
+
+		loader := NewLoader(tmpDir)
+		_, err = loader.LoadAll()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), `team "team-b" for agent agent1 is not defined in teams.yaml`)
+	})
+
+	t.Run("empty team in agent config should succeed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		agentsDir := filepath.Join(tmpDir, "agents")
+		err := os.Mkdir(agentsDir, 0755)
+		require.NoError(t, err)
+
+		// Write teams.yaml
+		teamsYaml := `
+teams:
+  - team-a
+`
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+		require.NoError(t, err)
+
+		agentPath := filepath.Join(agentsDir, "agent1")
+		err = os.Mkdir(agentPath, 0755)
+		require.NoError(t, err)
+
+		config := `
+id: agent-one
+name: agent1
+description: Test Agent 1
+cli:
+  - cli: agy
+    model: gemini-2.5-flash
+`
+		err = os.WriteFile(filepath.Join(agentPath, "config.yaml"), []byte(config), 0644)
+		require.NoError(t, err)
+
+		loader := NewLoader(tmpDir)
+		agents, err := loader.LoadAll()
+		assert.NoError(t, err)
+		assert.Len(t, agents, 1)
+		assert.Equal(t, "", agents[0].Config.Team)
 	})
 }
 
