@@ -28,16 +28,26 @@ var allowlist = map[string]struct{}{
 	"call-peer":     {},
 }
 
+// TODO: need a robust parser of command.
 func RunClient(args []string) error {
 	isAllowlisted := false
-	for _, arg := range args {
-		if _, ok := allowlist[arg]; ok {
-			isAllowlisted = true
-			break
+	if len(args) > 1 {
+		var targetCmd string
+		if len(args) >= 3 && args[1] == "-c" {
+			fields := strings.Fields(args[2])
+			if len(fields) > 0 {
+				targetCmd = fields[0]
+			}
+		} else {
+			targetCmd = args[1]
 		}
-		if _, ok := allowlist[filepath.Base(arg)]; ok {
-			isAllowlisted = true
-			break
+
+		if targetCmd != "" {
+			if _, ok := allowlist[targetCmd]; ok {
+				isAllowlisted = true
+			} else if _, ok := allowlist[filepath.Base(targetCmd)]; ok {
+				isAllowlisted = true
+			}
 		}
 	}
 

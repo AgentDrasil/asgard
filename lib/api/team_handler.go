@@ -58,12 +58,12 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	team := currentAgent.Config.Team
-	var teamAgents []agents.AgentConfig
+	teamAgents := []string{}
 
 	if team != "" {
 		for _, a := range s.agents {
-			if a.Config.Team == team && a.Config.Name != currentAgent.Config.Name {
-				teamAgents = append(teamAgents, a.Config)
+			if a.Config.Team == team && a.Config.ID != currentAgent.Config.ID {
+				teamAgents = append(teamAgents, a.Config.ID)
 			}
 		}
 	}

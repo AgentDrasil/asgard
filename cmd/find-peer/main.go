@@ -56,13 +56,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	var peers []string
+	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
 		log.Error().Err(err).Msg("Error decoding JSON from /team API")
 		os.Exit(1)
 	}
+	if peers == nil {
+		peers = []string{}
+	}
 
-	formatted, err := json.MarshalIndent(raw, "", "  ")
+	formatted, err := json.MarshalIndent(peers, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("Error formatting JSON response")
 		os.Exit(1)

@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/lib/config"
@@ -145,19 +144,19 @@ cli:
 	srv.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	var returnedAgents []agents.AgentConfig
+	var returnedAgents []string
 	err = json.Unmarshal(w.Body.Bytes(), &returnedAgents)
 	assert.NoError(t, err)
 
-	// Should contain Agent Father and Agent Beta, but not Agent Alpha (current) or Agent Gamma (team-blue)
+	// Should contain agent_father and agent_beta, but not agent_alpha (current) or agent_gamma (team-blue)
 	assert.Len(t, returnedAgents, 2)
 
-	names := make(map[string]bool)
-	for _, a := range returnedAgents {
-		names[a.Name] = true
+	ids := make(map[string]bool)
+	for _, id := range returnedAgents {
+		ids[id] = true
 	}
-	assert.True(t, names["Agent Father"])
-	assert.True(t, names["Agent Beta"])
-	assert.False(t, names["Agent Alpha"])
-	assert.False(t, names["Agent Gamma"])
+	assert.True(t, ids["agent_father"])
+	assert.True(t, ids["agent_beta"])
+	assert.False(t, ids["agent_alpha"])
+	assert.False(t, ids["agent_gamma"])
 }

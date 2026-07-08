@@ -78,6 +78,13 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			runDirOpt = optional.Some(session.RunDir)
 		}
 
+		if e.repo != nil {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
+				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
+				return
+			}
+		}
+
 		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to run agent: %w", err))
