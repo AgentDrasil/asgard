@@ -13,7 +13,7 @@ import (
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, hasSocket bool, chatID string) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -108,6 +108,12 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		args = append(args, "--bind", logDir, logDir)
 	}
 
+	// Mount the socket directory to /fakebash
+	if sockDir != "" {
+		args = append(args, "--dir", "/fakebash")
+		args = append(args, "--bind", sockDir, "/fakebash")
+	}
+
 	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/bash")
 	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/bash")
 
@@ -162,20 +168,17 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, socketFile *os.File, chatID string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, socketFile != nil, chatID)
+func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, sockDir, chatID)
 	if err != nil {
 		return nil, err
 	}
 	cmd := exec.Command("bwrap", bwrapArgs...)
-	if socketFile != nil {
-		cmd.ExtraFiles = []*os.File{socketFile}
-	}
 	return cmd, nil
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, socketFile *os.File) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -239,12 +242,15 @@ func CommandForCommandExec(runDir string, socketFile *os.File) (*exec.Cmd, error
 		args = append(args, "--chdir", home)
 	}
 
+	// Mount the socket directory to /fakebash
+	if sockDir != "" {
+		args = append(args, "--dir", "/fakebash")
+		args = append(args, "--bind", sockDir, "/fakebash")
+	}
+
 	args = append(args, "--")
 	args = append(args, "/bin/fakebashd")
 
 	cmd := exec.Command("bwrap", args...)
-	if socketFile != nil {
-		cmd.ExtraFiles = []*os.File{socketFile}
-	}
 	return cmd, nil
 }

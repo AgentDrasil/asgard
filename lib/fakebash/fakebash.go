@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/creack/pty"
 	"github.com/google/uuid"
@@ -27,54 +26,6 @@ var allowlist = map[string]struct{}{
 	"agystatusline": {},
 	"find-peer":     {},
 	"call-peer":     {},
-}
-
-func isFDValid(fd int) bool {
-	var stat syscall.Stat_t
-	err := syscall.Fstat(fd, &stat)
-	return err == nil
-}
-
-func isFDValidPath(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func FindSocketFD() (int, error) {
-	if isFDValid(3) {
-		return 3, nil
-	}
-	if isFDValidPath("/proc/1/fd/3") {
-		f, err := os.OpenFile("/proc/1/fd/3", os.O_RDWR, 0)
-		if err == nil {
-			return int(f.Fd()), nil
-		}
-	}
-	if isFDValidPath("/proc/self/fd/3") {
-		f, err := os.OpenFile("/proc/self/fd/3", os.O_RDWR, 0)
-		if err == nil {
-			return int(f.Fd()), nil
-		}
-	}
-	dirs, err := os.ReadDir("/proc")
-	if err == nil {
-		for _, d := range dirs {
-			if !d.IsDir() {
-				continue
-			}
-			if d.Name() == "self" {
-				continue
-			}
-			pidPath := filepath.Join("/proc", d.Name(), "fd", "3")
-			if isFDValidPath(pidPath) {
-				f, err := os.OpenFile(pidPath, os.O_RDWR, 0)
-				if err == nil {
-					return int(f.Fd()), nil
-				}
-			}
-		}
-	}
-	return -1, fmt.Errorf("no shared socket fd found")
 }
 
 func RunClient(args []string) error {
@@ -119,32 +70,7 @@ func RunClient(args []string) error {
 		}
 	}
 
-	fd, err := FindSocketFD()
-	if err != nil {
-		return fmt.Errorf("fakebash error: %w", err)
-	}
-
-	file := os.NewFile(uintptr(fd), "socket")
-	conn, err := net.FileConn(file)
-	if err != nil {
-		return fmt.Errorf("fakebash FileConn error: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	var once sync.Once
-	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
-		var c net.Conn
-		once.Do(func() {
-			c = conn
-		})
-		if c == nil {
-			return nil, io.EOF
-		}
-		return c, nil
-	}
-
-	grpcConn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(dialer),
+	grpcConn, err := grpc.NewClient("unix:///fakebash/fakebash.sock",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -189,65 +115,6 @@ func RunClient(args []string) error {
 		}
 	}
 	return nil
-}
-
-type SingleConnListener struct {
-	conn     net.Conn
-	done     chan struct{}
-	accepted bool
-	closed   bool
-	mu       sync.Mutex
-}
-
-func NewSingleConnListener(c net.Conn) *SingleConnListener {
-	return &SingleConnListener{
-		conn: c,
-		done: make(chan struct{}),
-	}
-}
-
-func (l *SingleConnListener) Accept() (net.Conn, error) {
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
-		return nil, io.EOF
-	}
-	if l.accepted {
-		l.mu.Unlock()
-		<-l.done
-		return nil, io.EOF
-	}
-	c := l.conn
-	l.conn = nil
-	l.accepted = true
-	l.mu.Unlock()
-
-	return c, nil
-}
-
-func (l *SingleConnListener) Close() error {
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
-		return nil
-	}
-	l.closed = true
-	if l.conn != nil {
-		_ = l.conn.Close()
-		l.conn = nil
-	}
-	close(l.done)
-	l.mu.Unlock()
-	return nil
-}
-
-func (l *SingleConnListener) Addr() net.Addr {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.conn != nil {
-		return l.conn.LocalAddr()
-	}
-	return &net.UnixAddr{Name: "single-conn", Net: "unix"}
 }
 
 type fakebashServer struct {
@@ -386,14 +253,13 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 }
 
 func RunDaemon() error {
-	file := os.NewFile(3, "socket")
-	conn, err := net.FileConn(file)
-	if err != nil {
-		return fmt.Errorf("fakebashd FileConn error: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
+	socketPath := "/fakebash/fakebash.sock"
+	_ = os.Remove(socketPath)
 
-	listener := NewSingleConnListener(conn)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("fakebashd failed to listen on unix socket: %w", err)
+	}
 	defer func() { _ = listener.Close() }()
 
 	grpcServer := grpc.NewServer()

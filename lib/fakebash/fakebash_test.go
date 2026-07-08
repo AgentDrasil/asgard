@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"syscall"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,24 +18,13 @@ import (
 )
 
 func TestFakebashGRPC(t *testing.T) {
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "fakebash_test.sock")
+
+	listener, err := net.Listen("unix", socketPath)
 	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
 
-	clientFile := os.NewFile(uintptr(fds[0]), "client")
-	serverFile := os.NewFile(uintptr(fds[1]), "server")
-	defer func() { _ = clientFile.Close() }()
-	defer func() { _ = serverFile.Close() }()
-
-	clientConn, err := net.FileConn(clientFile)
-	require.NoError(t, err)
-	defer func() { _ = clientConn.Close() }()
-
-	serverConn, err := net.FileConn(serverFile)
-	require.NoError(t, err)
-	defer func() { _ = serverConn.Close() }()
-
-	// Start the gRPC server on the server socket
-	listener := NewSingleConnListener(serverConn)
 	grpcServer := grpc.NewServer()
 	srv := &fakebashServer{}
 	pb.RegisterFakebashServiceServer(grpcServer, srv)
@@ -45,13 +34,7 @@ func TestFakebashGRPC(t *testing.T) {
 	}()
 	defer grpcServer.Stop()
 
-	// Set up client dialer
-	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
-		return clientConn, nil
-	}
-
-	grpcConn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(dialer),
+	grpcConn, err := grpc.NewClient("unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	require.NoError(t, err)

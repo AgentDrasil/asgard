@@ -25,7 +25,7 @@ The sandbox execution is managed by the orchestrator in [run.go](src/AgentDrasil
 graph TD
     subgraph Host Process [Host Orchestrator]
         RunGo[run.Go]
-        SocketPair[syscall.Socketpair]
+        SockDir[Host Socket Directory]
     end
 
     subgraph AgentSandbox [Agent Sandbox (bwrap)]
@@ -42,9 +42,9 @@ graph TD
 
     RunGo -->|Spawns| AgentSandbox
     RunGo -->|Spawns| CmdSandbox
-    SocketPair ---|FD 3 / Unix Conn| FakeBashClient
-    SocketPair ---|FD 3 / Unix Conn| FakeBashDaemon
-    FakeBashClient <-->|gRPC over Unix socket| FakeBashDaemon
+    SockDir ---|Mounts to /fakebash| AgentSandbox
+    SockDir ---|Mounts to /fakebash| CmdSandbox
+    FakeBashClient <-->|gRPC over /fakebash/fakebash.sock| FakeBashDaemon
 ```
 
 ### 1. The Dual-Sandbox Concept
@@ -62,11 +62,11 @@ When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
 ### 2. Communication Protocol (`fakebash` & `fakebashd`)
 
-The host process initializes an anonymous UNIX domain socket pair (`syscall.Socketpair`) and passes one end to each sandbox as file descriptor `3`.
+The host process initializes a temporary host directory and bind-mounts it to `/fakebash` inside both sandboxes.
 
 1.  **Command Interception**: When the agent attempts to run a shell command, it calls `/bin/bash`, invoking the `fakebash` client.
 2.  **Allowlist Filtering**: The `fakebash` client checks if the command is in the allowlist (e.g., `agystatusline`). If allowlisted, it runs directly in the Agent Sandbox.
-3.  **gRPC Forwarding**: Otherwise, `fakebash` establishes a gRPC connection over the shared socket descriptor (FD 3) to the `fakebashd` daemon running in the Command Execution Sandbox.
+3.  **gRPC Forwarding**: Otherwise, `fakebash` establishes a gRPC connection over the Unix socket file at `/fakebash/fakebash.sock` to the `fakebashd` daemon running in the Command Execution Sandbox.
 4.  **Execution in PTY**: `fakebashd` runs a persistent `bash` shell inside a PTY and executes the forwarded command in the specified working directory, forwarding stdout/stderr stream packages and the exit code back to the client.
 
 ## API Endpoints

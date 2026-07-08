@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
@@ -83,25 +82,23 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	// Create Socketpair for communicating between agent sandbox and command sandbox
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("creating socketpair: %w", err)
+		return nil, fmt.Errorf("getting user home directory: %w", err)
 	}
-	syscall.CloseOnExec(fds[0])
-	syscall.CloseOnExec(fds[1])
-	agentSocket := os.NewFile(uintptr(fds[0]), "agent-socket")
-	commandSocket := os.NewFile(uintptr(fds[1]), "command-socket")
-	defer func() { _ = agentSocket.Close() }()
-	defer func() { _ = commandSocket.Close() }()
+	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewString())
+	if err := os.MkdirAll(sockDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
+	}
+	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, agentSocket, chatID)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, *selectedTarget, prompt, session, runDir, sockDir, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, commandSocket)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
@@ -123,11 +120,6 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	if err := agentSandboxCmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting agent sandbox command: %w", err)
 	}
-
-	// Close parent's references to the sockets so they are only held by the child sandboxes.
-	// This ensures fakebashd gets io.EOF and exits cleanly when the agent wrapper terminates.
-	_ = agentSocket.Close()
-	_ = commandSocket.Close()
 
 	defer func() {
 		if cmdSandboxCmd.Process != nil {
