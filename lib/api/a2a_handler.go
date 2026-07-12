@@ -153,3 +153,19 @@ func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRep
 
 	return restHandler, card
 }
+
+// handleAgents handles GET /agents to list loaded agent names.
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	names := make([]string, 0, len(s.agents))
+	for _, agent := range s.agents {
+		names = append(names, agent.Config.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(names)
+}
+

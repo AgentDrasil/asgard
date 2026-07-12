@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,3 +41,34 @@ func TestNewAgentHandler(t *testing.T) {
 	// A2A REST handler should return JSON content type
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 }
+
+func TestHandleAgents(t *testing.T) {
+	srv := &Server{
+		agents: []*agents.Agent{
+			{
+				Config: agents.AgentConfig{
+					Name: "Agent Alpha",
+				},
+			},
+			{
+				Config: agents.AgentConfig{
+					Name: "Agent Beta",
+				},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	w := httptest.NewRecorder()
+	srv.handleAgents(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var returnedNames []string
+	err := json.Unmarshal(w.Body.Bytes(), &returnedNames)
+	assert.NoError(t, err)
+
+	assert.Equal(t, []string{"Agent Alpha", "Agent Beta"}, returnedNames)
+}
+

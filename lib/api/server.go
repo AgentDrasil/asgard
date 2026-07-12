@@ -73,6 +73,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 
 	mux.HandleFunc("POST /manage/reload", s.handleReload)
 	mux.HandleFunc("GET /team", s.handleTeam)
+	mux.HandleFunc("GET /agents", s.handleAgents)
 
 	return mux
 }
