@@ -18,8 +18,10 @@ import (
 )
 
 type agentExecutor struct {
-	agent *agents.Agent
-	repo  *dbmodels.SessionRepository
+	agent     *agents.Agent
+	repo      *dbmodels.SessionRepository
+	server    *Server
+	statusURL string
 }
 
 // Execute handles the agent execution.
@@ -85,45 +87,116 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			}
 		}
 
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID)
-		if err != nil {
-			yield(nil, fmt.Errorf("failed to run agent: %w", err))
-			return
+		// ── Subscribe to status updates for this chat ─────────────────────────
+		// statusCh receives incremental AgentStatusUpdate events while run.Run executes.
+		var statusCh <-chan AgentStatusUpdate
+		var cancelListener func()
+		if e.server != nil && e.statusURL != "" {
+			statusCh, cancelListener = e.server.AddStatusListener(chatID)
+			defer cancelListener()
 		}
 
-		type promptResult struct {
-			SessionID   string  `json:"session_id"`
-			InputTokens int     `json:"input_tokens"`
-			MaxTokens   int     `json:"max_tokens"`
-			Remaining   float64 `json:"remaining"`
-			LastContent string  `json:"last_content"`
+		// ── Run the agent in a goroutine, collect result on resultCh ──────────
+		type runResult struct {
+			out []byte
+			err error
 		}
+		resultCh := make(chan runResult, 1)
+		go func() {
+			out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.statusURL)
+			resultCh <- runResult{out, err}
+		}()
 
-		var result promptResult
-		var respText string
-		if err := json.Unmarshal(out, &result); err == nil {
-			respText = result.LastContent
-			if e.repo != nil && (result.SessionID != "" || runDirOpt.IsSome()) {
-				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID, runDirOpt); err != nil {
-					yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+		// ── Stream intermediate status events until run.Run completes ─────────
+		for {
+			if statusCh == nil {
+				// No listener configured — just wait for result.
+				result := <-resultCh
+				if result.err != nil {
+					yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
 					return
 				}
+				e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt)
+				return
 			}
-		} else {
-			respText = string(out)
-			if e.repo != nil && runDirOpt.IsSome() {
-				if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
-					yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+
+			select {
+			case update, ok := <-statusCh:
+				if !ok {
+					// Channel closed unexpectedly; wait for result.
+					statusCh = nil
+					continue
+				}
+				// Emit an intermediate TaskStatusUpdateEvent.
+				updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
+				metadata := map[string]any{
+					"entry_type": update.EntryType,
+					"source":     update.Source,
+					"step_index": update.StepIndex,
+				}
+				for k, v := range update.Metadata {
+					metadata[k] = v
+				}
+				updateMsg.Metadata = metadata
+				evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
+				if !yield(evt, nil) {
 					return
 				}
-			}
-		}
 
-		respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
-		if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil) {
-			return
+			case result := <-resultCh:
+				if result.err != nil {
+					yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
+					return
+				}
+				e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt)
+				return
+
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
 		}
 	}
+}
+
+// handleFinalResult parses the agent output and emits the final TaskStatusUpdateEvent.
+func (e *agentExecutor) handleFinalResult(
+	yield func(a2a.Event, error) bool,
+	execCtx *a2asrv.ExecutorContext,
+	out []byte,
+	chatID string,
+	runDirOpt optional.Option[string],
+) {
+	type promptResult struct {
+		SessionID   string  `json:"session_id"`
+		InputTokens int     `json:"input_tokens"`
+		MaxTokens   int     `json:"max_tokens"`
+		Remaining   float64 `json:"remaining"`
+		LastContent string  `json:"last_content"`
+	}
+
+	var result promptResult
+	var respText string
+	if err := json.Unmarshal(out, &result); err == nil {
+		respText = result.LastContent
+		if e.repo != nil && (result.SessionID != "" || runDirOpt.IsSome()) {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID, runDirOpt); err != nil {
+				yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+				return
+			}
+		}
+	} else {
+		respText = string(out)
+		if e.repo != nil && runDirOpt.IsSome() {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
+				yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+				return
+			}
+		}
+	}
+
+	respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
+	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
 }
 
 // Cancel handles canceling an execution.
@@ -135,8 +208,13 @@ func (e *agentExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorCont
 }
 
 // NewAgentHandler creates the A2A HTTP REST handler and the AgentCard for the given agent.
-func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRepository) (http.Handler, *a2a.AgentCard) {
-	executor := &agentExecutor{agent: agent, repo: repo}
+func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRepository, server *Server, statusURL string) (http.Handler, *a2a.AgentCard) {
+	executor := &agentExecutor{
+		agent:     agent,
+		repo:      repo,
+		server:    server,
+		statusURL: statusURL,
+	}
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)
 
@@ -144,6 +222,9 @@ func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRep
 		Name:        agent.Config.Name,
 		Description: agent.Config.Description,
 		Version:     "1.0.0",
+		Capabilities: a2a.AgentCapabilities{
+			Streaming: true,
+		},
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", host, agent.Config.ID), a2a.TransportProtocolHTTPJSON),
 		},
@@ -168,4 +249,3 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(names)
 }
-

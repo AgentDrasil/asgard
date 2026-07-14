@@ -22,11 +22,12 @@ import (
 
 // Server manages the HTTP server hosting A2A agents.
 type Server struct {
-	conf   *config.Config
-	mu     sync.RWMutex
-	agents []*agents.Agent
-	mux    *http.ServeMux
-	repo   *dbmodels.SessionRepository
+	conf            *config.Config
+	mu              sync.RWMutex
+	agents          []*agents.Agent
+	mux             *http.ServeMux
+	repo            *dbmodels.SessionRepository
+	statusListeners map[string][]chan AgentStatusUpdate
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
@@ -59,8 +60,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
+	statusURL := fmt.Sprintf("http://127.0.0.1:%d/agent-status", s.conf.InternalPort)
+
 	for _, agent := range s.agents {
-		restHandler, card := NewAgentHandler(agent, s.conf.Host, s.repo)
+		restHandler, card := NewAgentHandler(agent, s.conf.Host, s.repo, s, statusURL)
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
 		mux.Handle(prefix, http.StripPrefix(fmt.Sprintf("/agents/%s", agent.Config.ID), restHandler))
@@ -78,19 +81,35 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	return mux
 }
 
-// Start starts the HTTP server hosting A2A agents with graceful shutdown.
+// Start starts the public HTTP server and an internal-only loopback HTTP server
+// for agent status callbacks. Both shut down gracefully on SIGINT/SIGTERM.
 func (s *Server) Start() error {
-	srv := &http.Server{
+	// ── Public server ────────────────────────────────────────────────────────
+	publicSrv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.conf.Port),
 		Handler: s,
 	}
 
-	// Channel to listen for errors from Server.ListenAndServe()
-	serverErrors := make(chan error, 1)
+	// ── Internal server (loopback only) ──────────────────────────────────────
+	internalMux := http.NewServeMux()
+	internalMux.HandleFunc("POST /agent-status", s.handleAgentStatus)
+	internalSrv := &http.Server{
+		Addr:    fmt.Sprintf("127.0.0.1:%d", s.conf.InternalPort),
+		Handler: internalMux,
+	}
+
+	serverErrors := make(chan error, 2)
 
 	go func() {
-		log.Info().Msgf("Starting HTTP server on %s", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Info().Msgf("Starting public HTTP server on %s", publicSrv.Addr)
+		if err := publicSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErrors <- err
+		}
+	}()
+
+	go func() {
+		log.Info().Msgf("Starting internal HTTP server on %s", internalSrv.Addr)
+		if err := internalSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErrors <- err
 		}
 	}()
@@ -106,18 +125,25 @@ func (s *Server) Start() error {
 	case sig := <-shutdownSignals:
 		log.Info().Msgf("Shutdown signal received: %v. Starting graceful shutdown...", sig)
 
-		// Context with timeout for graceful shutdown
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			// Force shutdown if graceful fails
-			if err := srv.Close(); err != nil {
-				log.Error().Err(err).Msg("Failed to close HTTP server")
+		publicErr := publicSrv.Shutdown(shutdownCtx)
+		internalErr := internalSrv.Shutdown(shutdownCtx)
+
+		if publicErr != nil {
+			if err := publicSrv.Close(); err != nil {
+				log.Error().Err(err).Msg("Failed to close public HTTP server")
 			}
-			return fmt.Errorf("graceful shutdown failed: %w", err)
+			return fmt.Errorf("public server graceful shutdown failed: %w", publicErr)
 		}
-		log.Info().Msg("Server gracefully stopped")
+		if internalErr != nil {
+			if err := internalSrv.Close(); err != nil {
+				log.Error().Err(err).Msg("Failed to close internal HTTP server")
+			}
+			return fmt.Errorf("internal server graceful shutdown failed: %w", internalErr)
+		}
+		log.Info().Msg("Servers gracefully stopped")
 	}
 
 	return nil

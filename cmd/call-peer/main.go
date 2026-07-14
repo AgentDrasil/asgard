@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"iter"
 	"os"
+	"os/signal"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -51,7 +53,8 @@ func main() {
 	}
 
 	targetURL := fmt.Sprintf("%s/agents/%s", host, agentID)
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
 	client, err := a2aclient.NewFromEndpoints(ctx, []*a2a.AgentInterface{
 		a2a.NewAgentInterface(targetURL, a2a.TransportProtocolHTTPJSON),
@@ -64,35 +67,76 @@ func main() {
 	reqMsg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(messageText))
 	reqMsg.ContextID = chatID
 
-	res, err := client.SendMessage(ctx, &a2a.SendMessageRequest{
+	req := &a2a.SendMessageRequest{
 		Message: reqMsg,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("Error calling peer agent")
-		os.Exit(1)
 	}
 
-	task, ok := res.(*a2a.Task)
-	if !ok {
-		log.Error().Type("result_type", res).Msg("Expected *a2a.Task response")
+	// Use streaming to receive intermediate status updates in real-time.
+	events := client.SendStreamingMessage(ctx, req)
+	if err := drainEvents(events); err != nil {
+		log.Error().Err(err).Msg("Error from agent stream")
 		os.Exit(1)
 	}
+}
 
-	if task.Status.Message != nil {
-		for _, part := range task.Status.Message.Parts {
-			if part != nil && part.Text() != "" {
-				fmt.Print(part.Text())
-			}
+// drainEvents iterates over the SSE event stream, printing intermediate updates
+// to stderr and the final response to stdout.
+func drainEvents(events iter.Seq2[a2a.Event, error]) error {
+	for evt, err := range events {
+		if err != nil {
+			return err
 		}
-	} else {
-		if len(task.History) > 0 {
-			lastMsg := task.History[len(task.History)-1]
-			for _, part := range lastMsg.Parts {
-				if part != nil && part.Text() != "" {
-					fmt.Print(part.Text())
+		switch e := evt.(type) {
+		case *a2a.TaskStatusUpdateEvent:
+			if e.Status.Message != nil {
+				text := extractText(e.Status.Message)
+				switch e.Status.State {
+				case a2a.TaskStateCompleted:
+					// Final response — print to stdout.
+					fmt.Print(text)
+					fmt.Println()
+				case a2a.TaskStateWorking:
+					// Intermediate update — print entry type and short preview to stderr.
+					entryType := "update"
+					if e.Status.Message.Metadata != nil {
+						if et, ok := e.Status.Message.Metadata["entry_type"].(string); ok && et != "" {
+							entryType = et
+						}
+					}
+					preview := text
+					if len(preview) > 120 {
+						preview = preview[:120] + "…"
+					}
+					if preview != "" {
+						fmt.Fprintf(os.Stderr, "[%s] %s\n", entryType, preview)
+					}
 				}
 			}
+		case *a2a.Task:
+			// Non-streaming fallback: the server returned a completed Task directly.
+			if e.Status.Message != nil {
+				fmt.Print(extractText(e.Status.Message))
+				fmt.Println()
+			} else if len(e.History) > 0 {
+				lastMsg := e.History[len(e.History)-1]
+				fmt.Print(extractText(lastMsg))
+				fmt.Println()
+			}
 		}
 	}
-	fmt.Println()
+	return nil
+}
+
+// extractText returns the concatenated text from all TextPart parts of a message.
+func extractText(msg *a2a.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var out string
+	for _, part := range msg.Parts {
+		if part != nil && part.Text() != "" {
+			out += part.Text()
+		}
+	}
+	return out
 }

@@ -34,7 +34,9 @@ func isAllowedDir(path string, allowedDirs []string) bool {
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the first target that has more than 20% quota remaining.
 // If no targets have more than 20% quota remaining, it returns an error.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string) ([]byte, error) {
+// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
+// string to disable status reporting.
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, statusURL string) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
@@ -104,6 +106,9 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 
 	agentSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
+	if statusURL != "" {
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL)
+	}
 	cmdSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
 
 	cmdSandboxCmd.Stdout = os.Stdout

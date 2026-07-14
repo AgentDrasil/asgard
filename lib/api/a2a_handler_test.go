@@ -26,7 +26,7 @@ func TestNewAgentHandler(t *testing.T) {
 		Path: "/dummy/path",
 	}
 
-	handler, card := NewAgentHandler(agent, "http://localhost:8080", repo)
+	handler, card := NewAgentHandler(agent, "http://localhost:8080", repo, nil, "")
 	assert.NotNil(t, handler)
 	assert.NotNil(t, card)
 	assert.Equal(t, "Test Agent", card.Name)
@@ -71,4 +71,3 @@ func TestHandleAgents(t *testing.T) {
 
 	assert.Equal(t, []string{"Agent Alpha", "Agent Beta"}, returnedNames)
 }
-

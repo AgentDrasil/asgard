@@ -9,12 +9,13 @@ import (
 )
 
 type Config struct {
-	Debug    bool   `yaml:"debug"`
-	DB       string `yaml:"db"`
-	DSN      string `yaml:"dsn"`
-	AgentDir string `yaml:"agent_dir"`
-	Port     int    `yaml:"port"`
-	Host     string `yaml:"host"`
+	Debug        bool   `yaml:"debug"`
+	DB           string `yaml:"db"`
+	DSN          string `yaml:"dsn"`
+	AgentDir     string `yaml:"agent_dir"`
+	Port         int    `yaml:"port"`
+	InternalPort int    `yaml:"internal_port"`
+	Host         string `yaml:"host"`
 }
 
 func (c *Config) validate() error {
@@ -77,6 +78,10 @@ func LoadConfig(path string) (*Config, error) {
 
 	if cfg.Port <= 0 {
 		cfg.Port = 8080
+	}
+
+	if cfg.InternalPort <= 0 {
+		cfg.InternalPort = 8081
 	}
 
 	if err := cfg.verifyDirs(); err != nil {

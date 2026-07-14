@@ -1,7 +1,7 @@
 package opencode
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,10 +22,29 @@ type opencodeLine struct {
 			Total int `json:"total"`
 			Input int `json:"input"`
 		} `json:"tokens"`
+		// Tool-call fields
+		ToolName  string         `json:"toolName"`
+		ToolInput map[string]any `json:"input"`
 	} `json:"part"`
 }
 
-// Prompt sends a prompt to opencode and parses its JSONL output.
+// classifyLine maps an opencode output line to an entry type.
+func classifyLine(opl *opencodeLine) string {
+	switch opl.Type {
+	case "tool_use", "tool_result":
+		return "tool_call"
+	case "text":
+		return "agent_response"
+	default:
+		if opl.Part.Reason == "tool_use" {
+			return "tool_call"
+		}
+		return "other"
+	}
+}
+
+// Prompt sends a prompt to opencode and parses its JSONL output in real-time.
+// If opts.ReportCallback is set, it is called for each meaningful output line.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	argv := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	if opts.SessionID != "" {
@@ -41,23 +60,31 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		cmd.Dir = opts.Dir
 	}
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating opencode stdout pipe: %w", err)
+	}
 
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("running opencode prompt: %w", err)
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting opencode: %w", err)
 	}
 
 	var sessionID string
 	var inputTokens int
 	var totalTokens int
 	var targetMessageID string
+	stepIndex := 0
 
 	// Map to accumulate text contents by messageID
 	textMap := make(map[string]*strings.Builder)
 
-	lines := strings.Split(out.String(), "\n")
-	for _, line := range lines {
+	scanner := bufio.NewScanner(stdout)
+	// Use a large buffer for potentially long lines.
+	buf := make([]byte, 4*1024*1024)
+	scanner.Buffer(buf, len(buf))
+
+	for scanner.Scan() {
+		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -92,6 +119,27 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 				targetMessageID = opl.Part.MessageID
 			}
 		}
+
+		// Report incremental update if callback is set.
+		if opts.ReportCallback != nil {
+			entryType := classifyLine(&opl)
+			if entryType != "other" {
+				content := opl.Part.Text
+				var metadata map[string]any
+				if opl.Part.ToolName != "" {
+					metadata = map[string]any{"tool_name": opl.Part.ToolName}
+				}
+				opts.ReportCallback(stepIndex, "MODEL", entryType, content, metadata)
+			}
+		}
+		stepIndex++
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("running opencode prompt: %w", err)
 	}
 
 	var lastContent string

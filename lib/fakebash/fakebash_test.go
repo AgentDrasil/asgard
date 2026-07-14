@@ -88,10 +88,10 @@ func TestUnpackCommand(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		args       []string
-		wantCmd    []string
-		wantOk     bool
+		name    string
+		args    []string
+		wantCmd []string
+		wantOk  bool
 	}{
 		{
 			name:    "direct call simple name",

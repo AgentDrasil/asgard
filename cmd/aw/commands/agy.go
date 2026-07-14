@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -87,9 +89,10 @@ var agyCmd = &cobra.Command{
 		}
 
 		result, err := agy.Prompt(ctx, prompt, types.PromptOptions{
-			Dir:       dir,
-			SessionID: agySession,
-			Model:     agyModel,
+			Dir:            dir,
+			SessionID:      agySession,
+			Model:          agyModel,
+			ReportCallback: buildHTTPReporter(),
 		})
 		if err != nil {
 			return fmt.Errorf("running prompt: %w", err)
@@ -140,4 +143,48 @@ func init() {
 	agyCmd.Flags().StringVarP(&agySession, "session", "s", "", "Session ID to resume")
 	agyCmd.Flags().BoolVar(&agyUsage, "usage", false, "Print token usage information")
 	agyCmd.Flags().StringVarP(&agyModel, "model", "m", "", "Model to select for the session")
+}
+
+// agentStatusPayload matches the AgentStatusUpdate struct in lib/api/status_handler.go.
+type agentStatusPayload struct {
+	ChatID    string         `json:"chat_id"`
+	StepIndex int            `json:"step_index"`
+	Source    string         `json:"source"`
+	EntryType string         `json:"entry_type"`
+	Content   string         `json:"content"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// buildHTTPReporter returns a ReportFunc that POSTs status updates to the
+// ASGARD_STATUS_URL env var. Returns nil when the env var is not set, which
+// means the caller will simply skip reporting.
+func buildHTTPReporter() types.ReportFunc {
+	statusURL := os.Getenv("ASGARD_STATUS_URL")
+	if statusURL == "" {
+		return nil
+	}
+	chatID := os.Getenv("ASGARD_CHAT_ID")
+	client := &http.Client{}
+
+	return func(stepIndex int, source, entryType, content string, metadata map[string]any) {
+		payload := agentStatusPayload{
+			ChatID:    chatID,
+			StepIndex: stepIndex,
+			Source:    source,
+			EntryType: entryType,
+			Content:   content,
+			Metadata:  metadata,
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			log.Warn().Err(err).Msg("aw/agy: failed to marshal status update")
+			return
+		}
+		resp, err := client.Post(statusURL, "application/json", bytes.NewReader(body))
+		if err != nil {
+			log.Warn().Err(err).Str("url", statusURL).Msg("aw/agy: failed to post status update")
+			return
+		}
+		_ = resp.Body.Close()
+	}
 }

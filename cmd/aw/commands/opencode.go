@@ -77,9 +77,10 @@ var opencodeCmd = &cobra.Command{
 		}
 
 		result, err := opencode.Prompt(ctx, prompt, types.PromptOptions{
-			Dir:       dir,
-			SessionID: opencodeSession,
-			Model:     opencodeModel,
+			Dir:            dir,
+			SessionID:      opencodeSession,
+			Model:          opencodeModel,
+			ReportCallback: buildHTTPReporter(),
 		})
 		if err != nil {
 			return fmt.Errorf("running prompt: %w", err)

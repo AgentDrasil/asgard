@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// ReportFunc is called for each incremental update emitted by the agent during
+// a Prompt call. Parameters:
+//
+//	stepIndex – 0-based line index in the transcript file
+//	source    – originating party, e.g. "MODEL", "SYSTEM"
+//	entryType – classification: "tool_call", "agent_response", or "other"
+//	content   – raw content string from the transcript entry
+//	metadata  – optional extra fields (may be nil)
+type ReportFunc func(stepIndex int, source, entryType, content string, metadata map[string]any)
+
 // CLIClient defines the interface that all CLI agents must implement.
 type CLIClient interface {
 	Usage(ctx context.Context, opts UsageOptions) ([]ModelUsage, error)
@@ -90,6 +100,11 @@ type PromptOptions struct {
 
 	// Model is the name of the model to select.
 	Model string
+
+	// ReportCallback, if non-nil, is invoked for each incremental status update
+	// produced by the agent during execution. It is safe to be nil; callers that
+	// do not need streaming updates can omit it.
+	ReportCallback ReportFunc
 }
 
 func (o *PromptOptions) StartupDelayOrDefault() time.Duration {
