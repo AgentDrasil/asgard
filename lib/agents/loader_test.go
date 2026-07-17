@@ -67,7 +67,7 @@ teams:
 			{
 				name: "agent1",
 				config: `
-id: agent-one
+id: agent1
 name: agent1
 description: Test Agent 1
 team: team-a
@@ -81,7 +81,7 @@ mount_dirs:
   readwrite: ["/tmp/rw"]
 `,
 				expected: AgentConfig{
-					ID:          "agent-one",
+					ID:          "agent1",
 					Name:        "agent1",
 					Description: "Test Agent 1",
 					Team:        "team-a",
@@ -98,7 +98,7 @@ mount_dirs:
 			{
 				name: "agent2",
 				config: `
-id: agent-two
+id: agent2
 name: agent2
 description: Test Agent 2
 team: team-b
@@ -107,7 +107,7 @@ cli:
     model: deepseek-chat
 `,
 				expected: AgentConfig{
-					ID:          "agent-two",
+					ID:          "agent2",
 					Name:        "agent2",
 					Description: "Test Agent 2",
 					Team:        "team-b",
@@ -217,7 +217,7 @@ cli:
 		require.NoError(t, err)
 
 		config := `
-id: agent-one
+id: agent1
 name: agent1
 description: Test Agent 1
 cli:
@@ -252,7 +252,7 @@ teams:
 		require.NoError(t, err)
 
 		config := `
-id: agent-one
+id: agent1
 name: agent1
 description: Test Agent 1
 team: team-b
@@ -288,7 +288,7 @@ teams:
 		require.NoError(t, err)
 
 		config := `
-id: agent-one
+id: agent1
 name: agent1
 description: Test Agent 1
 cli:
@@ -303,6 +303,41 @@ cli:
 		assert.NoError(t, err)
 		assert.Len(t, agents, 1)
 		assert.Equal(t, "", agents[0].Config.Team)
+	})
+
+	t.Run("mismatched agent ID and directory name should fail", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		agentsDir := filepath.Join(tmpDir, "agents")
+		err := os.Mkdir(agentsDir, 0755)
+		require.NoError(t, err)
+
+		// Write teams.yaml
+		teamsYaml := `
+teams:
+  - team-a
+`
+		err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+		require.NoError(t, err)
+
+		agentPath := filepath.Join(agentsDir, "agent1")
+		err = os.Mkdir(agentPath, 0755)
+		require.NoError(t, err)
+
+		config := `
+id: mismatched-id
+name: agent1
+description: Test Agent 1
+cli:
+  - cli: agy
+    model: gemini-2.5-flash
+`
+		err = os.WriteFile(filepath.Join(agentPath, "config.yaml"), []byte(config), 0644)
+		require.NoError(t, err)
+
+		loader := NewLoader(tmpDir)
+		_, err = loader.LoadAll()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), `agent ID "mismatched-id" does not match directory name "agent1"`)
 	})
 }
 
