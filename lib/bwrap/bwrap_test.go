@@ -50,13 +50,22 @@ func TestBuildArgs(t *testing.T) {
 		}
 	}
 
+	// Create simulated agent configuration directory with AGENTS.md and skills
+	agentPath := filepath.Join(tmpDir, "test-agent-dir")
+	if err := os.MkdirAll(filepath.Join(agentPath, "skills"), 0755); err != nil {
+		t.Fatalf("failed to create skills dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644); err != nil {
+		t.Fatalf("failed to write AGENTS.md: %v", err)
+	}
+
 	// Test case 1: agy CLITarget with session
 	targetAgy := agents.CLITarget{
 		CLI:   "agy",
 		Model: "some-model",
 	}
 
-	args, err := buildArgsForAgent(cfg, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat")
+	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat")
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -89,6 +98,16 @@ func TestBuildArgs(t *testing.T) {
 		t.Errorf("expected agy .gemini bind mount, got: %s", argStr)
 	}
 
+	// Verify agy agent path mounts
+	expectedAgyAgentsMD := filepath.Join(home, ".gemini", "GEMINI.md")
+	expectedAgySkills := filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+	if !strings.Contains(argStr, "--ro-bind "+filepath.Join(agentPath, "AGENTS.md")+" "+expectedAgyAgentsMD) {
+		t.Errorf("expected agy AGENTS.md mount, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedAgySkills) {
+		t.Errorf("expected agy skills mount, got: %s", argStr)
+	}
+
 	// Verify ending command structure with --session and --prompt
 	expectedEnd := "-- aw agy --model some-model --session my-session-id --prompt some prompt"
 	if !strings.HasSuffix(argStr, expectedEnd) {
@@ -101,7 +120,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "test-chat")
+	argsOpencode, err := buildArgsForAgent(cfg, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "test-chat")
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
@@ -123,6 +142,16 @@ func TestBuildArgs(t *testing.T) {
 	}
 	if !strings.Contains(argStrOpencode, "--chdir "+runDir) {
 		t.Errorf("expected '--chdir %s' in argsOpencode, got: %s", runDir, argStrOpencode)
+	}
+
+	// Verify opencode agent path mounts
+	expectedOpencodeAgentsMD := filepath.Join(home, ".config", "opencode", "AGENTS.md")
+	expectedOpencodeSkills := filepath.Join(home, ".config", "opencode", "skills")
+	if !strings.Contains(argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "AGENTS.md")+" "+expectedOpencodeAgentsMD) {
+		t.Errorf("expected opencode AGENTS.md mount, got: %s", argStrOpencode)
+	}
+	if !strings.Contains(argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedOpencodeSkills) {
+		t.Errorf("expected opencode skills mount, got: %s", argStrOpencode)
 	}
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"

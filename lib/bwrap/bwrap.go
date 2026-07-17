@@ -13,7 +13,7 @@ import (
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -147,6 +147,39 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 		}
 	}
 
+	// Mount AGENTS.md and skills/ if they exist in agentPath
+	if agentPath != "" {
+		agentsMDPath := filepath.Join(agentPath, "AGENTS.md")
+		skillsPath := filepath.Join(agentPath, "skills")
+
+		var hasAgentsMD bool
+		if st, err := os.Stat(agentsMDPath); err == nil && !st.IsDir() {
+			hasAgentsMD = true
+		}
+
+		var hasSkills bool
+		if st, err := os.Stat(skillsPath); err == nil && st.IsDir() {
+			hasSkills = true
+		}
+
+		switch target.CLI {
+		case "agy":
+			if hasAgentsMD {
+				args = append(args, "--ro-bind", agentsMDPath, filepath.Join(home, ".gemini", "GEMINI.md"))
+			}
+			if hasSkills {
+				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".gemini", "antigravity-cli", "skills"))
+			}
+		case "opencode":
+			if hasAgentsMD {
+				args = append(args, "--ro-bind", agentsMDPath, filepath.Join(home, ".config", "opencode", "AGENTS.md"))
+			}
+			if hasSkills {
+				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".config", "opencode", "skills"))
+			}
+		}
+	}
+
 	// End of bubblewrap arguments
 	args = append(args, "--")
 
@@ -168,8 +201,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt 
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, target, prompt, session, runDir, sockDir, chatID)
+func CommandForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID)
 	if err != nil {
 		return nil, err
 	}
