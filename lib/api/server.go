@@ -49,8 +49,18 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 	return s, nil
 }
 
-// ServeHTTP delegates HTTP requests to the current active ServeMux.
+// ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// CORS Headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	s.mu.RLock()
 	mux := s.mux
 	s.mu.RUnlock()
@@ -66,17 +76,26 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 		restHandler, card := NewAgentHandler(agent, s.conf.Host, s.repo, s, statusURL)
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
-		mux.Handle(prefix, http.StripPrefix(fmt.Sprintf("/agents/%s", agent.Config.ID), restHandler))
+		agentBase := fmt.Sprintf("/agents/%s", agent.Config.ID)
+
+		// Standard routes: /agents/{id}/message:stream etc.
+		mux.Handle(prefix, http.StripPrefix(agentBase, restHandler))
+
+		// Compat routes for @a2a-js/sdk@0.x which:
+		//   1. Prefixes all paths with /v1/  (e.g. /v1/message:stream)
+		//   2. Sends message.content instead of message.parts
+		v1Prefix := prefix + "v1/"
+		mux.Handle(v1Prefix, http.StripPrefix(agentBase+"/v1", rewriteContentToParts(restHandler)))
 
 		cardHandler := a2asrv.NewStaticAgentCardHandler(card)
 		mux.Handle(prefix+strings.TrimPrefix(a2asrv.WellKnownAgentCardPath, "/"), cardHandler)
 
-		log.Info().Msgf("Registered agent %s at /agents/%s/", agent.Config.Name, agent.Config.ID)
+		log.Info().Msgf("Registered agent %s at /agents/%s/ (+ /v1/ compat)", agent.Config.Name, agent.Config.ID)
 	}
 
 	mux.HandleFunc("POST /manage/reload", s.handleReload)
 	mux.HandleFunc("GET /team", s.handleTeam)
-	mux.HandleFunc("GET /agents", s.handleAgents)
+	mux.HandleFunc("GET /api/agents", s.handleAgents)
 
 	return mux
 }

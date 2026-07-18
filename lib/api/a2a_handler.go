@@ -235,17 +235,30 @@ func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRep
 	return restHandler, card
 }
 
+// AgentInfo holds details about an agent for the frontend UI.
+type AgentInfo struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	RunDirs     []string `json:"run_dirs"`
+}
+
 // handleAgents handles GET /agents to list loaded agent names.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	names := make([]string, 0, len(s.agents))
+	richAgents := make([]AgentInfo, 0, len(s.agents))
 	for _, agent := range s.agents {
-		names = append(names, agent.Config.Name)
+		richAgents = append(richAgents, AgentInfo{
+			ID:          agent.Config.ID,
+			Name:        agent.Config.Name,
+			Description: agent.Config.Description,
+			RunDirs:     agent.Config.RunDirs,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(names)
+	_ = json.NewEncoder(w).Encode(richAgents)
 }

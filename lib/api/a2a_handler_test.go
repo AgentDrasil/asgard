@@ -65,9 +65,11 @@ func TestHandleAgents(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 
-	var returnedNames []string
-	err := json.Unmarshal(w.Body.Bytes(), &returnedNames)
+	var returnedAgents []AgentInfo
+	err := json.Unmarshal(w.Body.Bytes(), &returnedAgents)
 	assert.NoError(t, err)
 
-	assert.Equal(t, []string{"Agent Alpha", "Agent Beta"}, returnedNames)
+	assert.Equal(t, 2, len(returnedAgents))
+	assert.Equal(t, "Agent Alpha", returnedAgents[0].Name)
+	assert.Equal(t, "Agent Beta", returnedAgents[1].Name)
 }

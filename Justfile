@@ -5,10 +5,12 @@ default:
 # Format code with goimports
 fmt:
     goimports -w -local "github.com/AgentDrasil/asgard" .
+    cd webui && npm run fmt
 
 # Run golangci-lint
 lint:
     golangci-lint run
+    cd webui && npm run lint
 
 # Run e2e tests
 e2e-test:
