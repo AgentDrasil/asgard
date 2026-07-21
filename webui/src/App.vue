@@ -5,7 +5,13 @@ import Sidebar from "./components/Sidebar.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import ChatArea from "./components/ChatArea.vue";
 import ChatInput from "./components/ChatInput.vue";
-import { getAgents, getSessions, saveSessionToLocal, deleteSessionFromLocal } from "./lib/api";
+import {
+  getAgents,
+  getSessions,
+  getSession,
+  saveSessionToLocal,
+  deleteSessionFromLocal,
+} from "./lib/api";
 import { runAgentStream } from "./lib/agent";
 import type { AgentInfo, ChatSession, ChatMessage } from "./types";
 
@@ -62,10 +68,13 @@ watch(activeSessionId, (newId) => {
   }
 });
 
-const handleSelectSession = (id: string) => {
+const handleSelectSession = async (id: string) => {
   activeSessionId.value = id;
-  // Local placeholder logic: clear current messaging state (sessions store chatID & params, message list is live)
   messages.value = [];
+  const session = await getSession(id);
+  if (session && session.messages) {
+    messages.value = session.messages;
+  }
 };
 
 const handleNewChat = () => {
@@ -89,14 +98,13 @@ const handleSendMessage = async (text: string) => {
   // Create new session if none exists
   if (!currentThreadId) {
     currentThreadId = uuidv4();
-    const firstLine = text.split("\n")[0];
-    const title = firstLine.length > 30 ? firstLine.substring(0, 30) + "..." : firstLine;
 
     const newSession: ChatSession = {
       chatID: currentThreadId,
-      title,
+      title: "",
       currentAgent: selectedAgentId.value,
       runDir: selectedDir.value,
+      messages: [],
     };
 
     await saveSessionToLocal(newSession);
@@ -109,9 +117,24 @@ const handleSendMessage = async (text: string) => {
     chatID: currentThreadId,
     currentAgent: selectedAgentId.value,
     runDir: selectedDir.value,
+    title: "",
   };
 
   loading.value = true;
+
+  const saveCurrentSession = async () => {
+    if (!currentThreadId) return;
+    const sessionToSave: ChatSession = {
+      chatID: currentThreadId,
+      title: currentSession.title || "",
+      currentAgent: currentSession.currentAgent,
+      runDir: currentSession.runDir,
+      messages: messages.value,
+    };
+    await saveSessionToLocal(sessionToSave);
+    const updated = await getSessions();
+    sessions.value = updated;
+  };
 
   // 1. Add User Message
   const userMsgId = uuidv4();
@@ -122,6 +145,8 @@ const handleSendMessage = async (text: string) => {
     timestamp: Date.now(),
   });
 
+  await saveCurrentSession();
+
   const runId = uuidv4();
   const assistantMsgId = uuidv4();
   const reasoningMsgId = `reasoning-${runId}`;
@@ -129,6 +154,21 @@ const handleSendMessage = async (text: string) => {
   // Placeholders for assistant response & reasoning details
   let hasAssistantMsg = false;
   let hasReasoningMsg = false;
+
+  const refreshSessionTitle = async (chatID: string) => {
+    const sess = await getSession(chatID);
+    if (sess && sess.title) {
+      const idx = sessions.value.findIndex((s) => s.chatID === chatID);
+      if (idx > -1) {
+        sessions.value[idx] = { ...sessions.value[idx], title: sess.title };
+      }
+    }
+  };
+
+  // Schedule a title refresh fallback shortly after stream initiation if title is empty
+  if (!currentSession.title) {
+    setTimeout(() => refreshSessionTitle(currentThreadId), 1500);
+  }
 
   await runAgentStream(
     currentSession.currentAgent,
@@ -149,6 +189,9 @@ const handleSendMessage = async (text: string) => {
             timestamp: Date.now(),
           });
           hasAssistantMsg = true;
+          if (!currentSession.title) {
+            refreshSessionTitle(currentThreadId);
+          }
         } else {
           messages.value = messages.value.map((m) =>
             m.id === assistantMsgId ? { ...m, content: textContent } : m,
@@ -184,7 +227,7 @@ const handleSendMessage = async (text: string) => {
           });
         }
       },
-      onError: (err) => {
+      onError: async (err) => {
         messages.value.push({
           id: `error-${uuidv4()}`,
           role: "activity",
@@ -193,9 +236,16 @@ const handleSendMessage = async (text: string) => {
           timestamp: Date.now(),
         });
         loading.value = false;
+        await saveCurrentSession();
       },
-      onComplete: () => {
+      onComplete: async () => {
         loading.value = false;
+        await saveCurrentSession();
+        if (!currentSession.title) {
+          await refreshSessionTitle(currentThreadId);
+        }
+        const updated = await getSessions();
+        sessions.value = updated;
       },
     },
   );

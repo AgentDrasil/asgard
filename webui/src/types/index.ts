@@ -27,4 +27,5 @@ export interface ChatSession {
   runDir: string;
   createdAt?: string;
   updatedAt?: string;
+  messages?: ChatMessage[];
 }

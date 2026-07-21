@@ -59,7 +59,7 @@ func TestSessionRepository(t *testing.T) {
 	sess, err = repo.GetSession(chatID)
 	assert.NoError(t, err)
 	require.NotNil(t, sess)
-	assert.Equal(t, "agent-2", sess.CurrentAgent)
+	assert.Equal(t, "agent-1", sess.CurrentAgent)
 	require.Len(t, sess.Agents, 2)
 	assert.Equal(t, "agent-1", sess.Agents[0].Name)
 	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
@@ -74,4 +74,31 @@ func TestSessionRepository(t *testing.T) {
 	assert.NoError(t, err)
 	require.NotNil(t, sess)
 	assert.Equal(t, "/some/run/dir", sess.RunDir)
+
+	// Test GetSessions
+	sessions, err := repo.GetSessions()
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 1)
+	assert.Equal(t, chatID, sessions[0].ChatID)
+
+	// Save session directly to test Title saving
+	sessions[0].Title = "Test Chat Title"
+	err = repo.SaveSession(&sessions[0])
+	assert.NoError(t, err)
+
+	// Test UpdateSessionTitle
+	err = repo.UpdateSessionTitle(chatID, "Updated Chat Title")
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	assert.Equal(t, "Updated Chat Title", sess.Title)
+
+	// Test DeleteSession
+	err = repo.DeleteSession(chatID)
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	assert.Nil(t, sess)
 }

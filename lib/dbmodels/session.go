@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/moznion/go-optional"
 	"gorm.io/gorm"
@@ -37,6 +38,44 @@ func (a *Agents) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, a)
 }
 
+type ChatMessage struct {
+	ID           string `json:"id"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	Timestamp    int64  `json:"timestamp,omitempty"`
+	ActivityType string `json:"activityType,omitempty"`
+	StepIndex    int    `json:"stepIndex,omitempty"`
+	IsReasoning  bool   `json:"isReasoning,omitempty"`
+}
+
+type Messages []ChatMessage
+
+// Value implements driver.Valuer
+func (m Messages) Value() (driver.Value, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements sql.Scanner
+func (m *Messages) Scan(value interface{}) error {
+	if value == nil {
+		*m = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to scan Messages: unsupported type %T", value)
+	}
+	return json.Unmarshal(bytes, m)
+}
+
 type Session struct {
 	ChatID string `gorm:"primaryKey"`
 	// name of current agent.
@@ -45,6 +84,13 @@ type Session struct {
 	Agents Agents `gorm:"type:text"`
 	// Dir agent running on
 	RunDir string
+	// Title of the session
+	Title string
+	// Messages of the session
+	Messages Messages `gorm:"type:text"`
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Agent struct {
@@ -58,6 +104,18 @@ type SessionRepository struct {
 
 func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
+}
+
+// GetSessions retrieves all sessions.
+func (r *SessionRepository) GetSessions() ([]Session, error) {
+	var sessions []Session
+	err := r.db.Order("updated_at desc").Limit(20).Find(&sessions).Error
+	return sessions, err
+}
+
+// DeleteSession deletes a session by chat ID.
+func (r *SessionRepository) DeleteSession(chatID string) error {
+	return r.db.Delete(&Session{}, "chat_id = ?", chatID).Error
 }
 
 // GetSession retrieves the session for a given chat ID.
@@ -115,7 +173,20 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		})
 	}
 
-	session.CurrentAgent = agentName
+	return r.SaveSession(session)
+}
 
+// UpdateSessionTitle updates the title of a session by chat ID.
+func (r *SessionRepository) UpdateSessionTitle(chatID string, title string) error {
+	session, err := r.GetSession(chatID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		session = &Session{
+			ChatID: chatID,
+		}
+	}
+	session.Title = title
 	return r.SaveSession(session)
 }

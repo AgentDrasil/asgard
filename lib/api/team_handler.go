@@ -16,6 +16,12 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "chat_id is required"})
 		return
 	}
+	if !IsValidChatID(chatID) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid chat_id format"})
+		return
+	}
 
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")

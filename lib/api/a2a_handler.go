@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
+	"google.golang.org/genai"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agents/run"
@@ -34,6 +38,10 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		chatID := execCtx.ContextID
+		if chatID != "" && !IsValidChatID(chatID) {
+			yield(nil, fmt.Errorf("invalid chatID format"))
+			return
+		}
 
 		var session *dbmodels.Session
 		agentSessionID := optional.None[string]()
@@ -84,6 +92,32 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
+			}
+
+			// Generate title on first request if session has no title
+			if session == nil || session.Title == "" {
+				apiKey := ""
+				if e.server != nil && e.server.conf != nil {
+					apiKey = e.server.conf.GeminiAPIKey
+				}
+				agentID := e.agent.Config.ID
+				agentDesc := e.agent.Config.Description
+				repo := e.repo
+
+				go func() {
+					titleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					title, err := generateSessionTitle(titleCtx, apiKey, prompt, agentID, agentDesc)
+					if err != nil {
+						log.Warn().Err(err).Msg("failed to generate session title via gemini")
+						return
+					}
+					if title != "" {
+						if err := repo.UpdateSessionTitle(chatID, title); err != nil {
+							log.Warn().Err(err).Msg("failed to update session title in repo")
+						}
+					}
+				}()
 			}
 		}
 
@@ -261,4 +295,34 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(richAgents)
+}
+
+func generateSessionTitle(ctx context.Context, apiKey string, req string, agentID string, agentDesc string) (string, error) {
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("gemini api key not configured")
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	prompt := fmt.Sprintf(
+		"User is sending a request %q to agent %q (%s). Generate a short, clear, and descriptive title (3 to 8 words) for this chat session. Keep it short. Do not use quotation marks, markdown, or prefixes. Output only the title text.",
+		req, agentID, agentDesc,
+	)
+
+	resp, err := client.Models.GenerateContent(ctx, "gemini-3.1-flash-lite", genai.Text(prompt), nil)
+	if err != nil {
+		return "", fmt.Errorf("gemini generate content failed: %w", err)
+	}
+
+	title := strings.TrimSpace(resp.Text())
+	title = strings.Trim(title, "\"`")
+	return title, nil
 }

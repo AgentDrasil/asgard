@@ -16,6 +16,7 @@ type Config struct {
 	Port         int    `yaml:"port"`
 	InternalPort int    `yaml:"internal_port"`
 	Host         string `yaml:"host"`
+	GeminiAPIKey string `yaml:"gemini_api_key"`
 }
 
 func (c *Config) validate() error {

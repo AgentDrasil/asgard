@@ -23,7 +23,7 @@ func rewriteContentToParts(next http.Handler) http.Handler {
 		}
 
 		body, err := io.ReadAll(r.Body)
-		r.Body.Close()
+		_ = r.Body.Close()
 		if err != nil {
 			http.Error(w, "failed to read request body", http.StatusBadRequest)
 			return

@@ -19,6 +19,19 @@ export async function getAgents(): Promise<AgentInfo[]> {
   }
 }
 
+export async function getSession(chatID: string): Promise<ChatSession | null> {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(chatID)}`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.error("Failed to fetch session from backend:", err);
+  }
+
+  // Fallback to localStorage
+  const sessions = await getSessions();
+  return sessions.find((s) => s.chatID === chatID) || null;
+}
+
 // Session API client placeholders for now
 const SESSIONS_STORAGE_KEY = "asgard_webui_sessions";
 
@@ -26,7 +39,9 @@ export async function getSessions(): Promise<ChatSession[]> {
   try {
     const res = await fetch("/api/sessions");
     if (res.ok) return await res.json();
-  } catch {}
+  } catch (err) {
+    console.error("Failed to fetch sessions from backend:", err);
+  }
 
   // Fallback to localStorage
   const data = localStorage.getItem(SESSIONS_STORAGE_KEY);
@@ -34,6 +49,20 @@ export async function getSessions(): Promise<ChatSession[]> {
 }
 
 export async function saveSessionToLocal(session: ChatSession): Promise<void> {
+  try {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(session),
+    });
+    if (res.ok) return;
+  } catch (err) {
+    console.error("Failed to save session to backend:", err);
+  }
+
+  // Fallback to localStorage
   const sessions = await getSessions();
   const idx = sessions.findIndex((s) => s.chatID === session.chatID);
   if (idx > -1) {
@@ -45,6 +74,16 @@ export async function saveSessionToLocal(session: ChatSession): Promise<void> {
 }
 
 export async function deleteSessionFromLocal(chatID: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/sessions?chat_id=${encodeURIComponent(chatID)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) return;
+  } catch (err) {
+    console.error("Failed to delete session from backend:", err);
+  }
+
+  // Fallback to localStorage
   const sessions = await getSessions();
   const filtered = sessions.filter((s) => s.chatID !== chatID);
   localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(filtered));
