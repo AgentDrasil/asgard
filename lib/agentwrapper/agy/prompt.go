@@ -77,6 +77,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		log.Debug().Int("start_offset", startOffset).Msg("agy/prompt: transcript resume offset")
 	}
 
+	log.Debug().Str("session_id", awSessionID).Msg("agy/prompt: launching agy")
 	done, err := t.RunCommandInDir(context.Background(), argv, runDir, []string{"AW_SESSION_ID=" + awSessionID})
 	if err != nil {
 		return nil, fmt.Errorf("launching agy: %w", err)
