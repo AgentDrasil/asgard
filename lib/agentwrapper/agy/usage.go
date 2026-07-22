@@ -184,7 +184,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	// Exit: Esc, then Ctrl-D twice.
 	CleanExit(t, done)
 
-	var result []types.ModelUsage
+	result := make([]types.ModelUsage, 0, len(models))
 	for _, mName := range models {
 		rem, ref := getModelQuota(mName, quota)
 		result = append(result, types.ModelUsage{

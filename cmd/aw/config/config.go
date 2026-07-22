@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -60,7 +61,11 @@ func (c *Config) IsModelAllowed(agentName, modelName string) bool {
 		return true
 	}
 	for _, pattern := range patterns {
-		matched, err := regexp.MatchString(pattern, modelName)
+		p := pattern
+		if !strings.HasPrefix(p, "(?i)") {
+			p = "(?i)" + p
+		}
+		matched, err := regexp.MatchString(p, modelName)
 		if err == nil && matched {
 			return true
 		}

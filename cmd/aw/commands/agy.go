@@ -68,7 +68,7 @@ var agyCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("fetching usage: %w", err)
 			}
-			var filtered []types.ModelUsage
+			filtered := make([]types.ModelUsage, 0, len(entries))
 			for _, entry := range entries {
 				if GlobalConfig.IsModelAllowed("agy", entry.Model) {
 					filtered = append(filtered, entry)

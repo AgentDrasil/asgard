@@ -47,6 +47,17 @@ func TestConfig_IsModelAllowed(t *testing.T) {
 			wantAllow: true,
 		},
 		{
+			name: "model matches pattern case insensitively",
+			cfg: &Config{
+				Agents: []map[string][]string{
+					{"agy": {"Gemini.*", "Claude.*"}},
+				},
+			},
+			agent:     "agy",
+			model:     "gemini-3.6-flash-low",
+			wantAllow: true,
+		},
+		{
 			name: "model does not match pattern",
 			cfg: &Config{
 				Agents: []map[string][]string{
