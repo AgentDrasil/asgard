@@ -93,6 +93,13 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
 			}
+			// Only update status if this is the primary/entry agent for the session
+			if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name {
+				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusRunning); err != nil {
+					yield(nil, fmt.Errorf("failed to update agent status to running: %w", err))
+					return
+				}
+			}
 
 			// Generate title on first request if session has no title
 			if session == nil || session.Title == "" {
@@ -228,6 +235,13 @@ func (e *agentExecutor) handleFinalResult(
 				yield(nil, fmt.Errorf("failed to update agent session: %w", err))
 				return
 			}
+		}
+	}
+
+	if e.repo != nil {
+		sess, err := e.repo.GetSession(chatID)
+		if err == nil && sess != nil && (sess.CurrentAgent == "" || sess.CurrentAgent == e.agent.Config.Name) {
+			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
 		}
 	}
 

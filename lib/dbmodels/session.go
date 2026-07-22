@@ -93,9 +93,18 @@ type Session struct {
 	UpdatedAt time.Time
 }
 
+type AgentStatus uint
+
+const (
+	AgentStatusUnknown AgentStatus = iota
+	AgentStatusRunning
+	AgentStatusCompleted
+)
+
 type Agent struct {
-	Name      string `json:"name"`
-	SessionID string `json:"session_id"`
+	Name      string      `json:"name"`
+	SessionID string      `json:"session_id"`
+	Status    AgentStatus `json:"status,omitempty"`
 }
 
 type SessionRepository struct {
@@ -134,6 +143,34 @@ func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
 // SaveSession saves or updates the session.
 func (r *SessionRepository) SaveSession(session *Session) error {
 	return r.db.Save(session).Error
+}
+
+// UpdateAgentStatus updates the status for a specific agent in a session.
+func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, status AgentStatus) error {
+	session, err := r.GetSession(chatID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return nil
+	}
+
+	found := false
+	for i, a := range session.Agents {
+		if a.Name == agentName {
+			session.Agents[i].Status = status
+			found = true
+			break
+		}
+	}
+	if !found {
+		session.Agents = append(session.Agents, Agent{
+			Name:   agentName,
+			Status: status,
+		})
+	}
+
+	return r.SaveSession(session)
 }
 
 // UpdateAgentSession updates the session ID for a specific agent in a topic and optionally updates the run directory.
