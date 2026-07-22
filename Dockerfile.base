@@ -33,9 +33,12 @@ ARG NODE_VERSION
 
 # Install Go
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz && \
-    rm go${GO_VERSION}.linux-amd64.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
+    mkdir -p /usr/lib/go && \
+    tar -C /usr/lib/go --strip-components=1 -xzf go${GO_VERSION}.linux-amd64.tar.gz && \
+    rm go${GO_VERSION}.linux-amd64.tar.gz && \
+    ln -s /usr/lib/go/bin/go /usr/bin/go && \
+    ln -s /usr/lib/go/bin/gofmt /usr/bin/gofmt
+ENV PATH="/usr/lib/go/bin:${PATH}"
 
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
