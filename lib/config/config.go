@@ -9,14 +9,15 @@ import (
 )
 
 type Config struct {
-	Debug        bool   `yaml:"debug"`
-	DB           string `yaml:"db"`
-	DSN          string `yaml:"dsn"`
-	AgentDir     string `yaml:"agent_dir"`
-	Port         int    `yaml:"port"`
-	InternalPort int    `yaml:"internal_port"`
-	Host         string `yaml:"host"`
-	GeminiAPIKey string `yaml:"gemini_api_key"`
+	Debug                   bool   `yaml:"debug"`
+	DB                      string `yaml:"db"`
+	DSN                     string `yaml:"dsn"`
+	AgentDir                string `yaml:"agent_dir"`
+	Port                    int    `yaml:"port"`
+	InternalPort            int    `yaml:"internal_port"`
+	Host                    string `yaml:"host"`
+	GeminiAPIKey            string `yaml:"gemini_api_key"`
+	GeminiModelForChatTitle string `yaml:"gemini_model_for_chat_title"`
 }
 
 func (c *Config) validate() error {
@@ -38,6 +39,13 @@ func (c *Config) validate() error {
 		return fmt.Errorf("failed to make agent_dir absolute: %w", err)
 	}
 	c.AgentDir = absDir
+
+	if c.GeminiAPIKey == "" {
+		return fmt.Errorf("missing gemini_api_key")
+	}
+	if c.GeminiModelForChatTitle == "" {
+		return fmt.Errorf("missing gemini_model_for_chat_title")
+	}
 
 	return nil
 }
@@ -73,16 +81,16 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
 	if cfg.Port <= 0 {
 		cfg.Port = 8080
 	}
 
 	if cfg.InternalPort <= 0 {
 		cfg.InternalPort = 8081
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
 	if err := cfg.verifyDirs(); err != nil {

@@ -97,8 +97,10 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			// Generate title on first request if session has no title
 			if session == nil || session.Title == "" {
 				apiKey := ""
+				model := ""
 				if e.server != nil && e.server.conf != nil {
 					apiKey = e.server.conf.GeminiAPIKey
+					model = e.server.conf.GeminiModelForChatTitle
 				}
 				agentID := e.agent.Config.ID
 				agentDesc := e.agent.Config.Description
@@ -107,7 +109,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				go func() {
 					titleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
-					title, err := generateSessionTitle(titleCtx, apiKey, prompt, agentID, agentDesc)
+					title, err := generateSessionTitle(titleCtx, apiKey, model, prompt, agentID, agentDesc)
 					if err != nil {
 						log.Warn().Err(err).Msg("failed to generate session title via gemini")
 						return
@@ -297,12 +299,16 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(richAgents)
 }
 
-func generateSessionTitle(ctx context.Context, apiKey string, req string, agentID string, agentDesc string) (string, error) {
+func generateSessionTitle(ctx context.Context, apiKey string, model string, req string, agentID string, agentDesc string) (string, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
 		return "", fmt.Errorf("gemini api key not configured")
+	}
+
+	if model == "" {
+		model = "gemini-3.1-flash-lite"
 	}
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -317,7 +323,7 @@ func generateSessionTitle(ctx context.Context, apiKey string, req string, agentI
 		req, agentID, agentDesc,
 	)
 
-	resp, err := client.Models.GenerateContent(ctx, "gemini-3.1-flash-lite", genai.Text(prompt), nil)
+	resp, err := client.Models.GenerateContent(ctx, model, genai.Text(prompt), nil)
 	if err != nil {
 		return "", fmt.Errorf("gemini generate content failed: %w", err)
 	}
