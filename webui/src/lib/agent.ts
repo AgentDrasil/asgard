@@ -4,6 +4,7 @@ import {
   JsonRpcTransportFactory,
   Client,
 } from "@a2a-js/sdk/client";
+import { apiFetch } from "./api";
 
 interface NewSpecAgentCard {
   supportedInterfaces?: Array<{ url: string; protocolBinding: string }>;
@@ -12,7 +13,7 @@ interface NewSpecAgentCard {
 
 // Translate from the Go server's supportedInterfaces spec to the SDK's expected format.
 async function fetchAndBridgeAgentCard(cardUrl: string): Promise<object> {
-  const res = await fetch(cardUrl);
+  const res = await apiFetch(cardUrl);
   if (!res.ok) {
     throw new Error(`Failed to fetch agent card: ${res.status} ${res.statusText}`);
   }
@@ -38,7 +39,7 @@ async function fetchAndBridgeAgentCard(cardUrl: string): Promise<object> {
 
 // Patched fetch to bridge the Go server's taskId field to the SDK's expected taskStatusUpdateEvent name field.
 async function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
+  const response = await apiFetch(input, init);
   const contentType = response.headers.get("Content-Type");
   if (!contentType?.startsWith("text/event-stream") || !response.body) {
     return response;
