@@ -67,9 +67,9 @@ const formatContent = (content: string) => {
       class="px-6 py-4 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0"
     >
       <div class="space-y-1">
-        <h2 class="text-md font-bold flex items-center gap-2">
+        <h2 class="text-md font-bold text-base-content flex items-center gap-2">
           <span>🤖</span>
-          <span>{{ activeAgent?.name || "Coding Agent" }}</span>
+          <span class="text-base-content font-bold">{{ activeAgent?.name || "Coding Agent" }}</span>
         </h2>
         <p class="text-xs text-base-content/60 font-mono">
           Workspace:

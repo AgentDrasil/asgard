@@ -256,17 +256,24 @@ const handleStartWelcomeChat = () => {
     handleSendMessage(welcomePrompt.value);
   }
 };
+
+const isSidebarOpen = ref(true);
+const toggleSidebar = () => {
+  isSidebarOpen.value = !isSidebarOpen.value;
+};
 </script>
 
 <template>
   <div class="flex w-full h-full bg-base-100 overflow-hidden">
     <!-- Sidebar -->
     <Sidebar
+      :isOpen="isSidebarOpen"
       :sessions="sessions"
       :activeSessionId="activeSessionId"
       @select-session="handleSelectSession"
       @new-chat="handleNewChat"
       @delete-session="handleDeleteSession"
+      @toggle-sidebar="toggleSidebar"
     />
 
     <!-- Main Content Area -->

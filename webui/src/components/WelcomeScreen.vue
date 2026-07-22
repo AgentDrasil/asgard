@@ -86,7 +86,7 @@ const handleSubmit = () => {
       <!-- App title & intro -->
       <div class="text-center space-y-2">
         <h2
-          class="text-3xl font-extrabold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent"
+          class="text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
         >
           Start a Chat
         </h2>
@@ -99,17 +99,22 @@ const handleSubmit = () => {
         <!-- Agent Selection -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text">Select Coding Agent</span>
+            <span class="label-text text-base-content">Select Coding Agent</span>
           </label>
           <select
             v-model="localAgentId"
-            class="select select-bordered w-full bg-base-300 border-base-300 focus:outline-none"
+            class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none"
           >
-            <option v-for="agent in agents" :key="agent.id" :value="agent.id">
+            <option
+              v-for="agent in agents"
+              :key="agent.id"
+              :value="agent.id"
+              class="bg-base-100 text-base-content"
+            >
               {{ agent.name }} ({{ agent.id }})
             </option>
           </select>
-          <label class="label text-xs text-base-content/50" v-if="currentAgent">
+          <label class="label text-xs text-base-content/60" v-if="currentAgent">
             <span>{{ currentAgent.description }}</span>
           </label>
         </div>
@@ -117,14 +122,19 @@ const handleSubmit = () => {
         <!-- Run Directory Selection -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text">Workspace (Run Directory)</span>
+            <span class="label-text text-base-content">Workspace (Run Directory)</span>
           </label>
           <select
             v-model="baseDir"
-            class="select select-bordered w-full bg-base-300 border-base-300 focus:outline-none"
+            class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none"
             :disabled="runDirs.length === 0"
           >
-            <option v-for="dir in runDirs" :key="dir" :value="dir">
+            <option
+              v-for="dir in runDirs"
+              :key="dir"
+              :value="dir"
+              class="bg-base-100 text-base-content"
+            >
               {{ dir }}
             </option>
           </select>
@@ -136,15 +146,15 @@ const handleSubmit = () => {
         <!-- Subdirectory Selection -->
         <div class="form-control w-full" v-if="runDirs.length > 0">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text">Subdirectory (optional)</span>
+            <span class="label-text text-base-content">Subdirectory (optional)</span>
           </label>
           <input
             v-model="subDir"
             type="text"
             placeholder="e.g. subdir/project"
-            class="input input-bordered w-full bg-base-300 border-base-300 focus:outline-none text-sm"
+            class="input input-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none text-sm"
           />
-          <label class="label text-xs text-base-content/50" v-if="selectedDir">
+          <label class="label text-xs text-base-content/60" v-if="selectedDir">
             <span class="truncate">Full path: {{ selectedDir }}</span>
           </label>
         </div>
@@ -152,11 +162,11 @@ const handleSubmit = () => {
         <!-- Prompt Textarea -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text">What would you like to build?</span>
+            <span class="label-text text-base-content">What would you like to build?</span>
           </label>
           <textarea
             v-model="localPrompt"
-            class="textarea textarea-bordered h-32 bg-base-300 border-base-300 w-full focus:outline-none font-mono text-sm leading-relaxed"
+            class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
             placeholder="Type your coding request here..."
             @keydown.enter.exact.prevent="handleSubmit"
           ></textarea>
