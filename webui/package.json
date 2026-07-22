@@ -16,7 +16,8 @@
     "@a2a-js/sdk": "^0.3.14",
     "@types/uuid": "^10.0.0",
     "uuid": "^14.0.1",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@iconify/vue": "^5.0.1",

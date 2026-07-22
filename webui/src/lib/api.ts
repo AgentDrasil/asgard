@@ -62,4 +62,3 @@ export async function deleteSessionFromLocal(chatID: string): Promise<void> {
     console.error("Failed to delete session from backend:", err);
   }
 }
-

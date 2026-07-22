@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { v4 as uuidv4 } from "uuid";
 import Sidebar from "./components/Sidebar.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
@@ -15,6 +16,9 @@ import {
 import { runAgentStream } from "./lib/agent";
 import type { AgentInfo, ChatSession, ChatMessage } from "./types";
 
+const route = useRoute();
+const router = useRouter();
+
 const agents = ref<AgentInfo[]>([]);
 const sessions = ref<ChatSession[]>([]);
 
@@ -25,6 +29,45 @@ const welcomePrompt = ref("");
 
 const messages = ref<ChatMessage[]>([]);
 const loading = ref(false);
+
+const activeSession = ref<ChatSession | null>(null);
+const activeAgent = ref<AgentInfo | null>(null);
+
+const loadSessionData = async (id: string) => {
+  activeSessionId.value = id;
+  messages.value = [];
+  const session = await getSession(id);
+  if (session && session.messages) {
+    messages.value = session.messages;
+  }
+};
+
+const handleSelectSession = (id: string) => {
+  if (route.params.id !== id) {
+    router.push(`/chat/${id}`);
+  }
+};
+
+const handleNewChat = () => {
+  if (route.path !== "/newchat") {
+    router.push("/newchat");
+  }
+};
+
+// Watch route parameter changes to update active session
+watch(
+  () => route.params.id,
+  async (newId) => {
+    if (newId && typeof newId === "string") {
+      await loadSessionData(newId);
+    } else {
+      activeSessionId.value = null;
+      messages.value = [];
+      welcomePrompt.value = "";
+    }
+  },
+  { immediate: true },
+);
 
 // Initialize agents and sessions
 onMounted(async () => {
@@ -39,6 +82,10 @@ onMounted(async () => {
 
   const loadedSessions = await getSessions();
   sessions.value = loadedSessions;
+
+  if (route.params.id && typeof route.params.id === "string") {
+    await loadSessionData(route.params.id);
+  }
 });
 
 // Update selected workspace directory when active agent changes
@@ -50,9 +97,6 @@ watch(selectedAgentId, (newAgentId) => {
     selectedDir.value = "";
   }
 });
-
-const activeSession = ref<ChatSession | null>(null);
-const activeAgent = ref<AgentInfo | null>(null);
 
 // Watch session select and update references
 watch(activeSessionId, (newId) => {
@@ -68,26 +112,11 @@ watch(activeSessionId, (newId) => {
   }
 });
 
-const handleSelectSession = async (id: string) => {
-  activeSessionId.value = id;
-  messages.value = [];
-  const session = await getSession(id);
-  if (session && session.messages) {
-    messages.value = session.messages;
-  }
-};
-
-const handleNewChat = () => {
-  activeSessionId.value = null;
-  messages.value = [];
-  welcomePrompt.value = "";
-};
-
 const handleDeleteSession = async (id: string) => {
   await deleteSessionFromLocal(id);
   const updated = await getSessions();
   sessions.value = updated;
-  if (activeSessionId.value === id) {
+  if (route.params.id === id || activeSessionId.value === id) {
     handleNewChat();
   }
 };
@@ -111,6 +140,7 @@ const handleSendMessage = async (text: string) => {
     const updated = await getSessions();
     sessions.value = updated;
     activeSessionId.value = currentThreadId;
+    router.push(`/chat/${currentThreadId}`);
   }
 
   const currentSession = sessions.value.find((s) => s.chatID === currentThreadId) || {
