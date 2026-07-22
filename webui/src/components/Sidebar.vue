@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import type { ChatSession } from "../types";
+import { Icon } from "@iconify/vue";
 
 const props = withDefaults(
   defineProps<{
@@ -51,10 +52,7 @@ const toggleTheme = () => {
   >
     <!-- Header / Toggle Sidebar Button -->
     <div
-      :class="[
-        'p-4 border-b border-base-100 flex items-center gap-2 w-full',
-        isOpen ? 'justify-between' : 'justify-center',
-      ]"
+      :class="['p-4 flex items-center gap-2 w-full', isOpen ? 'justify-between' : 'justify-center']"
     >
       <h1
         v-if="isOpen"
@@ -67,18 +65,7 @@ const toggleTheme = () => {
         class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
         :title="isOpen ? 'Collapse Sidebar' : 'Expand Sidebar'"
       >
-        <svg
-          class="w-5 h-5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <rect x="3" y="3" width="18" height="18" rx="4" />
-          <line x1="9" y1="3" x2="9" y2="21" />
-        </svg>
+        <Icon icon="mynaui:sidebar" class="h-5 w-5 fill-current" />
       </button>
     </div>
 
@@ -93,20 +80,7 @@ const toggleTheme = () => {
         ]"
         title="New chat"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-5 w-5 shrink-0 text-base-content/70"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-          />
-        </svg>
+        <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
         <span v-if="isOpen">New chat</span>
       </button>
 
@@ -137,20 +111,7 @@ const toggleTheme = () => {
             ]"
             title="Delete session"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
+            <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
           </button>
         </div>
       </template>
@@ -159,7 +120,7 @@ const toggleTheme = () => {
     <!-- Footer / Theme Toggle -->
     <div
       :class="[
-        'p-3 border-t border-base-100 bg-base-300 flex items-center text-xs w-full',
+        'p-3 bg-base-300 flex items-center text-xs w-full',
         isOpen ? 'justify-between px-4' : 'justify-center',
       ]"
     >
@@ -177,25 +138,9 @@ const toggleTheme = () => {
           @change="toggleTheme"
         />
         <!-- Sun icon (shown when dark, click for light) -->
-        <svg
-          class="swap-off fill-current w-4 h-4"
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-        >
-          <path
-            d="M5.64,17l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0l.71-.71A1,1,0,0,0,5.64,17ZM5,12a1,1,0,0,0-1-1H3a1,1,0,0,0,0,2H4A1,1,0,0,0,5,12Zm7-7a1,1,0,0,0,1-1V3a1,1,0,0,0-2,0V4A1,1,0,0,0,12,5ZM5.64,7.05a1,1,0,0,0,.71.71,1,1,0,0,0,1.41,0,1,1,0,0,0,0-1.41l-.71-.71A1,1,0,0,0,5.64,7.05ZM18.36,17A1,1,0,0,0,17,18.36l.71.71a1,1,0,0,0,1.41,0,1,1,0,0,0,0-1.41ZM21,11H20a1,1,0,0,0,0,2h1a1,1,0,0,0,0-2Zm-9,7a1,1,0,0,0-1,1v1a1,1,0,0,0,2,0V19A1,1,0,0,0,12,18ZM18.36,7.05,19.07,6.34a1,1,0,0,0-1.41-1.41l-.71.71a1,1,0,0,0,0,1.41A1,1,0,0,0,18.36,7.05ZM12,6a6,6,0,1,0,6,6A6.07,6.07,0,0,0,12,6Z"
-          />
-        </svg>
+        <Icon icon="mynaui:sun" class="swap-off fill-current w-5 h-5" />
         <!-- Moon icon (shown when light, click for dark) -->
-        <svg
-          class="swap-on fill-current w-4 h-4"
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-        >
-          <path
-            d="M21.64,13a1,1,0,0,0-1.05-.14,8.05,8.05,0,0,1-3.37.73A8.15,8.15,0,0,1,9.08,5.49a8.59,8.59,0,0,1,.25-2A1,1,0,0,0,8,2.36,10.14,10.14,0,1,0,22,14.05A1,1,0,0,0,21.64,13Z"
-          />
-        </svg>
+        <Icon icon="mynaui:moon" class="swap-on fill-current w-5 h-5" />
       </label>
     </div>
   </aside>
