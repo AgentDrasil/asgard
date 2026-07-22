@@ -163,6 +163,12 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 	}
 
+	// Ignore ssh dir to prevent key leak
+	sshDir := filepath.Join(home, ".ssh")
+	if _, err := os.Stat(sshDir); err == nil {
+		args = append(args, "--tmpfs", sshDir)
+	}
+
 	// Mount AGENTS.md and skills/ if they exist in agentPath
 	if agentPath != "" {
 		agentsMDPath := filepath.Join(agentPath, "AGENTS.md")
@@ -274,7 +280,7 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	// Bind HOME
 	args = append(args, "--bind", home, home)
 
-	// Ignore auth dir for agy and opencode
+	// Ignore auth dir for agy and opencode, and ssh dir to prevent key leak
 	agyAuthDir := filepath.Join(home, ".gemini")
 	if _, err := os.Stat(agyAuthDir); err == nil {
 		args = append(args, "--tmpfs", agyAuthDir)
@@ -282,6 +288,10 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	opencodeAuthDir := filepath.Join(home, ".local", "share", "opencode")
 	if _, err := os.Stat(opencodeAuthDir); err == nil {
 		args = append(args, "--tmpfs", opencodeAuthDir)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	if _, err := os.Stat(sshDir); err == nil {
+		args = append(args, "--tmpfs", sshDir)
 	}
 
 	if runDir != "" {

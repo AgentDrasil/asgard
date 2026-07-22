@@ -44,7 +44,7 @@ func TestBuildArgs(t *testing.T) {
 	home := tmpDir
 
 	// Create directories that buildArgsForAgent expects to exist under HOME
-	for _, subDir := range []string{".gemini", ".cache", ".config", ".local"} {
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
 		if err := os.MkdirAll(filepath.Join(home, subDir), 0755); err != nil {
 			t.Fatalf("failed to create %s dir: %v", subDir, err)
 		}
@@ -71,6 +71,11 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	argStr := strings.Join(args, " ")
+
+	sshDir := filepath.Join(home, ".ssh")
+	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
+		t.Errorf("expected '--tmpfs %s' in args, got: %s", sshDir, argStr)
+	}
 
 	// Verify required bwrap components
 	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
@@ -179,6 +184,10 @@ func TestCommandForCommandExec(t *testing.T) {
 	if err := os.MkdirAll(opencodeAuthDir, 0755); err != nil {
 		t.Fatalf("failed to create opencode auth dir: %v", err)
 	}
+	sshDir := filepath.Join(tmpDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0755); err != nil {
+		t.Fatalf("failed to create ssh dir: %v", err)
+	}
 
 	runDir := filepath.Join(tmpDir, "rundir")
 	if err := os.MkdirAll(runDir, 0755); err != nil {
@@ -204,6 +213,9 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--tmpfs "+opencodeAuthDir) {
 		t.Errorf("expected opencode auth dir masking, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
+		t.Errorf("expected ssh dir masking, got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
 		t.Errorf("expected runDir bind mount, got: %s", argStr)
