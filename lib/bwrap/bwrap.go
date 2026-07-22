@@ -23,16 +23,8 @@ func setupTmpDir(home string, chatID string) (string, error) {
 	return tmpDir, nil
 }
 
-// buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
-// It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("getting user home directory: %w", err)
-	}
-
-	var args []string
-
+// appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (die-with-parent, unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH).
+func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string, error) {
 	// Basic safety isolation flags
 	args = append(args, "--die-with-parent")
 	args = append(args, "--unshare-pid")
@@ -47,19 +39,33 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 	}
 	args = append(args, "--bind", tmpDir, "/tmp")
 
-	// Mount system paths as read-only
+	// Mount system paths and all PATH directories as read-only
+	mountedPaths := make(map[string]bool)
 	systemROPaths := []string{"/bin", "/usr/bin", "/usr/local/bin"}
+	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
+		for _, p := range filepath.SplitList(pathEnv) {
+			if p != "" {
+				systemROPaths = append(systemROPaths, p)
+			}
+		}
+	}
 	for _, p := range systemROPaths {
-		if _, err := os.Stat(p); err == nil {
-			args = append(args, "--ro-bind", p, p)
+		if !mountedPaths[p] {
+			if _, err := os.Stat(p); err == nil {
+				args = append(args, "--ro-bind", p, p)
+				mountedPaths[p] = true
+			}
 		}
 	}
 
 	// Mount library/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility
-	extraROPaths := []string{"/lib", "/lib64", "/etc"}
+	extraROPaths := []string{"/lib", "/lib64", "/usr/lib", "/etc"}
 	for _, p := range extraROPaths {
-		if _, err := os.Stat(p); err == nil {
-			args = append(args, "--ro-bind", p, p)
+		if !mountedPaths[p] {
+			if _, err := os.Stat(p); err == nil {
+				args = append(args, "--ro-bind", p, p)
+				mountedPaths[p] = true
+			}
 		}
 	}
 	if _, err := os.Stat("/proc"); err == nil {
@@ -67,6 +73,29 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 	}
 	if _, err := os.Stat("/dev"); err == nil {
 		args = append(args, "--dev", "/dev")
+	}
+
+	// Set HOME and PATH env
+	args = append(args, "--setenv", "HOME", home)
+	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
+		args = append(args, "--setenv", "PATH", pathEnv)
+	}
+
+	return args, nil
+}
+
+// buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
+// It returns the list of arguments to pass to the bwrap executable.
+func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting user home directory: %w", err)
+	}
+
+	var args []string
+	args, err = appendBaseSandboxArgs(args, home, chatID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Mount roles config run_dirs as read-write
@@ -112,10 +141,11 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 	}
 	if !runDirMounted {
-		if _, err := os.Stat(runDir); err != nil {
+		if _, err := os.Stat(runDir); err == nil {
+			args = append(args, "--bind", runDir, runDir)
+		} else {
 			return nil, fmt.Errorf("run directory %q does not exist: %w", runDir, err)
 		}
-		args = append(args, "--bind", runDir, runDir)
 	}
 
 	// Bind logs directory
@@ -135,9 +165,6 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 
 	// Change working directory to runDir in the sandbox
 	args = append(args, "--chdir", runDir)
-
-	// Set HOME env
-	args = append(args, "--setenv", "HOME", home)
 
 	if chatID != "" {
 		args = append(args, "--setenv", "ASGARD_CHAT_ID", chatID)
@@ -240,41 +267,9 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	}
 
 	var args []string
-
-	// Basic safety isolation flags
-	args = append(args, "--die-with-parent")
-	args = append(args, "--unshare-pid")
-	args = append(args, "--unshare-ipc")
-	args = append(args, "--unshare-uts")
-	args = append(args, "--unshare-cgroup")
-
-	// Mount chatID tmp directory to /tmp
-	tmpDir, err := setupTmpDir(home, chatID)
+	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
 		return nil, err
-	}
-	args = append(args, "--bind", tmpDir, "/tmp")
-
-	// Mount system paths as read-only
-	systemROPaths := []string{"/bin", "/usr/bin", "/usr/local/bin"}
-	for _, p := range systemROPaths {
-		if _, err := os.Stat(p); err == nil {
-			args = append(args, "--ro-bind", p, p)
-		}
-	}
-
-	// Mount library/etc/proc/dev paths
-	extraROPaths := []string{"/lib", "/lib64", "/etc"}
-	for _, p := range extraROPaths {
-		if _, err := os.Stat(p); err == nil {
-			args = append(args, "--ro-bind", p, p)
-		}
-	}
-	if _, err := os.Stat("/proc"); err == nil {
-		args = append(args, "--proc", "/proc")
-	}
-	if _, err := os.Stat("/dev"); err == nil {
-		args = append(args, "--dev", "/dev")
 	}
 
 	// Bind HOME
