@@ -128,7 +128,7 @@ func parseResetTime(s string) int64 {
 //  4. Poll the statusline JSON every 200 ms until the statusbar last line's first
 //     token is "idle" (or StartupDelay elapses).
 //  5. Read the statusline JSON and parse the model quota info.
-//  6. Press Esc, then Ctrl-D twice to exit cleanly.
+//  6. Send /exit + Enter to exit cleanly.
 //  7. Map each model to its corresponding quota group (gemini or 3p) and return.
 func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
 	models, err := Models(ctx, opts)
@@ -149,7 +149,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	handleErr := func(err error) error {
 		if ctx.Err() != nil {
-			GratefulShutdown(t, done)
+			CleanExit(t, done)
 			return ctx.Err()
 		}
 		return err
@@ -181,7 +181,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 		log.Warn().Err(err).Msg("failed to read statusline JSON for quota")
 	}
 
-	// Exit: Esc, then Ctrl-D twice.
+	// Exit: /exit + Enter.
 	CleanExit(t, done)
 
 	result := make([]types.ModelUsage, 0, len(models))

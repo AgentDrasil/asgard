@@ -30,7 +30,7 @@ import (
 //  4. Send the prompt text followed by Enter.
 //  5. Wait until idle again (idle #2 – post-response idle).
 //  6. Sleep 200 ms, then wait until idle once more (idle #3 – double-check).
-//  7. Exit agy cleanly (Esc, Ctrl-D, Ctrl-D).
+//  7. Exit agy cleanly (/exit + Enter).
 //  8. Read the last line of ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl.
 //  9. Parse the statusline for token metadata and return a PromptResult.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
@@ -85,7 +85,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 
 	handleErr := func(err error) error {
 		if ctx.Err() != nil {
-			GratefulShutdown(t, done)
+			CleanExit(t, done)
 			return ctx.Err()
 		}
 		return err
