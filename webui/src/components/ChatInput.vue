@@ -36,7 +36,7 @@ const handleSend = () => {
         placeholder="Type a message... (Press Enter to send)"
         rows="1"
         :disabled="loading"
-        class="textarea textarea-bordered bg-base-200 w-full pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-sm font-sans"
+        class="textarea textarea-bordered bg-base-200 text-base-content w-full pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-sm font-sans placeholder:text-base-content/60"
       ></textarea>
 
       <button
