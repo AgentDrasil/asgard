@@ -26,14 +26,8 @@ export async function getSession(chatID: string): Promise<ChatSession | null> {
   } catch (err) {
     console.error("Failed to fetch session from backend:", err);
   }
-
-  // Fallback to localStorage
-  const sessions = await getSessions();
-  return sessions.find((s) => s.chatID === chatID) || null;
+  return null;
 }
-
-// Session API client placeholders for now
-const SESSIONS_STORAGE_KEY = "asgard_webui_sessions";
 
 export async function getSessions(): Promise<ChatSession[]> {
   try {
@@ -42,49 +36,30 @@ export async function getSessions(): Promise<ChatSession[]> {
   } catch (err) {
     console.error("Failed to fetch sessions from backend:", err);
   }
-
-  // Fallback to localStorage
-  const data = localStorage.getItem(SESSIONS_STORAGE_KEY);
-  return data ? JSON.parse(data) : [];
+  return [];
 }
 
 export async function saveSessionToLocal(session: ChatSession): Promise<void> {
   try {
-    const res = await fetch("/api/sessions", {
+    await fetch("/api/sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(session),
     });
-    if (res.ok) return;
   } catch (err) {
     console.error("Failed to save session to backend:", err);
   }
-
-  // Fallback to localStorage
-  const sessions = await getSessions();
-  const idx = sessions.findIndex((s) => s.chatID === session.chatID);
-  if (idx > -1) {
-    sessions[idx] = session;
-  } else {
-    sessions.unshift(session);
-  }
-  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
 }
 
 export async function deleteSessionFromLocal(chatID: string): Promise<void> {
   try {
-    const res = await fetch(`/api/sessions?chat_id=${encodeURIComponent(chatID)}`, {
+    await fetch(`/api/sessions?chat_id=${encodeURIComponent(chatID)}`, {
       method: "DELETE",
     });
-    if (res.ok) return;
   } catch (err) {
     console.error("Failed to delete session from backend:", err);
   }
-
-  // Fallback to localStorage
-  const sessions = await getSessions();
-  const filtered = sessions.filter((s) => s.chatID !== chatID);
-  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(filtered));
 }
+
