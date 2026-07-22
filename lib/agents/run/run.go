@@ -100,7 +100,7 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

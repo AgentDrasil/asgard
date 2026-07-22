@@ -11,6 +11,18 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
 
+// setupTmpDir determines the host directory for sandbox /tmp (e.g. /home/user/tmp/<chatID>) and ensures it exists.
+func setupTmpDir(home string, chatID string) (string, error) {
+	if chatID == "" {
+		chatID = "default"
+	}
+	tmpDir := filepath.Join(home, "tmp", chatID)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
+	}
+	return tmpDir, nil
+}
+
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
 func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
@@ -28,8 +40,12 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-	// Mount tmpfs for /tmp
-	args = append(args, "--tmpfs", "/tmp")
+	// Mount chatID tmp directory to /tmp
+	tmpDir, err := setupTmpDir(home, chatID)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--bind", tmpDir, "/tmp")
 
 	// Mount system paths as read-only
 	systemROPaths := []string{"/bin", "/usr/bin", "/usr/local/bin"}
@@ -211,7 +227,7 @@ func CommandForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CL
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, sockDir string) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -226,8 +242,12 @@ func CommandForCommandExec(runDir string, sockDir string) (*exec.Cmd, error) {
 	args = append(args, "--unshare-uts")
 	args = append(args, "--unshare-cgroup")
 
-	// Mount tmpfs for /tmp
-	args = append(args, "--tmpfs", "/tmp")
+	// Mount chatID tmp directory to /tmp
+	tmpDir, err := setupTmpDir(home, chatID)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--bind", tmpDir, "/tmp")
 
 	// Mount system paths as read-only
 	systemROPaths := []string{"/bin", "/usr/bin", "/usr/local/bin"}

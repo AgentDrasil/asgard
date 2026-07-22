@@ -73,8 +73,9 @@ func TestBuildArgs(t *testing.T) {
 	argStr := strings.Join(args, " ")
 
 	// Verify required bwrap components
-	if !strings.Contains(argStr, "--tmpfs /tmp") {
-		t.Errorf("expected '--tmpfs /tmp' in args, got: %s", argStr)
+	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
+	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
+		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
 	}
 	if !strings.Contains(argStr, "--setenv HOME "+home) {
 		t.Errorf("expected home env setup, got: %s", argStr)
@@ -120,12 +121,17 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "test-chat")
+	argsOpencode, err := buildArgsForAgent(cfg, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "")
 	if err != nil {
 		t.Fatalf("buildArgsForAgent error: %v", err)
 	}
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
+
+	expectedDefaultTmpDir := filepath.Join(home, "tmp", "default")
+	if !strings.Contains(argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp") {
+		t.Errorf("expected '--bind %s /tmp' in argsOpencode, got: %s", expectedDefaultTmpDir, argStrOpencode)
+	}
 
 	// Verify opencode specific mounts
 	cacheDir := filepath.Join(home, ".cache")
@@ -179,15 +185,16 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runDir, "test-sock-dir")
+	cmd, err := CommandForCommandExec(runDir, "test-sock-dir", "test-chat")
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	if !strings.Contains(argStr, "--tmpfs /tmp") {
-		t.Errorf("expected '--tmpfs /tmp' in args, got: %s", argStr)
+	expectedTmpDir := filepath.Join(tmpDir, "tmp", "test-chat")
+	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
+		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
 	}
 	if !strings.Contains(argStr, "--bind "+tmpDir+" "+tmpDir) {
 		t.Errorf("expected home bind mount, got: %s", argStr)
