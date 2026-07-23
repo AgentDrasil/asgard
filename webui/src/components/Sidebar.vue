@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue";
 import type { ChatSession } from "../types";
 import { Icon } from "@iconify/vue";
+import { apiFetch } from "../lib/api";
 
 const props = withDefaults(
   defineProps<{
@@ -22,6 +23,19 @@ const emit = defineEmits<{
 }>();
 
 const currentTheme = ref("dark");
+const isReloading = ref(false);
+
+const reloadApp = async () => {
+  if (isReloading.value) return;
+  isReloading.value = true;
+  try {
+    await apiFetch("/api/manage/reload", { method: "POST" });
+  } catch (err) {
+    console.error("Failed to reload via /api/manage/reload:", err);
+  } finally {
+    isReloading.value = false;
+  }
+};
 
 onMounted(() => {
   const saved = localStorage.getItem("theme");
@@ -117,10 +131,35 @@ const toggleTheme = () => {
       </template>
     </div>
 
+    <!-- Action Menu (Horizontal with icon only) -->
+    <div
+      class="px-3 py-1 flex items-center justify-around gap-1 w-full border-t border-base-100/50"
+    >
+      <button
+        @click="reloadApp"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Reload (/api/manage/reload)"
+        :disabled="isReloading"
+      >
+        <Icon
+          icon="mynaui:refresh"
+          :class="['h-5 w-5 fill-current', { 'animate-spin': isReloading }]"
+        />
+      </button>
+
+      <button
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content opacity-50 cursor-not-allowed"
+        title="Terminal (TODO)"
+        disabled
+      >
+        <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
+      </button>
+    </div>
+
     <!-- Footer / Theme Toggle -->
     <div
       :class="[
-        'p-3 bg-base-300 flex items-center text-xs w-full',
+        'p-3 bg-base-300 flex items-center text-xs w-full border-t border-base-100',
         isOpen ? 'justify-between px-4' : 'justify-center',
       ]"
     >

@@ -93,8 +93,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 		log.Info().Msgf("Registered agent %s at /agents/%s/ (+ /v1/ compat)", agent.Config.Name, agent.Config.ID)
 	}
 
-	mux.HandleFunc("POST /manage/reload", s.handleReload)
 	mux.HandleFunc("GET /team", s.handleTeam)
+	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)

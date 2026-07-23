@@ -45,7 +45,7 @@ const handleSend = () => {
         class="btn btn-circle btn-primary btn-sm absolute right-3 hover:scale-105 active:scale-95 transition-transform"
       >
         <span v-if="loading" class="loading loading-spinner loading-xs"></span>
-        <Icon icon="material-symbols:send" class="h-4 w-4 fill-current" />
+        <Icon v-else icon="material-symbols:send" class="h-4 w-4 fill-current" />
       </button>
     </div>
   </div>

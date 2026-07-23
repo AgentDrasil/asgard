@@ -111,8 +111,8 @@ cli:
 	err = os.WriteFile(filepath.Join(agentDir, "config.yaml"), []byte(configYaml), 0644)
 	assert.NoError(t, err)
 
-	// Call POST /manage/reload via ServeHTTP
-	req := httptest.NewRequest(http.MethodPost, "/manage/reload", nil)
+	// Call POST /api/manage/reload via ServeHTTP
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
