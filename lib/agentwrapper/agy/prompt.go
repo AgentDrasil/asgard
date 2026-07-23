@@ -196,15 +196,16 @@ type fullTranscriptEntry struct {
 // classifyEntry returns the entryType string for a transcript entry.
 func classifyEntry(e *fullTranscriptEntry) string {
 	switch e.Type {
+	case "CHECKPOINT", "CONVERSATION_HISTORY", "SYSTEM_MESSAGE", "USER_INPUT":
+		return "ignore"
 	case "PLANNER_RESPONSE":
 		if len(e.ToolCalls) > 0 {
 			return "tool_call"
 		}
 		return "agent_response"
-	case "TOOL_CALL", "VIEW_FILE", "RUN_COMMAND":
-		return "tool_call"
 	default:
-		return "other"
+		// Any other non-ignored type (e.g. RUN_COMMAND, LIST_DIRECTORY, VIEW_FILE, GREP_SEARCH) is a tool call / result
+		return "tool_call"
 	}
 }
 
@@ -290,7 +291,7 @@ func readNewLines(path string, currentLine *int, startOffset int, report types.R
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 4*1024*1024)
+	buf := make([]byte, 64*1024*1024)
 	scanner.Buffer(buf, len(buf))
 
 	lineIdx := 0
@@ -321,9 +322,21 @@ func readNewLines(path string, currentLine *int, startOffset int, report types.R
 		}
 
 		entryType := classifyEntry(&entry)
+		if entryType == "ignore" {
+			lineIdx++
+			*currentLine++
+			continue
+		}
+
 		var metadata map[string]any
 		if entry.Type != "" {
 			metadata = map[string]any{"raw_type": entry.Type}
+		}
+		if len(entry.ToolCalls) > 0 {
+			if metadata == nil {
+				metadata = make(map[string]any)
+			}
+			metadata["tool_calls"] = entry.ToolCalls
 		}
 		report(startOffset+*currentLine, entry.Source, entryType, entry.Content, metadata)
 

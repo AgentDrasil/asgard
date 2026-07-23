@@ -25,4 +25,3 @@ func CleanExit(t *term.Term, done <-chan error) {
 		log.Warn().Msg("agy: process did not exit after clean exit")
 	}
 }
-

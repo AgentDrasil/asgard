@@ -42,10 +42,10 @@ type ChatMessage struct {
 	ID           string `json:"id"`
 	Role         string `json:"role"`
 	Content      string `json:"content"`
+	AgentName    string `json:"agentName,omitempty"`
 	Timestamp    int64  `json:"timestamp,omitempty"`
 	ActivityType string `json:"activityType,omitempty"`
 	StepIndex    int    `json:"stepIndex,omitempty"`
-	IsReasoning  bool   `json:"isReasoning,omitempty"`
 }
 
 type Messages []ChatMessage
@@ -225,5 +225,20 @@ func (r *SessionRepository) UpdateSessionTitle(chatID string, title string) erro
 		}
 	}
 	session.Title = title
+	return r.SaveSession(session)
+}
+
+// AppendMessage appends a ChatMessage to a session by chat ID.
+func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error {
+	session, err := r.GetSession(chatID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		session = &Session{
+			ChatID: chatID,
+		}
+	}
+	session.Messages = append(session.Messages, msg)
 	return r.SaveSession(session)
 }

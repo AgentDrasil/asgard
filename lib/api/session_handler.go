@@ -16,7 +16,7 @@ type ChatSession struct {
 	Messages     dbmodels.Messages `json:"messages,omitempty"`
 }
 
-// handleSessions handles GET, POST, and DELETE requests to /api/sessions.
+// handleSessions handles GET and DELETE requests to /api/sessions.
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -28,8 +28,6 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		s.handleGetSessions(w, r)
-	case http.MethodPost:
-		s.handleSaveSession(w, r)
 	case http.MethodDelete:
 		s.handleDeleteSession(w, r)
 	default:
@@ -109,60 +107,6 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(sessions)
-}
-
-func (s *Server) handleSaveSession(w http.ResponseWriter, r *http.Request) {
-	var req ChatSession
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: " + err.Error()})
-		return
-	}
-
-	if req.ChatID == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "chatID is required"})
-		return
-	}
-	if !IsValidChatID(req.ChatID) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid chatID format"})
-		return
-	}
-
-	session, err := s.repo.GetSession(req.ChatID)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query session: " + err.Error()})
-		return
-	}
-
-	if session == nil {
-		session = &dbmodels.Session{
-			ChatID: req.ChatID,
-		}
-	}
-
-	// Session title is generated and managed exclusively by the model/backend.
-	// Users are not allowed to set or overwrite session.Title via handleSaveSession.
-	session.CurrentAgent = req.CurrentAgent
-	session.RunDir = req.RunDir
-	session.Messages = req.Messages
-
-	if err := s.repo.SaveSession(session); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to save session: " + err.Error()})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {

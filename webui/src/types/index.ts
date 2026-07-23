@@ -14,10 +14,10 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system" | "developer" | "reasoning" | "activity";
   content: string;
+  agentName?: string;
   timestamp?: number;
   activityType?: string;
   stepIndex?: number;
-  isReasoning?: boolean;
 }
 
 export interface ChatSession {

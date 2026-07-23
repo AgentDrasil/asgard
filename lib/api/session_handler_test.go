@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,8 +42,8 @@ func TestSessionHandler(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, sessions)
 
-	// 2. POST /api/sessions should create a new session
-	newSession := ChatSession{
+	// 2. Insert session via repo
+	err = repo.SaveSession(&dbmodels.Session{
 		ChatID:       "chat-1",
 		Title:        "My First Chat",
 		CurrentAgent: "agent-alpha",
@@ -61,14 +60,8 @@ func TestSessionHandler(t *testing.T) {
 				Content: "Hi there",
 			},
 		},
-	}
-	body, err := json.Marshal(newSession)
+	})
 	require.NoError(t, err)
-
-	req = httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
-	rr = httptest.NewRecorder()
-	server.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// 3. GET /api/sessions/{id} should return the created session with messages
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/chat-1", nil)
@@ -80,7 +73,7 @@ func TestSessionHandler(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &fetchedSession)
 	require.NoError(t, err)
 	assert.Equal(t, "chat-1", fetchedSession.ChatID)
-	assert.Equal(t, "", fetchedSession.Title) // handleSaveSession does not accept user title overwrite
+	assert.Equal(t, "My First Chat", fetchedSession.Title)
 	assert.Equal(t, "agent-alpha", fetchedSession.CurrentAgent)
 	assert.Equal(t, "/path/to/run", fetchedSession.RunDir)
 	require.Len(t, fetchedSession.Messages, 2)
@@ -88,25 +81,21 @@ func TestSessionHandler(t *testing.T) {
 	assert.Equal(t, "Hello", fetchedSession.Messages[0].Content)
 
 	// 4. Test limit 20 and ordering by update time
-	// Let's delete chat-1 first so we start clean
+	// Delete chat-1 first so we start clean
 	req = httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id=chat-1", nil)
 	rr = httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	// Insert 22 sessions
+	// Insert 22 sessions directly via repo
 	for i := 1; i <= 22; i++ {
-		sess := ChatSession{
+		err := repo.SaveSession(&dbmodels.Session{
 			ChatID:       fmt.Sprintf("chat-%d", i),
 			Title:        fmt.Sprintf("Chat %d", i),
 			CurrentAgent: "agent",
 			RunDir:       "/",
-		}
-		body, _ = json.Marshal(sess)
-		req = httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
-		rr = httptest.NewRecorder()
-		server.ServeHTTP(rr, req)
-		assert.Equal(t, http.StatusOK, rr.Code)
+		})
+		require.NoError(t, err)
 	}
 
 	// GET /api/sessions should return 20 sessions

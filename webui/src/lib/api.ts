@@ -4,9 +4,9 @@ import type { AgentInfo, ChatSession } from "../types";
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
   if (response.status === 401) {
-    console.log('apiFetch: 401 received, redirecting to refresh session via SSO...');
+    console.log("apiFetch: 401 received, redirecting to refresh session via SSO...");
     const url = new URL(window.location.href);
-    url.searchParams.set('_auth_refresh', Date.now().toString());
+    url.searchParams.set("_auth_refresh", Date.now().toString());
     window.location.href = url.toString();
   }
   return response;
@@ -49,20 +49,6 @@ export async function getSessions(): Promise<ChatSession[]> {
     console.error("Failed to fetch sessions from backend:", err);
   }
   return [];
-}
-
-export async function saveSessionToLocal(session: ChatSession): Promise<void> {
-  try {
-    await apiFetch("/api/sessions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(session),
-    });
-  } catch (err) {
-    console.error("Failed to save session to backend:", err);
-  }
 }
 
 export async function deleteSessionFromLocal(chatID: string): Promise<void> {

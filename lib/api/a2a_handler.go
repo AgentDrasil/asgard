@@ -93,6 +93,20 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
 			}
+			// Save incoming user message to session in DB
+			if prompt != "" {
+				userMsgID := ""
+				if execCtx.Message != nil {
+					userMsgID = execCtx.Message.ID
+				}
+				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+					ID:        userMsgID,
+					Role:      "user",
+					Content:   prompt,
+					Timestamp: time.Now().UnixMilli(),
+				})
+			}
+
 			// Only update status if this is the primary/entry agent for the session
 			if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name {
 				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusRunning); err != nil {
@@ -170,6 +184,23 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 					statusCh = nil
 					continue
 				}
+				// Save status update to session DB if content is present and not agent_response (which is saved as final result)
+				if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
+					role := update.EntryType
+					if role == "" || role == "other" {
+						role = "activity"
+					}
+					_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+						ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+						Role:         role,
+						Content:      update.Content,
+						AgentName:    e.agent.Config.Name,
+						Timestamp:    time.Now().UnixMilli(),
+						ActivityType: strings.ToUpper(role),
+						StepIndex:    update.StepIndex,
+					})
+				}
+
 				// Emit an intermediate TaskStatusUpdateEvent.
 				updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
 				metadata := map[string]any{
@@ -242,6 +273,16 @@ func (e *agentExecutor) handleFinalResult(
 		sess, err := e.repo.GetSession(chatID)
 		if err == nil && sess != nil && (sess.CurrentAgent == "" || sess.CurrentAgent == e.agent.Config.Name) {
 			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
+		}
+		// Save final assistant response to DB session
+		if respText != "" {
+			_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+				ID:        fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),
+				Role:      "assistant",
+				Content:   respText,
+				AgentName: e.agent.Config.Name,
+				Timestamp: time.Now().UnixMilli(),
+			})
 		}
 	}
 

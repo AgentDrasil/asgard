@@ -100,13 +100,14 @@ const formatContent = (content: string) => {
           </details>
         </div>
 
-        <!-- Activity / Step Badge -->
-        <div v-else-if="msg.role === 'activity'" class="w-full pl-2 my-1">
+        <!-- Activity / Step Badge (including tool_call) -->
+        <div v-else-if="msg.role === 'activity' || msg.role === 'tool_call'" class="w-full pl-2 my-1">
           <div
             class="inline-flex items-center gap-2 text-xs font-mono bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 px-3 py-1 rounded-lg"
           >
             <span>⚙️</span>
-            <span>[{{ msg.activityType || "STEP" }}]</span>
+            <span v-if="msg.agentName" class="font-bold text-cyan-300">{{ msg.agentName }}:</span>
+            <span>[{{ msg.activityType || msg.role.toUpperCase() }}]</span>
             <span>{{ msg.content }}</span>
           </div>
         </div>
@@ -114,9 +115,10 @@ const formatContent = (content: string) => {
         <!-- Standard Chat Bubbles -->
         <div v-else :class="['chat', msg.role === 'user' ? 'chat-end' : 'chat-start']">
           <div
-            class="chat-header text-[10px] uppercase font-bold text-base-content/40 mb-1 select-none"
+            class="chat-header text-[10px] uppercase font-bold text-base-content/40 mb-1 select-none flex items-center gap-1"
           >
-            {{ msg.role === "user" ? "You" : "Agent" }}
+            <span v-if="msg.role === 'user'">You</span>
+            <span v-else>{{ msg.agentName || activeAgent?.name || "Agent" }}</span>
           </div>
 
           <div

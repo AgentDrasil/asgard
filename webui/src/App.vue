@@ -6,13 +6,7 @@ import Sidebar from "./components/Sidebar.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import ChatArea from "./components/ChatArea.vue";
 import ChatInput from "./components/ChatInput.vue";
-import {
-  getAgents,
-  getSessions,
-  getSession,
-  saveSessionToLocal,
-  deleteSessionFromLocal,
-} from "./lib/api";
+import { getAgents, getSessions, getSession, deleteSessionFromLocal } from "./lib/api";
 import { runAgentStream } from "./lib/agent";
 import type { AgentInfo, ChatSession, ChatMessage } from "./types";
 
@@ -127,20 +121,8 @@ const handleSendMessage = async (text: string) => {
   // Create new session if none exists
   if (!currentThreadId) {
     currentThreadId = uuidv4();
-
-    const newSession: ChatSession = {
-      chatID: currentThreadId,
-      title: "",
-      currentAgent: selectedAgentId.value,
-      runDir: selectedDir.value,
-      messages: [],
-    };
-
-    await saveSessionToLocal(newSession);
-    const updated = await getSessions();
-    sessions.value = updated;
     activeSessionId.value = currentThreadId;
-    router.push(`/chat/${currentThreadId}`);
+    await router.push(`/chat/${currentThreadId}`);
   }
 
   const currentSession = sessions.value.find((s) => s.chatID === currentThreadId) || {
@@ -152,20 +134,6 @@ const handleSendMessage = async (text: string) => {
 
   loading.value = true;
 
-  const saveCurrentSession = async () => {
-    if (!currentThreadId) return;
-    const sessionToSave: ChatSession = {
-      chatID: currentThreadId,
-      title: currentSession.title || "",
-      currentAgent: currentSession.currentAgent,
-      runDir: currentSession.runDir,
-      messages: messages.value,
-    };
-    await saveSessionToLocal(sessionToSave);
-    const updated = await getSessions();
-    sessions.value = updated;
-  };
-
   // 1. Add User Message
   const userMsgId = uuidv4();
   messages.value.push({
@@ -174,8 +142,6 @@ const handleSendMessage = async (text: string) => {
     content: text,
     timestamp: Date.now(),
   });
-
-  await saveCurrentSession();
 
   const runId = uuidv4();
   const assistantMsgId = uuidv4();
@@ -212,13 +178,14 @@ const handleSendMessage = async (text: string) => {
     {
       onText: (textContent) => {
         if (!hasAssistantMsg) {
+          // If reasoning is present, ensure assistant message is pushed after reasoning
+          hasAssistantMsg = true;
           messages.value.push({
             id: assistantMsgId,
             role: "assistant",
             content: textContent,
             timestamp: Date.now(),
           });
-          hasAssistantMsg = true;
           if (!currentSession.title) {
             refreshSessionTitle(currentThreadId);
           }
@@ -232,12 +199,23 @@ const handleSendMessage = async (text: string) => {
         // Track reasoning steps inside the Thinking Process dropdown
         if (statusText) {
           if (!hasReasoningMsg) {
-            messages.value.push({
+            // Push reasoning message before assistant message if assistant exists
+            const reasoningObj: ChatMessage = {
               id: reasoningMsgId,
               role: "reasoning",
               content: statusText,
               timestamp: Date.now(),
-            });
+            };
+            if (hasAssistantMsg) {
+              const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
+              if (assistantIdx > -1) {
+                messages.value.splice(assistantIdx, 0, reasoningObj);
+              } else {
+                messages.value.push(reasoningObj);
+              }
+            } else {
+              messages.value.push(reasoningObj);
+            }
             hasReasoningMsg = true;
           } else {
             messages.value = messages.value.map((m) =>
@@ -247,12 +225,12 @@ const handleSendMessage = async (text: string) => {
         }
 
         // Add a line entry for step transition notifications
-        if (state && state !== "running" && state !== "input-required") {
+        if (state && state !== "running" && state !== "input-required" && statusText) {
           messages.value.push({
             id: `activity-${uuidv4()}`,
             role: "activity",
             activityType: "STEP",
-            content: `Status: ${state}`,
+            content: statusText,
             timestamp: Date.now(),
           });
         }
@@ -266,11 +244,9 @@ const handleSendMessage = async (text: string) => {
           timestamp: Date.now(),
         });
         loading.value = false;
-        await saveCurrentSession();
       },
       onComplete: async () => {
         loading.value = false;
-        await saveCurrentSession();
         if (!currentSession.title) {
           await refreshSessionTitle(currentThreadId);
         }
