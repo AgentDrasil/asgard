@@ -21,42 +21,39 @@ watch(
   { deep: true },
 );
 
-// Simple markdown formatter to display formatted content safely
+import { Icon } from "@iconify/vue";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
+
 const formatContent = (content: string) => {
   if (!content) return "";
+  const rawHtml = marked.parse(content) as string;
+  return DOMPurify.sanitize(rawHtml);
+};
 
-  // Escape HTML characters to prevent XSS
-  let html = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Track which messages are toggled to show raw Markdown text
+const showRawMap = ref<Record<string, boolean>>({});
+const toggleRaw = (id: string) => {
+  showRawMap.value[id] = !showRawMap.value[id];
+};
 
-  // Format code blocks: ```lang ... ```
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<div class="mockup-code bg-base-300 my-3 text-sm font-mono relative overflow-x-auto">
-      <div class="px-5 text-xs text-base-content/40 absolute right-3 top-2">${lang || "code"}</div>
-      <pre class="px-5"><code>${code.trim()}</code></pre>
-    </div>`;
-  });
-
-  // Format inline code: `code`
-  html = html.replace(
-    /`([^`]+)`/g,
-    '<code class="bg-base-300 text-warning px-1.5 py-0.5 rounded font-mono text-xs">$1</code>',
-  );
-
-  // Format bold text: **bold**
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
-
-  // Format line breaks
-  html = html
-    .split("\n")
-    .map((line) => {
-      if (line.startsWith("- ") || line.startsWith("* ")) {
-        return `<li class="ml-4 list-disc">${line.slice(2)}</li>`;
-      }
-      return line ? `<p class="mb-2">${line}</p>` : '<div class="h-2"></div>';
-    })
-    .join("");
-
-  return html;
+// Track copy feedback state per message
+const copiedMap = ref<Record<string, boolean>>({});
+const copyMessage = async (id: string, text: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedMap.value[id] = true;
+    setTimeout(() => {
+      copiedMap.value[id] = false;
+    }, 2000);
+  } catch (e) {
+    console.error("Failed to copy text:", e);
+  }
 };
 </script>
 
@@ -79,77 +76,142 @@ const formatContent = (content: string) => {
     </header>
 
     <!-- Message List -->
-    <div class="flex-1 overflow-y-auto p-6 space-y-4">
-      <div v-for="msg in messages" :key="msg.id" class="w-full">
-        <!-- Reasoning / Thinking Balloon -->
-        <div v-if="msg.role === 'reasoning'" class="w-full pl-2 pr-12 my-2">
-          <details
-            open
-            class="collapse collapse-arrow bg-base-200/50 border border-dashed border-base-300 rounded-lg"
-          >
-            <summary
-              class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
+    <div class="flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl w-full mx-auto space-y-4">
+        <div v-for="msg in messages" :key="msg.id" class="w-full">
+          <!-- Reasoning / Thinking Balloon -->
+          <div v-if="msg.role === 'reasoning'" class="w-full pl-2 pr-12 my-2">
+            <details
+              open
+              class="collapse collapse-arrow bg-base-200/50 border border-dashed border-base-300 rounded-lg"
             >
-              <span>💭</span> Thinking Process
-            </summary>
+              <summary
+                class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
+              >
+                <span>💭</span> Thinking Process
+              </summary>
+              <div
+                class="collapse-content text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed"
+              >
+                {{ msg.content }}
+              </div>
+            </details>
+          </div>
+
+          <!-- Activity / Step / Tool Call Collapsible Box -->
+          <div
+            v-else-if="msg.role === 'activity' || msg.role === 'tool_call'"
+            class="w-full pl-2 pr-2 my-2"
+          >
+            <div class="flex items-center gap-2 mb-1.5 select-none">
+              <span class="text-sm">🤖</span>
+              <span class="text-xs font-bold text-base-content/70">
+                {{ msg.agentName || activeAgent?.name || "Agent" }}
+              </span>
+            </div>
+            <details
+              class="collapse collapse-arrow bg-base-200/40 border border-base-300 rounded-lg text-xs w-full"
+            >
+              <summary
+                class="collapse-title font-mono font-medium text-base-content/70 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
+              >
+                <span class="text-primary">⚙️</span>
+                <span
+                  class="badge badge-sm badge-ghost text-[10px] uppercase tracking-wider font-semibold font-sans"
+                >
+                  {{ msg.activityType || msg.role }}
+                </span>
+              </summary>
+              <div class="collapse-content border-t border-base-300/40 pt-3">
+                <pre
+                  class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto text-xs font-mono text-base-content/80"
+                ><code class="whitespace-pre-wrap">{{ msg.content }}</code></pre>
+              </div>
+            </details>
+          </div>
+
+          <!-- User Chat Bubble -->
+          <div v-else-if="msg.role === 'user'" class="chat chat-end">
             <div
-              class="collapse-content text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed"
+              class="chat-header text-[10px] uppercase font-bold text-base-content/40 mb-1 select-none flex items-center gap-1"
+            >
+              You
+            </div>
+            <div
+              class="chat-bubble chat-bubble-primary text-primary-content border border-primary/20 text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap"
             >
               {{ msg.content }}
             </div>
-          </details>
-        </div>
-
-        <!-- Activity / Step Badge (including tool_call) -->
-        <div v-else-if="msg.role === 'activity' || msg.role === 'tool_call'" class="w-full pl-2 my-1">
-          <div
-            class="inline-flex items-center gap-2 text-xs font-mono bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 px-3 py-1 rounded-lg"
-          >
-            <span>⚙️</span>
-            <span v-if="msg.agentName" class="font-bold text-cyan-300">{{ msg.agentName }}:</span>
-            <span>[{{ msg.activityType || msg.role.toUpperCase() }}]</span>
-            <span>{{ msg.content }}</span>
-          </div>
-        </div>
-
-        <!-- Standard Chat Bubbles -->
-        <div v-else :class="['chat', msg.role === 'user' ? 'chat-end' : 'chat-start']">
-          <div
-            class="chat-header text-[10px] uppercase font-bold text-base-content/40 mb-1 select-none flex items-center gap-1"
-          >
-            <span v-if="msg.role === 'user'">You</span>
-            <span v-else>{{ msg.agentName || activeAgent?.name || "Agent" }}</span>
           </div>
 
-          <div
-            :class="[
-              'chat-bubble text-sm leading-relaxed max-w-3xl shadow-sm border',
-              msg.role === 'user'
-                ? 'chat-bubble-primary text-primary-content border-primary/20'
-                : 'bg-base-200 text-base-content border-base-300',
-            ]"
-          >
-            <!-- User messages: Plain Text -->
-            <div v-if="msg.role === 'user'" class="whitespace-pre-wrap font-sans">
-              {{ msg.content }}
+          <!-- Assistant Message (Full-width markdown without chat bubble) -->
+          <div v-else class="w-full pl-2 pr-2 py-2 my-1">
+            <div class="flex items-center gap-2 mb-2 select-none">
+              <span class="text-sm">🤖</span>
+              <span class="text-xs font-bold text-base-content/70">
+                {{ msg.agentName || activeAgent?.name || "Agent" }}
+              </span>
             </div>
 
-            <!-- Assistant/Other: Formatted HTML Markdown -->
-            <div v-else v-html="formatContent(msg.content)" class="font-sans"></div>
+            <!-- Raw Markdown vs Rendered HTML -->
+            <div v-if="showRawMap[msg.id]" class="my-2">
+              <pre
+                class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto text-xs font-mono text-base-content/80"
+              ><code class="whitespace-pre-wrap">{{ msg.content }}</code></pre>
+            </div>
+            <div
+              v-else
+              v-html="formatContent(msg.content)"
+              class="font-sans prose prose-sm max-w-none text-base-content leading-relaxed [&_p]:mb-3 [&_pre]:bg-base-200/80 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-base-300 [&_code]:bg-base-200/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-warning [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_a]:text-primary [&_a]:underline"
+            ></div>
+
+            <!-- Action Buttons at bottom: Flip View & Copy (Icon-only) -->
+            <div class="flex items-center gap-1 mt-2 select-none">
+              <button
+                @click="toggleRaw(msg.id)"
+                class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
+                :title="showRawMap[msg.id] ? 'Show Rendered HTML' : 'Show Raw Markdown'"
+              >
+                <Icon
+                  :icon="
+                    showRawMap[msg.id]
+                      ? 'material-symbols:html-rounded'
+                      : 'material-symbols:markdown-outline-rounded'
+                  "
+                  class="w-5 h-5 text-base-content/75"
+                />
+              </button>
+
+              <button
+                @click="copyMessage(msg.id, msg.content)"
+                class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
+                :title="copiedMap[msg.id] ? 'Copied!' : 'Copy message content'"
+              >
+                <Icon
+                  :icon="
+                    copiedMap[msg.id]
+                      ? 'material-symbols:check-circle-outline-rounded'
+                      : 'mage:copy'
+                  "
+                  class="w-5 h-5"
+                  :class="copiedMap[msg.id] ? 'text-success' : 'text-base-content/75'"
+                />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Agent Working state -->
-      <div
-        v-if="loading"
-        class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
-      >
-        <span class="loading loading-ring loading-xs text-primary"></span>
-        <span>Agent is working...</span>
-      </div>
+        <!-- Agent Working state -->
+        <div
+          v-if="loading"
+          class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
+        >
+          <span class="loading loading-ring loading-xs text-primary"></span>
+          <span>Agent is working...</span>
+        </div>
 
-      <div ref="bottomRef"></div>
+        <div ref="bottomRef"></div>
+      </div>
     </div>
   </div>
 </template>

@@ -189,41 +189,65 @@ export async function runAgentStream(
     console.log("[agent.ts] Sending message stream with parameters:", sendParams);
     const stream = client.sendMessageStream(sendParams);
 
-    for await (const event of stream) {
-      console.log("[agent.ts] Stream event:", event);
+    let accumulatedText = "";
 
-      // Handle raw messages from agent
-      if (event.kind === "message" && event.parts) {
+    for await (const event of stream) {
+      const eventAny = event as any;
+      const eventKind: string = eventAny.kind ?? "";
+      const eventStatus = eventAny.status;
+      const eventParts = eventAny.parts;
+      console.log(
+        "[agent.ts] kind:",
+        eventKind,
+        "state:",
+        eventStatus?.state,
+        "final:",
+        eventAny.final,
+        "entry_type:",
+        eventStatus?.message?.metadata?.entry_type,
+      );
+
+      // Handle raw message events (kind === "message")
+      if (eventKind === "message" && eventParts) {
         let textContent = "";
-        for (const part of event.parts) {
-          if (part.kind === "text") {
-            textContent += part.text;
-          }
+        for (const part of eventParts) {
+          if (part.kind === "text") textContent += part.text;
         }
         if (textContent) {
-          callbacks.onText(textContent);
+          accumulatedText += textContent;
+          callbacks.onText(accumulatedText);
         }
       }
 
-      // Handle status updates
-      if (event.kind === "status-update" && event.status) {
-        const state = event.status.state;
-        const msg = event.status.message;
+      // Handle status updates (kind === "status-update")
+      if (eventKind === "status-update" && eventStatus) {
+        const state: string = eventStatus.state ?? "";
+        const msg = eventStatus.message;
+        // entry_type is now set at event level (eventAny.metadata) and message level as fallback
+        const entryType: string = eventAny.metadata?.entry_type ?? msg?.metadata?.entry_type ?? "";
+        const isFinal =
+          eventAny.final === true ||
+          state === "completed" ||
+          state === "canceled" ||
+          state === "failed";
 
         let statusText = "";
-        if (msg && msg.parts) {
+        if (msg?.parts) {
           for (const part of msg.parts) {
-            // Check nested part/content structure
-            if (part.kind === "text") {
-              statusText += part.text;
-            } else if ((part as any).part?.$case === "text") {
-              statusText += (part as any).part.value;
-            }
+            if (part.kind === "text") statusText += part.text;
+            else if (part.part?.$case === "text") statusText += part.part.value;
           }
         }
 
-        if (statusText || state) {
-          callbacks.onStatus?.(statusText || state || "", state);
+        if (!statusText) continue;
+
+        if (entryType === "agent_response" || isFinal) {
+          // Agent response text (streaming or final) → assistant bubble
+          accumulatedText += statusText;
+          callbacks.onText(accumulatedText);
+        } else {
+          // Tool calls, steps, reasoning → thinking/activity box
+          callbacks.onStatus?.(statusText, state);
         }
       }
     }

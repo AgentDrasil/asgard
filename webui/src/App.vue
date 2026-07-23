@@ -23,17 +23,20 @@ const welcomePrompt = ref("");
 
 const messages = ref<ChatMessage[]>([]);
 const loading = ref(false);
+const isStreaming = ref(false);
+// Incremented each time loadSessionData is called; lets in-flight loads detect they've been superseded.
+let loadGen = 0;
 
 const activeSession = ref<ChatSession | null>(null);
 const activeAgent = ref<AgentInfo | null>(null);
 
 const loadSessionData = async (id: string) => {
   activeSessionId.value = id;
-  messages.value = [];
+  const myGen = ++loadGen;
   const session = await getSession(id);
-  if (session && session.messages) {
-    messages.value = session.messages;
-  }
+  // Bail out if a newer load has started or we're in the middle of a stream
+  if (myGen !== loadGen || isStreaming.value) return;
+  messages.value = session?.messages ?? [];
 };
 
 const handleSelectSession = (id: string) => {
@@ -53,7 +56,12 @@ watch(
   () => route.params.id,
   async (newId) => {
     if (newId && typeof newId === "string") {
-      await loadSessionData(newId);
+      // Don't reload while a stream is actively populating messages
+      if (!isStreaming.value) {
+        await loadSessionData(newId);
+      } else {
+        activeSessionId.value = newId;
+      }
     } else {
       activeSessionId.value = null;
       messages.value = [];
@@ -98,7 +106,10 @@ watch(activeSessionId, (newId) => {
     const session = sessions.value.find((s) => s.chatID === newId) || null;
     activeSession.value = session;
     if (session) {
-      activeAgent.value = agents.value.find((a) => a.id === session.currentAgent) || null;
+      activeAgent.value =
+        agents.value.find(
+          (a) => a.id === session.currentAgent || a.name === session.currentAgent,
+        ) || null;
     }
   } else {
     activeSession.value = null;
@@ -118,6 +129,11 @@ const handleDeleteSession = async (id: string) => {
 const handleSendMessage = async (text: string) => {
   let currentThreadId = activeSessionId.value;
 
+  // Mark streaming as active BEFORE router.push so the route watcher doesn't
+  // trigger loadSessionData and race-wipe our in-progress messages.
+  isStreaming.value = true;
+  loading.value = true;
+
   // Create new session if none exists
   if (!currentThreadId) {
     currentThreadId = uuidv4();
@@ -131,8 +147,6 @@ const handleSendMessage = async (text: string) => {
     runDir: selectedDir.value,
     title: "",
   };
-
-  loading.value = true;
 
   // 1. Add User Message
   const userMsgId = uuidv4();
@@ -166,8 +180,14 @@ const handleSendMessage = async (text: string) => {
     setTimeout(() => refreshSessionTitle(currentThreadId), 1500);
   }
 
+  // Look up agent ID (handle case where currentAgent stored agent name vs agent ID)
+  const matchedAgent = agents.value.find(
+    (a) => a.id === currentSession.currentAgent || a.name === currentSession.currentAgent,
+  );
+  const targetAgentId = matchedAgent ? matchedAgent.id : currentSession.currentAgent;
+
   await runAgentStream(
-    currentSession.currentAgent,
+    targetAgentId,
     {
       prompt: text,
       runDir: currentSession.runDir,
@@ -177,8 +197,13 @@ const handleSendMessage = async (text: string) => {
     },
     {
       onText: (textContent) => {
+        console.log(
+          "[App.vue] onText called, length:",
+          textContent.length,
+          "hasAssistantMsg:",
+          hasAssistantMsg,
+        );
         if (!hasAssistantMsg) {
-          // If reasoning is present, ensure assistant message is pushed after reasoning
           hasAssistantMsg = true;
           messages.value.push({
             id: assistantMsgId,
@@ -195,14 +220,20 @@ const handleSendMessage = async (text: string) => {
           );
         }
       },
-      onStatus: (statusText, state) => {
-        // Track reasoning steps inside the Thinking Process dropdown
+      onStatus: (statusText) => {
+        console.log(
+          "[App.vue] onStatus called, length:",
+          statusText.length,
+          "hasReasoningMsg:",
+          hasReasoningMsg,
+        );
+        // Handle step/tool/reasoning status updates
         if (statusText) {
           if (!hasReasoningMsg) {
-            // Push reasoning message before assistant message if assistant exists
             const reasoningObj: ChatMessage = {
               id: reasoningMsgId,
-              role: "reasoning",
+              role: "tool_call",
+              activityType: "TOOL_CALL",
               content: statusText,
               timestamp: Date.now(),
             };
@@ -223,17 +254,6 @@ const handleSendMessage = async (text: string) => {
             );
           }
         }
-
-        // Add a line entry for step transition notifications
-        if (state && state !== "running" && state !== "input-required" && statusText) {
-          messages.value.push({
-            id: `activity-${uuidv4()}`,
-            role: "activity",
-            activityType: "STEP",
-            content: statusText,
-            timestamp: Date.now(),
-          });
-        }
       },
       onError: async (err) => {
         messages.value.push({
@@ -243,10 +263,14 @@ const handleSendMessage = async (text: string) => {
           content: err.message || "An execution error occurred.",
           timestamp: Date.now(),
         });
+        isStreaming.value = false;
         loading.value = false;
       },
       onComplete: async () => {
+        // Clear streaming flag before reloading so loadSessionData is allowed to run
+        isStreaming.value = false;
         loading.value = false;
+        await loadSessionData(currentThreadId);
         if (!currentSession.title) {
           await refreshSessionTitle(currentThreadId);
         }
