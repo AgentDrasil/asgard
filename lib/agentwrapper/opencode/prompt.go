@@ -15,14 +15,21 @@ type opencodeLine struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
 	Part      struct {
+		Type      string `json:"type"`
 		Text      string `json:"text"`
 		Reason    string `json:"reason"`
 		MessageID string `json:"messageID"`
-		Tokens    struct {
+		Tool      string `json:"tool"`
+		State     struct {
+			Status string         `json:"status"`
+			Input  map[string]any `json:"input"`
+			Output string         `json:"output"`
+		} `json:"state"`
+		Tokens struct {
 			Total int `json:"total"`
 			Input int `json:"input"`
 		} `json:"tokens"`
-		// Tool-call fields
+		// Legacy / alternative tool-call fields
 		ToolName  string         `json:"toolName"`
 		ToolInput map[string]any `json:"input"`
 	} `json:"part"`
@@ -125,9 +132,13 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			entryType := classifyLine(&opl)
 			if entryType != "other" {
 				content := opl.Part.Text
+				toolName := opl.Part.ToolName
+				if toolName == "" {
+					toolName = opl.Part.Tool
+				}
 				var metadata map[string]any
-				if opl.Part.ToolName != "" {
-					metadata = map[string]any{"tool_name": opl.Part.ToolName}
+				if toolName != "" {
+					metadata = map[string]any{"tool_name": toolName}
 				}
 				opts.ReportCallback(stepIndex, "MODEL", entryType, content, metadata)
 			}
