@@ -2,10 +2,12 @@ package agentwrapper
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/cmd/aw/config"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
@@ -32,28 +34,68 @@ func GetSupportedCLIsAndModels() map[string][]string {
 	defer cancel()
 
 	res := make(map[string][]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
 	for name, client := range clients {
-		if models, err := client.Models(ctx, types.UsageOptions{}); err == nil {
+		wg.Add(1)
+		go func(name string, client types.CLIClient) {
+			defer wg.Done()
+			var models []string
+			if m, err := client.Models(ctx, types.UsageOptions{}); err == nil {
+				models = m
+			} else {
+				models = []string{}
+			}
+			mu.Lock()
 			res[name] = models
-		} else {
-			res[name] = []string{}
-		}
+			mu.Unlock()
+		}(name, client)
 	}
 
+	wg.Wait()
 	return res
 }
 
 func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 	res := make(map[string][]types.ModelUsage)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for name, client := range clients {
-		if usages, err := client.Usage(ctx, types.UsageOptions{}); err == nil {
+		wg.Add(1)
+		go func(name string, client types.CLIClient) {
+			defer wg.Done()
+			var usages []types.ModelUsage
+			if u, err := client.Usage(ctx, types.UsageOptions{}); err == nil {
+				usages = u
+			} else {
+				log.Error().Err(err).Str("cli", name).Msg("Failed to check quota for CLI")
+				usages = []types.ModelUsage{}
+			}
+			mu.Lock()
 			res[name] = usages
-		} else {
-			log.Error().Err(err).Str("cli", name).Msg("Failed to check quota for CLI")
-			res[name] = []types.ModelUsage{}
-		}
+			mu.Unlock()
+		}(name, client)
 	}
+
+	wg.Wait()
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load aw config for quota filtering")
+	}
+
+	for agentName, usages := range res {
+		filtered := make([]types.ModelUsage, 0, len(usages))
+		for _, u := range usages {
+			if cfg.IsModelAllowed(agentName, u.Model) {
+				filtered = append(filtered, u)
+			}
+		}
+		res[agentName] = filtered
+	}
+
 	return res, nil
 }
 

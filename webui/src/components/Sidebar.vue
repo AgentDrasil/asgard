@@ -219,7 +219,7 @@ const toggleTheme = () => {
       <button
         @click="reloadApp"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Reload (/api/manage/reload)"
+        title="Reload Agents"
         :disabled="isReloading"
       >
         <Icon
@@ -233,7 +233,7 @@ const toggleTheme = () => {
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
         title="Check Quota"
       >
-        <Icon icon="mynaui:chart-pie" class="h-5 w-5 fill-current" />
+        <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current" />
       </button>
 
       <button
@@ -288,7 +288,7 @@ const toggleTheme = () => {
           class="px-6 py-4 border-b border-base-100 flex items-center justify-between bg-base-300/50"
         >
           <div class="flex items-center gap-2">
-            <Icon icon="mynaui:chart-pie" class="h-6 w-6 text-primary" />
+            <Icon icon="mynaui:chart-bar-one" class="h-6 w-6 text-primary" />
             <h2 class="text-lg font-bold text-base-content">Model Quota Details</h2>
           </div>
           <button

@@ -28,8 +28,9 @@ func (s *Server) reload() error {
 			break
 		}
 	}
+
 	if !hasAgentFather {
-		return fmt.Errorf("default agent config %s not found", agentFatherID)
+		return fmt.Errorf("agent_father is required but not found in the agents folder")
 	}
 
 	s.mu.Lock()
@@ -37,14 +38,13 @@ func (s *Server) reload() error {
 	s.mux = s.buildMuxLocked()
 	s.mu.Unlock()
 
-	log.Info().Msg("Agents reloaded and handlers refreshed successfully")
 	return nil
 }
 
-// handleReload handles HTTP requests to trigger agent reloading.
+// handleReload handles POST /api/manage/reload.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if err := s.reload(); err != nil {
-		log.Error().Err(err).Msg("Failed to reload agents via HTTP")
+		log.Error().Err(err).Msg("Failed to reload agents")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
