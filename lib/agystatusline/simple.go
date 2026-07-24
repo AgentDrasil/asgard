@@ -14,9 +14,14 @@ func renderSimple(p Payload) string {
 	}
 
 	stateUpper := strings.ToUpper(p.AgentState)
+	sessionID := p.SessionID
+	if sessionID == "" {
+		sessionID = "no-session-id"
+	}
 
-	res := fmt.Sprintf("%s | %s/%s (%s%.0f%%%s)",
+	res := fmt.Sprintf("%s | %s | %s/%s (%s%.0f%%%s)",
 		stateUpper,
+		sessionID,
 		formatTokens(p.ContextWindow.TotalInputTokens),
 		formatTokens(p.ContextWindow.ContextWindowSize),
 		color,
