@@ -38,12 +38,12 @@ type opencodeLine struct {
 // classifyLine maps an opencode output line to an entry type.
 func classifyLine(opl *opencodeLine) string {
 	switch opl.Type {
-	case "tool_use", "tool_result":
+	case "tool_use", "tool_result", "tool":
 		return "tool_call"
 	case "text":
 		return "agent_response"
 	default:
-		if opl.Part.Reason == "tool_use" {
+		if opl.Part.Type == "tool" || opl.Part.Reason == "tool_use" || opl.Part.Tool != "" || opl.Part.ToolName != "" {
 			return "tool_call"
 		}
 		return "other"
@@ -53,7 +53,7 @@ func classifyLine(opl *opencodeLine) string {
 // Prompt sends a prompt to opencode and parses its JSONL output in real-time.
 // If opts.ReportCallback is set, it is called for each meaningful output line.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
-	argv := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
+	argv := []string{"run", "--format", "json", "--auto"}
 	if opts.SessionID != "" {
 		argv = append(argv, "--session", opts.SessionID)
 	}
@@ -80,6 +80,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	var inputTokens int
 	var totalTokens int
 	var targetMessageID string
+	var lastToolOutput string
 	stepIndex := 0
 
 	// Map to accumulate text contents by messageID
@@ -127,23 +128,45 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			}
 		}
 
-		// Report incremental update if callback is set.
-		if opts.ReportCallback != nil {
-			entryType := classifyLine(&opl)
-			if entryType != "other" {
-				content := opl.Part.Text
-				toolName := opl.Part.ToolName
-				if toolName == "" {
-					toolName = opl.Part.Tool
+		// Classify line and track tool/text updates.
+		entryType := classifyLine(&opl)
+		if entryType != "other" {
+			content := opl.Part.Text
+			toolName := opl.Part.ToolName
+			if toolName == "" {
+				toolName = opl.Part.Tool
+			}
+			if entryType == "tool_call" {
+				if content == "" {
+					content = opl.Part.State.Output
 				}
-				var metadata map[string]any
-				if toolName != "" {
-					metadata = map[string]any{"tool_name": toolName}
+				if content == "" && len(opl.Part.State.Input) > 0 {
+					if inputBytes, err := json.Marshal(opl.Part.State.Input); err == nil {
+						content = string(inputBytes)
+					}
 				}
-				opts.ReportCallback(stepIndex, "MODEL", entryType, content, metadata)
+				if content == "" && len(opl.Part.ToolInput) > 0 {
+					if inputBytes, err := json.Marshal(opl.Part.ToolInput); err == nil {
+						content = string(inputBytes)
+					}
+				}
+				if content == "" {
+					content = fmt.Sprintf("Executing tool %s", toolName)
+				}
+				lastToolOutput = content
+			}
+
+			if content != "" {
+				if opts.ReportCallback != nil {
+					var metadata map[string]any
+					if toolName != "" {
+						metadata = map[string]any{"tool_name": toolName}
+					}
+					opts.ReportCallback(stepIndex, "MODEL", entryType, content, metadata)
+				}
+				stepIndex++
 			}
 		}
-		stepIndex++
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -158,6 +181,17 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		if builder, exists := textMap[targetMessageID]; exists {
 			lastContent = builder.String()
 		}
+	}
+	if lastContent == "" && len(textMap) > 0 {
+		// Fallback to the text of any completed/recorded message
+		for _, builder := range textMap {
+			if bStr := builder.String(); bStr != "" {
+				lastContent = bStr; break
+			}
+		}
+	}
+	if lastContent == "" && lastToolOutput != "" {
+		lastContent = lastToolOutput
 	}
 
 	maxTokens := 1048576

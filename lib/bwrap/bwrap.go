@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
@@ -182,6 +183,7 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 			filepath.Join(home, ".cache"),
 			filepath.Join(home, ".config"),
 			filepath.Join(home, ".local"),
+			filepath.Join(home, ".npm"),
 		}
 		for _, dir := range dirs {
 			if _, err := os.Stat(dir); err == nil {
@@ -245,6 +247,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 	if prompt != "" {
 		args = append(args, "--prompt", prompt)
 	}
+
+	log.Debug().Strs("args", args).Msg("bwrap arguments")
 
 	return args, nil
 }

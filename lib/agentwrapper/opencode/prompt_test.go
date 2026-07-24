@@ -73,3 +73,17 @@ func TestParsePromptOutput(t *testing.T) {
 	}
 	assert.Equal(t, "Go 1.26.3", lastContent)
 }
+
+func TestClassifyLineAndContent(t *testing.T) {
+	toolUseLine := `{"type":"tool_use","timestamp":1784810278338,"sessionID":"ses_0710485c4ffeJikUP3wUorQ5Ob","part":{"type":"tool","tool":"bash","callID":"tool-d3dd738fa0d740039f234b487570c782","state":{"status":"completed","input":{"command":"go version"},"output":"go version go1.26.5-X:nodwarf5 linux/amd64\n"},"id":"prt_f8efb8d82001Uqnb9s1Xamiiis"}}`
+
+	var opl opencodeLine
+	err := json.Unmarshal([]byte(toolUseLine), &opl)
+	require.NoError(t, err)
+
+	entryType := classifyLine(&opl)
+	assert.Equal(t, "tool_call", entryType)
+	assert.Equal(t, "bash", opl.Part.Tool)
+	assert.Equal(t, "go version go1.26.5-X:nodwarf5 linux/amd64\n", opl.Part.State.Output)
+}
+
