@@ -101,21 +101,38 @@ watch(selectedAgentId, (newAgentId) => {
 });
 
 // Watch session select and update references
-watch(activeSessionId, (newId) => {
-  if (newId) {
-    const session = sessions.value.find((s) => s.chatID === newId) || null;
-    activeSession.value = session;
-    if (session) {
-      activeAgent.value =
-        agents.value.find(
-          (a) => a.id === session.currentAgent || a.name === session.currentAgent,
-        ) || null;
+watch(
+  [activeSessionId, sessions],
+  ([newId]) => {
+    if (newId) {
+      const session = sessions.value.find((s) => s.chatID === newId) || null;
+      activeSession.value = session;
+      if (session) {
+        activeAgent.value =
+          agents.value.find(
+            (a) => a.id === session.currentAgent || a.name === session.currentAgent,
+          ) || null;
+      }
+    } else {
+      activeSession.value = null;
+      activeAgent.value = agents.value.find((a) => a.id === selectedAgentId.value) || null;
     }
-  } else {
-    activeSession.value = null;
-    activeAgent.value = agents.value.find((a) => a.id === selectedAgentId.value) || null;
-  }
-});
+  },
+  { immediate: true, deep: true },
+);
+
+// Update document title dynamically based on active session title
+watch(
+  [activeSessionId, () => activeSession.value?.title],
+  ([id, title]) => {
+    if (id && title && title.trim()) {
+      document.title = `${title.trim()}`;
+    } else {
+      document.title = "Asgard - New Chat";
+    }
+  },
+  { immediate: true },
+);
 
 const handleDeleteSession = async (id: string) => {
   await deleteSessionFromLocal(id);
