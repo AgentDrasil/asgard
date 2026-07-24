@@ -13,7 +13,7 @@ import (
 // The exit step is sending "/exit" followed by Enter.
 func CleanExit(t *term.Term, done <-chan error) {
 	log.Debug().Msg("agy: executing clean exit (/exit + Enter)")
-	_ = t.SendString("/exit\n")
+	_ = t.SendString("/exit\r")
 
 	// Wait for the process to exit with a 5s timeout
 	exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
