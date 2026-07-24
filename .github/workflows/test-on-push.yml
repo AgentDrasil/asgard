@@ -6,7 +6,9 @@ on:
 
 env:
   GO_VERSION: 1.26
+  GOIMPORTS_VERSION: latest
   GOLANGCI_LINT_VERSION: latest
+  NODE_VERSION: 26
 
 jobs:
   backend:
@@ -20,13 +22,13 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
 
     - name: Install goimports
-      run: go install golang.org/x/tools/cmd/goimports@latest
+      run: go install golang.org/x/tools/cmd/goimports@${{ env.GOIMPORTS_VERSION }}
 
-    - name: Check Go format
+    - name: Format check
       run: |
         $(go env GOPATH)/bin/goimports -l .
 
-    - name: Run linter
+    - name: Lint check
       uses: golangci/golangci-lint-action@v9
       with:
         version: ${{ env.GOLANGCI_LINT_VERSION }}
@@ -46,7 +48,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20
+        node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
         cache-dependency-path: webui/package-lock.json
 
