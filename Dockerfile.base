@@ -7,7 +7,9 @@ ARG AGY_VERSION=1.1.5
 FROM debian:${DEBIAN_VERSION} AS base
 
 # Install required dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Add sid repository for ttyd package (not yet in Debian stable/testing)
+RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list && \
+    apt update && apt install -y --no-install-recommends \
     bubblewrap \
     git \
     bash \
