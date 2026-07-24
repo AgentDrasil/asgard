@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -26,10 +28,6 @@ func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
 
 	parts := strings.SplitN(rawPath, "/", 2)
 	sessionKey := parts[0]
-	subPath := ""
-	if len(parts) > 1 {
-		subPath = "/" + parts[1]
-	}
 
 	if sessionKey == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -49,8 +47,14 @@ func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
 		agentSessionID := strings.TrimPrefix(sessionKey, "agent-")
 		if s.repo != nil {
 			sess, err := s.repo.GetSession(agentSessionID)
-			if err == nil && sess != nil && sess.RunDir != "" {
+			if err != nil {
+				log.Error().Err(err).Str("agent_session_id", agentSessionID).Msg("failed to query agent session for ttyd working directory")
+			} else if sess == nil {
+				log.Warn().Str("agent_session_id", agentSessionID).Msg("agent session not found for ttyd working directory")
+			} else if sess.RunDir != "" {
 				workingDir = sess.RunDir
+			} else {
+				log.Warn().Str("agent_session_id", agentSessionID).Msg("agent session RunDir is empty")
 			}
 		}
 	}
@@ -64,12 +68,70 @@ func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rewrite request URL path to subPath for ttyd
+	// Forward the exact incoming request URL path to ttyd since ttyd expects its -b prefix
 	req := r.Clone(r.Context())
-	if subPath == "" {
-		req.URL.Path = "/"
-	} else {
-		req.URL.Path = subPath
+
+	// Check if this is a WebSocket upgrade request
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		// Hijack the HTTP connection for WebSocket proxying
+		targetConn, err := net.Dial("unix", inst.SocketPath)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to dial unix socket for websocket")
+			http.Error(w, "Failed to connect to ttyd socket", http.StatusInternalServerError)
+			return
+		}
+		defer func() { _ = targetConn.Close() }()
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			log.Error().Msg("webserver does not support connection hijacking")
+			http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+
+		clientConn, brw, err := hj.Hijack()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to hijack client connection")
+			return
+		}
+		defer func() { _ = clientConn.Close() }()
+
+		targetPath := req.URL.Path
+		if req.URL.RawQuery != "" {
+			targetPath += "?" + req.URL.RawQuery
+		}
+
+		// Send initial HTTP request to ttyd
+		req.URL.Path = targetPath
+		if err := req.Write(targetConn); err != nil {
+			log.Error().Err(err).Msg("failed to write request to ttyd socket")
+			return
+		}
+
+		// Flush any buffered reader data from hijacking before starting bi-directional copy
+		errChan := make(chan error, 2)
+		go func() {
+			var err error
+			if brw.Reader.Buffered() > 0 {
+				buf := make([]byte, brw.Reader.Buffered())
+				_, err = brw.Read(buf)
+				if err == nil {
+					_, err = targetConn.Write(buf)
+				}
+			}
+			if err == nil {
+				_, err = io.Copy(targetConn, clientConn)
+			}
+			errChan <- err
+		}()
+
+		go func() {
+			_, err := io.Copy(clientConn, targetConn)
+			errChan <- err
+		}()
+
+		<-errChan
+		return
 	}
 
 	inst.Proxy.ServeHTTP(w, req)

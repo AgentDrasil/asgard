@@ -73,8 +73,13 @@ func (m *Manager) GetOrStart(sessionID string, workingDir string) (*Instance, er
 	socketPath := filepath.Join(m.sockDir, fmt.Sprintf("%s.sock", sessionID))
 	_ = os.Remove(socketPath) // Clean stale socket if any
 
-	// ttyd -i <sock> -o --once <shell>
-	args := []string{"-i", socketPath, "-o", shell}
+	// ttyd -i <sock> -b /api/ttyd/<session_id> -w <workingDir> -W -t TERM=xterm-256color -o --once <shell>
+	basePath := fmt.Sprintf("/api/ttyd/%s", sessionID)
+	args := []string{"-i", socketPath, "-b", basePath}
+	if workingDir != "" {
+		args = append(args, "-w", workingDir)
+	}
+	args = append(args, "-W", "-t", "TERM=xterm-256color", "-o", shell)
 	cmd := exec.Command("ttyd", args...)
 	if workingDir != "" {
 		cmd.Dir = workingDir

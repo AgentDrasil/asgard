@@ -87,6 +87,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		if runDirOpt.IsNone() && session != nil && session.RunDir != "" {
 			runDirOpt = optional.Some(session.RunDir)
 		}
+		if runDirOpt.IsNone() && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
+			runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
+		}
 
 		if e.repo != nil {
 			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
