@@ -101,6 +101,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		log.Debug().Msg("agy/prompt: startup idle reached (#1)")
 	}
 
+	// ── wait until screen contains "(Google AI " before sending prompt ───
+	if err := waitForSubscriptionLevel(ctx, t, done, opts.StartupDelayOrDefault()); err != nil {
+		return nil, handleErr(err)
+	}
+
 	// ── send the prompt ───────────────────────────────────────────────────────
 	if err := t.SendString(prompt); err != nil {
 		return nil, handleErr(fmt.Errorf("sending prompt: %w", err))
@@ -182,6 +187,33 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		Remaining:   remaining,
 		LastContent: lastContent,
 	}, nil
+}
+
+// waitForSubscriptionLevel polls the terminal screen buffer until a line containing "(Google AI " is found,
+// or until timeout/cancellation occurs.
+func waitForSubscriptionLevel(ctx context.Context, t *term.Term, done <-chan error, timeout time.Duration) error {
+	log.Debug().Msg("agy/prompt: waiting for screen to display subscription level")
+	screenTimeout := time.After(timeout)
+	screenTicker := time.NewTicker(100 * time.Millisecond)
+	defer screenTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-done:
+			return fmt.Errorf("agy exited unexpectedly: %w", err)
+		case <-screenTimeout:
+			log.Warn().Msg("agy/prompt: waiting for subscription level timed out")
+			return nil
+		case <-screenTicker.C:
+			for _, line := range t.Screen() {
+				if strings.Contains(line, "(Google AI ") {
+					return nil
+				}
+			}
+		}
+	}
 }
 
 // fullTranscriptEntry is a richer transcript line shape used for classification.
