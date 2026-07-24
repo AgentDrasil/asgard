@@ -1,7 +1,6 @@
 package fakebash
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -13,8 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/creack/pty"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -109,9 +106,7 @@ func RunClient(args []string) error {
 
 type fakebashServer struct {
 	pb.UnimplementedFakebashServiceServer
-	mu       sync.Mutex
-	ptyFile  *os.File
-	shellCmd *exec.Cmd
+	mu sync.Mutex
 }
 
 func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashService_RunCommandServer) error {
@@ -141,94 +136,83 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		return nil
 	}
 
-	if s.ptyFile == nil {
-		s.shellCmd = exec.Command("bash")
-		s.shellCmd.Env = os.Environ()
-
-		ptyFile, err := pty.Start(s.shellCmd)
-		if err != nil {
-			return fmt.Errorf("fakebashd failed to start shell in PTY: %w", err)
-		}
-		s.ptyFile = ptyFile
+	cmd := exec.CommandContext(stream.Context(), "bash", "-c", cmdStr)
+	if req.Cwd != "" {
+		cmd.Dir = req.Cwd
+	}
+	if len(req.Env) > 0 {
+		cmd.Env = req.Env
+	} else {
+		cmd.Env = os.Environ()
 	}
 
-	token := uuid.NewString()
-	sentinel := "FAKEBASH_DONE_" + token
-
-	var envExports []string
-	for _, e := range req.Env {
-		if !strings.HasPrefix(e, "_=") && !strings.HasPrefix(e, "SHLVL=") {
-			envExports = append(envExports, "export "+e)
-		}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	compositeCmd := fmt.Sprintf("(cd %s && %s && %s); echo; echo \"%s:$?\"\n",
-		strconv.Quote(req.Cwd),
-		strings.Join(envExports, " && "),
-		cmdStr,
-		sentinel,
-	)
-
-	if _, err := s.ptyFile.Write([]byte(compositeCmd)); err != nil {
-		log.Error().Err(err).Msg("fakebashd failed to write to PTY")
-		if err := stream.Send(&pb.CommandResponse{
-			Type:    pb.CommandResponse_EXIT,
-			Payload: []byte("1"),
-		}); err != nil {
-			log.Error().Err(err).Msg("fakebashd write exit frame error")
-		}
-		return nil
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	sentinelBytes := []byte(sentinel)
-	buf := make([]byte, 4096)
-	var pending []byte
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Stream stdout
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stdoutPipe.Read(buf)
+			if n > 0 {
+				if sendErr := stream.Send(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDOUT,
+					Payload: buf[:n],
+				}); sendErr != nil {
+					log.Error().Err(sendErr).Msg("fakebashd write stdout frame error")
+					return
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Stream stderr
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stderrPipe.Read(buf)
+			if n > 0 {
+				if sendErr := stream.Send(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDERR,
+					Payload: buf[:n],
+				}); sendErr != nil {
+					log.Error().Err(sendErr).Msg("fakebashd write stderr frame error")
+					return
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
+
 	exitCode := 0
-
-	for {
-		n, err := s.ptyFile.Read(buf)
-		if err != nil {
-			// If PTY is closed/broken, reset PTY so next command starts a new shell
-			_ = s.ptyFile.Close()
-			s.ptyFile = nil
-			s.shellCmd = nil
-			break
-		}
-		data := append(pending, buf[:n]...)
-		idx := bytes.Index(data, sentinelBytes)
-		if idx != -1 {
-			before := data[:idx]
-			before = bytes.TrimRight(before, "\r\n")
-			if len(before) > 0 {
-				if err := stream.Send(&pb.CommandResponse{
-					Type:    pb.CommandResponse_STDOUT,
-					Payload: before,
-				}); err != nil {
-					log.Error().Err(err).Msg("fakebashd write stdout frame error")
-				}
-			}
-
-			after := data[idx+len(sentinelBytes):]
-			afterStr := string(after)
-			parts := strings.Split(afterStr, "\n")
-			codeStr := strings.TrimSpace(strings.TrimPrefix(parts[0], ":"))
-			if code, err := strconv.Atoi(codeStr); err == nil {
-				exitCode = code
-			}
-			break
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
 		} else {
-			keep := len(sentinelBytes)
-			if len(data) > keep {
-				if err := stream.Send(&pb.CommandResponse{
-					Type:    pb.CommandResponse_STDOUT,
-					Payload: data[:len(data)-keep],
-				}); err != nil {
-					log.Error().Err(err).Msg("fakebashd write stdout frame error")
-				}
-				pending = data[len(data)-keep:]
-			} else {
-				pending = data
-			}
+			exitCode = 1
 		}
 	}
 
@@ -254,11 +238,6 @@ func RunDaemon() error {
 
 	grpcServer := grpc.NewServer()
 	srv := &fakebashServer{}
-	defer func() {
-		if srv.ptyFile != nil {
-			_ = srv.ptyFile.Close()
-		}
-	}()
 	pb.RegisterFakebashServiceServer(grpcServer, srv)
 
 	if err := grpcServer.Serve(listener); err != nil {

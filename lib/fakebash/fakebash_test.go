@@ -18,13 +18,15 @@ import (
 	"github.com/AgentDrasil/asgard/lib/fakebash/pb"
 )
 
-func TestFakebashGRPC(t *testing.T) {
+func TestFakebashGRPC_Integration(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "fakebash_test.sock")
 
 	listener, err := net.Listen("unix", socketPath)
 	require.NoError(t, err)
-	defer func() { _ = listener.Close() }()
+	t.Cleanup(func() { _ = listener.Close() })
 
 	grpcServer := grpc.NewServer()
 	srv := &fakebashServer{}
@@ -33,55 +35,100 @@ func TestFakebashGRPC(t *testing.T) {
 	go func() {
 		_ = grpcServer.Serve(listener)
 	}()
-	defer grpcServer.Stop()
+	t.Cleanup(func() { grpcServer.Stop() })
 
 	grpcConn, err := grpc.NewClient("unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	require.NoError(t, err)
-	defer func() { _ = grpcConn.Close() }()
+	t.Cleanup(func() { _ = grpcConn.Close() })
 
 	client := pb.NewFakebashServiceClient(grpcConn)
 
-	// Test RunCommand
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-
-	stream, err := client.RunCommand(ctx, &pb.CommandRequest{
-		Args: []string{"echo", "hello-world-test"},
-		Cwd:  cwd,
-		Env:  []string{"FOO=bar"},
-	})
-	require.NoError(t, err)
-
-	var outputs []string
-	var exitCode string
-
-	for {
-		resp, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-
-		switch resp.Type {
-		case pb.CommandResponse_STDOUT:
-			outputs = append(outputs, string(resp.Payload))
-		case pb.CommandResponse_EXIT:
-			exitCode = string(resp.Payload)
-		}
+	tests := []struct {
+		name         string
+		args         []string
+		cwd          string
+		env          []string
+		wantStdout   string
+		wantStderr   string
+		wantExitCode string
+	}{
+		{
+			name:         "clean stdout without pty echo",
+			args:         []string{"-c", "echo hello-world-test"},
+			cwd:          tmpDir,
+			wantStdout:   "hello-world-test\n",
+			wantStderr:   "",
+			wantExitCode: "0",
+		},
+		{
+			name:         "separated stderr stream",
+			args:         []string{"-c", "echo err-output >&2"},
+			cwd:          tmpDir,
+			wantStdout:   "",
+			wantStderr:   "err-output\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "environment variables and pwd propagation",
+			args:         []string{"-c", "pwd && echo $TEST_VAR"},
+			cwd:          tmpDir,
+			env:          append(os.Environ(), "TEST_VAR=my_secret_val"),
+			wantStdout:   tmpDir + "\nmy_secret_val\n",
+			wantStderr:   "",
+			wantExitCode: "0",
+		},
+		{
+			name:         "non-zero exit code",
+			args:         []string{"-c", "exit 42"},
+			cwd:          tmpDir,
+			wantStdout:   "",
+			wantStderr:   "",
+			wantExitCode: "42",
+		},
 	}
 
-	fullOutput := ""
-	for _, out := range outputs {
-		fullOutput += out
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Contains(t, fullOutput, "hello-world-test")
-	assert.Equal(t, "0", exitCode)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			stream, err := client.RunCommand(ctx, &pb.CommandRequest{
+				Args: tt.args,
+				Cwd:  tt.cwd,
+				Env:  tt.env,
+			})
+			require.NoError(t, err)
+
+			var stdoutBuf strings.Builder
+			var stderrBuf strings.Builder
+			var exitCode string
+
+			for {
+				resp, err := stream.Recv()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+
+				switch resp.Type {
+				case pb.CommandResponse_STDOUT:
+					stdoutBuf.Write(resp.Payload)
+				case pb.CommandResponse_STDERR:
+					stderrBuf.Write(resp.Payload)
+				case pb.CommandResponse_EXIT:
+					exitCode = string(resp.Payload)
+				}
+			}
+
+			assert.Equal(t, tt.wantStdout, stdoutBuf.String())
+			assert.Equal(t, tt.wantStderr, stderrBuf.String())
+			assert.Equal(t, tt.wantExitCode, exitCode)
+		})
+	}
 }
 
 func TestUnpackCommand(t *testing.T) {
