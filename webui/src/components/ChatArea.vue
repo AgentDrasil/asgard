@@ -7,6 +7,7 @@ const props = defineProps<{
   loading: boolean;
   activeAgent: AgentInfo | null;
   runDir: string;
+  sessionId?: string | null;
 }>();
 
 const bottomRef = ref<HTMLDivElement | null>(null);
@@ -73,6 +74,17 @@ const copyMessage = async (id: string, text: string) => {
           <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content">{{ runDir }}</span>
         </p>
       </div>
+      <a
+        v-if="sessionId"
+        :href="`/api/ttyd/agent-${sessionId}`"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn btn-outline btn-sm gap-2 text-xs"
+        title="Open Agent Workspace Terminal"
+      >
+        <Icon icon="mynaui:terminal" class="h-4 w-4" />
+        <span>Open Terminal</span>
+      </a>
     </header>
 
     <!-- Message List -->

@@ -236,13 +236,15 @@ const toggleTheme = () => {
         <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current" />
       </button>
 
-      <button
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content opacity-50 cursor-not-allowed"
-        title="Terminal (TODO)"
-        disabled
+      <a
+        href="/api/ttyd/sidebar"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Open Terminal"
       >
         <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
-      </button>
+      </a>
     </div>
 
     <!-- Footer / Theme Toggle -->

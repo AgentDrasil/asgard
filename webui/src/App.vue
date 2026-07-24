@@ -314,6 +314,7 @@ const toggleSidebar = () => {
           :loading="loading"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
+          :sessionId="activeSessionId"
         />
         <ChatInput @send="handleSendMessage" :loading="loading" />
       </template>

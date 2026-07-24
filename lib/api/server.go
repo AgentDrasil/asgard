@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/lib/ttyd"
 )
 
 // Server manages the HTTP server hosting A2A agents.
@@ -28,6 +29,7 @@ type Server struct {
 	mux             *http.ServeMux
 	repo            *dbmodels.SessionRepository
 	statusListeners map[string][]chan AgentStatusUpdate
+	ttydManager     *ttyd.Manager
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
@@ -37,9 +39,15 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		repo = dbmodels.NewSessionRepository(dbConn)
 	}
 
+	ttydMgr, err := ttyd.NewManager("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
+	}
+
 	s := &Server{
-		conf: conf,
-		repo: repo,
+		conf:        conf,
+		repo:        repo,
+		ttydManager: ttydMgr,
 	}
 
 	if err := s.reload(); err != nil {
@@ -101,6 +109,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
 
 	return mux
 }
