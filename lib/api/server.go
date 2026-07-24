@@ -96,6 +96,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
+	mux.HandleFunc("GET /api/quota", s.handleQuota)
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)

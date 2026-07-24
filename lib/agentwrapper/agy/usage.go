@@ -169,16 +169,21 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	filePath := filepath.Join(statuslineDir, awSessionID+".json")
 	var quota map[string]QuotaEntry
-	jsonData, err := os.ReadFile(filePath)
-	if err == nil {
-		var sq StatuslineQuota
-		if err := json.Unmarshal(jsonData, &sq); err == nil {
-			quota = sq.Quota
-		} else {
-			log.Warn().Err(err).Msg("failed to parse statusline JSON for quota")
+	var lastErr error
+
+	for start := time.Now(); time.Since(start) < 2*time.Second; time.Sleep(100 * time.Millisecond) {
+		var jsonData []byte
+		jsonData, lastErr = os.ReadFile(filePath)
+		if lastErr == nil {
+			var sq StatuslineQuota
+			if lastErr = json.Unmarshal(jsonData, &sq); lastErr == nil && len(sq.Quota) > 0 {
+				quota = sq.Quota
+				break
+			}
 		}
-	} else {
-		log.Warn().Err(err).Msg("failed to read statusline JSON for quota")
+	}
+	if len(quota) == 0 {
+		log.Warn().Err(lastErr).Msg("failed to read or parse populated statusline JSON for quota")
 	}
 
 	// Exit: /exit + Enter.
@@ -187,10 +192,40 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	result := make([]types.ModelUsage, 0, len(models))
 	for _, mName := range models {
 		rem, ref := getModelQuota(mName, quota)
+
+		var limits []types.QuotaLimit
+		isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(mName)), "gemini")
+		var q5h, qWeekly QuotaEntry
+		var has5h, hasWeekly bool
+
+		if isGemini {
+			q5h, has5h = quota["gemini-5h"]
+			qWeekly, hasWeekly = quota["gemini-weekly"]
+		} else {
+			q5h, has5h = quota["3p-5h"]
+			qWeekly, hasWeekly = quota["3p-weekly"]
+		}
+
+		if has5h {
+			limits = append(limits, types.QuotaLimit{
+				Name:        "5h",
+				Remaining:   q5h.RemainingFraction,
+				RefreshDate: parseResetTime(q5h.ResetTime),
+			})
+		}
+		if hasWeekly {
+			limits = append(limits, types.QuotaLimit{
+				Name:        "weekly",
+				Remaining:   qWeekly.RemainingFraction,
+				RefreshDate: parseResetTime(qWeekly.ResetTime),
+			})
+		}
+
 		result = append(result, types.ModelUsage{
 			Model:       mName,
 			Remaining:   rem,
 			RefreshDate: ref,
+			Limits:      limits,
 		})
 	}
 

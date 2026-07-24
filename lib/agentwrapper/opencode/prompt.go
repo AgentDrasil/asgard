@@ -186,7 +186,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		// Fallback to the text of any completed/recorded message
 		for _, builder := range textMap {
 			if bStr := builder.String(); bStr != "" {
-				lastContent = bStr; break
+				lastContent = bStr
+				break
 			}
 		}
 	}

@@ -44,6 +44,19 @@ func GetSupportedCLIsAndModels() map[string][]string {
 	return res
 }
 
+func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
+	res := make(map[string][]types.ModelUsage)
+	for name, client := range clients {
+		if usages, err := client.Usage(ctx, types.UsageOptions{}); err == nil {
+			res[name] = usages
+		} else {
+			log.Error().Err(err).Str("cli", name).Msg("Failed to check quota for CLI")
+			res[name] = []types.ModelUsage{}
+		}
+	}
+	return res, nil
+}
+
 func CheckQuota(cli string, model string) float64 {
 	client, ok := clients[cli]
 	if !ok {

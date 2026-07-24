@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 )
 
 const agentFatherID = "agent_father"
@@ -53,4 +54,20 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "agents reloaded"})
+}
+
+// handleQuota handles GET /api/quota.
+func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
+	res, err := agentwrapper.GetQuota(r.Context())
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to fetch quota info")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
 }

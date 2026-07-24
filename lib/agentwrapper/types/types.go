@@ -22,6 +22,13 @@ type CLIClient interface {
 	Prompt(ctx context.Context, prompt string, opts PromptOptions) (*PromptResult, error)
 }
 
+// QuotaLimit represents a single specific quota limit (e.g. 5h, weekly).
+type QuotaLimit struct {
+	Name        string  `json:"name"`
+	Remaining   float64 `json:"remaining"`
+	RefreshDate int64   `json:"refresh_date,omitempty"`
+}
+
 // ModelUsage represents the quota status for a single model.
 type ModelUsage struct {
 	// Model is the full model name, e.g. "Claude Sonnet 4.6 (Thinking)".
@@ -34,6 +41,9 @@ type ModelUsage struct {
 	// RefreshDate is the unix timestamp (seconds since epoch) when the quota resets.
 	// 0 when quota is fully available.
 	RefreshDate int64 `json:"refresh_date,omitempty"`
+
+	// Limits holds the breakdown of individual quota limits.
+	Limits []QuotaLimit `json:"limits,omitempty"`
 }
 
 // PromptResult is the structured response from a Prompt call.

@@ -86,4 +86,3 @@ func TestClassifyLineAndContent(t *testing.T) {
 	assert.Equal(t, "bash", opl.Part.Tool)
 	assert.Equal(t, "go version go1.26.5-X:nodwarf5 linux/amd64\n", opl.Part.State.Output)
 }
-

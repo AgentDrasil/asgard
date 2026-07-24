@@ -136,28 +136,38 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 						var remainingVal = 1.0
 						var refreshDate int64 = 0
 						foundLimit := false
+						var limits []types.QuotaLimit
 						for _, limit := range qr.Data.Limits {
+							var remVal float64
+							if limit.Usage > 0 {
+								remVal = limit.Remaining / limit.Usage
+							} else {
+								remVal = 1.0 - (limit.Percentage / 100.0)
+							}
+							refDate := limit.NextResetTime / 1000
+
+							limits = append(limits, types.QuotaLimit{
+								Name:        limit.Type,
+								Remaining:   remVal,
+								RefreshDate: refDate,
+							})
+
 							if limit.Type == "TIME_LIMIT" {
-								if limit.Usage > 0 {
-									remainingVal = limit.Remaining / limit.Usage
-								} else {
-									remainingVal = 1.0 - (limit.Percentage / 100.0)
-								}
-								refreshDate = limit.NextResetTime / 1000
+								remainingVal = remVal
+								refreshDate = refDate
 								foundLimit = true
-								break
 							}
 						}
 						if foundLimit {
 							log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
-							for i := range result {
-								if strings.HasPrefix(result[i].Model, "zai-coding-plan") {
-									result[i].Remaining = remainingVal
-									result[i].RefreshDate = refreshDate
-								}
+						}
+						// If we fetched limits, apply them to the matching model(s)
+						for i := range result {
+							if strings.HasPrefix(result[i].Model, "zai-coding-plan") {
+								result[i].Remaining = remainingVal
+								result[i].RefreshDate = refreshDate
+								result[i].Limits = limits
 							}
-						} else {
-							log.Debug().Msg("no TIME_LIMIT found in zai quota response")
 						}
 					}
 				}
