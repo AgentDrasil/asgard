@@ -26,7 +26,7 @@ func TestRenderSimple(t *testing.T) {
 					"remaining_percentage": 91.58
 				}
 			}`,
-			wantContain: []string{"IDLE | 86K/195K (", "92%", ansiGreen},
+			wantContain: []string{"IDLE | no-session-id | 86K/195K (", "92%", ansiGreen},
 		},
 		{
 			name: "thinking with medium remaining (yellow)",
@@ -38,7 +38,7 @@ func TestRenderSimple(t *testing.T) {
 					"remaining_percentage": 52.0
 				}
 			}`,
-			wantContain: []string{"THINKING | 488K/976K (", "52%", ansiYellow},
+			wantContain: []string{"THINKING | no-session-id | 488K/976K (", "52%", ansiYellow},
 		},
 		{
 			name: "working with low remaining (red)",
@@ -50,7 +50,7 @@ func TestRenderSimple(t *testing.T) {
 					"remaining_percentage": 5.5
 				}
 			}`,
-			wantContain: []string{"WORKING | 966K/1M (", "6%", ansiRed},
+			wantContain: []string{"WORKING | no-session-id | 966K/1M (", "6%", ansiRed},
 		},
 		{
 			name: "exactly 80 percent remaining (green)",
@@ -62,7 +62,7 @@ func TestRenderSimple(t *testing.T) {
 					"remaining_percentage": 80.0
 				}
 			}`,
-			wantContain: []string{"TOOL_USE | 195K/244K (", "80%", ansiGreen},
+			wantContain: []string{"TOOL_USE | no-session-id | 195K/244K (", "80%", ansiGreen},
 		},
 		{
 			name: "exactly 50 percent remaining (yellow)",
@@ -74,7 +74,7 @@ func TestRenderSimple(t *testing.T) {
 					"remaining_percentage": 50.0
 				}
 			}`,
-			wantContain: []string{"INITIALIZING | 512K/1M (", "50%", ansiYellow},
+			wantContain: []string{"INITIALIZING | no-session-id | 512K/1M (", "50%", ansiYellow},
 		},
 		{
 			name: "working with background tasks",
@@ -90,7 +90,7 @@ func TestRenderSimple(t *testing.T) {
 					{"name": "test",  "status": "running", "index": 2}
 				]
 			}`,
-			wantContain: []string{"WORKING | 97K/1M (", "90%"},
+			wantContain: []string{"WORKING | no-session-id | 97K/1M (", "90%"},
 		},
 		{
 			name: "thinking with active subagents",
@@ -106,7 +106,7 @@ func TestRenderSimple(t *testing.T) {
 					{"name": "coder",    "role": "Coder",      "status": "idle"}
 				]
 			}`,
-			wantContain: []string{"THINKING | 97K/1M (", "90%"},
+			wantContain: []string{"THINKING | no-session-id | 97K/1M (", "90%"},
 		},
 		{
 			name: "idle with all subagents idle",
@@ -122,7 +122,7 @@ func TestRenderSimple(t *testing.T) {
 					{"name": "coder",    "role": "Coder",      "status": "idle"}
 				]
 			}`,
-			wantContain: []string{"IDLE | 97K/1M (", "90%"},
+			wantContain: []string{"IDLE | no-session-id | 97K/1M (", "90%"},
 		},
 		{
 			name: "idle with model display name",
@@ -138,7 +138,7 @@ func TestRenderSimple(t *testing.T) {
 					"display_name": "Gemini 1.5 Pro"
 				}
 			}`,
-			wantContain: []string{"IDLE | 97K/1M (", "90%", "Gemini 1.5 Pro"},
+			wantContain: []string{"IDLE | no-session-id | 97K/1M (", "90%", "Gemini 1.5 Pro"},
 		},
 		{
 			name: "idle with model id only",
@@ -153,7 +153,7 @@ func TestRenderSimple(t *testing.T) {
 					"id": "gemini-1.5-flash"
 				}
 			}`,
-			wantContain: []string{"IDLE | 97K/1M (", "90%", "gemini-1.5-flash"},
+			wantContain: []string{"IDLE | no-session-id | 97K/1M (", "90%", "gemini-1.5-flash"},
 		},
 	}
 

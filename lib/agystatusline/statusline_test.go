@@ -32,7 +32,7 @@ func TestRun(t *testing.T) {
 			name:        "routes to renderSimple by default",
 			input:       validInput,
 			icon:        "",
-			wantContain: []string{"IDLE | 100/1000"},
+			wantContain: []string{"IDLE | no-session-id | 100/1000"},
 		},
 		{
 			name:        "routes to renderNF",
