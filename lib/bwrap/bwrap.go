@@ -5,11 +5,69 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
+
+// agentSystemPrompts holds the CLI-specific system prompt additions injected
+// before any user-supplied AGENTS.md content.
+var agentSystemPrompts = map[string]string{
+	"agy": strings.Join([]string{
+		"## Important Instructions",
+		"",
+		"- Forget the `ask_question` tool. When you want to ask the user a question, use a regular text response instead.",
+	}, "\n"),
+	"opencode": strings.Join([]string{
+		"## Important Instructions",
+		"",
+		"- Forget the `question` tool. When you want to ask the user a question, use a regular text response instead.",
+	}, "\n"),
+}
+
+// buildSystemPrompt constructs the full system prompt for the given CLI.
+// It starts with the CLI-specific instructions and appends the content of
+// agentsMDPath if the file exists.
+func buildSystemPrompt(cli string, agentsMDPath string) (string, error) {
+	var sb strings.Builder
+
+	if base, ok := agentSystemPrompts[cli]; ok {
+		sb.WriteString(base)
+	}
+
+	if agentsMDPath != "" {
+		data, err := os.ReadFile(agentsMDPath)
+		if err == nil && len(data) > 0 {
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.Write(data)
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("reading AGENTS.md at %q: %w", agentsMDPath, err)
+		}
+	}
+
+	return sb.String(), nil
+}
+
+// writeSystemPromptFile writes the combined system prompt for the given CLI to
+// a file named ".asgard_system_prompt" inside dir, and returns the host path.
+func writeSystemPromptFile(dir string, cli string, agentsMDPath string) (string, error) {
+	content, err := buildSystemPrompt(cli, agentsMDPath)
+	if err != nil {
+		return "", err
+	}
+	if content == "" {
+		return "", nil
+	}
+	destPath := filepath.Join(dir, ".asgard_system_prompt")
+	if err := os.WriteFile(destPath, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("writing system prompt file: %w", err)
+	}
+	return destPath, nil
+}
 
 // setupTmpDir determines the host directory for sandbox /tmp (e.g. /home/user/tmp/<chatID>) and ensures it exists.
 func setupTmpDir(home string, chatID string) (string, error) {
@@ -197,34 +255,50 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		args = append(args, "--tmpfs", sshDir)
 	}
 
-	// Mount AGENTS.md and skills/ if they exist in agentPath
-	if agentPath != "" {
-		agentsMDPath := filepath.Join(agentPath, "AGENTS.md")
-		skillsPath := filepath.Join(agentPath, "skills")
-
-		var hasAgentsMD bool
-		if st, err := os.Stat(agentsMDPath); err == nil && !st.IsDir() {
-			hasAgentsMD = true
+	// Build and mount the system prompt, and mount skills/ if present in agentPath.
+	// The system prompt is written to the chat tmpDir on the host so that bwrap
+	// can bind-mount it read-only at the CLI's expected configuration path.
+	{
+		var agentsMDPath string
+		var skillsPath string
+		if agentPath != "" {
+			candidate := filepath.Join(agentPath, "AGENTS.md")
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				agentsMDPath = candidate
+			}
+			skillsPath = filepath.Join(agentPath, "skills")
+			if st, err := os.Stat(skillsPath); err != nil || !st.IsDir() {
+				skillsPath = ""
+			}
 		}
 
-		var hasSkills bool
-		if st, err := os.Stat(skillsPath); err == nil && st.IsDir() {
-			hasSkills = true
+		// Determine the host dir where we can write the prompt file (already mounted as /tmp).
+		promptHostDir, err := setupTmpDir(home, chatID)
+		if err != nil {
+			return nil, err
 		}
 
 		switch target.CLI {
 		case "agy":
-			if hasAgentsMD {
-				args = append(args, "--ro-bind", agentsMDPath, filepath.Join(home, ".gemini", "GEMINI.md"))
+			promptFile, err := writeSystemPromptFile(promptHostDir, "agy", agentsMDPath)
+			if err != nil {
+				return nil, err
 			}
-			if hasSkills {
+			if promptFile != "" {
+				args = append(args, "--ro-bind", promptFile, filepath.Join(home, ".gemini", "GEMINI.md"))
+			}
+			if skillsPath != "" {
 				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".gemini", "antigravity-cli", "skills"))
 			}
 		case "opencode":
-			if hasAgentsMD {
-				args = append(args, "--ro-bind", agentsMDPath, filepath.Join(home, ".config", "opencode", "AGENTS.md"))
+			promptFile, err := writeSystemPromptFile(promptHostDir, "opencode", agentsMDPath)
+			if err != nil {
+				return nil, err
 			}
-			if hasSkills {
+			if promptFile != "" {
+				args = append(args, "--ro-bind", promptFile, filepath.Join(home, ".config", "opencode", "AGENTS.md"))
+			}
+			if skillsPath != "" {
 				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".config", "opencode", "skills"))
 			}
 		}

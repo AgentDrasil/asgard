@@ -7,27 +7,97 @@ import (
 	"testing"
 
 	"github.com/moznion/go-optional"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 )
+
+func TestBuildSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentsMDPath := filepath.Join(tmpDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(agentsMDPath, []byte("# Custom Instructions\n\nDo stuff."), 0644))
+
+	tests := []struct {
+		name         string
+		cli          string
+		agentsMDPath string
+		wantContains []string
+	}{
+		{
+			name:         "agy with AGENTS.md",
+			cli:          "agy",
+			agentsMDPath: agentsMDPath,
+			wantContains: []string{
+				"Forget the `ask_question` tool",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+		},
+		{
+			name:         "agy without AGENTS.md",
+			cli:          "agy",
+			agentsMDPath: "",
+			wantContains: []string{
+				"Forget the `ask_question` tool",
+			},
+		},
+		{
+			name:         "opencode with AGENTS.md",
+			cli:          "opencode",
+			agentsMDPath: agentsMDPath,
+			wantContains: []string{
+				"Forget the `question` tool",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+		},
+		{
+			name:         "opencode without AGENTS.md",
+			cli:          "opencode",
+			agentsMDPath: "",
+			wantContains: []string{
+				"Forget the `question` tool",
+			},
+		},
+		{
+			name:         "unknown CLI without AGENTS.md returns empty",
+			cli:          "unknown",
+			agentsMDPath: "",
+			wantContains: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath)
+			require.NoError(t, err)
+
+			for _, want := range tt.wantContains {
+				assert.Contains(t, got, want)
+			}
+			if tt.wantContains == nil {
+				assert.Empty(t, got)
+			}
+		})
+	}
+}
 
 func TestBuildArgs(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runDir := filepath.Join(tmpDir, "rundir")
-	if err := os.MkdirAll(runDir, 0755); err != nil {
-		t.Fatalf("failed to create rundir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(runDir, 0755))
 
 	roDir := filepath.Join(tmpDir, "rodir")
-	if err := os.MkdirAll(roDir, 0755); err != nil {
-		t.Fatalf("failed to create rodir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(roDir, 0755))
 
 	rwDir := filepath.Join(tmpDir, "rwdir")
-	if err := os.MkdirAll(rwDir, 0755); err != nil {
-		t.Fatalf("failed to create rwdir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(rwDir, 0755))
 
 	cfg := &agents.AgentConfig{
 		ID:          "test-agent",
@@ -45,19 +115,13 @@ func TestBuildArgs(t *testing.T) {
 
 	// Create directories that buildArgsForAgent expects to exist under HOME
 	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
-		if err := os.MkdirAll(filepath.Join(home, subDir), 0755); err != nil {
-			t.Fatalf("failed to create %s dir: %v", subDir, err)
-		}
+		require.NoError(t, os.MkdirAll(filepath.Join(home, subDir), 0755))
 	}
 
 	// Create simulated agent configuration directory with AGENTS.md and skills
 	agentPath := filepath.Join(tmpDir, "test-agent-dir")
-	if err := os.MkdirAll(filepath.Join(agentPath, "skills"), 0755); err != nil {
-		t.Fatalf("failed to create skills dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644); err != nil {
-		t.Fatalf("failed to write AGENTS.md: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(agentPath, "skills"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644))
 
 	// Test case 1: agy CLITarget with session
 	targetAgy := agents.CLITarget{
@@ -66,59 +130,41 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat")
-	if err != nil {
-		t.Fatalf("buildArgsForAgent error: %v", err)
-	}
+	require.NoError(t, err)
 
 	argStr := strings.Join(args, " ")
 
 	sshDir := filepath.Join(home, ".ssh")
-	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
-		t.Errorf("expected '--tmpfs %s' in args, got: %s", sshDir, argStr)
-	}
+	assert.Contains(t, argStr, "--tmpfs "+sshDir)
 
 	// Verify required bwrap components
 	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
-	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
-		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
-	}
-	if !strings.Contains(argStr, "--setenv HOME "+home) {
-		t.Errorf("expected home env setup, got: %s", argStr)
-	}
-	if !strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
-		t.Errorf("expected run_dirs bind mount, got: %s", argStr)
-	}
-	if !strings.Contains(argStr, "--chdir "+runDir) {
-		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)
-	}
-	if !strings.Contains(argStr, "--ro-bind "+roDir+" "+roDir) {
-		t.Errorf("expected mount_dirs readonly mount, got: %s", argStr)
-	}
-	if !strings.Contains(argStr, "--bind "+rwDir+" "+rwDir) {
-		t.Errorf("expected mount_dirs readwrite mount, got: %s", argStr)
-	}
+	assert.Contains(t, argStr, "--bind "+expectedTmpDir+" /tmp")
+	assert.Contains(t, argStr, "--setenv HOME "+home)
+	assert.Contains(t, argStr, "--bind "+runDir+" "+runDir)
+	assert.Contains(t, argStr, "--chdir "+runDir)
+	assert.Contains(t, argStr, "--ro-bind "+roDir+" "+roDir)
+	assert.Contains(t, argStr, "--bind "+rwDir+" "+rwDir)
 
 	// Verify agy specific mounts
 	geminiDir := filepath.Join(home, ".gemini")
-	if !strings.Contains(argStr, "--bind "+geminiDir+" "+geminiDir) {
-		t.Errorf("expected agy .gemini bind mount, got: %s", argStr)
-	}
+	assert.Contains(t, argStr, "--bind "+geminiDir+" "+geminiDir)
 
-	// Verify agy agent path mounts
-	expectedAgyAgentsMD := filepath.Join(home, ".gemini", "GEMINI.md")
+	// Verify agy system prompt: a generated file is mounted at GEMINI.md (not the raw AGENTS.md)
+	expectedAgyDest := filepath.Join(home, ".gemini", "GEMINI.md")
 	expectedAgySkills := filepath.Join(home, ".gemini", "antigravity-cli", "skills")
-	if !strings.Contains(argStr, "--ro-bind "+filepath.Join(agentPath, "AGENTS.md")+" "+expectedAgyAgentsMD) {
-		t.Errorf("expected agy AGENTS.md mount, got: %s", argStr)
-	}
-	if !strings.Contains(argStr, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedAgySkills) {
-		t.Errorf("expected agy skills mount, got: %s", argStr)
-	}
+	assert.Contains(t, argStr, "--ro-bind "+expectedTmpDir+"/.asgard_system_prompt "+expectedAgyDest)
+	assert.Contains(t, argStr, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedAgySkills)
+
+	// Verify the generated prompt file contains our instructions and the AGENTS.md content
+	promptContent, readErr := os.ReadFile(filepath.Join(expectedTmpDir, ".asgard_system_prompt"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(promptContent), "Forget the `ask_question` tool")
+	assert.Contains(t, string(promptContent), "agents instructions")
 
 	// Verify ending command structure with --session and --prompt
 	expectedEnd := "-- aw agy --model some-model --session my-session-id --prompt some prompt"
-	if !strings.HasSuffix(argStr, expectedEnd) {
-		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
-	}
+	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
 	// Test case 2: opencode CLITarget without session (None)
 	targetOpencode := agents.CLITarget{
@@ -127,48 +173,36 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	argsOpencode, err := buildArgsForAgent(cfg, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "")
-	if err != nil {
-		t.Fatalf("buildArgsForAgent error: %v", err)
-	}
+	require.NoError(t, err)
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
 
 	expectedDefaultTmpDir := filepath.Join(home, "tmp", "default")
-	if !strings.Contains(argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp") {
-		t.Errorf("expected '--bind %s /tmp' in argsOpencode, got: %s", expectedDefaultTmpDir, argStrOpencode)
-	}
+	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp")
 
 	// Verify opencode specific mounts
 	cacheDir := filepath.Join(home, ".cache")
 	configDir := filepath.Join(home, ".config")
 	localDir := filepath.Join(home, ".local")
-	if !strings.Contains(argStrOpencode, "--bind "+cacheDir+" "+cacheDir) {
-		t.Errorf("expected opencode .cache bind mount, got: %s", argStrOpencode)
-	}
-	if !strings.Contains(argStrOpencode, "--bind "+configDir+" "+configDir) {
-		t.Errorf("expected opencode .config bind mount, got: %s", argStrOpencode)
-	}
-	if !strings.Contains(argStrOpencode, "--bind "+localDir+" "+localDir) {
-		t.Errorf("expected opencode .local bind mount, got: %s", argStrOpencode)
-	}
-	if !strings.Contains(argStrOpencode, "--chdir "+runDir) {
-		t.Errorf("expected '--chdir %s' in argsOpencode, got: %s", runDir, argStrOpencode)
-	}
+	assert.Contains(t, argStrOpencode, "--bind "+cacheDir+" "+cacheDir)
+	assert.Contains(t, argStrOpencode, "--bind "+configDir+" "+configDir)
+	assert.Contains(t, argStrOpencode, "--bind "+localDir+" "+localDir)
+	assert.Contains(t, argStrOpencode, "--chdir "+runDir)
 
-	// Verify opencode agent path mounts
-	expectedOpencodeAgentsMD := filepath.Join(home, ".config", "opencode", "AGENTS.md")
+	// Verify opencode system prompt: a generated file is mounted at AGENTS.md (not the raw AGENTS.md)
+	expectedOpencodeDest := filepath.Join(home, ".config", "opencode", "AGENTS.md")
 	expectedOpencodeSkills := filepath.Join(home, ".config", "opencode", "skills")
-	if !strings.Contains(argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "AGENTS.md")+" "+expectedOpencodeAgentsMD) {
-		t.Errorf("expected opencode AGENTS.md mount, got: %s", argStrOpencode)
-	}
-	if !strings.Contains(argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedOpencodeSkills) {
-		t.Errorf("expected opencode skills mount, got: %s", argStrOpencode)
-	}
+	assert.Contains(t, argStrOpencode, "--ro-bind "+expectedDefaultTmpDir+"/.asgard_system_prompt "+expectedOpencodeDest)
+	assert.Contains(t, argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedOpencodeSkills)
+
+	// Verify the generated prompt file contains our instructions and the AGENTS.md content
+	opencodePromptContent, readErr := os.ReadFile(filepath.Join(expectedDefaultTmpDir, ".asgard_system_prompt"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(opencodePromptContent), "Forget the `question` tool")
+	assert.Contains(t, string(opencodePromptContent), "agents instructions")
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
-	if !strings.HasSuffix(argStrOpencode, expectedEndOpencode) {
-		t.Errorf("expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
-	}
+	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 }
 
 func TestCommandForCommandExec(t *testing.T) {
