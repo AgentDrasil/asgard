@@ -16,6 +16,7 @@ type Config struct {
 	Port                    int    `yaml:"port"`
 	InternalPort            int    `yaml:"internal_port"`
 	Host                    string `yaml:"host"`
+	WebUIPath               string `yaml:"webui_path"`
 	GeminiAPIKey            string `yaml:"gemini_api_key"`
 	GeminiModelForChatTitle string `yaml:"gemini_model_for_chat_title"`
 }

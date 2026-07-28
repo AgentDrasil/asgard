@@ -2,6 +2,8 @@ ARG GO_VERSION=1.26.4
 ARG NODE_VERSION=26
 ARG DEBIAN_VERSION=bookworm
 ARG AGY_VERSION=1.1.7
+ARG USER_UID=1000
+ARG USER_GID=1000
 
 # Stage 1: base
 FROM debian:${DEBIAN_VERSION} AS base
@@ -59,3 +61,51 @@ WORKDIR /workspace
 
 # Run infinitely loop
 CMD ["tail", "-f", "/dev/null"]
+
+# Stage 3: webui-builder
+FROM node:${NODE_VERSION}-alpine AS webui-builder
+
+WORKDIR /webui
+
+COPY webui/package*.json ./
+RUN npm ci
+
+COPY webui/ .
+RUN npm run build
+
+# Stage 4: go-builder
+FROM golang:${GO_VERSION}-alpine AS go-builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN mkdir -p /app/bin && \
+    for d in cmd/*; do \
+    if [ -d "$d" ]; then \
+    name=$(basename "$d"); \
+    echo "Building $name..."; \
+    go build -v -o "/app/bin/$name" "./$d"; \
+    fi; \
+    done
+
+# Stage 5: runner
+FROM base AS runner
+
+ARG USER_UID
+ARG USER_GID
+
+RUN groupadd -g ${USER_GID} user && \
+    useradd -u ${USER_UID} -g user -m -s /bin/bash user
+
+COPY --from=go-builder /app/bin/* /bin/
+COPY --from=webui-builder /webui/dist /opt/asgard/webui
+
+USER user
+WORKDIR /home/user
+
+CMD ["asgard"]
+

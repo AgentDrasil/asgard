@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -110,6 +111,20 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
+
+	if s.conf.WebUIPath != "" {
+		fs := http.FileServer(http.Dir(s.conf.WebUIPath))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			path := filepath.Join(s.conf.WebUIPath, filepath.Clean(r.URL.Path))
+			info, err := os.Stat(path)
+			if err == nil && !info.IsDir() {
+				fs.ServeHTTP(w, r)
+				return
+			}
+			http.ServeFile(w, r, filepath.Join(s.conf.WebUIPath, "index.html"))
+		})
+		log.Info().Msgf("Registered static Web UI hosting from %s at /", s.conf.WebUIPath)
+	}
 
 	return mux
 }
