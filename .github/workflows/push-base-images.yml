@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'Dockerfile.base'
+      - 'Dockerfile'
       - 'docker-scripts/**'
       - '.github/workflows/push-base-images.yml'
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile.base
+          file: Dockerfile
           target: base
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
@@ -65,7 +65,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile.base
+          file: Dockerfile
           target: base_devtool
           push: true
           tags: ${{ steps.meta-devtool.outputs.tags }}

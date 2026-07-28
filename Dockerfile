@@ -1,46 +1,61 @@
 ARG GO_VERSION=1.26.4
-ARG USER_UID=1000
-ARG USER_GID=1000
+ARG NODE_VERSION=26
+ARG DEBIAN_VERSION=bookworm
+ARG AGY_VERSION=1.1.7
 
-# Build stage
-FROM golang:${GO_VERSION}-alpine AS builder
+# Stage 1: base
+FROM debian:${DEBIAN_VERSION} AS base
 
-WORKDIR /app
+# Install required dependencies
+# Add sid repository for ttyd package (not yet in Debian stable/testing)
+RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list && \
+    apt update && apt install -y --no-install-recommends \
+    bubblewrap \
+    git \
+    bash \
+    ca-certificates \
+    curl \
+    wget \
+    ripgrep \
+    ttyd \
+    fish \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
-COPY go.mod go.sum ./
-RUN go mod download
+# Install agy
+COPY docker-scripts/install-agy.sh /tmp/install-agy.sh
+RUN chmod +x /tmp/install-agy.sh && /tmp/install-agy.sh --dir /bin && rm /tmp/install-agy.sh
 
-# Copy source code
-COPY . .
+# Install opencode
+COPY docker-scripts/install-opencode.sh /tmp/install-opencode.sh
+RUN chmod +x /tmp/install-opencode.sh && /tmp/install-opencode.sh --dir /bin && rm /tmp/install-opencode.sh
 
-# Build all commands in cmd/
-RUN mkdir -p /app/bin && \
-    for d in cmd/*; do \
-    if [ -d "$d" ]; then \
-    name=$(basename "$d"); \
-    echo "Building $name..."; \
-    go build -v -o "/app/bin/$name" "./$d"; \
-    fi; \
-    done
+# Stage 2: base_devtool
+FROM base AS base_devtool
 
-# Runner stage
-FROM ghcr.io/agentdrasil/asgard-base-devtool:latest AS runner
+ARG GO_VERSION
+ARG NODE_VERSION
 
-ARG USER_UID
-ARG USER_GID
+# Install Go
+RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
+    mkdir -p /usr/lib/go && \
+    tar -C /usr/lib/go --strip-components=1 -xzf go${GO_VERSION}.linux-amd64.tar.gz && \
+    rm go${GO_VERSION}.linux-amd64.tar.gz && \
+    ln -s /usr/lib/go/bin/go /usr/bin/go && \
+    ln -s /usr/lib/go/bin/gofmt /usr/bin/gofmt
+ENV PATH="/usr/lib/go/bin:${PATH}"
 
-# Create group and user
-RUN groupadd -g ${USER_GID} user && \
-    useradd -u ${USER_UID} -g user -m -s /bin/bash user
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get update && apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy built binaries to /bin
-COPY --from=builder /app/bin/* /bin/
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Set default user and working directory
-USER user
-WORKDIR /home/user
+# Install just
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+WORKDIR /workspace
 
 # Run infinitely loop
 CMD ["tail", "-f", "/dev/null"]
-
