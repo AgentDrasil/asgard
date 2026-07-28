@@ -31,7 +31,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "agy",
 			agentsMDPath: agentsMDPath,
 			wantContains: []string{
-				"Forget the `ask_question` tool",
+				"Forget `ask_question`, `invoke_subagent`, and `send_message` tools",
+				"call-peer",
 				"# Custom Instructions",
 				"Do stuff.",
 			},
@@ -41,7 +42,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "agy",
 			agentsMDPath: "",
 			wantContains: []string{
-				"Forget the `ask_question` tool",
+				"Forget `ask_question`, `invoke_subagent`, and `send_message` tools",
+				"call-peer",
 			},
 		},
 		{
@@ -49,7 +51,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "opencode",
 			agentsMDPath: agentsMDPath,
 			wantContains: []string{
-				"Forget the `question` tool",
+				"Forget `question` and `task` tools",
+				"call-peer",
 				"# Custom Instructions",
 				"Do stuff.",
 			},
@@ -59,7 +62,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "opencode",
 			agentsMDPath: "",
 			wantContains: []string{
-				"Forget the `question` tool",
+				"Forget `question` and `task` tools",
+				"call-peer",
 			},
 		},
 		{
@@ -159,7 +163,8 @@ func TestBuildArgs(t *testing.T) {
 	// Verify the generated prompt file contains our instructions and the AGENTS.md content
 	promptContent, readErr := os.ReadFile(filepath.Join(expectedTmpDir, ".asgard_system_prompt"))
 	require.NoError(t, readErr)
-	assert.Contains(t, string(promptContent), "Forget the `ask_question` tool")
+	assert.Contains(t, string(promptContent), "Forget `ask_question`, `invoke_subagent`, and `send_message` tools")
+	assert.Contains(t, string(promptContent), "/bin/call-peer <agent-id> <message>")
 	assert.Contains(t, string(promptContent), "agents instructions")
 
 	// Verify ending command structure with --session and --prompt
@@ -198,7 +203,8 @@ func TestBuildArgs(t *testing.T) {
 	// Verify the generated prompt file contains our instructions and the AGENTS.md content
 	opencodePromptContent, readErr := os.ReadFile(filepath.Join(expectedDefaultTmpDir, ".asgard_system_prompt"))
 	require.NoError(t, readErr)
-	assert.Contains(t, string(opencodePromptContent), "Forget the `question` tool")
+	assert.Contains(t, string(opencodePromptContent), "Forget `question` and `task` tools")
+	assert.Contains(t, string(opencodePromptContent), "/bin/call-peer <agent-id> <message>")
 	assert.Contains(t, string(opencodePromptContent), "agents instructions")
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
