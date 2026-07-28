@@ -43,25 +43,17 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			return
 		}
 
+		// Resolve session and run modes from agent config (empty string = default).
+		sessionMode := e.agent.Config.SessionMode // "" or "resume" → resume; "fresh" → fresh
+		runMode := e.agent.Config.RunMode         // "" or "sequential" → sequential; "parallel" → parallel
+
 		var session *dbmodels.Session
-		agentSessionID := optional.None[string]()
 		if e.repo != nil {
 			var err error
 			session, err = e.repo.GetSession(chatID)
 			if err != nil {
 				yield(nil, fmt.Errorf("failed to get session: %w", err))
 				return
-			}
-
-			if session != nil {
-				for _, dbAgent := range session.Agents {
-					if dbAgent.Name == e.agent.Config.Name {
-						if dbAgent.SessionID != "" {
-							agentSessionID = optional.Some(dbAgent.SessionID)
-						}
-						break
-					}
-				}
 			}
 		}
 
@@ -92,7 +84,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		if e.repo != nil {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", "", runDirOpt); err != nil {
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
 			}
@@ -156,128 +148,329 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			defer cancelListener()
 		}
 
-		// ── Run the agent in a goroutine, collect result on resultCh ──────────
-		type runResult struct {
-			out []byte
-			err error
-		}
-		resultCh := make(chan runResult, 1)
-		go func() {
-			out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.statusURL)
-			resultCh <- runResult{out, err}
-		}()
-
-		// ── Stream intermediate status events until run.Run completes ─────────
-		for {
-			if statusCh == nil {
-				// No listener configured — just wait for result.
-				result := <-resultCh
-				if result.err != nil {
-					yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
-					return
-				}
-				e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt)
-				return
-			}
-
-			select {
-			case update, ok := <-statusCh:
-				if !ok {
-					// Channel closed unexpectedly; wait for result.
-					statusCh = nil
-					continue
-				}
-				// Save status update to session DB if content is present and not agent_response (which is saved as final result)
-				if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
-					role := update.EntryType
-					if role == "" || role == "other" {
-						role = "activity"
-					}
-					_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-						ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
-						Role:         role,
-						Content:      update.Content,
-						AgentName:    e.agent.Config.Name,
-						Timestamp:    time.Now().UnixMilli(),
-						ActivityType: strings.ToUpper(role),
-						StepIndex:    update.StepIndex,
-					})
-				}
-
-				// Emit an intermediate TaskStatusUpdateEvent.
-				updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
-				metadata := map[string]any{
-					"entry_type": update.EntryType,
-					"source":     update.Source,
-					"step_index": update.StepIndex,
-				}
-				for k, v := range update.Metadata {
-					metadata[k] = v
-				}
-				updateMsg.Metadata = metadata
-				evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
-				if !yield(evt, nil) {
-					return
-				}
-
-			case result := <-resultCh:
-				if result.err != nil {
-					yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
-					return
-				}
-				e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt)
-				return
-
-			case <-ctx.Done():
-				yield(nil, ctx.Err())
-				return
-			}
+		if runMode == "parallel" {
+			e.executeParallel(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, statusCh)
+		} else {
+			e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, session, statusCh)
 		}
 	}
 }
 
+// seqRunResult carries the output of a sequential run.Run call.
+type seqRunResult struct {
+	out []byte
+	err error
+}
+
+// executeSequential runs the first available CLI target (by quota) and streams results.
+func (e *agentExecutor) executeSequential(
+	ctx context.Context,
+	yield func(a2a.Event, error) bool,
+	execCtx *a2asrv.ExecutorContext,
+	prompt string,
+	chatID string,
+	runDirOpt optional.Option[string],
+	sessionMode string,
+	session *dbmodels.Session,
+	statusCh <-chan AgentStatusUpdate,
+) {
+	// Resolve which session ID to resume (if any).
+	agentSessionID := optional.None[string]()
+	if sessionMode != "fresh" && e.repo != nil && session != nil {
+		for _, dbAgent := range session.Agents {
+			if dbAgent.Name == e.agent.Config.Name {
+				// For sequential mode, pick the first session from the map (if any).
+				for _, sid := range dbAgent.Sessions {
+					if sid != "" {
+						agentSessionID = optional.Some(sid)
+					}
+					break
+				}
+				break
+			}
+		}
+	}
+
+	// ── Run the agent in a goroutine, collect result on resultCh ──────────
+	resultCh := make(chan seqRunResult, 1)
+	go func() {
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.statusURL)
+		resultCh <- seqRunResult{out, err}
+	}()
+
+	e.streamAndFinish(ctx, yield, execCtx, chatID, runDirOpt, sessionMode, statusCh, resultCh)
+}
+
+// executeParallel runs ALL CLI targets concurrently and combines their results into a single response.
+func (e *agentExecutor) executeParallel(
+	ctx context.Context,
+	yield func(a2a.Event, error) bool,
+	execCtx *a2asrv.ExecutorContext,
+	prompt string,
+	chatID string,
+	runDirOpt optional.Option[string],
+	sessionMode string,
+	statusCh <-chan AgentStatusUpdate,
+) {
+	// Resolve sessions map for resume mode.
+	sessions := map[string]string{}
+	if sessionMode != "fresh" && e.repo != nil {
+		if s, err := e.repo.GetAgentSessions(chatID, e.agent.Config.Name); err == nil && s != nil {
+			sessions = s
+		}
+	}
+
+	// ── Run all targets concurrently ──────────────────────────────────────
+	type runAllResult struct {
+		results []run.RunResult
+	}
+	resultCh := make(chan runAllResult, 1)
+	go func() {
+		results := run.RunAll(ctx, e.agent, prompt, sessions, runDirOpt, chatID, e.statusURL)
+		resultCh <- runAllResult{results}
+	}()
+
+	// Drain status events while waiting for all targets to finish.
+	for {
+		if statusCh == nil {
+			result := <-resultCh
+			e.handleParallelResult(yield, execCtx, result.results, chatID, runDirOpt, sessionMode)
+			return
+		}
+
+		select {
+		case update, ok := <-statusCh:
+			if !ok {
+				statusCh = nil
+				continue
+			}
+			if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
+				role := update.EntryType
+				if role == "" || role == "other" {
+					role = "activity"
+				}
+				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+					Role:         role,
+					Content:      update.Content,
+					AgentName:    e.agent.Config.Name,
+					Timestamp:    time.Now().UnixMilli(),
+					ActivityType: strings.ToUpper(role),
+					StepIndex:    update.StepIndex,
+				})
+			}
+			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
+			metadata := map[string]any{
+				"entry_type": update.EntryType,
+				"source":     update.Source,
+				"step_index": update.StepIndex,
+			}
+			for k, v := range update.Metadata {
+				metadata[k] = v
+			}
+			updateMsg.Metadata = metadata
+			evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
+			if !yield(evt, nil) {
+				return
+			}
+
+		case result := <-resultCh:
+			e.handleParallelResult(yield, execCtx, result.results, chatID, runDirOpt, sessionMode)
+			return
+
+		case <-ctx.Done():
+			yield(nil, ctx.Err())
+			return
+		}
+	}
+}
+
+// streamAndFinish drains status events from statusCh until resultCh delivers the final output.
+func (e *agentExecutor) streamAndFinish(
+	ctx context.Context,
+	yield func(a2a.Event, error) bool,
+	execCtx *a2asrv.ExecutorContext,
+	chatID string,
+	runDirOpt optional.Option[string],
+	sessionMode string,
+	statusCh <-chan AgentStatusUpdate,
+	resultCh <-chan seqRunResult,
+) {
+	for {
+		if statusCh == nil {
+			// No listener configured — just wait for result.
+			result := <-resultCh
+			if result.err != nil {
+				yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
+				return
+			}
+			e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt, sessionMode)
+			return
+		}
+
+		select {
+		case update, ok := <-statusCh:
+			if !ok {
+				// Channel closed unexpectedly; wait for result.
+				statusCh = nil
+				continue
+			}
+			// Save status update to session DB if content is present and not agent_response (which is saved as final result)
+			if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
+				role := update.EntryType
+				if role == "" || role == "other" {
+					role = "activity"
+				}
+				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+					Role:         role,
+					Content:      update.Content,
+					AgentName:    e.agent.Config.Name,
+					Timestamp:    time.Now().UnixMilli(),
+					ActivityType: strings.ToUpper(role),
+					StepIndex:    update.StepIndex,
+				})
+			}
+
+			// Emit an intermediate TaskStatusUpdateEvent.
+			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
+			metadata := map[string]any{
+				"entry_type": update.EntryType,
+				"source":     update.Source,
+				"step_index": update.StepIndex,
+			}
+			for k, v := range update.Metadata {
+				metadata[k] = v
+			}
+			updateMsg.Metadata = metadata
+			evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
+			if !yield(evt, nil) {
+				return
+			}
+
+		case result := <-resultCh:
+			if result.err != nil {
+				yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
+				return
+			}
+			e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt, sessionMode)
+			return
+
+		case <-ctx.Done():
+			yield(nil, ctx.Err())
+			return
+		}
+	}
+}
+
+// promptResult is the JSON structure returned by CLI agents.
+type promptResult struct {
+	SessionID   string  `json:"session_id"`
+	InputTokens int     `json:"input_tokens"`
+	MaxTokens   int     `json:"max_tokens"`
+	Remaining   float64 `json:"remaining"`
+	LastContent string  `json:"last_content"`
+}
+
+// parseOutput attempts to JSON-decode a CLI output, falling back to raw string.
+func parseOutput(out []byte) (lastContent string, sessionID string) {
+	var result promptResult
+	if err := json.Unmarshal(out, &result); err == nil {
+		return result.LastContent, result.SessionID
+	}
+	return strings.TrimSpace(string(out)), ""
+}
+
 // handleFinalResult parses the agent output and emits the final TaskStatusUpdateEvent.
+// sessionMode controls whether the returned session ID is persisted to DB.
 func (e *agentExecutor) handleFinalResult(
 	yield func(a2a.Event, error) bool,
 	execCtx *a2asrv.ExecutorContext,
 	out []byte,
 	chatID string,
 	runDirOpt optional.Option[string],
+	sessionMode string,
 ) {
-	type promptResult struct {
-		SessionID   string  `json:"session_id"`
-		InputTokens int     `json:"input_tokens"`
-		MaxTokens   int     `json:"max_tokens"`
-		Remaining   float64 `json:"remaining"`
-		LastContent string  `json:"last_content"`
+	respText, sessionID := parseOutput(out)
+
+	if e.repo != nil {
+		// Always update runDir; only persist sessionID in resume mode.
+		cliKey := ""
+		persistSessionID := ""
+		if sessionMode != "fresh" && sessionID != "" {
+			// For sequential mode the CLI target is whichever was selected by quota;
+			// we don't have the target here, so use a blank cliKey to skip map update
+			// when sessionID is empty (handled inside UpdateAgentSession).
+			// The actual cliKey is not needed because sequential mode stores only one entry.
+			cliKey = "sequential"
+			persistSessionID = sessionID
+		}
+		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, cliKey, persistSessionID, runDirOpt); err != nil {
+			yield(nil, fmt.Errorf("failed to update agent session: %w", err))
+			return
+		}
+
+		sess, err := e.repo.GetSession(chatID)
+		if err == nil && sess != nil && (sess.CurrentAgent == "" || sess.CurrentAgent == e.agent.Config.Name) {
+			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
+		}
+		// Save final assistant response to DB session
+		if respText != "" {
+			_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+				ID:        fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),
+				Role:      "assistant",
+				Content:   respText,
+				AgentName: e.agent.Config.Name,
+				Timestamp: time.Now().UnixMilli(),
+			})
+		}
 	}
 
-	var result promptResult
-	var respText string
-	if err := json.Unmarshal(out, &result); err == nil {
-		respText = result.LastContent
-		if e.repo != nil && (result.SessionID != "" || runDirOpt.IsSome()) {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, result.SessionID, runDirOpt); err != nil {
-				yield(nil, fmt.Errorf("failed to update agent session: %w", err))
-				return
+	respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
+	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
+}
+
+// handleParallelResult combines all RunResult outputs into a single final message.
+// Session IDs are persisted per-target (keyed by CLIKey) unless sessionMode is "fresh".
+func (e *agentExecutor) handleParallelResult(
+	yield func(a2a.Event, error) bool,
+	execCtx *a2asrv.ExecutorContext,
+	results []run.RunResult,
+	chatID string,
+	runDirOpt optional.Option[string],
+	sessionMode string,
+) {
+	var combined strings.Builder
+	for _, r := range results {
+		lastContent, sessionID := parseOutput(r.Output)
+
+		// Persist session ID per CLI target (resume mode only).
+		if e.repo != nil && sessionMode != "fresh" && sessionID != "" && r.CLIKey != "" {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, r.CLIKey, sessionID, runDirOpt); err != nil {
+				log.Warn().Err(err).Str("cliKey", r.CLIKey).Msg("failed to update agent session for parallel target")
 			}
+		} else if e.repo != nil && combined.Len() == 0 {
+			// Still update runDir on the first target even in fresh mode.
+			_ = e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", "", runDirOpt)
 		}
-	} else {
-		respText = string(out)
-		if e.repo != nil && runDirOpt.IsSome() {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", runDirOpt); err != nil {
-				yield(nil, fmt.Errorf("failed to update agent session: %w", err))
-				return
-			}
+
+		if combined.Len() > 0 {
+			combined.WriteString("\n\n")
+		}
+		if r.Err != nil {
+			fmt.Fprintf(&combined, "--- %s (error) ---\n%s", r.CLIKey, r.Err.Error())
+		} else {
+			fmt.Fprintf(&combined, "--- %s ---\n%s", r.CLIKey, lastContent)
 		}
 	}
+
+	respText := combined.String()
 
 	if e.repo != nil {
 		sess, err := e.repo.GetSession(chatID)
 		if err == nil && sess != nil && (sess.CurrentAgent == "" || sess.CurrentAgent == e.agent.Config.Name) {
 			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
 		}
-		// Save final assistant response to DB session
 		if respText != "" {
 			_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
 				ID:        fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),

@@ -26,8 +26,8 @@ func TestSessionRepository(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, sess)
 
-	// 2. UpdateAgentSession should create a session and save the agent
-	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1", optional.None[string]())
+	// 2. UpdateAgentSession should create a session and save the agent with the session ID
+	err = repo.UpdateAgentSession(chatID, "agent-1", "agy/gemini-flash", "session-1", optional.None[string]())
 	assert.NoError(t, err)
 
 	// Verify session was created
@@ -38,10 +38,10 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "agent-1", sess.CurrentAgent)
 	require.Len(t, sess.Agents, 1)
 	assert.Equal(t, "agent-1", sess.Agents[0].Name)
-	assert.Equal(t, "session-1", sess.Agents[0].SessionID)
+	assert.Equal(t, "session-1", sess.Agents[0].Sessions["agy/gemini-flash"])
 
-	// 3. UpdateAgentSession for the same agent should update the session ID
-	err = repo.UpdateAgentSession(chatID, "agent-1", "session-1-updated", optional.None[string]())
+	// 3. UpdateAgentSession for the same agent+cliKey should update the session ID
+	err = repo.UpdateAgentSession(chatID, "agent-1", "agy/gemini-flash", "session-1-updated", optional.None[string]())
 	assert.NoError(t, err)
 
 	sess, err = repo.GetSession(chatID)
@@ -50,10 +50,21 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "agent-1", sess.CurrentAgent)
 	require.Len(t, sess.Agents, 1)
 	assert.Equal(t, "agent-1", sess.Agents[0].Name)
-	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
+	assert.Equal(t, "session-1-updated", sess.Agents[0].Sessions["agy/gemini-flash"])
 
-	// 4. UpdateAgentSession for a different agent should append to the list
-	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2", optional.None[string]())
+	// 4. UpdateAgentSession for a different CLI key on the same agent should add an entry
+	err = repo.UpdateAgentSession(chatID, "agent-1", "opencode/zai", "session-oc-1", optional.None[string]())
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Agents, 1)
+	assert.Equal(t, "session-1-updated", sess.Agents[0].Sessions["agy/gemini-flash"])
+	assert.Equal(t, "session-oc-1", sess.Agents[0].Sessions["opencode/zai"])
+
+	// 5. UpdateAgentSession for a different agent should append to the list
+	err = repo.UpdateAgentSession(chatID, "agent-2", "agy/gemini-flash", "session-2", optional.None[string]())
 	assert.NoError(t, err)
 
 	sess, err = repo.GetSession(chatID)
@@ -62,12 +73,11 @@ func TestSessionRepository(t *testing.T) {
 	assert.Equal(t, "agent-1", sess.CurrentAgent)
 	require.Len(t, sess.Agents, 2)
 	assert.Equal(t, "agent-1", sess.Agents[0].Name)
-	assert.Equal(t, "session-1-updated", sess.Agents[0].SessionID)
 	assert.Equal(t, "agent-2", sess.Agents[1].Name)
-	assert.Equal(t, "session-2", sess.Agents[1].SessionID)
+	assert.Equal(t, "session-2", sess.Agents[1].Sessions["agy/gemini-flash"])
 
-	// 5. UpdateAgentSession should update RunDir
-	err = repo.UpdateAgentSession(chatID, "agent-2", "session-2", optional.Some("/some/run/dir"))
+	// 6. UpdateAgentSession should update RunDir
+	err = repo.UpdateAgentSession(chatID, "agent-2", "", "", optional.Some("/some/run/dir"))
 	assert.NoError(t, err)
 
 	sess, err = repo.GetSession(chatID)
@@ -75,15 +85,27 @@ func TestSessionRepository(t *testing.T) {
 	require.NotNil(t, sess)
 	assert.Equal(t, "/some/run/dir", sess.RunDir)
 
-	// Test GetSessions
-	sessions, err := repo.GetSessions()
+	// 7. GetAgentSessions returns the correct sessions map
+	sessions2, err := repo.GetAgentSessions(chatID, "agent-1")
 	assert.NoError(t, err)
-	assert.Len(t, sessions, 1)
-	assert.Equal(t, chatID, sessions[0].ChatID)
+	require.NotNil(t, sessions2)
+	assert.Equal(t, "session-1-updated", sessions2["agy/gemini-flash"])
+	assert.Equal(t, "session-oc-1", sessions2["opencode/zai"])
+
+	// GetAgentSessions for non-existent agent returns nil
+	sessions3, err := repo.GetAgentSessions(chatID, "nonexistent")
+	assert.NoError(t, err)
+	assert.Nil(t, sessions3)
+
+	// Test GetSessions
+	allSessions, err := repo.GetSessions()
+	assert.NoError(t, err)
+	assert.Len(t, allSessions, 1)
+	assert.Equal(t, chatID, allSessions[0].ChatID)
 
 	// Save session directly to test Title saving
-	sessions[0].Title = "Test Chat Title"
-	err = repo.SaveSession(&sessions[0])
+	allSessions[0].Title = "Test Chat Title"
+	err = repo.SaveSession(&allSessions[0])
 	assert.NoError(t, err)
 
 	// Test UpdateSessionTitle

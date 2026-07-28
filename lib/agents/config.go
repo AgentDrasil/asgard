@@ -35,6 +35,16 @@ type AgentConfig struct {
 
 	// MountDirs configures additional directories to mount into the sandbox.
 	MountDirs MountConfig `yaml:"mount_dirs"`
+
+	// SessionMode controls whether the CLI session is resumed across calls.
+	// "resume" (default): reuse the previous session ID stored in DB.
+	// "fresh": always start a new session; do not persist the returned session ID.
+	SessionMode string `yaml:"session_mode"`
+
+	// RunMode controls how multiple CLI targets are executed.
+	// "sequential" (default): pick the first target with >20% quota remaining.
+	// "parallel": run ALL configured CLI targets concurrently and combine results.
+	RunMode string `yaml:"run_mode"`
 }
 
 // Validate checks the AgentConfig fields for correctness.
@@ -102,6 +112,20 @@ func (cfg *AgentConfig) Validate() error {
 		if !filepath.IsAbs(dir) {
 			return fmt.Errorf("mount readwrite directory must be an absolute path: %q", dir)
 		}
+	}
+
+	switch cfg.SessionMode {
+	case "", "resume", "fresh":
+		// valid
+	default:
+		return fmt.Errorf("session_mode must be \"resume\" or \"fresh\", got %q", cfg.SessionMode)
+	}
+
+	switch cfg.RunMode {
+	case "", "sequential", "parallel":
+		// valid
+	default:
+		return fmt.Errorf("run_mode must be \"sequential\" or \"parallel\", got %q", cfg.RunMode)
 	}
 
 	return nil

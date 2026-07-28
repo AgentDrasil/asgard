@@ -102,9 +102,12 @@ const (
 )
 
 type Agent struct {
-	Name      string      `json:"name"`
-	SessionID string      `json:"session_id"`
-	Status    AgentStatus `json:"status,omitempty"`
+	Name string `json:"name"`
+	// Sessions maps "<cli>/<model>" → session ID returned by that CLI.
+	// For sequential agents this map has at most one entry.
+	// For fresh-mode agents this map is not written.
+	Sessions map[string]string `json:"sessions,omitempty"`
+	Status   AgentStatus       `json:"status,omitempty"`
 }
 
 type SessionRepository struct {
@@ -173,8 +176,10 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, s
 	return r.SaveSession(session)
 }
 
-// UpdateAgentSession updates the session ID for a specific agent in a topic and optionally updates the run directory.
-func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, sessionID string, runDirOpt optional.Option[string]) error {
+// UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
+// optionally updates the run directory. cliKey has the format "<cli>/<model>".
+// Pass an empty sessionID to skip updating the session map entry.
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, cliKey string, sessionID string, runDirOpt optional.Option[string]) error {
 	session, err := r.GetSession(chatID)
 	if err != nil {
 		return err
@@ -195,8 +200,11 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 	found := false
 	for i, a := range session.Agents {
 		if a.Name == agentName {
-			if sessionID != "" {
-				session.Agents[i].SessionID = sessionID
+			if sessionID != "" && cliKey != "" {
+				if session.Agents[i].Sessions == nil {
+					session.Agents[i].Sessions = make(map[string]string)
+				}
+				session.Agents[i].Sessions[cliKey] = sessionID
 			}
 			found = true
 			break
@@ -204,13 +212,32 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 	}
 
 	if !found {
-		session.Agents = append(session.Agents, Agent{
-			Name:      agentName,
-			SessionID: sessionID,
-		})
+		newAgent := Agent{Name: agentName}
+		if sessionID != "" && cliKey != "" {
+			newAgent.Sessions = map[string]string{cliKey: sessionID}
+		}
+		session.Agents = append(session.Agents, newAgent)
 	}
 
 	return r.SaveSession(session)
+}
+
+// GetAgentSessions returns the sessions map for a specific agent in a chat.
+// Returns nil if the session or agent is not found.
+func (r *SessionRepository) GetAgentSessions(chatID string, agentName string) (map[string]string, error) {
+	session, err := r.GetSession(chatID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, nil
+	}
+	for _, a := range session.Agents {
+		if a.Name == agentName {
+			return a.Sessions, nil
+		}
+	}
+	return nil, nil
 }
 
 // UpdateSessionTitle updates the title of a session by chat ID.

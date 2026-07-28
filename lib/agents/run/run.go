@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
@@ -31,59 +32,43 @@ func isAllowedDir(path string, allowedDirs []string) bool {
 	return false
 }
 
-// Run checks the remaining quota for each CLI target configured on the agent.
-// It runs the bubblewrap command for the first target that has more than 20% quota remaining.
-// If no targets have more than 20% quota remaining, it returns an error.
-// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
-// string to disable status reporting.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, statusURL string) ([]byte, error) {
-	if len(agent.Config.CLI) == 0 {
-		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
-	}
-
-	var selectedTarget *agents.CLITarget
-	for _, target := range agent.Config.CLI {
-		quota := agentwrapper.CheckQuota(target.CLI, target.Model)
-		if quota > 0.20 {
-			selectedTarget = &target
-			break
-		}
-	}
-
-	if selectedTarget == nil {
-		return nil, fmt.Errorf("no CLI target with more than 20%% quota remaining is available for agent %s", agent.Config.ID)
-	}
-
-	var runDir string
+// resolveRunDir resolves the run directory for an agent invocation.
+func resolveRunDir(agent *agents.Agent, runDirOpt optional.Option[string]) (string, error) {
 	if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
 		rd := runDirOpt.Unwrap()
 		if !isAllowedDir(rd, agent.Config.RunDirs) {
-			return nil, fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
+			return "", fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
 		}
-		runDir = rd
-	} else if len(agent.Config.RunDirs) > 0 && agent.Config.RunDirs[0] != "" {
-		runDir = agent.Config.RunDirs[0]
-	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("getting user home directory: %w", err)
-		}
-		tmpDir := filepath.Join(home, "tmp")
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
-			return nil, fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
-		}
-		uuidDir := filepath.Join(tmpDir, uuid.NewString())
-		if err := os.MkdirAll(uuidDir, 0755); err != nil {
-			return nil, fmt.Errorf("creating uuid run directory %q: %w", uuidDir, err)
-		}
-		runDir = uuidDir
+		return rd, nil
 	}
-
-	// Ensure the resolved runDir exists (e.g. if it was a subdirectory under config run_dirs that was not created yet)
-	if err := os.MkdirAll(runDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
+	if len(agent.Config.RunDirs) > 0 && agent.Config.RunDirs[0] != "" {
+		return agent.Config.RunDirs[0], nil
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting user home directory: %w", err)
+	}
+	tmpDir := filepath.Join(home, "tmp")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
+	}
+	uuidDir := filepath.Join(tmpDir, uuid.NewString())
+	if err := os.MkdirAll(uuidDir, 0755); err != nil {
+		return "", fmt.Errorf("creating uuid run directory %q: %w", uuidDir, err)
+	}
+	return uuidDir, nil
+}
 
+// RunResult holds the output of a single CLI target execution.
+type RunResult struct {
+	// CLIKey is "<cli>/<model>" identifying the target that produced this result.
+	CLIKey string
+	Output []byte
+	Err    error
+}
+
+// runTarget executes a single CLI target in its own bubblewrap sandbox.
+func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusURL string) ([]byte, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -94,7 +79,7 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, *selectedTarget, prompt, session, runDir, sockDir, chatID)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
@@ -123,6 +108,8 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	agentSandboxCmd.Stderr = os.Stderr
 
 	if err := agentSandboxCmd.Start(); err != nil {
+		_ = cmdSandboxCmd.Process.Kill()
+		_, _ = cmdSandboxCmd.Process.Wait()
 		return nil, fmt.Errorf("starting agent sandbox command: %w", err)
 	}
 
@@ -160,4 +147,85 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 
 	return out, nil
+}
+
+// Run checks the remaining quota for each CLI target configured on the agent.
+// It runs the bubblewrap command for the first target that has more than 20% quota remaining.
+// If no targets have more than 20% quota remaining, it returns an error.
+// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
+// string to disable status reporting.
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, statusURL string) ([]byte, error) {
+	if len(agent.Config.CLI) == 0 {
+		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
+	}
+
+	var selectedTarget *agents.CLITarget
+	for _, target := range agent.Config.CLI {
+		quota := agentwrapper.CheckQuota(target.CLI, target.Model)
+		if quota > 0.20 {
+			selectedTarget = &target
+			break
+		}
+	}
+
+	if selectedTarget == nil {
+		return nil, fmt.Errorf("no CLI target with more than 20%% quota remaining is available for agent %s", agent.Config.ID)
+	}
+
+	runDir, err := resolveRunDir(agent, runDirOpt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure the resolved runDir exists (e.g. if it was a subdirectory under config run_dirs that was not created yet)
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
+	}
+
+	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusURL)
+}
+
+// RunAll runs ALL CLI targets on the agent concurrently and returns one RunResult per target.
+// sessions maps "<cli>/<model>" to the session ID to resume for that target.
+// Pass an empty or nil map to start fresh sessions for all targets.
+// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
+// string to disable status reporting.
+func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions map[string]string, runDirOpt optional.Option[string], chatID string, statusURL string) []RunResult {
+	if len(agent.Config.CLI) == 0 {
+		return []RunResult{{Err: fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)}}
+	}
+
+	runDir, err := resolveRunDir(agent, runDirOpt)
+	if err != nil {
+		return []RunResult{{Err: err}}
+	}
+
+	// Ensure the resolved runDir exists.
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return []RunResult{{Err: fmt.Errorf("creating run directory %q: %w", runDir, err)}}
+	}
+
+	results := make([]RunResult, len(agent.Config.CLI))
+	var wg sync.WaitGroup
+
+	for i, target := range agent.Config.CLI {
+		wg.Add(1)
+		go func(idx int, t agents.CLITarget) {
+			defer wg.Done()
+			cliKey := t.CLI + "/" + t.Model
+			sessionOpt := optional.None[string]()
+			if sid, ok := sessions[cliKey]; ok && sid != "" {
+				sessionOpt = optional.Some(sid)
+			}
+			out, err := runTarget(ctx, agent, t, prompt, sessionOpt, runDir, chatID, statusURL)
+			results[idx] = RunResult{
+				CLIKey: cliKey,
+				Output: out,
+				Err:    err,
+			}
+		}(i, target)
+	}
+
+	wg.Wait()
+	return results
 }
