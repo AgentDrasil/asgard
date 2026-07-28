@@ -88,38 +88,9 @@ func drainEvents(events iter.Seq2[a2a.Event, error]) error {
 		}
 		switch e := evt.(type) {
 		case *a2a.TaskStatusUpdateEvent:
-			if e.Status.Message != nil {
-				text := extractText(e.Status.Message)
-				switch e.Status.State {
-				case a2a.TaskStateCompleted:
-					// Final response — print to stdout.
-					fmt.Print(text)
-					fmt.Println()
-				case a2a.TaskStateWorking:
-					// Intermediate update — print entry type and short preview to stderr.
-					entryType := "update"
-					if e.Status.Message.Metadata != nil {
-						if et, ok := e.Status.Message.Metadata["entry_type"].(string); ok && et != "" {
-							entryType = et
-						}
-					}
-					preview := text
-					if len(preview) > 120 {
-						preview = preview[:120] + "…"
-					}
-					if preview != "" {
-						fmt.Fprintf(os.Stderr, "[%s] %s\n", entryType, preview)
-					}
-				}
-			}
-		case *a2a.Task:
-			// Non-streaming fallback: the server returned a completed Task directly.
-			if e.Status.Message != nil {
+			if e.Status.State == a2a.TaskStateCompleted && e.Status.Message != nil {
+				// Final response — print to stdout.
 				fmt.Print(extractText(e.Status.Message))
-				fmt.Println()
-			} else if len(e.History) > 0 {
-				lastMsg := e.History[len(e.History)-1]
-				fmt.Print(extractText(lastMsg))
 				fmt.Println()
 			}
 		}
