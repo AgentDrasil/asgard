@@ -10,31 +10,19 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 )
 
-// agentSystemPrompts holds the CLI-specific system prompt additions injected
-// before any user-supplied AGENTS.md content.
-var agentSystemPrompts = map[string]string{
-	"agy": strings.Join([]string{
-		"## Important Instructions",
-		"",
-		"- Forget the `ask_question` tool. When you want to ask the user a question, use a regular text response instead.",
-	}, "\n"),
-	"opencode": strings.Join([]string{
-		"## Important Instructions",
-		"",
-		"- Forget the `question` tool. When you want to ask the user a question, use a regular text response instead.",
-	}, "\n"),
-}
-
 // buildSystemPrompt constructs the full system prompt for the given CLI.
-// It starts with the CLI-specific instructions and appends the content of
+// It starts with the CLI-specific instructions from its SandboxSpec and appends the content of
 // agentsMDPath if the file exists.
 func buildSystemPrompt(cli string, agentsMDPath string) (string, error) {
 	var sb strings.Builder
 
-	if base, ok := agentSystemPrompts[cli]; ok {
-		sb.WriteString(base)
+	if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
+		if header := spec.SystemPromptHeader(); header != "" {
+			sb.WriteString(header)
+		}
 	}
 
 	if agentsMDPath != "" {
@@ -228,21 +216,11 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		args = append(args, "--setenv", "ASGARD_CHAT_ID", chatID)
 	}
 
+	spec := agentwrapper.GetSandboxSpec(target.CLI)
+
 	// Target-specific mounts
-	switch target.CLI {
-	case "agy":
-		geminiDir := filepath.Join(home, ".gemini")
-		if _, err := os.Stat(geminiDir); err == nil {
-			args = append(args, "--bind", geminiDir, geminiDir)
-		}
-	case "opencode":
-		dirs := []string{
-			filepath.Join(home, ".cache"),
-			filepath.Join(home, ".config"),
-			filepath.Join(home, ".local"),
-			filepath.Join(home, ".npm"),
-		}
-		for _, dir := range dirs {
+	if spec != nil {
+		for _, dir := range spec.MountDirectories(home) {
 			if _, err := os.Stat(dir); err == nil {
 				args = append(args, "--bind", dir, dir)
 			}
@@ -278,28 +256,20 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 			return nil, err
 		}
 
-		switch target.CLI {
-		case "agy":
-			promptFile, err := writeSystemPromptFile(promptHostDir, "agy", agentsMDPath)
+		if spec != nil {
+			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath)
 			if err != nil {
 				return nil, err
 			}
 			if promptFile != "" {
-				args = append(args, "--ro-bind", promptFile, filepath.Join(home, ".gemini", "GEMINI.md"))
+				if dest := spec.SystemPromptConfigPath(home); dest != "" {
+					args = append(args, "--ro-bind", promptFile, dest)
+				}
 			}
 			if skillsPath != "" {
-				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".gemini", "antigravity-cli", "skills"))
-			}
-		case "opencode":
-			promptFile, err := writeSystemPromptFile(promptHostDir, "opencode", agentsMDPath)
-			if err != nil {
-				return nil, err
-			}
-			if promptFile != "" {
-				args = append(args, "--ro-bind", promptFile, filepath.Join(home, ".config", "opencode", "AGENTS.md"))
-			}
-			if skillsPath != "" {
-				args = append(args, "--ro-bind", skillsPath, filepath.Join(home, ".config", "opencode", "skills"))
+				if dest := spec.SkillsMountPath(home); dest != "" {
+					args = append(args, "--ro-bind", skillsPath, dest)
+				}
 			}
 		}
 	}
@@ -350,14 +320,15 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	// Bind HOME
 	args = append(args, "--bind", home, home)
 
-	// Ignore auth dir for agy and opencode, and ssh dir to prevent key leak
-	agyAuthDir := filepath.Join(home, ".gemini")
-	if _, err := os.Stat(agyAuthDir); err == nil {
-		args = append(args, "--tmpfs", agyAuthDir)
-	}
-	opencodeAuthDir := filepath.Join(home, ".local", "share", "opencode")
-	if _, err := os.Stat(opencodeAuthDir); err == nil {
-		args = append(args, "--tmpfs", opencodeAuthDir)
+	// Ignore auth dir for all registered CLIs, and ssh dir to prevent key leak
+	for _, cli := range agentwrapper.GetRegisteredCLIs() {
+		if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
+			if authDir := spec.AuthDirectory(home); authDir != "" {
+				if _, err := os.Stat(authDir); err == nil {
+					args = append(args, "--tmpfs", authDir)
+				}
+			}
+		}
 	}
 	sshDir := filepath.Join(home, ".ssh")
 	if _, err := os.Stat(sshDir); err == nil {

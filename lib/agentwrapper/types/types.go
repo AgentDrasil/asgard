@@ -15,6 +15,15 @@ import (
 //	metadata  – optional extra fields (may be nil)
 type ReportFunc func(stepIndex int, source, entryType, content string, metadata map[string]any)
 
+// SandboxSpec defines the agent-specific configurations needed when setting up a bubblewrap sandbox.
+type SandboxSpec interface {
+	SystemPromptHeader() string
+	SystemPromptConfigPath(home string) string
+	SkillsMountPath(home string) string
+	MountDirectories(home string) []string
+	AuthDirectory(home string) string
+}
+
 // CLIClient defines the interface that all CLI agents must implement.
 type CLIClient interface {
 	Usage(ctx context.Context, opts UsageOptions) ([]ModelUsage, error)

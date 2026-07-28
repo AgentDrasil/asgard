@@ -122,3 +122,22 @@ func CheckQuota(cli string, model string) float64 {
 
 	return 0.0
 }
+
+// GetSandboxSpec returns the SandboxSpec for the given CLI if implemented, or nil.
+func GetSandboxSpec(cli string) types.SandboxSpec {
+	if client, ok := clients[cli]; ok {
+		if spec, ok := client.(types.SandboxSpec); ok {
+			return spec
+		}
+	}
+	return nil
+}
+
+// GetRegisteredCLIs returns all registered CLI names.
+func GetRegisteredCLIs() []string {
+	names := make([]string, 0, len(clients))
+	for name := range clients {
+		names = append(names, name)
+	}
+	return names
+}
