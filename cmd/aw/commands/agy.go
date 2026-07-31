@@ -24,7 +24,7 @@ var (
 	agySession          string
 	agyUsage            bool
 	agyModel            string
-	supportedAgyVersion = "1.1.7"
+	supportedAgyVersion = "1.1.9"
 )
 
 var agyCmd = &cobra.Command{
