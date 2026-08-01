@@ -4,115 +4,8 @@ import {
   JsonRpcTransportFactory,
   Client,
 } from "@a2a-js/sdk/client";
+import { Role, TaskState } from "@a2a-js/sdk";
 import { apiFetch } from "./api";
-
-interface NewSpecAgentCard {
-  supportedInterfaces?: Array<{ url: string; protocolBinding: string }>;
-  [key: string]: unknown;
-}
-
-// Translate from the Go server's supportedInterfaces spec to the SDK's expected format.
-async function fetchAndBridgeAgentCard(cardUrl: string): Promise<object> {
-  const res = await apiFetch(cardUrl);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch agent card: ${res.status} ${res.statusText}`);
-  }
-  const card = (await res.json()) as NewSpecAgentCard;
-
-  if ("url" in card) {
-    return card;
-  }
-
-  const ifaces = card.supportedInterfaces ?? [];
-  if (ifaces.length === 0) {
-    throw new Error("Agent card has no supportedInterfaces");
-  }
-
-  const [primary, ...rest] = ifaces;
-  return {
-    ...card,
-    url: primary.url,
-    preferredTransport: primary.protocolBinding,
-    additionalInterfaces: rest.map((i) => ({ url: i.url, transport: i.protocolBinding })),
-  };
-}
-
-// Patched fetch to bridge the Go server's taskId field to the SDK's expected taskStatusUpdateEvent name field.
-async function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await apiFetch(input, init);
-  const contentType = response.headers.get("Content-Type");
-  if (!contentType?.startsWith("text/event-stream") || !response.body) {
-    return response;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            if (buffer) {
-              controller.enqueue(encoder.encode(buffer));
-            }
-            controller.close();
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (let line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const jsonStr = line.slice(6).trim();
-                if (jsonStr) {
-                  const obj = JSON.parse(jsonStr);
-
-                  // Helper to recursively map parts -> content for the SDK parser
-                  const translateParts = (o: any) => {
-                    if (o && typeof o === "object") {
-                      if (Array.isArray(o.parts) && o.content === undefined) {
-                        o.content = o.parts;
-                      }
-                      for (const k of Object.keys(o)) {
-                        translateParts(o[k]);
-                      }
-                    }
-                  };
-                  translateParts(obj);
-
-                  if (obj.statusUpdate && obj.statusUpdate.taskId && !obj.statusUpdate.name) {
-                    obj.statusUpdate.name = `tasks/${obj.statusUpdate.taskId}`;
-                  }
-
-                  line = `data: ${JSON.stringify(obj)}`;
-                }
-              } catch (e) {
-                console.error("[patchedFetch] Failed to parse JSON:", line, e);
-              }
-            }
-            controller.enqueue(encoder.encode(line + "\n"));
-          }
-        }
-      } catch (err) {
-        console.error("[patchedFetch] Stream error:", err);
-        controller.error(err);
-      }
-    },
-  });
-
-  return new Response(stream, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
-}
 
 // Keep a cache of client instances to avoid fetching agent-card every request
 const clientCache: Record<string, Client> = {};
@@ -123,21 +16,17 @@ export async function getAgentClient(agentId: string, customBaseUrl?: string): P
   }
 
   const baseUrl = customBaseUrl || window.location.origin;
+  // The agent endpoint — createFromUrl will append /.well-known/agent-card.json
   const endpoint = `${baseUrl}/agents/${agentId}/`;
-  const cardUrl = `${endpoint}.well-known/agent-card.json`;
 
   const factory = new ClientFactory({
-    transports: [
-      new RestTransportFactory({ fetchImpl: patchedFetch }),
-      new JsonRpcTransportFactory(),
-    ],
+    transports: [new RestTransportFactory({ fetchImpl: apiFetch }), new JsonRpcTransportFactory()],
     preferredTransports: ["HTTP+JSON"],
   });
 
-  const card = await fetchAndBridgeAgentCard(cardUrl);
-  const client = await factory.createFromAgentCard(
-    card as Parameters<typeof factory.createFromAgentCard>[0],
-  );
+  // v1.0: createFromUrl fetches + normalizes the AgentCard natively.
+  // The Go server returns supportedInterfaces which the v1.0 SDK handles directly.
+  const client = await factory.createFromUrl(endpoint);
 
   clientCache[agentId] = client;
   return client;
@@ -149,6 +38,27 @@ export interface StreamCallbacks {
   onStatus?: (statusText: string, state?: string) => void;
   onError?: (err: Error) => void;
   onComplete?: () => void;
+}
+
+/** Extract plain text from a v1.0 Part array. */
+function extractTextFromParts(parts: any[]): string {
+  let text = "";
+  for (const part of parts) {
+    if (part?.content?.$case === "text") {
+      text += part.content.value;
+    }
+  }
+  return text;
+}
+
+/** Returns true if the TaskState is a terminal/final state. */
+function isFinalState(state: TaskState): boolean {
+  return (
+    state === TaskState.TASK_STATE_COMPLETED ||
+    state === TaskState.TASK_STATE_CANCELED ||
+    state === TaskState.TASK_STATE_FAILED ||
+    state === TaskState.TASK_STATE_REJECTED
+  );
 }
 
 export async function runAgentStream(
@@ -167,20 +77,28 @@ export async function runAgentStream(
 
     const sendParams = {
       message: {
-        kind: "message" as const,
         messageId: params.userMsgId,
         contextId: params.threadId,
-        role: "user" as const,
+        role: Role.ROLE_USER,
         parts: [
           {
-            kind: "text" as const,
-            text: params.prompt,
+            content: { $case: "text" as const, value: params.prompt },
+            mediaType: "text/plain",
+            filename: "",
+            metadata: undefined,
           },
         ],
+        metadata: undefined,
+        extensions: [],
+        referenceTaskIds: [],
+        taskId: "",
       },
       configuration: {
         acceptedOutputModes: ["text"],
-        state: {
+        returnImmediately: false,
+        taskPushNotificationConfig: undefined,
+        // Pass custom state via metadata (not configuration.state in v1.0)
+        metadata: {
           run_dir: params.runDir,
         },
       },
@@ -192,63 +110,88 @@ export async function runAgentStream(
     let accumulatedText = "";
 
     for await (const event of stream) {
-      const eventAny = event as any;
-      const eventKind: string = eventAny.kind ?? "";
-      const eventStatus = eventAny.status;
-      const eventParts = eventAny.parts;
-      console.log(
-        "[agent.ts] kind:",
-        eventKind,
-        "state:",
-        eventStatus?.state,
-        "final:",
-        eventAny.final,
-        "entry_type:",
-        eventStatus?.message?.metadata?.entry_type,
-      );
+      const payload = event.payload;
+      if (!payload) continue;
 
-      // Handle raw message events (kind === "message")
-      if (eventKind === "message" && eventParts) {
-        let textContent = "";
-        for (const part of eventParts) {
-          if (part.kind === "text") textContent += part.text;
-        }
+      console.log("[agent.ts] StreamResponse.$case:", payload.$case);
+
+      // Direct message from agent (no task wrapping)
+      if (payload.$case === "message") {
+        const msg = payload.value;
+        const textContent = extractTextFromParts(msg.parts);
         if (textContent) {
           accumulatedText += textContent;
           callbacks.onText(accumulatedText);
         }
+        continue;
       }
 
-      // Handle status updates (kind === "status-update")
-      if (eventKind === "status-update" && eventStatus) {
-        const state: string = eventStatus.state ?? "";
-        const msg = eventStatus.message;
-        // entry_type is now set at event level (eventAny.metadata) and message level as fallback
-        const entryType: string = eventAny.metadata?.entry_type ?? msg?.metadata?.entry_type ?? "";
-        const isFinal =
-          eventAny.final === true ||
-          state === "completed" ||
-          state === "canceled" ||
-          state === "failed";
+      // Task snapshot (initial submission or final state)
+      if (payload.$case === "task") {
+        const task = payload.value;
+        const status = task.status;
+        if (!status) continue;
+
+        const state = status.state;
+        console.log("[agent.ts] task state:", TaskState[state]);
+
+        if (status.message) {
+          const statusText = extractTextFromParts(status.message.parts);
+          if (statusText) {
+            if (isFinalState(state)) {
+              accumulatedText += statusText;
+              callbacks.onText(accumulatedText);
+            } else {
+              callbacks.onStatus?.(statusText, TaskState[state]);
+            }
+          }
+        }
+        continue;
+      }
+
+      // Incremental status update (working, completed, etc.)
+      if (payload.$case === "statusUpdate") {
+        const update = payload.value;
+        const status = update.status;
+        if (!status) continue;
+
+        const state = status.state;
+        const msg = status.message;
+
+        // entry_type is carried in metadata at event or message level
+        const entryType: string =
+          update.metadata?.["entry_type"] ?? msg?.metadata?.["entry_type"] ?? "";
 
         let statusText = "";
         if (msg?.parts) {
-          for (const part of msg.parts) {
-            if (part.kind === "text") statusText += part.text;
-            else if (part.part?.$case === "text") statusText += part.part.value;
-          }
+          statusText = extractTextFromParts(msg.parts);
         }
 
         if (!statusText) continue;
 
-        if (entryType === "agent_response" || isFinal) {
+        console.log(
+          "[agent.ts] statusUpdate state:",
+          TaskState[state],
+          "entryType:",
+          entryType,
+          "isFinal:",
+          isFinalState(state),
+        );
+
+        if (entryType === "agent_response" || isFinalState(state)) {
           // Agent response text (streaming or final) → assistant bubble
           accumulatedText += statusText;
           callbacks.onText(accumulatedText);
         } else {
           // Tool calls, steps, reasoning → thinking/activity box
-          callbacks.onStatus?.(statusText, state);
+          callbacks.onStatus?.(statusText, TaskState[state]);
         }
+        continue;
+      }
+
+      // Artifact updates — not handled by current UI, log only
+      if (payload.$case === "artifactUpdate") {
+        console.log("[agent.ts] artifactUpdate received (not handled)");
       }
     }
 

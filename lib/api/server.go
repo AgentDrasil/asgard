@@ -90,16 +90,10 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 		// Standard routes: /agents/{id}/message:stream etc.
 		mux.Handle(prefix, http.StripPrefix(agentBase, restHandler))
 
-		// Compat routes for @a2a-js/sdk@0.x which:
-		//   1. Prefixes all paths with /v1/  (e.g. /v1/message:stream)
-		//   2. Sends message.content instead of message.parts
-		v1Prefix := prefix + "v1/"
-		mux.Handle(v1Prefix, http.StripPrefix(agentBase+"/v1", rewriteContentToParts(restHandler)))
-
 		cardHandler := a2asrv.NewStaticAgentCardHandler(card)
 		mux.Handle(prefix+strings.TrimPrefix(a2asrv.WellKnownAgentCardPath, "/"), cardHandler)
 
-		log.Info().Msgf("Registered agent %s at /agents/%s/ (+ /v1/ compat)", agent.Config.Name, agent.Config.ID)
+		log.Info().Msgf("Registered agent %s at /agents/%s/", agent.Config.Name, agent.Config.ID)
 	}
 
 	mux.HandleFunc("GET /team", s.handleTeam)
