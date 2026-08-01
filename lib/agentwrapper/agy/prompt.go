@@ -6,33 +6,85 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
-
-	"github.com/AgentDrasil/asgard/lib/term"
 )
 
-// Prompt launches agy in a headless terminal with --conversation=<sessionID>
-// and --dangerously-skip-permissions, sends the given prompt text, waits for
-// the agent to return to idle (with a double-check), then reads the transcript
-// and returns structured metadata.
+// ── stream-json event types ────────────────────────────────────────────────
+
+// streamEvent is the top-level wrapper for every NDJSON line emitted by
+// `agy --output-format stream-json`.
+type streamEvent struct {
+	Event          string            `json:"event"`
+	ConversationID string            `json:"conversation_id"`
+	Init           *streamInit       `json:"init,omitempty"`
+	StepUpdate     *streamStepUpdate `json:"step_update,omitempty"`
+	Result         *streamResult     `json:"result,omitempty"`
+}
+
+type streamInit struct {
+	CWD            string   `json:"cwd"`
+	Tools          []string `json:"tools"`
+	PermissionMode string   `json:"permission_mode"`
+}
+
+type streamStepUpdate struct {
+	ConversationID  string          `json:"conversation_id"`
+	StepIndex       int             `json:"step_index"`
+	State           string          `json:"state"`
+	StepType        string          `json:"step_type"`
+	ToolName        string          `json:"tool_name,omitempty"`
+	ToolInfo        *streamToolInfo `json:"tool_info,omitempty"`
+	TextDelta       string          `json:"text_delta,omitempty"`
+	DurationSeconds float64         `json:"duration_seconds,omitempty"`
+	Usage           *streamUsage    `json:"usage,omitempty"`
+}
+
+type streamToolInfo struct {
+	Name       string           `json:"name"`
+	Parameters map[string]any   `json:"parameters,omitempty"`
+	Output     string           `json:"output,omitempty"`
+	Error      *streamToolError `json:"error,omitempty"`
+}
+
+type streamToolError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type streamUsage struct {
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	ThinkingTokens  int `json:"thinking_tokens"`
+	CacheReadTokens int `json:"cache_read_tokens"`
+	TotalTokens     int `json:"total_tokens"`
+}
+
+type streamResult struct {
+	ConversationID  string       `json:"conversation_id"`
+	Status          string       `json:"status"`
+	Response        string       `json:"response"`
+	DurationSeconds float64      `json:"duration_seconds"`
+	NumTurns        int          `json:"num_turns"`
+	Usage           *streamUsage `json:"usage,omitempty"`
+}
+
+// ── Prompt ─────────────────────────────────────────────────────────────────
+
+// Prompt runs `agy --dangerously-skip-permissions --output-format stream-json
+// -p <prompt>` and streams NDJSON events until the process exits.
 //
-// The sequence is:
-//  1. Open a headless PTY-backed terminal (220×50).
-//  2. Launch `agy --conversation=<sessionID> --dangerously-skip-permissions`.
-//  3. Wait until the statusbar reports idle (idle #1 – startup idle).
-//  4. Send the prompt text followed by Enter.
-//  5. Wait until idle again (idle #2 – post-response idle).
-//  6. Sleep 200 ms, then wait until idle once more (idle #3 – double-check).
-//  7. Exit agy cleanly (/exit + Enter).
-//  8. Read the last line of ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl.
-//  9. Parse the statusline for token metadata and return a PromptResult.
+// Compared to the old PTY-based approach, this requires no terminal emulation,
+// no statusline polling, and no transcript file tailing. The agy process
+// manages its own I/O and exits cleanly when done.
+//
+// Session resumption is supported via --conversation=<sessionID>.
+// Model selection is supported via --model <model>.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	runDir := opts.Dir
 	if runDir == "" {
@@ -46,381 +98,140 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("ensuring workspace is trusted: %w", err)
 	}
 
-	sessionID := opts.SessionID
-	isNewSession := sessionID == ""
-
-	t := term.NewTerm(termCols, termRows)
-	defer t.Close()
-
-	argv := []string{"agy"}
-	if !isNewSession {
-		argv = append(argv, "--conversation="+sessionID)
+	argv := []string{"agy", "--dangerously-skip-permissions", "--output-format", "stream-json", "--add-dir", runDir}
+	if opts.SessionID != "" {
+		argv = append(argv, "--conversation="+opts.SessionID)
 	}
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
 	}
-	argv = append(argv, "--dangerously-skip-permissions")
+	argv = append(argv, "-p", prompt)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")
 
-	awSessionID := opts.SessionID
-	if awSessionID == "" {
-		awSessionID = uuid.NewString()
-	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = runDir
 
-	// ── resume diff: count existing lines before launching ────────────────────
-	// We need the transcript path early; we use awSessionID as a best-guess
-	// (it is the same as sessionID when resuming).
-	startOffset := 0
-	if !isNewSession {
-		startOffset = countTranscriptLines(awSessionID)
-		log.Debug().Int("start_offset", startOffset).Msg("agy/prompt: transcript resume offset")
-	}
-
-	log.Debug().Str("session_id", awSessionID).Msg("agy/prompt: launching agy")
-	done, err := t.RunCommandInDir(context.Background(), argv, runDir, []string{"AW_SESSION_ID=" + awSessionID})
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("launching agy: %w", err)
+		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
-	handleErr := func(err error) error {
-		if ctx.Err() != nil {
-			CleanExit(t, done)
-			return ctx.Err()
-		}
-		return err
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting agy: %w", err)
 	}
 
-	// ── idle #1: wait for startup idle ────────────────────────────────────────
-	log.Debug().Msg("agy/prompt: waiting for startup idle (#1)")
-	if timedOut, err := pollUntilIdle(ctx, awSessionID, done, opts.StartupDelayOrDefault()); err != nil {
-		return nil, handleErr(err)
-	} else if timedOut {
-		log.Warn().Msg("agy/prompt: startup idle (#1) timed out")
-	} else {
-		log.Debug().Msg("agy/prompt: startup idle reached (#1)")
-	}
+	// textByStep accumulates text_delta across ACTIVE→DONE events for the same
+	// step_index so we can deliver a single ReportCallback per response step.
+	textByStep := make(map[int]string)
 
-	// ── wait until screen contains "(Google AI " before sending prompt ───
-	if err := waitForSubscriptionLevel(ctx, t, done, opts.StartupDelayOrDefault()); err != nil {
-		return nil, handleErr(err)
-	}
-
-	// ── send the prompt ───────────────────────────────────────────────────────
-	if err := t.SendString(prompt); err != nil {
-		return nil, handleErr(fmt.Errorf("sending prompt: %w", err))
-	}
-	if err := t.SendKeys(term.KeyEnter); err != nil {
-		return nil, handleErr(fmt.Errorf("sending Enter: %w", err))
-	}
-	log.Debug().Msg("agy/prompt: prompt sent")
-
-	// ── background transcript watcher ─────────────────────────────────────────
-	watcherDone := make(chan struct{})
-	if opts.ReportCallback != nil {
-		go watchTranscript(ctx, awSessionID, opts.SessionID, startOffset, opts.ReportCallback, watcherDone)
-	} else {
-		close(watcherDone)
-	}
-
-	// ── idle #2: wait for the agent to finish responding ──────────────────────
-	log.Debug().Msg("agy/prompt: waiting for post-response idle (#2)")
-	if timedOut, err := pollUntilIdle(ctx, awSessionID, done, opts.ResponseDelayOrDefault()); err != nil {
-		if opts.ReportCallback != nil {
-			close(watcherDone)
-		}
-		return nil, handleErr(err)
-	} else if timedOut {
-		log.Warn().Msg("agy/prompt: post-response idle (#2) timed out")
-	} else {
-		log.Debug().Msg("agy/prompt: post-response idle reached (#2)")
-	}
-
-	// ── idle #3: sleep 200 ms, then double-check idle ────────────────────────
-	select {
-	case <-time.After(200 * time.Millisecond):
-	case <-ctx.Done():
-		if opts.ReportCallback != nil {
-			close(watcherDone)
-		}
-		return nil, handleErr(ctx.Err())
-	}
-
-	log.Debug().Msg("agy/prompt: waiting for double-check idle (#3)")
-	if timedOut, err := pollUntilIdle(ctx, awSessionID, done, opts.ResponseDelayOrDefault()); err != nil {
-		if opts.ReportCallback != nil {
-			close(watcherDone)
-		}
-		return nil, handleErr(err)
-	} else if timedOut {
-		log.Warn().Msg("agy/prompt: double-check idle (#3) timed out")
-	} else {
-		log.Debug().Msg("agy/prompt: double-check idle reached (#3)")
-	}
-
-	// ── stop the watcher before exiting ──────────────────────────────────────
-	if opts.ReportCallback != nil {
-		close(watcherDone)
-	}
-
-	// ── exit agy cleanly ─────────────────────────────────────────────────────
-	CleanExit(t, done)
-
-	// ── parse statusline for token metadata ───────────────────────────────────
-	parsedSessionID, inputTokens, maxTokens, remaining := parseStatusLineFromSession(awSessionID)
-	if parsedSessionID != "" {
-		sessionID = parsedSessionID
-	}
-
-	// ── read the last transcript line ─────────────────────────────────────────
-	lastContent, err := readLastTranscriptContent(sessionID)
-	if err != nil {
-		// Non-fatal: log and continue with an empty string.
-		log.Warn().Err(err).Str("session_id", sessionID).Msg("agy/prompt: could not read transcript")
-		lastContent = ""
-	}
-
-	return &types.PromptResult{
-		SessionID:   sessionID,
-		InputTokens: inputTokens,
-		MaxTokens:   maxTokens,
-		Remaining:   remaining,
-		LastContent: lastContent,
-	}, nil
-}
-
-// waitForSubscriptionLevel polls the terminal screen buffer until a line containing "(Google AI " is found,
-// or until timeout/cancellation occurs.
-func waitForSubscriptionLevel(ctx context.Context, t *term.Term, done <-chan error, timeout time.Duration) error {
-	log.Debug().Msg("agy/prompt: waiting for screen to display subscription level")
-	screenTimeout := time.After(timeout)
-	screenTicker := time.NewTicker(100 * time.Millisecond)
-	defer screenTicker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-done:
-			return fmt.Errorf("agy exited unexpectedly: %w", err)
-		case <-screenTimeout:
-			log.Warn().Msg("agy/prompt: waiting for subscription level timed out")
-			return nil
-		case <-screenTicker.C:
-			for _, line := range t.Screen() {
-				if strings.Contains(line, "(Google AI ") {
-					return nil
-				}
-			}
-		}
-	}
-}
-
-// fullTranscriptEntry is a richer transcript line shape used for classification.
-type fullTranscriptEntry struct {
-	StepIndex int              `json:"step_index"`
-	Source    string           `json:"source"`
-	Type      string           `json:"type"`
-	Content   string           `json:"content"`
-	ToolCalls []map[string]any `json:"tool_calls"`
-}
-
-// classifyEntry returns the entryType string for a transcript entry.
-func classifyEntry(e *fullTranscriptEntry) string {
-	switch e.Type {
-	case "CHECKPOINT", "CONVERSATION_HISTORY", "SYSTEM_MESSAGE", "USER_INPUT":
-		return "ignore"
-	case "PLANNER_RESPONSE":
-		if len(e.ToolCalls) > 0 {
-			return "tool_call"
-		}
-		return "agent_response"
-	default:
-		// Any other non-ignored type (e.g. RUN_COMMAND, LIST_DIRECTORY, VIEW_FILE, GREP_SEARCH) is a tool call / result
-		return "tool_call"
-	}
-}
-
-// transcriptPath returns the path to the transcript.jsonl file for the given sessionID.
-func transcriptPath(sessionID string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("determining home directory: %w", err)
-	}
-	return filepath.Join(home, ".gemini", "antigravity-cli", "brain", sessionID,
-		".system_generated", "logs", "transcript.jsonl"), nil
-}
-
-// countTranscriptLines returns the number of non-empty lines currently in the
-// transcript file. Used to establish a resume offset before launching agy.
-func countTranscriptLines(sessionID string) int {
-	path, err := transcriptPath(sessionID)
-	if err != nil {
-		return 0
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return 0
-	}
-	defer func() { _ = f.Close() }()
-
-	count := 0
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 4*1024*1024)
-	scanner.Buffer(buf, len(buf))
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
-			count++
-		}
-	}
-	return count
-}
-
-// watchTranscript polls the transcript file every 500 ms and calls report for
-// each new non-empty line found after startOffset. It stops when done is closed.
-func watchTranscript(ctx context.Context, awSessionID string, initialSessionID string, startOffset int, report types.ReportFunc, done <-chan struct{}) {
-	realSessionID := initialSessionID
-
-	currentLine := 0
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			// One final drain before returning.
-			if realSessionID == "" {
-				realSessionID, _, _, _ = parseStatusLineFromSession(awSessionID)
-			}
-			if realSessionID != "" {
-				if path, err := transcriptPath(realSessionID); err == nil {
-					readNewLines(path, &currentLine, startOffset, report)
-				}
-			}
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if realSessionID == "" {
-				realSessionID, _, _, _ = parseStatusLineFromSession(awSessionID)
-			}
-			if realSessionID != "" {
-				if path, err := transcriptPath(realSessionID); err == nil {
-					readNewLines(path, &currentLine, startOffset, report)
-				}
-			}
-		}
-	}
-}
-
-// readNewLines reads all lines in path after the resume offset + currentLine
-// and advances currentLine. Each parsed entry is classified and reported.
-func readNewLines(path string, currentLine *int, startOffset int, report types.ReportFunc) {
-	f, err := os.Open(path)
-	if err != nil {
-		return // file may not exist yet
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 64*1024*1024)
-	scanner.Buffer(buf, len(buf))
-
-	lineIdx := 0
-	for scanner.Scan() {
-		raw := scanner.Text()
-		if strings.TrimSpace(raw) == "" {
-			lineIdx++
-			continue
-		}
-		// Skip lines we already know about (pre-existing + already reported)
-		if lineIdx < startOffset+*currentLine {
-			lineIdx++
-			continue
-		}
-
-		var entry fullTranscriptEntry
-		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-			lineIdx++
-			*currentLine++
-			continue
-		}
-
-		// Skip checkpoints — they carry no useful content.
-		if entry.Type == "CHECKPOINT" {
-			lineIdx++
-			*currentLine++
-			continue
-		}
-
-		entryType := classifyEntry(&entry)
-		if entryType == "ignore" {
-			lineIdx++
-			*currentLine++
-			continue
-		}
-
-		var metadata map[string]any
-		if entry.Type != "" {
-			metadata = map[string]any{"raw_type": entry.Type}
-		}
-		if len(entry.ToolCalls) > 0 {
-			if metadata == nil {
-				metadata = make(map[string]any)
-			}
-			metadata["tool_calls"] = entry.ToolCalls
-		}
-		report(startOffset+*currentLine, entry.Source, entryType, entry.Content, metadata)
-
-		lineIdx++
-		*currentLine++
-	}
-}
-
-// transcriptLine is the minimal shape we need from each JSONL line.
-type transcriptLine struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-}
-
-// readLastTranscriptContent reads the last line of
-// ~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/transcript.jsonl
-// that is not of type CHECKPOINT, and returns its "content" field.
-func readLastTranscriptContent(sessionID string) (string, error) {
-	path, err := transcriptPath(sessionID)
-	if err != nil {
-		return "", fmt.Errorf("determining transcript path: %w", err)
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("opening transcript %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
+	var sessionID string
 	var lastContent string
-	scanner := bufio.NewScanner(f)
-	// Use a large buffer for potentially long lines.
+	var inputTokens int
+
+	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 4*1024*1024)
 	scanner.Buffer(buf, len(buf))
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var entry transcriptLine
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return "", fmt.Errorf("parsing transcript JSON: %w", err)
+
+		var ev streamEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			log.Warn().Err(err).Str("line", line).Msg("agy/prompt: failed to parse stream event")
+			continue
 		}
-		if entry.Type != "CHECKPOINT" {
-			lastContent = entry.Content
+
+		switch ev.Event {
+		case "init":
+			sessionID = ev.ConversationID
+			log.Debug().Str("session_id", sessionID).Msg("agy/prompt: session started")
+
+		case "step_update":
+			if ev.StepUpdate == nil {
+				continue
+			}
+			su := ev.StepUpdate
+
+			// Accumulate text_delta for agent_response steps so we can fire a
+			// single callback with the complete text when the step is DONE.
+			if su.StepType == "agent_response" && su.TextDelta != "" {
+				textByStep[su.StepIndex] += su.TextDelta
+			}
+
+			if opts.ReportCallback == nil {
+				continue
+			}
+
+			switch {
+			case su.StepType == "tool" && su.State == "ACTIVE" && su.ToolName != "":
+				// Tool invocation started — report name + parameters.
+				metadata := map[string]any{"tool_name": su.ToolName}
+				if su.ToolInfo != nil && len(su.ToolInfo.Parameters) > 0 {
+					metadata["parameters"] = su.ToolInfo.Parameters
+				}
+				opts.ReportCallback(su.StepIndex, "TOOL", "tool_call", su.ToolName, metadata)
+
+			case su.StepType == "tool" && su.State == "DONE" && su.ToolInfo != nil:
+				// Tool completed — report output or error.
+				metadata := map[string]any{"tool_name": su.ToolName}
+				content := su.ToolInfo.Output
+				if su.ToolInfo.Error != nil {
+					content = su.ToolInfo.Error.Message
+					metadata["error_type"] = su.ToolInfo.Error.Type
+				}
+				opts.ReportCallback(su.StepIndex, "TOOL", "tool_result", content, metadata)
+
+			case su.StepType == "agent_response" && su.State == "DONE":
+				// Agent response step complete — deliver the full accumulated text.
+				full := textByStep[su.StepIndex]
+				delete(textByStep, su.StepIndex)
+				if full != "" {
+					opts.ReportCallback(su.StepIndex, "MODEL", "agent_response", full, nil)
+				}
+			}
+
+		case "result":
+			if ev.Result == nil {
+				continue
+			}
+			r := ev.Result
+			if r.ConversationID != "" {
+				sessionID = r.ConversationID
+			}
+			lastContent = r.Response
+			if r.Usage != nil {
+				inputTokens = r.Usage.InputTokens
+			}
+			log.Debug().
+				Str("status", r.Status).
+				Str("session_id", sessionID).
+				Int("num_turns", r.NumTurns).
+				Msg("agy/prompt: result received")
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("reading transcript: %w", err)
+		log.Warn().Err(err).Msg("agy/prompt: scanner error")
 	}
-	return lastContent, nil
+
+	// Wait for the subprocess. A non-zero exit after successful output is
+	// non-fatal — log and continue.
+	if err := cmd.Wait(); err != nil {
+		log.Warn().Err(err).Msg("agy/prompt: agy exited with error")
+	}
+
+	return &types.PromptResult{
+		SessionID:   sessionID,
+		InputTokens: inputTokens,
+		LastContent: lastContent,
+	}, nil
 }
+
+// ── workspace trust ────────────────────────────────────────────────────────
 
 func ensureWorkspaceTrusted(dir string) error {
 	absDir, err := filepath.Abs(dir)

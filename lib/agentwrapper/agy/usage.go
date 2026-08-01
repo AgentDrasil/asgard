@@ -17,14 +17,99 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
-
 	"github.com/AgentDrasil/asgard/lib/term"
 )
 
 const (
 	termCols uint16 = 220
 	termRows uint16 = 50
+
+	usagePollInterval = 200 * time.Millisecond
 )
+
+// statuslineDir is the directory where agy writes per-session statusline JSON files.
+var statuslineDir = "/tmp/agystatusline"
+
+// ── idle polling (used by Usage only) ─────────────────────────────────────
+
+// isIdle reads the statusline JSON for the given session ID and returns true
+// if the agent state is idle, background tasks are empty, and all subagents
+// are idle.
+func isIdle(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	filePath := filepath.Join(statuslineDir, sessionID+".json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return false
+	}
+
+	type subagent struct {
+		Status string `json:"status"`
+	}
+	type payload struct {
+		AgentState string     `json:"agent_state"`
+		Subagents  []subagent `json:"subagents"`
+		TaskCount  int        `json:"task_count"`
+	}
+
+	var p payload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return false
+	}
+	if !strings.EqualFold(p.AgentState, "idle") {
+		return false
+	}
+	if p.TaskCount > 0 {
+		return false
+	}
+	for _, s := range p.Subagents {
+		if !strings.EqualFold(s.Status, "idle") {
+			return false
+		}
+	}
+	return true
+}
+
+// pollUntilIdle polls the statusline JSON every usagePollInterval until isIdle
+// returns true or timeout elapses.
+func pollUntilIdle(ctx context.Context, sessionID string, done <-chan error, timeout time.Duration) (timedOut bool, err error) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	tick := time.NewTicker(usagePollInterval)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-tick.C:
+			if isIdle(sessionID) {
+				return false, nil
+			}
+		case <-timer.C:
+			return true, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case err := <-done:
+			return false, fmt.Errorf("agy exited unexpectedly: %w", err)
+		}
+	}
+}
+
+// cleanExit sends /exit to the running agy process and waits up to 5 s for
+// it to exit.
+func cleanExit(t *term.Term, done <-chan error) {
+	log.Debug().Msg("agy/usage: executing clean exit (/exit + Enter)")
+	_ = t.SendString("/exit\r")
+	exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-done:
+		log.Debug().Msg("agy/usage: process exited after clean exit")
+	case <-exitCtx.Done():
+		log.Warn().Msg("agy/usage: process did not exit after clean exit")
+	}
+}
 
 type QuotaEntry struct {
 	RemainingFraction float64 `json:"remaining_fraction"`
@@ -149,7 +234,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	handleErr := func(err error) error {
 		if ctx.Err() != nil {
-			CleanExit(t, done)
+			cleanExit(t, done)
 			return ctx.Err()
 		}
 		return err
@@ -187,7 +272,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	}
 
 	// Exit: /exit + Enter.
-	CleanExit(t, done)
+	cleanExit(t, done)
 
 	result := make([]types.ModelUsage, 0, len(models))
 	for _, mName := range models {
