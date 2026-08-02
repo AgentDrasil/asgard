@@ -30,13 +30,56 @@ let loadGen = 0;
 const activeSession = ref<ChatSession | null>(null);
 const activeAgent = ref<AgentInfo | null>(null);
 
+// mergeToolMessages collapses consecutive tool_call → tool_result pairs in
+// a flat DB message list into a single activity bubble per tool invocation.
+// Two messages are treated as a pair when:
+//  - they are adjacent in the list
+//  - the first has role "tool_call" and the second has role "tool_result"
+//  - they share the same step_index (when present)
+//
+// The merged message keeps the tool_call role/activityType and concatenates
+// the content as "call\nresult", separating distinct pairs with a blank line.
+function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  let i = 0;
+  while (i < msgs.length) {
+    const cur = msgs[i];
+    const next = msgs[i + 1];
+    const curIsCall = cur.role === "tool_call";
+    const nextIsResult =
+      next?.role === "tool_result" &&
+      (cur.stepIndex == null || next.stepIndex == null || cur.stepIndex === next.stepIndex);
+
+    if (curIsCall && nextIsResult) {
+      // Check if the previous out entry is also a merged tool bubble we can append to
+      const prev = out[out.length - 1];
+      if (prev?.role === "tool_call" && (prev?.activityType === "TOOL_CALL" || prev?.activityType === "TOOL")) {
+        prev.activityType = "TOOL";
+        // Append this pair to the running tool log with a special delimiter
+        prev.content = prev.content + "\n---TOOL_ITEM_DELIMITER---\n" + cur.content + "\n---TOOL_ITEM_DELIMITER---\n" + next.content;
+      } else {
+        out.push({
+          ...cur,
+          activityType: "TOOL",
+          content: cur.content + "\n---TOOL_ITEM_DELIMITER---\n" + next.content,
+        });
+      }
+      i += 2; // consumed both
+    } else {
+      out.push(cur);
+      i += 1;
+    }
+  }
+  return out;
+}
+
 const loadSessionData = async (id: string) => {
   activeSessionId.value = id;
   const myGen = ++loadGen;
   const session = await getSession(id);
   // Bail out if a newer load has started or we're in the middle of a stream
   if (myGen !== loadGen || isStreaming.value) return;
-  messages.value = session?.messages ?? [];
+  messages.value = mergeToolMessages(session?.messages ?? []);
 };
 
 const handleSelectSession = (id: string) => {
@@ -181,6 +224,7 @@ const handleSendMessage = async (text: string) => {
   // Placeholders for assistant response & reasoning details
   let hasAssistantMsg = false;
   let hasReasoningMsg = false;
+  let toolLog = ""; // accumulated tool activity text for the single shared bubble
 
   const refreshSessionTitle = async (chatID: string) => {
     const sess = await getSession(chatID);
@@ -237,39 +281,42 @@ const handleSendMessage = async (text: string) => {
           );
         }
       },
-      onStatus: (statusText) => {
-        console.log(
-          "[App.vue] onStatus called, length:",
-          statusText.length,
-          "hasReasoningMsg:",
-          hasReasoningMsg,
-        );
-        // Handle step/tool/reasoning status updates
-        if (statusText) {
-          if (!hasReasoningMsg) {
-            const reasoningObj: ChatMessage = {
-              id: reasoningMsgId,
-              role: "tool_call",
-              activityType: "TOOL_CALL",
-              content: statusText,
-              timestamp: Date.now(),
-            };
-            if (hasAssistantMsg) {
-              const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
-              if (assistantIdx > -1) {
-                messages.value.splice(assistantIdx, 0, reasoningObj);
-              } else {
-                messages.value.push(reasoningObj);
-              }
+      onStatus: (statusText, entryType) => {
+        if (!statusText) return;
+
+        // Accumulate all tool activity into a single shared log.
+        // New tool invocations (tool_call) are separated from the previous pair
+        // by a blank line; tool_result is appended directly on the next line.
+        if (!toolLog) {
+          toolLog = statusText;
+        } else {
+          toolLog += "\n---TOOL_ITEM_DELIMITER---\n" + statusText;
+        }
+
+        const exists = messages.value.some((m) => m.id === reasoningMsgId);
+        if (!exists) {
+          const bubble: ChatMessage = {
+            id: reasoningMsgId,
+            role: "tool_call",
+            activityType: "TOOL",
+            content: toolLog,
+            timestamp: Date.now(),
+          };
+          if (hasAssistantMsg) {
+            const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
+            if (assistantIdx > -1) {
+              messages.value.splice(assistantIdx, 0, bubble);
             } else {
-              messages.value.push(reasoningObj);
+              messages.value.push(bubble);
             }
-            hasReasoningMsg = true;
           } else {
-            messages.value = messages.value.map((m) =>
-              m.id === reasoningMsgId ? { ...m, content: statusText } : m,
-            );
+            messages.value.push(bubble);
           }
+          if (!hasReasoningMsg) hasReasoningMsg = true;
+        } else {
+          messages.value = messages.value.map((m) =>
+            m.id === reasoningMsgId ? { ...m, content: toolLog } : m,
+          );
         }
       },
       onError: async (err) => {

@@ -35,7 +35,7 @@ export async function getAgentClient(agentId: string, customBaseUrl?: string): P
 export interface StreamCallbacks {
   onText: (text: string) => void;
   onReasoning?: (text: string) => void;
-  onStatus?: (statusText: string, state?: string) => void;
+  onStatus?: (statusText: string, entryType?: string, state?: string) => void;
   onError?: (err: Error) => void;
   onComplete?: () => void;
 }
@@ -142,7 +142,7 @@ export async function runAgentStream(
               accumulatedText += statusText;
               callbacks.onText(accumulatedText);
             } else {
-              callbacks.onStatus?.(statusText, TaskState[state]);
+              callbacks.onStatus?.(statusText, entryType, TaskState[state]);
             }
           }
         }
@@ -178,13 +178,16 @@ export async function runAgentStream(
           isFinalState(state),
         );
 
-        if (entryType === "agent_response" || isFinalState(state)) {
+        const isAgentResponse = entryType === "agent_response";
+        const isFinalResult = isFinalState(state) && !entryType;
+
+        if (isAgentResponse || isFinalResult) {
           // Agent response text (streaming or final) → assistant bubble
           accumulatedText += statusText;
           callbacks.onText(accumulatedText);
         } else {
           // Tool calls, steps, reasoning → thinking/activity box
-          callbacks.onStatus?.(statusText, TaskState[state]);
+          callbacks.onStatus?.(statusText, entryType, TaskState[state]);
         }
         continue;
       }

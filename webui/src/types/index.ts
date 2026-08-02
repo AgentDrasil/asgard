@@ -12,7 +12,7 @@ export interface MessagePart {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "system" | "developer" | "reasoning" | "activity" | "tool_call";
+  role: "user" | "assistant" | "system" | "developer" | "reasoning" | "activity" | "tool_call" | "tool_result";
   content: string;
   agentName?: string;
   timestamp?: number;
