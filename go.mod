@@ -1,11 +1,11 @@
 module github.com/AgentDrasil/asgard
 
-go 1.26.4
+go 1.26.5
 
 require github.com/goccy/go-yaml v1.19.2
 
 require (
-	github.com/a2aproject/a2a-go/v2 v2.3.1
+	github.com/a2aproject/a2a-go/v2 v2.4.0
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/libtnb/sqlite v1.2.1
@@ -14,11 +14,11 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/genai v1.65.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/genai v1.66.0
+	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/driver/postgres v1.6.0
+	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
 )
 
@@ -65,10 +65,10 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
-	google.golang.org/api v0.290.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260723215102-3fe39f3c1018 // indirect
-	modernc.org/libc v1.74.3 // indirect
+	google.golang.org/api v0.291.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260729162451-8efbd57d26e0 // indirect
+	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.54.0 // indirect
+	modernc.org/sqlite v1.55.0 // indirect
 )
