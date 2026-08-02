@@ -24,6 +24,30 @@ const emit = defineEmits<{
 
 const currentTheme = ref("dark");
 const isReloading = ref(false);
+const viewMode = ref<"list" | "agent">("list");
+const collapsedGroups = ref<Record<string, boolean>>({});
+
+const toggleGroupCollapse = (agentName: string) => {
+  collapsedGroups.value[agentName] = !collapsedGroups.value[agentName];
+};
+
+const toggleViewMode = (mode: "list" | "agent") => {
+  viewMode.value = mode;
+};
+
+// Computed property to group sessions by currentAgent
+import { computed } from "vue";
+const groupedSessions = computed(() => {
+  const groups: Record<string, ChatSession[]> = {};
+  for (const session of props.sessions) {
+    const agentKey = session.currentAgent || "Unknown Agent";
+    if (!groups[agentKey]) {
+      groups[agentKey] = [];
+    }
+    groups[agentKey].push(session);
+  }
+  return groups;
+});
 
 const reloadApp = async () => {
   if (isReloading.value) return;
@@ -164,9 +188,8 @@ const toggleTheme = () => {
       </button>
     </div>
 
-    <!-- Sessions List -->
-    <div class="flex-1 overflow-y-auto p-2 space-y-1 w-full flex flex-col items-center">
-      <!-- New Chat Button in List -->
+    <!-- New Chat Button (above view mode switch) -->
+    <div :class="['px-2 pt-1 pb-1 w-full flex flex-col items-center']">
       <button
         @click="emit('new-chat')"
         :class="[
@@ -178,42 +201,142 @@ const toggleTheme = () => {
         <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
         <span v-if="isOpen">New chat</span>
       </button>
+    </div>
 
+    <!-- View Mode Switcher (List Mode vs Group by Agent Mode) -->
+    <div v-if="isOpen" class="px-3 pb-2 w-full">
+      <div class="join w-full bg-base-200/60 p-0.5 rounded-lg">
+        <button
+          @click="toggleViewMode('list')"
+          :class="[
+            'join-item btn btn-xs flex-1 border-none font-medium gap-1.5',
+            viewMode === 'list'
+              ? 'btn-primary shadow-xs'
+              : 'btn-ghost text-base-content/70 hover:text-base-content',
+          ]"
+          title="List View Mode"
+        >
+          <Icon icon="mynaui:list-solid" class="h-4 w-4 fill-current" />
+          <span>List</span>
+        </button>
+        <button
+          @click="toggleViewMode('agent')"
+          :class="[
+            'join-item btn btn-xs flex-1 border-none font-medium gap-1.5',
+            viewMode === 'agent'
+              ? 'btn-primary shadow-xs'
+              : 'btn-ghost text-base-content/70 hover:text-base-content',
+          ]"
+          title="Group by Agent Model"
+        >
+          <Icon icon="mynaui:grid" class="h-4 w-4 fill-current" />
+          <span>By Agent</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Sessions List -->
+    <div class="flex-1 overflow-y-auto p-2 space-y-1 w-full flex flex-col items-center">
       <template v-if="isOpen">
         <div v-if="sessions.length === 0" class="text-xs text-base-content/50 text-center py-6">
           No active sessions
         </div>
-        <div
-          v-for="session in sessions"
-          :key="session.chatID"
-          @click="emit('select-session', session.chatID)"
-          :class="[
-            'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-full',
-            activeSessionId === session.chatID
-              ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
-              : 'hover:bg-base-200 text-base-content/85',
-          ]"
-        >
-          <span class="truncate pr-2 select-none">{{ session.title || "Untitled Chat" }}</span>
 
-          <button
-            @click.stop="emit('delete-session', session.chatID)"
+        <!-- 1. List Mode -->
+        <template v-else-if="viewMode === 'list'">
+          <div
+            v-for="session in sessions"
+            :key="session.chatID"
+            @click="emit('select-session', session.chatID)"
             :class="[
-              'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6',
+              'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-full',
               activeSessionId === session.chatID
-                ? 'text-primary-content hover:bg-white/20'
-                : 'text-error hover:bg-error/10',
+                ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
+                : 'hover:bg-base-200 text-base-content/85',
             ]"
-            title="Delete session"
           >
-            <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
-          </button>
-        </div>
+            <span class="truncate pr-2 select-none">{{ session.title || "Untitled Chat" }}</span>
+
+            <button
+              @click.stop="emit('delete-session', session.chatID)"
+              :class="[
+                'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6',
+                activeSessionId === session.chatID
+                  ? 'text-primary-content hover:bg-white/20'
+                  : 'text-error hover:bg-error/10',
+              ]"
+              title="Delete session"
+            >
+              <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
+            </button>
+          </div>
+        </template>
+
+        <!-- 2. Group by Agent Model Mode -->
+        <template v-else-if="viewMode === 'agent'">
+          <div
+            v-for="(agentSessions, agentName) in groupedSessions"
+            :key="agentName"
+            class="w-full space-y-1 mb-2"
+          >
+            <div
+              @click="toggleGroupCollapse(agentName)"
+              class="px-2 py-1 flex items-center justify-between text-xs font-semibold text-primary/80 uppercase tracking-wider select-none cursor-pointer hover:bg-base-200/50 rounded-md transition-colors"
+            >
+              <div class="flex items-center gap-1.5 min-w-0">
+                <Icon
+                  icon="mynaui:chevron-down"
+                  :class="[
+                    'h-3.5 w-3.5 fill-current shrink-0 transition-transform duration-200',
+                    collapsedGroups[agentName] ? '-rotate-90' : '',
+                  ]"
+                />
+                <Icon icon="mynaui:bot" class="h-4 w-4 fill-current text-primary shrink-0" />
+                <span class="truncate">{{ agentName }}</span>
+              </div>
+              <span class="text-[10px] text-base-content/40 font-normal shrink-0"
+                >({{ agentSessions.length }})</span
+              >
+            </div>
+
+            <template v-if="!collapsedGroups[agentName]">
+              <div
+                v-for="session in agentSessions"
+                :key="session.chatID"
+                @click="emit('select-session', session.chatID)"
+                :class="[
+                  'group flex items-center justify-between pl-4 pr-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-full',
+                  activeSessionId === session.chatID
+                    ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
+                    : 'hover:bg-base-200 text-base-content/85',
+                ]"
+              >
+                <span class="truncate pr-2 select-none">{{
+                  session.title || "Untitled Chat"
+                }}</span>
+
+                <button
+                  @click.stop="emit('delete-session', session.chatID)"
+                  :class="[
+                    'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6',
+                    activeSessionId === session.chatID
+                      ? 'text-primary-content hover:bg-white/20'
+                      : 'text-error hover:bg-error/10',
+                  ]"
+                  title="Delete session"
+                >
+                  <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
+                </button>
+              </div>
+            </template>
+          </div>
+        </template>
       </template>
     </div>
 
-    <!-- Action Menu (Horizontal with icon only) -->
+    <!-- Action Menu (Horizontal with icon only, visible when sidebar is open) -->
     <div
+      v-if="isOpen"
       class="px-3 py-1 flex items-center justify-around gap-1 w-full border-t border-base-100/50"
     >
       <button
