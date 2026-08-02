@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import type { AgentInfo } from "../types";
-import { getSubdirs } from "../lib/api";
+import { getDirInfo, getSubdirs } from "../lib/api";
 
 const props = defineProps<{
   agents: AgentInfo[];
@@ -29,6 +29,7 @@ const subSegments = ref<string[]>([]);
 const levelSubdirs = ref<string[][]>([]);
 const loadingLevels = ref<boolean[]>([]);
 const isSyncingFromProps = ref(false);
+const selectedGitRoot = ref("");
 
 const currentAgent = computed(() => {
   return props.agents.find((a) => a.id === props.selectedAgentId) || null;
@@ -52,6 +53,19 @@ const computedSelectedDir = computed(() => {
   }
   return combined;
 });
+
+watch(
+  computedSelectedDir,
+  async (newDir) => {
+    if (!newDir) {
+      selectedGitRoot.value = "";
+      return;
+    }
+    const info = await getDirInfo(newDir);
+    selectedGitRoot.value = info.gitRoot || "";
+  },
+  { immediate: true },
+);
 
 const loadSubdirsForLevel = async (levelIndex: number) => {
   const currentPath = [baseDir.value, ...subSegments.value.slice(0, levelIndex)]
@@ -252,24 +266,34 @@ const handleSubmit = () => {
           <div class="p-3.5 bg-base-100 rounded-xl border border-base-300 shadow-sm space-y-3">
             <!-- Full Path Bar & Reset Action -->
             <div
-              class="flex items-center justify-between text-xs text-base-content/70 pb-2 border-b border-base-300/60 font-mono"
+              class="flex flex-col gap-1.5 text-xs text-base-content/70 pb-2 border-b border-base-300/60 font-mono"
             >
-              <div class="flex items-center gap-1.5 min-w-0 pr-2">
-                <span class="text-primary font-semibold shrink-0">Full Path:</span>
+              <div class="flex items-center justify-between min-w-0">
+                <div class="flex items-center gap-1.5 min-w-0 pr-2">
+                  <span class="text-primary font-semibold shrink-0">Full Path:</span>
+                  <span
+                    class="truncate bg-base-200 px-2 py-0.5 rounded text-base-content font-semibold border border-base-300/40"
+                  >
+                    {{ selectedDir }}
+                  </span>
+                </div>
+                <button
+                  v-if="subSegments.length > 0"
+                  type="button"
+                  @click="resetSubSegments"
+                  class="btn btn-ghost btn-xs text-error/80 hover:text-error shrink-0"
+                >
+                  Reset
+                </button>
+              </div>
+              <div v-if="selectedGitRoot" class="flex items-center gap-1.5 min-w-0 pr-2">
+                <span class="text-primary font-semibold shrink-0">Git Root:</span>
                 <span
                   class="truncate bg-base-200 px-2 py-0.5 rounded text-base-content font-semibold border border-base-300/40"
                 >
-                  {{ selectedDir }}
+                  {{ selectedGitRoot }}
                 </span>
               </div>
-              <button
-                v-if="subSegments.length > 0"
-                type="button"
-                @click="resetSubSegments"
-                class="btn btn-ghost btn-xs text-error/80 hover:text-error shrink-0"
-              >
-                Reset
-              </button>
             </div>
 
             <!-- Inline Cascader Selector Row -->

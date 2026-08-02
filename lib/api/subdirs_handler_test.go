@@ -113,3 +113,25 @@ func TestHandleSubdirs_TableDriven(t *testing.T) {
 		})
 	}
 }
+
+func TestFindGitRoot(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "myrepo")
+	subDir := filepath.Join(repoDir, "a", "b")
+	err := os.MkdirAll(subDir, 0755)
+	require.NoError(t, err)
+
+	// Before creating .git, findGitRoot on subDir inside tmpDir should return "" (or non-repoDir)
+	gitRootBefore := findGitRoot(subDir)
+	assert.NotEqual(t, repoDir, gitRootBefore)
+
+	// Create fake .git directory inside repoDir
+	err = os.MkdirAll(filepath.Join(repoDir, ".git"), 0755)
+	require.NoError(t, err)
+
+	// Now findGitRoot on subDir should return repoDir
+	gitRootAfter := findGitRoot(subDir)
+	assert.Equal(t, repoDir, gitRootAfter)
+}

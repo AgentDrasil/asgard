@@ -33,7 +33,13 @@ export interface ChatSession {
   title: string;
   currentAgent: string;
   runDir: string;
+  gitRoot?: string;
   createdAt?: string;
   updatedAt?: string;
   messages?: ChatMessage[];
+}
+
+export interface DirInfo {
+  subdirs: string[];
+  gitRoot?: string;
 }

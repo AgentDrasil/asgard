@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { ChatMessage, AgentInfo } from "../types";
+import { getDirInfo } from "../lib/api";
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -9,6 +10,21 @@ const props = defineProps<{
   runDir: string;
   sessionId?: string | null;
 }>();
+
+const gitRoot = ref("");
+
+watch(
+  () => props.runDir,
+  async (newDir) => {
+    if (!newDir) {
+      gitRoot.value = "";
+      return;
+    }
+    const info = await getDirInfo(newDir);
+    gitRoot.value = info.gitRoot || "";
+  },
+  { immediate: true },
+);
 
 const bottomRef = ref<HTMLDivElement | null>(null);
 
@@ -75,6 +91,12 @@ const copyMessage = async (id: string, text: string) => {
           Workspace:
           <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
             runDir
+          }}</span>
+        </p>
+        <p v-if="gitRoot" class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
+          Git Root:
+          <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+            gitRoot
           }}</span>
         </p>
       </div>

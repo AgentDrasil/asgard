@@ -13,6 +13,7 @@ type ChatSession struct {
 	Title        string            `json:"title"`
 	CurrentAgent string            `json:"currentAgent"`
 	RunDir       string            `json:"runDir"`
+	GitRoot      string            `json:"gitRoot,omitempty"`
 	Messages     dbmodels.Messages `json:"messages,omitempty"`
 }
 
@@ -77,6 +78,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		Title:        sess.Title,
 		CurrentAgent: sess.CurrentAgent,
 		RunDir:       sess.RunDir,
+		GitRoot:      findGitRoot(sess.RunDir),
 		Messages:     sess.Messages,
 	}
 
@@ -101,6 +103,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			Title:        sess.Title,
 			CurrentAgent: sess.CurrentAgent,
 			RunDir:       sess.RunDir,
+			GitRoot:      findGitRoot(sess.RunDir),
 		})
 	}
 

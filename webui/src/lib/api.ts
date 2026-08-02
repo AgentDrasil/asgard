@@ -1,4 +1,4 @@
-import type { AgentInfo, ChatSession } from "../types";
+import type { AgentInfo, ChatSession, DirInfo } from "../types";
 
 // Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -61,15 +61,23 @@ export async function deleteSessionFromLocal(chatID: string): Promise<void> {
   }
 }
 
-export async function getSubdirs(dir: string): Promise<string[]> {
-  if (!dir) return [];
+export async function getDirInfo(dir: string): Promise<DirInfo> {
+  if (!dir) return { subdirs: [], gitRoot: "" };
   try {
     const res = await apiFetch(`/api/subdirs?dir=${encodeURIComponent(dir)}`);
-    if (!res.ok) return [];
+    if (!res.ok) return { subdirs: [], gitRoot: "" };
     const data = await res.json();
-    return data.subdirs || [];
+    return {
+      subdirs: data.subdirs || [],
+      gitRoot: data.git_root || data.gitRoot || "",
+    };
   } catch (err) {
-    console.error("getSubdirs error:", err);
-    return [];
+    console.error("getDirInfo error:", err);
+    return { subdirs: [], gitRoot: "" };
   }
+}
+
+export async function getSubdirs(dir: string): Promise<string[]> {
+  const info = await getDirInfo(dir);
+  return info.subdirs;
 }
