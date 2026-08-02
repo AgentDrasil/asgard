@@ -53,10 +53,18 @@ function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
     if (curIsCall && nextIsResult) {
       // Check if the previous out entry is also a merged tool bubble we can append to
       const prev = out[out.length - 1];
-      if (prev?.role === "tool_call" && (prev?.activityType === "TOOL_CALL" || prev?.activityType === "TOOL")) {
+      if (
+        prev?.role === "tool_call" &&
+        (prev?.activityType === "TOOL_CALL" || prev?.activityType === "TOOL")
+      ) {
         prev.activityType = "TOOL";
         // Append this pair to the running tool log with a special delimiter
-        prev.content = prev.content + "\n---TOOL_ITEM_DELIMITER---\n" + cur.content + "\n---TOOL_ITEM_DELIMITER---\n" + next.content;
+        prev.content =
+          prev.content +
+          "\n---TOOL_ITEM_DELIMITER---\n" +
+          cur.content +
+          "\n---TOOL_ITEM_DELIMITER---\n" +
+          next.content;
       } else {
         out.push({
           ...cur,

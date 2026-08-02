@@ -112,7 +112,9 @@ const copyMessage = async (id: string, text: string) => {
 
           <!-- Activity / Step / Tool Call Collapsible Box -->
           <div
-            v-else-if="msg.role === 'activity' || msg.role === 'tool_call' || msg.role === 'tool_result'"
+            v-else-if="
+              msg.role === 'activity' || msg.role === 'tool_call' || msg.role === 'tool_result'
+            "
             class="w-full pl-2 pr-2 my-2"
           >
             <div class="flex items-center gap-2 mb-1.5 select-none">
@@ -131,11 +133,22 @@ const copyMessage = async (id: string, text: string) => {
                 <span
                   class="badge badge-sm badge-ghost text-[10px] uppercase tracking-wider font-semibold font-sans"
                 >
-                  {{ (msg.activityType || msg.role) === 'TOOL_CALL' || (msg.activityType || msg.role) === 'tool_call' || (msg.activityType || msg.role) === 'tool_result' ? 'TOOL' : (msg.activityType || msg.role) }}
+                  {{
+                    (msg.activityType || msg.role) === "TOOL_CALL" ||
+                    (msg.activityType || msg.role) === "tool_call" ||
+                    (msg.activityType || msg.role) === "tool_result"
+                      ? "TOOL"
+                      : msg.activityType || msg.role
+                  }}
                 </span>
               </summary>
               <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2">
-                <template v-for="(item, idx) in (msg.content.includes('---TOOL_ITEM_DELIMITER---') ? msg.content.split('---TOOL_ITEM_DELIMITER---') : msg.content.split('\n\n'))" :key="idx">
+                <template
+                  v-for="(item, idx) in msg.content.includes('---TOOL_ITEM_DELIMITER---')
+                    ? msg.content.split('---TOOL_ITEM_DELIMITER---')
+                    : msg.content.split('\n\n')"
+                  :key="idx"
+                >
                   <pre
                     v-if="item.trim()"
                     class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto text-xs font-mono text-base-content/80"
