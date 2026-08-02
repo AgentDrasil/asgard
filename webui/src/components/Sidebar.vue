@@ -180,7 +180,7 @@ const toggleTheme = () => {
         v-if="isOpen"
         class="text-lg font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent truncate"
       >
-        Asgard WebUI
+        Asgard
       </h1>
       <button
         @click="emit('toggle-sidebar')"

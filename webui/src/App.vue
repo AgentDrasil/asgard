@@ -26,6 +26,7 @@ const messages = ref<ChatMessage[]>([]);
 const loading = ref(false);
 const isStreaming = ref(false);
 const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
+const isWorkspaceDetailsOpen = ref(false);
 // Incremented each time loadSessionData is called; lets in-flight loads detect they've been superseded.
 let loadGen = 0;
 
@@ -36,6 +37,7 @@ const closeSidebarOnMobile = () => {
   if (typeof window !== "undefined" && window.innerWidth < 768) {
     isSidebarOpen.value = false;
   }
+  isWorkspaceDetailsOpen.value = false;
 };
 
 // mergeToolMessages collapses consecutive tool_call → tool_result pairs in
@@ -396,15 +398,19 @@ const toggleSidebar = () => {
       >
         <Icon icon="mynaui:sidebar" class="h-5 w-5" />
       </button>
-      <div class="flex items-center gap-1 text-sm font-semibold truncate max-w-[200px]">
-        <span
-          class="bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent font-bold"
-          >Asgard</span
-        >
-        <span v-if="activeAgent?.name" class="text-xs text-base-content/70 font-normal truncate">
-          ({{ activeAgent.name }})
+      <button
+        @click="isWorkspaceDetailsOpen = !isWorkspaceDetailsOpen"
+        class="flex items-center gap-1.5 text-sm font-semibold truncate max-w-[220px] px-2 py-1 rounded-md hover:bg-base-200/60 active:bg-base-200 transition-colors cursor-pointer select-none"
+        title="Toggle Workspace Info"
+      >
+        <span class="text-base-content font-bold truncate">
+          {{ activeAgent?.name || "Coding Agent" }}
         </span>
-      </div>
+        <Icon
+          :icon="isWorkspaceDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
+          class="h-3.5 w-3.5 text-base-content/70 shrink-0"
+        />
+      </button>
       <button
         @click="handleNewChat"
         class="btn btn-ghost btn-xs btn-square text-base-content/80"
@@ -441,6 +447,7 @@ const toggleSidebar = () => {
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId"
+          :isDetailsOpen="isWorkspaceDetailsOpen"
         />
         <ChatInput @send="handleSendMessage" :loading="loading" />
       </template>

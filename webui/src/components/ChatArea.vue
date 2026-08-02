@@ -4,13 +4,19 @@ import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
 
-const props = defineProps<{
-  messages: ChatMessage[];
-  loading: boolean;
-  activeAgent: AgentInfo | null;
-  runDir: string;
-  sessionId?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    messages: ChatMessage[];
+    loading: boolean;
+    activeAgent: AgentInfo | null;
+    runDir: string;
+    sessionId?: string | null;
+    isDetailsOpen?: boolean;
+  }>(),
+  {
+    isDetailsOpen: false,
+  },
+);
 
 const gitRoot = ref("");
 
@@ -80,9 +86,10 @@ const copyMessage = async (id: string, text: string) => {
     <!-- Header -->
     <header
       class="px-3 py-2.5 sm:px-6 sm:py-4 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0"
+      :class="isDetailsOpen ? 'flex' : 'hidden md:flex'"
     >
       <div class="space-y-0.5 sm:space-y-1 min-w-0 pr-2">
-        <h2 class="text-sm sm:text-md font-bold text-base-content flex items-center gap-2 truncate">
+        <h2 class="hidden md:flex text-sm sm:text-md font-bold text-base-content items-center gap-2 truncate">
           <span>🤖</span>
           <span class="text-base-content font-bold truncate">{{
             activeAgent?.name || "Coding Agent"
@@ -110,7 +117,7 @@ const copyMessage = async (id: string, text: string) => {
         title="Open Agent Workspace Terminal"
       >
         <Icon icon="mynaui:terminal" class="h-4 w-4" />
-        <span class="hidden sm:inline">Open Terminal</span>
+        <span class="inline sm:inline">Open Terminal</span>
       </a>
     </header>
 
