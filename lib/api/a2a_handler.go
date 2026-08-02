@@ -388,12 +388,12 @@ type promptResult struct {
 }
 
 // parseOutput attempts to JSON-decode a CLI output, falling back to raw string.
-func parseOutput(out []byte) (lastContent string, sessionID string) {
+func parseOutput(out []byte) (lastContent string, sessionID string, inputTokens int, maxTokens int) {
 	var result promptResult
 	if err := json.Unmarshal(out, &result); err == nil {
-		return result.LastContent, result.SessionID
+		return result.LastContent, result.SessionID, result.InputTokens, result.MaxTokens
 	}
-	return strings.TrimSpace(string(out)), ""
+	return strings.TrimSpace(string(out)), "", 0, 0
 }
 
 // handleFinalResult parses the agent output and emits the final TaskStatusUpdateEvent.
@@ -406,7 +406,7 @@ func (e *agentExecutor) handleFinalResult(
 	runDirOpt optional.Option[string],
 	sessionMode string,
 ) {
-	respText, sessionID := parseOutput(out)
+	respText, sessionID, inputTokens, maxTokens := parseOutput(out)
 
 	if e.repo != nil {
 		// Always update runDir; only persist sessionID in resume mode.
@@ -432,16 +432,24 @@ func (e *agentExecutor) handleFinalResult(
 		// Save final assistant response to DB session
 		if respText != "" {
 			_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-				ID:        fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),
-				Role:      "assistant",
-				Content:   respText,
-				AgentName: e.agent.Config.Name,
-				Timestamp: time.Now().UnixMilli(),
+				ID:          fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),
+				Role:        "assistant",
+				Content:     respText,
+				AgentName:   e.agent.Config.Name,
+				Timestamp:   time.Now().UnixMilli(),
+				InputTokens: inputTokens,
+				MaxTokens:   maxTokens,
 			})
 		}
 	}
 
 	respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
+	if inputTokens > 0 || maxTokens > 0 {
+		respMsg.Metadata = map[string]any{
+			"input_tokens": inputTokens,
+			"max_tokens":   maxTokens,
+		}
+	}
 	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
 }
 
@@ -457,7 +465,7 @@ func (e *agentExecutor) handleParallelResult(
 ) {
 	var combined strings.Builder
 	for _, r := range results {
-		lastContent, sessionID := parseOutput(r.Output)
+		lastContent, sessionID, _, _ := parseOutput(r.Output)
 
 		// Persist session ID per CLI target (resume mode only).
 		if e.repo != nil && sessionMode != "fresh" && sessionID != "" && r.CLIKey != "" {

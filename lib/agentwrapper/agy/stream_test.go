@@ -46,7 +46,7 @@ func collectCalls(ndjson string) (sessionID, lastContent string, inputTokens int
 	cb := types.ReportFunc(func(si int, src, et, content string, _ map[string]any) {
 		calls = append(calls, streamCall{si, src, et, content})
 	})
-	sessionID, lastContent, inputTokens = parseStream(strings.NewReader(ndjson), cb)
+	sessionID, lastContent, inputTokens, _ = parseStream(strings.NewReader(ndjson), cb)
 	return
 }
 
@@ -82,10 +82,11 @@ func TestParseStream_Replay(t *testing.T) {
 // TestParseStream_NilCallback verifies that parseStream still returns the
 // correct sessionID and lastContent when no callback is registered.
 func TestParseStream_NilCallback(t *testing.T) {
-	sessionID, lastContent, inputTokens := parseStream(strings.NewReader(realNDJSON), nil)
+	sessionID, lastContent, inputTokens, maxTokens := parseStream(strings.NewReader(realNDJSON), nil)
 	assert.Equal(t, "57659af8-fee7-4694-8913-6ad09e91234a", sessionID)
 	assert.Equal(t, wantResponse, lastContent)
 	assert.Equal(t, 15198, inputTokens)
+	assert.Equal(t, 1048576, maxTokens)
 }
 
 // TestParseStream_ToolFormatting covers the content string built for every

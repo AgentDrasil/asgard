@@ -13,7 +13,7 @@ const emit = defineEmits<{
 const text = ref("");
 
 const handleKeyDown = (e: KeyboardEvent) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     handleSend();
   }
@@ -35,7 +35,7 @@ const handleSend = () => {
       <textarea
         v-model="text"
         @keydown="handleKeyDown"
-        placeholder="Type a message..."
+        placeholder="Type a message... (Ctrl+Enter to send)"
         rows="1"
         :disabled="loading"
         class="textarea textarea-bordered bg-base-200 text-base-content w-full pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"

@@ -26,6 +26,8 @@ export interface ChatMessage {
   timestamp?: number;
   activityType?: string;
   stepIndex?: number;
+  inputTokens?: number;
+  maxTokens?: number;
 }
 
 export interface ChatSession {

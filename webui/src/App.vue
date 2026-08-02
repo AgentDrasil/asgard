@@ -275,7 +275,7 @@ const handleSendMessage = async (text: string) => {
       userMsgId,
     },
     {
-      onText: (textContent) => {
+      onText: (textContent, inputTokens, maxTokens) => {
         console.log(
           "[App.vue] onText called, length:",
           textContent.length,
@@ -289,13 +289,22 @@ const handleSendMessage = async (text: string) => {
             role: "assistant",
             content: textContent,
             timestamp: Date.now(),
+            ...(inputTokens ? { inputTokens } : {}),
+            ...(maxTokens ? { maxTokens } : {}),
           });
           if (!currentSession.title) {
             refreshSessionTitle(currentThreadId);
           }
         } else {
           messages.value = messages.value.map((m) =>
-            m.id === assistantMsgId ? { ...m, content: textContent } : m,
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: textContent,
+                  ...(inputTokens ? { inputTokens } : {}),
+                  ...(maxTokens ? { maxTokens } : {}),
+                }
+              : m,
           );
         }
       },

@@ -46,6 +46,8 @@ type ChatMessage struct {
 	Timestamp    int64  `json:"timestamp,omitempty"`
 	ActivityType string `json:"activityType,omitempty"`
 	StepIndex    int    `json:"stepIndex,omitempty"`
+	InputTokens  int    `json:"inputTokens,omitempty"`
+	MaxTokens    int    `json:"maxTokens,omitempty"`
 }
 
 type Messages []ChatMessage

@@ -360,8 +360,9 @@ const handleSubmit = () => {
           <textarea
             v-model="localPrompt"
             class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
-            placeholder="Type your coding request here..."
-            @keydown.enter.exact.prevent="handleSubmit"
+            placeholder="Type your coding request here... (Ctrl+Enter to submit)"
+            @keydown.ctrl.enter.prevent="handleSubmit"
+            @keydown.meta.enter.prevent="handleSubmit"
           ></textarea>
         </div>
 

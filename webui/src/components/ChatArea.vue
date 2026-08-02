@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from "vue";
 import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo } from "../lib/api";
+import { formatContextUsage, getContextColorClass } from "../lib/format";
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -251,6 +252,15 @@ const copyMessage = async (id: string, text: string) => {
                   :class="copiedMap[msg.id] ? 'text-success' : 'text-base-content/75'"
                 />
               </button>
+
+              <span
+                v-if="msg.inputTokens && msg.maxTokens"
+                class="text-xs font-mono ml-1.5 px-2 py-0.5 rounded cursor-default select-none transition-colors"
+                :class="getContextColorClass(msg.inputTokens, msg.maxTokens)"
+                :title="`${msg.inputTokens.toLocaleString()} / ${msg.maxTokens.toLocaleString()} tokens`"
+              >
+                {{ formatContextUsage(msg.inputTokens, msg.maxTokens) }}
+              </span>
             </div>
           </div>
         </div>

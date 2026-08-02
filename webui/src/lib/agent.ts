@@ -33,7 +33,7 @@ export async function getAgentClient(agentId: string, customBaseUrl?: string): P
 }
 
 export interface StreamCallbacks {
-  onText: (text: string) => void;
+  onText: (text: string, inputTokens?: number, maxTokens?: number) => void;
   onReasoning?: (text: string) => void;
   onStatus?: (statusText: string, entryType?: string, state?: string) => void;
   onError?: (err: Error) => void;
@@ -49,6 +49,17 @@ function extractTextFromParts(parts: any[]): string {
     }
   }
   return text;
+}
+
+function extractTokens(val: any): { inputTokens?: number; maxTokens?: number } {
+  if (!val) return {};
+  const meta = val.metadata || val.status?.message?.metadata || val.message?.metadata || {};
+  const inputTokens = meta["input_tokens"] ?? meta["total_input_tokens"];
+  const maxTokens = meta["max_tokens"] ?? meta["context_window_size"];
+  return {
+    inputTokens: typeof inputTokens === "number" ? inputTokens : undefined,
+    maxTokens: typeof maxTokens === "number" ? maxTokens : undefined,
+  };
 }
 
 /** Returns true if the TaskState is a terminal/final state. */
@@ -123,7 +134,8 @@ export async function runAgentStream(
         const textContent = extractTextFromParts(msg.parts);
         if (textContent) {
           accumulatedText += textContent;
-          callbacks.onText(accumulatedText);
+          const tokens = extractTokens(msg);
+          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         }
         continue;
       }
@@ -146,7 +158,8 @@ export async function runAgentStream(
           if (statusText) {
             if (isFinalState(state)) {
               accumulatedText += statusText;
-              callbacks.onText(accumulatedText);
+              const tokens = extractTokens(task);
+              callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
             } else {
               callbacks.onStatus?.(statusText, entryType, TaskState[state]);
             }
@@ -190,7 +203,8 @@ export async function runAgentStream(
         if (isAgentResponse || isFinalResult) {
           // Agent response text (streaming or final) → assistant bubble
           accumulatedText += statusText;
-          callbacks.onText(accumulatedText);
+          const tokens = extractTokens(update);
+          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         } else {
           // Tool calls, steps, reasoning → thinking/activity box
           callbacks.onStatus?.(statusText, entryType, TaskState[state]);

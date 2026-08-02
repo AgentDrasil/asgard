@@ -158,9 +158,15 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 
 			if content != "" {
 				if opts.ReportCallback != nil {
-					var metadata map[string]any
+					metadata := map[string]any{
+						"max_tokens": 1048576,
+					}
 					if toolName != "" {
-						metadata = map[string]any{"tool_name": toolName}
+						metadata["tool_name"] = toolName
+					}
+					if inputTokens > 0 {
+						metadata["input_tokens"] = inputTokens
+						metadata["total_input_tokens"] = inputTokens
 					}
 					opts.ReportCallback(stepIndex, "MODEL", entryType, content, metadata)
 				}

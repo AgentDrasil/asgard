@@ -84,7 +84,9 @@ type streamResult struct {
 //   - "step_update" (tool DONE/ERROR)      → cb("TOOL", "tool_result", "name → output")
 //   - "step_update" (agent_response DONE)  → cb("MODEL","agent_response", accumulated text_delta)
 //   - "result"      → captures response + usage
-func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent string, inputTokens int) {
+func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent string, inputTokens, maxTokens int) {
+	maxTokens = 1048576
+
 	// textByStep accumulates text_delta across ACTIVE→DONE events for the same
 	// step_index so we deliver a single callback with the full response text.
 	textByStep := make(map[int]string)
@@ -115,6 +117,10 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				continue
 			}
 			su := ev.StepUpdate
+
+			if su.Usage != nil && su.Usage.InputTokens > 0 {
+				inputTokens = su.Usage.InputTokens
+			}
 
 			// Always accumulate text_delta regardless of cb so lastContent
 			// is correct even when no callback is registered.
@@ -156,7 +162,14 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				full := textByStep[su.StepIndex]
 				delete(textByStep, su.StepIndex)
 				if full != "" {
-					cb(su.StepIndex, "MODEL", "agent_response", full, nil)
+					metadata := map[string]any{
+						"max_tokens": maxTokens,
+					}
+					if inputTokens > 0 {
+						metadata["input_tokens"] = inputTokens
+						metadata["total_input_tokens"] = inputTokens
+					}
+					cb(su.StepIndex, "MODEL", "agent_response", full, metadata)
 				}
 			}
 
@@ -169,7 +182,7 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				sessionID = res.ConversationID
 			}
 			lastContent = res.Response
-			if res.Usage != nil {
+			if res.Usage != nil && res.Usage.InputTokens > 0 {
 				inputTokens = res.Usage.InputTokens
 			}
 			log.Debug().
