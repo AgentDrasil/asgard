@@ -26,7 +26,7 @@ const messages = ref<ChatMessage[]>([]);
 const loading = ref(false);
 const isStreaming = ref(false);
 const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
-const isWorkspaceDetailsOpen = ref(false);
+const isWorkspaceDetailsOpen = ref(true);
 // Incremented each time loadSessionData is called; lets in-flight loads detect they've been superseded.
 let loadGen = 0;
 
@@ -37,7 +37,6 @@ const closeSidebarOnMobile = () => {
   if (typeof window !== "undefined" && window.innerWidth < 768) {
     isSidebarOpen.value = false;
   }
-  isWorkspaceDetailsOpen.value = false;
 };
 
 // mergeToolMessages collapses consecutive tool_call → tool_result pairs in
@@ -447,7 +446,7 @@ const toggleSidebar = () => {
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId"
-          :isDetailsOpen="isWorkspaceDetailsOpen"
+          v-model:isDetailsOpen="isWorkspaceDetailsOpen"
         />
         <ChatInput @send="handleSendMessage" :loading="loading" />
       </template>

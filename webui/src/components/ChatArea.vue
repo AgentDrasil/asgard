@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
@@ -14,9 +14,13 @@ const props = withDefaults(
     isDetailsOpen?: boolean;
   }>(),
   {
-    isDetailsOpen: false,
+    isDetailsOpen: true,
   },
 );
+
+const emit = defineEmits<{
+  (e: "update:isDetailsOpen", val: boolean): void;
+}>();
 
 const gitRoot = ref("");
 
@@ -34,15 +38,65 @@ watch(
 );
 
 const bottomRef = ref<HTMLDivElement | null>(null);
+const scrollContainerRef = ref<HTMLDivElement | null>(null);
+let lastAtTopState = props.isDetailsOpen;
+let ticking = false;
 
-// Auto scroll to bottom when new messages arrive
+const checkScrollPosition = () => {
+  if (!scrollContainerRef.value) return;
+  const atTop = scrollContainerRef.value.scrollTop <= 5;
+  if (atTop !== lastAtTopState) {
+    lastAtTopState = atTop;
+    emit("update:isDetailsOpen", atTop);
+  }
+};
+
+const handleScroll = () => {
+  if (!ticking) {
+    requestAnimationFrame(() => {
+      checkScrollPosition();
+      ticking = false;
+    });
+    ticking = true;
+  }
+};
+
 watch(
-  () => props.messages,
+  () => props.isDetailsOpen,
+  (newVal) => {
+    lastAtTopState = newVal;
+  },
+);
+
+onMounted(() => {
+  const el = scrollContainerRef.value;
+  if (el) {
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    nextTick(() => {
+      checkScrollPosition();
+    });
+  }
+});
+
+onUnmounted(() => {
+  const el = scrollContainerRef.value;
+  if (el) {
+    el.removeEventListener("scroll", handleScroll);
+  }
+});
+
+// Auto scroll to bottom when new messages arrive and re-check scroll position
+watch(
+  [() => props.sessionId, () => props.messages],
   async () => {
     await nextTick();
     bottomRef.value?.scrollIntoView({ behavior: "smooth" });
+    checkScrollPosition();
+    setTimeout(() => {
+      checkScrollPosition();
+    }, 150);
   },
-  { deep: true },
+  { deep: true, immediate: true },
 );
 
 import { Icon } from "@iconify/vue";
@@ -85,28 +139,36 @@ const copyMessage = async (id: string, text: string) => {
   <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0">
     <!-- Header -->
     <header
-      class="px-3 py-2.5 sm:px-6 sm:py-4 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0"
+      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
       :class="isDetailsOpen ? 'flex' : 'hidden md:flex'"
     >
       <div class="space-y-0.5 sm:space-y-1 min-w-0 pr-2">
-        <h2 class="hidden md:flex text-sm sm:text-md font-bold text-base-content items-center gap-2 truncate">
+        <button
+          @click="emit('update:isDetailsOpen', !isDetailsOpen)"
+          class="hidden md:flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate"
+          title="Toggle Workspace Info"
+        >
           <span>🤖</span>
-          <span class="text-base-content font-bold truncate">{{
-            activeAgent?.name || "Coding Agent"
-          }}</span>
-        </h2>
-        <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
-          Workspace:
-          <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
-            runDir
-          }}</span>
-        </p>
-        <p v-if="gitRoot" class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
-          Git Root:
-          <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
-            gitRoot
-          }}</span>
-        </p>
+          <span class="font-bold truncate">{{ activeAgent?.name || "Coding Agent" }}</span>
+          <Icon
+            :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
+            class="h-3.5 w-3.5 text-base-content/70 shrink-0"
+          />
+        </button>
+        <div v-if="isDetailsOpen" class="space-y-0.5 sm:space-y-1">
+          <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
+            Workspace:
+            <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+              runDir
+            }}</span>
+          </p>
+          <p v-if="gitRoot" class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
+            Git Root:
+            <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+              gitRoot
+            }}</span>
+          </p>
+        </div>
       </div>
       <a
         v-if="sessionId"
@@ -122,7 +184,10 @@ const copyMessage = async (id: string, text: string) => {
     </header>
 
     <!-- Message List -->
-    <div class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0 w-full">
+    <div
+      ref="scrollContainerRef"
+      class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0 w-full"
+    >
       <div class="max-w-4xl w-full mx-auto space-y-4 min-w-0">
         <div v-for="msg in messages" :key="msg.id" class="w-full min-w-0">
           <!-- Reasoning / Thinking Balloon -->
