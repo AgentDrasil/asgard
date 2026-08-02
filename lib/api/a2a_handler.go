@@ -83,6 +83,21 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
 		}
 
+		if runDirOpt.IsSome() {
+			rd, _ := runDirOpt.Take()
+			if rd != "" {
+				info, err := os.Stat(rd)
+				if err != nil {
+					yield(nil, fmt.Errorf("run_dir %q does not exist: %w", rd, err))
+					return
+				}
+				if !info.IsDir() {
+					yield(nil, fmt.Errorf("run_dir %q is not a directory", rd))
+					return
+				}
+			}
+		}
+
 		if e.repo != nil {
 			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", "", runDirOpt); err != nil {
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))

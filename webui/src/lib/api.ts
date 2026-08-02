@@ -60,3 +60,16 @@ export async function deleteSessionFromLocal(chatID: string): Promise<void> {
     console.error("Failed to delete session from backend:", err);
   }
 }
+
+export async function getSubdirs(dir: string): Promise<string[]> {
+  if (!dir) return [];
+  try {
+    const res = await apiFetch(`/api/subdirs?dir=${encodeURIComponent(dir)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.subdirs || [];
+  } catch (err) {
+    console.error("getSubdirs error:", err);
+    return [];
+  }
+}
