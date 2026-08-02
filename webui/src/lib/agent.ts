@@ -76,6 +76,8 @@ export async function runAgentStream(
     const client = await getAgentClient(agentId);
 
     const sendParams = {
+      tenant: "",
+      metadata: undefined,
       message: {
         messageId: params.userMsgId,
         contextId: params.threadId,
@@ -135,8 +137,12 @@ export async function runAgentStream(
         const state = status.state;
         console.log("[agent.ts] task state:", TaskState[state]);
 
-        if (status.message) {
-          const statusText = extractTextFromParts(status.message.parts);
+        const msg = status.message;
+        const entryType: string =
+          task.metadata?.["entry_type"] ?? msg?.metadata?.["entry_type"] ?? "";
+
+        if (msg) {
+          const statusText = extractTextFromParts(msg.parts);
           if (statusText) {
             if (isFinalState(state)) {
               accumulatedText += statusText;

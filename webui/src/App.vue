@@ -289,7 +289,7 @@ const handleSendMessage = async (text: string) => {
           );
         }
       },
-      onStatus: (statusText, entryType) => {
+      onStatus: (statusText) => {
         if (!statusText) return;
 
         // Accumulate all tool activity into a single shared log.
