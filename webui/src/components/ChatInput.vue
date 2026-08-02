@@ -28,21 +28,23 @@ const handleSend = () => {
 </script>
 
 <template>
-  <div class="p-4 bg-base-100">
-    <div class="relative flex items-center max-w-4xl w-full mx-auto">
+  <div
+    class="p-2.5 sm:p-4 bg-base-100 border-t border-base-200/50 md:border-t-0 shrink-0 min-w-0 w-full"
+  >
+    <div class="relative flex items-center max-w-4xl w-full mx-auto min-w-0">
       <textarea
         v-model="text"
         @keydown="handleKeyDown"
-        placeholder="Type a message... (Press Enter to send)"
+        placeholder="Type a message..."
         rows="1"
         :disabled="loading"
-        class="textarea textarea-bordered bg-base-200 text-base-content w-full pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-sm font-sans placeholder:text-base-content/60"
+        class="textarea textarea-bordered bg-base-200 text-base-content w-full pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
       ></textarea>
 
       <button
         @click="handleSend"
         :disabled="loading || !text.trim()"
-        class="btn btn-circle btn-primary btn-sm absolute right-3 hover:scale-105 active:scale-95 transition-transform"
+        class="btn btn-circle btn-primary btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"
       >
         <span v-if="loading" class="loading loading-spinner loading-xs"></span>
         <Icon v-else icon="material-symbols:send" class="h-4 w-4 fill-current" />

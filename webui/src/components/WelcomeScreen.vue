@@ -177,18 +177,20 @@ const handleSubmit = () => {
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col justify-center items-center p-8 bg-base-100 overflow-y-auto">
+  <div
+    class="flex-1 flex flex-col justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
+  >
     <div
-      class="max-w-2xl w-full space-y-8 bg-base-200 p-8 rounded-2xl shadow-xl border border-base-300"
+      class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300"
     >
       <!-- App title & intro -->
-      <div class="text-center space-y-2">
+      <div class="text-center space-y-1.5 sm:space-y-2">
         <h2
-          class="text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
+          class="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
         >
           Start a Chat
         </h2>
-        <p class="text-sm text-base-content/60">
+        <p class="text-xs sm:text-sm text-base-content/60">
           Select an agent, workspace directory, and start building.
         </p>
       </div>

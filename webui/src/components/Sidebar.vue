@@ -165,8 +165,11 @@ const toggleTheme = () => {
 <template>
   <aside
     :class="[
-      isOpen ? 'w-64' : 'w-16 items-center',
-      'bg-base-300 border-r border-base-100 flex flex-col h-full shrink-0 transition-all duration-200',
+      isOpen
+        ? 'w-72 md:w-64 max-md:translate-x-0'
+        : 'w-72 md:w-16 md:items-center max-md:-translate-x-full',
+      'bg-base-300 border-r border-base-100 flex flex-col h-full shrink-0 transition-all duration-300',
+      'max-md:fixed max-md:top-0 max-md:bottom-0 max-md:left-0 max-md:z-50 max-md:shadow-2xl md:relative',
     ]"
   >
     <!-- Header / Toggle Sidebar Button -->

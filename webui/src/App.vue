@@ -8,6 +8,7 @@ import ChatArea from "./components/ChatArea.vue";
 import ChatInput from "./components/ChatInput.vue";
 import { getAgents, getSessions, getSession, deleteSessionFromLocal } from "./lib/api";
 import { runAgentStream } from "./lib/agent";
+import { Icon } from "@iconify/vue";
 import type { AgentInfo, ChatSession, ChatMessage } from "./types";
 
 const route = useRoute();
@@ -24,11 +25,18 @@ const welcomePrompt = ref("");
 const messages = ref<ChatMessage[]>([]);
 const loading = ref(false);
 const isStreaming = ref(false);
+const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 // Incremented each time loadSessionData is called; lets in-flight loads detect they've been superseded.
 let loadGen = 0;
 
 const activeSession = ref<ChatSession | null>(null);
 const activeAgent = ref<AgentInfo | null>(null);
+
+const closeSidebarOnMobile = () => {
+  if (typeof window !== "undefined" && window.innerWidth < 768) {
+    isSidebarOpen.value = false;
+  }
+};
 
 // mergeToolMessages collapses consecutive tool_call → tool_result pairs in
 // a flat DB message list into a single activity bubble per tool invocation.
@@ -94,12 +102,14 @@ const handleSelectSession = (id: string) => {
   if (route.params.id !== id) {
     router.push(`/chat/${id}`);
   }
+  closeSidebarOnMobile();
 };
 
 const handleNewChat = () => {
   if (route.path !== "/newchat") {
     router.push("/newchat");
   }
+  closeSidebarOnMobile();
 };
 
 // Watch route parameter changes to update active session
@@ -359,14 +369,49 @@ const handleStartWelcomeChat = () => {
   }
 };
 
-const isSidebarOpen = ref(true);
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value;
 };
 </script>
 
 <template>
-  <div class="flex w-full h-full bg-base-100 overflow-hidden">
+  <div class="flex flex-col md:flex-row w-full h-[100dvh] bg-base-100 overflow-hidden relative">
+    <!-- Mobile Top Navigation Header -->
+    <header
+      class="md:hidden flex items-center justify-between px-3 py-2.5 bg-base-300 border-b border-base-100 shrink-0 z-30"
+    >
+      <button
+        @click="toggleSidebar"
+        class="btn btn-ghost btn-xs btn-square text-base-content/80"
+        title="Toggle Menu"
+      >
+        <Icon icon="mynaui:sidebar" class="h-5 w-5" />
+      </button>
+      <div class="flex items-center gap-1 text-sm font-semibold truncate max-w-[200px]">
+        <span
+          class="bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent font-bold"
+          >Asgard</span
+        >
+        <span v-if="activeAgent?.name" class="text-xs text-base-content/70 font-normal truncate">
+          ({{ activeAgent.name }})
+        </span>
+      </div>
+      <button
+        @click="handleNewChat"
+        class="btn btn-ghost btn-xs btn-square text-base-content/80"
+        title="New Chat"
+      >
+        <Icon icon="mynaui:edit-one" class="h-5 w-5" />
+      </button>
+    </header>
+
+    <!-- Mobile Overlay Backdrop -->
+    <div
+      v-if="isSidebarOpen"
+      @click="toggleSidebar"
+      class="md:hidden fixed inset-0 bg-black/50 z-40 transition-opacity"
+    ></div>
+
     <!-- Sidebar -->
     <Sidebar
       :isOpen="isSidebarOpen"
@@ -379,7 +424,7 @@ const toggleSidebar = () => {
     />
 
     <!-- Main Content Area -->
-    <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden">
+    <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
       <template v-if="activeSessionId">
         <ChatArea
           :messages="messages"
