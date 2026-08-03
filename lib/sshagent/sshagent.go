@@ -14,12 +14,24 @@ import (
 func SetupSSHAgent() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to get user home directory")
 		return err
 	}
 
 	sshDir := filepath.Join(home, ".ssh")
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
-		return os.ErrNotExist
+		if err := os.MkdirAll(sshDir, 0700); err != nil {
+			log.Error().Err(err).Str("dir", sshDir).Msg("Failed to create ~/.ssh directory")
+			return err
+		}
+	}
+
+	// Set global GIT_SSH_COMMAND default according to ~/.ssh/config existence
+	sshConfigPath := filepath.Join(sshDir, "config")
+	if _, err := os.Stat(sshConfigPath); err == nil {
+		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F "+sshConfigPath+" -o StrictHostKeyChecking=no -o IdentitiesOnly=yes")
+	} else {
+		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
 	}
 
 	// Check if SSH_AUTH_SOCK is already set and working
@@ -30,11 +42,28 @@ func SetupSSHAgent() error {
 		}
 	}
 
-	// Start a background ssh-agent
-	out, err := exec.Command("ssh-agent", "-s").Output()
+	// Find ssh-agent binary path
+	agentBin, err := exec.LookPath("ssh-agent")
 	if err != nil {
-		return err
+		log.Warn().Err(err).Msg("ssh-agent binary not found in PATH, skipping agent setup")
+		return nil
 	}
+
+	// Force socket path to /tmp/asgard-ssh-agent.sock to avoid Read-only file system errors on ~/.ssh
+	socketPath := "/tmp/asgard-ssh-agent.sock"
+	_ = os.Remove(socketPath)
+
+	// Start a background ssh-agent with explicit socket path in /tmp
+	cmd := exec.Command(agentBin, "-a", socketPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		log.Warn().Err(err).Str("stderr", stderr.String()).Msg("ssh-agent failed to execute, skipping agent setup")
+		return nil
+	}
+
+	_ = os.Setenv("SSH_AUTH_SOCK", socketPath)
 
 	// Parse environment variables output by `ssh-agent -s`
 	// Output format:
@@ -57,14 +86,6 @@ func SetupSSHAgent() error {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
 		return os.ErrNotExist
-	}
-
-	// Set global GIT_SSH_COMMAND default according to ~/.ssh/config existence
-	sshConfigPath := filepath.Join(sshDir, "config")
-	if _, err := os.Stat(sshConfigPath); err == nil {
-		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F "+sshConfigPath+" -o StrictHostKeyChecking=no -o IdentitiesOnly=no")
-	} else {
-		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
 	}
 
 	// Find and add private keys in ~/.ssh

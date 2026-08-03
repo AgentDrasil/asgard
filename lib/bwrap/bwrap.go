@@ -142,6 +142,17 @@ func appendSSHSandboxArgs(args []string, home string) []string {
 		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
 	}
 
+	// Mount *.pub public keys read-only so ssh can compute key fingerprints for IdentitiesOnly=yes via ssh-agent
+	entries, err := os.ReadDir(sshDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".pub") {
+				pubPath := filepath.Join(sshDir, entry.Name())
+				args = append(args, "--ro-bind", pubPath, pubPath)
+			}
+		}
+	}
+
 	// Pass through GIT_SSH_COMMAND if set
 	if gitSshCmd := os.Getenv("GIT_SSH_COMMAND"); gitSshCmd != "" {
 		args = append(args, "--setenv", "GIT_SSH_COMMAND", gitSshCmd)
