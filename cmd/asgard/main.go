@@ -13,6 +13,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/lib/sshagent"
 )
 
 func defaultConfigPath() string {
@@ -52,6 +53,8 @@ func main() {
 	}
 
 	setupLogger(conf)
+
+	sshagent.SetupSSHAgent()
 
 	database, err := db.NewDB(conf)
 	if err != nil {

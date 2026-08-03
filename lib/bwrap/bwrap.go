@@ -227,10 +227,16 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 	}
 
-	// Ignore ssh dir to prevent key leak
+	// Ensure .ssh is always masked with tmpfs to prevent key leak to any sandbox
 	sshDir := filepath.Join(home, ".ssh")
-	if _, err := os.Stat(sshDir); err == nil {
-		args = append(args, "--tmpfs", sshDir)
+	args = append(args, "--tmpfs", sshDir)
+
+	// Pass through SSH_AUTH_SOCK if set in host environment
+	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
+		if _, err := os.Stat(authSock); err == nil {
+			args = append(args, "--bind", authSock, authSock)
+			args = append(args, "--setenv", "SSH_AUTH_SOCK", authSock)
+		}
 	}
 
 	// Build and mount the system prompt, and mount skills/ if present in agentPath.
@@ -331,8 +337,14 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 		}
 	}
 	sshDir := filepath.Join(home, ".ssh")
-	if _, err := os.Stat(sshDir); err == nil {
-		args = append(args, "--tmpfs", sshDir)
+	args = append(args, "--tmpfs", sshDir)
+
+	// Pass through SSH_AUTH_SOCK if set in host environment
+	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
+		if _, err := os.Stat(authSock); err == nil {
+			args = append(args, "--bind", authSock, authSock)
+			args = append(args, "--setenv", "SSH_AUTH_SOCK", authSock)
+		}
 	}
 
 	if runDir != "" {

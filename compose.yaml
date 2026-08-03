@@ -5,8 +5,11 @@ services:
       context: .
       dockerfile: Dockerfile.dev
       target: runner
+    environment:
+      - SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
     volumes:
       - ./tmp/docker/home:/home/user
+      - ${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}
     privileged: true
     ports:
       - "8080:8080"

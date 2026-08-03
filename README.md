@@ -85,59 +85,28 @@ Each configured agent is exposed as an individual endpoint based on the **Agent-
     *   Identifies that agent's team configurations.
     *   Returns details on all other agents that belong to the same team.
 
-## SSH Wrapper Configuration
+## SSH Agent Integration
 
-Asgard base images include [ssh-wrapper](https://github.com/AgentDrasil/ssh-wrapper.git) to restrict agent SSH access and manage SSH keys securely.
+Asgard uses standard `ssh-agent` Socket passthrough to allow agents to perform SSH operations (e.g., `git clone`, `git push`) without exposing private keys (`/home/user/.ssh`) inside the sandboxes.
 
-The recommended deployment method is to build a custom `Dockerfile` extending `asgard`:
+### How it works:
+1. The host (or parent container) runs `ssh-agent` and sets the `SSH_AUTH_SOCK` environment variable.
+2. The `SSH_AUTH_SOCK` Unix socket is mounted into the Asgard container.
+3. Asgard's `bwrap` sandbox automatically passes through `SSH_AUTH_SOCK` into the agent and command execution sandboxes while keeping `/home/user/.ssh` masked with an empty `tmpfs`.
 
-1. Copy your `ssh.config.yaml` to `/etc/ssh.config.yaml` with mode `0400` owned by `root:root`.
-2. Copy SSH private keys to `/etc/keys/` with directory mode `0700` and key mode `0400` owned by `root:root`.
-3. Create the log directory (e.g. `/var/log/ssh-wrapper`).
-4. Switch to `USER user` before starting Asgard.
+### Running with Docker Compose:
 
-### Example Custom `Dockerfile`
+Ensure your host has `ssh-agent` running and key loaded:
 
-```dockerfile
-FROM ghcr.io/agentdrasil/asgard:latest
-
-# 1. Copy config and set strict root-only permissions (0400)
-COPY config/ssh.config.yaml /etc/ssh.config.yaml
-RUN chown root:root /etc/ssh.config.yaml && \
-    chmod 0400 /etc/ssh.config.yaml
-
-# 2. Copy SSH keys into /etc/keys/ with strict permissions
-COPY keys/ /etc/keys/
-RUN chown -R root:root /etc/keys && \
-    chmod 0700 /etc/keys && \
-    chmod 0400 /etc/keys/*
-
-# 3. Prepare log directory
-RUN mkdir -p /var/log/ssh-wrapper && \
-    chmod 777 /var/log/ssh-wrapper
-
-# 4. Drop privileges to non-root user
-USER user
-
-# 5. Start Asgard
-CMD ["asgard"]
+```bash
+eval $(ssh-agent)
+ssh-add /path/to/your/dedicated_key
 ```
 
-### Example `ssh.config.yaml`
+Then start Asgard via Docker Compose:
 
-```yaml
-logpath: /var/log/ssh-wrapper/ssh-wrapper.log
-
-allowed:
-  - host: ghhy                      # Host alias (used in git clone git@ghhy:...)
-    hostname: github.com            # Real hostname sent to SSH
-    key_path: /etc/keys/ghhy_key    # Custom key for this host (mode 0400, owned by root)
-    path_prefix:
-      - my-org/
-
-  - host: github.com                # Default key (/etc/keys/key)
-    path_prefix:
-      - my-org/
+```bash
+SSH_AUTH_SOCK=$SSH_AUTH_SOCK docker compose up -d
 ```
 
 ## GitHub Account Setup
