@@ -132,11 +132,11 @@ const handleDelete = () => {
         session.title || "Untitled Chat"
       }}</span>
 
-      <!-- Desktop Mouse Hover Delete Button -->
+      <!-- Desktop Mouse Hover Delete Button (Only on devices with cursor/mouse precision) -->
       <button
         @click.stop="handleDelete"
         :class="[
-          'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 shrink-0 hidden md:flex items-center justify-center',
+          'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 shrink-0 hidden [@media(pointer:fine)]:flex items-center justify-center',
           isActive ? 'text-primary-content hover:bg-white/20' : 'text-error hover:bg-error/10',
         ]"
         title="Delete session"
