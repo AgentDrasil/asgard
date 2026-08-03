@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from "vue";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
+import SessionItem from "./SessionItem.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -253,32 +254,14 @@ const toggleTheme = () => {
 
         <!-- 1. List Mode -->
         <template v-else-if="viewMode === 'list'">
-          <div
+          <SessionItem
             v-for="session in sessions"
             :key="session.chatID"
-            @click="emit('select-session', session.chatID)"
-            :class="[
-              'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-full',
-              activeSessionId === session.chatID
-                ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
-                : 'hover:bg-base-200 text-base-content/85',
-            ]"
-          >
-            <span class="truncate pr-2 select-none">{{ session.title || "Untitled Chat" }}</span>
-
-            <button
-              @click.stop="emit('delete-session', session.chatID)"
-              :class="[
-                'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6',
-                activeSessionId === session.chatID
-                  ? 'text-primary-content hover:bg-white/20'
-                  : 'text-error hover:bg-error/10',
-              ]"
-              title="Delete session"
-            >
-              <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
-            </button>
-          </div>
+            :session="session"
+            :is-active="activeSessionId === session.chatID"
+            @select-session="emit('select-session', $event)"
+            @delete-session="emit('delete-session', $event)"
+          />
         </template>
 
         <!-- 2. Group by Agent Model Mode -->
@@ -309,34 +292,14 @@ const toggleTheme = () => {
             </div>
 
             <template v-if="!collapsedGroups[agentName]">
-              <div
+              <SessionItem
                 v-for="session in agentSessions"
                 :key="session.chatID"
-                @click="emit('select-session', session.chatID)"
-                :class="[
-                  'group flex items-center justify-between pl-4 pr-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-full',
-                  activeSessionId === session.chatID
-                    ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
-                    : 'hover:bg-base-200 text-base-content/85',
-                ]"
-              >
-                <span class="truncate pr-2 select-none">{{
-                  session.title || "Untitled Chat"
-                }}</span>
-
-                <button
-                  @click.stop="emit('delete-session', session.chatID)"
-                  :class="[
-                    'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6',
-                    activeSessionId === session.chatID
-                      ? 'text-primary-content hover:bg-white/20'
-                      : 'text-error hover:bg-error/10',
-                  ]"
-                  title="Delete session"
-                >
-                  <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
-                </button>
-              </div>
+                :session="session"
+                :is-active="activeSessionId === session.chatID"
+                @select-session="emit('select-session', $event)"
+                @delete-session="emit('delete-session', $event)"
+              />
             </template>
           </div>
         </template>
