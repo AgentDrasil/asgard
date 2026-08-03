@@ -283,7 +283,7 @@ const handleSendMessage = async (text: string) => {
     targetAgentId,
     {
       prompt: text,
-      runDir: currentSession.runDir,
+      runDir: currentSession.runDir || selectedDir.value,
       threadId: currentThreadId,
       runId,
       userMsgId,

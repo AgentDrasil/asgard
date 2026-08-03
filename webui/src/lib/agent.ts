@@ -88,7 +88,9 @@ export async function runAgentStream(
 
     const sendParams = {
       tenant: "",
-      metadata: undefined,
+      metadata: {
+        run_dir: params.runDir,
+      },
       message: {
         messageId: params.userMsgId,
         contextId: params.threadId,
@@ -110,10 +112,6 @@ export async function runAgentStream(
         acceptedOutputModes: ["text"],
         returnImmediately: false,
         taskPushNotificationConfig: undefined,
-        // Pass custom state via metadata (not configuration.state in v1.0)
-        metadata: {
-          run_dir: params.runDir,
-        },
       },
     };
 
