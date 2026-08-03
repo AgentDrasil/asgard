@@ -11,32 +11,29 @@ import (
 )
 
 // SetupSSHAgent starts ssh-agent if not already running, scans ~/.ssh for private keys, and adds them.
-func SetupSSHAgent() {
+func SetupSSHAgent() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to get home directory for ssh-agent setup")
-		return
+		return err
 	}
 
 	sshDir := filepath.Join(home, ".ssh")
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
-		log.Debug().Msg("No ~/.ssh directory found, skipping ssh-agent setup")
-		return
+		return os.ErrNotExist
 	}
 
 	// Check if SSH_AUTH_SOCK is already set and working
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		if _, err := os.Stat(sock); err == nil {
 			log.Info().Str("socket", sock).Msg("Using existing SSH_AUTH_SOCK")
-			return
+			return nil
 		}
 	}
 
 	// Start a background ssh-agent
 	out, err := exec.Command("ssh-agent", "-s").Output()
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to start ssh-agent")
-		return
+		return err
 	}
 
 	// Parse environment variables output by `ssh-agent -s`
@@ -59,17 +56,21 @@ func SetupSSHAgent() {
 
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
-		log.Warn().Msg("ssh-agent output did not yield SSH_AUTH_SOCK")
-		return
+		return os.ErrNotExist
 	}
 
-	log.Info().Str("socket", sock).Msg("Started ssh-agent successfully")
+	// Set global GIT_SSH_COMMAND default according to ~/.ssh/config existence
+	sshConfigPath := filepath.Join(sshDir, "config")
+	if _, err := os.Stat(sshConfigPath); err == nil {
+		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F "+sshConfigPath+" -o StrictHostKeyChecking=no -o IdentitiesOnly=no")
+	} else {
+		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
+	}
 
 	// Find and add private keys in ~/.ssh
 	entries, err := os.ReadDir(sshDir)
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to read ~/.ssh directory")
-		return
+		return err
 	}
 
 	for _, entry := range entries {
@@ -93,4 +94,6 @@ func SetupSSHAgent() {
 			log.Info().Str("key", name).Msg("Added SSH key to ssh-agent")
 		}
 	}
+
+	return nil
 }

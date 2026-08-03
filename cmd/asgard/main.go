@@ -54,7 +54,9 @@ func main() {
 
 	setupLogger(conf)
 
-	sshagent.SetupSSHAgent()
+	if err := sshagent.SetupSSHAgent(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to setup SSH agent from ~/.ssh")
+	}
 
 	database, err := db.NewDB(conf)
 	if err != nil {

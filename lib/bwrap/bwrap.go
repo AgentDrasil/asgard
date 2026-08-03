@@ -130,6 +130,34 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 	return args, nil
 }
 
+// appendSSHSandboxArgs adds SSH-related mounts (~/.ssh tmpfs masking, config mount, GIT_SSH_COMMAND & SSH_AUTH_SOCK envs).
+func appendSSHSandboxArgs(args []string, home string) []string {
+	// Ensure .ssh is masked with tmpfs to prevent key leak to any sandbox
+	sshDir := filepath.Join(home, ".ssh")
+	args = append(args, "--tmpfs", sshDir)
+
+	// If host ~/.ssh/config exists, mount it read-only so SSH host aliases (e.g. ghhy) still work safely
+	sshConfigPath := filepath.Join(sshDir, "config")
+	if _, err := os.Stat(sshConfigPath); err == nil {
+		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
+	}
+
+	// Pass through GIT_SSH_COMMAND if set
+	if gitSshCmd := os.Getenv("GIT_SSH_COMMAND"); gitSshCmd != "" {
+		args = append(args, "--setenv", "GIT_SSH_COMMAND", gitSshCmd)
+	}
+
+	// Pass through SSH_AUTH_SOCK if set in host environment
+	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
+		if _, err := os.Stat(authSock); err == nil {
+			args = append(args, "--bind", authSock, authSock)
+			args = append(args, "--setenv", "SSH_AUTH_SOCK", authSock)
+		}
+	}
+
+	return args
+}
+
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
 func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
@@ -227,26 +255,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 	}
 
-	// Ensure .ssh is masked with tmpfs to prevent key leak to any sandbox
-	sshDir := filepath.Join(home, ".ssh")
-	args = append(args, "--tmpfs", sshDir)
-
-	// If host ~/.ssh/config exists, mount it read-only so SSH host aliases (e.g. ghhy) still work safely
-	sshConfigPath := filepath.Join(sshDir, "config")
-	if _, err := os.Stat(sshConfigPath); err == nil {
-		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
-	}
-
-	// Bypass system /etc/ssh/ssh_config.d bad owner errors in bwrap sandbox by default for git
-	args = append(args, "--setenv", "GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
-
-	// Pass through SSH_AUTH_SOCK if set in host environment
-	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
-		if _, err := os.Stat(authSock); err == nil {
-			args = append(args, "--bind", authSock, authSock)
-			args = append(args, "--setenv", "SSH_AUTH_SOCK", authSock)
-		}
-	}
+	// Append unified SSH sandbox mounts and environment variables
+	args = appendSSHSandboxArgs(args, home)
 
 	// Build and mount the system prompt, and mount skills/ if present in agentPath.
 	// The system prompt is written to the chat tmpDir on the host so that bwrap
@@ -345,25 +355,8 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 			}
 		}
 	}
-	sshDir := filepath.Join(home, ".ssh")
-	args = append(args, "--tmpfs", sshDir)
-
-	// If host ~/.ssh/config exists, mount it read-only so SSH host aliases (e.g. ghhy) still work safely
-	sshConfigPath := filepath.Join(sshDir, "config")
-	if _, err := os.Stat(sshConfigPath); err == nil {
-		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
-	}
-
-	// Bypass system /etc/ssh/ssh_config.d bad owner errors in bwrap sandbox by default for git
-	args = append(args, "--setenv", "GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
-
-	// Pass through SSH_AUTH_SOCK if set in host environment
-	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
-		if _, err := os.Stat(authSock); err == nil {
-			args = append(args, "--bind", authSock, authSock)
-			args = append(args, "--setenv", "SSH_AUTH_SOCK", authSock)
-		}
-	}
+	// Append unified SSH sandbox mounts and environment variables
+	args = appendSSHSandboxArgs(args, home)
 
 	if runDir != "" {
 		if _, err := os.Stat(runDir); err == nil {
