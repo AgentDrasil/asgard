@@ -227,9 +227,18 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 	}
 
-	// Ensure .ssh is always masked with tmpfs to prevent key leak to any sandbox
+	// Ensure .ssh is masked with tmpfs to prevent key leak to any sandbox
 	sshDir := filepath.Join(home, ".ssh")
 	args = append(args, "--tmpfs", sshDir)
+
+	// If host ~/.ssh/config exists, mount it read-only so SSH host aliases (e.g. ghhy) still work safely
+	sshConfigPath := filepath.Join(sshDir, "config")
+	if _, err := os.Stat(sshConfigPath); err == nil {
+		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
+	}
+
+	// Bypass system /etc/ssh/ssh_config.d bad owner errors in bwrap sandbox by default for git
+	args = append(args, "--setenv", "GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
 
 	// Pass through SSH_AUTH_SOCK if set in host environment
 	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
@@ -338,6 +347,15 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	}
 	sshDir := filepath.Join(home, ".ssh")
 	args = append(args, "--tmpfs", sshDir)
+
+	// If host ~/.ssh/config exists, mount it read-only so SSH host aliases (e.g. ghhy) still work safely
+	sshConfigPath := filepath.Join(sshDir, "config")
+	if _, err := os.Stat(sshConfigPath); err == nil {
+		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
+	}
+
+	// Bypass system /etc/ssh/ssh_config.d bad owner errors in bwrap sandbox by default for git
+	args = append(args, "--setenv", "GIT_SSH_COMMAND", "ssh -F /dev/null -o StrictHostKeyChecking=no")
 
 	// Pass through SSH_AUTH_SOCK if set in host environment
 	if authSock := os.Getenv("SSH_AUTH_SOCK"); authSock != "" {
