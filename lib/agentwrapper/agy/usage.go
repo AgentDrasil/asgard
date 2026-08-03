@@ -279,31 +279,33 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 		rem, ref := getModelQuota(mName, quota)
 
 		var limits []types.QuotaLimit
-		isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(mName)), "gemini")
-		var q5h, qWeekly QuotaEntry
-		var has5h, hasWeekly bool
+		if opts.Detailed {
+			isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(mName)), "gemini")
+			var q5h, qWeekly QuotaEntry
+			var has5h, hasWeekly bool
 
-		if isGemini {
-			q5h, has5h = quota["gemini-5h"]
-			qWeekly, hasWeekly = quota["gemini-weekly"]
-		} else {
-			q5h, has5h = quota["3p-5h"]
-			qWeekly, hasWeekly = quota["3p-weekly"]
-		}
+			if isGemini {
+				q5h, has5h = quota["gemini-5h"]
+				qWeekly, hasWeekly = quota["gemini-weekly"]
+			} else {
+				q5h, has5h = quota["3p-5h"]
+				qWeekly, hasWeekly = quota["3p-weekly"]
+			}
 
-		if has5h {
-			limits = append(limits, types.QuotaLimit{
-				Name:        "5h",
-				Remaining:   q5h.RemainingFraction,
-				RefreshDate: parseResetTime(q5h.ResetTime),
-			})
-		}
-		if hasWeekly {
-			limits = append(limits, types.QuotaLimit{
-				Name:        "weekly",
-				Remaining:   qWeekly.RemainingFraction,
-				RefreshDate: parseResetTime(qWeekly.ResetTime),
-			})
+			if has5h {
+				limits = append(limits, types.QuotaLimit{
+					Name:        "5h",
+					Remaining:   q5h.RemainingFraction,
+					RefreshDate: parseResetTime(q5h.ResetTime),
+				})
+			}
+			if hasWeekly {
+				limits = append(limits, types.QuotaLimit{
+					Name:        "weekly",
+					Remaining:   qWeekly.RemainingFraction,
+					RefreshDate: parseResetTime(qWeekly.ResetTime),
+				})
+			}
 		}
 
 		result = append(result, types.ModelUsage{

@@ -86,6 +86,10 @@ type UsageOptions struct {
 
 	// ResponseDelay is how long to wait for the command response to appear.
 	ResponseDelay time.Duration
+
+	// Detailed requests multi-tier breakdown of quota limits (e.g. for Web UI).
+	// When false (default for CLI mode), only top-level main quota is returned.
+	Detailed bool
 }
 
 func (o *UsageOptions) StartupDelayOrDefault() time.Duration {

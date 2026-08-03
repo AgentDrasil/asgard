@@ -477,8 +477,8 @@ const toggleTheme = () => {
                     </span>
                   </div>
 
-                  <!-- Overall Progress Bar -->
-                  <div class="space-y-1">
+                  <!-- Single Progress Bar (when no multi-tier breakdown limits exist) -->
+                  <div v-if="!m.limits || m.limits.length === 0" class="space-y-1">
                     <progress
                       class="progress w-full"
                       :class="getProgressClass(m.remaining)"
@@ -496,10 +496,7 @@ const toggleTheme = () => {
                   </div>
 
                   <!-- Specific Detailed Limits (if any) -->
-                  <div
-                    v-if="m.limits && m.limits.length > 0"
-                    class="mt-3 pt-3 border-t border-base-100/40 space-y-2"
-                  >
+                  <div v-else class="space-y-2">
                     <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
                       Quota Limits Breakdown
                     </h5>

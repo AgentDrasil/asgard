@@ -166,7 +166,9 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 							if strings.HasPrefix(result[i].Model, "zai-coding-plan") {
 								result[i].Remaining = remainingVal
 								result[i].RefreshDate = refreshDate
-								result[i].Limits = limits
+								if opts.Detailed {
+									result[i].Limits = limits
+								}
 							}
 						}
 					}

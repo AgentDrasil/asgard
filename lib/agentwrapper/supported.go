@@ -67,7 +67,7 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 		go func(name string, client types.CLIClient) {
 			defer wg.Done()
 			var usages []types.ModelUsage
-			if u, err := client.Usage(ctx, types.UsageOptions{}); err == nil {
+			if u, err := client.Usage(ctx, types.UsageOptions{Detailed: true}); err == nil {
 				usages = u
 			} else {
 				log.Error().Err(err).Str("cli", name).Msg("Failed to check quota for CLI")
