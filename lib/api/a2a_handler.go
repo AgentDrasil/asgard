@@ -552,6 +552,7 @@ type AgentInfo struct {
 	Description string   `json:"description"`
 	Icon        string   `json:"icon"`
 	RunDirs     []string `json:"run_dirs"`
+	MainAgent   bool     `json:"main_agent"`
 }
 
 // handleAgents handles GET /agents to list loaded agent names.
@@ -567,6 +568,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			Description: agent.Config.Description,
 			Icon:        agent.Config.Icon,
 			RunDirs:     agent.Config.RunDirs,
+			MainAgent:   agent.Config.IsMainAgent(),
 		})
 	}
 

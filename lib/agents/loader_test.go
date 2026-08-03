@@ -86,6 +86,7 @@ mount_dirs:
 					Description: "Test Agent 1",
 					Icon:        "fluent-color:bot-24",
 					Team:        "team-a",
+					MainAgent:   boolPtr(true),
 					CLI: []CLITarget{
 						{CLI: "agy", Model: "gemini-2.5-flash"},
 					},
@@ -103,6 +104,7 @@ id: agent2
 name: agent2
 description: Test Agent 2
 team: team-b
+main_agent: false
 cli:
   - cli: opencode
     model: deepseek-chat
@@ -113,6 +115,7 @@ cli:
 					Description: "Test Agent 2",
 					Icon:        "fluent-color:bot-24",
 					Team:        "team-b",
+					MainAgent:   boolPtr(false),
 					CLI: []CLITarget{
 						{CLI: "opencode", Model: "deepseek-chat"},
 					},
@@ -522,4 +525,8 @@ func TestAgentConfig_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }

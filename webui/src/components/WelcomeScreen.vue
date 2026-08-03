@@ -31,6 +31,10 @@ const loadingLevels = ref<boolean[]>([]);
 const isSyncingFromProps = ref(false);
 const selectedGitRoot = ref("");
 
+const mainAgents = computed(() => {
+  return props.agents.filter((a) => a.main_agent !== false);
+});
+
 const currentAgent = computed(() => {
   return props.agents.find((a) => a.id === props.selectedAgentId) || null;
 });
@@ -220,7 +224,7 @@ const handleSubmit = () => {
             class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none"
           >
             <option
-              v-for="agent in agents"
+              v-for="agent in mainAgents"
               :key="agent.id"
               :value="agent.id"
               class="bg-base-100 text-base-content"

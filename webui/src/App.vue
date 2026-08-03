@@ -147,10 +147,12 @@ watch(
 onMounted(async () => {
   const loadedAgents = await getAgents();
   agents.value = loadedAgents;
-  if (loadedAgents.length > 0) {
-    selectedAgentId.value = loadedAgents[0].id;
-    if (loadedAgents[0].run_dirs.length > 0) {
-      selectedDir.value = loadedAgents[0].run_dirs[0];
+  const mainAgents = loadedAgents.filter((a) => a.main_agent !== false);
+  const initialAgent = mainAgents.length > 0 ? mainAgents[0] : loadedAgents[0];
+  if (initialAgent) {
+    selectedAgentId.value = initialAgent.id;
+    if (initialAgent.run_dirs.length > 0) {
+      selectedDir.value = initialAgent.run_dirs[0];
     }
   }
 

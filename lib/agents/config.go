@@ -26,6 +26,7 @@ type AgentConfig struct {
 	Description string `yaml:"description"`
 	Icon        string `yaml:"icon"`
 	Team        string `yaml:"team"`
+	MainAgent   *bool  `yaml:"main_agent"`
 
 	// CLI is a list of CLI targets (CLI name and model) that can be used,
 	// typically ordered by preference to support quota-based fallbacks.
@@ -48,8 +49,21 @@ type AgentConfig struct {
 	RunMode string `yaml:"run_mode"`
 }
 
+// IsMainAgent returns true if MainAgent is true or nil (default).
+func (cfg *AgentConfig) IsMainAgent() bool {
+	if cfg.MainAgent == nil {
+		return true
+	}
+	return *cfg.MainAgent
+}
+
 // Validate checks the AgentConfig fields for correctness.
 func (cfg *AgentConfig) Validate() error {
+	if cfg.MainAgent == nil {
+		def := true
+		cfg.MainAgent = &def
+	}
+
 	if cfg.ID == "" {
 		return fmt.Errorf("id cannot be empty")
 	}

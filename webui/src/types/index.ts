@@ -4,6 +4,7 @@ export interface AgentInfo {
   description: string;
   icon?: string;
   run_dirs: string[];
+  main_agent?: boolean;
 }
 
 export interface MessagePart {
