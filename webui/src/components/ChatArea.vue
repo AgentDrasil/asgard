@@ -179,7 +179,7 @@ const copyMessage = async (id: string, text: string) => {
           class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
           title="Open Git Diff View"
         >
-          <Icon icon="material-symbols:difference-outline" class="h-4 w-4" />
+          <Icon icon="octicon:file-diff-24" class="h-4 w-4" />
           <span class="hidden sm:inline">Open Diff</span>
         </button>
 

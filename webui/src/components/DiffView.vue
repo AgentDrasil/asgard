@@ -455,7 +455,7 @@ function fileHasComments(filePath: string): boolean {
                       :disabled="!widgetInput.trim()"
                       class="btn btn-primary btn-xs gap-1"
                     >
-                      <Icon icon="material-symbols:send" class="h-3.5 w-3.5" />
+                      <Icon icon="material-symbols:add" class="h-3.5 w-3.5" />
                       Add to Chat
                     </button>
                   </div>
