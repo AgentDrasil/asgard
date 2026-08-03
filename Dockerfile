@@ -4,6 +4,20 @@ ARG DEBIAN_VERSION=bookworm
 ARG AGY_VERSION=1.1.9
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG SSH_WRAPPER_REPO=https://github.com/AgentDrasil/ssh-wrapper.git
+
+# Stage 0: ssh-wrapper builder
+FROM golang:${GO_VERSION}-alpine AS ssh-wrapper-builder
+
+ARG SSH_WRAPPER_REPO
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+RUN git clone ${SSH_WRAPPER_REPO} ssh-wrapper
+
+WORKDIR /src/ssh-wrapper
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ssh-wrapper .
 
 # Stage 1: base
 FROM debian:${DEBIAN_VERSION} AS base
@@ -23,6 +37,22 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     fish \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ssh-wrapper into Debian base image
+# 1. Backup original ssh client binary
+RUN mv /usr/bin/ssh /usr/bin/ssh.orig && \
+    chown root:root /usr/bin/ssh.orig && \
+    chmod 700 /usr/bin/ssh.orig
+
+# 2. Copy compiled ssh-wrapper & set setuid
+COPY --from=ssh-wrapper-builder /src/ssh-wrapper/ssh-wrapper /usr/bin/ssh
+RUN chown root:root /usr/bin/ssh && \
+    chmod 4755 /usr/bin/ssh
+
+# 3. Create keys directory for ssh-wrapper
+RUN mkdir -p /etc/keys && \
+    chown root:root /etc/keys && \
+    chmod 700 /etc/keys
 
 # Install agy
 COPY docker-scripts/install-agy.sh /tmp/install-agy.sh
@@ -105,7 +135,6 @@ RUN groupadd -g ${USER_GID} user && \
 COPY --from=go-builder /app/bin/* /bin/
 COPY --from=webui-builder /webui/dist /opt/asgard/webui
 
-USER user
 WORKDIR /home/user
 
 CMD ["asgard"]

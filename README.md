@@ -85,6 +85,61 @@ Each configured agent is exposed as an individual endpoint based on the **Agent-
     *   Identifies that agent's team configurations.
     *   Returns details on all other agents that belong to the same team.
 
+## SSH Wrapper Configuration
+
+Asgard base images include [ssh-wrapper](https://github.com/AgentDrasil/ssh-wrapper.git) to restrict agent SSH access and manage SSH keys securely.
+
+The recommended deployment method is to build a custom `Dockerfile` extending `asgard`:
+
+1. Copy your `ssh.config.yaml` to `/etc/ssh.config.yaml` with mode `0400` owned by `root:root`.
+2. Copy SSH private keys to `/etc/keys/` with directory mode `0700` and key mode `0400` owned by `root:root`.
+3. Create the log directory (e.g. `/var/log/ssh-wrapper`).
+4. Switch to `USER user` before starting Asgard.
+
+### Example Custom `Dockerfile`
+
+```dockerfile
+FROM ghcr.io/agentdrasil/asgard:latest
+
+# 1. Copy config and set strict root-only permissions (0400)
+COPY config/ssh.config.yaml /etc/ssh.config.yaml
+RUN chown root:root /etc/ssh.config.yaml && \
+    chmod 0400 /etc/ssh.config.yaml
+
+# 2. Copy SSH keys into /etc/keys/ with strict permissions
+COPY keys/ /etc/keys/
+RUN chown -R root:root /etc/keys && \
+    chmod 0700 /etc/keys && \
+    chmod 0400 /etc/keys/*
+
+# 3. Prepare log directory
+RUN mkdir -p /var/log/ssh-wrapper && \
+    chmod 777 /var/log/ssh-wrapper
+
+# 4. Drop privileges to non-root user
+USER user
+
+# 5. Start Asgard
+CMD ["asgard"]
+```
+
+### Example `ssh.config.yaml`
+
+```yaml
+logpath: /var/log/ssh-wrapper/ssh-wrapper.log
+
+allowed:
+  - host: ghhy                      # Host alias (used in git clone git@ghhy:...)
+    hostname: github.com            # Real hostname sent to SSH
+    key_path: /etc/keys/ghhy_key    # Custom key for this host (mode 0400, owned by root)
+    path_prefix:
+      - my-org/
+
+  - host: github.com                # Default key (/etc/keys/key)
+    path_prefix:
+      - my-org/
+```
+
 ## GitHub Account Setup
 
 **Recommended**: Create a separate GitHub account for Asgard to avoid exposing your main account's credentials. If your main account is used and its private tokens leak, an attacker could access all your repositories.
