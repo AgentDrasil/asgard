@@ -45,3 +45,11 @@ export interface DirInfo {
   subdirs: string[];
   gitRoot?: string;
 }
+
+export interface GitDiffFile {
+  oldPath: string;
+  newPath: string;
+  oldContent: string;
+  newContent: string;
+  hunks: string[];
+}

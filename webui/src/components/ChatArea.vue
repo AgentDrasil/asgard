@@ -20,6 +20,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
+  (e: "open-diff", gitRoot: string): void;
 }>();
 
 const gitRoot = ref("");
@@ -170,17 +171,31 @@ const copyMessage = async (id: string, text: string) => {
           </p>
         </div>
       </div>
-      <a
-        v-if="sessionId"
-        :href="`/api/ttyd/agent-${sessionId}`"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs shrink-0"
-        title="Open Agent Workspace Terminal"
-      >
-        <Icon icon="mynaui:terminal" class="h-4 w-4" />
-        <span class="inline sm:inline">Open Terminal</span>
-      </a>
+      <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+        <!-- Open Diff (only in git repos) -->
+        <button
+          v-if="gitRoot"
+          @click="emit('open-diff', gitRoot)"
+          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
+          title="Open Git Diff View"
+        >
+          <Icon icon="material-symbols:difference-outline" class="h-4 w-4" />
+          <span class="hidden sm:inline">Open Diff</span>
+        </button>
+
+        <!-- Open Terminal -->
+        <a
+          v-if="sessionId"
+          :href="`/api/ttyd/agent-${sessionId}`"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
+          title="Open Agent Workspace Terminal"
+        >
+          <Icon icon="mynaui:terminal" class="h-4 w-4" />
+          <span class="hidden sm:inline">Open Terminal</span>
+        </a>
+      </div>
     </header>
 
     <!-- Message List -->

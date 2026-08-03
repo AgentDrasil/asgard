@@ -1,4 +1,4 @@
-import type { AgentInfo, ChatSession, DirInfo } from "../types";
+import type { AgentInfo, ChatSession, DirInfo, GitDiffFile } from "../types";
 
 // Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -80,4 +80,17 @@ export async function getDirInfo(dir: string): Promise<DirInfo> {
 export async function getSubdirs(dir: string): Promise<string[]> {
   const info = await getDirInfo(dir);
   return info.subdirs;
+}
+
+export async function getGitDiff(dir: string): Promise<GitDiffFile[]> {
+  if (!dir) return [];
+  try {
+    const res = await apiFetch(`/api/git/diff?dir=${encodeURIComponent(dir)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.files || [];
+  } catch (err) {
+    console.error("getGitDiff error:", err);
+    return [];
+  }
 }

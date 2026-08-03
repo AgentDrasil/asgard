@@ -6,6 +6,7 @@ import Sidebar from "./components/Sidebar.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import ChatArea from "./components/ChatArea.vue";
 import ChatInput from "./components/ChatInput.vue";
+import DiffView from "./components/DiffView.vue";
 import { getAgents, getSessions, getSession, deleteSessionFromLocal } from "./lib/api";
 import { runAgentStream } from "./lib/agent";
 import { Icon } from "@iconify/vue";
@@ -32,6 +33,11 @@ let loadGen = 0;
 
 const activeSession = ref<ChatSession | null>(null);
 const activeAgent = ref<AgentInfo | null>(null);
+
+// Diff view state
+const showDiffView = ref(false);
+const chatInputText = ref("");
+const currentGitRoot = ref("");
 
 const closeSidebarOnMobile = () => {
   if (typeof window !== "undefined" && window.innerWidth < 768) {
@@ -117,6 +123,10 @@ const handleNewChat = () => {
 watch(
   () => route.params.id,
   async (newId) => {
+    // Close diff view when switching sessions
+    showDiffView.value = false;
+    chatInputText.value = "";
+
     if (newId && typeof newId === "string") {
       // Don't reload while a stream is actively populating messages
       if (!isStreaming.value) {
@@ -206,6 +216,9 @@ const handleDeleteSession = async (id: string) => {
 };
 
 const handleSendMessage = async (text: string) => {
+  // Clear diff comments and close diff view on send
+  chatInputText.value = "";
+
   let currentThreadId = activeSessionId.value;
 
   // Mark streaming as active BEFORE router.push so the route watcher doesn't
@@ -440,15 +453,31 @@ const toggleSidebar = () => {
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
       <template v-if="activeSessionId">
+        <!-- Diff View (replaces chat area when open) -->
+        <DiffView
+          v-if="showDiffView"
+          :runDir="activeSession?.runDir || selectedDir"
+          :gitRoot="currentGitRoot"
+          v-model:chatInputText="chatInputText"
+          @close="showDiffView = false"
+        />
+        <!-- Normal Chat Area -->
         <ChatArea
+          v-else
           :messages="messages"
           :loading="loading"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
+          @open-diff="
+            (gitRoot) => {
+              currentGitRoot = gitRoot;
+              showDiffView = true;
+            }
+          "
         />
-        <ChatInput @send="handleSendMessage" :loading="loading" />
+        <ChatInput @send="handleSendMessage" :loading="loading" v-model="chatInputText" />
       </template>
       <template v-else>
         <WelcomeScreen
