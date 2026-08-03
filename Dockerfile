@@ -21,6 +21,7 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     ripgrep \
     ttyd \
     fish \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install agy
