@@ -84,6 +84,7 @@ mount_dirs:
 					ID:          "agent1",
 					Name:        "agent1",
 					Description: "Test Agent 1",
+					Icon:        "fluent-color:bot-24",
 					Team:        "team-a",
 					CLI: []CLITarget{
 						{CLI: "agy", Model: "gemini-2.5-flash"},
@@ -110,6 +111,7 @@ cli:
 					ID:          "agent2",
 					Name:        "agent2",
 					Description: "Test Agent 2",
+					Icon:        "fluent-color:bot-24",
 					Team:        "team-b",
 					CLI: []CLITarget{
 						{CLI: "opencode", Model: "deepseek-chat"},

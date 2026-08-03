@@ -415,6 +415,7 @@ const toggleSidebar = () => {
         class="flex items-center gap-1.5 text-sm font-semibold truncate max-w-[220px] px-2 py-1 rounded-md hover:bg-base-200/60 active:bg-base-200 transition-colors cursor-pointer select-none"
         title="Toggle Workspace Info"
       >
+        <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
         <span class="text-base-content font-bold truncate">
           {{ activeAgent?.name || "Coding Agent" }}
         </span>
@@ -443,6 +444,7 @@ const toggleSidebar = () => {
     <Sidebar
       :isOpen="isSidebarOpen"
       :sessions="sessions"
+      :agents="agents"
       :activeSessionId="activeSessionId"
       @select-session="handleSelectSession"
       @new-chat="handleNewChat"

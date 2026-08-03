@@ -550,6 +550,7 @@ type AgentInfo struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
+	Icon        string   `json:"icon"`
 	RunDirs     []string `json:"run_dirs"`
 }
 
@@ -564,6 +565,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			ID:          agent.Config.ID,
 			Name:        agent.Config.Name,
 			Description: agent.Config.Description,
+			Icon:        agent.Config.Icon,
 			RunDirs:     agent.Config.RunDirs,
 		})
 	}

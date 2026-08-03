@@ -25,6 +25,7 @@ export async function getAgents(): Promise<AgentInfo[]> {
         id: "agent_father",
         name: "Agent Father",
         description: "Default coding agent orchestrator",
+        icon: "fluent-color:bot-24",
         run_dirs: ["/home/user/src/AgentDrasil/asgard"],
       },
     ];

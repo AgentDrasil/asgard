@@ -149,7 +149,7 @@ const copyMessage = async (id: string, text: string) => {
           class="hidden md:flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate"
           title="Toggle Workspace Info"
         >
-          <span>🤖</span>
+          <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
           <span class="font-bold truncate">{{ activeAgent?.name || "Coding Agent" }}</span>
           <Icon
             :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
@@ -232,7 +232,7 @@ const copyMessage = async (id: string, text: string) => {
             class="w-full pl-2 pr-2 my-2 min-w-0"
           >
             <div class="flex items-center gap-2 mb-1.5 select-none">
-              <span class="text-sm">🤖</span>
+              <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
               <span class="text-xs font-bold text-base-content/70">
                 {{ msg.agentName || activeAgent?.name || "Agent" }}
               </span>
@@ -289,7 +289,7 @@ const copyMessage = async (id: string, text: string) => {
           <!-- Assistant Message (Full-width markdown without chat bubble) -->
           <div v-else class="w-full pl-2 pr-2 py-2 my-1 min-w-0">
             <div class="flex items-center gap-2 mb-2 select-none">
-              <span class="text-sm">🤖</span>
+              <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
               <span class="text-xs font-bold text-base-content/70">
                 {{ msg.agentName || activeAgent?.name || "Agent" }}
               </span>

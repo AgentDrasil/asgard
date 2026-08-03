@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import type { ChatSession } from "../types";
+import { ref, onMounted, computed } from "vue";
+import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
 
 const props = withDefaults(
   defineProps<{
     sessions: ChatSession[];
+    agents?: AgentInfo[];
     activeSessionId: string | null;
     isOpen?: boolean;
   }>(),
   {
     isOpen: true,
+    agents: () => [],
   },
 );
 
@@ -35,8 +37,12 @@ const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
 };
 
+const getAgentIcon = (agentName: string): string => {
+  const matched = props.agents?.find((a) => a.name === agentName || a.id === agentName);
+  return matched?.icon || "fluent-color:bot-24";
+};
+
 // Computed property to group sessions by currentAgent
-import { computed } from "vue";
 const groupedSessions = computed(() => {
   const groups: Record<string, ChatSession[]> = {};
   for (const session of props.sessions) {
@@ -294,7 +300,7 @@ const toggleTheme = () => {
                     collapsedGroups[agentName] ? '-rotate-90' : '',
                   ]"
                 />
-                <Icon icon="mynaui:bot" class="h-4 w-4 fill-current text-primary shrink-0" />
+                <Icon :icon="getAgentIcon(agentName)" class="h-4 w-4 shrink-0" />
                 <span class="truncate">{{ agentName }}</span>
               </div>
               <span class="text-[10px] text-base-content/40 font-normal shrink-0"

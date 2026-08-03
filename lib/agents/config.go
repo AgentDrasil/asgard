@@ -24,6 +24,7 @@ type AgentConfig struct {
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	Icon        string `yaml:"icon"`
 	Team        string `yaml:"team"`
 
 	// CLI is a list of CLI targets (CLI name and model) that can be used,
@@ -61,6 +62,9 @@ func (cfg *AgentConfig) Validate() error {
 	}
 	if cfg.Description == "" {
 		return fmt.Errorf("description cannot be empty")
+	}
+	if cfg.Icon == "" {
+		cfg.Icon = "fluent-color:bot-24"
 	}
 
 	if len(cfg.CLI) == 0 {
