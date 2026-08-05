@@ -8,6 +8,7 @@ import (
 
 	"github.com/moznion/go-optional"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Agents []Agent
@@ -154,76 +155,84 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 
 // UpdateAgentStatus updates the status for a specific agent in a session.
 func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, status AgentStatus) error {
-	session, err := r.GetSession(chatID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return nil
-	}
-
-	found := false
-	for i, a := range session.Agents {
-		if a.Name == agentName {
-			session.Agents[i].Status = status
-			found = true
-			break
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
 		}
-	}
-	if !found {
-		session.Agents = append(session.Agents, Agent{
-			Name:   agentName,
-			Status: status,
-		})
-	}
 
-	return r.SaveSession(session)
+		found := false
+		for i, a := range session.Agents {
+			if a.Name == agentName {
+				session.Agents[i].Status = status
+				found = true
+				break
+			}
+		}
+		if !found {
+			session.Agents = append(session.Agents, Agent{
+				Name:   agentName,
+				Status: status,
+			})
+		}
+
+		return tx.Save(&session).Error
+	})
 }
 
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
 // optionally updates the run directory. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
 func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, cliKey string, sessionID string, runDirOpt optional.Option[string]) error {
-	session, err := r.GetSession(chatID)
-	if err != nil {
-		return err
-	}
-
-	if session == nil {
-		// Create new session if it doesn't exist
-		session = &Session{
-			ChatID:       chatID,
-			CurrentAgent: agentName,
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
 		}
-	}
 
-	if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
-		session.RunDir = runDirOpt.Unwrap()
-	}
-
-	found := false
-	for i, a := range session.Agents {
-		if a.Name == agentName {
-			if sessionID != "" && cliKey != "" {
-				if session.Agents[i].Sessions == nil {
-					session.Agents[i].Sessions = make(map[string]string)
-				}
-				session.Agents[i].Sessions[cliKey] = sessionID
+		var sessPtr *Session
+		if err == nil {
+			sessPtr = &session
+		} else {
+			sessPtr = &Session{
+				ChatID:       chatID,
+				CurrentAgent: agentName,
 			}
-			found = true
-			break
 		}
-	}
 
-	if !found {
-		newAgent := Agent{Name: agentName}
-		if sessionID != "" && cliKey != "" {
-			newAgent.Sessions = map[string]string{cliKey: sessionID}
+		if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
+			sessPtr.RunDir = runDirOpt.Unwrap()
 		}
-		session.Agents = append(session.Agents, newAgent)
-	}
 
-	return r.SaveSession(session)
+		found := false
+		for i, a := range sessPtr.Agents {
+			if a.Name == agentName {
+				if sessionID != "" && cliKey != "" {
+					if sessPtr.Agents[i].Sessions == nil {
+						sessPtr.Agents[i].Sessions = make(map[string]string)
+					}
+					sessPtr.Agents[i].Sessions[cliKey] = sessionID
+				}
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			newAgent := Agent{Name: agentName}
+			if sessionID != "" && cliKey != "" {
+				newAgent.Sessions = map[string]string{cliKey: sessionID}
+			}
+			sessPtr.Agents = append(sessPtr.Agents, newAgent)
+		}
+
+		return tx.Save(sessPtr).Error
+	})
 }
 
 // GetAgentSessions returns the sessions map for a specific agent in a chat.
@@ -246,63 +255,80 @@ func (r *SessionRepository) GetAgentSessions(chatID string, agentName string) (m
 
 // UpdateSessionTitle updates the title of a session by chat ID.
 func (r *SessionRepository) UpdateSessionTitle(chatID string, title string) error {
-	session, err := r.GetSession(chatID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		session = &Session{
-			ChatID: chatID,
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
 		}
-	}
-	session.Title = title
-	return r.SaveSession(session)
+
+		var sessPtr *Session
+		if err == nil {
+			sessPtr = &session
+		} else {
+			sessPtr = &Session{
+				ChatID: chatID,
+			}
+		}
+		sessPtr.Title = title
+		return tx.Save(sessPtr).Error
+	})
 }
 
 // AppendMessage appends a ChatMessage to a session by chat ID.
 func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error {
-	session, err := r.GetSession(chatID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		session = &Session{
-			ChatID: chatID,
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
 		}
-	}
-	session.Messages = append(session.Messages, msg)
-	return r.SaveSession(session)
+
+		var sessPtr *Session
+		if err == nil {
+			sessPtr = &session
+		} else {
+			sessPtr = &Session{
+				ChatID: chatID,
+			}
+		}
+		sessPtr.Messages = append(sessPtr.Messages, msg)
+		return tx.Save(sessPtr).Error
+	})
 }
 
 // MarkAskUserReplied marks an ask_user ChatMessage as replied and sets its reply text.
 func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) error {
-	session, err := r.GetSession(chatID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return nil
-	}
-
-	found := false
-	for i, m := range session.Messages {
-		if m.ID == messageID || (m.Role == "ask_user" && !m.Replied && messageID == "") {
-			session.Messages[i].Replied = true
-			session.Messages[i].ReplyText = replyText
-			found = true
-			break
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
 		}
-	}
 
-	if !found {
-		for i := len(session.Messages) - 1; i >= 0; i-- {
-			if session.Messages[i].Role == "ask_user" && !session.Messages[i].Replied {
+		found := false
+		for i, m := range session.Messages {
+			if m.ID == messageID || (m.Role == "ask_user" && !m.Replied && messageID == "") {
 				session.Messages[i].Replied = true
 				session.Messages[i].ReplyText = replyText
+				found = true
 				break
 			}
 		}
-	}
 
-	return r.SaveSession(session)
+		if !found {
+			for i := len(session.Messages) - 1; i >= 0; i-- {
+				if session.Messages[i].Role == "ask_user" && !session.Messages[i].Replied {
+					session.Messages[i].Replied = true
+					session.Messages[i].ReplyText = replyText
+					break
+				}
+			}
+		}
+
+		return tx.Save(&session).Error
+	})
 }
