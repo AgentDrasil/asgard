@@ -58,6 +58,8 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 		req.MessageID = fmt.Sprintf("ask-%d", time.Now().UnixNano())
 	}
 
+	log.Info().Str("chat_id", req.ChatID).Str("question", req.Question).Str("agent_name", req.AgentName).Msg("handleAskUser: received ask-user request from sandbox")
+
 	if s.repo != nil {
 		agentName := req.AgentName
 		if agentName == "" {

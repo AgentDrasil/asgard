@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,6 +55,7 @@ func findServiceAccountFile() (path string, data []byte, projectID string, err e
 	if home, e := os.UserHomeDir(); e == nil {
 		candidates = append(candidates,
 			filepath.Join(home, ".config", "service-account.json"),
+			filepath.Join(home, ".gemini", "service-account.json"),
 		)
 	}
 
@@ -89,8 +91,10 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 	}
 	pushTokensMu.Unlock()
 
+	log.Info().Str("chat_id", chatID).Int("token_count", len(tokens)).Msg("SendPushNotification called for ask-user event")
+
 	if len(tokens) == 0 {
-		log.Debug().Msg("No registered FCM tokens to send push notification")
+		log.Warn().Str("chat_id", chatID).Msg("SendPushNotification: No registered FCM tokens. Make sure browser opened WebUI and allowed push notifications.")
 		return
 	}
 
@@ -113,7 +117,7 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 			log.Warn().Err(err).Msg("Failed to parse Service Account JSON for FCM OAuth2")
 		}
 	} else {
-		log.Warn().Msg("Service account JSON file not found (place 'service-account.json' in project root or set FCM_SERVICE_ACCOUNT_FILE). Falling back to direct HTTP post.")
+		log.Warn().Msg("Service account JSON file not found (place 'service-account.json' at ~/.config/service-account.json or set FCM_SERVICE_ACCOUNT_FILE). Falling back to direct HTTP post.")
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
@@ -150,8 +154,13 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 					req.Header.Set("Content-Type", "application/json")
 					resp, err := httpClient.Do(req)
 					if err == nil {
+						respBody, _ := io.ReadAll(resp.Body)
 						_ = resp.Body.Close()
-						log.Info().Int("status", resp.StatusCode).Str("chat_id", chatID).Msg("Sent FCM HTTP v1 notification")
+						if resp.StatusCode == http.StatusOK {
+							log.Info().Int("status", resp.StatusCode).Str("chat_id", chatID).Msg("Successfully sent FCM HTTP v1 notification")
+						} else {
+							log.Error().Int("status", resp.StatusCode).Str("body", string(respBody)).Str("chat_id", chatID).Msg("FCM HTTP v1 error response")
+						}
 						return
 					} else {
 						log.Error().Err(err).Msg("Error posting to FCM HTTP v1 API")
@@ -182,7 +191,9 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 				req.Header.Set("Content-Type", "application/json")
 				resp, err := httpClient.Do(req)
 				if err == nil {
+					respBody, _ := io.ReadAll(resp.Body)
 					_ = resp.Body.Close()
+					log.Info().Int("status", resp.StatusCode).Str("body", string(respBody)).Str("chat_id", chatID).Msg("Fallback FCM response")
 				}
 			}
 		}(token)
