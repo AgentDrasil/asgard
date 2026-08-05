@@ -73,6 +73,9 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 			AgentName: agentName,
 			Timestamp: time.Now().UnixMilli(),
 		})
+		s.SendPushNotification(req.ChatID, req.Question, agentName)
+	} else {
+		s.SendPushNotification(req.ChatID, req.Question, req.AgentName)
 	}
 
 	replyCh := make(chan string, 1)

@@ -143,9 +143,14 @@ watch(
   { immediate: true },
 );
 
+import { initPushNotifications } from "./lib/push";
+
 // Initialize agents and sessions
 onMounted(async () => {
+  initPushNotifications().catch((err) => console.error("Push notification init error:", err));
+
   const loadedAgents = await getAgents();
+
   agents.value = loadedAgents;
   const mainAgents = loadedAgents.filter((a) => a.main_agent !== false);
   const initialAgent = mainAgents.length > 0 ? mainAgents[0] : loadedAgents[0];

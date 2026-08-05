@@ -117,3 +117,17 @@ export async function sendAskUserReply(
     return false;
   }
 }
+
+export async function registerPushToken(token: string): Promise<boolean> {
+  try {
+    const res = await apiFetch("/api/push/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("registerPushToken error:", err);
+    return false;
+  }
+}

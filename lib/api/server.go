@@ -124,6 +124,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/ask-user", s.handleAskUser)
 	mux.HandleFunc("/api/ask-user/reply", s.handleAskUserReply)
+	mux.HandleFunc("POST /api/push/tokens", s.handleRegisterPushToken)
 	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
 
 	if s.conf.WebUIPath != "" {
