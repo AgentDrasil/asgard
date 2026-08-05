@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
@@ -58,18 +59,59 @@ func TestHandleAgents(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
 	w := httptest.NewRecorder()
+
 	srv.handleAgents(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 
-	var returnedAgents []AgentInfo
-	err := json.Unmarshal(w.Body.Bytes(), &returnedAgents)
+	var res []AgentInfo
+	err := json.Unmarshal(w.Body.Bytes(), &res)
 	assert.NoError(t, err)
+	assert.Len(t, res, 2)
+	assert.Equal(t, "Agent Alpha", res[0].Name)
+	assert.Equal(t, "Agent Beta", res[1].Name)
+}
 
-	assert.Equal(t, 2, len(returnedAgents))
-	assert.Equal(t, "Agent Alpha", returnedAgents[0].Name)
-	assert.Equal(t, "Agent Beta", returnedAgents[1].Name)
+func TestAgentCardInternalHandler(t *testing.T) {
+	srv := &Server{
+		conf: &config.Config{
+			Host: "https://public.example.com",
+			Port: 8080,
+		},
+		agents: []*agents.Agent{
+			{
+				Config: agents.AgentConfig{
+					ID:   "test-agent",
+					Name: "Test Agent",
+				},
+			},
+		},
+	}
+
+	mux := srv.buildMuxLocked()
+
+	// Default request returns public host URL
+	reqPublic := httptest.NewRequest(http.MethodGet, "/agents/test-agent/.well-known/agent-card.json", nil)
+	wPublic := httptest.NewRecorder()
+	mux.ServeHTTP(wPublic, reqPublic)
+	assert.Equal(t, http.StatusOK, wPublic.Code)
+	assert.Contains(t, wPublic.Body.String(), "https://public.example.com/agents/test-agent")
+
+	// Internal query parameter request returns internal localhost URL
+	reqInternalQuery := httptest.NewRequest(http.MethodGet, "/agents/test-agent/.well-known/agent-card.json?internal=true", nil)
+	wInternalQuery := httptest.NewRecorder()
+	mux.ServeHTTP(wInternalQuery, reqInternalQuery)
+	assert.Equal(t, http.StatusOK, wInternalQuery.Code)
+	assert.Contains(t, wInternalQuery.Body.String(), "http://127.0.0.1:8080/agents/test-agent")
+
+	// Internal header request returns internal localhost URL
+	reqInternalHeader := httptest.NewRequest(http.MethodGet, "/agents/test-agent/.well-known/agent-card.json", nil)
+	reqInternalHeader.Header.Set("X-Internal", "true")
+	wInternalHeader := httptest.NewRecorder()
+	mux.ServeHTTP(wInternalHeader, reqInternalHeader)
+	assert.Equal(t, http.StatusOK, wInternalHeader.Code)
+	assert.Contains(t, wInternalHeader.Body.String(), "http://127.0.0.1:8080/agents/test-agent")
 }

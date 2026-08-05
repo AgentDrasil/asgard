@@ -33,15 +33,16 @@ func main() {
 		}
 	}
 
-	host := "http://127.0.0.1:8080"
+	port := 8080
 	if data, err := os.ReadFile(configPath); err == nil {
 		var cfg struct {
-			Host string `yaml:"host"`
+			Port int `yaml:"port"`
 		}
-		if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Host != "" {
-			host = cfg.Host
+		if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Port > 0 {
+			port = cfg.Port
 		}
 	}
+	host := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	resp, err := http.Get(host + "/team?chat_id=" + url.QueryEscape(chatID))
 	if err != nil {

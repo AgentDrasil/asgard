@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
 	"os"
 	"os/signal"
 
@@ -42,23 +44,46 @@ func main() {
 		}
 	}
 
-	host := "http://127.0.0.1:8080"
+	port := 8080
 	if data, err := os.ReadFile(configPath); err == nil {
 		var cfg struct {
-			Host string `yaml:"host"`
+			Port int `yaml:"port"`
 		}
-		if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Host != "" {
-			host = cfg.Host
+		if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Port > 0 {
+			port = cfg.Port
 		}
 	}
+	host := fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	targetURL := fmt.Sprintf("%s/agents/%s", host, agentID)
+	cardURL := fmt.Sprintf("%s/agents/%s/.well-known/agent-card.json?internal=true", host, agentID)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	client, err := a2aclient.NewFromEndpoints(ctx, []*a2a.AgentInterface{
-		a2a.NewAgentInterface(targetURL, a2a.TransportProtocolHTTPJSON),
-	})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, cardURL, nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Error creating request for agent card")
+		os.Exit(1)
+	}
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		log.Error().Err(err).Msg("Error fetching agent card")
+		os.Exit(1)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Error().Int("status", resp.StatusCode).Msg("Failed to fetch agent card")
+		os.Exit(1)
+	}
+
+	var card a2a.AgentCard
+	if err := json.NewDecoder(resp.Body).Decode(&card); err != nil {
+		log.Error().Err(err).Msg("Error decoding agent card")
+		os.Exit(1)
+	}
+
+	client, err := a2aclient.NewFromCard(ctx, &card)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating A2A client")
 		os.Exit(1)

@@ -93,7 +93,7 @@ func main() {
 
 	log.Info().Str("question", questionText).Str("host", internalHost).Msg("ask-user: question sent, waiting for user reply...")
 
-	client := &http.Client{Timeout: 30 * time.Minute}
+	client := &http.Client{Timeout: 3 * time.Hour}
 	resp, err := client.Post(askUserURL, "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Error().Err(err).Msg("Error connecting to ask-user endpoint")

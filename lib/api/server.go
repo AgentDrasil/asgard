@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
@@ -90,8 +91,23 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 		// Standard routes: /agents/{id}/message:stream etc.
 		mux.Handle(prefix, http.StripPrefix(agentBase, restHandler))
 
+		internalHost := fmt.Sprintf("http://127.0.0.1:%d", s.conf.Port)
+		internalCard := *card
+		internalCard.SupportedInterfaces = []*a2a.AgentInterface{
+			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", internalHost, agent.Config.ID), a2a.TransportProtocolHTTPJSON),
+		}
+
 		cardHandler := a2asrv.NewStaticAgentCardHandler(card)
-		mux.Handle(prefix+strings.TrimPrefix(a2asrv.WellKnownAgentCardPath, "/"), cardHandler)
+		internalCardHandler := a2asrv.NewStaticAgentCardHandler(&internalCard)
+
+		cardPath := prefix + strings.TrimPrefix(a2asrv.WellKnownAgentCardPath, "/")
+		mux.HandleFunc("GET "+cardPath, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("internal") == "true" || r.Header.Get("X-Internal") == "true" {
+				internalCardHandler.ServeHTTP(w, r)
+			} else {
+				cardHandler.ServeHTTP(w, r)
+			}
+		})
 
 		log.Info().Msgf("Registered agent %s at /agents/%s/", agent.Config.Name, agent.Config.ID)
 	}
