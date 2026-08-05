@@ -19,7 +19,7 @@ Asgard is designed to be a self-hosted AI coding solution that:
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).
 
-The sandbox execution is managed by the orchestrator in [run.go](src/AgentDrasil/asgard/lib/agents/run/run.go).
+The sandbox execution is managed by the orchestrator in [run.go](lib/agents/run/run.go).
 
 ```mermaid
 graph TD
@@ -54,8 +54,8 @@ When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
     *   System directories (`/bin`, `/usr/bin`, etc.) are mounted read-only.
-    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](src/AgentDrasil/asgard/cmd/fakebash/main.go) to intercept any shell command executions by the agent.
-*   **Command Execution Sandbox**: Runs the [fakebashd](src/AgentDrasil/asgard/cmd/fakebashd/main.go) daemon.
+    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](cmd/fakebash/main.go) to intercept any shell command executions by the agent.
+*   **Command Execution Sandbox**: Runs the [fakebashd](cmd/fakebashd/main.go) daemon.
     *   This is where actual shell commands requested by the agent are executed.
     *   It mounts the active `runDir` read-write, allowing commands to read/write workspace files.
     *   **Credential Masking**: To prevent credential theft, sensitive directories such as `~/.gemini` and `~/.local/share/opencode` are masked with empty `tmpfs` mounts, ensuring that commands executed by the agent cannot read authentication keys.
