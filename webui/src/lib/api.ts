@@ -19,16 +19,19 @@ export async function getAgents(): Promise<AgentInfo[]> {
     if (!res.ok) throw new Error("Failed to fetch agents");
     return await res.json();
   } catch (err) {
-    console.error("getAgents error, fallback to mock:", err);
-    return [
-      {
-        id: "agent_father",
-        name: "Agent Father",
-        description: "Default coding agent orchestrator",
-        icon: "fluent-color:bot-24",
-        run_dirs: ["/home/user/src/AgentDrasil/asgard"],
-      },
-    ];
+    console.error("getAgents error:", err);
+    if (import.meta.env.DEV) {
+      return [
+        {
+          id: "agent_father",
+          name: "Agent Father",
+          description: "Default coding agent orchestrator",
+          icon: "fluent-color:bot-24",
+          run_dirs: ["/home/user/src/AgentDrasil/asgard"],
+        },
+      ];
+    }
+    return [];
   }
 }
 
