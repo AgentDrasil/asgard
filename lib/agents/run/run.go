@@ -18,7 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/config"
 )
 
-func isAllowedDir(path string, allowedDirs []string) bool {
+func IsAllowedDir(path string, allowedDirs []string) bool {
 	path = filepath.Clean(path)
 	for _, dir := range allowedDirs {
 		dir = filepath.Clean(dir)
@@ -37,7 +37,7 @@ func isAllowedDir(path string, allowedDirs []string) bool {
 func resolveRunDir(agent *agents.Agent, runDirOpt optional.Option[string]) (string, error) {
 	if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
 		rd := runDirOpt.Unwrap()
-		if !isAllowedDir(rd, agent.Config.RunDirs) {
+		if !IsAllowedDir(rd, agent.Config.RunDirs) {
 			return "", fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
 		}
 		return rd, nil
