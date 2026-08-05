@@ -17,6 +17,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
+	"github.com/AgentDrasil/asgard/lib/agents/run"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
@@ -38,7 +39,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		chatID := execCtx.ContextID
-		if chatID != "" && !IsValidChatID(chatID) {
+		if !IsValidChatID(chatID) {
 			yield(nil, fmt.Errorf("invalid chatID format"))
 			return
 		}
@@ -71,21 +72,26 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		prompt := promptBuilder.String()
 
 		runDirOpt := optional.None[string]()
-		if execCtx.Metadata != nil {
+		// Always lock to established session.RunDir if session already exists
+		if session != nil && session.RunDir != "" {
+			runDirOpt = optional.Some(session.RunDir)
+		} else if execCtx.Metadata != nil {
 			if rd, ok := execCtx.Metadata["run_dir"].(string); ok && rd != "" {
 				runDirOpt = optional.Some(rd)
 			}
-		}
-		if runDirOpt.IsNone() && session != nil && session.RunDir != "" {
-			runDirOpt = optional.Some(session.RunDir)
 		}
 		if runDirOpt.IsNone() && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
 			runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
 		}
 
+		// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
 		if runDirOpt.IsSome() {
-			rd, _ := runDirOpt.Take()
+			rd := runDirOpt.Unwrap()
 			if rd != "" {
+				if len(e.agent.Config.RunDirs) > 0 && !run.IsAllowedDir(rd, e.agent.Config.RunDirs) {
+					yield(nil, fmt.Errorf("run directory %q is not allowed by agent configuration", rd))
+					return
+				}
 				info, err := os.Stat(rd)
 				if err != nil {
 					yield(nil, fmt.Errorf("run_dir %q does not exist: %w", rd, err))

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
@@ -115,4 +116,26 @@ func TestAgentCardInternalHandler(t *testing.T) {
 	mux.ServeHTTP(wInternalHeader, reqInternalHeader)
 	assert.Equal(t, http.StatusOK, wInternalHeader.Code)
 	assert.Contains(t, wInternalHeader.Body.String(), "http://127.0.0.1:8080/agents/test-agent")
+}
+
+func TestExecuteValidation(t *testing.T) {
+	agent := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:      "test-agent",
+			Name:    "Test Agent",
+			RunDirs: []string{"/tmp"},
+		},
+	}
+	executor := &agentExecutor{agent: agent}
+
+	// Test empty chatID fails validation
+	execCtxEmptyChat := &a2asrv.ExecutorContext{
+		ContextID: "",
+	}
+	seq := executor.Execute(t.Context(), execCtxEmptyChat)
+	for _, err := range seq {
+		if err != nil {
+			assert.Contains(t, err.Error(), "invalid chatID format")
+		}
+	}
 }
