@@ -120,7 +120,6 @@ export async function runAgentStream(
       },
     };
 
-    console.log("[agent.ts] Sending message stream with parameters:", sendParams);
     const stream = client.sendMessageStream(sendParams);
 
     let accumulatedText = "";
@@ -128,8 +127,6 @@ export async function runAgentStream(
     for await (const event of stream) {
       const payload = event.payload;
       if (!payload) continue;
-
-      console.log("[agent.ts] StreamResponse.$case:", payload.$case);
 
       // Direct message from agent (no task wrapping)
       if (payload.$case === "message") {
@@ -150,7 +147,6 @@ export async function runAgentStream(
         if (!status) continue;
 
         const state = status.state;
-        console.log("[agent.ts] task state:", TaskState[state]);
 
         const msg = status.message;
         const entryType: string =
@@ -190,15 +186,6 @@ export async function runAgentStream(
         }
 
         if (!statusText) continue;
-
-        console.log(
-          "[agent.ts] statusUpdate state:",
-          TaskState[state],
-          "entryType:",
-          entryType,
-          "isFinal:",
-          isFinalState(state),
-        );
 
         const isAgentResponse = entryType === "agent_response";
         const isFinalResult = isFinalState(state) && !entryType;

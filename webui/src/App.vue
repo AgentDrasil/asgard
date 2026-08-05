@@ -313,12 +313,6 @@ const handleSendMessage = async (text: string) => {
     },
     {
       onText: (textContent, inputTokens, maxTokens) => {
-        console.log(
-          "[App.vue] onText called, length:",
-          textContent.length,
-          "hasAssistantMsg:",
-          hasAssistantMsg,
-        );
         if (!hasAssistantMsg) {
           hasAssistantMsg = true;
           messages.value.push({
