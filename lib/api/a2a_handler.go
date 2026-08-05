@@ -265,11 +265,15 @@ func (e *agentExecutor) executeParallel(
 				if role == "" || role == "other" {
 					role = "activity"
 				}
+				agentName := e.agent.Config.Name
+				if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
+					agentName = name
+				}
 				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
 					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
 					Role:         role,
 					Content:      update.Content,
-					AgentName:    e.agent.Config.Name,
+					AgentName:    agentName,
 					Timestamp:    time.Now().UnixMilli(),
 					ActivityType: strings.ToUpper(role),
 					StepIndex:    update.StepIndex,
@@ -337,11 +341,15 @@ func (e *agentExecutor) streamAndFinish(
 				if role == "" || role == "other" {
 					role = "activity"
 				}
+				agentName := e.agent.Config.Name
+				if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
+					agentName = name
+				}
 				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
 					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
 					Role:         role,
 					Content:      update.Content,
-					AgentName:    e.agent.Config.Name,
+					AgentName:    agentName,
 					Timestamp:    time.Now().UnixMilli(),
 					ActivityType: strings.ToUpper(role),
 					StepIndex:    update.StepIndex,

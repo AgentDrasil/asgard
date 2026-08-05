@@ -88,6 +88,22 @@ function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
         });
       }
       i += 2; // consumed both
+    } else if (curIsCall) {
+      // Handle isolated tool_call (e.g. status updates)
+      const prev = out[out.length - 1];
+      if (
+        prev?.role === "tool_call" &&
+        (prev?.activityType === "TOOL_CALL" || prev?.activityType === "TOOL")
+      ) {
+        prev.activityType = "TOOL";
+        prev.content = prev.content + "\n---TOOL_ITEM_DELIMITER---\n" + cur.content;
+      } else {
+        out.push({
+          ...cur,
+          activityType: "TOOL",
+        });
+      }
+      i += 1;
     } else {
       out.push(cur);
       i += 1;
@@ -332,10 +348,11 @@ const handleSendMessage = async (text: string) => {
       onStatus: (statusText, entryType, _state, metadata) => {
         if (!statusText) return;
 
+        const agentName =
+          (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
+
         if (entryType === "ask_user") {
           const askMsgId = (metadata?.["message_id"] as string) || `ask-${Date.now()}`;
-          const agentName =
-            (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
           const exists = messages.value.some((m) => m.id === askMsgId);
           if (!exists) {
             messages.value.push({
@@ -365,6 +382,7 @@ const handleSendMessage = async (text: string) => {
             role: "tool_call",
             activityType: "TOOL",
             content: toolLog,
+            agentName: agentName,
             timestamp: Date.now(),
           };
           if (hasAssistantMsg) {
