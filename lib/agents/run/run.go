@@ -147,10 +147,11 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 		}
 	}()
 
+	var agentErr error
 	if ctx.Done() != nil {
 		done := make(chan struct{})
 		go func() {
-			_ = agentSandboxCmd.Wait()
+			agentErr = agentSandboxCmd.Wait()
 			close(done)
 		}()
 
@@ -162,18 +163,18 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 			return stdoutBuf.Bytes(), ctx.Err()
 		}
 	} else {
-		if err := agentSandboxCmd.Wait(); err != nil {
-			return stdoutBuf.Bytes(), err
-		}
+		agentErr = agentSandboxCmd.Wait()
+	}
+
+	// Kill the command execution sandbox (fakebashd) now that the agent process has finished.
+	if cmdSandboxCmd.Process != nil {
+		_ = cmdSandboxCmd.Process.Kill()
+		_, _ = cmdSandboxCmd.Process.Wait()
 	}
 
 	out := stdoutBuf.Bytes()
-
-	if err := cmdSandboxCmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return out, fmt.Errorf("running agent sandbox command: %w (output: %q)", err, string(out))
+	if agentErr != nil {
+		return out, agentErr
 	}
 
 	return out, nil
