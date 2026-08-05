@@ -18,14 +18,15 @@ import (
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agents/run"
+	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
 type agentExecutor struct {
-	agent     *agents.Agent
-	repo      *dbmodels.SessionRepository
-	server    *Server
-	statusURL string
+	agent  *agents.Agent
+	conf   *config.Config
+	repo   *dbmodels.SessionRepository
+	server *Server
 }
 
 // Execute handles the agent execution.
@@ -158,7 +159,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		// statusCh receives incremental AgentStatusUpdate events while run.Run executes.
 		var statusCh <-chan AgentStatusUpdate
 		var cancelListener func()
-		if e.server != nil && e.statusURL != "" {
+		if e.server != nil && e.conf != nil {
 			statusCh, cancelListener = e.server.AddStatusListener(chatID)
 			defer cancelListener()
 		}
@@ -209,7 +210,7 @@ func (e *agentExecutor) executeSequential(
 	// ── Run the agent in a goroutine, collect result on resultCh ──────────
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.statusURL)
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.conf)
 		resultCh <- seqRunResult{out, err}
 	}()
 
@@ -241,7 +242,7 @@ func (e *agentExecutor) executeParallel(
 	}
 	resultCh := make(chan runAllResult, 1)
 	go func() {
-		results := run.RunAll(ctx, e.agent, prompt, sessions, runDirOpt, chatID, e.statusURL)
+		results := run.RunAll(ctx, e.agent, prompt, sessions, runDirOpt, chatID, e.conf)
 		resultCh <- runAllResult{results}
 	}()
 
@@ -514,15 +515,20 @@ func (e *agentExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorCont
 }
 
 // NewAgentHandler creates the A2A HTTP REST handler and the AgentCard for the given agent.
-func NewAgentHandler(agent *agents.Agent, host string, repo *dbmodels.SessionRepository, server *Server, statusURL string) (http.Handler, *a2a.AgentCard) {
+func NewAgentHandler(agent *agents.Agent, conf *config.Config, repo *dbmodels.SessionRepository, server *Server) (http.Handler, *a2a.AgentCard) {
 	executor := &agentExecutor{
-		agent:     agent,
-		repo:      repo,
-		server:    server,
-		statusURL: statusURL,
+		agent:  agent,
+		conf:   conf,
+		repo:   repo,
+		server: server,
 	}
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)
+
+	host := "http://localhost:8080"
+	if conf != nil && conf.Host != "" {
+		host = conf.Host
+	}
 
 	card := &a2a.AgentCard{
 		Name:        agent.Config.Name,

@@ -21,6 +21,24 @@ type Config struct {
 	GeminiModelForChatTitle string `yaml:"gemini_model_for_chat_title"`
 }
 
+func (c *Config) APIHost() string {
+	if c == nil || c.Port <= 0 {
+		return "http://127.0.0.1:8080"
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", c.Port)
+}
+
+func (c *Config) InternalAPIHost() string {
+	if c == nil || c.InternalPort <= 0 {
+		return "http://127.0.0.1:8081"
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", c.InternalPort)
+}
+
+func (c *Config) StatusURL() string {
+	return c.InternalAPIHost() + "/agent-status"
+}
+
 func (c *Config) validate() error {
 	if c.Host == "" {
 		return fmt.Errorf("missing host")

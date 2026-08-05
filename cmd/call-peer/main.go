@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -35,25 +36,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		if _, err := os.Stat("/home/user/config.yaml"); err == nil {
-			configPath = "/home/user/config.yaml"
-		} else {
-			configPath = "config.yaml"
+	host := os.Getenv("ASGARD_API_HOST")
+	if host == "" {
+		configPath := os.Getenv("CONFIG_PATH")
+		if configPath == "" {
+			if _, err := os.Stat("/home/user/config.yaml"); err == nil {
+				configPath = "/home/user/config.yaml"
+			} else {
+				configPath = "config.yaml"
+			}
 		}
-	}
 
-	port := 8080
-	if data, err := os.ReadFile(configPath); err == nil {
-		var cfg struct {
-			Port int `yaml:"port"`
+		port := 8080
+		if data, err := os.ReadFile(configPath); err == nil {
+			var cfg struct {
+				Port int `yaml:"port"`
+			}
+			if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Port > 0 {
+				port = cfg.Port
+			}
 		}
-		if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Port > 0 {
-			port = cfg.Port
-		}
+		host = fmt.Sprintf("http://127.0.0.1:%d", port)
 	}
-	host := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		host = "http://" + host
+	}
 
 	cardURL := fmt.Sprintf("%s/agents/%s/.well-known/agent-card.json?internal=true", host, agentID)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

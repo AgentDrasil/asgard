@@ -83,10 +83,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
-	statusURL := fmt.Sprintf("http://127.0.0.1:%d/agent-status", s.conf.InternalPort)
-
 	for _, agent := range s.agents {
-		restHandler, card := NewAgentHandler(agent, s.conf.Host, s.repo, s, statusURL)
+		restHandler, card := NewAgentHandler(agent, s.conf, s.repo, s)
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
 		agentBase := fmt.Sprintf("/agents/%s", agent.Config.ID)
@@ -94,7 +92,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 		// Standard routes: /agents/{id}/message:stream etc.
 		mux.Handle(prefix, http.StripPrefix(agentBase, restHandler))
 
-		internalHost := fmt.Sprintf("http://127.0.0.1:%d", s.conf.Port)
+		internalHost := s.conf.APIHost()
 		internalCard := *card
 		internalCard.SupportedInterfaces = []*a2a.AgentInterface{
 			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", internalHost, agent.Config.ID), a2a.TransportProtocolHTTPJSON),

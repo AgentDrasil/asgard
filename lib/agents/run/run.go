@@ -15,6 +15,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/bwrap"
+	"github.com/AgentDrasil/asgard/lib/config"
 )
 
 func isAllowedDir(path string, allowedDirs []string) bool {
@@ -68,7 +69,7 @@ type RunResult struct {
 }
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
-func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusURL string) ([]byte, error) {
+func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, conf *config.Config) ([]byte, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -96,10 +97,30 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
 		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
 	}
-	if statusURL != "" {
-		internalHost := strings.TrimSuffix(statusURL, "/agent-status")
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+	if conf != nil {
+		statusURL := conf.StatusURL()
+		internalHost := conf.InternalAPIHost()
+		apiHost := conf.APIHost()
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env,
+			"ASGARD_STATUS_URL="+statusURL,
+			"ASGARD_INTERNAL_API_HOST="+internalHost,
+			"ASGARD_API_HOST="+apiHost,
+		)
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env,
+			"ASGARD_STATUS_URL="+statusURL,
+			"ASGARD_INTERNAL_API_HOST="+internalHost,
+			"ASGARD_API_HOST="+apiHost,
+		)
+	} else {
+		if envHost := os.Getenv("ASGARD_API_HOST"); envHost != "" {
+			agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_API_HOST="+envHost)
+			cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_API_HOST="+envHost)
+		}
+		if statusURL := os.Getenv("ASGARD_STATUS_URL"); statusURL != "" {
+			internalHost := strings.TrimSuffix(statusURL, "/agent-status")
+			agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+			cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+		}
 	}
 
 	cmdSandboxCmd.Stdout = os.Stdout
@@ -128,24 +149,27 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 
 	if ctx.Done() != nil {
 		done := make(chan struct{})
-		defer close(done)
 		go func() {
-			select {
-			case <-ctx.Done():
-				if agentSandboxCmd.Process != nil {
-					_ = agentSandboxCmd.Process.Kill()
-				}
-				if cmdSandboxCmd.Process != nil {
-					_ = cmdSandboxCmd.Process.Kill()
-				}
-			case <-done:
-			}
+			_ = agentSandboxCmd.Wait()
+			close(done)
 		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			_ = agentSandboxCmd.Process.Kill()
+			<-done
+			return stdoutBuf.Bytes(), ctx.Err()
+		}
+	} else {
+		if err := agentSandboxCmd.Wait(); err != nil {
+			return stdoutBuf.Bytes(), err
+		}
 	}
 
-	err = agentSandboxCmd.Wait()
 	out := stdoutBuf.Bytes()
-	if err != nil {
+
+	if err := cmdSandboxCmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -158,9 +182,7 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the first target that has more than 20% quota remaining.
 // If no targets have more than 20% quota remaining, it returns an error.
-// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
-// string to disable status reporting.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, statusURL string) ([]byte, error) {
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, conf *config.Config) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
@@ -188,15 +210,13 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusURL)
+	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, conf)
 }
 
 // RunAll runs ALL CLI targets on the agent concurrently and returns one RunResult per target.
 // sessions maps "<cli>/<model>" to the session ID to resume for that target.
 // Pass an empty or nil map to start fresh sessions for all targets.
-// statusURL is the optional internal-only URL to POST agent status updates to; pass an empty
-// string to disable status reporting.
-func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions map[string]string, runDirOpt optional.Option[string], chatID string, statusURL string) []RunResult {
+func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions map[string]string, runDirOpt optional.Option[string], chatID string, conf *config.Config) []RunResult {
 	if len(agent.Config.CLI) == 0 {
 		return []RunResult{{Err: fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)}}
 	}
@@ -223,7 +243,7 @@ func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions ma
 			if sid, ok := sessions[cliKey]; ok && sid != "" {
 				sessionOpt = optional.Some(sid)
 			}
-			out, err := runTarget(ctx, agent, t, prompt, sessionOpt, runDir, chatID, statusURL)
+			out, err := runTarget(ctx, agent, t, prompt, sessionOpt, runDir, chatID, conf)
 			results[idx] = RunResult{
 				CLIKey: cliKey,
 				Output: out,

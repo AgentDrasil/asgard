@@ -27,7 +27,8 @@ func TestNewAgentHandler(t *testing.T) {
 		Path: "/dummy/path",
 	}
 
-	handler, card := NewAgentHandler(agent, "http://localhost:8080", repo, nil, "")
+	conf := &config.Config{Host: "http://localhost:8080"}
+	handler, card := NewAgentHandler(agent, conf, repo, nil)
 	assert.NotNil(t, handler)
 	assert.NotNil(t, card)
 	assert.Equal(t, "Test Agent", card.Name)
