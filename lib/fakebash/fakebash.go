@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -108,13 +109,9 @@ func RunClient(args []string) error {
 
 type fakebashServer struct {
 	pb.UnimplementedFakebashServiceServer
-	mu sync.Mutex
 }
 
 func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashService_RunCommandServer) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var cmdStr string
 	if len(req.Args) > 0 {
 		if req.Args[0] == "-c" {
@@ -248,7 +245,7 @@ func RunDaemon() error {
 	return nil
 }
 
-func splitCommandString(cmdStr string) ([][]string, error) {
+func splitCommandString(cmdStr string) [][]string {
 	var commands [][]string
 	var currentCmd []string
 	var currentWord strings.Builder
@@ -259,7 +256,7 @@ func splitCommandString(cmdStr string) ([][]string, error) {
 	wordStarted := false
 
 	emitWord := func() {
-		if wordStarted {
+		if wordStarted || currentWord.Len() > 0 {
 			currentCmd = append(currentCmd, currentWord.String())
 			currentWord.Reset()
 			wordStarted = false
@@ -279,62 +276,55 @@ func splitCommandString(cmdStr string) ([][]string, error) {
 
 		if escaped {
 			currentWord.WriteByte(c)
-			wordStarted = true
 			escaped = false
+			wordStarted = true
 			continue
 		}
 
-		if inSingleQuote {
-			if c == '\'' {
-				inSingleQuote = false
-			} else {
-				currentWord.WriteByte(c)
-				wordStarted = true
-			}
-			continue
-		}
-
-		if inDoubleQuote {
-			switch c {
-			case '\\':
-				escaped = true
-			case '"':
-				inDoubleQuote = false
-			default:
-				currentWord.WriteByte(c)
-				wordStarted = true
-			}
-			continue
-		}
-
-		// Not in quotes
-		switch c {
-		case '\\':
+		if c == '\\' && !inSingleQuote {
 			escaped = true
-		case '\'':
-			inSingleQuote = true
 			wordStarted = true
-		case '"':
-			inDoubleQuote = true
-			wordStarted = true
-		case ';', '\n':
-			emitCommand()
-		case '&', '|':
-			emitCommand()
-			if i+1 < len(cmdStr) && cmdStr[i+1] == c {
-				i++
-			}
-		case ' ', '\t', '\r':
-			emitWord()
-		default:
-			currentWord.WriteByte(c)
-			wordStarted = true
+			continue
 		}
+
+		if c == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			wordStarted = true
+			continue
+		}
+
+		if c == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			wordStarted = true
+			continue
+		}
+
+		if !inSingleQuote && !inDoubleQuote {
+			if c == ';' || c == '\n' {
+				emitCommand()
+				continue
+			}
+			if c == '&' || c == '|' {
+				// Handle && or || operators
+				if i+1 < len(cmdStr) && cmdStr[i+1] == c {
+					i++
+				}
+				emitCommand()
+				continue
+			}
+			if unicode.IsSpace(rune(c)) {
+				emitWord()
+				continue
+			}
+		}
+
+		currentWord.WriteByte(c)
+		wordStarted = true
 	}
 
 	emitCommand()
 
-	return commands, nil
+	return commands
 }
 
 func isNoOpCommand(name string) bool {
@@ -386,10 +376,7 @@ func unpackCommand(cmd []string) ([]string, bool) {
 			}
 
 			if innerCmdStr != "" {
-				innerCmds, err := splitCommandString(innerCmdStr)
-				if err != nil {
-					return nil, false
-				}
+				innerCmds := splitCommandString(innerCmdStr)
 
 				var finalCmd []string
 				for _, innerCmd := range innerCmds {
@@ -404,7 +391,10 @@ func unpackCommand(cmd []string) ([]string, bool) {
 						finalCmd = unpacked
 					}
 				}
-				return finalCmd, true
+				if len(finalCmd) > 0 {
+					return finalCmd, true
+				}
+				return nil, true
 			}
 		}
 
