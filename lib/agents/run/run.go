@@ -148,22 +148,20 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	}()
 
 	var agentErr error
-	if ctx.Done() != nil {
-		done := make(chan struct{})
-		go func() {
-			agentErr = agentSandboxCmd.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-ctx.Done():
-			_ = agentSandboxCmd.Process.Kill()
-			<-done
-			return stdoutBuf.Bytes(), ctx.Err()
-		}
-	} else {
+	done := make(chan struct{})
+	go func() {
 		agentErr = agentSandboxCmd.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if agentSandboxCmd.Process != nil {
+			_ = agentSandboxCmd.Process.Kill()
+		}
+		<-done
+		return stdoutBuf.Bytes(), ctx.Err()
 	}
 
 	// Kill the command execution sandbox (fakebashd) now that the agent process has finished.

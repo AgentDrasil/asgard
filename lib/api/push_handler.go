@@ -220,10 +220,3 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 		}
 	}()
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
