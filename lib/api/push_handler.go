@@ -52,7 +52,9 @@ func findServiceAccountFile() (path string, data []byte, projectID string, err e
 	}
 
 	if home, e := os.UserHomeDir(); e == nil {
-		candidates = append(candidates, filepath.Join(home, ".gemini", "service-account.json"))
+		candidates = append(candidates,
+			filepath.Join(home, ".config", "service-account.json"),
+		)
 	}
 
 	for _, c := range candidates {
@@ -68,6 +70,15 @@ func findServiceAccountFile() (path string, data []byte, projectID string, err e
 		}
 	}
 	return "", nil, "", os.ErrNotExist
+}
+
+func CheckPushNotificationSetup() {
+	saPath, _, projectID, err := findServiceAccountFile()
+	if err != nil {
+		log.Warn().Msg("FCM Service Account JSON not found! Web Push notifications will not work until service-account.json is provided (checked ~/.config/service-account.json, ./service-account.json, or FCM_SERVICE_ACCOUNT_FILE).")
+	} else {
+		log.Info().Str("path", saPath).Str("project_id", projectID).Msg("FCM Service Account JSON loaded successfully")
+	}
 }
 
 func (s *Server) SendPushNotification(chatID string, questionText string, agentName string) {

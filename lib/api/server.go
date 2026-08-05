@@ -52,7 +52,10 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		ttydManager: ttydMgr,
 	}
 
+	CheckPushNotificationSetup()
+
 	if err := s.reload(); err != nil {
+
 		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
