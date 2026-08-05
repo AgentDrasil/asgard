@@ -20,6 +20,10 @@ type MountConfig struct {
 	ReadWrite []string `yaml:"readwrite"`
 }
 
+// AgentFatherID is the ID of the initial root agent required by Asgard.
+// The default agent set can be cloned from https://github.com/AgentDrasil/asgard-agents.git
+const AgentFatherID = "agent_father"
+
 type AgentConfig struct {
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`

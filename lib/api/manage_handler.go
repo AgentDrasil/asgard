@@ -30,7 +30,7 @@ func (s *Server) reload() error {
 	}
 
 	if !hasAgentFather {
-		return fmt.Errorf("agent_father is required but not found in the agents folder")
+		return fmt.Errorf("agent_father is required as the initial root agent, but was not found in the agents directory (%s). You can clone the default agents via: git clone https://github.com/AgentDrasil/asgard-agents.git %s", s.conf.AgentDir, s.conf.AgentDir)
 	}
 
 	s.mu.Lock()
