@@ -18,6 +18,11 @@ import (
 var (
 	pushTokensMu sync.Mutex
 	pushTokens   = make(map[string]time.Time)
+
+	fcmClientMu     sync.Mutex
+	cachedFcmClient *http.Client
+	cachedProjectID string
+	cachedFcmInit   bool
 )
 
 type RegisterPushTokenRequest struct {
@@ -26,6 +31,35 @@ type RegisterPushTokenRequest struct {
 
 type serviceAccountFile struct {
 	ProjectID string `json:"project_id"`
+}
+
+func getFCMClient() (*http.Client, string) {
+	fcmClientMu.Lock()
+	defer fcmClientMu.Unlock()
+
+	if cachedFcmInit {
+		return cachedFcmClient, cachedProjectID
+	}
+
+	cachedFcmInit = true
+	saPath, saData, projectID, saErr := findServiceAccountFile()
+
+	if saErr == nil {
+		ctx := context.Background()
+		jwtCfg, err := google.JWTConfigFromJSON(saData, "https://www.googleapis.com/auth/firebase.messaging")
+		if err == nil {
+			cachedFcmClient = jwtCfg.Client(ctx)
+			cachedProjectID = projectID
+			log.Info().Str("service_account", saPath).Str("project_id", projectID).Msg("FCM HTTP v1 authenticated client initialized")
+		} else {
+			log.Warn().Err(err).Msg("Failed to parse Service Account JSON for FCM OAuth2")
+		}
+	} else {
+		log.Warn().Msg("Service account JSON file not found (place 'service-account.json' at ~/.config/service-account.json or set FCM_SERVICE_ACCOUNT_FILE). Falling back to direct HTTP post.")
+		cachedFcmClient = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	return cachedFcmClient, cachedProjectID
 }
 
 func (s *Server) handleRegisterPushToken(w http.ResponseWriter, r *http.Request) {
@@ -84,48 +118,35 @@ func CheckPushNotificationSetup() {
 }
 
 func (s *Server) SendPushNotification(chatID string, questionText string, agentName string) {
-	pushTokensMu.Lock()
-	tokens := make([]string, 0, len(pushTokens))
-	for t := range pushTokens {
-		tokens = append(tokens, t)
-	}
-	pushTokensMu.Unlock()
-
-	log.Info().Str("chat_id", chatID).Int("token_count", len(tokens)).Msg("SendPushNotification called for ask-user event")
-
-	if len(tokens) == 0 {
-		log.Warn().Str("chat_id", chatID).Msg("SendPushNotification: No registered FCM tokens. Make sure browser opened WebUI and allowed push notifications.")
-		return
-	}
-
-	title := "Ask User: Agent Needs Your Input"
-	if agentName != "" {
-		title = "Ask User (" + agentName + ")"
-	}
-
-	saPath, saData, projectID, saErr := findServiceAccountFile()
-	var httpClient *http.Client
-
-	if saErr == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		jwtCfg, err := google.JWTConfigFromJSON(saData, "https://www.googleapis.com/auth/firebase.messaging")
-		if err == nil {
-			httpClient = jwtCfg.Client(ctx)
-			log.Info().Str("service_account", saPath).Str("project_id", projectID).Msg("FCM HTTP v1 authenticated client initialized")
-		} else {
-			log.Warn().Err(err).Msg("Failed to parse Service Account JSON for FCM OAuth2")
+	go func() {
+		pushTokensMu.Lock()
+		tokens := make([]string, 0, len(pushTokens))
+		for t := range pushTokens {
+			tokens = append(tokens, t)
 		}
-	} else {
-		log.Warn().Msg("Service account JSON file not found (place 'service-account.json' at ~/.config/service-account.json or set FCM_SERVICE_ACCOUNT_FILE). Falling back to direct HTTP post.")
-		httpClient = &http.Client{Timeout: 10 * time.Second}
-	}
+		pushTokensMu.Unlock()
 
-	targetURL := "/chat/" + chatID
+		log.Info().Str("chat_id", chatID).Int("token_count", len(tokens)).Msg("SendPushNotification called for ask-user event")
 
-	for _, token := range tokens {
-		go func(tok string) {
-			if projectID != "" && httpClient != nil {
+		if len(tokens) == 0 {
+			log.Warn().Str("chat_id", chatID).Msg("SendPushNotification: No registered FCM tokens. Make sure browser opened WebUI and allowed push notifications.")
+			return
+		}
+
+		httpClient, projectID := getFCMClient()
+		if httpClient == nil {
+			return
+		}
+
+		title := "Ask User: Agent Needs Your Input"
+		if agentName != "" {
+			title = "Ask User (" + agentName + ")"
+		}
+
+		targetURL := "/chat/" + chatID
+
+		for _, tok := range tokens {
+			if projectID != "" {
 				// FCM HTTP v1 API
 				fcmV1Endpoint := "https://fcm.googleapis.com/v1/projects/" + projectID + "/messages:send"
 				v1Payload := map[string]any{
@@ -161,7 +182,7 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 						} else {
 							log.Error().Int("status", resp.StatusCode).Str("body", string(respBody)).Str("chat_id", chatID).Msg("FCM HTTP v1 error response")
 						}
-						return
+						continue
 					} else {
 						log.Error().Err(err).Msg("Error posting to FCM HTTP v1 API")
 					}
@@ -196,8 +217,8 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 					log.Info().Int("status", resp.StatusCode).Str("body", string(respBody)).Str("chat_id", chatID).Msg("Fallback FCM response")
 				}
 			}
-		}(token)
-	}
+		}
+	}()
 }
 
 func min(a, b int) int {

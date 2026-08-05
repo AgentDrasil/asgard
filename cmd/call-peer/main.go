@@ -90,7 +90,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := a2aclient.NewFromCard(ctx, &card)
+	httpClient := &http.Client{Timeout: 0}
+	client, err := a2aclient.NewFromCard(ctx, &card,
+		a2aclient.WithRESTTransport(httpClient),
+		a2aclient.WithJSONRPCTransport(httpClient),
+	)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating A2A client")
 		os.Exit(1)
@@ -98,6 +102,12 @@ func main() {
 
 	reqMsg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(messageText))
 	reqMsg.ContextID = chatID
+	reqMsg.Metadata = map[string]any{
+		"internal":          true,
+		"source":            "call-peer",
+		"caller_agent_id":   os.Getenv("ASGARD_AGENT_ID"),
+		"caller_agent_name": os.Getenv("ASGARD_AGENT_NAME"),
+	}
 
 	req := &a2a.SendMessageRequest{
 		Message: reqMsg,

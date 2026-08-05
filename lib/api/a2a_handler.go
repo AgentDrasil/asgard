@@ -104,17 +104,41 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
 			}
-			// Save incoming user message to session in DB
+			// Save incoming message to session in DB
 			if prompt != "" {
 				userMsgID := ""
+				isInternal := false
+				callerName := ""
 				if execCtx.Message != nil {
 					userMsgID = execCtx.Message.ID
+					if execCtx.Message.Metadata != nil {
+						if v, ok := execCtx.Message.Metadata["internal"].(bool); ok && v {
+							isInternal = true
+						}
+						if cn, ok := execCtx.Message.Metadata["caller_agent_name"].(string); ok {
+							callerName = cn
+						}
+					}
+				}
+				role := "user"
+				activityType := ""
+				agentName := ""
+				if isInternal {
+					role = "activity"
+					activityType = "CALL_PEER"
+					if callerName != "" {
+						agentName = callerName
+					} else {
+						agentName = e.agent.Config.Name
+					}
 				}
 				_ = e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-					ID:        userMsgID,
-					Role:      "user",
-					Content:   prompt,
-					Timestamp: time.Now().UnixMilli(),
+					ID:           userMsgID,
+					Role:         role,
+					ActivityType: activityType,
+					Content:      prompt,
+					AgentName:    agentName,
+					Timestamp:    time.Now().UnixMilli(),
 				})
 			}
 
