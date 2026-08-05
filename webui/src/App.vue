@@ -324,8 +324,25 @@ const handleSendMessage = async (text: string) => {
           );
         }
       },
-      onStatus: (statusText) => {
+      onStatus: (statusText, entryType, _state, metadata) => {
         if (!statusText) return;
+
+        if (entryType === "ask_user") {
+          const askMsgId = (metadata?.["message_id"] as string) || `ask-${Date.now()}`;
+          const agentName =
+            (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
+          const exists = messages.value.some((m) => m.id === askMsgId);
+          if (!exists) {
+            messages.value.push({
+              id: askMsgId,
+              role: "ask_user",
+              content: statusText,
+              agentName: agentName,
+              timestamp: Date.now(),
+            });
+          }
+          return;
+        }
 
         // Accumulate all tool activity into a single shared log.
         // New tool invocations (tool_call) are separated from the previous pair

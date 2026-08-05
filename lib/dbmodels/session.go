@@ -48,6 +48,8 @@ type ChatMessage struct {
 	StepIndex    int    `json:"stepIndex,omitempty"`
 	InputTokens  int    `json:"inputTokens,omitempty"`
 	MaxTokens    int    `json:"maxTokens,omitempty"`
+	Replied      bool   `json:"replied,omitempty"`
+	ReplyText    string `json:"replyText,omitempty"`
 }
 
 type Messages []ChatMessage
@@ -269,5 +271,38 @@ func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error 
 		}
 	}
 	session.Messages = append(session.Messages, msg)
+	return r.SaveSession(session)
+}
+
+// MarkAskUserReplied marks an ask_user ChatMessage as replied and sets its reply text.
+func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) error {
+	session, err := r.GetSession(chatID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return nil
+	}
+
+	found := false
+	for i, m := range session.Messages {
+		if m.ID == messageID || (m.Role == "ask_user" && !m.Replied && messageID == "") {
+			session.Messages[i].Replied = true
+			session.Messages[i].ReplyText = replyText
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		for i := len(session.Messages) - 1; i >= 0; i-- {
+			if session.Messages[i].Role == "ask_user" && !session.Messages[i].Replied {
+				session.Messages[i].Replied = true
+				session.Messages[i].ReplyText = replyText
+				break
+			}
+		}
+	}
+
 	return r.SaveSession(session)
 }

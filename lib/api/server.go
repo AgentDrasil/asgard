@@ -106,6 +106,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/ask-user", s.handleAskUser)
+	mux.HandleFunc("/api/ask-user/reply", s.handleAskUserReply)
 	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
 
 	if s.conf.WebUIPath != "" {
@@ -136,7 +138,8 @@ func (s *Server) Start() error {
 
 	// ── Internal server (loopback only) ──────────────────────────────────────
 	internalMux := http.NewServeMux()
-	internalMux.HandleFunc("POST /agent-status", s.handleAgentStatus)
+	internalMux.HandleFunc("/agent-status", s.handleAgentStatus)
+	internalMux.HandleFunc("/api/ask-user", s.handleAskUser)
 	internalSrv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", s.conf.InternalPort),
 		Handler: internalMux,

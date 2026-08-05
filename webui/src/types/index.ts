@@ -22,7 +22,8 @@ export interface ChatMessage {
     | "reasoning"
     | "activity"
     | "tool_call"
-    | "tool_result";
+    | "tool_result"
+    | "ask_user";
   content: string;
   agentName?: string;
   timestamp?: number;
@@ -30,6 +31,8 @@ export interface ChatMessage {
   stepIndex?: number;
   inputTokens?: number;
   maxTokens?: number;
+  replied?: boolean;
+  replyText?: string;
 }
 
 export interface ChatSession {

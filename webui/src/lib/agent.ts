@@ -35,7 +35,12 @@ export async function getAgentClient(agentId: string, customBaseUrl?: string): P
 export interface StreamCallbacks {
   onText: (text: string, inputTokens?: number, maxTokens?: number) => void;
   onReasoning?: (text: string) => void;
-  onStatus?: (statusText: string, entryType?: string, state?: string) => void;
+  onStatus?: (
+    statusText: string,
+    entryType?: string,
+    state?: string,
+    metadata?: Record<string, any>,
+  ) => void;
   onError?: (err: Error) => void;
   onComplete?: () => void;
 }
@@ -204,8 +209,13 @@ export async function runAgentStream(
           const tokens = extractTokens(update);
           callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         } else {
-          // Tool calls, steps, reasoning → thinking/activity box
-          callbacks.onStatus?.(statusText, entryType, TaskState[state]);
+          // Tool calls, steps, reasoning, ask_user → status handler
+          callbacks.onStatus?.(
+            statusText,
+            entryType,
+            TaskState[state],
+            update.metadata || msg?.metadata,
+          );
         }
         continue;
       }

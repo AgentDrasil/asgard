@@ -1,8 +1,30 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { ChatMessage, AgentInfo } from "../types";
-import { getDirInfo } from "../lib/api";
+import { getDirInfo, sendAskUserReply } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
+
+const inlineInputMap = ref<Record<string, string>>({});
+const inlineSubmittingMap = ref<Record<string, boolean>>({});
+const inlineSubmittedMap = ref<Record<string, boolean>>({});
+
+const submitInlineReply = async (msgId: string) => {
+  const text = inlineInputMap.value[msgId]?.trim();
+  if (!text || !props.sessionId || inlineSubmittingMap.value[msgId]) return;
+
+  inlineSubmittingMap.value[msgId] = true;
+  const ok = await sendAskUserReply(props.sessionId, msgId, text);
+  inlineSubmittingMap.value[msgId] = false;
+
+  if (ok) {
+    inlineSubmittedMap.value[msgId] = true;
+    const targetMsg = props.messages.find((m) => m.id === msgId);
+    if (targetMsg) {
+      targetMsg.replied = true;
+      targetMsg.replyText = text;
+    }
+  }
+};
 
 const props = withDefaults(
   defineProps<{
@@ -270,6 +292,62 @@ const copyMessage = async (id: string, text: string) => {
                 </template>
               </div>
             </details>
+          </div>
+
+          <!-- Ask User Question Box with Inline Reply -->
+          <div v-else-if="msg.role === 'ask_user'" class="w-full pl-2 pr-2 my-3 min-w-0">
+            <div
+              class="card bg-warning/10 border border-warning/30 shadow-sm p-4 rounded-xl space-y-3"
+            >
+              <div class="flex items-center gap-2 select-none">
+                <Icon
+                  :icon="activeAgent?.icon || 'fluent-color:bot-24'"
+                  class="h-5 w-5 shrink-0 text-warning"
+                />
+                <span class="text-xs font-bold text-base-content">
+                  {{ msg.agentName || activeAgent?.name || "Agent" }} is asking:
+                </span>
+              </div>
+              <div
+                class="text-sm font-medium text-base-content whitespace-pre-wrap leading-relaxed"
+              >
+                {{ msg.content }}
+              </div>
+
+              <!-- Inline Reply Box -->
+              <div
+                v-if="!msg.replied && !inlineSubmittedMap[msg.id]"
+                class="flex items-center gap-2 pt-2 border-t border-warning/20"
+              >
+                <input
+                  v-model="inlineInputMap[msg.id]"
+                  @keydown.enter="submitInlineReply(msg.id)"
+                  type="text"
+                  placeholder="Type your reply to agent..."
+                  class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
+                  :disabled="inlineSubmittingMap[msg.id]"
+                />
+                <button
+                  @click="submitInlineReply(msg.id)"
+                  class="btn btn-sm btn-warning gap-1 text-xs"
+                  :disabled="!inlineInputMap[msg.id]?.trim() || inlineSubmittingMap[msg.id]"
+                >
+                  <span
+                    v-if="inlineSubmittingMap[msg.id]"
+                    class="loading loading-spinner loading-xs"
+                  ></span>
+                  <Icon v-else icon="fluent:send-24-filled" class="h-3.5 w-3.5" />
+                  Reply
+                </button>
+              </div>
+              <div
+                v-else
+                class="text-xs font-semibold text-success flex items-center gap-1.5 pt-2 border-t border-warning/20"
+              >
+                <Icon icon="fluent:checkmark-circle-24-filled" class="h-4 w-4" />
+                <span>Replied: {{ msg.replyText || inlineInputMap[msg.id] }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- User Chat Bubble -->

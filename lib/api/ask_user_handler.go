@@ -1,0 +1,143 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
+)
+
+type askUserWaiter struct {
+	chatID    string
+	messageID string
+	replyCh   chan string
+}
+
+var (
+	askWaitersMu sync.Mutex
+	askWaiters   = make(map[string]*askUserWaiter)
+)
+
+type AskUserRequest struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	Question  string `json:"question"`
+	AgentID   string `json:"agent_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
+}
+
+type AskUserResponse struct {
+	Reply string `json:"reply"`
+	Error string `json:"error,omitempty"`
+}
+
+type AskUserReplyRequest struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	ReplyText string `json:"reply_text"`
+}
+
+func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
+	var req AskUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.ChatID == "" || req.Question == "" {
+		http.Error(w, "chat_id and question are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.MessageID == "" {
+		req.MessageID = fmt.Sprintf("ask-%d", time.Now().UnixNano())
+	}
+
+	if s.repo != nil {
+		agentName := req.AgentName
+		if agentName == "" {
+			session, _ := s.repo.GetSession(req.ChatID)
+			if session != nil {
+				agentName = session.CurrentAgent
+			}
+		}
+		_ = s.repo.AppendMessage(req.ChatID, dbmodels.ChatMessage{
+			ID:        req.MessageID,
+			Role:      "ask_user",
+			Content:   req.Question,
+			AgentName: agentName,
+			Timestamp: time.Now().UnixMilli(),
+		})
+	}
+
+	replyCh := make(chan string, 1)
+	waiter := &askUserWaiter{
+		chatID:    req.ChatID,
+		messageID: req.MessageID,
+		replyCh:   replyCh,
+	}
+
+	askWaitersMu.Lock()
+	askWaiters[req.MessageID] = waiter
+	askWaitersMu.Unlock()
+
+	defer func() {
+		askWaitersMu.Lock()
+		delete(askWaiters, req.MessageID)
+		askWaitersMu.Unlock()
+	}()
+
+	select {
+	case reply := <-replyCh:
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(AskUserResponse{Reply: reply})
+	case <-r.Context().Done():
+		log.Warn().Str("chat_id", req.ChatID).Str("message_id", req.MessageID).Msg("ask-user HTTP context cancelled before user replied")
+		http.Error(w, "client disconnected", http.StatusRequestTimeout)
+	}
+}
+
+func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
+	var req AskUserReplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.ChatID == "" || req.ReplyText == "" {
+		http.Error(w, "chat_id and reply_text are required", http.StatusBadRequest)
+		return
+	}
+
+	if s.repo != nil {
+		_ = s.repo.MarkAskUserReplied(req.ChatID, req.MessageID, req.ReplyText)
+	}
+
+	askWaitersMu.Lock()
+	waiter, exists := askWaiters[req.MessageID]
+	if !exists {
+		for _, w := range askWaiters {
+			if w.chatID == req.ChatID {
+				waiter = w
+				exists = true
+				break
+			}
+		}
+	}
+	askWaitersMu.Unlock()
+
+	if exists && waiter != nil {
+		select {
+		case waiter.replyCh <- req.ReplyText:
+		default:
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}

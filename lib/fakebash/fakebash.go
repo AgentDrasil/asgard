@@ -23,6 +23,8 @@ var allowlist = map[string]struct{}{
 	"agystatusline": {},
 	"find-peer":     {},
 	"call-peer":     {},
+	"ask-user":      {},
+	"ask_user":      {},
 }
 
 func RunClient(args []string) error {

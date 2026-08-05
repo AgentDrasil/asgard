@@ -91,10 +91,16 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	}
 
 	agentSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
-	if statusURL != "" {
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL)
-	}
 	cmdSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
+	if agent != nil {
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
+	}
+	if statusURL != "" {
+		internalHost := strings.TrimSuffix(statusURL, "/agent-status")
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+	}
 
 	cmdSandboxCmd.Stdout = os.Stdout
 	cmdSandboxCmd.Stderr = os.Stderr

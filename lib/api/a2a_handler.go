@@ -413,10 +413,6 @@ func (e *agentExecutor) handleFinalResult(
 		cliKey := ""
 		persistSessionID := ""
 		if sessionMode != "fresh" && sessionID != "" {
-			// For sequential mode the CLI target is whichever was selected by quota;
-			// we don't have the target here, so use a blank cliKey to skip map update
-			// when sessionID is empty (handled inside UpdateAgentSession).
-			// The actual cliKey is not needed because sequential mode stores only one entry.
 			cliKey = "sequential"
 			persistSessionID = sessionID
 		}

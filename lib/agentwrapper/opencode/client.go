@@ -26,7 +26,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts types.PromptOpt
 
 func (c *Client) SystemPromptHeader() string {
 	return "## Important Instructions\n\n" +
-		"- Forget `question` and `task` tools. When you want to ask the user a question, use a regular text response instead.\n" +
+		"- When you need to ask the user a question or request user confirmation/input, execute the CLI tool `/bin/ask-user <question>`.\n" +
 		"- When you need to call a subagent or agent teammate, execute the CLI tool `/bin/call-peer <agent-id> <message>`."
 }
 

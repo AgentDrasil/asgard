@@ -95,3 +95,25 @@ export async function getGitDiff(dir: string): Promise<GitDiffFile[]> {
     return [];
   }
 }
+
+export async function sendAskUserReply(
+  chatID: string,
+  messageID: string,
+  replyText: string,
+): Promise<boolean> {
+  try {
+    const res = await apiFetch("/api/ask-user/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatID,
+        message_id: messageID,
+        reply_text: replyText,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("sendAskUserReply error:", err);
+    return false;
+  }
+}
