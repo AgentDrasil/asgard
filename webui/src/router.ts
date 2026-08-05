@@ -1,6 +1,10 @@
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
-const routes = [
+/**
+ * Router definitions for URL synchronization.
+ * Views are rendered inside App.vue which watches active route parameters.
+ */
+const routes: RouteRecordRaw[] = [
   {
     path: "/",
     redirect: "/newchat",
