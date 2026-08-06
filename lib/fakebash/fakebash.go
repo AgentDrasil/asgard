@@ -112,14 +112,17 @@ type fakebashServer struct {
 }
 
 func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashService_RunCommandServer) error {
+	var cmd *exec.Cmd
 	var cmdStr string
 	if len(req.Args) > 0 {
 		if req.Args[0] == "-c" {
 			if len(req.Args) > 1 {
-				cmdStr = strings.Join(req.Args[1:], " ")
+				cmdStr = req.Args[1]
+				cmd = exec.CommandContext(stream.Context(), "bash", append([]string{"-c"}, req.Args[1:]...)...)
 			}
 		} else {
 			cmdStr = strings.Join(req.Args, " ")
+			cmd = exec.CommandContext(stream.Context(), req.Args[0], req.Args[1:]...)
 		}
 	}
 
@@ -134,8 +137,6 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		}
 		return nil
 	}
-
-	cmd := exec.CommandContext(stream.Context(), "bash", "-c", cmdStr)
 	if req.Cwd != "" {
 		cmd.Dir = req.Cwd
 	}

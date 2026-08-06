@@ -87,6 +87,14 @@ func TestFakebashGRPC_Integration(t *testing.T) {
 			wantStderr:   "",
 			wantExitCode: "42",
 		},
+		{
+			name:         "positional args preservation",
+			args:         []string{"-c", "echo $0 $1", "script_name", "first_arg"},
+			cwd:          tmpDir,
+			wantStdout:   "script_name first_arg\n",
+			wantStderr:   "",
+			wantExitCode: "0",
+		},
 	}
 
 	for _, tt := range tests {
