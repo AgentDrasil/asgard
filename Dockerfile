@@ -94,7 +94,7 @@ RUN mkdir -p /app/bin && \
     done
 
 # Stage 5: runner
-FROM base AS runner
+FROM base_devtool AS runner
 
 ARG USER_UID
 ARG USER_GID
