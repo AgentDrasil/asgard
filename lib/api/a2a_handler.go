@@ -176,7 +176,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 				repo := e.repo
 
 				go func() {
-					titleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					titleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 					defer cancel()
 					title, err := generateSessionTitle(titleCtx, apiKey, model, prompt, agentID, agentDesc)
 					if err != nil {
