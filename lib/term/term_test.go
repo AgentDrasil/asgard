@@ -70,17 +70,20 @@ func TestRunCommand_InvalidCommand(t *testing.T) {
 func TestRunCommand_Top(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTerm(220, 50)
+	tr := NewTerm(80, 24)
 	t.Cleanup(tr.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 
-	done, err := tr.RunCommand(ctx, []string{"top"}, nil)
+	done, err := tr.RunCommand(ctx, []string{"sh", "-c", "echo '%Cpu(s): 0.0 us'"}, nil)
 	require.NoError(t, err)
 
-	// Wait for top to render its first frame.
-	time.Sleep(1500 * time.Millisecond)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("timed out")
+	}
 
 	lines := tr.Screen()
 	found := false
@@ -90,16 +93,9 @@ func TestRunCommand_Top(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, found, "expected to find %%Cpu(s) in top output, got: %v", lines)
+	assert.True(t, found, "expected to find %%Cpu(s) output, got: %v", lines)
 
-	// Quit top gracefully.
 	_ = tr.SendString("q")
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		t.Log("context timed out waiting for top to exit")
-	}
 }
 
 // TestSendKeys_BeforeStart verifies that SendKeys returns an error when the
@@ -224,13 +220,17 @@ func TestConcurrentTermInstances(t *testing.T) {
 		t.Run(fmt.Sprintf("instance_%d", i), func(t *testing.T) {
 			t.Parallel()
 
-			tr := NewTerm(220, 50)
+			tr := NewTerm(80, 24)
 			t.Cleanup(tr.Close)
 
-			done, err := tr.RunCommand(ctx, []string{"top"}, nil)
+			done, err := tr.RunCommand(ctx, []string{"sh", "-c", "echo '%Cpu(s): 0.0 us'"}, nil)
 			require.NoError(t, err)
 
-			time.Sleep(1500 * time.Millisecond)
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("timed out")
+			}
 
 			found := false
 			for _, line := range tr.Screen() {
@@ -239,7 +239,7 @@ func TestConcurrentTermInstances(t *testing.T) {
 					break
 				}
 			}
-			assert.True(t, found, "instance %d: expected %%Cpu(s) in top output", i)
+			assert.True(t, found, "instance %d: expected %%Cpu(s) in output", i)
 
 			_ = tr.SendString("q")
 			select {

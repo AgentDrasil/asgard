@@ -143,6 +143,13 @@ cli:
 	err = os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644)
 	assert.NoError(t, err)
 
+	teamsYaml := `
+teams:
+  - my-team
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+	assert.NoError(t, err)
+
 	conf := &config.Config{
 		AgentDir: tmpDir,
 		Port:     8080,
