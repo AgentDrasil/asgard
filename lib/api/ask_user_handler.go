@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
@@ -25,10 +26,9 @@ var (
 
 type AskUserRequest struct {
 	ChatID    string `json:"chat_id"`
-	MessageID string `json:"message_id"`
+	AgentName string `json:"agent_name"`
 	Question  string `json:"question"`
-	AgentID   string `json:"agent_id,omitempty"`
-	AgentName string `json:"agent_name,omitempty"`
+	MessageID string `json:"message_id"`
 }
 
 type AskUserResponse struct {
@@ -55,7 +55,7 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.MessageID == "" {
-		req.MessageID = fmt.Sprintf("ask-%d", time.Now().UnixNano())
+		req.MessageID = fmt.Sprintf("ask-%s", uuid.Must(uuid.NewV7()).String())
 	}
 
 	log.Info().Str("chat_id", req.ChatID).Str("question", req.Question).Str("agent_name", req.AgentName).Msg("handleAskUser: received ask-user request from sandbox")

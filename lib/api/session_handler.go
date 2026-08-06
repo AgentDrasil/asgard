@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/moznion/go-optional"
+
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
@@ -17,7 +20,12 @@ type ChatSession struct {
 	Messages     dbmodels.Messages `json:"messages,omitempty"`
 }
 
-// handleSessions handles GET and DELETE requests to /api/sessions.
+type CreateSessionRequest struct {
+	CurrentAgent string `json:"currentAgent"`
+	RunDir       string `json:"runDir"`
+}
+
+// handleSessions handles GET, POST, and DELETE requests to /api/sessions.
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -29,11 +37,43 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		s.handleGetSessions(w, r)
+	case http.MethodPost:
+		s.handleCreateSession(w, r)
 	case http.MethodDelete:
 		s.handleDeleteSession(w, r)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	var req CreateSessionRequest
+	if r.Body != nil && r.Body != http.NoBody {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	chatID := uuid.Must(uuid.NewV7()).String()
+
+	runDirOpt := optional.None[string]()
+	if req.RunDir != "" {
+		runDirOpt = optional.Some(req.RunDir)
+	}
+
+	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create session: " + err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(ChatSession{
+		ChatID:       chatID,
+		CurrentAgent: req.CurrentAgent,
+		RunDir:       req.RunDir,
+		GitRoot:      findGitRoot(req.RunDir),
+	})
 }
 
 func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {

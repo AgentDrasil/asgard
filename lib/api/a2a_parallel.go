@@ -8,6 +8,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -152,7 +153,7 @@ func (e *agentExecutor) handleParallelResult(
 		}
 		if respText != "" {
 			if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-				ID:        fmt.Sprintf("assistant-%s-%d", chatID, time.Now().UnixNano()),
+				ID:        fmt.Sprintf("assistant-%s-%s", chatID, uuid.Must(uuid.NewV7()).String()),
 				Role:      "assistant",
 				Content:   respText,
 				AgentName: e.agent.Config.Name,

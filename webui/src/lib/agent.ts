@@ -84,7 +84,7 @@ export async function runAgentStream(
     runDir: string;
     threadId: string;
     runId: string;
-    userMsgId: string;
+    userMsgId?: string;
   },
   callbacks: StreamCallbacks,
 ) {
@@ -97,7 +97,7 @@ export async function runAgentStream(
         run_dir: params.runDir,
       },
       message: {
-        messageId: params.userMsgId,
+        messageId: params.userMsgId || "",
         contextId: params.threadId,
         role: Role.ROLE_USER,
         parts: [

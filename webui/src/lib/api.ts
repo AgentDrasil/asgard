@@ -55,6 +55,23 @@ export async function getSessions(): Promise<ChatSession[]> {
   return [];
 }
 
+export async function createSession(
+  currentAgent?: string,
+  runDir?: string,
+): Promise<ChatSession | null> {
+  try {
+    const res = await apiFetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentAgent, runDir }),
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.error("Failed to create session on backend:", err);
+  }
+  return null;
+}
+
 export async function deleteSessionFromLocal(chatID: string): Promise<void> {
   try {
     await apiFetch(`/api/sessions?chat_id=${encodeURIComponent(chatID)}`, {

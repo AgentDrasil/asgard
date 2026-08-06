@@ -128,11 +128,11 @@ func TestExecuteValidation(t *testing.T) {
 	}
 	executor := &agentExecutor{agent: agent}
 
-	// Test empty chatID fails validation
-	execCtxEmptyChat := &a2asrv.ExecutorContext{
-		ContextID: "",
+	// Test invalid chatID fails validation
+	execCtxInvalidChat := &a2asrv.ExecutorContext{
+		ContextID: "invalid id !@#$",
 	}
-	seq := executor.Execute(t.Context(), execCtxEmptyChat)
+	seq := executor.Execute(t.Context(), execCtxInvalidChat)
 	for _, err := range seq {
 		if err != nil {
 			assert.Contains(t, err.Error(), "invalid chatID format")

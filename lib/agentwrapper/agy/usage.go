@@ -226,7 +226,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	argv := []string{"agy"}
 
-	awSessionID := uuid.NewString()
+	awSessionID := uuid.Must(uuid.NewV7()).String()
 	done, err := t.RunCommandInDir(context.Background(), argv, opts.Dir, []string{"AW_SESSION_ID=" + awSessionID})
 	if err != nil {
 		return nil, fmt.Errorf("launching agy/usage: %w", err)

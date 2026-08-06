@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { v4 as uuidv4 } from "uuid";
 import Sidebar from "./components/Sidebar.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import ChatArea from "./components/ChatArea.vue";
 import ChatInput from "./components/ChatInput.vue";
 import DiffView from "./components/DiffView.vue";
-import { getAgents, getSessions, getSession, deleteSessionFromLocal } from "./lib/api";
+import {
+  getAgents,
+  getSessions,
+  getSession,
+  createSession,
+  deleteSessionFromLocal,
+} from "./lib/api";
 import { runAgentStream } from "./lib/agent";
 import { Icon } from "@iconify/vue";
 import type { AgentInfo, ChatSession, ChatMessage } from "./types";
@@ -251,9 +256,13 @@ const handleSendMessage = async (text: string) => {
 
   // Create new session if none exists
   if (!currentThreadId) {
-    currentThreadId = uuidv4();
-    activeSessionId.value = currentThreadId;
-    await router.push(`/chat/${currentThreadId}`);
+    const created = await createSession(selectedAgentId.value, selectedDir.value);
+    if (created && created.chatID) {
+      currentThreadId = created.chatID;
+      activeSessionId.value = currentThreadId;
+      sessions.value = [created, ...sessions.value.filter((s) => s.chatID !== created.chatID)];
+      await router.push(`/chat/${currentThreadId}`);
+    }
   }
 
   const currentSession = sessions.value.find((s) => s.chatID === currentThreadId) || {
@@ -264,7 +273,7 @@ const handleSendMessage = async (text: string) => {
   };
 
   // 1. Add User Message
-  const userMsgId = uuidv4();
+  const userMsgId = `user-${crypto.randomUUID()}`;
   messages.value.push({
     id: userMsgId,
     role: "user",
@@ -272,8 +281,8 @@ const handleSendMessage = async (text: string) => {
     timestamp: Date.now(),
   });
 
-  const runId = uuidv4();
-  const assistantMsgId = uuidv4();
+  const runId = crypto.randomUUID();
+  const assistantMsgId = crypto.randomUUID();
   const reasoningMsgId = `reasoning-${runId}`;
 
   // Placeholders for assistant response & reasoning details
@@ -398,7 +407,7 @@ const handleSendMessage = async (text: string) => {
       },
       onError: async (err) => {
         messages.value.push({
-          id: `error-${uuidv4()}`,
+          id: `error-${crypto.randomUUID()}`,
           role: "activity",
           activityType: "ERROR",
           content: err.message || "An execution error occurred.",

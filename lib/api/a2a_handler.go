@@ -12,6 +12,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/genai"
@@ -39,7 +40,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		chatID := execCtx.ContextID
-		if !IsValidChatID(chatID) {
+		if chatID == "" {
+			chatID = uuid.Must(uuid.NewV7()).String()
+		} else if !IsValidChatID(chatID) {
 			yield(nil, fmt.Errorf("invalid chatID format"))
 			return
 		}
@@ -124,6 +127,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 							callerName = cn
 						}
 					}
+				}
+				if userMsgID == "" {
+					userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
 				}
 				role := "user"
 				activityType := ""

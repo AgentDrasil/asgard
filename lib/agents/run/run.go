@@ -53,7 +53,7 @@ func resolveRunDir(agent *agents.Agent, runDirOpt optional.Option[string]) (stri
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
-	uuidDir := filepath.Join(tmpDir, uuid.NewString())
+	uuidDir := filepath.Join(tmpDir, uuid.Must(uuid.NewV7()).String())
 	if err := os.MkdirAll(uuidDir, 0755); err != nil {
 		return "", fmt.Errorf("creating uuid run directory %q: %w", uuidDir, err)
 	}
@@ -74,7 +74,7 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
 	}
-	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewString())
+	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.Must(uuid.NewV7()).String())
 	if err := os.MkdirAll(sockDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}

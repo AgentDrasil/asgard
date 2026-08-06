@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,20 @@ func TestSessionHandler(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &sessions)
 	require.NoError(t, err)
 	assert.Empty(t, sessions)
+
+	// 1b. POST /api/sessions should create a new session with UUIDv7 chatID
+	postReq := httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(`{"currentAgent":"agent-alpha","runDir":"/tmp"}`))
+	postReq.Header.Set("Content-Type", "application/json")
+	rrPost := httptest.NewRecorder()
+	server.ServeHTTP(rrPost, postReq)
+	assert.Equal(t, http.StatusCreated, rrPost.Code)
+
+	var createdSession ChatSession
+	err = json.Unmarshal(rrPost.Body.Bytes(), &createdSession)
+	require.NoError(t, err)
+	assert.NotEmpty(t, createdSession.ChatID)
+	assert.Equal(t, "agent-alpha", createdSession.CurrentAgent)
+	assert.Equal(t, "/tmp", createdSession.RunDir)
 
 	// 2. Insert session via repo
 	err = repo.SaveSession(&dbmodels.Session{
