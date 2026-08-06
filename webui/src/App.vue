@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import { Icon } from "@iconify/vue";
@@ -8,6 +8,7 @@ import { initPushNotifications } from "./lib/push";
 import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
 import { useChatStream } from "./composables/useChatStream";
+import type { ChatMessage } from "./types";
 
 const route = useRoute();
 const router = useRouter();
@@ -22,11 +23,10 @@ const isWorkspaceDetailsOpen = ref(true);
 // 1. Agents Composable
 const { agents, selectedAgentId, selectedDir, loadAgents } = useAgents();
 
-// Placeholder ref for isStreaming so useSessions can inspect it safely
+// 2. Chat state shared between composables
+const messages = ref<ChatMessage[]>([]);
 const isStreamingRef = ref(false);
-const messagesRef = ref([]);
 
-// 2. Sessions Composable
 const {
   sessions,
   activeSessionId,
@@ -43,14 +43,14 @@ const {
   agents,
   selectedAgentId,
   isStreamingRef,
-  messagesRef,
+  messages,
   welcomePrompt,
   showDiffView,
   chatInputText,
 );
 
 // 3. Chat Stream Composable
-const { messages, loading, isStreaming, handleSendMessage } = useChatStream(
+const { loading, isStreaming, handleSendMessage } = useChatStream(
   activeSessionId,
   sessions,
   agents,
@@ -59,11 +59,16 @@ const { messages, loading, isStreaming, handleSendMessage } = useChatStream(
   selectedDir,
   chatInputText,
   router,
-  loadSessionData,
+  messages,
 );
 
-// Synchronize state references
-isStreamingRef.value = isStreaming.value;
+watch(
+  isStreaming,
+  (val) => {
+    isStreamingRef.value = val;
+  },
+  { immediate: true },
+);
 
 onMounted(async () => {
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));

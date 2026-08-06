@@ -14,9 +14,8 @@ export function useChatStream(
   selectedDir: Ref<string>,
   chatInputText: Ref<string>,
   router: Router,
-  loadSessionData: (id: string) => Promise<void>,
+  messages: Ref<ChatMessage[]>,
 ) {
-  const messages = ref<ChatMessage[]>([]);
   const loading = ref(false);
   const isStreaming = ref(false);
 
@@ -184,11 +183,8 @@ export function useChatStream(
         onComplete: async () => {
           isStreaming.value = false;
           loading.value = false;
-          if (currentThreadId) {
-            await loadSessionData(currentThreadId);
-            if (!currentSession.title) {
-              await refreshSessionTitle(currentThreadId);
-            }
+          if (currentThreadId && !currentSession.title) {
+            await refreshSessionTitle(currentThreadId);
           }
           const updated = await getSessions();
           sessions.value = updated;

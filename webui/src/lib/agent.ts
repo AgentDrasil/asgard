@@ -133,7 +133,7 @@ export async function runAgentStream(
         const msg = payload.value;
         const textContent = extractTextFromParts(msg.parts);
         if (textContent) {
-          accumulatedText += textContent;
+          accumulatedText = textContent;
           const tokens = extractTokens(msg);
           callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         }
@@ -156,7 +156,7 @@ export async function runAgentStream(
           const statusText = extractTextFromParts(msg.parts);
           if (statusText) {
             if (isFinalState(state)) {
-              accumulatedText += statusText;
+              accumulatedText = statusText;
               const tokens = extractTokens(task);
               callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
             } else {
@@ -191,8 +191,8 @@ export async function runAgentStream(
         const isFinalResult = isFinalState(state) && !entryType;
 
         if (isAgentResponse || isFinalResult) {
-          // Agent response text (streaming or final) → assistant bubble
-          accumulatedText += statusText;
+          // Agent response text (full content in snapshot or final update) → assistant bubble
+          accumulatedText = statusText;
           const tokens = extractTokens(update);
           callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         } else {
