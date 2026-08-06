@@ -50,7 +50,7 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 
 	var currentAgent *agents.Agent
 	for _, a := range s.agents {
-		if a.Config.Name == session.CurrentAgent {
+		if a.Config.Name == session.CurrentAgent || a.Config.ID == session.CurrentAgent {
 			currentAgent = a
 			break
 		}

@@ -108,7 +108,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		if e.repo != nil {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", "", runDirOpt); err != nil {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
 				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
 				return
 			}
@@ -156,8 +156,8 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			}
 
 			// Only update status if this is the primary/entry agent for the session
-			if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name {
-				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusRunning); err != nil {
+			if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name || session.CurrentAgent == e.agent.Config.ID {
+				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); err != nil {
 					yield(nil, fmt.Errorf("failed to update agent status to running: %w", err))
 					return
 				}
@@ -221,8 +221,8 @@ func (e *agentExecutor) markAgentCompleted(chatID string) {
 	if e.repo == nil {
 		return
 	}
-	if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted); err != nil {
-		log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.Name).Msg("failed to mark agent status completed after run")
+	if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusCompleted); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.ID).Msg("failed to mark agent status completed after run")
 	}
 }
 

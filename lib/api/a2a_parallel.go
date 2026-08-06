@@ -30,7 +30,7 @@ func (e *agentExecutor) executeParallel(
 	// Resolve sessions map for resume mode.
 	sessions := map[string]string{}
 	if sessionMode != "fresh" && e.repo != nil {
-		if s, err := e.repo.GetAgentSessions(chatID, e.agent.Config.Name); err == nil && s != nil {
+		if s, err := e.repo.GetAgentSessions(chatID, e.agent.Config.ID); err == nil && s != nil {
 			sessions = s
 		}
 	}
@@ -122,12 +122,12 @@ func (e *agentExecutor) handleParallelResult(
 
 		// Persist session ID per CLI target (resume mode only).
 		if e.repo != nil && sessionMode != "fresh" && sessionID != "" && r.CLIKey != "" {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, r.CLIKey, sessionID, runDirOpt); err != nil {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, r.CLIKey, sessionID, runDirOpt); err != nil {
 				log.Warn().Err(err).Str("cliKey", r.CLIKey).Msg("failed to update agent session for parallel target")
 			}
 		} else if e.repo != nil && combined.Len() == 0 {
 			// Still update runDir on the first target even in fresh mode.
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, "", "", runDirOpt); err != nil {
+			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to update agent session runDir in parallel mode")
 			}
 		}

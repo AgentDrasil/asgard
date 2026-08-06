@@ -164,7 +164,7 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 }
 
 // UpdateAgentStatus updates the status for a specific agent in a session.
-func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, status AgentStatus) error {
+func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, status AgentStatus) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
@@ -177,7 +177,7 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, s
 
 		found := false
 		for i, a := range session.Agents {
-			if a.Name == agentName {
+			if a.Name == agentID {
 				session.Agents[i].Status = status
 				found = true
 				break
@@ -185,7 +185,7 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, s
 		}
 		if !found {
 			session.Agents = append(session.Agents, Agent{
-				Name:   agentName,
+				Name:   agentID,
 				Status: status,
 			})
 		}
@@ -197,7 +197,7 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentName string, s
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
 // optionally updates the run directory. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
-func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, cliKey string, sessionID string, runDirOpt optional.Option[string]) error {
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string]) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
@@ -211,7 +211,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		} else {
 			sessPtr = &Session{
 				ChatID:       chatID,
-				CurrentAgent: agentName,
+				CurrentAgent: agentID,
 			}
 		}
 
@@ -221,7 +221,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 
 		found := false
 		for i, a := range sessPtr.Agents {
-			if a.Name == agentName {
+			if a.Name == agentID {
 				if sessionID != "" && cliKey != "" {
 					if sessPtr.Agents[i].Sessions == nil {
 						sessPtr.Agents[i].Sessions = make(map[string]string)
@@ -235,7 +235,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 
 		if !found {
 			newAgent := Agent{
-				Name:   agentName,
+				Name:   agentID,
 				Status: AgentStatusRunning,
 			}
 			if sessionID != "" && cliKey != "" {
@@ -250,7 +250,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 
 // GetAgentSessions returns the sessions map for a specific agent in a chat.
 // Returns nil if the session or agent is not found.
-func (r *SessionRepository) GetAgentSessions(chatID string, agentName string) (map[string]string, error) {
+func (r *SessionRepository) GetAgentSessions(chatID string, agentID string) (map[string]string, error) {
 	session, err := r.GetSession(chatID)
 	if err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (r *SessionRepository) GetAgentSessions(chatID string, agentName string) (m
 		return nil, nil
 	}
 	for _, a := range session.Agents {
-		if a.Name == agentName {
+		if a.Name == agentID {
 			return a.Sessions, nil
 		}
 	}

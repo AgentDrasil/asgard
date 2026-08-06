@@ -38,7 +38,7 @@ func (e *agentExecutor) executeSequential(
 	agentSessionID := optional.None[string]()
 	if sessionMode != "fresh" && e.repo != nil && session != nil {
 		for _, dbAgent := range session.Agents {
-			if dbAgent.Name == e.agent.Config.Name {
+			if dbAgent.Name == e.agent.Config.Name || dbAgent.Name == e.agent.Config.ID {
 				// For sequential mode, pick the first session from the map (if any).
 				for _, sid := range dbAgent.Sessions {
 					if sid != "" {
@@ -165,7 +165,7 @@ func (e *agentExecutor) handleFinalResult(
 			cliKey = "sequential"
 			persistSessionID = sessionID
 		}
-		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.Name, cliKey, persistSessionID, runDirOpt); err != nil {
+		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, cliKey, persistSessionID, runDirOpt); err != nil {
 			yield(nil, fmt.Errorf("failed to update agent session: %w", err))
 			return
 		}
