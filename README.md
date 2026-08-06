@@ -79,6 +79,7 @@ Each configured agent is exposed as an individual endpoint based on the **Agent-
 *   `/agents/{agent_id}/.well-known/agent-card.json`: Returns the agent card metadata.
 
 ### 2. Management & Coordination API
+*   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).
 *   **Reload Configurations** (`POST /api/manage/reload`): Reloads the local agent definition YAML configurations dynamically without needing to restart the orchestrator server.
 *   **Team Discovery** (`GET /team`):
     *   Finds the agent linked to the session queried by chat ID.

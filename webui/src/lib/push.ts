@@ -1,7 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { firebaseConfig, vapidKey } from "../config/firebase";
-import { registerPushToken } from "./api";
+import { registerPushToken, getBackendConfig } from "./api";
 
 let initialized = false;
 
@@ -13,6 +12,28 @@ export async function initPushNotifications(): Promise<string | null> {
   }
 
   try {
+    const backendConfig = await getBackendConfig();
+    if (!backendConfig.firebase_webpush_web) {
+      console.log("Firebase Web Push configuration not provided by server.");
+      return null;
+    }
+
+    const cfg = backendConfig.firebase_webpush_web;
+    const firebaseConfig = {
+      apiKey: cfg.apiKey,
+      authDomain: cfg.authDomain,
+      projectId: cfg.projectId,
+      storageBucket: cfg.storageBucket,
+      messagingSenderId: cfg.messagingSenderId,
+      appId: cfg.appId,
+    };
+    const vapidKey = cfg.vapidKey;
+
+    if (!firebaseConfig.apiKey) {
+      console.warn("Invalid Firebase Web Push config structure (missing apiKey).");
+      return null;
+    }
+
     const permission = await Notification.requestPermission();
     if (permission !== "granted") {
       console.log("Notification permission not granted:", permission);

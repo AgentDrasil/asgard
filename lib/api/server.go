@@ -116,6 +116,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
+	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/quota", s.handleQuota)
 	mux.HandleFunc("GET /api/subdirs", s.handleSubdirs)
 	mux.HandleFunc("GET /api/git/diff", s.handleGitDiff)

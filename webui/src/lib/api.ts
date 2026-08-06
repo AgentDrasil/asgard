@@ -1,4 +1,10 @@
-import type { AgentInfo, ChatSession, DirInfo, GitDiffFile } from "../types";
+import type {
+  AgentInfo,
+  ChatSession,
+  DirInfo,
+  FirebaseWebpushWebConfig,
+  GitDiffFile,
+} from "../types";
 
 // Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -139,4 +145,16 @@ export async function registerPushToken(token: string): Promise<boolean> {
     console.error("registerPushToken error:", err);
     return false;
   }
+}
+
+export async function getBackendConfig(): Promise<{
+  firebase_webpush_web?: FirebaseWebpushWebConfig;
+}> {
+  try {
+    const res = await apiFetch("/api/config");
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.error("getBackendConfig error:", err);
+  }
+  return {};
 }

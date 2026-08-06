@@ -8,17 +8,28 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+type FirebaseWebpushWebConfig struct {
+	APIKey            string `yaml:"api_key" json:"apiKey"`
+	AuthDomain        string `yaml:"auth_domain" json:"authDomain"`
+	ProjectID         string `yaml:"project_id" json:"projectId"`
+	StorageBucket     string `yaml:"storage_bucket" json:"storageBucket"`
+	MessagingSenderID string `yaml:"messaging_sender_id" json:"messagingSenderId"`
+	AppID             string `yaml:"app_id" json:"appId"`
+	VapidKey          string `yaml:"vapid_key" json:"vapidKey"`
+}
+
 type Config struct {
-	Debug                   bool   `yaml:"debug"`
-	DB                      string `yaml:"db"`
-	DSN                     string `yaml:"dsn"`
-	AgentDir                string `yaml:"agent_dir"`
-	Port                    int    `yaml:"port"`
-	InternalPort            int    `yaml:"internal_port"`
-	Host                    string `yaml:"host"`
-	WebUIPath               string `yaml:"webui_path"`
-	GeminiAPIKey            string `yaml:"gemini_api_key"`
-	GeminiModelForChatTitle string `yaml:"gemini_model_for_chat_title"`
+	Debug                   bool                      `yaml:"debug"`
+	DB                      string                    `yaml:"db"`
+	DSN                     string                    `yaml:"dsn"`
+	AgentDir                string                    `yaml:"agent_dir"`
+	Port                    int                       `yaml:"port"`
+	InternalPort            int                       `yaml:"internal_port"`
+	Host                    string                    `yaml:"host"`
+	WebUIPath               string                    `yaml:"webui_path"`
+	GeminiAPIKey            string                    `yaml:"gemini_api_key"`
+	GeminiModelForChatTitle string                    `yaml:"gemini_model_for_chat_title"`
+	FirebaseWebpushWeb      *FirebaseWebpushWebConfig `yaml:"firebase_webpush_web"`
 }
 
 func (c *Config) APIHost() string {

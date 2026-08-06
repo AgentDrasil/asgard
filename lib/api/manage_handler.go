@@ -9,6 +9,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/lib/config"
 )
 
 const agentFatherID = "agent_father"
@@ -70,4 +71,19 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+// ConfigResponse represents the public configuration sent to web clients.
+type ConfigResponse struct {
+	FirebaseWebpushWeb *config.FirebaseWebpushWebConfig `json:"firebase_webpush_web,omitempty"`
+}
+
+// handleConfig handles GET /api/config.
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	resp := ConfigResponse{
+		FirebaseWebpushWeb: s.conf.FirebaseWebpushWeb,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }

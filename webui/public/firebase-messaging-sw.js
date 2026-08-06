@@ -1,29 +1,47 @@
 importScripts("https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js");
 
-firebase.initializeApp({
-  apiKey: "AIzaSyD7NMrg6mFHmj4JhmNfxZWIDscKaZmfO5c",
-  authDomain: "asgard-webpush.firebaseapp.com",
-  projectId: "asgard-webpush",
-  storageBucket: "asgard-webpush.firebasestorage.app",
-  messagingSenderId: "134748411039",
-  appId: "1:134748411039:web:0c1fdc3b5ac8be9f45beaa",
-});
+let messaging = null;
 
-const messaging = firebase.messaging();
+async function initSwFirebase() {
+  try {
+    const res = await fetch("/api/config");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.firebase_webpush_web) return;
 
-messaging.onBackgroundMessage((payload) => {
-  console.log("[firebase-messaging-sw.js] Received background message ", payload);
-  const notificationTitle =
-    payload.notification?.title || payload.data?.title || "Agent Needs Input";
-  const notificationOptions = {
-    body: payload.notification?.body || payload.data?.body || "Ask-user question",
-    icon: "/favicon.svg",
-    data: payload.data || {},
-  };
+    const cfg = data.firebase_webpush_web;
+    const firebaseConfig = {
+      apiKey: cfg.apiKey,
+      authDomain: cfg.authDomain,
+      projectId: cfg.projectId,
+      storageBucket: cfg.storageBucket,
+      messagingSenderId: cfg.messagingSenderId,
+      appId: cfg.appId,
+    };
+    if (!firebaseConfig.apiKey) return;
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
-});
+    firebase.initializeApp(firebaseConfig);
+    messaging = firebase.messaging();
+
+    messaging.onBackgroundMessage((payload) => {
+      console.log("[firebase-messaging-sw.js] Received background message ", payload);
+      const notificationTitle =
+        payload.notification?.title || payload.data?.title || "Agent Needs Input";
+      const notificationOptions = {
+        body: payload.notification?.body || payload.data?.body || "Ask-user question",
+        icon: "/favicon.svg",
+        data: payload.data || {},
+      };
+
+      self.registration.showNotification(notificationTitle, notificationOptions);
+    });
+  } catch (err) {
+    console.error("[firebase-messaging-sw.js] Error fetching config:", err);
+  }
+}
+
+initSwFirebase();
 
 self.addEventListener("push", (event) => {
   if (!event.data) return;

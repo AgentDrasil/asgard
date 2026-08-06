@@ -126,3 +126,41 @@ cli:
 	assert.Equal(t, "agent_father", srv.agents[0].Config.ID)
 	assert.Equal(t, "My Agent", srv.agents[1].Config.Name)
 }
+
+func TestServerConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755)
+	assert.NoError(t, err)
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644)
+	assert.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+		FirebaseWebpushWeb: &config.FirebaseWebpushWebConfig{
+			APIKey:   "test-key",
+			VapidKey: "test-vapid",
+		},
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"apiKey":"test-key"`)
+	assert.Contains(t, w.Body.String(), `"vapidKey":"test-vapid"`)
+}

@@ -59,3 +59,13 @@ export interface GitDiffFile {
   newContent: string;
   hunks: string[];
 }
+
+export interface FirebaseWebpushWebConfig {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  vapidKey?: string;
+}
