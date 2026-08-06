@@ -1,4 +1,4 @@
-import { ref, watch, onUnmounted, type Ref } from "vue";
+import { ref, watch, type Ref } from "vue";
 import type { RouteLocationNormalizedLoaded, Router } from "vue-router";
 import type { ChatSession, AgentInfo, ChatMessage } from "../types";
 import { getSessions, getSession, deleteSessionFromLocal } from "../lib/api";
@@ -20,14 +20,6 @@ export function useSessions(
   const activeSession = ref<ChatSession | null>(null);
   const activeAgent = ref<AgentInfo | null>(null);
   let loadGen = 0;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-  const stopPolling = () => {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  };
 
   const loadSessionData = async (id: string) => {
     activeSessionId.value = id;
@@ -35,33 +27,7 @@ export function useSessions(
     const session = await getSession(id);
     if (session) {
       activeSession.value = session;
-      if (session.isRunning) {
-        isStreaming.value = true;
-        if (!pollTimer) {
-          pollTimer = setInterval(async () => {
-            if (activeSessionId.value !== id) {
-              stopPolling();
-              return;
-            }
-            const updated = await getSession(id);
-            if (updated) {
-              activeSession.value = updated;
-              messages.value = mergeToolMessages(updated.messages ?? []);
-              if (!updated.isRunning) {
-                isStreaming.value = false;
-                stopPolling();
-                const loadedSessions = await getSessions();
-                sessions.value = loadedSessions;
-              }
-            }
-          }, 2000);
-        }
-      } else {
-        stopPolling();
-        isStreaming.value = false;
-      }
-    } else {
-      stopPolling();
+      isStreaming.value = !!session.isRunning;
     }
     if (myGen !== loadGen) return;
     messages.value = mergeToolMessages(session?.messages ?? []);
@@ -109,7 +75,6 @@ export function useSessions(
           activeSessionId.value = newId;
         }
       } else {
-        stopPolling();
         activeSessionId.value = null;
         messages.value = [];
         welcomePrompt.value = "";
@@ -151,10 +116,6 @@ export function useSessions(
     },
     { immediate: true },
   );
-
-  onUnmounted(() => {
-    stopPolling();
-  });
 
   return {
     sessions,
