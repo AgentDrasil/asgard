@@ -201,11 +201,28 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			defer cancelListener()
 		}
 
+		// Always mark the agent as completed once the sandbox execution
+		// finishes, regardless of success, error, client disconnect, or
+		// context cancellation. This guarantees the session's isRunning
+		// state is cleared after the agent sandbox exits.
+		defer e.markAgentCompleted(chatID)
 		if runMode == "parallel" {
 			e.executeParallel(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, statusCh)
 		} else {
 			e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, session, statusCh)
 		}
+	}
+}
+
+// markAgentCompleted unconditionally sets the agent status to completed for the
+// given chat. It is intended to be deferred from Execute so the session's
+// isRunning flag is always cleared after the agent sandbox exits.
+func (e *agentExecutor) markAgentCompleted(chatID string) {
+	if e.repo == nil {
+		return
+	}
+	if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.Name).Msg("failed to mark agent status completed after run")
 	}
 }
 

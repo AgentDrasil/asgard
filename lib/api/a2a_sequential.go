@@ -132,9 +132,6 @@ func (e *agentExecutor) streamAndFinish(
 
 		case result := <-resultCh:
 			if result.err != nil {
-				if e.repo != nil {
-					_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
-				}
 				yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
 				return
 			}
@@ -142,9 +139,6 @@ func (e *agentExecutor) streamAndFinish(
 			return
 
 		case <-ctx.Done():
-			if e.repo != nil {
-				_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
-			}
 			yield(nil, ctx.Err())
 			return
 		}
@@ -176,9 +170,6 @@ func (e *agentExecutor) handleFinalResult(
 			return
 		}
 
-		if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted); err != nil {
-			log.Error().Err(err).Str("chat_id", chatID).Msg("failed to update agent status to completed in repo")
-		}
 		// Save final assistant response to DB session
 		if respText != "" {
 			if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{

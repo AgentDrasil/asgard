@@ -100,9 +100,6 @@ func (e *agentExecutor) executeParallel(
 			return
 
 		case <-ctx.Done():
-			if e.repo != nil {
-				_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted)
-			}
 			yield(nil, ctx.Err())
 			return
 		}
@@ -148,9 +145,6 @@ func (e *agentExecutor) handleParallelResult(
 	respText := combined.String()
 
 	if e.repo != nil {
-		if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.Name, dbmodels.AgentStatusCompleted); err != nil {
-			log.Error().Err(err).Str("chat_id", chatID).Msg("failed to update agent status to completed in repo")
-		}
 		if respText != "" {
 			if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
 				ID:        fmt.Sprintf("assistant-%s-%s", chatID, uuid.Must(uuid.NewV7()).String()),

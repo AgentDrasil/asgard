@@ -222,7 +222,6 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		found := false
 		for i, a := range sessPtr.Agents {
 			if a.Name == agentName {
-				sessPtr.Agents[i].Status = AgentStatusRunning
 				if sessionID != "" && cliKey != "" {
 					if sessPtr.Agents[i].Sessions == nil {
 						sessPtr.Agents[i].Sessions = make(map[string]string)
