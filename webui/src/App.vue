@@ -158,7 +158,7 @@ const closeSidebarOnMobile = () => {
         <component
           :is="Component"
           :agents="agents"
-          :loading="loading"
+          :loading="loading || isStreaming || (activeSession?.isRunning ?? false)"
           :messages="messages"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"

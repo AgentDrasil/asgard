@@ -94,6 +94,21 @@ func TestSessionHandler(t *testing.T) {
 	require.Len(t, fetchedSession.Messages, 2)
 	assert.Equal(t, "msg-1", fetchedSession.Messages[0].ID)
 	assert.Equal(t, "Hello", fetchedSession.Messages[0].Content)
+	assert.False(t, fetchedSession.IsRunning)
+
+	// Update agent status to running and test isRunning == true
+	err = repo.UpdateAgentStatus("chat-1", "agent-alpha", dbmodels.AgentStatusRunning)
+	require.NoError(t, err)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/chat-1", nil)
+	rr = httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var runningSession ChatSession
+	err = json.Unmarshal(rr.Body.Bytes(), &runningSession)
+	require.NoError(t, err)
+	assert.True(t, runningSession.IsRunning)
 
 	// 4. Test limit 20 and ordering by update time
 	// Delete chat-1 first so we start clean

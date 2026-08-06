@@ -124,3 +124,16 @@ func TestSessionRepository(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, sess)
 }
+
+func TestSessionIsRunning(t *testing.T) {
+	s := &Session{
+		Agents: Agents{
+			{Name: "agent-1", Status: AgentStatusCompleted},
+			{Name: "agent-2", Status: AgentStatusRunning},
+		},
+	}
+	assert.True(t, s.IsRunning())
+
+	s.Agents[1].Status = AgentStatusCompleted
+	assert.False(t, s.IsRunning())
+}

@@ -25,7 +25,13 @@ export function useSessions(
     activeSessionId.value = id;
     const myGen = ++loadGen;
     const session = await getSession(id);
-    if (myGen !== loadGen || isStreaming.value) return;
+    if (session) {
+      activeSession.value = session;
+      if (session.isRunning) {
+        isStreaming.value = true;
+      }
+    }
+    if (myGen !== loadGen) return;
     messages.value = mergeToolMessages(session?.messages ?? []);
   };
 

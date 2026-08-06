@@ -98,6 +98,16 @@ type Session struct {
 	UpdatedAt time.Time
 }
 
+// IsRunning returns true if any agent in the session has status AgentStatusRunning.
+func (s *Session) IsRunning() bool {
+	for _, a := range s.Agents {
+		if a.Status == AgentStatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
 type AgentStatus uint
 
 const (
@@ -212,6 +222,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		found := false
 		for i, a := range sessPtr.Agents {
 			if a.Name == agentName {
+				sessPtr.Agents[i].Status = AgentStatusRunning
 				if sessionID != "" && cliKey != "" {
 					if sessPtr.Agents[i].Sessions == nil {
 						sessPtr.Agents[i].Sessions = make(map[string]string)
@@ -224,7 +235,10 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentName string, 
 		}
 
 		if !found {
-			newAgent := Agent{Name: agentName}
+			newAgent := Agent{
+				Name:   agentName,
+				Status: AgentStatusRunning,
+			}
 			if sessionID != "" && cliKey != "" {
 				newAgent.Sessions = map[string]string{cliKey: sessionID}
 			}

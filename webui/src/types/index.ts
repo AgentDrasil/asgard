@@ -41,6 +41,7 @@ export interface ChatSession {
   currentAgent: string;
   runDir: string;
   gitRoot?: string;
+  isRunning?: boolean;
   createdAt?: string;
   updatedAt?: string;
   messages?: ChatMessage[];

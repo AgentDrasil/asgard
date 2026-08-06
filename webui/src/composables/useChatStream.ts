@@ -30,8 +30,16 @@ export function useChatStream(
   };
 
   const handleSendMessage = async (text: string) => {
-    chatInputText.value = "";
     let currentThreadId = activeSessionId.value;
+
+    if (currentThreadId) {
+      const activeSess = sessions.value.find((s) => s.chatID === currentThreadId);
+      if (activeSess?.isRunning || isStreaming.value || loading.value) {
+        return;
+      }
+    }
+
+    chatInputText.value = "";
 
     isStreaming.value = true;
     loading.value = true;
