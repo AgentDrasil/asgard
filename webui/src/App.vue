@@ -2,10 +2,6 @@
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
-import WelcomeScreen from "./components/WelcomeScreen.vue";
-import ChatArea from "./components/ChatArea.vue";
-import ChatInput from "./components/ChatInput.vue";
-import DiffView from "./components/DiffView.vue";
 import { Icon } from "@iconify/vue";
 import { initPushNotifications } from "./lib/push";
 
@@ -153,43 +149,33 @@ const closeSidebarOnMobile = () => {
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
-      <template v-if="activeSessionId">
-        <!-- Diff View (replaces chat area when open) -->
-        <DiffView
-          v-if="showDiffView"
-          :runDir="activeSession?.runDir || selectedDir"
-          :gitRoot="currentGitRoot"
-          v-model:chatInputText="chatInputText"
-          @close="showDiffView = false"
-        />
-        <!-- Normal Chat Area -->
-        <ChatArea
-          v-else
-          :messages="messages"
+      <router-view v-slot="{ Component }">
+        <component
+          :is="Component"
+          :agents="agents"
           :loading="loading"
+          :messages="messages"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
-          :sessionId="activeSessionId"
+          :sessionId="activeSessionId || ''"
+          :showDiffView="showDiffView"
+          :gitRoot="currentGitRoot"
+          v-model:selectedAgentId="selectedAgentId"
+          v-model:selectedDir="selectedDir"
+          v-model:prompt="welcomePrompt"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
+          v-model:chatInputText="chatInputText"
+          @submit="handleStartWelcomeChat"
+          @send="handleSendMessage"
           @open-diff="
             (gitRoot) => {
               currentGitRoot = gitRoot;
               showDiffView = true;
             }
           "
+          @close-diff="showDiffView = false"
         />
-        <ChatInput @send="handleSendMessage" :loading="loading" v-model="chatInputText" />
-      </template>
-      <template v-else>
-        <WelcomeScreen
-          :agents="agents"
-          v-model:selectedAgentId="selectedAgentId"
-          v-model:selectedDir="selectedDir"
-          v-model:prompt="welcomePrompt"
-          @submit="handleStartWelcomeChat"
-          :loading="loading"
-        />
-      </template>
+      </router-view>
     </main>
   </div>
 </template>

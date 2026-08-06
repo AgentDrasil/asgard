@@ -1,9 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import NewChatView from "./views/NewChatView.vue";
+import ChatView from "./views/ChatView.vue";
 
-/**
- * Router definitions for URL synchronization.
- * Views are rendered inside App.vue which watches active route parameters.
- */
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
@@ -12,12 +10,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/newchat",
     name: "newchat",
-    component: { render: () => null },
+    component: NewChatView,
   },
   {
     path: "/chat/:id",
     name: "chat",
-    component: { render: () => null },
+    component: ChatView,
   },
 ];
 

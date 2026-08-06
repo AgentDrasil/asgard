@@ -20,17 +20,6 @@ export async function getAgents(): Promise<AgentInfo[]> {
     return await res.json();
   } catch (err) {
     console.error("getAgents error:", err);
-    if (import.meta.env.DEV) {
-      return [
-        {
-          id: "agent_father",
-          name: "Agent Father",
-          description: "Default coding agent orchestrator",
-          icon: "fluent-color:bot-24",
-          run_dirs: ["/home/user/src/AgentDrasil/asgard"],
-        },
-      ];
-    }
     return [];
   }
 }

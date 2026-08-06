@@ -3,6 +3,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo, sendAskUserReply } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
+import { TOOL_ITEM_DELIMITER } from "../utils/messageUtils";
 
 const inlineInputMap = ref<Record<string, string>>({});
 const inlineSubmittingMap = ref<Record<string, boolean>>({});
@@ -280,8 +281,8 @@ const copyMessage = async (id: string, text: string) => {
               </summary>
               <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
                 <template
-                  v-for="(item, idx) in msg.content.includes('---TOOL_ITEM_DELIMITER---')
-                    ? msg.content.split('---TOOL_ITEM_DELIMITER---')
+                  v-for="(item, idx) in msg.content.includes(TOOL_ITEM_DELIMITER)
+                    ? msg.content.split(TOOL_ITEM_DELIMITER)
                     : msg.content.split('\n\n')"
                   :key="idx"
                 >

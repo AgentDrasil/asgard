@@ -207,9 +207,9 @@ export async function runAgentStream(
         continue;
       }
 
-      // Artifact updates — not handled by current UI, log only
+      // Artifact updates — not handled by current UI
       if (payload.$case === "artifactUpdate") {
-        console.log("[agent.ts] artifactUpdate received (not handled)");
+        // Ignored in current UI
       }
     }
 

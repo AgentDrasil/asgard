@@ -32,13 +32,11 @@ export async function initPushNotifications(): Promise<string | null> {
     });
 
     if (token) {
-      console.log("FCM Token obtained:", token);
       await registerPushToken(token);
       initialized = true;
 
       // Handle foreground messages if the user is currently looking at the tab
       onMessage(messaging, (payload) => {
-        console.log("Foreground message received:", payload);
         const title = payload.notification?.title || payload.data?.title || "Agent Needs Input";
         const body = payload.notification?.body || payload.data?.body || "Ask-user question";
         new Notification(title, {
