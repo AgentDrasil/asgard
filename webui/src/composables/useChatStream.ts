@@ -187,6 +187,8 @@ export function useChatStream(
           });
           isStreaming.value = false;
           loading.value = false;
+          const updatedSessions = await getSessions();
+          sessions.value = updatedSessions;
         },
         onComplete: async () => {
           isStreaming.value = false;
@@ -194,8 +196,8 @@ export function useChatStream(
           if (currentThreadId && !currentSession.title) {
             await refreshSessionTitle(currentThreadId);
           }
-          const updated = await getSessions();
-          sessions.value = updated;
+          const updatedSessions = await getSessions();
+          sessions.value = updatedSessions;
         },
       },
     );
