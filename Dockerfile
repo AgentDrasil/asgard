@@ -1,4 +1,5 @@
 ARG GO_VERSION=1.26.5
+ARG GOLANGCI_LINT_VERSION=v2.12.2
 ARG NODE_VERSION=26
 ARG DEBIAN_VERSION=bookworm
 ARG AGY_VERSION=1.1.9
@@ -22,6 +23,7 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     ttyd \
     fish \
     openssh-client \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install agy
@@ -37,6 +39,7 @@ FROM base AS base_devtool
 
 ARG GO_VERSION
 ARG NODE_VERSION
+ARG GOLANGCI_LINT_VERSION
 
 # Install Go
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
@@ -46,6 +49,9 @@ RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
     ln -s /usr/lib/go/bin/go /usr/bin/go && \
     ln -s /usr/lib/go/bin/gofmt /usr/bin/gofmt
 ENV PATH="/usr/lib/go/bin:${PATH}"
+RUN GOBIN=/usr/bin /usr/bin/go install golang.org/x/tools/cmd/goimports@latest
+
+RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/bin ${GOLANGCI_LINT_VERSION}
 
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \

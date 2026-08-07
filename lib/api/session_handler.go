@@ -129,7 +129,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(chatSession)
 }
 
-func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetSessions(w http.ResponseWriter, _ *http.Request) {
 	dbSessions, err := s.repo.GetSessions()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
