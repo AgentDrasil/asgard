@@ -14,6 +14,7 @@ const prompt = defineModel<string>("prompt");
 
 defineEmits<{
   (e: "submit"): void;
+  (e: "toggle-sidebar"): void;
 }>();
 </script>
 
@@ -25,6 +26,7 @@ defineEmits<{
     v-model:selectedModel="selectedModel"
     v-model:prompt="prompt"
     @submit="$emit('submit')"
+    @toggle-sidebar="$emit('toggle-sidebar')"
     :loading="loading"
   />
 </template>

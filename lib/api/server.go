@@ -128,6 +128,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("/api/ask-user/reply", s.handleAskUserReply)
 	mux.HandleFunc("POST /api/push/tokens", s.handleRegisterPushToken)
 	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
+	mux.HandleFunc("GET /api/v1/workspace/file", s.handleWorkspaceFile)
 
 	if s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))

@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: "update:selectedModel", val: string): void;
   (e: "update:prompt", val: string): void;
   (e: "submit"): void;
+  (e: "toggle-sidebar"): void;
 }>();
 
 const localModel = computed({
@@ -210,25 +211,44 @@ const handleSubmit = () => {
 </script>
 
 <template>
-  <div
-    class="flex-1 flex flex-col justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
-  >
-    <div
-      class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300"
+  <div class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden relative">
+    <!-- Top Header -->
+    <header
+      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0"
     >
-      <!-- App title & intro -->
-      <div class="text-center space-y-1.5 sm:space-y-2">
-        <h2
-          class="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
+      <div class="flex items-center gap-2 min-w-0">
+        <button
+          @click="emit('toggle-sidebar')"
+          class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0"
+          title="Toggle Menu"
         >
-          Start a Chat
-        </h2>
-        <p class="text-xs sm:text-sm text-base-content/60">
-          Select an agent, workspace directory, and start building.
-        </p>
+          <Icon icon="mynaui:sidebar" class="h-5 w-5" />
+        </button>
+        <span class="text-sm font-bold text-base-content flex items-center gap-2">
+          <Icon icon="mynaui:edit-one" class="h-5 w-5 text-primary" />
+          <span>New Chat</span>
+        </span>
       </div>
+    </header>
 
-      <div class="space-y-6">
+    <div
+      class="flex-1 flex flex-col justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
+    >
+      <div
+        class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300"
+      >
+        <!-- App title & intro -->
+        <div class="text-center space-y-1.5 sm:space-y-2">
+          <h2
+            class="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
+          >
+            Start a Chat
+          </h2>
+          <p class="text-xs sm:text-sm text-base-content/60">
+            Select an agent, workspace directory, and start building.
+          </p>
+        </div>
+
         <!-- Agent Selection -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">

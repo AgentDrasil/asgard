@@ -36,18 +36,30 @@ const props = withDefaults(
     sessionId?: string | null;
     isDetailsOpen?: boolean;
     isTerminalOpen?: boolean;
+    modifiedFiles?: string[];
+    isArtifactDrawerOpen?: boolean;
   }>(),
   {
     isDetailsOpen: true,
     isTerminalOpen: false,
+    modifiedFiles: () => [],
+    isArtifactDrawerOpen: false,
   },
 );
 
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
   (e: "open-diff", gitRoot: string): void;
+  (e: "open-artifact", file: string): void;
   (e: "toggle-terminal"): void;
+  (e: "toggle-sidebar"): void;
+  (e: "toggle-artifact-drawer"): void;
 }>();
+
+function formatPath(path: string): string {
+  if (!path) return "";
+  return path.replace(/^\/home\/[^/]+/, "~");
+}
 
 const gitRoot = ref("");
 
@@ -174,38 +186,71 @@ const copyMessage = async (id: string, text: string) => {
   <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0 relative">
     <!-- Header -->
     <header
-      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
-      :class="isDetailsOpen ? 'flex' : 'hidden md:flex'"
+      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-start justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
     >
-      <div class="space-y-0.5 sm:space-y-1 min-w-0 pr-2">
+      <div class="flex items-start gap-2 min-w-0 pr-2">
         <button
-          @click="emit('update:isDetailsOpen', !isDetailsOpen)"
-          class="hidden md:flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate"
-          title="Toggle Workspace Info"
+          @click="emit('toggle-sidebar')"
+          class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0 mt-0.5"
+          title="Toggle Menu"
         >
-          <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
-          <span class="font-bold truncate">{{ activeAgent?.name || "Coding Agent" }}</span>
-          <Icon
-            :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
-            class="h-3.5 w-3.5 text-base-content/70 shrink-0"
-          />
+          <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
-        <div v-if="isDetailsOpen" class="space-y-0.5 sm:space-y-1">
-          <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
-            Workspace:
-            <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
-              runDir
-            }}</span>
-          </p>
-          <p v-if="gitRoot" class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
-            Git Root:
-            <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
-              gitRoot
-            }}</span>
-          </p>
+
+        <div class="space-y-1 min-w-0">
+          <button
+            @click="emit('update:isDetailsOpen', !isDetailsOpen)"
+            class="flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate h-7 sm:h-8"
+            title="Toggle Workspace Info"
+          >
+            <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
+            <span class="font-bold truncate">{{ activeAgent?.name || "Coding Agent" }}</span>
+            <Icon
+              :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
+              class="h-3.5 w-3.5 text-base-content/70 shrink-0"
+            />
+          </button>
+
+          <div v-if="isDetailsOpen" class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5">
+            <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
+              Workspace:
+              <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+                formatPath(runDir)
+              }}</span>
+            </p>
+            <p
+              v-if="gitRoot"
+              class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
+            >
+              Git Root:
+              <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+                formatPath(gitRoot)
+              }}</span>
+            </p>
+          </div>
         </div>
       </div>
-      <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+
+      <div class="flex items-center gap-1 sm:gap-2 shrink-0 h-7 sm:h-8">
+        <!-- Open Artifacts Button -->
+        <button
+          v-if="modifiedFiles && modifiedFiles.length > 0"
+          @click="emit('toggle-artifact-drawer')"
+          class="btn btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
+          :class="
+            isArtifactDrawerOpen ? 'btn-active btn-primary' : 'btn-secondary text-secondary-content'
+          "
+          title="Toggle Artifacts View"
+        >
+          <Icon icon="octicon:file-code-24" class="h-4 w-4" />
+          <span class="hidden sm:inline">Artifacts</span>
+          <span
+            class="badge badge-xs sm:badge-sm font-bold bg-base-100/20 text-current border-none"
+          >
+            {{ modifiedFiles.length }}
+          </span>
+        </button>
+
         <!-- Open Diff (only in git repos) -->
         <button
           v-if="gitRoot"
@@ -292,6 +337,27 @@ const copyMessage = async (id: string, text: string) => {
                 </span>
               </summary>
               <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
+                <!-- TargetFile Artifact Card Button -->
+                <div
+                  v-if="msg.targetFile"
+                  class="flex items-center justify-between p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2"
+                >
+                  <div class="flex items-center gap-2 overflow-hidden">
+                    <span class="text-emerald-400 font-bold text-xs">📄 Target File:</span>
+                    <span
+                      class="font-mono text-xs text-neutral-300 truncate"
+                      :title="msg.targetFile"
+                      >{{ msg.targetFile }}</span
+                    >
+                  </div>
+                  <button
+                    @click="emit('open-artifact', msg.targetFile)"
+                    class="btn btn-xs btn-emerald bg-emerald-600 hover:bg-emerald-500 text-white border-none gap-1 shrink-0 font-medium"
+                  >
+                    <span>Preview Artifact</span>
+                    <span>➔</span>
+                  </button>
+                </div>
                 <template
                   v-for="(item, idx) in msg.content.includes(TOOL_ITEM_DELIMITER)
                     ? msg.content.split(TOOL_ITEM_DELIMITER)

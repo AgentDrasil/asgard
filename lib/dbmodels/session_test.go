@@ -116,7 +116,26 @@ func TestSessionRepository(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Updated Chat Title", sess.Title)
 
-	// Test DeleteSession
+	// 10. AppendArtifact should add deduplicated artifact paths
+	err = repo.AppendArtifact(chatID, ".tmp/report.md")
+	assert.NoError(t, err)
+	err = repo.AppendArtifact(chatID, ".tmp/report.md") // duplicate
+	assert.NoError(t, err)
+	err = repo.AppendArtifact(chatID, "src/main.go")
+	assert.NoError(t, err)
+
+	sess, err = repo.GetSession(chatID)
+	assert.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.Equal(t, Artifacts{".tmp/report.md", "src/main.go"}, sess.Artifacts)
+
+	// AppendArtifact and AppendMessage on non-existent session should return an error
+	err = repo.AppendArtifact("non-existent-id", "some/file.txt")
+	assert.Error(t, err)
+	err = repo.AppendMessage("non-existent-id", ChatMessage{Content: "hello"})
+	assert.Error(t, err)
+
+	// 11. DeleteSession
 	err = repo.DeleteSession(chatID)
 	assert.NoError(t, err)
 

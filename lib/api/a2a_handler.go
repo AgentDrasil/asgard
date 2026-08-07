@@ -233,6 +233,41 @@ func (e *agentExecutor) markAgentCompleted(chatID string) {
 	}
 }
 
+// recordStatusUpdate processes an incremental status update from an agent run,
+// saving artifacts and messages to the session database, and logging warnings on error.
+func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, defaultAgentName string) {
+	if repo == nil || update.Content == "" || update.EntryType == "agent_response" {
+		return
+	}
+	role := update.EntryType
+	if role == "" || role == "other" {
+		role = "activity"
+	}
+	agentName := defaultAgentName
+	if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
+		agentName = name
+	}
+	targetFile := ""
+	if tf, ok := update.Metadata["target_file"].(string); ok {
+		targetFile = tf
+		if err := repo.AppendArtifact(chatID, targetFile); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", targetFile).Msg("failed to append artifact to repo")
+		}
+	}
+	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+		Role:         role,
+		Content:      update.Content,
+		AgentName:    agentName,
+		Timestamp:    time.Now().UnixMilli(),
+		ActivityType: strings.ToUpper(role),
+		StepIndex:    update.StepIndex,
+		TargetFile:   targetFile,
+	}); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
+	}
+}
+
 // promptResult is the JSON structure returned by CLI agents.
 type promptResult struct {
 	SessionID   string  `json:"session_id"`

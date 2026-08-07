@@ -35,6 +35,7 @@ export interface ChatMessage {
   maxTokens?: number;
   replied?: boolean;
   replyText?: string;
+  targetFile?: string;
 }
 
 export interface ChatSession {
@@ -47,6 +48,7 @@ export interface ChatSession {
   createdAt?: string;
   updatedAt?: string;
   messages?: ChatMessage[];
+  artifacts?: string[];
 }
 
 export interface DirInfo {

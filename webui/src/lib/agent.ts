@@ -208,11 +208,6 @@ export async function runAgentStream(
         }
         continue;
       }
-
-      // Artifact updates — not handled by current UI
-      if (payload.$case === "artifactUpdate") {
-        // Ignored in current UI
-      }
     }
 
     callbacks.onComplete?.();

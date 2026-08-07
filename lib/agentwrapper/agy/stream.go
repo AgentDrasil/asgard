@@ -139,6 +139,9 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				if su.ToolInfo != nil && len(su.ToolInfo.Parameters) > 0 {
 					metadata["parameters"] = su.ToolInfo.Parameters
 				}
+				if tf := extractTargetFile(su.ToolName, su.ToolInfo); tf != "" {
+					metadata["target_file"] = tf
+				}
 				cb(su.StepIndex, "TOOL", "tool_call", content, metadata)
 
 			case su.StepType == "tool" && su.ToolInfo != nil:
@@ -211,6 +214,9 @@ func formatToolCall(toolName string, info *streamToolInfo) string {
 	if path, ok := info.Parameters["AbsolutePath"].(string); ok && path != "" {
 		return "> " + path
 	}
+	if target, ok := info.Parameters["TargetFile"].(string); ok && target != "" {
+		return "> " + toolName + " " + target
+	}
 	if dir, ok := info.Parameters["DirectoryPath"].(string); ok && dir != "" {
 		return "> " + dir
 	}
@@ -221,4 +227,30 @@ func formatToolCall(toolName string, info *streamToolInfo) string {
 		return "> " + toolName + "(" + string(paramJSON) + ")"
 	}
 	return "> " + toolName
+}
+
+var fileModifyingTools = map[string]bool{
+	"write_to_file":              true,
+	"replace_file_content":       true,
+	"multi_replace_file_content": true,
+}
+
+func extractTargetFile(toolName string, info *streamToolInfo) string {
+	if info == nil || len(info.Parameters) == 0 {
+		return ""
+	}
+	if fileModifyingTools[toolName] {
+		if target, ok := info.Parameters["TargetFile"].(string); ok && target != "" {
+			return remapSandboxPath(target)
+		}
+	}
+	return ""
+}
+
+func remapSandboxPath(targetPath string) string {
+	targetPath = strings.TrimSpace(targetPath)
+	if strings.HasPrefix(targetPath, "/tmp/") {
+		return ".tmp/" + strings.TrimPrefix(targetPath, "/tmp/")
+	}
+	return targetPath
 }

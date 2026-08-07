@@ -59,27 +59,7 @@ func (e *agentExecutor) executeParallel(
 				statusCh = nil
 				continue
 			}
-			if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
-				role := update.EntryType
-				if role == "" || role == "other" {
-					role = "activity"
-				}
-				agentName := e.agent.Config.Name
-				if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
-					agentName = name
-				}
-				if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
-					Role:         role,
-					Content:      update.Content,
-					AgentName:    agentName,
-					Timestamp:    time.Now().UnixMilli(),
-					ActivityType: strings.ToUpper(role),
-					StepIndex:    update.StepIndex,
-				}); err != nil {
-					log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append parallel step message to repo")
-				}
-			}
+			recordStatusUpdate(e.repo, chatID, update, e.agent.Config.Name)
 			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
 			metadata := map[string]any{
 				"entry_type": update.EntryType,

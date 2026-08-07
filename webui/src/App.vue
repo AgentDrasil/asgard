@@ -2,7 +2,6 @@
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
-import { Icon } from "@iconify/vue";
 import { initPushNotifications } from "./lib/push";
 
 import { useAgents } from "./composables/useAgents";
@@ -130,40 +129,6 @@ const closeSidebarOnMobile = () => {
 
 <template>
   <div class="flex flex-col md:flex-row w-full h-[100dvh] bg-base-100 overflow-hidden relative">
-    <!-- Mobile Top Navigation Header -->
-    <header
-      class="md:hidden flex items-center justify-between px-3 py-2.5 bg-base-300 border-b border-base-100 shrink-0 z-30"
-    >
-      <button
-        @click="toggleSidebar"
-        class="btn btn-ghost btn-xs btn-square text-base-content/80"
-        title="Toggle Menu"
-      >
-        <Icon icon="mynaui:sidebar" class="h-5 w-5" />
-      </button>
-      <button
-        @click="isWorkspaceDetailsOpen = !isWorkspaceDetailsOpen"
-        class="flex items-center gap-1.5 text-sm font-semibold truncate max-w-[220px] px-2 py-1 rounded-md hover:bg-base-200/60 active:bg-base-200 transition-colors cursor-pointer select-none"
-        title="Toggle Workspace Info"
-      >
-        <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
-        <span class="text-base-content font-bold truncate">
-          {{ activeAgent?.name || "Coding Agent" }}
-        </span>
-        <Icon
-          :icon="isWorkspaceDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
-          class="h-3.5 w-3.5 text-base-content/70 shrink-0"
-        />
-      </button>
-      <button
-        @click="handleNewChat(closeSidebarOnMobile)"
-        class="btn btn-ghost btn-xs btn-square text-base-content/80"
-        title="New Chat"
-      >
-        <Icon icon="mynaui:edit-one" class="h-5 w-5" />
-      </button>
-    </header>
-
     <!-- Mobile Overlay Backdrop -->
     <div
       v-if="isSidebarOpen"
@@ -183,7 +148,6 @@ const closeSidebarOnMobile = () => {
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="toggleTerminal('sidebar')"
     />
-
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
       <router-view v-slot="{ Component }">
@@ -192,6 +156,7 @@ const closeSidebarOnMobile = () => {
           :agents="agents"
           :loading="loading || isStreaming || (activeSession?.isRunning ?? false)"
           :messages="messages"
+          :artifacts="activeSession?.artifacts || []"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId || ''"
@@ -215,6 +180,7 @@ const closeSidebarOnMobile = () => {
           "
           @close-diff="showDiffView = false"
           @toggle-terminal="toggleTerminal('session')"
+          @toggle-sidebar="toggleSidebar"
         />
       </router-view>
     </main>

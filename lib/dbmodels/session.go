@@ -51,6 +51,7 @@ type ChatMessage struct {
 	MaxTokens    int    `json:"maxTokens,omitempty"`
 	Replied      bool   `json:"replied,omitempty"`
 	ReplyText    string `json:"replyText,omitempty"`
+	TargetFile   string `json:"targetFile,omitempty"`
 }
 
 type Messages []ChatMessage
@@ -81,6 +82,34 @@ func (m *Messages) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, m)
 }
 
+type Artifacts []string
+
+// Value implements driver.Valuer
+func (a Artifacts) Value() (driver.Value, error) {
+	if len(a) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(a)
+}
+
+// Scan implements sql.Scanner
+func (a *Artifacts) Scan(value interface{}) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to scan Artifacts: unsupported type %T", value)
+	}
+	return json.Unmarshal(bytes, a)
+}
+
 type Session struct {
 	ChatID string `gorm:"primaryKey"`
 	// name of current agent.
@@ -93,6 +122,8 @@ type Session struct {
 	Title string
 	// Messages of the session
 	Messages Messages `gorm:"type:text"`
+	// Artifacts generated in session
+	Artifacts Artifacts `gorm:"type:text"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -293,20 +324,11 @@ func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error 
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
-		if err != nil && err != gorm.ErrRecordNotFound {
+		if err != nil {
 			return err
 		}
-
-		var sessPtr *Session
-		if err == nil {
-			sessPtr = &session
-		} else {
-			sessPtr = &Session{
-				ChatID: chatID,
-			}
-		}
-		sessPtr.Messages = append(sessPtr.Messages, msg)
-		return tx.Save(sessPtr).Error
+		session.Messages = append(session.Messages, msg)
+		return tx.Save(&session).Error
 	})
 }
 
@@ -342,6 +364,29 @@ func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, 
 			}
 		}
 
+		return tx.Save(&session).Error
+	})
+}
+
+// AppendArtifact appends an artifact path to a session's Artifacts list safely and deduplicated.
+func (r *SessionRepository) AppendArtifact(chatID string, artifactPath string) error {
+	if chatID == "" || artifactPath == "" {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil {
+			return err
+		}
+
+		for _, item := range session.Artifacts {
+			if item == artifactPath {
+				return nil // Already present
+			}
+		}
+
+		session.Artifacts = append(session.Artifacts, artifactPath)
 		return tx.Save(&session).Error
 	})
 }

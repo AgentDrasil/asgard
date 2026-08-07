@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -92,28 +91,7 @@ func (e *agentExecutor) streamAndFinish(
 				statusCh = nil
 				continue
 			}
-			// Save status update to session DB if content is present and not agent_response
-			if e.repo != nil && update.Content != "" && update.EntryType != "agent_response" {
-				role := update.EntryType
-				if role == "" || role == "other" {
-					role = "activity"
-				}
-				agentName := e.agent.Config.Name
-				if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
-					agentName = name
-				}
-				if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-					ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
-					Role:         role,
-					Content:      update.Content,
-					AgentName:    agentName,
-					Timestamp:    time.Now().UnixMilli(),
-					ActivityType: strings.ToUpper(role),
-					StepIndex:    update.StepIndex,
-				}); err != nil {
-					log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
-				}
-			}
+			recordStatusUpdate(e.repo, chatID, update, e.agent.Config.Name)
 
 			// Emit an intermediate TaskStatusUpdateEvent.
 			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))

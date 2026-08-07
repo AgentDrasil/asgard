@@ -12,13 +12,14 @@ import (
 
 // ChatSession represents a session response/request payload for the WebUI.
 type ChatSession struct {
-	ChatID       string            `json:"chatID"`
-	Title        string            `json:"title"`
-	CurrentAgent string            `json:"currentAgent"`
-	RunDir       string            `json:"runDir"`
-	GitRoot      string            `json:"gitRoot,omitempty"`
-	IsRunning    bool              `json:"isRunning"`
-	Messages     dbmodels.Messages `json:"messages,omitempty"`
+	ChatID       string             `json:"chatID"`
+	Title        string             `json:"title"`
+	CurrentAgent string             `json:"currentAgent"`
+	RunDir       string             `json:"runDir"`
+	GitRoot      string             `json:"gitRoot,omitempty"`
+	IsRunning    bool               `json:"isRunning"`
+	Messages     dbmodels.Messages  `json:"messages,omitempty"`
+	Artifacts    dbmodels.Artifacts `json:"artifacts,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -122,6 +123,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		GitRoot:      findGitRoot(sess.RunDir),
 		IsRunning:    sess.IsRunning(),
 		Messages:     sess.Messages,
+		Artifacts:    sess.Artifacts,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -147,6 +149,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, _ *http.Request) {
 			RunDir:       sess.RunDir,
 			GitRoot:      findGitRoot(sess.RunDir),
 			IsRunning:    sess.IsRunning(),
+			Artifacts:    sess.Artifacts,
 		})
 	}
 
