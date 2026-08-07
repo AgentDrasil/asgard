@@ -42,7 +42,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
 	}
-	argv = append(argv, "-p", prompt)
+	argv = append(argv, "--print", prompt)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")
 
