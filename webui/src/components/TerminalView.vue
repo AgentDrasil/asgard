@@ -107,6 +107,7 @@ onMounted(() => {
     theme: props.theme,
     scrollback: 5000,
     allowProposedApi: true,
+    overviewRuler: { width: 6 },
   });
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
@@ -185,5 +186,31 @@ onUnmounted(() => {
 }
 .terminal-host :deep(.xterm-viewport) {
   height: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 20%, transparent) transparent;
+}
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 6px;
+  height: 6px;
+}
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
+}
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  border-radius: 4px;
+}
+.terminal-host :deep(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
+  background: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+}
+.terminal-host :deep(.xterm-scrollable-element > .scrollbar) {
+  width: 6px !important;
+}
+.terminal-host :deep(.xterm-scrollable-element > .scrollbar > .slider) {
+  border-radius: 4px !important;
+  background: color-mix(in oklab, var(--color-base-content) 20%, transparent) !important;
+}
+.terminal-host :deep(.xterm-scrollable-element > .scrollbar > .slider:hover) {
+  background: color-mix(in oklab, var(--color-base-content) 35%, transparent) !important;
 }
 </style>

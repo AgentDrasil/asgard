@@ -11,6 +11,11 @@
 @plugin "./themes/catppuccinTheme.macchiato.ts";
 @plugin "./themes/catppuccinTheme.mocha.ts";
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 20%, transparent) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
