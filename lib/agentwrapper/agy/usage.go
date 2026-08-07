@@ -134,7 +134,11 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			models = append(models, line)
+			parts := strings.SplitN(line, "\t", 2)
+			modelID := strings.TrimSpace(parts[0])
+			if modelID != "" {
+				models = append(models, modelID)
+			}
 		}
 	}
 	return models, nil
