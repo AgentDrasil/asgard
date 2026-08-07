@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, onUnmounted } from "vue";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
@@ -29,10 +29,17 @@ const emit = defineEmits<{
 const currentTheme = ref("dark");
 const isReloading = ref(false);
 const viewMode = ref<"list" | "agent">("list");
-const collapsedGroups = ref<Record<string, boolean>>({});
 
-const toggleGroupCollapse = (agentName: string) => {
-  collapsedGroups.value[agentName] = !collapsedGroups.value[agentName];
+// Collapsed state tracking
+const collapsedAgents = ref<Record<string, boolean>>({});
+const collapsedWorkspaces = ref<Record<string, boolean>>({});
+
+const toggleAgentCollapse = (agentName: string) => {
+  collapsedAgents.value[agentName] = !collapsedAgents.value[agentName];
+};
+
+const toggleWorkspaceCollapse = (key: string) => {
+  collapsedWorkspaces.value[key] = !collapsedWorkspaces.value[key];
 };
 
 const toggleViewMode = (mode: "list" | "agent") => {
@@ -44,17 +51,94 @@ const getAgentIcon = (agentName: string): string => {
   return matched?.icon || "fluent-color:bot-24";
 };
 
-// Computed property to group sessions by currentAgent
-const groupedSessions = computed(() => {
-  const groups: Record<string, ChatSession[]> = {};
+// Resizable sidebar width logic
+const DEFAULT_WIDTH = 256;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 500;
+
+const sidebarWidth = ref(DEFAULT_WIDTH);
+const isResizing = ref(false);
+
+const startResize = (e: MouseEvent) => {
+  e.preventDefault();
+  isResizing.value = true;
+  document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("mouseup", stopResize);
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = "col-resize";
+};
+
+const handleMouseMove = (e: MouseEvent) => {
+  if (!isResizing.value) return;
+  const newWidth = Math.min(Math.max(e.clientX, MIN_WIDTH), MAX_WIDTH);
+  sidebarWidth.value = newWidth;
+};
+
+const stopResize = () => {
+  if (isResizing.value) {
+    isResizing.value = false;
+    localStorage.setItem("asgard_sidebar_width", sidebarWidth.value.toString());
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", stopResize);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  }
+};
+
+// Helper for display path of runDir / workspace
+const formatWorkspaceName = (runDir?: string): string => {
+  if (!runDir) return "Default Workspace";
+  const trimmed = runDir.replace(/[/\\]+$/, "");
+  const parts = trimmed.split(/[/\\]/);
+  return parts[parts.length - 1] || runDir;
+};
+
+// Nested 3-level structure: Agent -> Workspace -> Sessions
+interface WorkspaceGroup {
+  runDir: string;
+  displayName: string;
+  sessions: ChatSession[];
+}
+
+interface AgentNestedGroup {
+  agentName: string;
+  workspaces: WorkspaceGroup[];
+  totalSessions: number;
+}
+
+const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
+  const agentMap: Record<string, Record<string, ChatSession[]>> = {};
+
   for (const session of props.sessions) {
     const agentKey = session.currentAgent || "Unknown Agent";
-    if (!groups[agentKey]) {
-      groups[agentKey] = [];
+    const dirKey = session.runDir || "Default Workspace";
+
+    if (!agentMap[agentKey]) {
+      agentMap[agentKey] = {};
     }
-    groups[agentKey].push(session);
+    if (!agentMap[agentKey][dirKey]) {
+      agentMap[agentKey][dirKey] = [];
+    }
+    agentMap[agentKey][dirKey].push(session);
   }
-  return groups;
+
+  return Object.entries(agentMap).map(([agentName, workspacesObj]) => {
+    let totalSessions = 0;
+    const workspaces: WorkspaceGroup[] = Object.entries(workspacesObj).map(([runDir, sessions]) => {
+      totalSessions += sessions.length;
+      return {
+        runDir,
+        displayName: formatWorkspaceName(runDir),
+        sessions,
+      };
+    });
+
+    return {
+      agentName,
+      workspaces,
+      totalSessions,
+    };
+  });
 });
 
 const reloadApp = async () => {
@@ -156,6 +240,14 @@ const daisyUiThemes = computed(() => APP_THEMES.filter((t) => t.group === "Daisy
 const catppuccinThemes = computed(() => APP_THEMES.filter((t) => t.group === "Catppuccin Themes"));
 
 onMounted(() => {
+  const savedWidth = localStorage.getItem("asgard_sidebar_width");
+  if (savedWidth) {
+    const parsed = parseInt(savedWidth, 10);
+    if (!isNaN(parsed) && parsed >= MIN_WIDTH && parsed <= MAX_WIDTH) {
+      sidebarWidth.value = parsed;
+    }
+  }
+
   const saved = localStorage.getItem("theme");
   if (saved && APP_THEMES.some((t) => t.id === saved)) {
     currentTheme.value = saved;
@@ -168,12 +260,16 @@ onMounted(() => {
   document.documentElement.setAttribute("data-theme", currentTheme.value);
 });
 
+onUnmounted(() => {
+  document.removeEventListener("mousemove", handleMouseMove);
+  document.removeEventListener("mouseup", stopResize);
+});
+
 const selectTheme = (themeId: string) => {
   currentTheme.value = themeId;
   document.documentElement.setAttribute("data-theme", themeId);
   localStorage.setItem("theme", themeId);
 
-  // Close dropdown by removing focus from active element if focused
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
@@ -182,14 +278,24 @@ const selectTheme = (themeId: string) => {
 
 <template>
   <aside
+    :style="isOpen ? { width: `${sidebarWidth}px` } : undefined"
     :class="[
       isOpen
-        ? 'w-72 md:w-64 max-md:translate-x-0'
+        ? 'max-md:w-72 max-md:translate-x-0'
         : 'w-72 md:w-16 md:items-center max-md:-translate-x-full',
-      'bg-base-300 border-r border-base-100 flex flex-col h-full shrink-0 transition-all duration-300',
+      'bg-base-300 border-r border-base-100 flex flex-col h-full shrink-0 relative',
       'max-md:fixed max-md:top-0 max-md:bottom-0 max-md:left-0 max-md:z-50 max-md:shadow-2xl md:relative',
+      isResizing ? 'select-none transition-none' : 'transition-all duration-300',
     ]"
   >
+    <!-- Resize Handle (Visible only when sidebar is open on desktop) -->
+    <div
+      v-if="isOpen"
+      @mousedown="startResize"
+      class="hidden md:block absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/40 active:bg-primary z-30 transition-colors"
+      title="Drag to resize sidebar"
+    />
+
     <!-- Header / Toggle Sidebar Button -->
     <div
       :class="['p-4 flex items-center gap-2 w-full', isOpen ? 'justify-between' : 'justify-center']"
@@ -248,7 +354,7 @@ const selectTheme = (themeId: string) => {
               ? 'btn-primary shadow-xs'
               : 'btn-ghost text-base-content/70 hover:text-base-content',
           ]"
-          title="Group by Agent Model"
+          title="Group by Agent & Workspace"
         >
           <Icon icon="mynaui:grid" class="h-4 w-4 fill-current" />
           <span>By Agent</span>
@@ -275,15 +381,16 @@ const selectTheme = (themeId: string) => {
           />
         </template>
 
-        <!-- 2. Group by Agent Model Mode -->
+        <!-- 2. Group by Agent & Workspace Mode (3-Level Collapsible) -->
         <template v-else-if="viewMode === 'agent'">
           <div
-            v-for="(agentSessions, agentName) in groupedSessions"
-            :key="agentName"
+            v-for="agentGroup in nestedGroupedSessions"
+            :key="agentGroup.agentName"
             class="w-full space-y-1 mb-2"
           >
+            <!-- Level 1: Agent Header -->
             <div
-              @click="toggleGroupCollapse(agentName)"
+              @click="toggleAgentCollapse(agentGroup.agentName)"
               class="px-2 py-1 flex items-center justify-between text-xs font-semibold text-primary/80 uppercase tracking-wider select-none cursor-pointer hover:bg-base-200/50 rounded-md transition-colors"
             >
               <div class="flex items-center gap-1.5 min-w-0">
@@ -291,26 +398,62 @@ const selectTheme = (themeId: string) => {
                   icon="mynaui:chevron-down"
                   :class="[
                     'h-3.5 w-3.5 fill-current shrink-0 transition-transform duration-200',
-                    collapsedGroups[agentName] ? '-rotate-90' : '',
+                    collapsedAgents[agentGroup.agentName] ? '-rotate-90' : '',
                   ]"
                 />
-                <Icon :icon="getAgentIcon(agentName)" class="h-4 w-4 shrink-0" />
-                <span class="truncate">{{ agentName }}</span>
+                <Icon :icon="getAgentIcon(agentGroup.agentName)" class="h-4 w-4 shrink-0" />
+                <span class="truncate">{{ agentGroup.agentName }}</span>
               </div>
               <span class="text-[10px] text-base-content/40 font-normal shrink-0"
-                >({{ agentSessions.length }})</span
+                >({{ agentGroup.totalSessions }})</span
               >
             </div>
 
-            <template v-if="!collapsedGroups[agentName]">
-              <SessionItem
-                v-for="session in agentSessions"
-                :key="session.chatID"
-                :session="session"
-                :is-active="activeSessionId === session.chatID"
-                @select-session="emit('select-session', $event)"
-                @delete-session="emit('delete-session', $event)"
-              />
+            <!-- Level 2: Workspaces List -->
+            <template v-if="!collapsedAgents[agentGroup.agentName]">
+              <div
+                v-for="wsGroup in agentGroup.workspaces"
+                :key="wsGroup.runDir"
+                class="pl-2 space-y-1"
+              >
+                <!-- Workspace Header -->
+                <div
+                  @click="toggleWorkspaceCollapse(`${agentGroup.agentName}:${wsGroup.runDir}`)"
+                  class="px-2 py-0.5 flex items-center justify-between text-[11px] font-medium text-base-content/70 select-none cursor-pointer hover:bg-base-200/40 rounded-md transition-colors"
+                  :title="wsGroup.runDir"
+                >
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <Icon
+                      icon="mynaui:chevron-down"
+                      :class="[
+                        'h-3 w-3 fill-current shrink-0 transition-transform duration-200 opacity-70',
+                        collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]
+                          ? '-rotate-90'
+                          : '',
+                      ]"
+                    />
+                    <Icon icon="mynaui:folder" class="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    <span class="truncate">{{ wsGroup.displayName }}</span>
+                  </div>
+                  <span class="text-[10px] text-base-content/40 shrink-0"
+                    >({{ wsGroup.sessions.length }})</span
+                  >
+                </div>
+
+                <!-- Level 3: Sessions List under Workspace -->
+                <template v-if="!collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]">
+                  <div class="pl-2 space-y-0.5">
+                    <SessionItem
+                      v-for="session in wsGroup.sessions"
+                      :key="session.chatID"
+                      :session="session"
+                      :is-active="activeSessionId === session.chatID"
+                      @select-session="emit('select-session', $event)"
+                      @delete-session="emit('delete-session', $event)"
+                    />
+                  </div>
+                </template>
+              </div>
             </template>
           </div>
         </template>
