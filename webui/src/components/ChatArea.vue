@@ -66,16 +66,24 @@ watch(
 
 const bottomRef = ref<HTMLDivElement | null>(null);
 const scrollContainerRef = ref<HTMLDivElement | null>(null);
+const showScrollBottom = ref(false);
 let lastAtTopState = props.isDetailsOpen;
 let ticking = false;
 
 const checkScrollPosition = () => {
   if (!scrollContainerRef.value) return;
-  const atTop = scrollContainerRef.value.scrollTop <= 5;
+  const el = scrollContainerRef.value;
+  const atTop = el.scrollTop <= 5;
   if (atTop !== lastAtTopState) {
     lastAtTopState = atTop;
     emit("update:isDetailsOpen", atTop);
   }
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+  showScrollBottom.value = distanceFromBottom > 120;
+};
+
+const scrollToBottom = () => {
+  bottomRef.value?.scrollIntoView({ behavior: "smooth" });
 };
 
 const handleScroll = () => {
@@ -163,7 +171,7 @@ const copyMessage = async (id: string, text: string) => {
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0">
+  <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0 relative">
     <!-- Header -->
     <header
       class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-center justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
@@ -447,5 +455,25 @@ const copyMessage = async (id: string, text: string) => {
         <div ref="bottomRef"></div>
       </div>
     </div>
+
+    <!-- Scroll to bottom button -->
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 translate-y-2 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 translate-y-2 scale-95"
+    >
+      <button
+        v-if="showScrollBottom"
+        @click="scrollToBottom"
+        class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content"
+        title="Scroll to bottom"
+        aria-label="Scroll to bottom"
+      >
+        <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
+      </button>
+    </Transition>
   </div>
 </template>
