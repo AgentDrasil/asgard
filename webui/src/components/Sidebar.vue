@@ -150,23 +150,33 @@ const getRelativeTime = (timestamp?: number) => {
   return `(in ${minutes}m)`;
 };
 
+import { APP_THEMES } from "../themes/terminal";
+
+const daisyUiThemes = computed(() => APP_THEMES.filter((t) => t.group === "DaisyUI Themes"));
+const catppuccinThemes = computed(() => APP_THEMES.filter((t) => t.group === "Catppuccin Themes"));
+
 onMounted(() => {
   const saved = localStorage.getItem("theme");
-  if (saved) {
+  if (saved && APP_THEMES.some((t) => t.id === saved)) {
     currentTheme.value = saved;
   } else {
     const docTheme = document.documentElement.getAttribute("data-theme");
-    if (docTheme) {
+    if (docTheme && APP_THEMES.some((t) => t.id === docTheme)) {
       currentTheme.value = docTheme;
     }
   }
   document.documentElement.setAttribute("data-theme", currentTheme.value);
 });
 
-const toggleTheme = () => {
-  currentTheme.value = currentTheme.value === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", currentTheme.value);
-  localStorage.setItem("theme", currentTheme.value);
+const selectTheme = (themeId: string) => {
+  currentTheme.value = themeId;
+  document.documentElement.setAttribute("data-theme", themeId);
+  localStorage.setItem("theme", themeId);
+
+  // Close dropdown by removing focus from active element if focused
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
 };
 </script>
 
@@ -341,31 +351,70 @@ const toggleTheme = () => {
       </button>
     </div>
 
-    <!-- Footer / Theme Toggle -->
+    <!-- Footer / Theme Selector (Dropdown Up) -->
     <div
       :class="[
         'p-3 bg-base-300 flex items-center text-xs w-full border-t border-base-100',
         isOpen ? 'justify-between px-4' : 'justify-center',
       ]"
     >
-      <span v-if="isOpen" class="text-base-content/70 font-medium select-none capitalize">
-        {{ currentTheme }} mode
-      </span>
-      <label
-        class="swap swap-rotate btn btn-ghost btn-xs btn-circle text-base-content/80 hover:text-base-content"
-        title="Toggle Light/Dark Theme"
-      >
-        <input
-          type="checkbox"
-          class="theme-controller"
-          :checked="currentTheme === 'light'"
-          @change="toggleTheme"
-        />
-        <!-- Sun icon (shown when dark, click for light) -->
-        <Icon icon="mynaui:sun" class="swap-off fill-current w-5 h-5" />
-        <!-- Moon icon (shown when light, click for dark) -->
-        <Icon icon="mynaui:moon" class="swap-on fill-current w-5 h-5" />
-      </label>
+      <div class="dropdown dropdown-top w-full">
+        <div
+          tabindex="0"
+          role="button"
+          class="btn btn-ghost btn-xs w-full flex items-center justify-between px-2 text-xs text-base-content/80 hover:text-base-content"
+          title="Select Theme"
+        >
+          <div class="flex items-center gap-2 truncate">
+            <Icon icon="mynaui:palette" class="w-4 h-4 shrink-0 fill-current text-primary" />
+            <span v-if="isOpen" class="truncate font-medium capitalize">
+              {{ APP_THEMES.find((t) => t.id === currentTheme)?.name || currentTheme }}
+            </span>
+          </div>
+          <Icon
+            v-if="isOpen"
+            icon="mynaui:chevron-up"
+            class="w-3.5 h-3.5 shrink-0 fill-current opacity-70"
+          />
+        </div>
+        <ul
+          tabindex="0"
+          class="dropdown-content menu menu-sm bg-base-200 border border-base-100 rounded-box z-50 w-52 p-1.5 shadow-xl max-h-60 overflow-y-auto mb-1"
+        >
+          <li class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1">
+            DaisyUI Themes
+          </li>
+          <li v-for="t in daisyUiThemes" :key="t.id">
+            <button
+              @click="selectTheme(t.id)"
+              :class="[
+                'flex items-center justify-between py-1 px-2 text-xs rounded-md',
+                currentTheme === t.id ? 'active font-medium' : '',
+              ]"
+            >
+              <span>{{ t.name }}</span>
+              <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
+            </button>
+          </li>
+          <li
+            class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1 mt-1"
+          >
+            Catppuccin Themes
+          </li>
+          <li v-for="t in catppuccinThemes" :key="t.id">
+            <button
+              @click="selectTheme(t.id)"
+              :class="[
+                'flex items-center justify-between py-1 px-2 text-xs rounded-md',
+                currentTheme === t.id ? 'active font-medium' : '',
+              ]"
+            >
+              <span>{{ t.name }}</span>
+              <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
+            </button>
+          </li>
+        </ul>
+      </div>
     </div>
   </aside>
 

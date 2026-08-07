@@ -1,0 +1,25 @@
+import type { ITheme } from "@xterm/xterm";
+
+export const lightTheme: ITheme = {
+  background: "oklch(100% 0 0)",
+  foreground: "oklch(21% 0.006 285.885)",
+  cursor: "oklch(45% 0.24 277.023)",
+  cursorAccent: "oklch(100% 0 0)",
+  selectionBackground: "oklch(45% 0.24 277.023 / 0.2)",
+  black: "oklch(14% 0.005 285.823)",
+  red: "oklch(71% 0.194 13.428)",
+  green: "oklch(76% 0.177 163.223)",
+  yellow: "oklch(82% 0.189 84.429)",
+  blue: "oklch(45% 0.24 277.023)",
+  magenta: "oklch(65% 0.241 354.308)",
+  cyan: "oklch(77% 0.152 181.912)",
+  white: "oklch(95% 0 0)",
+  brightBlack: "oklch(30% 0.006 285.885)",
+  brightRed: "oklch(71% 0.194 13.428)",
+  brightGreen: "oklch(76% 0.177 163.223)",
+  brightYellow: "oklch(82% 0.189 84.429)",
+  brightBlue: "oklch(45% 0.24 277.023)",
+  brightMagenta: "oklch(65% 0.241 354.308)",
+  brightCyan: "oklch(77% 0.152 181.912)",
+  brightWhite: "oklch(100% 0 0)",
+};

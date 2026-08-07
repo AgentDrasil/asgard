@@ -29,5 +29,3 @@ export const CATPPUCCIN_THEMES: Record<Exclude<CatppuccinThemeKey, "auto">, Them
     theme: mochaTheme,
   },
 };
-
-export { latteTheme, frappeTheme, macchiatoTheme, mochaTheme };

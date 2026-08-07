@@ -1,5 +1,11 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes:
+    light --default,
+    dark --prefersdark,
+    cupcake;
+}
+@import "@catppuccin/daisyui/themes.css";
 
 ::-webkit-scrollbar {
   width: 6px;

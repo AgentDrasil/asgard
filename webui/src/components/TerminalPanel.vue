@@ -20,17 +20,7 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
-const { selectedThemeKey, activeTheme, setThemeKey, themeOptions } = useTerminalTheme();
-
-// DaisyUI focus-based dropdowns stay open while focused; blur to dismiss after
-// picking a theme.
-const closeThemeMenu = () => {
-  (document.activeElement as HTMLElement | null)?.blur();
-};
-const pickTheme = (key: (typeof themeOptions)[number]["key"]) => {
-  setThemeKey(key);
-  closeThemeMenu();
-};
+const { activeTheme } = useTerminalTheme();
 
 const STORAGE_KEY = "asgard_terminal_panel_height";
 const DEFAULT_HEIGHT = 320;
@@ -179,35 +169,6 @@ onUnmounted(() => {
           }}</span>
         </div>
         <div class="flex items-center gap-1">
-          <!-- Theme -->
-          <div class="dropdown dropdown-end">
-            <button
-              tabindex="0"
-              class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-              title="Terminal theme"
-            >
-              <Icon icon="mdi:palette" class="h-3.5 w-3.5" />
-            </button>
-            <ul
-              tabindex="0"
-              class="dropdown-content menu menu-xs bg-base-200 text-base-content rounded-md shadow-lg border border-base-300 w-48 z-50 mt-1 p-1"
-            >
-              <li v-for="opt in themeOptions" :key="opt.key">
-                <button
-                  class="flex items-center justify-between"
-                  :class="{ 'menu-active': selectedThemeKey === opt.key }"
-                  @click="pickTheme(opt.key)"
-                >
-                  <span>{{ opt.label }}</span>
-                  <Icon
-                    v-if="selectedThemeKey === opt.key"
-                    icon="ep:check"
-                    class="h-3 w-3 text-primary"
-                  />
-                </button>
-              </li>
-            </ul>
-          </div>
           <!-- Hide (collapse, keep terminal alive) -->
           <button
             @click="emit('hide')"
@@ -265,34 +226,6 @@ onUnmounted(() => {
         <span>Terminal</span>
       </div>
       <div class="flex items-center gap-2">
-        <div class="dropdown dropdown-end">
-          <button
-            tabindex="0"
-            class="btn btn-ghost btn-sm btn-square text-base-content/70"
-            title="Terminal theme"
-          >
-            <Icon icon="mdi:palette" class="h-5 w-5" />
-          </button>
-          <ul
-            tabindex="0"
-            class="dropdown-content menu menu-sm bg-base-200 text-base-content rounded-md shadow-lg border border-base-300 w-52 z-50 mt-1 p-1"
-          >
-            <li v-for="opt in themeOptions" :key="opt.key">
-              <button
-                class="flex items-center justify-between"
-                :class="{ 'menu-active': selectedThemeKey === opt.key }"
-                @click="pickTheme(opt.key)"
-              >
-                <span>{{ opt.label }}</span>
-                <Icon
-                  v-if="selectedThemeKey === opt.key"
-                  icon="ep:check"
-                  class="h-4 w-4 text-primary"
-                />
-              </button>
-            </li>
-          </ul>
-        </div>
         <button
           @click="emit('hide')"
           class="btn btn-ghost btn-sm btn-square text-base-content/70"

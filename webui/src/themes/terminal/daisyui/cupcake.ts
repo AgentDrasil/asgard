@@ -1,0 +1,25 @@
+import type { ITheme } from "@xterm/xterm";
+
+export const cupcakeTheme: ITheme = {
+  background: "oklch(97.788% 0.004 56.375)",
+  foreground: "oklch(23.574% 0.066 313.189)",
+  cursor: "oklch(85% 0.138 181.071)",
+  cursorAccent: "oklch(97.788% 0.004 56.375)",
+  selectionBackground: "oklch(85% 0.138 181.071 / 0.25)",
+  black: "oklch(27% 0.006 286.033)",
+  red: "oklch(64% 0.246 16.439)",
+  green: "oklch(69% 0.17 162.48)",
+  yellow: "oklch(79% 0.184 86.047)",
+  blue: "oklch(85% 0.138 181.071)",
+  magenta: "oklch(89% 0.061 343.231)",
+  cyan: "oklch(90% 0.076 70.697)",
+  white: "oklch(93.982% 0.007 61.449)",
+  brightBlack: "oklch(40% 0.006 286.033)",
+  brightRed: "oklch(64% 0.246 16.439)",
+  brightGreen: "oklch(69% 0.17 162.48)",
+  brightYellow: "oklch(79% 0.184 86.047)",
+  brightBlue: "oklch(85% 0.138 181.071)",
+  brightMagenta: "oklch(89% 0.061 343.231)",
+  brightCyan: "oklch(90% 0.076 70.697)",
+  brightWhite: "oklch(97.788% 0.004 56.375)",
+};
