@@ -1,0 +1,25 @@
+import type { ITheme } from "@xterm/xterm";
+
+export const macchiatoTheme: ITheme = {
+  background: "#24273a",
+  foreground: "#cad3f5",
+  cursor: "#f4dbd6",
+  cursorAccent: "#24273a",
+  selectionBackground: "#5b6078",
+  black: "#494d64",
+  red: "#ed8796",
+  green: "#a6da95",
+  yellow: "#eed49f",
+  blue: "#8aadf4",
+  magenta: "#f5bde6",
+  cyan: "#8bd5ca",
+  white: "#b8c0e0",
+  brightBlack: "#5b6078",
+  brightRed: "#ed8796",
+  brightGreen: "#a6da95",
+  brightYellow: "#eed49f",
+  brightBlue: "#8aadf4",
+  brightMagenta: "#f5bde6",
+  brightCyan: "#8bd5ca",
+  brightWhite: "#a5adcb",
+};

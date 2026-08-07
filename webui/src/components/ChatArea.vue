@@ -35,15 +35,18 @@ const props = withDefaults(
     runDir: string;
     sessionId?: string | null;
     isDetailsOpen?: boolean;
+    isTerminalOpen?: boolean;
   }>(),
   {
     isDetailsOpen: true,
+    isTerminalOpen: false,
   },
 );
 
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
   (e: "open-diff", gitRoot: string): void;
+  (e: "toggle-terminal"): void;
 }>();
 
 const gitRoot = ref("");
@@ -207,17 +210,18 @@ const copyMessage = async (id: string, text: string) => {
         </button>
 
         <!-- Open Terminal -->
-        <a
+        <button
           v-if="sessionId"
-          :href="`/api/ttyd/agent-${sessionId}`"
-          target="_blank"
-          rel="noopener noreferrer"
+          @click="emit('toggle-terminal')"
           class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
-          title="Open Agent Workspace Terminal"
+          :class="{ 'btn-active btn-primary': isTerminalOpen }"
+          title="Toggle Agent Workspace Terminal (Ctrl+`)"
         >
           <Icon icon="mynaui:terminal" class="h-4 w-4" />
-          <span class="hidden sm:inline">Open Terminal</span>
-        </a>
+          <span class="hidden sm:inline">{{
+            isTerminalOpen ? "Hide Terminal" : "Open Terminal"
+          }}</span>
+        </button>
       </div>
     </header>
 

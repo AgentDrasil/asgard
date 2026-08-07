@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import { Icon } from "@iconify/vue";
@@ -19,6 +19,31 @@ const chatInputText = ref("");
 const currentGitRoot = ref("");
 const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 const isWorkspaceDetailsOpen = ref(true);
+const isTerminalOpen = ref(false);
+const terminalType = ref<"session" | "sidebar">("session");
+
+const toggleTerminal = (type: "session" | "sidebar" = "session") => {
+  if (isTerminalOpen.value && terminalType.value === type) {
+    isTerminalOpen.value = false;
+  } else {
+    terminalType.value = type;
+    isTerminalOpen.value = true;
+  }
+};
+
+const handleGlobalKeydown = (e: KeyboardEvent) => {
+  if ((e.ctrlKey || e.metaKey) && (e.code === "Backquote" || e.key === "`")) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Toggle off whatever terminal is currently open (session or sidebar);
+    // open the session terminal when none is open.
+    if (isTerminalOpen.value) {
+      isTerminalOpen.value = false;
+    } else {
+      toggleTerminal("session");
+    }
+  }
+};
 
 // 1. Agents Composable
 const { agents, selectedAgentId, selectedDir, loadAgents } = useAgents();
@@ -71,6 +96,7 @@ watch(
 );
 
 onMounted(async () => {
+  window.addEventListener("keydown", handleGlobalKeydown, true);
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
   await loadAgents();
   await loadSessions();
@@ -78,6 +104,10 @@ onMounted(async () => {
   if (route.params.id && typeof route.params.id === "string") {
     await loadSessionData(route.params.id);
   }
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown, true);
 });
 
 const handleStartWelcomeChat = () => {
@@ -150,6 +180,7 @@ const closeSidebarOnMobile = () => {
       @new-chat="handleNewChat(closeSidebarOnMobile)"
       @delete-session="handleDeleteSession"
       @toggle-sidebar="toggleSidebar"
+      @toggle-terminal="toggleTerminal('sidebar')"
     />
 
     <!-- Main Content Area -->
@@ -165,11 +196,13 @@ const closeSidebarOnMobile = () => {
           :sessionId="activeSessionId || ''"
           :showDiffView="showDiffView"
           :gitRoot="currentGitRoot"
+          :terminalType="terminalType"
           v-model:selectedAgentId="selectedAgentId"
           v-model:selectedDir="selectedDir"
           v-model:prompt="welcomePrompt"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
           v-model:chatInputText="chatInputText"
+          v-model:isTerminalOpen="isTerminalOpen"
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
           @open-diff="
@@ -179,6 +212,7 @@ const closeSidebarOnMobile = () => {
             }
           "
           @close-diff="showDiffView = false"
+          @toggle-terminal="toggleTerminal('session')"
         />
       </router-view>
     </main>

@@ -128,6 +128,14 @@ cli:
 }
 
 func TestServerConfig(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
 	tmpDir := t.TempDir()
 	err := os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755)
 	assert.NoError(t, err)

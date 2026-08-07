@@ -1,0 +1,25 @@
+import type { ITheme } from "@xterm/xterm";
+
+export const frappeTheme: ITheme = {
+  background: "#303446",
+  foreground: "#c6d0f5",
+  cursor: "#f2d5cf",
+  cursorAccent: "#303446",
+  selectionBackground: "#626880",
+  black: "#51576d",
+  red: "#e78284",
+  green: "#a6d189",
+  yellow: "#e5c890",
+  blue: "#8caaee",
+  magenta: "#f4b8e4",
+  cyan: "#81c8be",
+  white: "#b5bfe2",
+  brightBlack: "#626880",
+  brightRed: "#e78284",
+  brightGreen: "#a6d189",
+  brightYellow: "#e5c890",
+  brightBlue: "#8caaee",
+  brightMagenta: "#f4b8e4",
+  brightCyan: "#81c8be",
+  brightWhite: "#a5adce",
+};

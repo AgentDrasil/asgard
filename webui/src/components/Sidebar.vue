@@ -23,6 +23,7 @@ const emit = defineEmits<{
   (e: "new-chat"): void;
   (e: "delete-session", id: string): void;
   (e: "toggle-sidebar"): void;
+  (e: "toggle-terminal"): void;
 }>();
 
 const currentTheme = ref("dark");
@@ -331,15 +332,13 @@ const toggleTheme = () => {
         <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current" />
       </button>
 
-      <a
-        href="/api/ttyd/sidebar"
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        @click="emit('toggle-terminal')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Open Terminal"
+        title="Toggle Global Terminal"
       >
         <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
-      </a>
+      </button>
     </div>
 
     <!-- Footer / Theme Toggle -->

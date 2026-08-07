@@ -2,8 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -68,71 +66,6 @@ func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Forward the exact incoming request URL path to ttyd since ttyd expects its -b prefix
-	req := r.Clone(r.Context())
-
-	// Check if this is a WebSocket upgrade request
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		// Hijack the HTTP connection for WebSocket proxying
-		targetConn, err := net.Dial("unix", inst.SocketPath)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to dial unix socket for websocket")
-			http.Error(w, "Failed to connect to ttyd socket", http.StatusInternalServerError)
-			return
-		}
-		defer func() { _ = targetConn.Close() }()
-
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			log.Error().Msg("webserver does not support connection hijacking")
-			http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-			return
-		}
-
-		clientConn, brw, err := hj.Hijack()
-		if err != nil {
-			log.Error().Err(err).Msg("failed to hijack client connection")
-			return
-		}
-		defer func() { _ = clientConn.Close() }()
-
-		targetPath := req.URL.Path
-		if req.URL.RawQuery != "" {
-			targetPath += "?" + req.URL.RawQuery
-		}
-
-		// Send initial HTTP request to ttyd
-		req.URL.Path = targetPath
-		if err := req.Write(targetConn); err != nil {
-			log.Error().Err(err).Msg("failed to write request to ttyd socket")
-			return
-		}
-
-		// Flush any buffered reader data from hijacking before starting bi-directional copy
-		errChan := make(chan error, 2)
-		go func() {
-			var err error
-			if brw.Reader.Buffered() > 0 {
-				buf := make([]byte, brw.Reader.Buffered())
-				_, err = brw.Read(buf)
-				if err == nil {
-					_, err = targetConn.Write(buf)
-				}
-			}
-			if err == nil {
-				_, err = io.Copy(targetConn, clientConn)
-			}
-			errChan <- err
-		}()
-
-		go func() {
-			_, err := io.Copy(clientConn, targetConn)
-			errChan <- err
-		}()
-
-		<-errChan
-		return
-	}
-
-	inst.Proxy.ServeHTTP(w, req)
+	// Serve request via reverse proxy (httputil.ReverseProxy handles HTTP & WebSocket hijacking transparently)
+	inst.Proxy.ServeHTTP(w, r)
 }
