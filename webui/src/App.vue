@@ -46,7 +46,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 };
 
 // 1. Agents Composable
-const { agents, selectedAgentId, selectedDir, loadAgents } = useAgents();
+const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
 // 2. Chat state shared between composables
 const messages = ref<ChatMessage[]>([]);
@@ -82,6 +82,7 @@ const { loading, isStreaming, handleSendMessage } = useChatStream(
   activeAgent,
   selectedAgentId,
   selectedDir,
+  selectedModel,
   chatInputText,
   router,
   messages,
@@ -199,6 +200,7 @@ const closeSidebarOnMobile = () => {
           :terminalType="terminalType"
           v-model:selectedAgentId="selectedAgentId"
           v-model:selectedDir="selectedDir"
+          v-model:selectedModel="selectedModel"
           v-model:prompt="welcomePrompt"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
           v-model:chatInputText="chatInputText"

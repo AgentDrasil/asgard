@@ -9,6 +9,7 @@ defineProps<{
 
 const selectedAgentId = defineModel<string>("selectedAgentId");
 const selectedDir = defineModel<string>("selectedDir");
+const selectedModel = defineModel<string>("selectedModel");
 const prompt = defineModel<string>("prompt");
 
 defineEmits<{
@@ -21,6 +22,7 @@ defineEmits<{
     :agents="agents"
     v-model:selectedAgentId="selectedAgentId"
     v-model:selectedDir="selectedDir"
+    v-model:selectedModel="selectedModel"
     v-model:prompt="prompt"
     @submit="$emit('submit')"
     :loading="loading"

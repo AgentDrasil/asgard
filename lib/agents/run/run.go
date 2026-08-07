@@ -178,25 +178,46 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	return out, nil
 }
 
+const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection
+
 // Run checks the remaining quota for each CLI target configured on the agent.
-// It runs the bubblewrap command for the first target that has more than 20% quota remaining.
-// If no targets have more than 20% quota remaining, it returns an error.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], chatID string, conf *config.Config) ([]byte, error) {
+// It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
+// If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
+// If selected model has <= 0 quota, it returns an error immediately with NO fallback.
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, conf *config.Config) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
 
 	var selectedTarget *agents.CLITarget
-	for _, target := range agent.Config.CLI {
-		quota := agentwrapper.CheckQuota(target.CLI, target.Model)
-		if quota > 0.20 {
-			selectedTarget = &target
-			break
+	if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
+		reqModel := modelOpt.Unwrap()
+		for _, target := range agent.Config.CLI {
+			if target.Model == reqModel {
+				t := target
+				selectedTarget = &t
+				break
+			}
+		}
+		if selectedTarget == nil {
+			return nil, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
+		}
+		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
+		if quota <= 0 {
+			return nil, fmt.Errorf("model %q has no quota remaining (quota: %.2f)", selectedTarget.Model, quota)
+		}
+	} else {
+		for _, target := range agent.Config.CLI {
+			quota := agentwrapper.CheckQuota(target.CLI, target.Model)
+			if quota > MinAutoQuotaThreshold {
+				selectedTarget = &target
+				break
+			}
 		}
 	}
 
 	if selectedTarget == nil {
-		return nil, fmt.Errorf("no CLI target with more than 20%% quota remaining is available for agent %s", agent.Config.ID)
+		return nil, fmt.Errorf("no CLI target with more than 10%% quota remaining is available for agent %s", agent.Config.ID)
 	}
 
 	runDir, err := resolveRunDir(agent, runDirOpt)
@@ -213,6 +234,8 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 }
 
 // RunAll runs ALL CLI targets on the agent concurrently and returns one RunResult per target.
+// Note: Model selection is only applicable to sequential execution (Run) and does not apply to parallel execution (RunAll),
+// which concurrently executes all configured CLI targets.
 // sessions maps "<cli>/<model>" to the session ID to resume for that target.
 // Pass an empty or nil map to start fresh sessions for all targets.
 func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions map[string]string, runDirOpt optional.Option[string], chatID string, conf *config.Config) []RunResult {

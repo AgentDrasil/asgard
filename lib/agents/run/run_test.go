@@ -57,6 +57,7 @@ func TestRun(t *testing.T) {
 	fakeAgy := &agentwrapper.FakeClient{
 		UsageFunc: func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
 			return []types.ModelUsage{
+				{Model: "agy-model-zero", Remaining: 0.0},
 				{Model: "agy-model-low", Remaining: 0.15},
 				{Model: "agy-model-high", Remaining: 0.50},
 			}, nil
@@ -76,16 +77,16 @@ func TestRun(t *testing.T) {
 	})
 	defer agentwrapper.SetClients(nil)
 
-	// 1. Test case: successful run choosing the first target with > 20% quota
+	// 1. Test case: successful run choosing the first target with > 10% quota
 	agent := &agents.Agent{
 		Config: agents.AgentConfig{
 			ID:          "test-agent",
 			Name:        "Test Agent",
 			Description: "A test agent for testing run pkg",
 			CLI: []agents.CLITarget{
-				{CLI: "agy", Model: "agy-model-low"},            // 15% quota (should be skipped)
-				{CLI: "agy", Model: "agy-model-high"},           // 50% quota (should be chosen)
-				{CLI: "opencode", Model: "opencode-model-high"}, // 80% quota (not reached because we pick first > 20%)
+				{CLI: "agy", Model: "agy-model-low"},            // 15% quota (>10%, chosen)
+				{CLI: "agy", Model: "agy-model-high"},           // 50% quota
+				{CLI: "opencode", Model: "opencode-model-high"}, // 80% quota
 			},
 			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
 		},
@@ -94,7 +95,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("failed to create run dir: %v", err)
 	}
 
-	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string](), "test-chat", nil)
+	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string](), optional.None[string](), "test-chat", nil)
 	if err != nil {
 		t.Fatalf("unexpected error running agent: %v", err)
 	}
@@ -103,37 +104,33 @@ func TestRun(t *testing.T) {
 	if !strings.Contains(outStr, "mock bwrap execution succeeded") {
 		t.Errorf("expected mock output, got: %q", outStr)
 	}
-	// Verify that agy-model-high was chosen
-	if !strings.Contains(outStr, "agy-model-high") {
-		t.Errorf("expected chosen model to be agy-model-high, output was: %q", outStr)
-	}
-	// Verify that agy-model-low was NOT chosen
-	if strings.Contains(outStr, "agy-model-low") {
-		t.Errorf("expected agy-model-low not to be chosen, output was: %q", outStr)
+	// Verify that agy-model-low (15% > 10%) was chosen
+	if !strings.Contains(outStr, "agy-model-low") {
+		t.Errorf("expected chosen model to be agy-model-low, output was: %q", outStr)
 	}
 
-	// 2. Test case: no targets have more than 20% quota
-	lowQuotaAgent := &agents.Agent{
+	// 2. Test case: no targets have more than 10% quota
+	insufficientQuotaAgent := &agents.Agent{
 		Config: agents.AgentConfig{
-			ID:          "low-quota-agent",
-			Name:        "Low Quota Agent",
-			Description: "An agent with only low quota targets",
+			ID:          "insufficient-quota-agent",
+			Name:        "Insufficient Quota Agent",
+			Description: "An agent with target below 10% quota",
 			CLI: []agents.CLITarget{
-				{CLI: "agy", Model: "agy-model-low"},
+				{CLI: "agy", Model: "agy-model-zero"}, // 0% quota
 			},
 			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
 		},
 	}
 
-	_, err = Run(context.Background(), lowQuotaAgent, "hello", optional.None[string](), optional.None[string](), "test-chat", nil)
+	_, err = Run(context.Background(), insufficientQuotaAgent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", nil)
 	if err == nil {
 		t.Error("expected error due to insufficient quota, but got nil")
-	} else if !strings.Contains(err.Error(), "no CLI target with more than 20% quota") {
+	} else if !strings.Contains(err.Error(), "no CLI target with more than 10% quota") {
 		t.Errorf("expected quota limit error message, got: %v", err)
 	}
 
 	// 3. Test case: runDir is not allowed
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")), "test-chat", nil)
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")), optional.None[string](), "test-chat", nil)
 	if err == nil {
 		t.Error("expected error due to disallowed run directory, but got nil")
 	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
@@ -142,7 +139,7 @@ func TestRun(t *testing.T) {
 
 	// 4. Test case: runDir is a valid subdirectory
 	validSubDir := filepath.Join(tmpDir, "some-allowed-dir", "subdir1")
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir), "test-chat", nil)
+	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir), optional.None[string](), "test-chat", nil)
 	if err != nil {
 		t.Fatalf("unexpected error with valid subdirectory: %v", err)
 	}
@@ -161,7 +158,7 @@ func TestRun(t *testing.T) {
 			},
 		},
 	}
-	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string](), "test-chat", nil)
+	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", nil)
 	if err != nil {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}
@@ -173,5 +170,126 @@ func TestRun(t *testing.T) {
 	}
 	if len(files) == 0 {
 		t.Error("expected uuid subdirectory to be created in tmp, but it was empty")
+	}
+
+	// 6. Test case: explicitly selecting model with available quota
+	out, err = Run(context.Background(), agent, "hello agent", optional.None[string](), optional.None[string](), optional.Some("opencode-model-high"), "test-chat", nil)
+	if err != nil {
+		t.Fatalf("unexpected error running explicitly selected model: %v", err)
+	}
+	if !strings.Contains(string(out), "opencode-model-high") {
+		t.Errorf("expected output to contain opencode-model-high, got: %s", string(out))
+	}
+
+	// 7. Test case: explicitly selecting model with no quota (0% or <= 0) should error without fallback
+	agentWithZeroQuota := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:          "zero-quota-agent",
+			Name:        "Zero Quota Agent",
+			Description: "An agent with zero quota target",
+			CLI: []agents.CLITarget{
+				{CLI: "agy", Model: "agy-model-zero"},
+			},
+			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
+		},
+	}
+	_, err = Run(context.Background(), agentWithZeroQuota, "hello agent", optional.None[string](), optional.None[string](), optional.Some("agy-model-zero"), "test-chat", nil)
+	if err == nil {
+		t.Error("expected error for model with zero quota when explicitly selected, but got nil")
+	} else if !strings.Contains(err.Error(), "has no quota remaining") {
+		t.Errorf("expected 'has no quota remaining' error, got: %v", err)
+	}
+}
+
+func TestRunAll(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origHome := os.Getenv("HOME")
+	origGopath := os.Getenv("GOPATH")
+	origGocache := os.Getenv("GOCACHE")
+
+	if origGopath != "" {
+		t.Setenv("GOPATH", origGopath)
+	} else if origHome != "" {
+		t.Setenv("GOPATH", filepath.Join(origHome, "go"))
+	}
+	if origGocache != "" {
+		t.Setenv("GOCACHE", origGocache)
+	} else if origHome != "" {
+		t.Setenv("GOCACHE", filepath.Join(origHome, ".cache", "go-build"))
+	}
+
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, subDir), 0755); err != nil {
+			t.Fatalf("failed to create %s dir: %v", subDir, err)
+		}
+	}
+
+	mockBwrapPath := filepath.Join(tmpDir, "bwrap")
+	scriptContent := "#!/bin/sh\nfor arg in \"$@\"; do\n  echo \"$arg\"\ndone\necho \"mock bwrap execution succeeded\"\n"
+	if err := os.WriteFile(mockBwrapPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write mock bwrap script: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+oldPath)
+
+	fakeAgy := &agentwrapper.FakeClient{
+		UsageFunc: func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+			return []types.ModelUsage{
+				{Model: "agy-model-high", Remaining: 0.50},
+			}, nil
+		},
+	}
+	fakeOpencode := &agentwrapper.FakeClient{
+		UsageFunc: func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+			return []types.ModelUsage{
+				{Model: "opencode-model-high", Remaining: 0.80},
+			}, nil
+		},
+	}
+
+	agentwrapper.SetClients(map[string]types.CLIClient{
+		"agy":      fakeAgy,
+		"opencode": fakeOpencode,
+	})
+	defer agentwrapper.SetClients(nil)
+
+	parallelAgent := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:          "parallel-agent",
+			Name:        "Parallel Agent",
+			Description: "Test agent for parallel RunAll",
+			CLI: []agents.CLITarget{
+				{CLI: "agy", Model: "agy-model-high"},
+				{CLI: "opencode", Model: "opencode-model-high"},
+			},
+			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
+		},
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "some-allowed-dir"), 0755); err != nil {
+		t.Fatalf("failed to create run dir: %v", err)
+	}
+
+	results := RunAll(context.Background(), parallelAgent, "hello parallel", nil, optional.None[string](), "test-parallel-chat", nil)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results from RunAll, got %d", len(results))
+	}
+
+	keys := map[string]bool{}
+	for _, res := range results {
+		if res.Err != nil {
+			t.Errorf("unexpected error for target %s: %v", res.CLIKey, res.Err)
+		}
+		keys[res.CLIKey] = true
+		if !strings.Contains(string(res.Output), "mock bwrap execution succeeded") {
+			t.Errorf("expected mock output for target %s, got: %s", res.CLIKey, string(res.Output))
+		}
+	}
+
+	if !keys["agy/agy-model-high"] || !keys["opencode/opencode-model-high"] {
+		t.Errorf("expected results for both targets, got keys: %v", keys)
 	}
 }

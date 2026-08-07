@@ -12,6 +12,7 @@ export function useChatStream(
   activeAgent: Ref<AgentInfo | null>,
   selectedAgentId: Ref<string>,
   selectedDir: Ref<string>,
+  selectedModel: Ref<string>,
   chatInputText: Ref<string>,
   router: Router,
   messages: Ref<ChatMessage[]>,
@@ -94,6 +95,7 @@ export function useChatStream(
         threadId: currentThreadId || undefined,
         runId,
         userMsgId,
+        model: selectedModel.value || undefined,
       },
       {
         onText: (textContent, inputTokens, maxTokens) => {

@@ -6,6 +6,7 @@ export function useAgents() {
   const agents = ref<AgentInfo[]>([]);
   const selectedAgentId = ref("");
   const selectedDir = ref("");
+  const selectedModel = ref("");
 
   const loadAgents = async () => {
     const loadedAgents = await getAgents();
@@ -18,10 +19,11 @@ export function useAgents() {
       if (initialAgent.run_dirs.length > 0) {
         selectedDir.value = initialAgent.run_dirs[0];
       }
+      selectedModel.value = "";
     }
   };
 
-  // Update selected workspace directory when active agent changes
+  // Update selected workspace directory & model when active agent changes
   watch(selectedAgentId, (newAgentId) => {
     const currentAgent = agents.value.find((a) => a.id === newAgentId);
     if (currentAgent && currentAgent.run_dirs.length > 0) {
@@ -29,12 +31,14 @@ export function useAgents() {
     } else {
       selectedDir.value = "";
     }
+    selectedModel.value = "";
   });
 
   return {
     agents,
     selectedAgentId,
     selectedDir,
+    selectedModel,
     loadAgents,
   };
 }

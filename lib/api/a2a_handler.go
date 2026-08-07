@@ -87,6 +87,13 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
 		}
 
+		modelOpt := optional.None[string]()
+		if execCtx.Metadata != nil {
+			if m, ok := execCtx.Metadata["model"].(string); ok && m != "" {
+				modelOpt = optional.Some(m)
+			}
+		}
+
 		// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
 		if runDirOpt.IsSome() {
 			rd := runDirOpt.Unwrap()
@@ -209,7 +216,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		if runMode == "parallel" {
 			e.executeParallel(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, statusCh)
 		} else {
-			e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, session, statusCh)
+			e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
 		}
 	}
 }
@@ -293,6 +300,8 @@ type AgentInfo struct {
 	Icon        string   `json:"icon"`
 	RunDirs     []string `json:"run_dirs"`
 	MainAgent   bool     `json:"main_agent"`
+	Models      []string `json:"models"`
+	RunMode     string   `json:"run_mode"`
 }
 
 // handleAgents handles GET /agents to list loaded agent names.
@@ -302,6 +311,13 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 	richAgents := make([]AgentInfo, 0, len(s.agents))
 	for _, agent := range s.agents {
+		models := make([]string, 0, len(agent.Config.CLI))
+		for _, target := range agent.Config.CLI {
+			if target.Model != "" {
+				models = append(models, target.Model)
+			}
+		}
+
 		richAgents = append(richAgents, AgentInfo{
 			ID:          agent.Config.ID,
 			Name:        agent.Config.Name,
@@ -309,6 +325,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			Icon:        agent.Config.Icon,
 			RunDirs:     agent.Config.RunDirs,
 			MainAgent:   agent.Config.IsMainAgent(),
+			Models:      models,
+			RunMode:     agent.Config.RunMode,
 		})
 	}
 

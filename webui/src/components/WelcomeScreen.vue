@@ -8,6 +8,7 @@ const props = defineProps<{
   agents: AgentInfo[];
   selectedAgentId: string;
   selectedDir: string;
+  selectedModel?: string;
   prompt: string;
   loading: boolean;
 }>();
@@ -15,9 +16,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "update:selectedAgentId", val: string): void;
   (e: "update:selectedDir", val: string): void;
+  (e: "update:selectedModel", val: string): void;
   (e: "update:prompt", val: string): void;
   (e: "submit"): void;
 }>();
+
+const localModel = computed({
+  get: () => props.selectedModel || "",
+  set: (val) => emit("update:selectedModel", val),
+});
 
 const localAgentId = computed({
   get: () => props.selectedAgentId,
@@ -37,6 +44,14 @@ const mainAgents = computed(() => {
 
 const currentAgent = computed(() => {
   return props.agents.find((a) => a.id === props.selectedAgentId) || null;
+});
+
+const currentAgentModels = computed(() => {
+  return currentAgent.value?.models || [];
+});
+
+const isParallelMode = computed(() => {
+  return currentAgent.value?.run_mode === "parallel";
 });
 
 const runDirs = computed(() => {
@@ -234,6 +249,43 @@ const handleSubmit = () => {
           </select>
           <label class="label text-xs text-base-content/60" v-if="currentAgent">
             <span>{{ currentAgent.description }}</span>
+          </label>
+        </div>
+
+        <!-- Model Selection (Optional) -->
+        <div class="form-control w-full" v-if="currentAgentModels.length > 0">
+          <label class="label font-semibold text-sm text-base-content/85">
+            <span class="label-text text-base-content">Select Model (Optional)</span>
+          </label>
+          <select
+            v-model="localModel"
+            :disabled="isParallelMode"
+            class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none disabled:bg-base-200 disabled:opacity-60"
+          >
+            <option value="" class="bg-base-100 text-base-content">
+              {{
+                isParallelMode
+                  ? "Disabled in parallel mode (runs all targets)"
+                  : "Auto (Default quota-based fallback logic)"
+              }}
+            </option>
+            <option
+              v-for="m in currentAgentModels"
+              :key="m"
+              :value="m"
+              class="bg-base-100 text-base-content"
+            >
+              {{ m }}
+            </option>
+          </select>
+          <label class="label text-xs text-base-content/60">
+            <span v-if="isParallelMode" class="text-warning font-medium">
+              Model selection is disabled because this agent operates in parallel mode, concurrently
+              executing all configured targets.
+            </span>
+            <span v-else>
+              If selected, no quota fallback will be performed if quota is depleted.
+            </span>
           </label>
         </div>
 

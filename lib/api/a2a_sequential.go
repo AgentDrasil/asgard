@@ -30,6 +30,7 @@ func (e *agentExecutor) executeSequential(
 	prompt string,
 	chatID string,
 	runDirOpt optional.Option[string],
+	modelOpt optional.Option[string],
 	sessionMode string,
 	session *dbmodels.Session,
 	statusCh <-chan AgentStatusUpdate,
@@ -54,7 +55,7 @@ func (e *agentExecutor) executeSequential(
 	// ── Run the agent in a goroutine, collect result on resultCh ──────────
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, chatID, e.conf)
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, modelOpt, chatID, e.conf)
 		resultCh <- seqRunResult{out, err}
 	}()
 
