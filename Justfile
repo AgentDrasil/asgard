@@ -12,6 +12,11 @@ lint:
     golangci-lint run
     cd webui && npm run lint
 
+# Build backend and webui
+build:
+    go build -o build ./...
+    cd webui && npm run build
+
 # Run e2e tests
 e2e-test:
     E2E_TEST=true go test -v ./...

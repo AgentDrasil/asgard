@@ -387,7 +387,7 @@ const copyMessage = async (id: string, text: string) => {
             <div
               v-else
               v-html="formatContent(msg.content)"
-              class="font-sans prose prose-sm max-w-none text-base-content leading-relaxed min-w-0 break-words [word-break:break-word] [&_p]:mb-3 [&_pre]:bg-base-200/80 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-base-300 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:bg-base-200/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-warning [&_code]:break-words [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_a]:text-primary [&_a]:underline [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full"
+              class="font-sans prose prose-sm max-w-none text-base-content leading-relaxed min-w-0 break-words [word-break:break-word] [&_p]:mb-3 [&_hr]:my-4 [&_hr]:border-base-300/60 [&_pre]:bg-base-200/80 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-base-300 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:bg-base-200/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-warning [&_code]:break-words [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_a]:text-primary [&_a]:underline [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full"
             ></div>
 
             <!-- Action Buttons at bottom: Flip View & Copy (Icon-only) -->
