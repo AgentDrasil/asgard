@@ -5,7 +5,11 @@
     dark --prefersdark,
     cupcake;
 }
-@import "@catppuccin/daisyui/themes.css";
+
+@plugin "./themes/catppuccinTheme.latte.ts";
+@plugin "./themes/catppuccinTheme.frappe.ts";
+@plugin "./themes/catppuccinTheme.macchiato.ts";
+@plugin "./themes/catppuccinTheme.mocha.ts";
 
 ::-webkit-scrollbar {
   width: 6px;
