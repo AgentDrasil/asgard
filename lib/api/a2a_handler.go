@@ -230,7 +230,7 @@ func (e *agentExecutor) markAgentCompleted(chatID string) {
 
 // recordStatusUpdate processes an incremental status update from an agent run,
 // saving artifacts and messages to the session database, and logging warnings on error.
-func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, defaultAgentName string) {
+func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agents.AgentConfig, workspaceDir string) {
 	if repo == nil || update.Content == "" || update.EntryType == "agent_response" {
 		return
 	}
@@ -238,14 +238,19 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 	if role == "" || role == "other" {
 		role = "activity"
 	}
-	agentName := defaultAgentName
+	agentName := ""
+	if agentConfig != nil {
+		agentName = agentConfig.Name
+	}
 	if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
 		agentName = name
 	}
 	targetFiles := toStringSlice(update.Metadata["target_files"])
 	for _, tf := range targetFiles {
-		if err := repo.AppendArtifact(chatID, tf); err != nil {
-			log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", tf).Msg("failed to append artifact to repo")
+		if agents.IsArtifact(tf, agentConfig, workspaceDir) {
+			if err := repo.AppendArtifact(chatID, tf); err != nil {
+				log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", tf).Msg("failed to append artifact to repo")
+			}
 		}
 	}
 	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{

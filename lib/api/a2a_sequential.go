@@ -72,6 +72,11 @@ func (e *agentExecutor) streamAndFinish(
 	statusCh <-chan AgentStatusUpdate,
 	resultCh <-chan seqRunResult,
 ) {
+	workspaceDir := ""
+	if runDirOpt.IsSome() {
+		workspaceDir = runDirOpt.Unwrap()
+	}
+
 	for {
 		if statusCh == nil {
 			// No listener configured — just wait for result.
@@ -91,7 +96,7 @@ func (e *agentExecutor) streamAndFinish(
 				statusCh = nil
 				continue
 			}
-			recordStatusUpdate(e.repo, chatID, update, e.agent.Config.Name)
+			recordStatusUpdate(e.repo, chatID, update, &e.agent.Config, workspaceDir)
 
 			// Emit an intermediate TaskStatusUpdateEvent.
 			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))

@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/config"
@@ -138,4 +142,56 @@ func TestExecuteValidation(t *testing.T) {
 			assert.Contains(t, err.Error(), "invalid chatID format")
 		}
 	}
+}
+
+func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	err := dbmodels.AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	repo := dbmodels.NewSessionRepository(testDB)
+
+	chatID := "test-chat-artifact-filtering"
+	err = repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+	})
+	require.NoError(t, err)
+
+	workspaceDir, err := os.MkdirTemp("", "asgard-a2a-test-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(workspaceDir) }()
+
+	// Create git repo in workspaceDir with .gitignore
+	cmd := exec.Command("git", "init", workspaceDir)
+	require.NoError(t, cmd.Run())
+	err = os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n*.tmp\n"), 0644)
+	require.NoError(t, err)
+
+	agentConfig := &agents.AgentConfig{
+		Name: "TestAgent",
+		MountDirs: agents.MountConfig{
+			ReadWrite: []string{"/tmp/custom_rw_dir"},
+		},
+	}
+
+	update := AgentStatusUpdate{
+		Content:   "Updated target files",
+		EntryType: "activity",
+		Metadata: map[string]any{
+			"target_files": []string{
+				"src/main.go",                  // unignored source file -> not artifact
+				"scratch/demo.py",              // ignored in gitignore -> artifact
+				"/tmp/custom_rw_dir/data.json", // in agent rw path -> artifact
+			},
+		},
+	}
+
+	recordStatusUpdate(repo, chatID, update, agentConfig, workspaceDir)
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.Contains(t, sess.Artifacts, "scratch/demo.py")
+	assert.Contains(t, sess.Artifacts, "/tmp/custom_rw_dir/data.json")
+	assert.NotContains(t, sess.Artifacts, "src/main.go")
 }
