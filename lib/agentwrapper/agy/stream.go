@@ -139,8 +139,8 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				if su.ToolInfo != nil && len(su.ToolInfo.Parameters) > 0 {
 					metadata["parameters"] = su.ToolInfo.Parameters
 				}
-				if tf := extractTargetFile(su.ToolName, su.ToolInfo); tf != "" {
-					metadata["target_file"] = tf
+				if tfs := extractTargetFiles(su.ToolName, su.ToolInfo); len(tfs) > 0 {
+					metadata["target_files"] = tfs
 				}
 				cb(su.StepIndex, "TOOL", "tool_call", content, metadata)
 
@@ -235,22 +235,17 @@ var fileModifyingTools = map[string]bool{
 	"multi_replace_file_content": true,
 }
 
-func extractTargetFile(toolName string, info *streamToolInfo) string {
+// extractTargetFiles resolves the target file path(s) from a file-modifying
+// tool's input payload so the UI can surface them as artifacts. agy's
+// (Cline-style) tools expose the path via the "TargetFile" parameter.
+func extractTargetFiles(toolName string, info *streamToolInfo) []string {
 	if info == nil || len(info.Parameters) == 0 {
-		return ""
+		return nil
 	}
 	if fileModifyingTools[toolName] {
 		if target, ok := info.Parameters["TargetFile"].(string); ok && target != "" {
-			return remapSandboxPath(target)
+			return []string{types.RemapSandboxPath(target)}
 		}
 	}
-	return ""
-}
-
-func remapSandboxPath(targetPath string) string {
-	targetPath = strings.TrimSpace(targetPath)
-	if strings.HasPrefix(targetPath, "/tmp/") {
-		return ".tmp/" + strings.TrimPrefix(targetPath, "/tmp/")
-	}
-	return targetPath
+	return nil
 }

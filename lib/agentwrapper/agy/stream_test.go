@@ -155,19 +155,22 @@ func TestParseStream_ToolFormatting(t *testing.T) {
 	}
 }
 
-func TestExtractTargetFile(t *testing.T) {
-	assert.Equal(t, "main.go", remapSandboxPath("main.go"))
-	assert.Equal(t, ".tmp/test.md", remapSandboxPath("/tmp/test.md"))
+func TestExtractTargetFiles(t *testing.T) {
+	assert.Equal(t, "main.go", types.RemapSandboxPath("main.go"))
+	assert.Equal(t, ".tmp/test.md", types.RemapSandboxPath("/tmp/test.md"))
 
 	infoWrite := &streamToolInfo{
 		Name:       "write_to_file",
 		Parameters: map[string]any{"TargetFile": "/tmp/out.txt"},
 	}
-	assert.Equal(t, ".tmp/out.txt", extractTargetFile("write_to_file", infoWrite))
+	assert.Equal(t, []string{".tmp/out.txt"}, extractTargetFiles("write_to_file", infoWrite))
 
 	infoReplace := &streamToolInfo{
 		Name:       "replace_file_content",
 		Parameters: map[string]any{"TargetFile": "src/app.ts"},
 	}
-	assert.Equal(t, "src/app.ts", extractTargetFile("replace_file_content", infoReplace))
+	assert.Equal(t, []string{"src/app.ts"}, extractTargetFiles("replace_file_content", infoReplace))
+
+	// Non file-modifying tools are ignored.
+	assert.Nil(t, extractTargetFiles("read", &streamToolInfo{Parameters: map[string]any{"TargetFile": "a.go"}}))
 }

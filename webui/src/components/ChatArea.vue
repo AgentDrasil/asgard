@@ -337,24 +337,37 @@ const copyMessage = async (id: string, text: string) => {
                 </span>
               </summary>
               <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
-                <!-- TargetFile Artifact Card Button -->
+                <!-- TargetFiles Artifact Card Button -->
                 <div
-                  v-if="msg.targetFile"
+                  v-if="msg.targetFiles && msg.targetFiles.length > 0"
                   class="flex items-center justify-between p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2"
                 >
                   <div class="flex items-center gap-2 overflow-hidden">
                     <span class="text-emerald-400 font-bold text-xs">📄 Target File:</span>
                     <span
+                      v-if="msg.targetFiles.length === 1"
                       class="font-mono text-xs text-neutral-300 truncate"
-                      :title="msg.targetFile"
-                      >{{ msg.targetFile }}</span
+                      :title="msg.targetFiles[0]"
+                      >{{ msg.targetFiles[0] }}</span
                     >
+                    <span v-else class="font-mono text-xs text-neutral-300">
+                      {{ msg.targetFiles.length }} files
+                    </span>
                   </div>
                   <button
-                    @click="emit('open-artifact', msg.targetFile)"
+                    v-if="msg.targetFiles.length === 1"
+                    @click="emit('open-artifact', msg.targetFiles[0])"
                     class="btn btn-xs btn-emerald bg-emerald-600 hover:bg-emerald-500 text-white border-none gap-1 shrink-0 font-medium"
                   >
                     <span>Preview Artifact</span>
+                    <span>➔</span>
+                  </button>
+                  <button
+                    v-else
+                    @click="emit('toggle-artifact-drawer')"
+                    class="btn btn-xs btn-emerald bg-emerald-600 hover:bg-emerald-500 text-white border-none gap-1 shrink-0 font-medium"
+                  >
+                    <span>Preview Artifacts</span>
                     <span>➔</span>
                   </button>
                 </div>

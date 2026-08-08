@@ -35,7 +35,7 @@ export interface ChatMessage {
   maxTokens?: number;
   replied?: boolean;
   replyText?: string;
-  targetFile?: string;
+  targetFiles?: string[];
 }
 
 export interface ChatSession {

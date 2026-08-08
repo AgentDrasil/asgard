@@ -130,7 +130,7 @@ export function useChatStream(
 
           const agentName =
             (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
-          const targetFile = (metadata?.["target_file"] as string) || undefined;
+          const targetFiles = (metadata?.["target_files"] as string[] | undefined) || undefined;
 
           if (entryType === "ask_user") {
             const askMsgId = (metadata?.["message_id"] as string) || `ask-${Date.now()}`;
@@ -162,7 +162,7 @@ export function useChatStream(
               content: toolLog,
               agentName: agentName,
               timestamp: Date.now(),
-              ...(targetFile ? { targetFile } : {}),
+              ...(targetFiles ? { targetFiles } : {}),
             };
             if (hasAssistantMsg) {
               const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
@@ -178,7 +178,7 @@ export function useChatStream(
           } else {
             messages.value = messages.value.map((m) =>
               m.id === reasoningMsgId
-                ? { ...m, content: toolLog, ...(targetFile ? { targetFile } : {}) }
+                ? { ...m, content: toolLog, ...(targetFiles ? { targetFiles } : {}) }
                 : m,
             );
           }

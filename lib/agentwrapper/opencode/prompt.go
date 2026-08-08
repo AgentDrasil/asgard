@@ -164,6 +164,9 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 					if toolName != "" {
 						metadata["tool_name"] = toolName
 					}
+					if tfs := extractTargetFiles(toolName, opl.Part.State.Input, opl.Part.ToolInput); len(tfs) > 0 {
+						metadata["target_files"] = tfs
+					}
 					if inputTokens > 0 {
 						metadata["input_tokens"] = inputTokens
 						metadata["total_input_tokens"] = inputTokens
@@ -217,4 +220,81 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		Remaining:   remaining,
 		LastContent: lastContent,
 	}, nil
+}
+
+// fileModifyingTools is the set of built-in opencode tools that create or
+// modify files. Mirrors opencode's own toToolKind() "edit" classification:
+// edit, write, apply_patch, and the legacy "patch" alias.
+//
+// See: packages/opencode/test/acp/tool.test.ts (toToolKind / toLocations).
+var fileModifyingTools = map[string]bool{
+	"edit":        true,
+	"write":       true,
+	"apply_patch": true,
+	"patch":       true,
+}
+
+// extractTargetFiles resolves the target file path(s) from a file-modifying
+// tool's input payload, so the UI can surface them as artifacts.
+//
+// opencode's input schema is not uniform across tools:
+//   - edit / write expose the path via the "filePath" field in the legacy
+//     packages/opencode schema, and via "path" in the newer V2 core schema
+//     (packages/core). Both keys are checked.
+//   - apply_patch (and its "patch" alias) take a single "patchText" argument;
+//     the target path is embedded inline as "*** Update File:" /
+//     "*** Add File:" / "*** Move to:" / "*** Delete File:" headers rather
+//     than a dedicated field. parsePatchTextFiles extracts every such path,
+//     so a multi-file patch yields all of them.
+//
+// See: packages/opencode/test/acp/tool.test.ts (toToolKind / toLocations).
+func extractTargetFiles(toolName string, inputs ...map[string]any) []string {
+	if !fileModifyingTools[toolName] {
+		return nil
+	}
+	for _, input := range inputs {
+		if len(input) == 0 {
+			continue
+		}
+		if toolName == "apply_patch" || toolName == "patch" {
+			if pt, ok := input["patchText"].(string); ok && pt != "" {
+				if files := parsePatchTextFiles(pt); len(files) > 0 {
+					remapped := make([]string, 0, len(files))
+					for _, f := range files {
+						remapped = append(remapped, types.RemapSandboxPath(f))
+					}
+					return remapped
+				}
+			}
+			continue
+		}
+		for _, key := range []string{"filePath", "path"} {
+			if val, ok := input[key].(string); ok && strings.TrimSpace(val) != "" {
+				return []string{types.RemapSandboxPath(val)}
+			}
+		}
+	}
+	return nil
+}
+
+// parsePatchTextFiles scans an apply_patch patchText and returns every target
+// file path declared by a header marker, in order of appearance and de-duplicated.
+func parsePatchTextFiles(patchText string) []string {
+	scanner := bufio.NewScanner(strings.NewReader(patchText))
+	var files []string
+	seen := make(map[string]bool)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		for _, marker := range []string{"*** Update File:", "*** Add File:", "*** Move to:", "*** Delete File:"} {
+			if strings.HasPrefix(line, marker) {
+				f := strings.TrimSpace(strings.TrimPrefix(line, marker))
+				if f != "" && !seen[f] {
+					seen[f] = true
+					files = append(files, f)
+				}
+				break
+			}
+		}
+	}
+	return files
 }

@@ -106,12 +106,14 @@ function syncArtifactFiles() {
     }
   }
 
-  // 2. Collect artifacts from message targetFile
+  // 2. Collect artifacts from message targetFiles
   if (props.messages && props.messages.length > 0) {
     for (const msg of props.messages) {
-      if (msg.targetFile) {
-        if (!currentFiles.includes(msg.targetFile)) {
-          currentFiles.push(msg.targetFile);
+      if (msg.targetFiles && msg.targetFiles.length > 0) {
+        for (const f of msg.targetFiles) {
+          if (f && !currentFiles.includes(f)) {
+            currentFiles.push(f);
+          }
         }
       }
     }

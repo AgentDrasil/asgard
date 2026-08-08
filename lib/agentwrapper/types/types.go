@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -142,4 +143,13 @@ func (o *PromptOptions) ResponseDelayOrDefault() time.Duration {
 		return o.ResponseDelay
 	}
 	return 300 * time.Second
+}
+
+// RemapSandboxPath remaps paths inside the sandbox temp directory (/tmp/) to .tmp/
+func RemapSandboxPath(targetPath string) string {
+	targetPath = strings.TrimSpace(targetPath)
+	if strings.HasPrefix(targetPath, "/tmp/") {
+		return ".tmp/" + strings.TrimPrefix(targetPath, "/tmp/")
+	}
+	return targetPath
 }

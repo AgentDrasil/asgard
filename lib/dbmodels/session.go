@@ -40,18 +40,18 @@ func (a *Agents) Scan(value interface{}) error {
 }
 
 type ChatMessage struct {
-	ID           string `json:"id"`
-	Role         string `json:"role"`
-	Content      string `json:"content"`
-	AgentName    string `json:"agentName,omitempty"`
-	Timestamp    int64  `json:"timestamp,omitempty"`
-	ActivityType string `json:"activityType,omitempty"`
-	StepIndex    int    `json:"stepIndex,omitempty"`
-	InputTokens  int    `json:"inputTokens,omitempty"`
-	MaxTokens    int    `json:"maxTokens,omitempty"`
-	Replied      bool   `json:"replied,omitempty"`
-	ReplyText    string `json:"replyText,omitempty"`
-	TargetFile   string `json:"targetFile,omitempty"`
+	ID           string   `json:"id"`
+	Role         string   `json:"role"`
+	Content      string   `json:"content"`
+	AgentName    string   `json:"agentName,omitempty"`
+	Timestamp    int64    `json:"timestamp,omitempty"`
+	ActivityType string   `json:"activityType,omitempty"`
+	StepIndex    int      `json:"stepIndex,omitempty"`
+	InputTokens  int      `json:"inputTokens,omitempty"`
+	MaxTokens    int      `json:"maxTokens,omitempty"`
+	Replied      bool     `json:"replied,omitempty"`
+	ReplyText    string   `json:"replyText,omitempty"`
+	TargetFiles  []string `json:"targetFiles,omitempty"`
 }
 
 type Messages []ChatMessage

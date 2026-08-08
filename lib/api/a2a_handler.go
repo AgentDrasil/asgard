@@ -247,11 +247,10 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 	if name, ok := update.Metadata["agent_name"].(string); ok && name != "" {
 		agentName = name
 	}
-	targetFile := ""
-	if tf, ok := update.Metadata["target_file"].(string); ok {
-		targetFile = tf
-		if err := repo.AppendArtifact(chatID, targetFile); err != nil {
-			log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", targetFile).Msg("failed to append artifact to repo")
+	targetFiles := toStringSlice(update.Metadata["target_files"])
+	for _, tf := range targetFiles {
+		if err := repo.AppendArtifact(chatID, tf); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", tf).Msg("failed to append artifact to repo")
 		}
 	}
 	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
@@ -262,10 +261,35 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 		Timestamp:    time.Now().UnixMilli(),
 		ActivityType: strings.ToUpper(role),
 		StepIndex:    update.StepIndex,
-		TargetFile:   targetFile,
+		TargetFiles:  targetFiles,
 	}); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
 	}
+}
+
+// toStringSlice coerces a JSON-decoded value into a []string. It accepts both
+// []string and []any (the shape produced by encoding/json for JSON arrays),
+// dropping any non-string or empty entries.
+func toStringSlice(v any) []string {
+	switch s := v.(type) {
+	case []string:
+		out := make([]string, 0, len(s))
+		for _, item := range s {
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(s))
+		for _, item := range s {
+			if str, ok := item.(string); ok && str != "" {
+				out = append(out, str)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // promptResult is the JSON structure returned by CLI agents.
