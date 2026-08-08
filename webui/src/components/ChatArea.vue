@@ -274,7 +274,7 @@ const copyMessage = async (id: string, text: string) => {
           :title="`Toggle Artifacts View (${toggleArtifactsShortcut})`"
         >
           <Icon icon="octicon:file-code-24" class="h-4 w-4" />
-          <span class="hidden sm:inline">Artifacts</span>
+          <span class="hidden xl:inline">Artifacts</span>
           <span
             class="badge badge-xs sm:badge-sm font-bold bg-base-100/20 text-current border-none"
           >
@@ -290,7 +290,7 @@ const copyMessage = async (id: string, text: string) => {
           :title="`Toggle Git Diff View (${toggleDiffShortcut})`"
         >
           <Icon icon="octicon:file-diff-24" class="h-4 w-4" />
-          <span class="hidden sm:inline">Open Diff</span>
+          <span class="hidden xl:inline">Open Diff</span>
         </button>
 
         <!-- Open Terminal -->
@@ -302,7 +302,7 @@ const copyMessage = async (id: string, text: string) => {
           :title="`Toggle Agent Workspace Terminal (${toggleTerminalShortcut})`"
         >
           <Icon icon="mynaui:terminal" class="h-4 w-4" />
-          <span class="hidden sm:inline">{{
+          <span class="hidden xl:inline">{{
             isTerminalOpen ? "Hide Terminal" : "Open Terminal"
           }}</span>
         </button>
