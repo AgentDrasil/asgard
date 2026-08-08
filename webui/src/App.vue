@@ -66,6 +66,7 @@ const {
   router,
   agents,
   selectedAgentId,
+  selectedDir,
   isStreamingRef,
   messages,
   welcomePrompt,
@@ -143,7 +144,7 @@ const closeSidebarOnMobile = () => {
       :agents="agents"
       :activeSessionId="activeSessionId"
       @select-session="(id) => handleSelectSession(id, closeSidebarOnMobile)"
-      @new-chat="handleNewChat(closeSidebarOnMobile)"
+      @new-chat="(agentId, runDir) => handleNewChat(closeSidebarOnMobile, agentId, runDir)"
       @delete-session="handleDeleteSession"
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="toggleTerminal('sidebar')"

@@ -9,6 +9,7 @@ export function useSessions(
   router: Router,
   agents: Ref<AgentInfo[]>,
   selectedAgentId: Ref<string>,
+  selectedDir: Ref<string>,
   isStreaming: Ref<boolean>,
   messages: Ref<ChatMessage[]>,
   welcomePrompt: Ref<string>,
@@ -45,7 +46,16 @@ export function useSessions(
     if (onSelect) onSelect();
   };
 
-  const handleNewChat = (onNewChat?: () => void) => {
+  const handleNewChat = (onNewChat?: () => void, agentId?: string, runDir?: string) => {
+    if (agentId) {
+      const foundAgent = agents.value.find((a) => a.id === agentId || a.name === agentId);
+      if (foundAgent) {
+        selectedAgentId.value = foundAgent.id;
+      }
+    }
+    if (runDir) {
+      selectedDir.value = runDir;
+    }
     if (route.path !== "/newchat") {
       router.push("/newchat");
     }

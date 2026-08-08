@@ -20,7 +20,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: "select-session", id: string): void;
-  (e: "new-chat"): void;
+  (e: "new-chat", agentId?: string, runDir?: string): void;
   (e: "delete-session", id: string): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-terminal"): void;
@@ -435,9 +435,18 @@ const selectTheme = (themeId: string) => {
                     <Icon icon="mynaui:folder" class="h-3.5 w-3.5 shrink-0 opacity-70" />
                     <span class="truncate">{{ wsGroup.displayName }}</span>
                   </div>
-                  <span class="text-[10px] text-base-content/40 shrink-0"
-                    >({{ wsGroup.sessions.length }})</span
-                  >
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      @click.stop="emit('new-chat', agentGroup.agentName, wsGroup.runDir)"
+                      class="btn btn-ghost btn-xs p-0.5 h-4 min-h-0 w-4 rounded text-base-content/60 hover:text-primary hover:bg-base-300"
+                      title="New chat with this agent and workspace"
+                    >
+                      <Icon icon="mynaui:plus" class="h-3 w-3 fill-current" />
+                    </button>
+                    <span class="text-[10px] text-base-content/40"
+                      >({{ wsGroup.sessions.length }})</span
+                    >
+                  </div>
                 </div>
 
                 <!-- Level 3: Sessions List under Workspace -->
