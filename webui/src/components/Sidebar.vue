@@ -475,10 +475,10 @@ const selectTheme = (themeId: string) => {
       </template>
     </div>
 
-    <!-- Action Menu (Horizontal with icon only, visible when sidebar is open) -->
+    <!-- Action Menu (Horizontal with icons, visible when sidebar is open) -->
     <div
       v-if="isOpen"
-      class="px-3 py-1 flex items-center justify-around gap-1 w-full border-t border-base-100/50"
+      class="px-3 py-1.5 flex items-center justify-around gap-1 w-full border-t border-base-100/50 bg-base-300"
     >
       <button
         @click="reloadApp"
@@ -500,41 +500,16 @@ const selectTheme = (themeId: string) => {
         <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current" />
       </button>
 
-      <button
-        @click="emit('toggle-terminal')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Toggle Global Terminal"
-      >
-        <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
-      </button>
-    </div>
-
-    <!-- Footer / Theme Selector (Dropdown Up) -->
-    <div
-      :class="[
-        'p-3 bg-base-300 flex items-center text-xs w-full border-t border-base-100',
-        isOpen ? 'justify-between px-4' : 'justify-center',
-      ]"
-    >
-      <div class="dropdown dropdown-top w-full">
-        <div
+      <!-- Theme Selector Dropdown -->
+      <div class="dropdown dropdown-top">
+        <button
           tabindex="0"
           role="button"
-          class="btn btn-ghost btn-xs w-full flex items-center justify-between px-2 text-xs text-base-content/80 hover:text-base-content"
+          class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
           title="Select Theme"
         >
-          <div class="flex items-center gap-2 truncate">
-            <Icon icon="mynaui:palette" class="w-4 h-4 shrink-0 fill-current text-primary" />
-            <span v-if="isOpen" class="truncate font-medium capitalize">
-              {{ APP_THEMES.find((t) => t.id === currentTheme)?.name || currentTheme }}
-            </span>
-          </div>
-          <Icon
-            v-if="isOpen"
-            icon="mynaui:chevron-up"
-            class="w-3.5 h-3.5 shrink-0 fill-current opacity-70"
-          />
-        </div>
+          <Icon icon="mdi:color" class="h-5 w-5 fill-current" />
+        </button>
         <ul
           tabindex="0"
           class="dropdown-content menu menu-sm bg-base-200 border border-base-100 rounded-box z-50 w-52 p-1.5 shadow-xl max-h-60 overflow-y-auto mb-1"
@@ -573,6 +548,14 @@ const selectTheme = (themeId: string) => {
           </li>
         </ul>
       </div>
+
+      <button
+        @click="emit('toggle-terminal')"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Toggle Global Terminal"
+      >
+        <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
+      </button>
     </div>
   </aside>
 
