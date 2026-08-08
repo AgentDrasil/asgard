@@ -8,8 +8,15 @@ import { getDirInfo, sendAskUserReply } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
 import { TOOL_ITEM_DELIMITER } from "../utils/messageUtils";
 import { useShiki } from "../composables/useShiki";
+import { useShortcuts } from "../composables/useShortcuts";
 
 const { highlightBlock, highlightHtmlCodeBlocks } = useShiki();
+const {
+  toggleSidebarShortcut,
+  toggleArtifactsShortcut,
+  toggleDiffShortcut,
+  toggleTerminalShortcut,
+} = useShortcuts();
 
 const inlineInputMap = ref<Record<string, string>>({});
 const inlineSubmittingMap = ref<Record<string, boolean>>({});
@@ -216,7 +223,7 @@ const copyMessage = async (id: string, text: string) => {
         <button
           @click="emit('toggle-sidebar')"
           class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0 mt-0.5"
-          title="Toggle Menu"
+          :title="`Toggle Menu (${toggleSidebarShortcut})`"
         >
           <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
@@ -264,7 +271,7 @@ const copyMessage = async (id: string, text: string) => {
           :class="
             isArtifactDrawerOpen ? 'btn-active btn-primary' : 'btn-secondary text-secondary-content'
           "
-          title="Toggle Artifacts View"
+          :title="`Toggle Artifacts View (${toggleArtifactsShortcut})`"
         >
           <Icon icon="octicon:file-code-24" class="h-4 w-4" />
           <span class="hidden sm:inline">Artifacts</span>
@@ -280,7 +287,7 @@ const copyMessage = async (id: string, text: string) => {
           v-if="gitRoot"
           @click="emit('open-diff', gitRoot)"
           class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
-          title="Open Git Diff View"
+          :title="`Toggle Git Diff View (${toggleDiffShortcut})`"
         >
           <Icon icon="octicon:file-diff-24" class="h-4 w-4" />
           <span class="hidden sm:inline">Open Diff</span>
@@ -292,7 +299,7 @@ const copyMessage = async (id: string, text: string) => {
           @click="emit('toggle-terminal')"
           class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
           :class="{ 'btn-active btn-primary': isTerminalOpen }"
-          title="Toggle Agent Workspace Terminal (Ctrl+`)"
+          :title="`Toggle Agent Workspace Terminal (${toggleTerminalShortcut})`"
         >
           <Icon icon="mynaui:terminal" class="h-4 w-4" />
           <span class="hidden sm:inline">{{

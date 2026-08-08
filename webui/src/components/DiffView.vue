@@ -6,6 +6,9 @@ import "@git-diff-view/vue/styles/diff-view.css";
 import { Icon } from "@iconify/vue";
 import { getGitDiff } from "../lib/api";
 import type { GitDiffFile } from "../types";
+import { useShortcuts } from "../composables/useShortcuts";
+
+const { toggleDiffShortcut } = useShortcuts();
 
 const props = defineProps<{
   runDir: string;
@@ -262,7 +265,7 @@ function fileHasComments(filePath: string): boolean {
       <button
         @click="emit('close')"
         class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-error"
-        title="Close diff view and return to chat"
+        :title="`Close diff view and return to chat (${toggleDiffShortcut})`"
       >
         <Icon icon="mynaui:x" class="h-5 w-5" />
       </button>

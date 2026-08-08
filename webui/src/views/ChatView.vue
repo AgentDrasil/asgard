@@ -22,11 +22,11 @@ const props = defineProps<{
 const isDetailsOpen = defineModel<boolean>("isDetailsOpen");
 const chatInputText = defineModel<string>("chatInputText");
 const isTerminalOpen = defineModel<boolean>("isTerminalOpen", { default: false });
+const isArtifactDrawerOpen = defineModel<boolean>("isArtifactDrawerOpen", { default: false });
 
 // Artifacts state management
 const activeArtifactPath = ref<string | null>(null);
 const modifiedFiles = ref<string[]>([]);
-const isArtifactDrawerOpen = ref<boolean>(false);
 
 // Resizable artifact panel width logic
 const DEFAULT_ARTIFACT_WIDTH = 500;
@@ -167,6 +167,12 @@ function toggleArtifactDrawer() {
     isArtifactDrawerOpen.value = false;
   }
 }
+
+watch(isArtifactDrawerOpen, (open) => {
+  if (open && !activeArtifactPath.value && modifiedFiles.value.length > 0) {
+    activeArtifactPath.value = modifiedFiles.value[modifiedFiles.value.length - 1];
+  }
+});
 </script>
 
 <template>

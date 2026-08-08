@@ -3,6 +3,9 @@ import { computed, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import type { AgentInfo } from "../types";
 import { getDirInfo, getSubdirs } from "../lib/api";
+import { useShortcuts } from "../composables/useShortcuts";
+
+const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
 
 const props = defineProps<{
   agents: AgentInfo[];
@@ -220,7 +223,7 @@ const handleSubmit = () => {
         <button
           @click="emit('toggle-sidebar')"
           class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0"
-          title="Toggle Menu"
+          :title="`Toggle Menu (${toggleSidebarShortcut})`"
         >
           <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
@@ -436,7 +439,7 @@ const handleSubmit = () => {
           <textarea
             v-model="localPrompt"
             class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
-            placeholder="Type your coding request here... (Ctrl+Enter to submit)"
+            :placeholder="`Type your coding request here... (${sendShortcut} to submit)`"
             @keydown.ctrl.enter.prevent="handleSubmit"
             @keydown.meta.enter.prevent="handleSubmit"
           ></textarea>

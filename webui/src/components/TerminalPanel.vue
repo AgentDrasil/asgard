@@ -3,6 +3,9 @@ import { ref, onMounted, onUnmounted, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import TerminalView from "./TerminalView.vue";
 import { useTerminalTheme } from "../composables/useTerminalTheme";
+import { useShortcuts } from "../composables/useShortcuts";
+
+const { toggleTerminalShortcut } = useShortcuts();
 
 const props = withDefaults(
   defineProps<{
@@ -181,7 +184,7 @@ onUnmounted(() => {
           <button
             @click="emit('hide')"
             class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            title="Hide Terminal (Ctrl+`)"
+            :title="`Hide Terminal (${toggleTerminalShortcut})`"
           >
             <Icon icon="ep:minus" class="h-3.5 w-3.5" />
           </button>

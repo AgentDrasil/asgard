@@ -19,6 +19,7 @@ const currentGitRoot = ref("");
 const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 const isWorkspaceDetailsOpen = ref(true);
 const isTerminalOpen = ref(false);
+const isArtifactDrawerOpen = ref(false);
 const terminalType = ref<"session" | "sidebar">("session");
 
 const toggleTerminal = (type: "session" | "sidebar" = "session") => {
@@ -31,7 +32,10 @@ const toggleTerminal = (type: "session" | "sidebar" = "session") => {
 };
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
-  if ((e.ctrlKey || e.metaKey) && (e.code === "Backquote" || e.key === "`")) {
+  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+  if (ctrlKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
     e.preventDefault();
     e.stopPropagation();
     // Toggle off whatever terminal is currently open (session or sidebar);
@@ -41,6 +45,33 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     } else {
       toggleTerminal("session");
     }
+    return;
+  }
+
+  // Guard: ignore editing shortcuts when focused on input fields or contenteditable elements
+  const target = e.target as HTMLElement | null;
+  if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) {
+    return;
+  }
+
+  if (ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyB") {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSidebar();
+  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyB") {
+    e.preventDefault();
+    e.stopPropagation();
+    isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
+  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!showDiffView.value) {
+      const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
+      if (gitRootCandidate) {
+        currentGitRoot.value = gitRootCandidate;
+      }
+    }
+    showDiffView.value = !showDiffView.value;
   }
 };
 
@@ -171,6 +202,7 @@ const closeSidebarOnMobile = () => {
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
           v-model:chatInputText="chatInputText"
           v-model:isTerminalOpen="isTerminalOpen"
+          v-model:isArtifactDrawerOpen="isArtifactDrawerOpen"
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
           @open-diff="

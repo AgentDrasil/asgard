@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
 import { Icon } from "@iconify/vue";
+import { useShortcuts } from "../composables/useShortcuts";
+
+const { modKey, sendShortcut } = useShortcuts();
 
 const props = defineProps<{
   loading: boolean;
@@ -86,7 +89,7 @@ const closeModal = () => {
       <textarea
         v-model="text"
         @keydown="handleKeyDown"
-        placeholder="Ctrl+Enter to send..."
+        :placeholder="`${sendShortcut} to send...`"
         rows="1"
         :disabled="loading"
         class="textarea textarea-bordered bg-base-200 text-base-content w-full pl-11 sm:pl-12 pr-11 sm:pr-12 rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
@@ -97,7 +100,7 @@ const closeModal = () => {
         @click="handleSend"
         :disabled="loading || !text.trim()"
         class="btn btn-circle btn-primary btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"
-        title="Send message (Ctrl+Enter)"
+        :title="`Send message (${sendShortcut})`"
       >
         <span v-if="loading" class="loading loading-spinner loading-xs"></span>
         <Icon v-else icon="material-symbols:send" class="h-4 w-4 fill-current" />
@@ -128,7 +131,7 @@ const closeModal = () => {
           <textarea
             v-model="text"
             @keydown="handleKeyDown"
-            placeholder="Type multiline prompt here... (Ctrl+Enter to send)"
+            :placeholder="`Type multiline prompt here... (${sendShortcut} to send)`"
             :disabled="loading"
             class="textarea textarea-bordered bg-base-200 text-base-content w-full flex-1 p-4 rounded-xl leading-relaxed focus:outline-none focus:border-primary text-sm font-mono resize-none"
           ></textarea>
@@ -136,7 +139,8 @@ const closeModal = () => {
 
         <div class="flex items-center justify-between gap-2 pt-2 border-t border-base-300">
           <span class="text-xs text-base-content/60 hidden sm:inline">
-            Press <kbd class="kbd kbd-xs">Ctrl</kbd> + <kbd class="kbd kbd-xs">Enter</kbd> to send
+            Press <kbd class="kbd kbd-xs">{{ modKey }}</kbd> +
+            <kbd class="kbd kbd-xs">Enter</kbd> to send
           </span>
           <div class="flex items-center gap-2 ml-auto">
             <button @click="closeModal" class="btn btn-sm btn-ghost">Done</button>

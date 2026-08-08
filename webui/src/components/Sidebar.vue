@@ -4,6 +4,9 @@ import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
 import SessionItem from "./SessionItem.vue";
+import { useShortcuts } from "../composables/useShortcuts";
+
+const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
 
 const props = withDefaults(
   defineProps<{
@@ -315,7 +318,11 @@ const selectTheme = (themeId: string) => {
       <button
         @click="emit('toggle-sidebar')"
         class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-        :title="isOpen ? 'Collapse Sidebar' : 'Expand Sidebar'"
+        :title="
+          isOpen
+            ? `Collapse Sidebar (${toggleSidebarShortcut})`
+            : `Expand Sidebar (${toggleSidebarShortcut})`
+        "
       >
         <Icon icon="mynaui:sidebar" class="h-5 w-5 fill-current" />
       </button>
@@ -552,7 +559,7 @@ const selectTheme = (themeId: string) => {
       <button
         @click="emit('toggle-terminal')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Toggle Global Terminal"
+        :title="`Toggle Global Terminal (${toggleTerminalShortcut})`"
       >
         <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
       </button>
