@@ -432,31 +432,31 @@ const selectTheme = (themeId: string) => {
                 <!-- Workspace Header -->
                 <div
                   @click="toggleWorkspaceCollapse(`${agentGroup.agentName}:${wsGroup.runDir}`)"
-                  class="px-2 py-0.5 flex items-center justify-between text-[11px] font-medium text-base-content/70 select-none cursor-pointer hover:bg-base-200/40 rounded-md transition-colors"
+                  class="px-2 py-1 flex items-center justify-between text-xs font-medium text-base-content/80 select-none cursor-pointer hover:bg-base-200/40 rounded-md transition-colors"
                   :title="wsGroup.runDir"
                 >
                   <div class="flex items-center gap-1.5 min-w-0">
                     <Icon
                       icon="mynaui:chevron-down"
                       :class="[
-                        'h-3 w-3 fill-current shrink-0 transition-transform duration-200 opacity-70',
+                        'h-3.5 w-3.5 fill-current shrink-0 transition-transform duration-200 opacity-70',
                         collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]
                           ? '-rotate-90'
                           : '',
                       ]"
                     />
-                    <Icon icon="mynaui:folder" class="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    <Icon icon="mynaui:folder" class="h-4 w-4 shrink-0 opacity-70" />
                     <span class="truncate">{{ wsGroup.displayName }}</span>
                   </div>
-                  <div class="flex items-center gap-1 shrink-0">
+                  <div class="flex items-center gap-1.5 shrink-0">
                     <button
                       @click.stop="emit('new-chat', agentGroup.agentName, wsGroup.runDir)"
-                      class="btn btn-ghost btn-xs p-1 h-5 min-h-0 w-5 rounded text-base-content/70 hover:text-primary hover:bg-base-300"
+                      class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
                       title="New chat with this agent and workspace"
                     >
-                      <Icon icon="mynaui:plus" class="h-3.5 w-3.5 fill-current" />
+                      <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
                     </button>
-                    <span class="text-[10px] text-base-content/40"
+                    <span class="text-xs text-base-content/40"
                       >({{ wsGroup.sessions.length }})</span
                     >
                   </div>
