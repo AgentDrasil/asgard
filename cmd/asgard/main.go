@@ -10,6 +10,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/api"
+	"github.com/AgentDrasil/asgard/lib/cleanup"
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
@@ -66,6 +67,17 @@ func main() {
 	if err := dbmodels.AutoMigrate(database); err != nil {
 		log.Fatal().Err(err).Msg("Failed to migrate database")
 	}
+
+	repo := dbmodels.NewSessionRepository(database)
+	scheduler, err := cleanup.NewScheduler(repo)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize cleanup scheduler")
+	}
+	defer func() {
+		if err := scheduler.Shutdown(); err != nil {
+			log.Error().Err(err).Msg("Failed to shutdown cleanup scheduler")
+		}
+	}()
 
 	srv, err := api.New(conf, database)
 	if err != nil {
