@@ -94,3 +94,36 @@ func TestIsArtifactWorkspaceIsRunDir(t *testing.T) {
 	// Relative path to an unignored source file -> not an artifact.
 	assert.False(t, IsArtifact("src/main.go", config, workspaceDir))
 }
+
+// TestIsArtifactRunDirAncestorOfWorkspace covers the common production layout where
+// the configured run_dir is an ancestor of the actual workspace. Tracked files inside
+// the workspace must NOT be classified as artifacts despite the run_dir prefix match.
+func TestIsArtifactRunDirAncestorOfWorkspace(t *testing.T) {
+	root, err := os.MkdirTemp("", "asgard-run-ancestor-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(root) }()
+
+	// root is the broad run_dir; the workspace is a sub-project inside it.
+	workspaceDir := filepath.Join(root, "myproject", "asgard")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0755))
+
+	require.NoError(t, exec.Command("git", "init", workspaceDir).Run())
+	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n"), 0644))
+
+	config := &AgentConfig{
+		RunDirs: []string{root}, // ancestor of the workspace
+	}
+
+	// Tracked source file inside the workspace (absolute) -> not an artifact.
+	tracked := filepath.Join(workspaceDir, "lib", "main.go")
+	assert.False(t, IsArtifact(tracked, config, workspaceDir))
+
+	// Gitignored file inside the workspace -> artifact.
+	ignored := filepath.Join(workspaceDir, "scratch", "demo.py")
+	assert.True(t, IsArtifact(ignored, config, workspaceDir))
+
+	// File outside the workspace but under the run_dir ancestor -> artifact
+	// (auxiliary output area).
+	aux := filepath.Join(root, "sibling-output.txt")
+	assert.True(t, IsArtifact(aux, config, workspaceDir))
+}
