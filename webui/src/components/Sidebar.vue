@@ -44,6 +44,7 @@ const toggleWorkspaceCollapse = (key: string) => {
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
+  localStorage.setItem("asgard_sidebar_view_mode", mode);
 };
 
 const getAgentIcon = (agentName: string): string => {
@@ -240,6 +241,11 @@ const daisyUiThemes = computed(() => APP_THEMES.filter((t) => t.group === "Daisy
 const catppuccinThemes = computed(() => APP_THEMES.filter((t) => t.group === "Catppuccin Themes"));
 
 onMounted(() => {
+  const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
+  if (savedViewMode === "list" || savedViewMode === "agent") {
+    viewMode.value = savedViewMode;
+  }
+
   const savedWidth = localStorage.getItem("asgard_sidebar_width");
   if (savedWidth) {
     const parsed = parseInt(savedWidth, 10);
@@ -438,10 +444,10 @@ const selectTheme = (themeId: string) => {
                   <div class="flex items-center gap-1 shrink-0">
                     <button
                       @click.stop="emit('new-chat', agentGroup.agentName, wsGroup.runDir)"
-                      class="btn btn-ghost btn-xs p-0.5 h-4 min-h-0 w-4 rounded text-base-content/60 hover:text-primary hover:bg-base-300"
+                      class="btn btn-ghost btn-xs p-1 h-5 min-h-0 w-5 rounded text-base-content/70 hover:text-primary hover:bg-base-300"
                       title="New chat with this agent and workspace"
                     >
-                      <Icon icon="mynaui:plus" class="h-3 w-3 fill-current" />
+                      <Icon icon="mynaui:plus" class="h-3.5 w-3.5 fill-current" />
                     </button>
                     <span class="text-[10px] text-base-content/40"
                       >({{ wsGroup.sessions.length }})</span

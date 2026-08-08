@@ -162,14 +162,22 @@ onUnmounted(() => {
       <div
         class="px-3 py-1.5 bg-base-200 border-b border-base-300 flex items-center justify-between shrink-0"
       >
-        <div class="flex items-center gap-2 text-xs font-semibold text-base-content/80">
-          <Icon icon="mynaui:terminal" class="h-4 w-4 text-primary" />
-          <span>{{
+        <div class="flex items-center gap-1.5 text-xs font-semibold text-base-content/80 min-w-0">
+          <!-- Mobile Back Button -->
+          <button
+            @click="emit('hide')"
+            class="sm:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0 mr-0.5"
+            title="Back to Chat"
+          >
+            <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
+          </button>
+          <Icon icon="mynaui:terminal" class="h-4 w-4 text-primary shrink-0" />
+          <span class="truncate">{{
             terminalType === "sidebar" ? "Global Terminal" : "Terminal (Agent Workspace)"
           }}</span>
         </div>
-        <div class="flex items-center gap-1">
-          <!-- Hide (collapse, keep terminal alive) -->
+        <div class="flex items-center gap-1 shrink-0">
+          <!-- Hide / Minimize (collapse, keep terminal alive) -->
           <button
             @click="emit('hide')"
             class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
@@ -177,10 +185,10 @@ onUnmounted(() => {
           >
             <Icon icon="ep:minus" class="h-3.5 w-3.5" />
           </button>
-          <!-- Maximize / Restore Toggle (Full view like diff) -->
+          <!-- Maximize / Restore Toggle (Desktop only) -->
           <button
             @click="toggleMaximize"
-            class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
+            class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
             :title="isMaximized ? 'Restore Down' : 'Maximize Terminal'"
           >
             <Icon
@@ -188,10 +196,10 @@ onUnmounted(() => {
               class="h-3.5 w-3.5"
             />
           </button>
-          <!-- Close (destroy terminal) -->
+          <!-- Close (destroy terminal) - Desktop only -->
           <button
             @click="closeTerminal"
-            class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
+            class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
             title="Close Terminal"
           >
             <Icon icon="ep:close" class="h-3.5 w-3.5" />
@@ -221,21 +229,23 @@ onUnmounted(() => {
     <header
       class="px-3 py-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between shrink-0"
     >
-      <div class="flex items-center gap-2 text-sm font-bold text-base-content">
-        <Icon icon="mynaui:terminal" class="h-5 w-5 text-primary" />
-        <span>Terminal</span>
-      </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 text-sm font-bold text-base-content min-w-0">
+        <!-- Mobile Back Button (Hide/Minimize) -->
         <button
           @click="emit('hide')"
-          class="btn btn-ghost btn-sm btn-square text-base-content/70"
-          title="Hide Terminal"
+          class="btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
+          title="Back to Chat (Minimize)"
         >
-          <Icon icon="ep:minus" class="h-5 w-5" />
+          <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
         </button>
+        <Icon icon="mynaui:terminal" class="h-5 w-5 text-primary shrink-0" />
+        <span class="truncate">Terminal</span>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
+        <!-- Close (destroy terminal) -->
         <button
           @click="closeTerminal"
-          class="btn btn-ghost btn-sm btn-square text-base-content/70"
+          class="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-base-content"
           title="Close Terminal"
         >
           <Icon icon="ep:close" class="h-5 w-5" />

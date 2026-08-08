@@ -110,16 +110,16 @@ function onFileSelectChange(event: Event) {
   >
     <!-- Header & Dropdown File Selection Bar -->
     <div
-      class="flex items-center justify-between px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 shrink-0 shadow-sm"
+      class="flex items-center justify-between px-3 py-2.5 sm:px-6 sm:py-3.5 bg-base-200 border-b border-base-300 shrink-0 shadow-sm min-h-[52px]"
     >
       <div class="flex items-center gap-2 overflow-hidden flex-1 min-w-0 mr-2">
         <!-- Mobile Back Button -->
         <button
           @click="emit('close')"
-          class="md:hidden flex items-center gap-1 text-xs px-2 py-1 bg-base-300 hover:bg-base-300/80 text-base-content rounded border border-base-300 shrink-0 font-medium"
+          class="md:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
           title="Back to Chat"
         >
-          <span>← Back</span>
+          <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
         </button>
 
         <span

@@ -202,8 +202,16 @@ function fileHasComments(filePath: string): boolean {
     <header
       class="px-3 py-2 sm:px-4 sm:py-2.5 bg-base-200 border-b border-base-300 flex items-center gap-2 shrink-0 shadow-sm"
     >
-      <!-- Title -->
+      <!-- Title & Mobile Back Button -->
       <div class="flex items-center gap-2 min-w-0 flex-1">
+        <!-- Mobile Back Button -->
+        <button
+          @click="emit('close')"
+          class="sm:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
+          title="Back to Chat"
+        >
+          <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
+        </button>
         <Icon icon="material-symbols:difference-outline" class="h-5 w-5 text-primary shrink-0" />
         <span class="text-sm font-bold text-base-content truncate">Git Diff</span>
         <span class="text-xs text-base-content/50 font-mono truncate hidden sm:block">{{
@@ -253,10 +261,10 @@ function fileHasComments(filePath: string): boolean {
         <Icon icon="mynaui:refresh" :class="['h-4 w-4', { 'animate-spin': loading }]" />
       </button>
 
-      <!-- Close -->
+      <!-- Desktop Close -->
       <button
         @click="emit('close')"
-        class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-error"
+        class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-error"
         title="Close diff view and return to chat"
       >
         <Icon icon="mynaui:x" class="h-5 w-5" />
