@@ -213,4 +213,9 @@ onUnmounted(() => {
 .terminal-host :deep(.xterm-scrollable-element > .scrollbar > .slider:hover) {
   background: color-mix(in oklab, var(--color-base-content) 35%, transparent) !important;
 }
+/* Hide xterm's overview ruler canvas (decoration minimap channel) on the right side,
+   which presents as an unused white vertical line when decoration markers are inactive. */
+.terminal-host :deep(.xterm-decoration-overview-ruler) {
+  display: none !important;
+}
 </style>
