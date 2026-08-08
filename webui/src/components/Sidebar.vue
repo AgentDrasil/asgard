@@ -515,7 +515,7 @@ const selectTheme = (themeId: string) => {
           class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
           title="Select Theme"
         >
-          <Icon icon="mdi:color" class="h-5 w-5 fill-current" />
+          <Icon icon="mdi:paint-outline" class="h-5 w-5 fill-current" />
         </button>
         <ul
           tabindex="0"
