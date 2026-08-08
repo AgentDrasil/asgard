@@ -1,7 +1,6 @@
 package agentwrapper
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,8 +9,7 @@ import (
 var homeDirFn = os.UserHomeDir
 
 // ValidateAgySetup verifies that agy is correctly set up on the user's system.
-// It checks that ~/.gemini/antigravity-cli/antigravity-oauth-token exists,
-// and that ~/.gemini/antigravity-cli/settings.json exists and has statusLine enabled.
+// It checks that ~/.gemini/antigravity-cli/antigravity-oauth-token exists.
 func ValidateAgySetup() error {
 	home, err := homeDirFn()
 	if err != nil {
@@ -26,28 +24,6 @@ func ValidateAgySetup() error {
 		return fmt.Errorf("failed to check oauth token: %w", err)
 	} else if fi.IsDir() {
 		return fmt.Errorf("agy setup validation failed: oauth token path %s is a directory", tokenPath)
-	}
-
-	settingsPath := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
-	settingsData, err := os.ReadFile(settingsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("agy setup validation failed: settings file does not exist at %s", settingsPath)
-		}
-		return fmt.Errorf("failed to read settings file: %w", err)
-	}
-
-	var config struct {
-		StatusLine *struct {
-			Enabled *bool `json:"enabled"`
-		} `json:"statusLine"`
-	}
-	if err := json.Unmarshal(settingsData, &config); err != nil {
-		return fmt.Errorf("failed to parse settings file: %w", err)
-	}
-
-	if config.StatusLine == nil || config.StatusLine.Enabled == nil || !*config.StatusLine.Enabled {
-		return fmt.Errorf("agy setup validation failed: settings.json at %s does not have statusLine enabled", settingsPath)
 	}
 
 	return nil

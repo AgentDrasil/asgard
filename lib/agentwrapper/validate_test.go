@@ -34,41 +34,7 @@ func TestValidateAgySetup(t *testing.T) {
 		t.Fatalf("failed to write token: %v", err)
 	}
 
-	// 2. Missing settings.json
-	err = ValidateAgySetup()
-	if err == nil {
-		t.Fatal("expected error when settings.json is missing, got nil")
-	}
-
-	// Create invalid settings.json
-	settingsPath := filepath.Join(cliDir, "settings.json")
-	if err := os.WriteFile(settingsPath, []byte("invalid-json"), 0600); err != nil {
-		t.Fatalf("failed to write settings: %v", err)
-	}
-
-	// 3. Invalid JSON settings.json
-	err = ValidateAgySetup()
-	if err == nil {
-		t.Fatal("expected error when settings.json is invalid, got nil")
-	}
-
-	// Create settings.json without statusLine enabled
-	if err := os.WriteFile(settingsPath, []byte(`{"statusLine": {"enabled": false}}`), 0600); err != nil {
-		t.Fatalf("failed to write settings: %v", err)
-	}
-
-	// 4. statusLine not enabled
-	err = ValidateAgySetup()
-	if err == nil {
-		t.Fatal("expected error when statusLine is disabled, got nil")
-	}
-
-	// Create settings.json with statusLine enabled
-	if err := os.WriteFile(settingsPath, []byte(`{"statusLine": {"enabled": true}}`), 0600); err != nil {
-		t.Fatalf("failed to write settings: %v", err)
-	}
-
-	// 5. Success
+	// 2. Success
 	err = ValidateAgySetup()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)

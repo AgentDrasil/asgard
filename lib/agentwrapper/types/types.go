@@ -61,14 +61,13 @@ type PromptResult struct {
 	// SessionID is the conversation / session identifier used for this run.
 	SessionID string `json:"session_id"`
 
-	// InputTokens is the value of input_tokens from the final statusline.
+	// InputTokens is the number of input tokens used.
 	InputTokens int `json:"input_tokens"`
 
-	// MaxTokens is the value of max (context window size) from the final statusline.
+	// MaxTokens is the context window size limit.
 	MaxTokens int `json:"max_tokens"`
 
-	// Remaining is the fraction of remaining quota in [0, 1] from the final
-	// statusline, e.g. 0.916.
+	// Remaining is the fraction of remaining quota in [0, 1], e.g. 0.916.
 	Remaining float64 `json:"remaining"`
 
 	// LastContent is the raw "content" field of the last line in the

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/AgentDrasil/asgard/lib/agystatusline"
 )
@@ -45,15 +44,4 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(line)
-
-	if sessionID := os.Getenv("AW_SESSION_ID"); sessionID != "" {
-		if err := os.MkdirAll("/tmp/agystatusline", 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "agystatusline: creating directory: %v\n", err)
-		} else {
-			filePath := filepath.Join("/tmp/agystatusline", sessionID+".json")
-			if err := os.WriteFile(filePath, data, 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "agystatusline: writing statusline JSON: %v\n", err)
-			}
-		}
-	}
 }
