@@ -1,0 +1,13 @@
+services:
+  asgard:
+    image: ghcr.io/agentdrasil/asgard:main
+    container_name: asgard-prod
+    hostname: asgard-host
+    volumes:
+      - ./home:/home/user
+      - ~/src:/home/user/src
+      - ./ssh:/home/user/.ssh:ro
+    privileged: true
+    restart: always
+    ports:
+      - "7000:7000"
