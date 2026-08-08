@@ -47,9 +47,8 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			return
 		}
 
-		// Resolve session and run modes from agent config (empty string = default).
+		// Resolve session mode from agent config (empty string = default).
 		sessionMode := e.agent.Config.SessionMode // "" or "resume" → resume; "fresh" → fresh
-		runMode := e.agent.Config.RunMode         // "" or "sequential" → sequential; "parallel" → parallel
 
 		var session *dbmodels.Session
 		if e.repo != nil {
@@ -213,11 +212,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		// context cancellation. This guarantees the session's isRunning
 		// state is cleared after the agent sandbox exits.
 		defer e.markAgentCompleted(chatID)
-		if runMode == "parallel" {
-			e.executeParallel(ctx, yield, execCtx, prompt, chatID, runDirOpt, sessionMode, statusCh)
-		} else {
-			e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
-		}
+		e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
 	}
 }
 
@@ -360,7 +355,6 @@ type AgentInfo struct {
 	RunDirs     []string `json:"run_dirs"`
 	MainAgent   bool     `json:"main_agent"`
 	Models      []string `json:"models"`
-	RunMode     string   `json:"run_mode"`
 }
 
 // handleAgents handles GET /agents to list loaded agent names.
@@ -385,7 +379,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			RunDirs:     agent.Config.RunDirs,
 			MainAgent:   agent.Config.IsMainAgent(),
 			Models:      models,
-			RunMode:     agent.Config.RunMode,
 		})
 	}
 

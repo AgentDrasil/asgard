@@ -54,10 +54,6 @@ const currentAgentModels = computed(() => {
   return currentAgent.value?.models || [];
 });
 
-const isParallelMode = computed(() => {
-  return currentAgent.value?.run_mode === "parallel";
-});
-
 const runDirs = computed(() => {
   return currentAgent.value?.run_dirs || [];
 });
@@ -282,15 +278,10 @@ const handleSubmit = () => {
           </label>
           <select
             v-model="localModel"
-            :disabled="isParallelMode"
             class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none disabled:bg-base-200 disabled:opacity-60"
           >
             <option value="" class="bg-base-100 text-base-content">
-              {{
-                isParallelMode
-                  ? "Disabled in parallel mode (runs all targets)"
-                  : "Auto (Default quota-based fallback logic)"
-              }}
+              Auto (Default quota-based fallback logic)
             </option>
             <option
               v-for="m in currentAgentModels"
@@ -302,13 +293,7 @@ const handleSubmit = () => {
             </option>
           </select>
           <label class="label text-xs text-base-content/60">
-            <span v-if="isParallelMode" class="text-warning font-medium">
-              Model selection is disabled because this agent operates in parallel mode, concurrently
-              executing all configured targets.
-            </span>
-            <span v-else>
-              If selected, no quota fallback will be performed if quota is depleted.
-            </span>
+            <span> If selected, no quota fallback will be performed if quota is depleted. </span>
           </label>
         </div>
 

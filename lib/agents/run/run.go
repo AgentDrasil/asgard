@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
@@ -231,49 +230,4 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 	}
 
 	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, conf)
-}
-
-// RunAll runs ALL CLI targets on the agent concurrently and returns one RunResult per target.
-// Note: Model selection is only applicable to sequential execution (Run) and does not apply to parallel execution (RunAll),
-// which concurrently executes all configured CLI targets.
-// sessions maps "<cli>/<model>" to the session ID to resume for that target.
-// Pass an empty or nil map to start fresh sessions for all targets.
-func RunAll(ctx context.Context, agent *agents.Agent, prompt string, sessions map[string]string, runDirOpt optional.Option[string], chatID string, conf *config.Config) []RunResult {
-	if len(agent.Config.CLI) == 0 {
-		return []RunResult{{Err: fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)}}
-	}
-
-	runDir, err := resolveRunDir(agent, runDirOpt)
-	if err != nil {
-		return []RunResult{{Err: err}}
-	}
-
-	// Ensure the resolved runDir exists.
-	if err := os.MkdirAll(runDir, 0755); err != nil {
-		return []RunResult{{Err: fmt.Errorf("creating run directory %q: %w", runDir, err)}}
-	}
-
-	results := make([]RunResult, len(agent.Config.CLI))
-	var wg sync.WaitGroup
-
-	for i, target := range agent.Config.CLI {
-		wg.Add(1)
-		go func(idx int, t agents.CLITarget) {
-			defer wg.Done()
-			cliKey := t.CLI + "/" + t.Model
-			sessionOpt := optional.None[string]()
-			if sid, ok := sessions[cliKey]; ok && sid != "" {
-				sessionOpt = optional.Some(sid)
-			}
-			out, err := runTarget(ctx, agent, t, prompt, sessionOpt, runDir, chatID, conf)
-			results[idx] = RunResult{
-				CLIKey: cliKey,
-				Output: out,
-				Err:    err,
-			}
-		}(i, target)
-	}
-
-	wg.Wait()
-	return results
 }
