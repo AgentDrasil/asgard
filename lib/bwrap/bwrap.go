@@ -69,10 +69,9 @@ func setupTmpDir(home string, chatID string) (string, error) {
 	return tmpDir, nil
 }
 
-// appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (die-with-parent, unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH).
+// appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH).
 func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string, error) {
 	// Basic safety isolation flags
-	args = append(args, "--die-with-parent")
 	args = append(args, "--unshare-pid")
 	args = append(args, "--unshare-ipc")
 	args = append(args, "--unshare-uts")
