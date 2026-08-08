@@ -79,7 +79,7 @@ onMounted(() => {
 });
 onUnmounted(() => observer.disconnect());
 
-// ── File selector (mobile dropdown) ──────────────────────────────────────────
+// ── File selector (dropdown) ──────────────────────────────────────────
 const showFileDropdown = ref(false);
 const fileDropdownRef = ref<HTMLDivElement | null>(null);
 
@@ -214,9 +214,6 @@ function fileHasComments(filePath: string): boolean {
         </button>
         <Icon icon="material-symbols:difference-outline" class="h-5 w-5 text-primary shrink-0" />
         <span class="text-sm font-bold text-base-content truncate">Git Diff</span>
-        <span class="text-xs text-base-content/50 font-mono truncate hidden sm:block">{{
-          gitRoot
-        }}</span>
       </div>
 
       <!-- Mode toggle (desktop only) -->
@@ -276,29 +273,8 @@ function fileHasComments(filePath: string): boolean {
       v-if="files.length > 0"
       class="px-2 py-1.5 bg-base-200/60 border-b border-base-300 shrink-0"
     >
-      <!-- Desktop: horizontal tab strip -->
-      <div class="hidden sm:flex items-center gap-0.5 overflow-x-auto">
-        <button
-          v-for="(f, idx) in files"
-          :key="f.newPath"
-          @click="
-            selectedIndex = idx;
-            activeWidget = null;
-          "
-          :class="[
-            'btn btn-xs rounded-md font-mono text-[11px] px-2.5 py-1 h-auto whitespace-nowrap shrink-0 border gap-1',
-            selectedIndex === idx
-              ? 'btn-primary border-primary/30'
-              : 'btn-ghost border-transparent text-base-content/70 hover:text-base-content',
-          ]"
-        >
-          <span v-if="fileHasComments(f.newPath)" class="badge badge-xs badge-warning">💬</span>
-          {{ f.newPath }}
-        </button>
-      </div>
-
-      <!-- Mobile: dropdown selector -->
-      <div class="sm:hidden relative" ref="fileDropdownRef">
+      <!-- Dropdown selector -->
+      <div class="relative" ref="fileDropdownRef">
         <button
           @click.stop="showFileDropdown = !showFileDropdown"
           class="btn btn-sm w-full justify-between font-mono text-xs text-left border border-base-300 bg-base-100 hover:bg-base-200"
