@@ -24,7 +24,14 @@ type MountConfig struct {
 // The default agent set can be cloned from https://github.com/AgentDrasil/asgard-agents.git
 const AgentFatherID = "agent_father"
 
+var allowAgentType = []string{
+	"agent",
+	"workflow",
+	"tool",
+}
+
 type AgentConfig struct {
+	Type        string `yaml:"type"`
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -128,6 +135,19 @@ func (cfg *AgentConfig) Validate() error {
 	for _, dir := range cfg.MountDirs.ReadWrite {
 		if !filepath.IsAbs(dir) {
 			return fmt.Errorf("mount readwrite directory must be an absolute path: %q", dir)
+		}
+	}
+
+	if cfg.Type != "" {
+		validType := false
+		for _, t := range allowAgentType {
+			if cfg.Type == t {
+				validType = true
+				break
+			}
+		}
+		if !validType {
+			return fmt.Errorf("invalid agent type: %q, must be one of %v", cfg.Type, allowAgentType)
 		}
 	}
 

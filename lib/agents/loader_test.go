@@ -511,6 +511,32 @@ func TestAgentConfig_Validate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid agent type",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				Type:        "agent",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid agent type",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				Type:        "invalid_type",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
