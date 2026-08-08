@@ -10,13 +10,13 @@ func TestManagerLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
+	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
 
 	mgr, err := NewManager(tempDir)
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(mgr.Close)
 
 	// Ensure socket directory exists
 	if _, err := os.Stat(tempDir); os.IsNotExist(err) {

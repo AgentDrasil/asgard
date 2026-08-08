@@ -75,7 +75,7 @@ func TestRun(t *testing.T) {
 		"agy":      fakeAgy,
 		"opencode": fakeOpencode,
 	})
-	defer agentwrapper.SetClients(nil)
+	t.Cleanup(func() { agentwrapper.SetClients(nil) })
 
 	// 1. Test case: successful run choosing the first target with > 10% quota
 	agent := &agents.Agent{

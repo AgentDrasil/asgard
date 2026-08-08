@@ -25,9 +25,9 @@ func TestSchedulerCleanExpiredSessions(t *testing.T) {
 
 	scheduler, err := NewScheduler(repo, WithTmpBase(tmpBase))
 	require.NoError(t, err)
-	defer func() {
+	t.Cleanup(func() {
 		_ = scheduler.Shutdown()
-	}()
+	})
 
 	expiredID := "sched-expired-session"
 	recentID := "sched-recent-session"

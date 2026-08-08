@@ -14,7 +14,7 @@ func TestIsArtifact(t *testing.T) {
 	// Setup temporary workspace directory with git repo
 	workspaceDir, err := os.MkdirTemp("", "asgard-test-workspace-*")
 	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(workspaceDir) }()
+	t.Cleanup(func() { _ = os.RemoveAll(workspaceDir) })
 
 	// Initialize git repo
 	cmd := exec.Command("git", "init", workspaceDir)
@@ -29,7 +29,7 @@ func TestIsArtifact(t *testing.T) {
 	customRW := filepath.Join(os.TempDir(), "asgard-agent-rw-dir")
 	err = os.MkdirAll(customRW, 0755)
 	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(customRW) }()
+	t.Cleanup(func() { _ = os.RemoveAll(customRW) })
 
 	config := &AgentConfig{
 		MountDirs: MountConfig{
@@ -74,7 +74,7 @@ func TestIsArtifact(t *testing.T) {
 func TestIsArtifactWorkspaceIsRunDir(t *testing.T) {
 	workspaceDir, err := os.MkdirTemp("", "asgard-test-run-workspace-*")
 	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(workspaceDir) }()
+	t.Cleanup(func() { _ = os.RemoveAll(workspaceDir) })
 
 	require.NoError(t, exec.Command("git", "init", workspaceDir).Run())
 	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n"), 0644))

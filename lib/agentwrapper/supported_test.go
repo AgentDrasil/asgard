@@ -26,7 +26,7 @@ func TestGetQuota_DetailedOptions(t *testing.T) {
 	}
 
 	origClients := clients
-	defer func() { clients = origClients }()
+	t.Cleanup(func() { clients = origClients })
 
 	clients = map[string]types.CLIClient{
 		"fake-agent": fake,

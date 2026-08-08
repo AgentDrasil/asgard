@@ -12,9 +12,9 @@ func TestValidateAgySetup(t *testing.T) {
 	homeDirFn = func() (string, error) {
 		return tempDir, nil
 	}
-	defer func() {
+	t.Cleanup(func() {
 		homeDirFn = origHomeDirFn
-	}()
+	})
 
 	// 1. Missing token
 	err := ValidateAgySetup()
@@ -47,9 +47,9 @@ func TestValidateOpencodeSetup(t *testing.T) {
 	homeDirFn = func() (string, error) {
 		return tempDir, nil
 	}
-	defer func() {
+	t.Cleanup(func() {
 		homeDirFn = origHomeDirFn
-	}()
+	})
 
 	// 1. Missing auth.json
 	err := ValidateOpencodeSetup()

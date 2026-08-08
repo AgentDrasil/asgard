@@ -121,7 +121,7 @@ cli:
 
 	// Verify that the new agent is loaded (total of 2 agents: agent_father + my-agent)
 	srv.mu.RLock()
-	defer srv.mu.RUnlock()
+	t.Cleanup(srv.mu.RUnlock)
 	assert.Len(t, srv.agents, 2)
 	assert.Equal(t, "agent_father", srv.agents[0].Config.ID)
 	assert.Equal(t, "My Agent", srv.agents[1].Config.Name)

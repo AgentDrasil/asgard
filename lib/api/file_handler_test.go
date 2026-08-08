@@ -91,7 +91,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		sessionTmpDir := filepath.Join(home, "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
-		defer func() { _ = os.RemoveAll(sessionTmpDir) }()
+		t.Cleanup(func() { _ = os.RemoveAll(sessionTmpDir) })
 
 		tmpFile, err := os.CreateTemp(sessionTmpDir, "asgard_test_*.md")
 		require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		sessionTmpDir := filepath.Join(home, "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
-		defer func() { _ = os.RemoveAll(sessionTmpDir) }()
+		t.Cleanup(func() { _ = os.RemoveAll(sessionTmpDir) })
 
 		tmpFile, err := os.CreateTemp(sessionTmpDir, "asgard_test_unauth_*.md")
 		require.NoError(t, err)

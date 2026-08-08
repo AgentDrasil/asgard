@@ -102,7 +102,7 @@ func TestFakebashGRPC_Integration(t *testing.T) {
 			t.Parallel()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+			t.Cleanup(cancel)
 
 			stream, err := client.RunCommand(ctx, &pb.CommandRequest{
 				Args: tt.args,
