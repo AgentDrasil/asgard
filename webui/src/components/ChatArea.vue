@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
+import { Icon } from "@iconify/vue";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo, sendAskUserReply } from "../lib/api";
 import { formatContextUsage, getContextColorClass } from "../lib/format";
 import { TOOL_ITEM_DELIMITER } from "../utils/messageUtils";
+import { useShiki } from "../composables/useShiki";
+
+const { highlightBlock, highlightHtmlCodeBlocks } = useShiki();
 
 const inlineInputMap = ref<Record<string, string>>({});
 const inlineSubmittingMap = ref<Record<string, boolean>>({});
@@ -146,19 +152,37 @@ watch(
   { deep: true, immediate: true },
 );
 
-import { Icon } from "@iconify/vue";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
-
 marked.setOptions({
   gfm: true,
   breaks: true,
 });
 
+const BLOCK_CLASSES = [
+  "rounded-lg",
+  "p-4",
+  "overflow-x-auto",
+  "my-2",
+  "border",
+  "border-base-300",
+  "text-xs",
+  "font-mono",
+] as const;
+
 const formatContent = (content: string) => {
   if (!content) return "";
   const rawHtml = marked.parse(content) as string;
-  return DOMPurify.sanitize(rawHtml);
+  const sanitized = DOMPurify.sanitize(rawHtml);
+  // Highlight every fenced code block. While Shiki is still loading this is a
+  // no-op (highlightHtmlCodeBlocks returns the input unchanged) and the
+  // render re-runs automatically once the highlighter becomes ready.
+  return highlightHtmlCodeBlocks(sanitized, [...BLOCK_CLASSES]);
+};
+
+const formatRawMarkdown = (content: string) => {
+  if (!content) return "";
+  const highlighted = highlightBlock(content, "markdown", [...BLOCK_CLASSES]);
+  if (highlighted) return highlighted;
+  return `<pre class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"><code class="whitespace-pre-wrap break-words [word-break:break-word]">${DOMPurify.sanitize(content)}</code></pre>`;
 };
 
 // Track which messages are toggled to show raw Markdown text
@@ -466,11 +490,11 @@ const copyMessage = async (id: string, text: string) => {
             </div>
 
             <!-- Raw Markdown vs Rendered HTML -->
-            <div v-if="showRawMap[msg.id]" class="my-2 min-w-0">
-              <pre
-                class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"
-              ><code class="whitespace-pre-wrap break-words [word-break:break-word]">{{ msg.content }}</code></pre>
-            </div>
+            <div
+              v-if="showRawMap[msg.id]"
+              v-html="formatRawMarkdown(msg.content)"
+              class="my-2 min-w-0 font-mono text-xs overflow-x-auto"
+            ></div>
             <div
               v-else
               v-html="formatContent(msg.content)"

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
 import { Icon } from "@iconify/vue";
+import DOMPurify from "dompurify";
+import { useShiki } from "../composables/useShiki";
+
+const { highlightBlock } = useShiki();
 
 const props = defineProps<{
   sessionId: string;
@@ -30,6 +34,26 @@ const isMarkdown = computed(() => {
   if (!fileData.value) return false;
   const ext = fileData.value.ext.toLowerCase();
   return ext === "md" || ext === "markdown";
+});
+
+const highlightedArtifactContent = computed(() => {
+  if (!fileData.value || !fileData.value.content) return "";
+  const ext = fileData.value.ext.toLowerCase();
+  const lang = isMarkdown.value ? "markdown" : ext || "text";
+  const highlighted = highlightBlock(fileData.value.content, lang, [
+    "rounded-lg",
+    "p-4",
+    "overflow-x-auto",
+    "border",
+    "border-base-300",
+    "text-xs",
+    "font-mono",
+    "leading-relaxed",
+  ]);
+  if (highlighted) return highlighted;
+  // Fallback while Shiki loads or when it fails: keep the same wrapping so the
+  // layout doesn't jump once highlighting kicks in.
+  return `<pre class="font-mono text-xs text-base-content bg-base-200/80 p-4 rounded-lg border border-base-300 overflow-x-auto leading-relaxed whitespace-pre-wrap break-words"><code>${DOMPurify.sanitize(fileData.value.content)}</code></pre>`;
 });
 
 function formatPath(path: string): string {
@@ -186,21 +210,7 @@ function onFileSelectChange(event: Event) {
       </div>
 
       <div v-else-if="fileData" class="h-full">
-        <!-- Markdown Render View -->
-        <div
-          v-if="isMarkdown"
-          class="prose prose-sm max-w-none text-base-content leading-relaxed whitespace-pre-wrap font-sans p-3 bg-base-200/50 rounded-lg border border-base-300"
-        >
-          {{ fileData.content }}
-        </div>
-
-        <!-- Code View Mode -->
-        <div
-          v-else
-          class="font-mono text-xs text-base-content bg-base-200/80 p-3 sm:p-4 rounded-lg border border-base-300 overflow-x-auto leading-relaxed shadow-inner"
-        >
-          <pre class="whitespace-pre-wrap break-words">{{ fileData.content }}</pre>
-        </div>
+        <div v-html="highlightedArtifactContent" class="w-full h-full min-w-0"></div>
       </div>
 
       <div v-else class="flex items-center justify-center h-full text-base-content/50 text-sm">
