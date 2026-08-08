@@ -23,16 +23,23 @@ export function useAgents() {
     }
   };
 
-  // Update selected workspace directory & model when active agent changes
-  watch(selectedAgentId, (newAgentId) => {
-    const currentAgent = agents.value.find((a) => a.id === newAgentId);
-    if (currentAgent && currentAgent.run_dirs.length > 0) {
-      selectedDir.value = currentAgent.run_dirs[0];
-    } else {
-      selectedDir.value = "";
-    }
-    selectedModel.value = "";
-  });
+  // Update selected workspace directory & model when active agent changes.
+  // flush: 'sync' so derived state updates immediately; otherwise an explicit
+  // `selectedDir` assignment right after changing the agent (e.g. handleNewChat
+  // from the sidebar "+") would be clobbered by this watcher on the next tick.
+  watch(
+    selectedAgentId,
+    (newAgentId) => {
+      const currentAgent = agents.value.find((a) => a.id === newAgentId);
+      if (currentAgent && currentAgent.run_dirs.length > 0) {
+        selectedDir.value = currentAgent.run_dirs[0];
+      } else {
+        selectedDir.value = "";
+      }
+      selectedModel.value = "";
+    },
+    { flush: "sync" },
+  );
 
   return {
     agents,
