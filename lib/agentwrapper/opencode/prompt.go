@@ -161,6 +161,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 					metadata := map[string]any{
 						"max_tokens": 1048576,
 					}
+					if entryType == "agent_response" {
+						metadata["is_append"] = true
+					} else {
+						metadata["is_append"] = false
+					}
 					if toolName != "" {
 						metadata["tool_name"] = toolName
 					}

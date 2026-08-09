@@ -192,9 +192,17 @@ export async function runAgentStream(
         const isAgentResponse = entryType === "agent_response";
         const isFinalResult = isFinalState(state) && !entryType;
 
+        const isAppend =
+          update.metadata?.["is_append"] === true ||
+          msg?.metadata?.["is_append"] === true;
+
         if (isAgentResponse || isFinalResult) {
-          // Agent response text (full content in snapshot or final update) → assistant bubble
-          accumulatedText = statusText;
+          // Agent response text → assistant bubble
+          if (isAppend) {
+            accumulatedText += statusText;
+          } else {
+            accumulatedText = statusText;
+          }
           const tokens = extractTokens(update);
           callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
         } else {

@@ -161,12 +161,13 @@ func parseStream(r io.Reader, cb types.ReportFunc) (sessionID, lastContent strin
 				cb(su.StepIndex, "TOOL", "tool_result", content, metadata)
 
 			case su.StepType == "agent_response" && su.State == "DONE":
-				// Response step complete — deliver the full accumulated text.
+				// Response step complete — deliver the full accumulated text for this step.
 				full := textByStep[su.StepIndex]
 				delete(textByStep, su.StepIndex)
 				if full != "" {
 					metadata := map[string]any{
 						"max_tokens": maxTokens,
+						"is_append":  false,
 					}
 					if inputTokens > 0 {
 						metadata["input_tokens"] = inputTokens

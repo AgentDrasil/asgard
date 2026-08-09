@@ -171,11 +171,13 @@ func (e *agentExecutor) handleFinalResult(
 	}
 
 	respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
-	if inputTokens > 0 || maxTokens > 0 {
-		respMsg.Metadata = map[string]any{
-			"input_tokens": inputTokens,
-			"max_tokens":   maxTokens,
-		}
+	meta := map[string]any{
+		"is_final": true,
 	}
+	if inputTokens > 0 || maxTokens > 0 {
+		meta["input_tokens"] = inputTokens
+		meta["max_tokens"] = maxTokens
+	}
+	respMsg.Metadata = meta
 	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
 }

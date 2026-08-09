@@ -150,7 +150,10 @@ export function useChatStream(
           if (!toolLog) {
             toolLog = statusText;
           } else {
-            toolLog += `\n${TOOL_ITEM_DELIMITER}\n` + statusText;
+            // Append incremental status updates with delimiter if not already present in toolLog
+            if (!toolLog.endsWith(statusText)) {
+              toolLog += `\n${TOOL_ITEM_DELIMITER}\n` + statusText;
+            }
           }
 
           const exists = messages.value.some((m) => m.id === reasoningMsgId);
