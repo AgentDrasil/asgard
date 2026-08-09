@@ -131,6 +131,7 @@ export function useChatStream(
           const agentName =
             (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
           const targetFiles = (metadata?.["target_files"] as string[] | undefined) || undefined;
+          const artifactFiles = (metadata?.["artifact_files"] as string[] | undefined) || undefined;
 
           if (entryType === "ask_user") {
             const askMsgId = (metadata?.["message_id"] as string) || `ask-${Date.now()}`;
@@ -166,6 +167,7 @@ export function useChatStream(
               agentName: agentName,
               timestamp: Date.now(),
               ...(targetFiles ? { targetFiles } : {}),
+              ...(artifactFiles ? { artifactFiles } : {}),
             };
             if (hasAssistantMsg) {
               const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
@@ -179,11 +181,21 @@ export function useChatStream(
             }
             if (!hasReasoningMsg) hasReasoningMsg = true;
           } else {
-            messages.value = messages.value.map((m) =>
-              m.id === reasoningMsgId
-                ? { ...m, content: toolLog, ...(targetFiles ? { targetFiles } : {}) }
-                : m,
-            );
+            messages.value = messages.value.map((m) => {
+              if (m.id !== reasoningMsgId) return m;
+              const mergedTargetFiles = targetFiles
+                ? Array.from(new Set([...(m.targetFiles || []), ...targetFiles]))
+                : m.targetFiles;
+              const mergedArtifactFiles = artifactFiles
+                ? Array.from(new Set([...(m.artifactFiles || []), ...artifactFiles]))
+                : m.artifactFiles;
+              return {
+                ...m,
+                content: toolLog,
+                ...(mergedTargetFiles ? { targetFiles: mergedTargetFiles } : {}),
+                ...(mergedArtifactFiles ? { artifactFiles: mergedArtifactFiles } : {}),
+              };
+            });
           }
         },
         onError: async (err) => {

@@ -73,7 +73,11 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := resolveAndValidatePath(runDir, reqPath, sessionModifiedFiles, sessionID)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		if strings.HasPrefix(err.Error(), "access denied") {
+			writeJSONError(w, http.StatusForbidden, err.Error())
+		} else {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
@@ -121,6 +125,10 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessionID string) (string, error) {
+	if !isPathAuthorized(reqPath, allowedFiles, runDir) {
+		return "", errors.New("access denied: file not authorized in session")
+	}
+
 	cleanReq := filepath.Clean(reqPath)
 
 	var targetAbs string
@@ -147,27 +155,6 @@ func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessi
 		if err != nil || strings.HasPrefix(rel, "..") {
 			return "", errors.New("access denied: path escapes temporary directory boundary")
 		}
-
-		// Validation check against session modified files
-		authorized := false
-		normalizeTmpPath := func(p string) string {
-			p = filepath.Clean(p)
-			p = strings.TrimPrefix(p, ".tmp/")
-			p = strings.TrimPrefix(p, "tmp/") // in case clean stripped leading slash
-			p = strings.TrimPrefix(p, "/tmp/")
-			return "/tmp/" + p
-		}
-
-		normReq := normalizeTmpPath(cleanReq)
-		for _, allowed := range allowedFiles {
-			if normalizeTmpPath(allowed) == normReq {
-				authorized = true
-				break
-			}
-		}
-		if !authorized {
-			return "", errors.New("access denied: file not authorized in session")
-		}
 		return targetAbs, nil
 	}
 
@@ -185,6 +172,61 @@ func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessi
 	}
 
 	return targetAbs, nil
+}
+
+func isPathAuthorized(reqPath string, allowedFiles []string, runDir string) bool {
+	cleanReq := filepath.Clean(reqPath)
+	cleanRunDir := ""
+	if runDir != "" {
+		cleanRunDir = filepath.Clean(runDir)
+	}
+
+	normalizeTmpPath := func(p string) string {
+		p = filepath.Clean(p)
+		p = strings.TrimPrefix(p, ".tmp/")
+		p = strings.TrimPrefix(p, "tmp/")
+		p = strings.TrimPrefix(p, "/tmp/")
+		return "/tmp/" + p
+	}
+
+	isTmpReq := strings.HasPrefix(cleanReq, "/tmp/") || cleanReq == "/tmp" || strings.HasPrefix(cleanReq, ".tmp/")
+
+	for _, allowed := range allowedFiles {
+		if allowed == "" {
+			continue
+		}
+		cleanAllowed := filepath.Clean(allowed)
+		if isTmpReq {
+			if strings.HasPrefix(cleanAllowed, "/tmp/") || cleanAllowed == "/tmp" || strings.HasPrefix(cleanAllowed, ".tmp/") || strings.HasPrefix(cleanAllowed, "tmp/") {
+				if normalizeTmpPath(cleanReq) == normalizeTmpPath(cleanAllowed) {
+					return true
+				}
+			}
+			continue
+		}
+
+		if cleanReq == cleanAllowed {
+			return true
+		}
+
+		var absReq, absAllowed string
+		if filepath.IsAbs(cleanReq) {
+			absReq = cleanReq
+		} else if cleanRunDir != "" {
+			absReq = filepath.Clean(filepath.Join(cleanRunDir, cleanReq))
+		}
+
+		if filepath.IsAbs(cleanAllowed) {
+			absAllowed = cleanAllowed
+		} else if cleanRunDir != "" {
+			absAllowed = filepath.Clean(filepath.Join(cleanRunDir, cleanAllowed))
+		}
+
+		if absReq != "" && absAllowed != "" && absReq == absAllowed {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSONError(w http.ResponseWriter, statusCode int, message string) {

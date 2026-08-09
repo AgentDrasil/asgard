@@ -35,6 +35,7 @@ export interface ChatMessage {
   replied?: boolean;
   replyText?: string;
   targetFiles?: string[];
+  artifactFiles?: string[];
 }
 
 export interface ChatSession {

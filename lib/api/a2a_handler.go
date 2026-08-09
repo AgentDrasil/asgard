@@ -246,22 +246,31 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 		agentName = name
 	}
 	targetFiles := toStringSlice(update.Metadata["target_files"])
+	var artifactFiles []string
 	for _, tf := range targetFiles {
 		if agents.IsArtifact(tf, agentConfig, workspaceDir) {
+			artifactFiles = append(artifactFiles, tf)
 			if err := repo.AppendArtifact(chatID, tf); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", tf).Msg("failed to append artifact to repo")
 			}
 		}
 	}
+	if update.Metadata == nil {
+		update.Metadata = make(map[string]any)
+	}
+	if len(artifactFiles) > 0 {
+		update.Metadata["artifact_files"] = artifactFiles
+	}
 	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
-		ID:           fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
-		Role:         role,
-		Content:      update.Content,
-		AgentName:    agentName,
-		Timestamp:    time.Now().UnixMilli(),
-		ActivityType: strings.ToUpper(role),
-		StepIndex:    update.StepIndex,
-		TargetFiles:  targetFiles,
+		ID:            fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+		Role:          role,
+		Content:       update.Content,
+		AgentName:     agentName,
+		Timestamp:     time.Now().UnixMilli(),
+		ActivityType:  strings.ToUpper(role),
+		StepIndex:     update.StepIndex,
+		TargetFiles:   targetFiles,
+		ArtifactFiles: artifactFiles,
 	}); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
 	}

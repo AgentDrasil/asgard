@@ -194,4 +194,11 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	assert.Contains(t, sess.Artifacts, "scratch/demo.py")
 	assert.Contains(t, sess.Artifacts, "/tmp/custom_rw_dir/data.json")
 	assert.NotContains(t, sess.Artifacts, "src/main.go")
+
+	require.Len(t, sess.Messages, 1)
+	msg := sess.Messages[0]
+	assert.Contains(t, msg.ArtifactFiles, "scratch/demo.py")
+	assert.Contains(t, msg.ArtifactFiles, "/tmp/custom_rw_dir/data.json")
+	assert.NotContains(t, msg.ArtifactFiles, "src/main.go")
+	assert.Contains(t, msg.TargetFiles, "src/main.go")
 }

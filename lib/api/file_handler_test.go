@@ -57,28 +57,52 @@ func TestWorkspaceFileHandler(t *testing.T) {
 	})
 
 	t.Run("Valid Workspace File Read", func(t *testing.T) {
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "hello.txt")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=hello.txt", nil)
 		rr := httptest.NewRecorder()
 		server.ServeHTTP(rr, req)
 		assert.Equal(t, http.StatusOK, rr.Code)
 
 		var resp WorkspaceFileResponse
-		err := json.Unmarshal(rr.Body.Bytes(), &resp)
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.Equal(t, "hello.txt", resp.Name)
 		assert.Equal(t, "txt", resp.Ext)
 		assert.Equal(t, "Hello Workspace World", resp.Content)
 	})
 
+	t.Run("Unauthorized Workspace File Read", func(t *testing.T) {
+		unauthPath := filepath.Join(tempWorkspaceDir, "secret.go")
+		err = os.WriteFile(unauthPath, []byte("package main"), 0644)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=secret.go", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "access denied: file not authorized in session")
+	})
+
 	t.Run("Path Traversal Guard", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=../../etc/passwd", nil)
 		rr := httptest.NewRecorder()
 		server.ServeHTTP(rr, req)
-		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
 		assert.Contains(t, rr.Body.String(), "access denied")
 	})
 
 	t.Run("File Not Found", func(t *testing.T) {
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "non_existent.txt")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=non_existent.txt", nil)
 		rr := httptest.NewRecorder()
 		server.ServeHTTP(rr, req)
@@ -138,7 +162,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path="+relTmpPath, nil)
 		rr := httptest.NewRecorder()
 		server.ServeHTTP(rr, req)
-		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
 		assert.Contains(t, rr.Body.String(), "access denied")
 	})
 }

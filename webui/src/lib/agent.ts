@@ -193,8 +193,7 @@ export async function runAgentStream(
         const isFinalResult = isFinalState(state) && !entryType;
 
         const isAppend =
-          update.metadata?.["is_append"] === true ||
-          msg?.metadata?.["is_append"] === true;
+          update.metadata?.["is_append"] === true || msg?.metadata?.["is_append"] === true;
 
         if (isAgentResponse || isFinalResult) {
           // Agent response text → assistant bubble

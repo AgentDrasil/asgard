@@ -37,12 +37,16 @@ export function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
           cur.content +
           `\n${TOOL_ITEM_DELIMITER}\n` +
           next.content;
+        mergeFiles(prev, cur);
+        mergeFiles(prev, next);
       } else {
-        out.push({
+        const newMsg: ChatMessage = {
           ...cur,
           activityType: "TOOL",
           content: cur.content + `\n${TOOL_ITEM_DELIMITER}\n` + next.content,
-        });
+        };
+        mergeFiles(newMsg, next);
+        out.push(newMsg);
       }
       i += 2; // consumed both
     } else if (curIsCall) {
@@ -54,6 +58,7 @@ export function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
       ) {
         prev.activityType = "TOOL";
         prev.content = prev.content + `\n${TOOL_ITEM_DELIMITER}\n` + cur.content;
+        mergeFiles(prev, cur);
       } else {
         out.push({
           ...cur,
@@ -67,4 +72,17 @@ export function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
     }
   }
   return out;
+}
+
+function mergeFiles(target: ChatMessage, source: ChatMessage) {
+  if (source.targetFiles && source.targetFiles.length > 0) {
+    target.targetFiles = Array.from(
+      new Set([...(target.targetFiles || []), ...source.targetFiles]),
+    );
+  }
+  if (source.artifactFiles && source.artifactFiles.length > 0) {
+    target.artifactFiles = Array.from(
+      new Set([...(target.artifactFiles || []), ...source.artifactFiles]),
+    );
+  }
 }
