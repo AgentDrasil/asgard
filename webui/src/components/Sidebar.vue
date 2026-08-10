@@ -404,22 +404,31 @@ const selectTheme = (themeId: string) => {
             <!-- Level 1: Agent Header -->
             <div
               @click="toggleAgentCollapse(agentGroup.agentName)"
-              class="px-2 py-1 flex items-center justify-between text-xs font-semibold text-primary/80 uppercase tracking-wider select-none cursor-pointer hover:bg-base-200/50 rounded-md transition-colors"
+              class="px-2 py-1 flex items-center justify-between text-sm font-semibold text-primary/90 select-none cursor-pointer hover:bg-base-200/50 rounded-md transition-colors"
             >
               <div class="flex items-center gap-1.5 min-w-0">
                 <Icon
                   icon="mynaui:chevron-down"
                   :class="[
-                    'h-3.5 w-3.5 fill-current shrink-0 transition-transform duration-200',
+                    'h-4 w-4 fill-current shrink-0 transition-transform duration-200',
                     collapsedAgents[agentGroup.agentName] ? '-rotate-90' : '',
                   ]"
                 />
-                <Icon :icon="getAgentIcon(agentGroup.agentName)" class="h-4 w-4 shrink-0" />
+                <Icon :icon="getAgentIcon(agentGroup.agentName)" class="h-4.5 w-4.5 shrink-0" />
                 <span class="truncate">{{ agentGroup.agentName }}</span>
               </div>
-              <span class="text-[10px] text-base-content/40 font-normal shrink-0"
-                >({{ agentGroup.totalSessions }})</span
-              >
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button
+                  @click.stop="emit('new-chat', agentGroup.agentName)"
+                  class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
+                  title="New chat with this agent"
+                >
+                  <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
+                </button>
+                <span class="text-xs text-base-content/40 font-normal"
+                  >({{ agentGroup.totalSessions }})</span
+                >
+              </div>
             </div>
 
             <!-- Level 2: Workspaces List -->
