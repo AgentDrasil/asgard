@@ -9,7 +9,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
-	github.com/libtnb/sqlite v1.2.1
+	github.com/libtnb/sqlite v1.2.2
 	github.com/moznion/go-optional v0.13.0
 	github.com/rcarmo/go-te v0.1.0
 	github.com/rs/zerolog v1.35.1
@@ -74,5 +74,5 @@ require (
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.55.0 // indirect
+	modernc.org/sqlite v1.56.0 // indirect
 )
