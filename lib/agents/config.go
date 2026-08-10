@@ -27,7 +27,6 @@ const AgentFatherID = "agent_father"
 var allowAgentType = []string{
 	"agent",
 	"workflow",
-	"tool",
 }
 
 type AgentConfig struct {
