@@ -86,3 +86,7 @@ function mergeFiles(target: ChatMessage, source: ChatMessage) {
     );
   }
 }
+
+export function getMessageArtifactFiles(msg: ChatMessage): string[] {
+  return msg.artifactFiles || [];
+}
