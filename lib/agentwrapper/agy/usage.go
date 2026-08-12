@@ -2,8 +2,6 @@
 package agy
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,24 +18,47 @@ type QuotaEntry struct {
 	ResetInSeconds    int     `json:"reset_in_seconds"`
 }
 
+type CLIEvent struct {
+	Command *struct {
+		Name string `json:"name"`
+		Data struct {
+			Models []struct {
+				ID    string `json:"id"`
+				Label string `json:"label,omitempty"`
+			} `json:"models"`
+			Groups []struct {
+				Name    string `json:"name"`
+				Buckets []struct {
+					ID                string  `json:"id"`
+					RemainingFraction float64 `json:"remaining_fraction"`
+					ResetTime         string  `json:"reset_time"`
+				} `json:"buckets"`
+			} `json:"groups"`
+		} `json:"data"`
+	} `json:"command,omitempty"`
+}
+
 func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "agy", "models")
+	cmd := exec.CommandContext(ctx, "agy", "--output-format", "json", "models")
 	cmd.Dir = opts.Dir
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return nil, fmt.Errorf("running agy models: %w", err)
 	}
-	var models []string
-	scanner := bufio.NewScanner(&stdout)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			parts := strings.SplitN(line, "\t", 2)
-			modelID := strings.TrimSpace(parts[0])
-			if modelID != "" {
-				models = append(models, modelID)
-			}
+
+	var ev CLIEvent
+	if err := json.Unmarshal(output, &ev); err != nil {
+		return nil, fmt.Errorf("parsing agy models json: %w", err)
+	}
+
+	if ev.Command == nil || ev.Command.Name != "models" {
+		return nil, fmt.Errorf("unexpected agy models response format")
+	}
+
+	models := make([]string, 0, len(ev.Command.Data.Models))
+	for _, m := range ev.Command.Data.Models {
+		if m.ID != "" {
+			models = append(models, m.ID)
 		}
 	}
 	return models, nil
@@ -127,27 +148,7 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	quota := make(map[string]QuotaEntry)
 
-	type Bucket struct {
-		ID                string  `json:"id"`
-		RemainingFraction float64 `json:"remaining_fraction"`
-		ResetTime         string  `json:"reset_time"`
-	}
-	type Group struct {
-		Name    string   `json:"name"`
-		Buckets []Bucket `json:"buckets"`
-	}
-	type CommandData struct {
-		Groups []Group `json:"groups"`
-	}
-	type Command struct {
-		Name string      `json:"name"`
-		Data CommandData `json:"data"`
-	}
-	type UsageEvent struct {
-		Command *Command `json:"command"`
-	}
-
-	var ev UsageEvent
+	var ev CLIEvent
 	if err := json.Unmarshal(output, &ev); err == nil && ev.Command != nil && ev.Command.Name == "usage" {
 		for _, g := range ev.Command.Data.Groups {
 			for _, b := range g.Buckets {
