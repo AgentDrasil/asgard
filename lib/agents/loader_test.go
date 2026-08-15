@@ -525,6 +525,42 @@ func TestAgentConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid opencode model without variant",
+			config: AgentConfig{
+				ID:          "agent-opencode-1",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "deepseek-chat"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid opencode model with variant",
+			config: AgentConfig{
+				ID:          "agent-opencode-2",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "deepseek-chat/low"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid opencode model",
+			config: AgentConfig{
+				ID:          "agent-opencode-3",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "unknown-model"},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid agent type",
 			config: AgentConfig{
 				ID:          "agent-one",

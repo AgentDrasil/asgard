@@ -50,3 +50,40 @@ func TestGetQuota_DetailedOptions(t *testing.T) {
 		t.Errorf("expected 2 limits, got %d", len(usages[0].Limits))
 	}
 }
+
+func TestCheckQuota_ModelVariant(t *testing.T) {
+	fake := NewFakeClient()
+	fake.UsageFunc = func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+		return []types.ModelUsage{
+			{
+				Model:     "zai-coding-plan/glm-5.3",
+				Remaining: 0.85,
+			},
+		}, nil
+	}
+
+	origClients := clients
+	t.Cleanup(func() { clients = origClients })
+
+	clients = map[string]types.CLIClient{
+		"opencode": fake,
+	}
+
+	// Exact match
+	q1 := CheckQuota("opencode", "zai-coding-plan/glm-5.3")
+	if q1 != 0.85 {
+		t.Errorf("expected quota 0.85 for exact model, got %f", q1)
+	}
+
+	// Variant match
+	q2 := CheckQuota("opencode", "zai-coding-plan/glm-5.3/low")
+	if q2 != 0.85 {
+		t.Errorf("expected quota 0.85 for model with variant, got %f", q2)
+	}
+
+	// Non-matching model
+	q3 := CheckQuota("opencode", "other-provider/other-model/low")
+	if q3 != 0.0 {
+		t.Errorf("expected quota 0.0 for unmatched model, got %f", q3)
+	}
+}

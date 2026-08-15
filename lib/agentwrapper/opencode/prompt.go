@@ -50,6 +50,28 @@ func classifyLine(opl *opencodeLine) string {
 	}
 }
 
+// knownVariants is the set of opencode effort variants that may be appended
+// to a model string as a suffix segment (e.g. "provider/model/low").
+var knownVariants = map[string]bool{
+	"low":    true,
+	"medium": true,
+	"high":   true,
+}
+
+// SplitModelVariant parses a model string that may contain a variant suffix
+// (e.g. "zai-coding-plan/glm-5.3/low" -> "zai-coding-plan/glm-5.3", "low") or
+// ("openai/gpt-5/high" -> "openai/gpt-5", "high").
+// Only a trailing segment matching a known variant is treated as a variant,
+// so models with multi-segment provider paths (e.g.
+// "openrouter/deepseek/deepseek-chat") are left intact.
+// If no variant suffix is present, it returns (model, "").
+func SplitModelVariant(model string) (string, string) {
+	if idx := strings.LastIndex(model, "/"); idx > 0 && knownVariants[model[idx+1:]] {
+		return model[:idx], model[idx+1:]
+	}
+	return model, ""
+}
+
 // Prompt sends a prompt to opencode and parses its JSONL output in real-time.
 // If opts.ReportCallback is set, it is called for each meaningful output line.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
@@ -58,7 +80,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		argv = append(argv, "--session", opts.SessionID)
 	}
 	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
+		baseModel, variant := SplitModelVariant(opts.Model)
+		argv = append(argv, "--model", baseModel)
+		if variant != "" {
+			argv = append(argv, "--variant", variant)
+		}
 	}
 	argv = append(argv, prompt)
 

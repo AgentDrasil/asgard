@@ -104,3 +104,57 @@ func TestExtractTargetFiles(t *testing.T) {
 	assert.Nil(t, extractTargetFiles("grep", map[string]any{"path": "/repo/src"}))
 	assert.Nil(t, extractTargetFiles("bash", map[string]any{"command": "ls"}))
 }
+
+func TestSplitModelVariant(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantBase string
+		wantVar  string
+	}{
+		{
+			input:    "zai-coding-plan/glm-5.3/low",
+			wantBase: "zai-coding-plan/glm-5.3",
+			wantVar:  "low",
+		},
+		{
+			input:    "opencode/claude-sonnet-4-6/high",
+			wantBase: "opencode/claude-sonnet-4-6",
+			wantVar:  "high",
+		},
+		{
+			input:    "zai-coding-plan/glm-5.3",
+			wantBase: "zai-coding-plan/glm-5.3",
+			wantVar:  "",
+		},
+		{
+			input:    "deepseek-chat",
+			wantBase: "deepseek-chat",
+			wantVar:  "",
+		},
+		{
+			// Multi-segment provider path: not a variant, must stay intact.
+			input:    "openrouter/deepseek/deepseek-chat",
+			wantBase: "openrouter/deepseek/deepseek-chat",
+			wantVar:  "",
+		},
+		{
+			// Unknown variant-like suffix: not a variant, must stay intact.
+			input:    "zai-coding-plan/glm-5.3/garbage",
+			wantBase: "zai-coding-plan/glm-5.3/garbage",
+			wantVar:  "",
+		},
+		{
+			input:    "",
+			wantBase: "",
+			wantVar:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			base, variant := SplitModelVariant(tt.input)
+			assert.Equal(t, tt.wantBase, base)
+			assert.Equal(t, tt.wantVar, variant)
+		})
+	}
+}

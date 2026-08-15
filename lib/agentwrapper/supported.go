@@ -115,7 +115,7 @@ func CheckQuota(cli string, model string) float64 {
 	}
 
 	for _, u := range usages {
-		if u.Model == model {
+		if MatchesModel(cli, model, u.Model) {
 			return u.Remaining
 		}
 	}

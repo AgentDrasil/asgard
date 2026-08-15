@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	opencode "github.com/AgentDrasil/asgard/lib/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
@@ -71,7 +72,14 @@ var opencodeCmd = &cobra.Command{
 		}
 
 		if opencodeModel != "" {
-			if !GlobalConfig.IsModelAllowed("opencode", opencodeModel) {
+			allowed := false
+			for _, name := range agentwrapper.ModelCandidates("opencode", opencodeModel) {
+				if GlobalConfig.IsModelAllowed("opencode", name) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
 				return fmt.Errorf("model %q is not allowed by config", opencodeModel)
 			}
 		}

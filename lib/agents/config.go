@@ -108,7 +108,7 @@ func (cfg *AgentConfig) Validate() error {
 		if len(models) > 0 {
 			modelSupported := false
 			for _, m := range models {
-				if target.Model == m {
+				if agentwrapper.MatchesModel(target.CLI, target.Model, m) {
 					modelSupported = true
 					break
 				}
