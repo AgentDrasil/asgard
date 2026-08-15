@@ -179,20 +179,23 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		dagSpec = defn.RawSpec()
 	}
 
-	artifactsDir := Interpolate(defn.ArtifactsDir, func(key string) (string, bool) {
-		if key == "session_id" {
+	tmpDir := Interpolate(defn.TmpDir, func(key string) (string, bool) {
+		switch key {
+		case "session_id":
 			return rc.SessionID, true
+		case "run_dir":
+			return rc.RunDir, true
 		}
 		return "", false
 	})
-	if artifactsDir == "" {
-		artifactsDir = filepath.Join(rc.RunDir, ".artifacts", rc.SessionID)
+	if tmpDir == "" {
+		tmpDir = filepath.Join(os.TempDir(), rc.SessionID)
 	}
-	if !filepath.IsAbs(artifactsDir) {
-		artifactsDir = filepath.Join(rc.RunDir, artifactsDir)
+	if !filepath.IsAbs(tmpDir) {
+		tmpDir = filepath.Join(rc.RunDir, tmpDir)
 	}
-	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating artifacts dir: %w", err)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating tmp dir: %w", err)
 	}
 
 	if store != nil {
@@ -291,7 +294,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			nctx := &NodeContext{
 				SessionID:    rc.SessionID,
 				RunDir:       rc.RunDir,
-				ArtifactsDir: artifactsDir,
+				TmpDir:       tmpDir,
 				Input:        rc.Input,
 				Defn:         defn,
 				Node:         node,

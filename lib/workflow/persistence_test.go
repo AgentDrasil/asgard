@@ -92,23 +92,24 @@ func (m *memStore) get(runID string) *RunSnapshot {
 
 const humanLoopYAML = `
 name: human-loop
+tmp_dir: "tmp/${session_id}"
 nodes:
   - id: prep
     type: command
-    command: "echo prepared > ${artifacts_dir}/prep.txt"
+    command: "echo prepared > ${tmp_dir}/prep.txt"
     output_file: "prep.txt"
   - id: plan_approval
     type: human
     depends:
       - node: prep
-    prompt: "review the plan at ${artifacts_dir}/prep.txt"
+    prompt: "review the plan at ${tmp_dir}/prep.txt"
     options: ["Approve", "Reject"]
     output_file: "user_feedback.md"
   - id: final
     type: command
     depends:
       - node: plan_approval
-    command: "cat ${artifacts_dir}/user_feedback.md > ${artifacts_dir}/final.txt"
+    command: "cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
     output_file: "final.txt"
 `
 
@@ -209,7 +210,7 @@ func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 	require.NotNil(t, out.result)
 	assert.Equal(t, RunStatusCompleted, out.result.Status)
 
-	artifactsDir := filepath.Join(runDir, ".artifacts", "chat-1")
+	artifactsDir := filepath.Join(runDir, "tmp", "chat-1")
 	feedback, err := os.ReadFile(filepath.Join(artifactsDir, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved", string(feedback))
@@ -264,7 +265,7 @@ func TestHumanNodeResumeAfterRestart(t *testing.T) {
 	assert.Equal(t, StatusSucceeded, result.Nodes["plan_approval"].Status)
 	assert.Equal(t, "looks good, ship it", result.Nodes["plan_approval"].Output)
 
-	artifactsDir := filepath.Join(runDir, ".artifacts", "chat-1")
+	artifactsDir := filepath.Join(runDir, "tmp", "chat-1")
 	feedback, err := os.ReadFile(filepath.Join(artifactsDir, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "looks good, ship it", string(feedback))

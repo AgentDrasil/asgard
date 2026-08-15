@@ -93,7 +93,7 @@ func collectArtifact(nctx *NodeContext, node *NodeSpec, result *NodeResult) {
 	}
 	path := node.OutputFile
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(nctx.ArtifactsDir, path)
+		path = filepath.Join(nctx.TmpDir, path)
 	}
 	if _, err := os.Stat(path); err != nil {
 		return

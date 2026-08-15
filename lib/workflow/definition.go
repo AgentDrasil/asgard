@@ -11,9 +11,9 @@ import (
 
 // WorkflowDefinition is the parsed YAML workflow definition.
 type WorkflowDefinition struct {
-	Name         string      `yaml:"name"`
-	ArtifactsDir string      `yaml:"artifacts_dir"`
-	Nodes        []*NodeSpec `yaml:"nodes"`
+	Name   string      `yaml:"name"`
+	TmpDir string      `yaml:"tmp_dir"`
+	Nodes  []*NodeSpec `yaml:"nodes"`
 
 	// raw is the YAML source this definition was parsed from; it is persisted
 	// as the DAG snapshot for pause/resume and crash recovery.

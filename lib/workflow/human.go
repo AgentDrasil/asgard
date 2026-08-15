@@ -114,7 +114,7 @@ func humanReplyResult(nctx *NodeContext, reply string) *NodeResult {
 	}
 	path := nctx.Node.OutputFile
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(nctx.ArtifactsDir, path)
+		path = filepath.Join(nctx.TmpDir, path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		log.Warn().Err(err).Str("path", path).Msg("creating human output artifact dir failed")

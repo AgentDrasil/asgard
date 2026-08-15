@@ -55,9 +55,9 @@ type NodeResult struct {
 // dependencies (llm.Client, agents.Loader, ...) are injected into the
 // respective runners via their constructors, never here.
 type NodeContext struct {
-	SessionID    string
-	RunDir       string
-	ArtifactsDir string
+	SessionID string
+	RunDir    string
+	TmpDir    string
 	// Input is the initial user prompt that triggered the workflow run.
 	Input string
 	// Defn is the workflow definition this node belongs to.
@@ -74,7 +74,7 @@ type NodeContext struct {
 }
 
 // Interpolate expands ${...} placeholders in text using run-scoped variables
-// (session_id, run_dir, artifacts_dir, input) and node result fields
+// (session_id, run_dir, tmp_dir, input) and node result fields
 // (nodes.<id>.status / exit_code / output / output_file).
 func (nctx *NodeContext) Interpolate(text string) string {
 	return Interpolate(text, nctx.resolveVar)
@@ -86,8 +86,8 @@ func (nctx *NodeContext) resolveVar(key string) (string, bool) {
 		return nctx.SessionID, true
 	case "run_dir":
 		return nctx.RunDir, true
-	case "artifacts_dir":
-		return nctx.ArtifactsDir, true
+	case "tmp_dir":
+		return nctx.TmpDir, true
 	case "input", "prompt":
 		return nctx.Input, true
 	case "node.id":

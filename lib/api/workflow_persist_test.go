@@ -20,6 +20,7 @@ import (
 
 const askUserReplyTestYAML = `
 name: ask-reply-loop
+tmp_dir: "tmp/${session_id}"
 nodes:
   - id: plan_approval
     type: human
@@ -29,7 +30,7 @@ nodes:
     type: command
     depends:
       - node: plan_approval
-    command: "cat ${artifacts_dir}/user_feedback.md > ${artifacts_dir}/final.txt"
+    command: "cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
 `
 
 func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
@@ -115,7 +116,7 @@ func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 	}
 
 	// The reply landed in the artifact and the ask_user message was marked.
-	feedback, err := os.ReadFile(filepath.Join(runDir, ".artifacts", chatID, "user_feedback.md"))
+	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved", string(feedback))
 
@@ -143,6 +144,6 @@ func TestAskUserReplyMismatchedMessageIDDoesNotResume(t *testing.T) {
 	require.NotNil(t, run)
 	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
 
-	_, err = os.Stat(filepath.Join(runDir, ".artifacts", chatID, "user_feedback.md"))
+	_, err = os.Stat(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
 	assert.True(t, os.IsNotExist(err), "artifact must not be written on mismatched reply")
 }

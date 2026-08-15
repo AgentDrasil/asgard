@@ -22,7 +22,8 @@ import (
 	"github.com/AgentDrasil/asgard/lib/llm"
 )
 
-// SingleAgentExecutor 负责单体 Agent 任务的响应与处理，直接满足 a2asrv 处理器契约。
+// SingleAgentExecutor handles responding to and processing single-agent tasks,
+// directly satisfying the a2asrv handler contract.
 type SingleAgentExecutor struct {
 	agent     *agents.Agent
 	conf      *config.Config

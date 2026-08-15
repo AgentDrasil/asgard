@@ -64,7 +64,7 @@ func TestEvaluateSimpleExprSyntaxOnly(t *testing.T) {
 func TestInterpolate(t *testing.T) {
 	vars := map[string]string{
 		"session_id":              "sess-1",
-		"artifacts_dir":           "/tmp/artifacts",
+		"tmp_dir":                 "/tmp/work",
 		"nodes.build.output_file": "build.log",
 	}
 	resolve := func(key string) (string, bool) {
@@ -73,8 +73,8 @@ func TestInterpolate(t *testing.T) {
 	}
 
 	assert.Equal(t,
-		"see /tmp/artifacts/build.log in sess-1",
-		Interpolate("see ${artifacts_dir}/${nodes.build.output_file} in ${session_id}", resolve),
+		"see /tmp/work/build.log in sess-1",
+		Interpolate("see ${tmp_dir}/${nodes.build.output_file} in ${session_id}", resolve),
 	)
 	// Unknown keys pass through verbatim.
 	assert.Equal(t,
