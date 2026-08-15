@@ -16,7 +16,9 @@ func TestMatchesModel(t *testing.T) {
 		{cli: "opencode", model: "zai-coding-plan/glm-5.3/low", known: "zai-coding-plan/glm-5.3", want: true},
 		{cli: "opencode", model: "zai-coding-plan/glm-5.3", known: "zai-coding-plan/glm-5.3/low", want: false},
 		{cli: "opencode", model: "openrouter/deepseek/deepseek-chat", known: "openrouter/deepseek", want: false},
-		{cli: "agy", model: "some-model/low", known: "some-model", want: false},
+		{cli: "agy", model: "gemini-3.7-flash-low", known: "gemini-3.7-flash", want: true},
+		{cli: "agy", model: "gemini-3.7-flash/low", known: "gemini-3.7-flash", want: true},
+		{cli: "agy", model: "gemini-3.7-flash", known: "gemini-3.7-flash", want: true},
 	}
 
 	for _, tt := range tests {
@@ -35,7 +37,10 @@ func TestModelCandidates(t *testing.T) {
 	if got := ModelCandidates("opencode", "zai-coding-plan/glm-5.3"); !reflect.DeepEqual(got, []string{"zai-coding-plan/glm-5.3"}) {
 		t.Errorf("unexpected candidates: %v", got)
 	}
-	if got := ModelCandidates("agy", "some-model/low"); !reflect.DeepEqual(got, []string{"some-model/low"}) {
+	if got := ModelCandidates("agy", "gemini-3.7-flash-low"); !reflect.DeepEqual(got, []string{"gemini-3.7-flash-low", "gemini-3.7-flash"}) {
+		t.Errorf("unexpected candidates: %v", got)
+	}
+	if got := ModelCandidates("agy", "gemini-3.7-flash/low"); !reflect.DeepEqual(got, []string{"gemini-3.7-flash/low", "gemini-3.7-flash"}) {
 		t.Errorf("unexpected candidates: %v", got)
 	}
 }

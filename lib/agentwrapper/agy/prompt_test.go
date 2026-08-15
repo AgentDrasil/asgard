@@ -63,3 +63,26 @@ func TestEnsureWorkspaceTrusted(t *testing.T) {
 	assert.Contains(t, config.TrustedWorkspaces, "/some/trusted/path")
 	assert.Contains(t, config.TrustedWorkspaces, untrustedPath)
 }
+
+func TestSplitModelVariant(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantModel string
+		wantVar   string
+	}{
+		{"gemini-3.7-flash-low", "gemini-3.7-flash", "low"},
+		{"gemini-3.7-flash-medium", "gemini-3.7-flash", "medium"},
+		{"gemini-3.7-flash-high", "gemini-3.7-flash", "high"},
+		{"gemini-3.7-flash/low", "gemini-3.7-flash", "low"},
+		{"gemini-3.7-flash", "gemini-3.7-flash", ""},
+		{"claude-3-7-sonnet-high", "claude-3-7-sonnet", "high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			base, variant := SplitModelVariant(tt.input)
+			assert.Equal(t, tt.wantModel, base)
+			assert.Equal(t, tt.wantVar, variant)
+		})
+	}
+}

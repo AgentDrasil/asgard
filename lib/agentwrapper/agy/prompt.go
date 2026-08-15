@@ -7,11 +7,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
+
+// knownVariants is the set of agy reasoning effort variants that may be appended
+// to a model string as a suffix segment (e.g. "gemini-3.7-flash/low" or "gemini-3.7-flash-low").
+var knownVariants = map[string]bool{
+	"low":    true,
+	"medium": true,
+	"high":   true,
+}
+
+// SplitModelVariant parses a model string that may contain a variant/effort suffix
+// (e.g. "gemini-3.7-flash-low" -> "gemini-3.7-flash", "low" or "gemini-3.7-flash/low" -> "gemini-3.7-flash", "low").
+func SplitModelVariant(model string) (string, string) {
+	if idx := strings.LastIndex(model, "/"); idx > 0 && knownVariants[model[idx+1:]] {
+		return model[:idx], model[idx+1:]
+	}
+	if idx := strings.LastIndex(model, "-"); idx > 0 && knownVariants[model[idx+1:]] {
+		return model[:idx], model[idx+1:]
+	}
+	return model, ""
+}
 
 // Prompt runs `agy --dangerously-skip-permissions --output-format stream-json
 // --add-dir <dir> -p <prompt>` and streams NDJSON events until the process exits.
@@ -21,7 +42,7 @@ import (
 // manages its own I/O and exits cleanly when done.
 //
 // Session resumption is supported via --conversation=<sessionID>.
-// Model selection is supported via --model <model>.
+// Model selection is supported via --model <model> and --effort <effort>.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	runDir := opts.Dir
 	if runDir == "" {
@@ -40,7 +61,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		argv = append(argv, "--conversation="+opts.SessionID)
 	}
 	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
+		baseModel, effort := SplitModelVariant(opts.Model)
+		argv = append(argv, "--model", baseModel)
+		if effort != "" {
+			argv = append(argv, "--effort", effort)
+		}
 	}
 	argv = append(argv, "--print", prompt)
 

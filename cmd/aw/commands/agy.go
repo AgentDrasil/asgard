@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
@@ -83,7 +84,14 @@ var agyCmd = &cobra.Command{
 		}
 
 		if agyModel != "" {
-			if !GlobalConfig.IsModelAllowed("agy", agyModel) {
+			allowed := false
+			for _, name := range agentwrapper.ModelCandidates("agy", agyModel) {
+				if GlobalConfig.IsModelAllowed("agy", name) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
 				return fmt.Errorf("model %q is not allowed by config", agyModel)
 			}
 		}
