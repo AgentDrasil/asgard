@@ -17,6 +17,11 @@ build:
     go build -o build ./...
     cd webui && npm run build
 
+# Test backend and webui
+test:
+    go test -v ./...
+    cd webui && npm run test
+
 # Run e2e tests
 e2e-test:
     E2E_TEST=true go test -v ./...
