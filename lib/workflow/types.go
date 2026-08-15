@@ -13,6 +13,7 @@ const (
 	NodeTypeAgent   NodeType = "agent"
 	NodeTypeLLM     NodeType = "llm"
 	NodeTypeCommand NodeType = "command"
+	NodeTypeHuman   NodeType = "human"
 )
 
 // NodeStatus is the lifecycle status of a single workflow node.
@@ -123,7 +124,7 @@ func (r *NodeRunnerRegistry) Register(runner NodeRunner) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand} {
+	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman} {
 		if runner.Supports(t) {
 			r.runners[t] = runner
 		}
@@ -163,11 +164,13 @@ func (v *RunValues) Set(key string, value any) {
 type WorkflowEventType string
 
 const (
-	EventWorkflowStarted  WorkflowEventType = "workflow_started"
-	EventNodeStarted      WorkflowEventType = "node_started"
-	EventNodeFinished     WorkflowEventType = "node_finished"
-	EventNodeSkipped      WorkflowEventType = "node_skipped"
-	EventWorkflowFinished WorkflowEventType = "workflow_finished"
+	EventWorkflowStarted   WorkflowEventType = "workflow_started"
+	EventNodeStarted       WorkflowEventType = "node_started"
+	EventNodeFinished      WorkflowEventType = "node_finished"
+	EventNodeSkipped       WorkflowEventType = "node_skipped"
+	EventWorkflowSuspended WorkflowEventType = "workflow_suspended"
+	EventWorkflowResumed   WorkflowEventType = "workflow_resumed"
+	EventWorkflowFinished  WorkflowEventType = "workflow_finished"
 )
 
 // WorkflowEvent is emitted by the engine as the run progresses.
@@ -180,16 +183,20 @@ type WorkflowEvent struct {
 	Status     NodeStatus
 	SkipReason SkipReason
 	Message    string
-	Timestamp  time.Time
+	// MessageID carries the deterministic ask_user MessageID
+	// (wf-<run_id>-<node_id>) on EventWorkflowSuspended events.
+	MessageID string
+	Timestamp time.Time
 }
 
 // WorkflowRunStatus is the settled status of a whole workflow run.
 type WorkflowRunStatus string
 
 const (
-	RunStatusCompleted WorkflowRunStatus = "COMPLETED"
-	RunStatusFailed    WorkflowRunStatus = "FAILED"
-	RunStatusCanceled  WorkflowRunStatus = "CANCELED"
+	RunStatusWaitingHuman WorkflowRunStatus = "WAITING_HUMAN"
+	RunStatusCompleted    WorkflowRunStatus = "COMPLETED"
+	RunStatusFailed       WorkflowRunStatus = "FAILED"
+	RunStatusCanceled     WorkflowRunStatus = "CANCELED"
 )
 
 // WorkflowRunResult is the settled outcome of a workflow run.

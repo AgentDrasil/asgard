@@ -53,6 +53,7 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 	}
 
 	executor := workflow.NewWorkflowExecutor(engine, defn)
+	executor.AgentName = agent.Config.Name
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)
 

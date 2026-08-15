@@ -21,6 +21,8 @@ type WorkflowExecutor struct {
 	// runDir pins the workflow to a working directory (usually a session's
 	// RunDir); empty means "resolve from request metadata / engine default".
 	runDir string
+	// AgentName names the workflow agent for chat routing of human nodes.
+	AgentName string
 }
 
 // NewWorkflowExecutor creates an executor for the given engine and definition.
@@ -51,6 +53,7 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 			SessionID: execCtx.ContextID,
 			RunDir:    e.runDir,
 			Input:     messageText(execCtx.Message),
+			AgentName: e.AgentName,
 		}
 		if rc.RunDir == "" && execCtx.Metadata != nil {
 			if rd, ok := execCtx.Metadata["run_dir"].(string); ok && rd != "" {
@@ -151,9 +154,23 @@ func validateRunDir(runDir string) error {
 
 func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield func(a2a.Event, error) bool) bool {
 	switch ev.Type {
+	case EventWorkflowSuspended:
+		// WAITING_HUMAN maps to the A2A input-required state so clients
+		// know the task is paused awaiting user input.
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
+		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateInputRequired, msg)
+		event.SetMeta("node_id", ev.NodeID)
+		return yield(event, nil)
+	case EventWorkflowResumed:
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
+		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
+		event.SetMeta("node_id", ev.NodeID)
+		return yield(event, nil)
 	case EventNodeStarted, EventNodeFinished, EventNodeSkipped:
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
-		return yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg), nil)
+		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
+		event.SetMeta("node_id", ev.NodeID)
+		return yield(event, nil)
 	default:
 		return true
 	}

@@ -60,6 +60,11 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		workflowEngine: workflowEngine,
 	}
 
+	if repo != nil {
+		workflowEngine.SetRunStore(newWorkflowRunStore(dbmodels.NewWorkflowRunRepository(dbConn)))
+		workflowEngine.SetHumanSuspender(s.suspendWorkflowHuman)
+	}
+
 	CheckPushNotificationSetup()
 
 	if err := s.reload(); err != nil {

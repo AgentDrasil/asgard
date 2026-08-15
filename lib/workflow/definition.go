@@ -14,6 +14,16 @@ type WorkflowDefinition struct {
 	Name         string      `yaml:"name"`
 	ArtifactsDir string      `yaml:"artifacts_dir"`
 	Nodes        []*NodeSpec `yaml:"nodes"`
+
+	// raw is the YAML source this definition was parsed from; it is persisted
+	// as the DAG snapshot for pause/resume and crash recovery.
+	raw string
+}
+
+// RawSpec returns the YAML source the definition was parsed from (may be empty
+// for hand-constructed definitions).
+func (d *WorkflowDefinition) RawSpec() string {
+	return d.raw
 }
 
 // NodeDependency is one incoming dependency edge of a node.
@@ -53,6 +63,10 @@ type NodeSpec struct {
 	Command    string `yaml:"command"`
 	OutputFile string `yaml:"output_file"`
 	Sandbox    *bool  `yaml:"sandbox"`
+
+	// Human node fields. Options is the optional list of canned replies
+	// offered to the user; when empty any free-form text is accepted.
+	Options []string `yaml:"options"`
 }
 
 // TimeoutDuration parses the node timeout (e.g. "300s"). Zero means no timeout.
@@ -107,6 +121,7 @@ func ParseDefinition(data []byte) (*WorkflowDefinition, error) {
 	if err := defn.Validate(); err != nil {
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
+	defn.raw = string(data)
 	return &defn, nil
 }
 
@@ -146,8 +161,17 @@ func (d *WorkflowDefinition) Validate() error {
 			if node.Command == "" {
 				return fmt.Errorf("node %s: command is required for command nodes", node.ID)
 			}
+		case NodeTypeHuman:
+			if node.Prompt == "" {
+				return fmt.Errorf("node %s: prompt is required for human nodes", node.ID)
+			}
+			for _, opt := range node.Options {
+				if opt == "" {
+					return fmt.Errorf("node %s: human node options cannot be empty", node.ID)
+				}
+			}
 		default:
-			return fmt.Errorf("node %s: invalid type %q (must be agent, llm or command)", node.ID, node.Type)
+			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command or human)", node.ID, node.Type)
 		}
 
 		switch node.Join {
@@ -191,6 +215,59 @@ func (d *WorkflowDefinition) Validate() error {
 
 	if err := detectCycle(d); err != nil {
 		return err
+	}
+	if err := validateHumanNodes(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateHumanNodes enforces the Phase 3 single-active-human-node constraint:
+// human nodes must be totally ordered by the dependency graph. Two human nodes
+// placed on branches that may execute concurrently are rejected.
+func validateHumanNodes(d *WorkflowDefinition) error {
+	var humans []string
+	for _, node := range d.Nodes {
+		if node.Type == NodeTypeHuman {
+			humans = append(humans, node.ID)
+		}
+	}
+	if len(humans) < 2 {
+		return nil
+	}
+
+	deps := make(map[string][]string, len(d.Nodes))
+	for _, node := range d.Nodes {
+		for _, dep := range node.Depends {
+			deps[node.ID] = append(deps[node.ID], dep.NodeID)
+		}
+	}
+
+	reaches := func(from, to string) bool {
+		seen := map[string]bool{from: true}
+		stack := append([]string{}, deps[from]...)
+		for len(stack) > 0 {
+			id := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if id == to {
+				return true
+			}
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			stack = append(stack, deps[id]...)
+		}
+		return false
+	}
+
+	for i := 0; i < len(humans); i++ {
+		for j := i + 1; j < len(humans); j++ {
+			a, b := humans[i], humans[j]
+			if !reaches(a, b) && !reaches(b, a) {
+				return fmt.Errorf("parallel human nodes are not supported in Phase 3: nodes %s and %s may run concurrently", a, b)
+			}
+		}
 	}
 	return nil
 }

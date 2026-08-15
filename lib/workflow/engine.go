@@ -25,11 +25,30 @@ const (
 type RunContext struct {
 	// SessionID identifies the workflow run (defaults to a generated UUID).
 	SessionID string
+	// RunID is the persistent run identifier recorded in the RunStore
+	// (defaults to a generated UUID). It is reused on resume so the
+	// deterministic human MessageIDs stay stable across restarts.
+	RunID string
 	// RunDir is the base working directory for the run.
 	RunDir string
 	// Input is the user prompt that triggered the run (interpolated as
 	// ${input} / ${prompt}).
 	Input string
+	// AgentName names the workflow agent for chat routing of human nodes.
+	AgentName string
+	// DAGSpec overrides the raw YAML snapshot persisted for this run
+	// (defaults to the definition's source).
+	DAGSpec string
+	// Store persists run snapshots; nil falls back to the engine-level store.
+	Store RunStore
+	// SuspendHuman delivers human-node suspensions to the host application;
+	// nil falls back to the engine-level hook.
+	SuspendHuman SuspendHumanFunc
+	// SeedNodes are pre-settled node results restored from a snapshot; their
+	// workers complete immediately without re-execution.
+	SeedNodes map[string]*NodeResult
+	// HumanReplies maps human node IDs to pre-supplied user replies (resume).
+	HumanReplies map[string]string
 	// EmitEvent receives engine lifecycle events; may be nil.
 	EmitEvent func(event WorkflowEvent)
 }
@@ -37,11 +56,34 @@ type RunContext struct {
 // Engine schedules workflow DAGs with fork-join parallelism.
 type Engine struct {
 	registry *NodeRunnerRegistry
+
+	// store / suspendHuman are the engine-level persistence defaults, wired
+	// once by the host application (lib/api).
+	store        RunStore
+	suspendHuman SuspendHumanFunc
+
+	// waiting tracks live suspended runs for in-process resume delivery.
+	waitMu  sync.Mutex
+	waiting map[string]chan string
 }
 
 // NewEngine creates an engine backed by the given runner registry.
 func NewEngine(registry *NodeRunnerRegistry) *Engine {
-	return &Engine{registry: registry}
+	return &Engine{
+		registry: registry,
+		waiting:  make(map[string]chan string),
+	}
+}
+
+// SetRunStore wires the engine-level persistence store used by Resume and by
+// runs whose RunContext carries no Store.
+func (e *Engine) SetRunStore(store RunStore) {
+	e.store = store
+}
+
+// SetHumanSuspender wires the engine-level suspension delivery hook.
+func (e *Engine) SetHumanSuspender(f SuspendHumanFunc) {
+	e.suspendHuman = f
 }
 
 // Registry exposes the engine's runner registry.
@@ -117,12 +159,24 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	if rc.SessionID == "" {
 		rc.SessionID = uuid.Must(uuid.NewV7()).String()
 	}
+	if rc.RunID == "" {
+		rc.RunID = uuid.Must(uuid.NewV7()).String()
+	}
 	if rc.RunDir == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("resolving default run dir: %w", err)
 		}
 		rc.RunDir = wd
+	}
+
+	store := rc.Store
+	if store == nil {
+		store = e.store
+	}
+	dagSpec := rc.DAGSpec
+	if dagSpec == "" {
+		dagSpec = defn.RawSpec()
 	}
 
 	artifactsDir := Interpolate(defn.ArtifactsDir, func(key string) (string, bool) {
@@ -139,6 +193,20 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating artifacts dir: %w", err)
+	}
+
+	if store != nil {
+		if err := store.StartRun(&RunSnapshot{
+			RunID:      rc.RunID,
+			SessionID:  rc.SessionID,
+			Status:     PersistStatusRunning,
+			DAGSpec:    dagSpec,
+			RunDir:     rc.RunDir,
+			Input:      rc.Input,
+			NodeStates: map[string]PersistedNodeState{},
+		}); err != nil {
+			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run start failed")
+		}
 	}
 
 	emit := func(ev WorkflowEvent) {
@@ -162,11 +230,25 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	for _, node := range defn.Nodes {
 		dones[node.ID] = make(chan struct{})
 	}
+	// Seed restored node results: their workers settle immediately.
+	for id, res := range rc.SeedNodes {
+		results[id] = res
+	}
 	values := &RunValues{}
+
+	snapshotStates := func() map[string]PersistedNodeState {
+		mu.Lock()
+		defer mu.Unlock()
+		return toPersistedStates(results)
+	}
 
 	for _, node := range defn.Nodes {
 		g.Go(func() error {
 			defer close(dones[node.ID])
+
+			if _, restored := rc.SeedNodes[node.ID]; restored {
+				return nil
+			}
 
 			// Fork-Join: wait until every direct dependency has settled.
 			for _, dep := range node.Depends {
@@ -204,16 +286,6 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				return nil
 			}
 
-			runner, ok := e.registry.Get(node.Type)
-			if !ok {
-				err := fmt.Errorf("no runner registered for node type %q", node.Type)
-				mu.Lock()
-				results[node.ID] = &NodeResult{Status: StatusFailed, Error: err}
-				mu.Unlock()
-				emit(WorkflowEvent{Type: EventNodeFinished, NodeID: node.ID, NodeType: node.Type, Status: StatusFailed, Message: err.Error()})
-				return nil
-			}
-
 			emit(WorkflowEvent{Type: EventNodeStarted, NodeID: node.ID, NodeType: node.Type, Status: StatusRunning, Message: fmt.Sprintf("node %s started", node.ID)})
 
 			nctx := &NodeContext{
@@ -228,7 +300,18 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				Values:       values,
 			}
 
-			result, err := runner.Run(gctx, nctx)
+			var result *NodeResult
+			var err error
+			if node.Type == NodeTypeHuman {
+				result = e.runHumanNode(gctx, rc, nctx, store, dagSpec, snapshotStates)
+			} else {
+				runner, ok := e.registry.Get(node.Type)
+				if !ok {
+					err = fmt.Errorf("no runner registered for node type %q", node.Type)
+				} else {
+					result, err = runner.Run(gctx, nctx)
+				}
+			}
 			result = normalizeResult(result, err)
 
 			mu.Lock()
@@ -260,6 +343,12 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		run.Error = ctx.Err()
 	} else {
 		run.Status = settleGlobalStatus(defn, results)
+	}
+
+	if store != nil {
+		if err := store.SettleRun(rc.RunID, persistStatus(run.Status), toPersistedStates(results)); err != nil {
+			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run settlement failed")
+		}
 	}
 
 	emit(WorkflowEvent{

@@ -123,6 +123,9 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 		_ = s.repo.MarkAskUserReplied(req.ChatID, req.MessageID, req.ReplyText)
 	}
 
+	// Route the reply into a suspended workflow run (WAITING_HUMAN), if any.
+	s.tryResumeWorkflow(req.ChatID, req.MessageID, req.ReplyText)
+
 	askWaitersMu.Lock()
 	waiter, exists := askWaiters[req.MessageID]
 	if !exists {
