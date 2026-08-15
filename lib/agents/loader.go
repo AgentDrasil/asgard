@@ -97,10 +97,20 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			return nil, fmt.Errorf("team %q for agent %s is not defined in teams.yaml", cfg.Team, entry.Name())
 		}
 
-		agents = append(agents, &Agent{
+		agent := &Agent{
 			Config: cfg,
 			Path:   agentPath,
-		})
+		}
+
+		if cfg.Type == "workflow" {
+			workflowPath := filepath.Join(agentPath, "workflow.yaml")
+			if _, err := os.Stat(workflowPath); err != nil {
+				return nil, fmt.Errorf("agent %s is of type workflow but workflow.yaml is missing: %w", entry.Name(), err)
+			}
+			agent.WorkflowPath = workflowPath
+		}
+
+		agents = append(agents, agent)
 	}
 
 	return agents, nil

@@ -21,6 +21,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/lib/ttyd"
+	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 // Server manages the HTTP server hosting A2A agents.
@@ -32,6 +33,7 @@ type Server struct {
 	repo            *dbmodels.SessionRepository
 	statusListeners map[string][]chan AgentStatusUpdate
 	ttydManager     *ttyd.Manager
+	workflowEngine  *workflow.Engine
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
@@ -46,10 +48,16 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
 	}
 
+	workflowEngine, err := newWorkflowEngine(conf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
+	}
+
 	s := &Server{
-		conf:        conf,
-		repo:        repo,
-		ttydManager: ttydMgr,
+		conf:           conf,
+		repo:           repo,
+		ttydManager:    ttydMgr,
+		workflowEngine: workflowEngine,
 	}
 
 	CheckPushNotificationSetup()
@@ -84,7 +92,20 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	for _, agent := range s.agents {
-		restHandler, card := NewAgentHandler(agent, s.conf, s.repo, s)
+		var restHandler http.Handler
+		var card *a2a.AgentCard
+
+		switch agent.Config.Type {
+		case "workflow":
+			restHandler, card = s.newWorkflowHandler(agent)
+		default:
+			restHandler, card = NewAgentHandler(agent, s.conf, s.repo, s)
+		}
+
+		if restHandler == nil || card == nil {
+			log.Error().Str("agent", agent.Config.ID).Msg("skipping registration of agent due to handler creation failure")
+			continue
+		}
 
 		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
 		agentBase := fmt.Sprintf("/agents/%s", agent.Config.ID)

@@ -86,7 +86,8 @@ func (cfg *AgentConfig) Validate() error {
 		cfg.Icon = "fluent-color:bot-24"
 	}
 
-	if len(cfg.CLI) == 0 {
+	// Workflow agents orchestrate other agents and do not need CLI targets.
+	if len(cfg.CLI) == 0 && cfg.Type != "workflow" {
 		return fmt.Errorf("cli list cannot be empty")
 	}
 
