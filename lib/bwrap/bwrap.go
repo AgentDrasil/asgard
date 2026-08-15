@@ -14,14 +14,22 @@ import (
 )
 
 // buildSystemPrompt constructs the full system prompt for the given CLI.
-// It starts with the CLI-specific instructions from its SandboxSpec and appends the content of
-// agentsMDPath if the file exists.
-func buildSystemPrompt(cli string, agentsMDPath string) (string, error) {
+// It starts with the CLI-specific instructions from its SandboxSpec (including SystemPromptPeerHeader if hasTeam is true)
+// and appends the content of agentsMDPath if the file exists.
+func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool) (string, error) {
 	var sb strings.Builder
 
 	if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
 		if header := spec.SystemPromptHeader(); header != "" {
 			sb.WriteString(header)
+		}
+		if hasTeam {
+			if peerHeader := spec.SystemPromptPeerHeader(); peerHeader != "" {
+				if sb.Len() > 0 {
+					sb.WriteString("\n\n")
+				}
+				sb.WriteString(peerHeader)
+			}
 		}
 	}
 
@@ -42,8 +50,8 @@ func buildSystemPrompt(cli string, agentsMDPath string) (string, error) {
 
 // writeSystemPromptFile writes the combined system prompt for the given CLI to
 // a file named ".asgard_system_prompt" inside dir, and returns the host path.
-func writeSystemPromptFile(dir string, cli string, agentsMDPath string) (string, error) {
-	content, err := buildSystemPrompt(cli, agentsMDPath)
+func writeSystemPromptFile(dir string, cli string, agentsMDPath string, hasTeam bool) (string, error) {
+	content, err := buildSystemPrompt(cli, agentsMDPath, hasTeam)
 	if err != nil {
 		return "", err
 	}
@@ -292,7 +300,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 		}
 
 		if spec != nil {
-			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath)
+			hasTeam := cfg != nil && strings.TrimSpace(cfg.Team) != ""
+			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath, hasTeam)
 			if err != nil {
 				return nil, err
 			}

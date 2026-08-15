@@ -11,6 +11,9 @@ import (
 //go:embed system_prompt_header.md
 var systemPromptHeader string
 
+//go:embed system_prompt_peer.md
+var systemPromptPeerHeader string
+
 type Client struct{}
 
 func NewClient() *Client {
@@ -31,6 +34,10 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts types.PromptOpt
 
 func (c *Client) SystemPromptHeader() string {
 	return strings.TrimSpace(systemPromptHeader)
+}
+
+func (c *Client) SystemPromptPeerHeader() string {
+	return strings.TrimSpace(systemPromptPeerHeader)
 }
 
 func (c *Client) SystemPromptConfigPath(home string) string {

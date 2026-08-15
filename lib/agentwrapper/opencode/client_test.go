@@ -13,8 +13,11 @@ func TestClient_SystemPromptHeader(t *testing.T) {
 	header := client.SystemPromptHeader()
 
 	assert.Contains(t, header, "/bin/ask-user")
-	assert.Contains(t, header, "/bin/call-peer")
 	assert.Contains(t, header, "Protocol and Tool Restrictions")
 	assert.Contains(t, header, "question")
-	assert.Contains(t, header, "task")
+	assert.NotContains(t, header, "call-peer")
+
+	peerHeader := client.SystemPromptPeerHeader()
+	assert.Contains(t, peerHeader, "/bin/call-peer")
+	assert.Contains(t, peerHeader, "task")
 }

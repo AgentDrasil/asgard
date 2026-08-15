@@ -45,6 +45,7 @@ type CLIClient interface {
 ```go
 type SandboxSpec interface {
     SystemPromptHeader() string
+    SystemPromptPeerHeader() string
     SystemPromptConfigPath(home string) string
     SkillsMountPath(home string) string
     MountDirectories(home string) []string

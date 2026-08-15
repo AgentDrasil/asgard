@@ -21,15 +21,18 @@ func TestBuildSystemPrompt(t *testing.T) {
 	require.NoError(t, os.WriteFile(agentsMDPath, []byte("# Custom Instructions\n\nDo stuff."), 0644))
 
 	tests := []struct {
-		name         string
-		cli          string
-		agentsMDPath string
-		wantContains []string
+		name           string
+		cli            string
+		agentsMDPath   string
+		hasTeam        bool
+		wantContains   []string
+		wantNotContain []string
 	}{
 		{
-			name:         "agy with AGENTS.md",
+			name:         "agy with AGENTS.md and team",
 			cli:          "agy",
 			agentsMDPath: agentsMDPath,
+			hasTeam:      true,
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
@@ -38,18 +41,46 @@ func TestBuildSystemPrompt(t *testing.T) {
 			},
 		},
 		{
-			name:         "agy without AGENTS.md",
+			name:         "agy with AGENTS.md and no team",
+			cli:          "agy",
+			agentsMDPath: agentsMDPath,
+			hasTeam:      false,
+			wantContains: []string{
+				"/bin/ask-user <question>",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+			wantNotContain: []string{
+				"call-peer",
+			},
+		},
+		{
+			name:         "agy without AGENTS.md with team",
 			cli:          "agy",
 			agentsMDPath: "",
+			hasTeam:      true,
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
 			},
 		},
 		{
-			name:         "opencode with AGENTS.md",
+			name:         "agy without AGENTS.md without team",
+			cli:          "agy",
+			agentsMDPath: "",
+			hasTeam:      false,
+			wantContains: []string{
+				"/bin/ask-user <question>",
+			},
+			wantNotContain: []string{
+				"call-peer",
+			},
+		},
+		{
+			name:         "opencode with AGENTS.md with team",
 			cli:          "opencode",
 			agentsMDPath: agentsMDPath,
+			hasTeam:      true,
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
@@ -58,11 +89,28 @@ func TestBuildSystemPrompt(t *testing.T) {
 			},
 		},
 		{
-			name:         "opencode without AGENTS.md",
+			name:         "opencode with AGENTS.md without team",
 			cli:          "opencode",
-			agentsMDPath: "",
+			agentsMDPath: agentsMDPath,
+			hasTeam:      false,
 			wantContains: []string{
 				"/bin/ask-user <question>",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+			wantNotContain: []string{
+				"call-peer",
+			},
+		},
+		{
+			name:         "opencode without AGENTS.md without team",
+			cli:          "opencode",
+			agentsMDPath: "",
+			hasTeam:      false,
+			wantContains: []string{
+				"/bin/ask-user <question>",
+			},
+			wantNotContain: []string{
 				"call-peer",
 			},
 		},
@@ -70,6 +118,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			name:         "unknown CLI without AGENTS.md returns empty",
 			cli:          "unknown",
 			agentsMDPath: "",
+			hasTeam:      true,
 			wantContains: nil,
 		},
 	}
@@ -78,11 +127,14 @@ func TestBuildSystemPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath)
+			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath, tt.hasTeam)
 			require.NoError(t, err)
 
 			for _, want := range tt.wantContains {
 				assert.Contains(t, got, want)
+			}
+			for _, dontWant := range tt.wantNotContain {
+				assert.NotContains(t, got, dontWant)
 			}
 			if tt.wantContains == nil {
 				assert.Empty(t, got)
@@ -107,6 +159,7 @@ func TestBuildArgs(t *testing.T) {
 		ID:          "test-agent",
 		Name:        "Test Agent",
 		Description: "A test agent",
+		Team:        "test-team",
 		RunDirs:     []string{runDir},
 		MountDirs: agents.MountConfig{
 			ReadOnly:  []string{roDir},
@@ -127,7 +180,7 @@ func TestBuildArgs(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(agentPath, "skills"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644))
 
-	// Test case 1: agy CLITarget with session
+	// Test case 1: agy CLITarget with session and team
 	targetAgy := agents.CLITarget{
 		CLI:   "agy",
 		Model: "some-model",
@@ -171,13 +224,20 @@ func TestBuildArgs(t *testing.T) {
 	expectedEnd := "-- aw agy --model some-model --session my-session-id --prompt some prompt"
 	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
-	// Test case 2: opencode CLITarget without session (None)
+	// Test case 2: opencode CLITarget without team
+	cfgNoTeam := &agents.AgentConfig{
+		ID:          "test-agent-no-team",
+		Name:        "Test Agent No Team",
+		Description: "A test agent without team",
+		RunDirs:     []string{runDir},
+	}
+
 	targetOpencode := agents.CLITarget{
 		CLI:   "opencode",
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfg, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "")
+	argsOpencode, err := buildArgsForAgent(cfgNoTeam, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "")
 	require.NoError(t, err)
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
@@ -200,11 +260,11 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStrOpencode, "--ro-bind "+expectedDefaultTmpDir+"/.asgard_system_prompt "+expectedOpencodeDest)
 	assert.Contains(t, argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedOpencodeSkills)
 
-	// Verify the generated prompt file contains our instructions and the AGENTS.md content
+	// Verify the generated prompt file contains ask-user instructions but NOT call-peer
 	opencodePromptContent, readErr := os.ReadFile(filepath.Join(expectedDefaultTmpDir, ".asgard_system_prompt"))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(opencodePromptContent), "/bin/ask-user <question>")
-	assert.Contains(t, string(opencodePromptContent), "/bin/call-peer <agent-id> <message>")
+	assert.NotContains(t, string(opencodePromptContent), "call-peer")
 	assert.Contains(t, string(opencodePromptContent), "agents instructions")
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"

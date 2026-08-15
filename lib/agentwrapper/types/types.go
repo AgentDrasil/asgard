@@ -19,6 +19,7 @@ type ReportFunc func(stepIndex int, source, entryType, content string, metadata 
 // SandboxSpec defines the agent-specific configurations needed when setting up a bubblewrap sandbox.
 type SandboxSpec interface {
 	SystemPromptHeader() string
+	SystemPromptPeerHeader() string
 	SystemPromptConfigPath(home string) string
 	SkillsMountPath(home string) string
 	MountDirectories(home string) []string
