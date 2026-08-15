@@ -69,6 +69,39 @@ The host process initializes a temporary host directory and bind-mounts it to `/
 3.  **gRPC Forwarding**: Otherwise, `fakebash` establishes a gRPC connection over the Unix socket file at `/fakebash/fakebash.sock` to the `fakebashd` daemon running in the Command Execution Sandbox.
 4.  **Execution in PTY**: `fakebashd` runs a persistent `bash` shell inside a PTY and executes the forwarded command in the specified working directory, forwarding stdout/stderr stream packages and the exit code back to the client.
 
+## Workflow Orchestration Engine
+
+Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates multi-step AI development pipelines combining autonomous coding agents, raw LLM calls, shell commands, and human-in-the-loop approvals.
+
+### Key Capabilities
+- **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
+- **Heterogeneous Node Types**:
+  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`).
+  - `command`: Executes sandboxed or direct bash shell commands.
+  - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
+  - `human`: Pauses workflow execution for user review via WebUI / A2A (`TaskStateInputRequired`), persisting state across server restarts.
+- **Smart Edge Conditions & Join Rules**:
+  - `when`: Dot-notation expressions (e.g. `nodes.build_cmd.exit_code != 0`) to trigger conditional repair or fallback branches.
+  - `join: always`: Runs summary or clean-up nodes regardless of upstream skips or failures.
+- **Sandbox-Friendly Workspaces**: Isolates intermediate step files under `tmp_dir` (defaults to `/tmp/${session_id}`).
+
+### Example Workflows (`examples/workflows/`)
+Ready-to-use workflow definitions are located in [`examples/workflows/`](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/):
+- **[build-and-fix.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/build-and-fix.yaml)**: Runs code generation, executes build checks, and conditionally triggers a fix agent if the build fails.
+- **[human-in-the-loop.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/human-in-the-loop.yaml)**: Generates a plan, pauses for human approval, uses a lightweight LLM classifier to parse natural language feedback, and conditionally proceeds with code execution.
+- **[parallel-review.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/parallel-review.yaml)**: Concurrently runs security and performance review agents and consolidates their reports.
+
+### Validating Workflow & Agent Definitions (`agent-validate`)
+Use the `agent-validate` CLI utility to validate workflow YAML syntax, DAG topology (cycle detection), edge expressions, and agent configs:
+
+```bash
+# Validate a standalone workflow definition
+go run ./cmd/agent-validate ./examples/workflows/build-and-fix.yaml
+
+# Validate an agent directory containing config.yaml & workflow.yaml
+go run ./cmd/agent-validate .agents/agents/my-workflow-agent/
+```
+
 ## API Endpoints
 
 Asgard serves an HTTP API for agent orchestration, team discovery, and system management:

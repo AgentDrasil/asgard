@@ -1,0 +1,41 @@
+name: build-and-fix-workflow
+tmp_dir: "/tmp/${session_id}"
+
+nodes:
+  # 1. Code Generation Agent
+  - id: coding_agent
+    type: agent
+    agent_id: agy-coder
+    session_policy: inherit
+    prompt: "根据需求编写并修改代码"
+
+  # 2. Build & Test Command
+  - id: build_cmd
+    type: command
+    depends:
+      - node: coding_agent
+    sandbox: true
+    working_dir: "${run_dir}"
+    command: "go build ./... > ${tmp_dir}/build.log 2>&1"
+    output_file: "build.log"
+    timeout: 300s
+
+  # 3. Conditional Fix Agent (Only runs if build_cmd fails)
+  - id: fix_build_agent
+    type: agent
+    depends:
+      - node: build_cmd
+        when: "nodes.build_cmd.exit_code != 0"
+    agent_id: agy-coder
+    session_policy: fresh
+    prompt: "根据 ${tmp_dir}/build.log 中的构建错误日志修复代码"
+
+  # 4. Final Review (Join node running regardless of upstream skips/failures)
+  - id: build_summary
+    type: llm
+    depends:
+      - node: build_cmd
+      - node: fix_build_agent
+    join: always
+    model: gemini-2.5-flash
+    prompt: "总结代码构建与修复结果"
