@@ -1,18 +1,15 @@
 name: parallel-review-workflow
-tmp_dir: "/tmp/${session_id}"
 
 nodes:
   # 1. Security Review Agent
   - id: sec_reviewer
     type: agent
     agent_id: agy-reviewer
-    prompt: "审查当前代码改动中的安全隐患，输出报告至 ${tmp_dir}/sec_review.txt"
 
   # 2. Performance Review Agent (Executes concurrently with sec_reviewer)
   - id: perf_reviewer
     type: agent
     agent_id: agy-reviewer
-    prompt: "审查当前代码改动中的性能瓶颈，输出报告至 ${tmp_dir}/perf_review.txt"
 
   # 3. Consolidated Summary (Fork-Join aggregate node)
   - id: final_summary
@@ -23,4 +20,4 @@ nodes:
     join: always
     model: gemini-2.5-flash
     prompt: |
-      整合安全评审报告 (${tmp_dir}/sec_review.txt) 与性能评审报告 (${tmp_dir}/perf_review.txt)，生成综合 Code Review 总结。
+      Consolidate the security review report (${tmp_dir}/sec_review.txt) and performance review report (${tmp_dir}/perf_review.txt) to generate a comprehensive Code Review summary.

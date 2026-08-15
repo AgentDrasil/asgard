@@ -1,5 +1,4 @@
 name: build-and-fix-workflow
-tmp_dir: "/tmp/${session_id}"
 
 nodes:
   # 1. Code Generation Agent
@@ -7,7 +6,6 @@ nodes:
     type: agent
     agent_id: agy-coder
     session_policy: inherit
-    prompt: "根据需求编写并修改代码"
 
   # 2. Build & Test Command
   - id: build_cmd
@@ -28,7 +26,6 @@ nodes:
         when: "nodes.build_cmd.exit_code != 0"
     agent_id: agy-coder
     session_policy: fresh
-    prompt: "根据 ${tmp_dir}/build.log 中的构建错误日志修复代码"
 
   # 4. Final Review (Join node running regardless of upstream skips/failures)
   - id: build_summary
@@ -38,4 +35,4 @@ nodes:
       - node: fix_build_agent
     join: always
     model: gemini-2.5-flash
-    prompt: "总结代码构建与修复结果"
+    prompt: "Summarize code build and fix results"

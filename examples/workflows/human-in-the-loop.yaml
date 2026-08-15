@@ -1,19 +1,17 @@
 name: human-in-the-loop-workflow
-tmp_dir: "/tmp/${session_id}"
 
 nodes:
   # 1. Architecture / Plan Agent
   - id: planner_agent
     type: agent
     agent_id: agy-planner
-    prompt: "分析需求并生成实施计划保存至 ${tmp_dir}/plan.md"
 
   # 2. Human Review Gateway (Suspends workflow until user responds via WebUI/A2A)
   - id: plan_approval
     type: human
     depends:
       - node: planner_agent
-    prompt: "请审阅生成的计划文件 ${tmp_dir}/plan.md，请输入修改意见或选择确认"
+    prompt: "Please review the generated plan file ${tmp_dir}/plan.md and choose Approve or Reject"
     options: ["Approve", "Reject"]
     output_file: "user_feedback.md"
 
@@ -24,8 +22,8 @@ nodes:
       - node: plan_approval
     model: gemini-2.5-flash
     prompt: |
-      用户对计划回复了: "${nodes.plan_approval.output}"
-      请判断用户的意图是同意还是拒绝。仅输出 APPROVED 或 REJECTED。
+      The user replied to the plan: "${nodes.plan_approval.output}"
+      Determine whether the user approved or rejected. Output only APPROVED or REJECTED.
 
   # 4. Code Execution Agent (Triggered only when approved)
   - id: executor_agent
@@ -35,4 +33,3 @@ nodes:
         when: "nodes.classify_feedback.output == 'APPROVED'"
     agent_id: agy-coder
     session_policy: inherit
-    prompt: "计划已获批准，开始执行 ${tmp_dir}/plan.md 中的代码变更"

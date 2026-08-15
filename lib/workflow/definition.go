@@ -150,6 +150,9 @@ func (d *WorkflowDefinition) Validate() error {
 			if node.AgentID == "" {
 				return fmt.Errorf("node %s: agent_id is required for agent nodes", node.ID)
 			}
+			if node.Prompt != "" {
+				return fmt.Errorf("node %s: prompt is not allowed for agent nodes (agent instructions belong in AGENTS.md)", node.ID)
+			}
 			if node.SessionPolicy != "" && node.SessionPolicy != "inherit" && node.SessionPolicy != "fresh" {
 				return fmt.Errorf("node %s: invalid session_policy %q (must be inherit or fresh)", node.ID, node.SessionPolicy)
 			}
@@ -199,7 +202,7 @@ func (d *WorkflowDefinition) Validate() error {
 	// Second pass: dependency references (all IDs are known now).
 	for _, node := range d.Nodes {
 		for _, dep := range node.Depends {
-			if dep.NodeID == node.ID {
+			if dep.NodeID == node.ID && dep.When == "" {
 				return fmt.Errorf("circular dependency detected: %s -> %s", node.ID, node.ID)
 			}
 			if _, ok := ids[dep.NodeID]; !ok {
@@ -239,7 +242,9 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 	deps := make(map[string][]string, len(d.Nodes))
 	for _, node := range d.Nodes {
 		for _, dep := range node.Depends {
-			deps[node.ID] = append(deps[node.ID], dep.NodeID)
+			if dep.When == "" {
+				deps[node.ID] = append(deps[node.ID], dep.NodeID)
+			}
 		}
 	}
 
@@ -283,6 +288,10 @@ func detectCycle(d *WorkflowDefinition) error {
 		}
 		seen := make(map[string]bool, len(node.Depends))
 		for _, dep := range node.Depends {
+			if dep.When != "" {
+				// Conditional loop/branch edges are evaluated dynamically at runtime
+				continue
+			}
 			if seen[dep.NodeID] {
 				continue
 			}
