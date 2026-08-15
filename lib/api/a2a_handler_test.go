@@ -130,7 +130,7 @@ func TestExecuteValidation(t *testing.T) {
 			RunDirs: []string{"/tmp"},
 		},
 	}
-	executor := &agentExecutor{agent: agent}
+	executor := NewSingleAgentExecutor(agent, nil, nil, nil, nil)
 
 	// Test invalid chatID fails validation
 	execCtxInvalidChat := &a2asrv.ExecutorContext{

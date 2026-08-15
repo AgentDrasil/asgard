@@ -22,7 +22,7 @@ type seqRunResult struct {
 }
 
 // executeSequential runs the first available CLI target (by quota) and streams results.
-func (e *agentExecutor) executeSequential(
+func (e *SingleAgentExecutor) executeSequential(
 	ctx context.Context,
 	yield func(a2a.Event, error) bool,
 	execCtx *a2asrv.ExecutorContext,
@@ -62,7 +62,7 @@ func (e *agentExecutor) executeSequential(
 }
 
 // streamAndFinish drains status events from statusCh until resultCh delivers the final output.
-func (e *agentExecutor) streamAndFinish(
+func (e *SingleAgentExecutor) streamAndFinish(
 	ctx context.Context,
 	yield func(a2a.Event, error) bool,
 	execCtx *a2asrv.ExecutorContext,
@@ -131,7 +131,7 @@ func (e *agentExecutor) streamAndFinish(
 
 // handleFinalResult parses the agent output and emits the final TaskStatusUpdateEvent.
 // sessionMode controls whether the returned session ID is persisted to DB.
-func (e *agentExecutor) handleFinalResult(
+func (e *SingleAgentExecutor) handleFinalResult(
 	yield func(a2a.Event, error) bool,
 	execCtx *a2asrv.ExecutorContext,
 	out []byte,
