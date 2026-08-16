@@ -83,7 +83,9 @@ func TestHumanSuspensionCarriesArtifacts(t *testing.T) {
 			evMu.Unlock()
 		},
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_, _ = engine.Execute(context.Background(), defn, rc)
 	}()
 
@@ -114,6 +116,8 @@ func TestHumanSuspensionCarriesArtifacts(t *testing.T) {
 
 	_, err = engine.Resume(context.Background(), "runart", "Approve")
 	require.NoError(t, err)
+
+	<-done
 }
 
 func TestDefaultTmpDirUnderHomeTmp(t *testing.T) {
