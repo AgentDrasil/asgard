@@ -49,6 +49,7 @@ id: "agent_father"
 name: "Agent Father"
 description: "The agent creates other agents."
 team: "team-red"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"
@@ -65,6 +66,7 @@ id: "agent_alpha"
 name: "Agent Alpha"
 description: "Alpha red agent"
 team: "team-red"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"
@@ -81,6 +83,7 @@ id: "agent_beta"
 name: "Agent Beta"
 description: "Beta red agent"
 team: "team-red"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"
@@ -97,6 +100,7 @@ id: "agent_gamma"
 name: "Agent Gamma"
 description: "Gamma blue agent"
 team: "team-blue"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"

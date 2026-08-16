@@ -54,6 +54,11 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 
 	executor := workflow.NewWorkflowExecutor(engine, defn)
 	executor.AgentName = agent.Config.Name
+	executor.WorkflowRunDirs = agent.Config.RunDirs
+	executor.WorkflowMountDirs = workflow.MountDirsConfig{
+		ReadOnly:  agent.Config.MountDirs.ReadOnly,
+		ReadWrite: agent.Config.MountDirs.ReadWrite,
+	}
 	executor.OnEvent = s.handleWorkflowEvent
 	handler := a2asrv.NewHandler(executor)
 	restHandler := a2asrv.NewRESTHandler(handler)

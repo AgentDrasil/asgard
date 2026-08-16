@@ -120,6 +120,10 @@ func (cfg *AgentConfig) Validate() error {
 		}
 	}
 
+	if cfg.IsMainAgent() && len(cfg.RunDirs) == 0 {
+		return fmt.Errorf("main_agent requires at least one run_dir")
+	}
+
 	for _, dir := range cfg.RunDirs {
 		if !filepath.IsAbs(dir) {
 			return fmt.Errorf("run directory must be an absolute path: %q", dir)

@@ -119,6 +119,8 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 	ctx, cancel := withNodeTimeout(ctx, node)
 	defer cancel()
 
+	effectiveAgent := resolveEffectiveAgent(agent, nctx)
+
 	log.Info().
 		Str("session_id", nctx.SessionID).
 		Str("node_id", node.ID).
@@ -126,7 +128,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		Str("policy", node.SessionPolicy).
 		Msgf("[AgentRunner] Starting agent %q for node %q", node.AgentID, node.ID)
 
-	out, err := run.Run(ctx, agent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
+	out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
 
 	lastContent, sessionID := parseAgentOutput(out)
 	if sessionID != "" && node.SessionPolicyInherit() {
@@ -173,4 +175,27 @@ func parseAgentOutput(out []byte) (lastContent string, sessionID string) {
 		return content, result.SessionID
 	}
 	return strings.TrimSpace(string(out)), ""
+}
+
+// resolveEffectiveAgent returns a clone of the agent with missing RunDirs and MountDirs
+// inherited from the enclosing workflow context.
+// ReadOnly and ReadWrite mounts are inherited independently to avoid dropping explicit configs.
+func resolveEffectiveAgent(agent *agents.Agent, nctx *NodeContext) *agents.Agent {
+	if agent == nil {
+		return nil
+	}
+	effectiveAgent := *agent
+	effectiveConfig := agent.Config
+
+	if len(effectiveConfig.RunDirs) == 0 && len(nctx.WorkflowRunDirs) > 0 {
+		effectiveConfig.RunDirs = append([]string(nil), nctx.WorkflowRunDirs...)
+	}
+	if len(effectiveConfig.MountDirs.ReadOnly) == 0 && len(nctx.WorkflowMountDirs.ReadOnly) > 0 {
+		effectiveConfig.MountDirs.ReadOnly = append([]string(nil), nctx.WorkflowMountDirs.ReadOnly...)
+	}
+	if len(effectiveConfig.MountDirs.ReadWrite) == 0 && len(nctx.WorkflowMountDirs.ReadWrite) > 0 {
+		effectiveConfig.MountDirs.ReadWrite = append([]string(nil), nctx.WorkflowMountDirs.ReadWrite...)
+	}
+	effectiveAgent.Config = effectiveConfig
+	return &effectiveAgent
 }

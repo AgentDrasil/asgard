@@ -261,6 +261,7 @@ id: agent1
 name: agent1
 description: Test Agent 1
 team: team-b
+run_dirs: ["/tmp"]
 cli:
   - cli: agy
     model: gemini-2.5-flash
@@ -296,6 +297,7 @@ teams:
 id: agent1
 name: agent1
 description: Test Agent 1
+run_dirs: ["/tmp"]
 cli:
   - cli: agy
     model: gemini-2.5-flash
@@ -332,6 +334,7 @@ teams:
 id: mismatched-id
 name: agent1
 description: Test Agent 1
+run_dirs: ["/tmp"]
 cli:
   - cli: agy
     model: gemini-2.5-flash
@@ -363,11 +366,38 @@ func TestAgentConfig_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid configuration",
+			name: "valid configuration with run_dirs",
 			config: AgentConfig{
 				ID:          "agent-one",
 				Name:        "agent1",
 				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "main_agent true without run_dirs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				MainAgent:   boolPtr(true),
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "main_agent false without run_dirs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				MainAgent:   boolPtr(false),
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
@@ -383,6 +413,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -395,6 +426,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -407,6 +439,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -419,6 +452,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -429,6 +463,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				Name:        "agent1",
 				Description: "Test Agent 1",
 				CLI:         []CLITarget{},
+				RunDirs:     []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -441,6 +476,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -453,6 +489,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "unsupported-cli", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -465,6 +502,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: ""},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -490,6 +528,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 				MountDirs: MountConfig{
 					ReadOnly: []string{"relative/path"},
 				},
@@ -505,6 +544,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 				MountDirs: MountConfig{
 					ReadWrite: []string{"relative/path"},
 				},
@@ -521,6 +561,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: false,
 		},
@@ -533,6 +574,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "opencode", Model: "deepseek-chat"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: false,
 		},
@@ -545,6 +587,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "opencode", Model: "deepseek-chat/low"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: false,
 		},
@@ -557,6 +600,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "opencode", Model: "unknown-model"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},
@@ -570,6 +614,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
+				RunDirs: []string{"/tmp/run"},
 			},
 			wantErr: true,
 		},

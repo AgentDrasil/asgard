@@ -71,6 +71,10 @@ type NodeContext struct {
 	// Values is a shared per-run key/value store for cross-node runtime state
 	// (e.g. CLI session IDs inherited between agent nodes).
 	Values *RunValues
+	// WorkflowRunDirs carries workflow/parent configured run directories.
+	WorkflowRunDirs []string
+	// WorkflowMountDirs carries workflow/parent configured mount directories.
+	WorkflowMountDirs MountDirsConfig
 }
 
 // Interpolate expands ${...} placeholders in text using run-scoped variables

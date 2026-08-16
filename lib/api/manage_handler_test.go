@@ -72,6 +72,7 @@ id: "agent_father"
 name: "Agent Father"
 description: "The agent creates other agents."
 team: "my-team"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "Gemini 3.5 Flash (Low)"
@@ -104,6 +105,7 @@ id: "my-agent"
 name: "My Agent"
 description: "Dynamically added agent"
 team: "my-team"
+run_dirs: ["/tmp"]
 cli:
   - cli: "opencode"
     model: "gemini-2.5-flash"
@@ -144,6 +146,7 @@ func TestServerConfig(t *testing.T) {
 id: "agent_father"
 name: "Agent Father"
 description: "Root agent"
+run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
     model: "test-model"

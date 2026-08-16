@@ -49,6 +49,10 @@ type RunContext struct {
 	SeedNodes map[string]*NodeResult
 	// HumanReplies maps human node IDs to pre-supplied user replies (resume).
 	HumanReplies map[string]string
+	// WorkflowRunDirs carries workflow/parent configured run directories.
+	WorkflowRunDirs []string
+	// WorkflowMountDirs carries workflow/parent configured mount directories.
+	WorkflowMountDirs MountDirsConfig
 	// EmitEvent receives engine lifecycle events; may be nil.
 	EmitEvent func(event WorkflowEvent)
 }
@@ -497,16 +501,20 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Message:  fmt.Sprintf("node %s started", node.ID),
 				})
 
+				wfRunDirs, wfMountDirs := resolveWorkflowDirs(rc, defn)
+
 				nctx := &NodeContext{
-					SessionID:    rc.SessionID,
-					RunDir:       rc.RunDir,
-					TmpDir:       tmpDir,
-					Input:        rc.Input,
-					Defn:         defn,
-					Node:         node,
-					Upstreams:    upstreams,
-					EventEmitter: emit,
-					Values:       values,
+					SessionID:         rc.SessionID,
+					RunDir:            rc.RunDir,
+					TmpDir:            tmpDir,
+					Input:             rc.Input,
+					Defn:              defn,
+					Node:              node,
+					Upstreams:         upstreams,
+					EventEmitter:      emit,
+					Values:            values,
+					WorkflowRunDirs:   wfRunDirs,
+					WorkflowMountDirs: wfMountDirs,
 				}
 
 				var result *NodeResult
@@ -546,15 +554,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Int("iteration", executionCount[node.ID]).
 					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, executionCount[node.ID])
 
-			emit(WorkflowEvent{
-				Type:      EventNodeFinished,
-				NodeID:    node.ID,
-				NodeType:  node.Type,
-				AgentID:   node.AgentID,
-				Status:    result.Status,
-				Message:   msg,
-				Artifacts: ArtifactViewerPaths(result.Artifacts, tmpDir),
-			})
+				emit(WorkflowEvent{
+					Type:      EventNodeFinished,
+					NodeID:    node.ID,
+					NodeType:  node.Type,
+					AgentID:   node.AgentID,
+					Status:    result.Status,
+					Message:   msg,
+					Artifacts: ArtifactViewerPaths(result.Artifacts, tmpDir),
+				})
 				evaluateDownstream(node.ID)
 				mu.Unlock()
 
@@ -659,4 +667,34 @@ func settleGlobalStatus(defn *WorkflowDefinition, results map[string]*NodeResult
 		}
 	}
 	return RunStatusCompleted
+}
+
+// resolveWorkflowDirs computes the effective RunDirs and MountDirs for a workflow run
+// by combining runtime context overrides (rc) with definition-level defaults (defn).
+// ReadOnly and ReadWrite mounts are resolved independently to preserve granular configuration.
+func resolveWorkflowDirs(rc RunContext, defn *WorkflowDefinition) ([]string, MountDirsConfig) {
+	var runDirs []string
+	if len(rc.WorkflowRunDirs) > 0 {
+		runDirs = append([]string(nil), rc.WorkflowRunDirs...)
+	} else if defn != nil && len(defn.RunDirs) > 0 {
+		runDirs = append([]string(nil), defn.RunDirs...)
+	} else if rc.RunDir != "" {
+		runDirs = []string{rc.RunDir}
+	}
+
+	var mountDirs MountDirsConfig
+	// ReadOnly mount fallback: runtime rc overrides defn if provided; otherwise fallback to defn
+	if len(rc.WorkflowMountDirs.ReadOnly) > 0 {
+		mountDirs.ReadOnly = append([]string(nil), rc.WorkflowMountDirs.ReadOnly...)
+	} else if defn != nil && len(defn.MountDirs.ReadOnly) > 0 {
+		mountDirs.ReadOnly = append([]string(nil), defn.MountDirs.ReadOnly...)
+	}
+	// ReadWrite mount fallback: runtime rc overrides defn if provided; otherwise fallback to defn
+	if len(rc.WorkflowMountDirs.ReadWrite) > 0 {
+		mountDirs.ReadWrite = append([]string(nil), rc.WorkflowMountDirs.ReadWrite...)
+	} else if defn != nil && len(defn.MountDirs.ReadWrite) > 0 {
+		mountDirs.ReadWrite = append([]string(nil), defn.MountDirs.ReadWrite...)
+	}
+
+	return runDirs, mountDirs
 }

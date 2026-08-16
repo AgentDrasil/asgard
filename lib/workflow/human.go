@@ -88,14 +88,14 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 
 	emit(WorkflowEvent{
-		Type:       EventWorkflowSuspended,
-		NodeID:     node.ID,
-		NodeType:   NodeTypeHuman,
-		Status:     NodeStatus(RunStatusWaitingHuman),
-		Message:    prompt,
-		MessageID:  messageID,
-		Artifacts:  artifactViewerPaths,
-		AgentName:  rc.AgentName,
+		Type:      EventWorkflowSuspended,
+		NodeID:    node.ID,
+		NodeType:  NodeTypeHuman,
+		Status:    NodeStatus(RunStatusWaitingHuman),
+		Message:   prompt,
+		MessageID: messageID,
+		Artifacts: artifactViewerPaths,
+		AgentName: rc.AgentName,
 	})
 
 	select {

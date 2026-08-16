@@ -172,6 +172,15 @@ func TestRun(t *testing.T) {
 		t.Error("expected uuid subdirectory to be created in tmp, but it was empty")
 	}
 
+	// 5b. Test case: agent without run_dirs receiving runDirOpt is rejected by strict allowlist
+	unallowedDir := filepath.Join(tmpDir, "some-arbitrary-dir")
+	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.Some(unallowedDir), optional.None[string](), "test-chat", nil)
+	if err == nil {
+		t.Error("expected error due to unallowed run directory on agent with no RunDirs, but got nil")
+	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
+		t.Errorf("expected disallowed run dir error message, got: %v", err)
+	}
+
 	// 6. Test case: explicitly selecting model with available quota
 	out, err = Run(context.Background(), agent, "hello agent", optional.None[string](), optional.None[string](), optional.Some("opencode-model-high"), "test-chat", nil)
 	if err != nil {

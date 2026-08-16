@@ -23,6 +23,10 @@ type WorkflowExecutor struct {
 	runDir string
 	// AgentName names the workflow agent for chat routing of human nodes.
 	AgentName string
+	// WorkflowRunDirs carries workflow/parent configured run directories.
+	WorkflowRunDirs []string
+	// WorkflowMountDirs carries workflow/parent configured mount directories.
+	WorkflowMountDirs MountDirsConfig
 	// OnEvent, when set, receives every consumed workflow event keyed by the
 	// session (chat) ID. The host application uses it for side effects such
 	// as persisting node artifacts into the session.
@@ -54,10 +58,12 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 		}
 
 		rc := RunContext{
-			SessionID: execCtx.ContextID,
-			RunDir:    e.runDir,
-			Input:     messageText(execCtx.Message),
-			AgentName: e.AgentName,
+			SessionID:         execCtx.ContextID,
+			RunDir:            e.runDir,
+			Input:             messageText(execCtx.Message),
+			AgentName:         e.AgentName,
+			WorkflowRunDirs:   e.WorkflowRunDirs,
+			WorkflowMountDirs: e.WorkflowMountDirs,
 		}
 		if rc.RunDir == "" && execCtx.Metadata != nil {
 			if rd, ok := execCtx.Metadata["run_dir"].(string); ok && rd != "" {

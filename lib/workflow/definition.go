@@ -9,11 +9,19 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// MountDirsConfig defines read-only and read-write mounts for the workflow.
+type MountDirsConfig struct {
+	ReadOnly  []string `yaml:"readonly"`
+	ReadWrite []string `yaml:"readwrite"`
+}
+
 // WorkflowDefinition is the parsed YAML workflow definition.
 type WorkflowDefinition struct {
-	Name   string      `yaml:"name"`
-	TmpDir string      `yaml:"tmp_dir"`
-	Nodes  []*NodeSpec `yaml:"nodes"`
+	Name      string          `yaml:"name"`
+	TmpDir    string          `yaml:"tmp_dir"`
+	RunDirs   []string        `yaml:"run_dirs"`
+	MountDirs MountDirsConfig `yaml:"mount_dirs"`
+	Nodes     []*NodeSpec     `yaml:"nodes"`
 
 	// raw is the YAML source this definition was parsed from; it is persisted
 	// as the DAG snapshot for pause/resume and crash recovery.
