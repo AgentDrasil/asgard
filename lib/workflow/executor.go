@@ -23,6 +23,10 @@ type WorkflowExecutor struct {
 	runDir string
 	// AgentName names the workflow agent for chat routing of human nodes.
 	AgentName string
+	// OnEvent, when set, receives every consumed workflow event keyed by the
+	// session (chat) ID. The host application uses it for side effects such
+	// as persisting node artifacts into the session.
+	OnEvent func(sessionID string, ev WorkflowEvent)
 }
 
 // NewWorkflowExecutor creates an executor for the given engine and definition.
@@ -95,12 +99,18 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 					events = nil // closed; wait for the outcome below
 					continue
 				}
+				if e.OnEvent != nil {
+					e.OnEvent(rc.SessionID, ev)
+				}
 				if !yieldNodeEvent(execCtx, ev, yield) {
 					return
 				}
 			case out := <-outCh:
 				// Drain any events buffered before completion.
 				for ev := range events {
+					if e.OnEvent != nil {
+						e.OnEvent(rc.SessionID, ev)
+					}
 					if !yieldNodeEvent(execCtx, ev, yield) {
 						return
 					}
@@ -156,10 +166,20 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 	switch ev.Type {
 	case EventWorkflowSuspended:
 		// WAITING_HUMAN maps to the A2A input-required state so clients
-		// know the task is paused awaiting user input.
+		// know the task is paused awaiting user input. The ask_user
+		// metadata mirrors the single-agent AskUser flow so the frontend
+		// renders the inline question box with reply routing.
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateInputRequired, msg)
 		event.SetMeta("node_id", ev.NodeID)
+		event.SetMeta("entry_type", "ask_user")
+		event.SetMeta("message_id", ev.MessageID)
+		if ev.AgentName != "" {
+			event.SetMeta("agent_name", ev.AgentName)
+		}
+		if len(ev.Artifacts) > 0 {
+			event.SetMeta("artifact_files", ev.Artifacts)
+		}
 		return yield(event, nil)
 	case EventWorkflowResumed:
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
@@ -170,6 +190,9 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
 		event.SetMeta("node_id", ev.NodeID)
+		if len(ev.Artifacts) > 0 {
+			event.SetMeta("artifact_files", ev.Artifacts)
+		}
 		return yield(event, nil)
 	default:
 		return true

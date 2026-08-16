@@ -187,6 +187,11 @@ type WorkflowEvent struct {
 	// MessageID carries the deterministic ask_user MessageID
 	// (wf-<run_id>-<node_id>) on EventWorkflowSuspended events.
 	MessageID string
+	// Artifacts lists viewer-facing artifact paths produced or referenced by
+	// the node (e.g. human prompt file references, output_file results).
+	Artifacts []string
+	// AgentName names the workflow agent for chat routing.
+	AgentName string
 	Timestamp time.Time
 }
 

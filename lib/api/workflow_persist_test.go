@@ -147,3 +147,32 @@ func TestAskUserReplyMismatchedMessageIDDoesNotResume(t *testing.T) {
 	_, err = os.Stat(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
 	assert.True(t, os.IsNotExist(err), "artifact must not be written on mismatched reply")
 }
+
+func TestSuspendWorkflowHumanRegistersArtifacts(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-wf-artifacts"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	err := s.suspendWorkflowHuman(workflow.SuspendRequest{
+		RunID:     "run3",
+		SessionID: chatID,
+		NodeID:    "plan_approval",
+		MessageID: "wf-run3-plan_approval",
+		Prompt:    "review /tmp/plan/plan.md",
+		Artifacts: []string{"/tmp/plan/plan.md", "/tmp/plan/review_feedback.md"},
+	})
+	require.NoError(t, err)
+
+	session, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+
+	// Artifacts are registered on the session for the artifact viewer.
+	assert.Equal(t, dbmodels.Artifacts{"/tmp/plan/plan.md", "/tmp/plan/review_feedback.md"}, session.Artifacts)
+
+	// The ask_user message carries the same references for the frontend card.
+	require.Len(t, session.Messages, 1)
+	msg := session.Messages[0]
+	assert.Equal(t, "ask_user", msg.Role)
+	assert.Equal(t, "wf-run3-plan_approval", msg.ID)
+	assert.Equal(t, []string{"/tmp/plan/plan.md", "/tmp/plan/review_feedback.md"}, msg.ArtifactFiles)
+}

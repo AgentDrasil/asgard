@@ -383,39 +383,26 @@ const copyMessage = async (id: string, text: string) => {
                 </span>
               </summary>
               <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
-                <!-- TargetFiles Artifact Card Button -->
+                <!-- TargetFiles Artifact Card (click a file to open it in the artifact viewer) -->
                 <div
                   v-if="getMessageArtifactFiles(msg).length > 0"
-                  class="flex items-center justify-between p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2"
+                  class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2 space-y-1.5"
                 >
-                  <div class="flex items-center gap-2 overflow-hidden">
-                    <span class="text-emerald-400 font-bold text-xs">📄 Target File:</span>
-                    <span
-                      v-if="getMessageArtifactFiles(msg).length === 1"
-                      class="font-mono text-xs text-neutral-300 truncate"
-                      :title="getMessageArtifactFiles(msg)[0]"
-                      >{{ getMessageArtifactFiles(msg)[0] }}</span
-                    >
-                    <span v-else class="font-mono text-xs text-neutral-300">
-                      {{ getMessageArtifactFiles(msg).length }} files
-                    </span>
+                  <div class="text-emerald-400 font-bold text-xs select-none">
+                    📄 Target File{{ getMessageArtifactFiles(msg).length > 1 ? "s" : "" }}:
                   </div>
-                  <button
-                    v-if="getMessageArtifactFiles(msg).length === 1"
-                    @click="emit('open-artifact', getMessageArtifactFiles(msg)[0])"
-                    class="btn btn-xs btn-emerald bg-emerald-600 hover:bg-emerald-500 text-white border-none gap-1 shrink-0 font-medium"
-                  >
-                    <span>Preview Artifact</span>
-                    <span>➔</span>
-                  </button>
-                  <button
-                    v-else
-                    @click="emit('toggle-artifact-drawer')"
-                    class="btn btn-xs btn-emerald bg-emerald-600 hover:bg-emerald-500 text-white border-none gap-1 shrink-0 font-medium"
-                  >
-                    <span>Preview Artifacts</span>
-                    <span>➔</span>
-                  </button>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button
+                      v-for="file in getMessageArtifactFiles(msg)"
+                      :key="file"
+                      @click="emit('open-artifact', file)"
+                      class="btn btn-xs gap-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white border-none font-mono normal-case h-6 min-h-0 px-2 max-w-full"
+                      :title="`Open artifact: ${file}`"
+                    >
+                      <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0" />
+                      <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
+                    </button>
+                  </div>
                 </div>
                 <template
                   v-for="(item, idx) in msg.content.includes(TOOL_ITEM_DELIMITER)
@@ -450,6 +437,28 @@ const copyMessage = async (id: string, text: string) => {
                 class="text-sm font-medium text-base-content whitespace-pre-wrap leading-relaxed"
               >
                 {{ msg.content }}
+              </div>
+
+              <!-- Referenced Artifact Files (click to open in artifact viewer) -->
+              <div v-if="getMessageArtifactFiles(msg).length > 0" class="space-y-1.5 pt-1">
+                <div
+                  class="text-[11px] font-bold uppercase tracking-wider text-base-content/50 select-none"
+                >
+                  Files to review
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="file in getMessageArtifactFiles(msg)"
+                    :key="file"
+                    @click="emit('open-artifact', file)"
+                    class="btn btn-xs gap-1.5 bg-base-200/80 hover:bg-warning/20 border border-warning/40 text-base-content font-mono normal-case h-7 min-h-0 px-2.5 max-w-full"
+                    :title="`Open artifact: ${file}`"
+                  >
+                    <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0 text-warning" />
+                    <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
+                    <span class="text-warning">➔</span>
+                  </button>
+                </div>
               </div>
 
               <!-- Quick Action Option Buttons -->

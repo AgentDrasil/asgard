@@ -143,6 +143,7 @@ export function useChatStream(
                 content: statusText,
                 agentName: agentName,
                 timestamp: Date.now(),
+                ...(artifactFiles ? { artifactFiles } : {}),
               });
             }
             return;

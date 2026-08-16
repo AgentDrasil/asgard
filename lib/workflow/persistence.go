@@ -79,6 +79,9 @@ type SuspendRequest struct {
 	Options []string
 	// AgentName names the workflow agent for chat routing / notifications.
 	AgentName string
+	// Artifacts lists viewer-facing artifact file paths referenced by the
+	// prompt (e.g. the plan/review documents the user is asked to inspect).
+	Artifacts []string
 }
 
 // SuspendHumanFunc delivers the suspension to the user. Returning an error

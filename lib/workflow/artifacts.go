@@ -1,0 +1,105 @@
+package workflow
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// tmpDirRefRe matches `${tmp_dir}/...` references in raw (un-interpolated)
+// node prompts, e.g. `${tmp_dir}/plan/plan.md`.
+var tmpDirRefRe = regexp.MustCompile(`\$\{tmp_dir\}(/[^\s"'` + "`" + `\)\]}>,;]*)`)
+
+// absPathRe matches absolute filesystem paths in interpolated prompt text,
+// e.g. /home/user/tmp/0198a.../plan/plan.md.
+var absPathRe = regexp.MustCompile(`/(?:[A-Za-z0-9._~@+-]+/)*[A-Za-z0-9._~@+-]+`)
+
+// DefaultTmpDir returns the per-run temporary directory for a session:
+// <home>/tmp/<sessionID>, the same host directory the sandbox binds as /tmp
+// (see bwrap.setupTmpDir). This keeps workflow tmp files, sandbox agent
+// output and session cleanup (dbmodels.CleanExpiredSessions) consistent.
+// Falls back to os.TempDir()/<sessionID> when no home dir is resolvable.
+func DefaultTmpDir(sessionID string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, "tmp", sessionID)
+	}
+	return filepath.Join(os.TempDir(), sessionID)
+}
+
+// ExtractArtifactPaths collects artifact file paths referenced by a human
+// node prompt: explicit `${tmp_dir}/...` references from the raw prompt plus
+// absolute paths under the run's tmp/run directories found in the
+// interpolated prompt. Only paths that exist as regular files are returned,
+// in order of first appearance.
+func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) []string {
+	var ordered []string
+	seen := make(map[string]bool)
+	add := func(p string) {
+		p = filepath.Clean(p)
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		ordered = append(ordered, p)
+	}
+
+	for _, m := range tmpDirRefRe.FindAllStringSubmatch(rawPrompt, -1) {
+		add(filepath.Join(tmpDir, m[1]))
+	}
+	for _, m := range absPathRe.FindAllString(interpolatedPrompt, -1) {
+		p := filepath.Clean(strings.TrimRight(m, ".,;:!?"))
+		if isUnderDir(p, tmpDir) || isUnderDir(p, runDir) {
+			add(p)
+		}
+	}
+
+	out := make([]string, 0, len(ordered))
+	for _, p := range ordered {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ViewerArtifactPath translates a host artifact path into the form the
+// workspace file API accepts. Paths under the run's tmp dir (the sandbox /tmp)
+// are presented as /tmp/<rel> so the file endpoint can remap them back to
+// <home>/tmp/<sessionID>/<rel>; other paths pass through unchanged.
+func ViewerArtifactPath(path, tmpDir string) string {
+	if rel, err := filepath.Rel(tmpDir, path); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		return filepath.Join("/tmp", rel)
+	}
+	return path
+}
+
+// ArtifactViewerPaths converts a node result's artifact map (declared name →
+// host path) into a stable, sorted list of viewer-facing paths.
+func ArtifactViewerPaths(artifacts map[string]string, tmpDir string) []string {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(artifacts))
+	for _, p := range artifacts {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, ViewerArtifactPath(p, tmpDir))
+	}
+	return out
+}
+
+func isUnderDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != "" && !strings.HasPrefix(rel, ".."))
+}

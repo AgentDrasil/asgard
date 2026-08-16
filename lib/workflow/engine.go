@@ -189,7 +189,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		return "", false
 	})
 	if tmpDir == "" {
-		tmpDir = filepath.Join(os.TempDir(), rc.SessionID)
+		tmpDir = DefaultTmpDir(rc.SessionID)
 	}
 	if !filepath.IsAbs(tmpDir) {
 		tmpDir = filepath.Join(rc.RunDir, tmpDir)
@@ -221,6 +221,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 		ev.Workflow = defn.Name
 		ev.SessionID = rc.SessionID
+		if ev.AgentName == "" {
+			ev.AgentName = rc.AgentName
+		}
 		rc.EmitEvent(ev)
 	}
 	emit(WorkflowEvent{Type: EventWorkflowStarted, Message: fmt.Sprintf("workflow %s started", defn.Name)})
@@ -287,7 +290,20 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	// evaluateDownstream checks dependents of settled nodes
 	var evaluateDownstream func(settledNodeID string)
 	evaluateDownstream = func(settledNodeID string) {
+		// A condition-false skip is a dead branch end: the branch did no
+		// work, so already-settled dependents (e.g. loop join nodes) must
+		// not be re-triggered — otherwise conditional loops would re-execute
+		// forever. Dependents that never ran are still evaluated normally.
+		skipIsDeadBranch := false
+		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonConditionFalse {
+			skipIsDeadBranch = true
+		}
 		for _, depNode := range dependents[settledNodeID] {
+			if skipIsDeadBranch {
+				if _, settled := results[depNode.ID]; settled {
+					continue
+				}
+			}
 			// 1. Check if any conditional edge from settledNodeID triggered
 			hasMatchingConditional := false
 			for _, cond := range conditionalDeps[depNode.ID] {
@@ -327,7 +343,10 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					}
 				}
 
-				if allUnconditionalSettled || depNode.Join == "always" || depNode.AllowsSkip() {
+				settledRes := results[settledNodeID]
+				settledRan := settledRes != nil && settledRes.Status == StatusSucceeded
+
+				if allUnconditionalSettled || (depNode.Join == "always" && settledRan) {
 					action, reason := EvaluateNodeReadiness(depNode, results)
 					if action == ActionSkip {
 						if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != StatusSkipped {
@@ -527,14 +546,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Int("iteration", executionCount[node.ID]).
 					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, executionCount[node.ID])
 
-				emit(WorkflowEvent{
-					Type:     EventNodeFinished,
-					NodeID:   node.ID,
-					NodeType: node.Type,
-					AgentID:  node.AgentID,
-					Status:   result.Status,
-					Message:  msg,
-				})
+			emit(WorkflowEvent{
+				Type:      EventNodeFinished,
+				NodeID:    node.ID,
+				NodeType:  node.Type,
+				AgentID:   node.AgentID,
+				Status:    result.Status,
+				Message:   msg,
+				Artifacts: ArtifactViewerPaths(result.Artifacts, tmpDir),
+			})
 				evaluateDownstream(node.ID)
 				mu.Unlock()
 

@@ -37,6 +37,14 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 	messageID := HumanMessageID(rc.RunID, node.ID)
 
+	// Collect artifact files referenced by the prompt so the host app can
+	// register them for the session and surface them to the frontend.
+	artifactPaths := ExtractArtifactPaths(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir)
+	artifactViewerPaths := make([]string, 0, len(artifactPaths))
+	for _, p := range artifactPaths {
+		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPath(p, nctx.TmpDir))
+	}
+
 	// Register the waiter before delivering the suspension so a racing
 	// Resume can never fall through to the snapshot re-drive path while a
 	// live worker is about to block.
@@ -58,6 +66,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		Prompt:    prompt,
 		Options:   node.Options,
 		AgentName: rc.AgentName,
+		Artifacts: artifactViewerPaths,
 	}); err != nil {
 		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: delivering human suspension: %w", node.ID, err)}
 	}
@@ -79,12 +88,14 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 
 	emit(WorkflowEvent{
-		Type:      EventWorkflowSuspended,
-		NodeID:    node.ID,
-		NodeType:  NodeTypeHuman,
-		Status:    NodeStatus(RunStatusWaitingHuman),
-		Message:   prompt,
-		MessageID: messageID,
+		Type:       EventWorkflowSuspended,
+		NodeID:     node.ID,
+		NodeType:   NodeTypeHuman,
+		Status:     NodeStatus(RunStatusWaitingHuman),
+		Message:    prompt,
+		MessageID:  messageID,
+		Artifacts:  artifactViewerPaths,
+		AgentName:  rc.AgentName,
 	})
 
 	select {

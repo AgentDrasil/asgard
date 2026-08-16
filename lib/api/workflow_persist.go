@@ -141,8 +141,9 @@ func toDBNodeStates(states map[string]workflow.PersistedNodeState) map[string]db
 }
 
 // suspendWorkflowHuman delivers a human-node suspension to the chat session:
-// it appends the deterministic ask_user message and fires a push notification,
-// mirroring the single-agent AskUser flow.
+// it registers the prompt's artifact files, appends the deterministic ask_user
+// message (with artifact references) and fires a push notification, mirroring
+// the single-agent AskUser flow.
 func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 	if s.repo == nil {
 		return nil
@@ -153,17 +154,41 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 			agentName = session.CurrentAgent
 		}
 	}
+	for _, artifact := range req.Artifacts {
+		if err := s.repo.AppendArtifact(req.SessionID, artifact); err != nil {
+			log.Warn().Err(err).Str("chat_id", req.SessionID).Str("artifact", artifact).Msg("failed to append workflow artifact to repo")
+		}
+	}
 	if err := s.repo.AppendMessage(req.SessionID, dbmodels.ChatMessage{
-		ID:        req.MessageID,
-		Role:      "ask_user",
-		Content:   req.Prompt,
-		AgentName: agentName,
-		Timestamp: time.Now().UnixMilli(),
+		ID:            req.MessageID,
+		Role:          "ask_user",
+		Content:       req.Prompt,
+		AgentName:     agentName,
+		Timestamp:     time.Now().UnixMilli(),
+		ArtifactFiles: req.Artifacts,
 	}); err != nil {
 		return err
 	}
 	s.SendPushNotification(req.SessionID, req.Prompt, agentName)
 	return nil
+}
+
+// handleWorkflowEvent persists side effects of workflow node events. Node
+// artifacts (e.g. command output_file results) are registered on the session
+// so the frontend artifact viewer can list and open them.
+func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent) {
+	if s.repo == nil || sessionID == "" || len(ev.Artifacts) == 0 {
+		return
+	}
+	// Suspended human-node artifacts are registered by suspendWorkflowHuman.
+	if ev.Type == workflow.EventWorkflowSuspended {
+		return
+	}
+	for _, artifact := range ev.Artifacts {
+		if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
+			log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow node artifact to repo")
+		}
+	}
 }
 
 // tryResumeWorkflow routes an ask-user reply to a suspended workflow run for
