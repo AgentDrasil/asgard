@@ -221,7 +221,7 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, string(promptContent), "agents instructions")
 
 	// Verify ending command structure with --session and --prompt
-	expectedEnd := "-- aw agy --model some-model --session my-session-id --prompt some prompt"
+	expectedEnd := "-- aw agy --model some-model --add-tmp-to-dir --session my-session-id --prompt some prompt"
 	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
 	// Test case 2: opencode CLITarget without team

@@ -325,6 +325,9 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 	args = append(args, "aw")
 	args = append(args, target.CLI)
 	args = append(args, "--model", target.Model)
+	if spec != nil {
+		args = append(args, spec.ExtraArgs()...)
+	}
 	if session.IsSome() {
 		sessVal := session.Unwrap()
 		if sessVal != "" {

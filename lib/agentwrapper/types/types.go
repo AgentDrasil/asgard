@@ -24,6 +24,7 @@ type SandboxSpec interface {
 	SkillsMountPath(home string) string
 	MountDirectories(home string) []string
 	AuthDirectory(home string) string
+	ExtraArgs() []string
 }
 
 // CLIClient defines the interface that all CLI agents must implement.
@@ -124,6 +125,9 @@ type PromptOptions struct {
 
 	// Model is the name of the model to select.
 	Model string
+
+	// AddTmpToDir adds /tmp as an additional allowed directory for the agent.
+	AddTmpToDir bool
 
 	// ReportCallback, if non-nil, is invoked for each incremental status update
 	// produced by the agent during execution. It is safe to be nil; callers that

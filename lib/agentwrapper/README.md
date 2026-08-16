@@ -50,6 +50,7 @@ type SandboxSpec interface {
     SkillsMountPath(home string) string
     MountDirectories(home string) []string
     AuthDirectory(home string) string
+    ExtraArgs() []string
 }
 ```
 
@@ -97,6 +98,10 @@ func (c *Client) SystemPromptHeader() string {
     return "## Important Instructions\n..."
 }
 
+func (c *Client) SystemPromptPeerHeader() string {
+    return "## Peer Collaboration Instructions\n..."
+}
+
 func (c *Client) SystemPromptConfigPath(home string) string {
     return home + "/.myagent/SYSTEM.md"
 }
@@ -111,6 +116,10 @@ func (c *Client) MountDirectories(home string) []string {
 
 func (c *Client) AuthDirectory(home string) string {
     return home + "/.myagent"
+}
+
+func (c *Client) ExtraArgs() []string {
+    return nil
 }
 ```
 

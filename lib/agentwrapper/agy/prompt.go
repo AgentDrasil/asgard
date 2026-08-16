@@ -34,8 +34,28 @@ func SplitModelVariant(model string) (string, string) {
 	return model, ""
 }
 
+// buildPromptArgv constructs the command-line arguments for running agy.
+func buildPromptArgv(runDir string, prompt string, opts types.PromptOptions) []string {
+	argv := []string{"agy", "--dangerously-skip-permissions", "--output-format", "stream-json", "--add-dir", runDir}
+	if opts.AddTmpToDir {
+		argv = append(argv, "--add-dir", "/tmp")
+	}
+	if opts.SessionID != "" {
+		argv = append(argv, "--conversation="+opts.SessionID)
+	}
+	if opts.Model != "" {
+		baseModel, effort := SplitModelVariant(opts.Model)
+		argv = append(argv, "--model", baseModel)
+		if effort != "" {
+			argv = append(argv, "--effort", effort)
+		}
+	}
+	argv = append(argv, "--print", prompt)
+	return argv
+}
+
 // Prompt runs `agy --dangerously-skip-permissions --output-format stream-json
-// --add-dir <dir> -p <prompt>` and streams NDJSON events until the process exits.
+// --add-dir <dir> [-p|--print] <prompt>` and streams NDJSON events until the process exits.
 //
 // Compared to the old PTY-based approach, this requires no terminal emulation,
 // no statusline polling, and no transcript file tailing. The agy process
@@ -55,19 +75,13 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if err := ensureWorkspaceTrusted(runDir); err != nil {
 		return nil, fmt.Errorf("ensuring workspace is trusted: %w", err)
 	}
-
-	argv := []string{"agy", "--dangerously-skip-permissions", "--output-format", "stream-json", "--add-dir", runDir}
-	if opts.SessionID != "" {
-		argv = append(argv, "--conversation="+opts.SessionID)
-	}
-	if opts.Model != "" {
-		baseModel, effort := SplitModelVariant(opts.Model)
-		argv = append(argv, "--model", baseModel)
-		if effort != "" {
-			argv = append(argv, "--effort", effort)
+	if opts.AddTmpToDir {
+		if err := ensureWorkspaceTrusted("/tmp"); err != nil {
+			return nil, fmt.Errorf("ensuring /tmp workspace is trusted: %w", err)
 		}
 	}
-	argv = append(argv, "--print", prompt)
+
+	argv := buildPromptArgv(runDir, prompt, opts)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")
 

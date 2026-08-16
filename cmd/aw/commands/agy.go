@@ -25,6 +25,7 @@ var (
 	agySession          string
 	agyUsage            bool
 	agyModel            string
+	agyAddTmpToDir      bool
 	supportedAgyVersion = "1.1.13"
 )
 
@@ -100,6 +101,7 @@ var agyCmd = &cobra.Command{
 			Dir:            dir,
 			SessionID:      agySession,
 			Model:          agyModel,
+			AddTmpToDir:    agyAddTmpToDir,
 			ReportCallback: buildHTTPReporter(),
 		})
 		if err != nil {
@@ -151,6 +153,7 @@ func init() {
 	agyCmd.Flags().StringVarP(&agySession, "session", "s", "", "Session ID to resume")
 	agyCmd.Flags().BoolVar(&agyUsage, "usage", false, "Print token usage information")
 	agyCmd.Flags().StringVarP(&agyModel, "model", "m", "", "Model to select for the session")
+	agyCmd.Flags().BoolVar(&agyAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent")
 }
 
 // agentStatusPayload matches the AgentStatusUpdate struct in lib/api/status_handler.go.

@@ -55,3 +55,8 @@ func (c *Client) MountDirectories(home string) []string {
 func (c *Client) AuthDirectory(home string) string {
 	return home + "/.gemini"
 }
+
+func (c *Client) ExtraArgs() []string {
+	return []string{"--add-tmp-to-dir"}
+}
+

@@ -60,3 +60,8 @@ func (c *Client) MountDirectories(home string) []string {
 func (c *Client) AuthDirectory(home string) string {
 	return home + "/.local/share/opencode"
 }
+
+func (c *Client) ExtraArgs() []string {
+	return nil
+}
+

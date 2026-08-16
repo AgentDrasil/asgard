@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
 )
 
 func TestEnsureWorkspaceTrusted(t *testing.T) {
@@ -86,3 +88,61 @@ func TestSplitModelVariant(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildPromptArgv(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		runDir   string
+		prompt   string
+		opts     types.PromptOptions
+		wantArgv []string
+	}{
+		{
+			name:   "basic options without AddTmpToDir",
+			runDir: "/workspace",
+			prompt: "hello world",
+			opts: types.PromptOptions{
+				SessionID: "sess-123",
+				Model:     "gemini-3.7-flash",
+			},
+			wantArgv: []string{
+				"agy", "--dangerously-skip-permissions", "--output-format", "stream-json",
+				"--add-dir", "/workspace",
+				"--conversation=sess-123",
+				"--model", "gemini-3.7-flash",
+				"--print", "hello world",
+			},
+		},
+		{
+			name:   "with AddTmpToDir enabled",
+			runDir: "/workspace",
+			prompt: "hello world",
+			opts: types.PromptOptions{
+				SessionID:   "sess-123",
+				Model:       "gemini-3.7-flash-high",
+				AddTmpToDir: true,
+			},
+			wantArgv: []string{
+				"agy", "--dangerously-skip-permissions", "--output-format", "stream-json",
+				"--add-dir", "/workspace",
+				"--add-dir", "/tmp",
+				"--conversation=sess-123",
+				"--model", "gemini-3.7-flash",
+				"--effort", "high",
+				"--print", "hello world",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			argv := buildPromptArgv(tt.runDir, tt.prompt, tt.opts)
+			assert.Equal(t, tt.wantArgv, argv)
+		})
+	}
+}
+

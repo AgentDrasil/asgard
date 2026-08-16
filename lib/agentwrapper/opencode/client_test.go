@@ -21,3 +21,11 @@ func TestClient_SystemPromptHeader(t *testing.T) {
 	assert.Contains(t, peerHeader, "/bin/call-peer")
 	assert.Contains(t, peerHeader, "task")
 }
+
+func TestClient_ExtraArgs(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient()
+	assert.Nil(t, client.ExtraArgs())
+}
+
