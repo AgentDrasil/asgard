@@ -40,6 +40,21 @@ const submitInlineReply = async (msgId: string) => {
   }
 };
 
+const parseOptions = (content: string): string[] => {
+  if (!content) return [];
+  const match = content.match(/Options:\s*([^\n\r]+)/i);
+  if (!match || !match[1]) return [];
+  return match[1]
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
+const selectOptionAndReply = (msgId: string, option: string) => {
+  inlineInputMap.value[msgId] = option;
+  submitInlineReply(msgId);
+};
+
 const props = withDefaults(
   defineProps<{
     messages: ChatMessage[];
@@ -435,6 +450,26 @@ const copyMessage = async (id: string, text: string) => {
                 class="text-sm font-medium text-base-content whitespace-pre-wrap leading-relaxed"
               >
                 {{ msg.content }}
+              </div>
+
+              <!-- Quick Action Option Buttons -->
+              <div
+                v-if="
+                  !msg.replied &&
+                  !inlineSubmittedMap[msg.id] &&
+                  parseOptions(msg.content).length > 0
+                "
+                class="flex flex-wrap gap-2 pt-1"
+              >
+                <button
+                  v-for="opt in parseOptions(msg.content)"
+                  :key="opt"
+                  @click="selectOptionAndReply(msg.id, opt)"
+                  class="btn btn-xs btn-outline btn-warning hover:btn-warning font-medium transition-all"
+                  :disabled="inlineSubmittingMap[msg.id]"
+                >
+                  {{ opt }}
+                </button>
               </div>
 
               <!-- Inline Reply Box -->

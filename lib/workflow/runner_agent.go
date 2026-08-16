@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agents/run"
@@ -118,6 +119,13 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 	ctx, cancel := withNodeTimeout(ctx, node)
 	defer cancel()
 
+	log.Info().
+		Str("session_id", nctx.SessionID).
+		Str("node_id", node.ID).
+		Str("agent_id", node.AgentID).
+		Str("policy", node.SessionPolicy).
+		Msgf("[AgentRunner] Starting agent %q for node %q", node.AgentID, node.ID)
+
 	out, err := run.Run(ctx, agent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
 
 	lastContent, sessionID := parseAgentOutput(out)
@@ -126,12 +134,24 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 	}
 
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("session_id", nctx.SessionID).
+			Str("node_id", node.ID).
+			Str("agent_id", node.AgentID).
+			Msgf("[AgentRunner] Agent %q for node %q FAILED: %v", node.AgentID, node.ID, err)
 		return &NodeResult{
 			Status: StatusFailed,
 			Output: lastContent,
 			Error:  fmt.Errorf("agent %s run failed: %w", node.AgentID, err),
 		}, nil
 	}
+
+	log.Info().
+		Str("session_id", nctx.SessionID).
+		Str("node_id", node.ID).
+		Str("agent_id", node.AgentID).
+		Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully", node.AgentID, node.ID)
 	return &NodeResult{Status: StatusSucceeded, Output: lastContent}, nil
 }
 

@@ -242,9 +242,7 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 	deps := make(map[string][]string, len(d.Nodes))
 	for _, node := range d.Nodes {
 		for _, dep := range node.Depends {
-			if dep.When == "" {
-				deps[node.ID] = append(deps[node.ID], dep.NodeID)
-			}
+			deps[node.ID] = append(deps[node.ID], dep.NodeID)
 		}
 	}
 

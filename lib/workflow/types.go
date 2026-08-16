@@ -180,6 +180,7 @@ type WorkflowEvent struct {
 	SessionID  string
 	NodeID     string
 	NodeType   NodeType
+	AgentID    string
 	Status     NodeStatus
 	SkipReason SkipReason
 	Message    string

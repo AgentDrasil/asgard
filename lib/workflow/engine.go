@@ -229,11 +229,6 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 	var mu sync.Mutex
 	results := make(map[string]*NodeResult, len(defn.Nodes))
-	dones := make(map[string]chan struct{}, len(defn.Nodes))
-	for _, node := range defn.Nodes {
-		dones[node.ID] = make(chan struct{})
-	}
-	// Seed restored node results: their workers settle immediately.
 	for id, res := range rc.SeedNodes {
 		results[id] = res
 	}
@@ -245,97 +240,323 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		return toPersistedStates(results)
 	}
 
-	for _, node := range defn.Nodes {
-		g.Go(func() error {
-			defer close(dones[node.ID])
+	const maxNodeExecutions = 100
+	executionCount := make(map[string]int, len(defn.Nodes))
 
-			if _, restored := rc.SeedNodes[node.ID]; restored {
-				return nil
+	nodeByID := make(map[string]*NodeSpec, len(defn.Nodes))
+	for _, n := range defn.Nodes {
+		nodeByID[n.ID] = n
+	}
+
+	// Classify dependencies
+	unconditionalDeps := make(map[string][]string, len(defn.Nodes))
+	conditionalDeps := make(map[string][]NodeDependency, len(defn.Nodes))
+	dependents := make(map[string][]*NodeSpec, len(defn.Nodes))
+
+	for _, node := range defn.Nodes {
+		for _, dep := range node.Depends {
+			dependents[dep.NodeID] = append(dependents[dep.NodeID], node)
+			if dep.When != "" {
+				conditionalDeps[node.ID] = append(conditionalDeps[node.ID], dep)
+			} else {
+				unconditionalDeps[node.ID] = append(unconditionalDeps[node.ID], dep.NodeID)
+			}
+		}
+	}
+
+	readyQueue := make([]string, 0, len(defn.Nodes))
+	running := make(map[string]bool)
+	eventCh := make(chan struct{}, 100)
+
+	enqueue := func(nodeID string) {
+		if running[nodeID] {
+			return
+		}
+		for _, id := range readyQueue {
+			if id == nodeID {
+				return
+			}
+		}
+		if executionCount[nodeID] >= maxNodeExecutions {
+			log.Warn().Str("node", nodeID).Msg("max execution count reached, skipping loop re-entry")
+			return
+		}
+		readyQueue = append(readyQueue, nodeID)
+	}
+
+	// evaluateDownstream checks dependents of settled nodes
+	var evaluateDownstream func(settledNodeID string)
+	evaluateDownstream = func(settledNodeID string) {
+		for _, depNode := range dependents[settledNodeID] {
+			// 1. Check if any conditional edge from settledNodeID triggered
+			hasMatchingConditional := false
+			for _, cond := range conditionalDeps[depNode.ID] {
+				if cond.NodeID == settledNodeID {
+					match, err := EvaluateSimpleExpr(cond.When, results, nil)
+					if err != nil {
+						log.Warn().Err(err).Str("node", depNode.ID).Msgf("when expression %q evaluation failed", cond.When)
+						match = false
+					}
+					if match {
+						hasMatchingConditional = true
+						break
+					}
+				}
 			}
 
-			// Fork-Join: wait until every direct dependency has settled.
-			for _, dep := range node.Depends {
-				select {
-				case <-dones[dep.NodeID]:
-				case <-gctx.Done():
+			if hasMatchingConditional {
+				enqueue(depNode.ID)
+				continue
+			}
+
+			// 2. Check if settledNodeID is an unconditional parent of depNode
+			isUnconditionalParent := false
+			for _, parentID := range unconditionalDeps[depNode.ID] {
+				if parentID == settledNodeID {
+					isUnconditionalParent = true
+					break
+				}
+			}
+
+			if isUnconditionalParent {
+				allUnconditionalSettled := true
+				for _, parentID := range unconditionalDeps[depNode.ID] {
+					if _, ok := results[parentID]; !ok {
+						allUnconditionalSettled = false
+						break
+					}
+				}
+
+				if allUnconditionalSettled || depNode.Join == "always" || depNode.AllowsSkip() {
+					action, reason := EvaluateNodeReadiness(depNode, results)
+					if action == ActionSkip {
+						if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != StatusSkipped {
+							res := &NodeResult{Status: StatusSkipped, SkipReason: reason}
+							results[depNode.ID] = res
+							log.Info().
+								Str("workflow", defn.Name).
+								Str("session_id", rc.SessionID).
+								Str("node_id", depNode.ID).
+								Str("node_type", string(depNode.Type)).
+								Str("agent_id", depNode.AgentID).
+								Str("skip_reason", string(reason)).
+								Msgf("[Workflow %s] Node %q (type=%s, agent=%s) SKIPPED: %s", defn.Name, depNode.ID, depNode.Type, depNode.AgentID, reason)
+							emit(WorkflowEvent{
+								Type:       EventNodeSkipped,
+								NodeID:     depNode.ID,
+								NodeType:   depNode.Type,
+								AgentID:    depNode.AgentID,
+								Status:     StatusSkipped,
+								SkipReason: reason,
+								Message:    fmt.Sprintf("node %s skipped (%s)", depNode.ID, reason),
+							})
+							evaluateDownstream(depNode.ID)
+						}
+					} else {
+						enqueue(depNode.ID)
+					}
+				}
+			} else if len(unconditionalDeps[depNode.ID]) == 0 {
+				// Node has ONLY conditional dependencies. If all conditional parents have settled and none matched:
+				allConditionalSettled := true
+				for _, cond := range conditionalDeps[depNode.ID] {
+					if _, ok := results[cond.NodeID]; !ok {
+						allConditionalSettled = false
+						break
+					}
+				}
+				if allConditionalSettled {
+					if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != StatusSkipped {
+						res := &NodeResult{Status: StatusSkipped, SkipReason: SkipReasonConditionFalse}
+						results[depNode.ID] = res
+						log.Info().
+							Str("workflow", defn.Name).
+							Str("session_id", rc.SessionID).
+							Str("node_id", depNode.ID).
+							Str("node_type", string(depNode.Type)).
+							Str("agent_id", depNode.AgentID).
+							Str("skip_reason", string(SkipReasonConditionFalse)).
+							Msgf("[Workflow %s] Node %q (type=%s, agent=%s) SKIPPED: %s", defn.Name, depNode.ID, depNode.Type, depNode.AgentID, SkipReasonConditionFalse)
+						emit(WorkflowEvent{
+							Type:       EventNodeSkipped,
+							NodeID:     depNode.ID,
+							NodeType:   depNode.Type,
+							AgentID:    depNode.AgentID,
+							Status:     StatusSkipped,
+							SkipReason: SkipReasonConditionFalse,
+							Message:    fmt.Sprintf("node %s skipped (%s)", depNode.ID, SkipReasonConditionFalse),
+						})
+						evaluateDownstream(depNode.ID)
+					}
+				}
+			}
+		}
+	}
+
+	// Initial seeds & roots
+	mu.Lock()
+	if len(rc.SeedNodes) > 0 {
+		for id := range rc.SeedNodes {
+			evaluateDownstream(id)
+		}
+	} else {
+		for _, node := range defn.Nodes {
+			if len(node.Depends) == 0 || (len(unconditionalDeps[node.ID]) == 0 && len(conditionalDeps[node.ID]) == 0) {
+				enqueue(node.ID)
+			}
+		}
+	}
+	mu.Unlock()
+
+	// Scheduling Loop
+	for gctx.Err() == nil {
+		mu.Lock()
+		toLaunch := make([]string, len(readyQueue))
+		copy(toLaunch, readyQueue)
+		readyQueue = readyQueue[:0]
+
+		for _, nodeID := range toLaunch {
+			running[nodeID] = true
+			executionCount[nodeID]++
+			node := nodeByID[nodeID]
+
+			g.Go(func() error {
+				mu.Lock()
+				upstreams := make(map[string]*NodeResult, len(results))
+				for k, v := range results {
+					upstreams[k] = v
+				}
+				mu.Unlock()
+
+				action, reason := EvaluateNodeReadiness(node, upstreams)
+				if action == ActionSkip {
+					mu.Lock()
+					res := &NodeResult{Status: StatusSkipped, SkipReason: reason}
+					results[node.ID] = res
+					delete(running, node.ID)
+					log.Info().
+						Str("workflow", defn.Name).
+						Str("session_id", rc.SessionID).
+						Str("node_id", node.ID).
+						Str("node_type", string(node.Type)).
+						Str("agent_id", node.AgentID).
+						Str("skip_reason", string(reason)).
+						Msgf("[Workflow %s] Node %q (type=%s, agent=%s) SKIPPED: %s", defn.Name, node.ID, node.Type, node.AgentID, reason)
+					emit(WorkflowEvent{
+						Type:       EventNodeSkipped,
+						NodeID:     node.ID,
+						NodeType:   node.Type,
+						AgentID:    node.AgentID,
+						Status:     StatusSkipped,
+						SkipReason: reason,
+						Message:    fmt.Sprintf("node %s skipped (%s)", node.ID, reason),
+					})
+					evaluateDownstream(node.ID)
+					mu.Unlock()
+					select {
+					case eventCh <- struct{}{}:
+					default:
+					}
 					return nil
 				}
-			}
-			if gctx.Err() != nil {
-				return nil
-			}
 
-			mu.Lock()
-			upstreams := make(map[string]*NodeResult, len(results))
-			for k, v := range results {
-				upstreams[k] = v
-			}
-			mu.Unlock()
+				log.Info().
+					Str("workflow", defn.Name).
+					Str("session_id", rc.SessionID).
+					Str("node_id", node.ID).
+					Str("node_type", string(node.Type)).
+					Str("agent_id", node.AgentID).
+					Int("iteration", executionCount[node.ID]).
+					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) STARTED (iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, executionCount[node.ID])
 
-			action, reason := EvaluateNodeReadiness(node, upstreams)
-			if action == ActionSkip {
-				res := &NodeResult{Status: StatusSkipped, SkipReason: reason}
-				mu.Lock()
-				results[node.ID] = res
-				mu.Unlock()
 				emit(WorkflowEvent{
-					Type:       EventNodeSkipped,
-					NodeID:     node.ID,
-					NodeType:   node.Type,
-					Status:     StatusSkipped,
-					SkipReason: reason,
-					Message:    fmt.Sprintf("node %s skipped (%s)", node.ID, reason),
+					Type:     EventNodeStarted,
+					NodeID:   node.ID,
+					NodeType: node.Type,
+					AgentID:  node.AgentID,
+					Status:   StatusRunning,
+					Message:  fmt.Sprintf("node %s started", node.ID),
 				})
-				return nil
-			}
 
-			emit(WorkflowEvent{Type: EventNodeStarted, NodeID: node.ID, NodeType: node.Type, Status: StatusRunning, Message: fmt.Sprintf("node %s started", node.ID)})
-
-			nctx := &NodeContext{
-				SessionID:    rc.SessionID,
-				RunDir:       rc.RunDir,
-				TmpDir:       tmpDir,
-				Input:        rc.Input,
-				Defn:         defn,
-				Node:         node,
-				Upstreams:    upstreams,
-				EventEmitter: emit,
-				Values:       values,
-			}
-
-			var result *NodeResult
-			var err error
-			if node.Type == NodeTypeHuman {
-				result = e.runHumanNode(gctx, rc, nctx, store, dagSpec, snapshotStates)
-			} else {
-				runner, ok := e.registry.Get(node.Type)
-				if !ok {
-					err = fmt.Errorf("no runner registered for node type %q", node.Type)
-				} else {
-					result, err = runner.Run(gctx, nctx)
+				nctx := &NodeContext{
+					SessionID:    rc.SessionID,
+					RunDir:       rc.RunDir,
+					TmpDir:       tmpDir,
+					Input:        rc.Input,
+					Defn:         defn,
+					Node:         node,
+					Upstreams:    upstreams,
+					EventEmitter: emit,
+					Values:       values,
 				}
-			}
-			result = normalizeResult(result, err)
 
-			mu.Lock()
-			results[node.ID] = result
-			mu.Unlock()
+				var result *NodeResult
+				var err error
+				if node.Type == NodeTypeHuman {
+					result = e.runHumanNode(gctx, rc, nctx, store, dagSpec, snapshotStates)
+				} else {
+					runner, ok := e.registry.Get(node.Type)
+					if !ok {
+						err = fmt.Errorf("no runner registered for node type %q", node.Type)
+					} else {
+						result, err = runner.Run(gctx, nctx)
+					}
+				}
+				result = normalizeResult(result, err)
 
-			msg := fmt.Sprintf("node %s %s", node.ID, result.Status)
-			if result.Error != nil {
-				msg = fmt.Sprintf("node %s %s: %v", node.ID, result.Status, result.Error)
-			}
-			emit(WorkflowEvent{
-				Type:     EventNodeFinished,
-				NodeID:   node.ID,
-				NodeType: node.Type,
-				Status:   result.Status,
-				Message:  msg,
+				mu.Lock()
+				results[node.ID] = result
+				delete(running, node.ID)
+				msg := fmt.Sprintf("node %s %s", node.ID, result.Status)
+				if result.Error != nil {
+					msg = fmt.Sprintf("node %s %s: %v", node.ID, result.Status, result.Error)
+				}
+
+				evLog := log.Info()
+				if result.Status == StatusFailed {
+					evLog = log.Error().Err(result.Error)
+				}
+				evLog.
+					Str("workflow", defn.Name).
+					Str("session_id", rc.SessionID).
+					Str("node_id", node.ID).
+					Str("node_type", string(node.Type)).
+					Str("agent_id", node.AgentID).
+					Str("status", string(result.Status)).
+					Int("exit_code", result.ExitCode).
+					Int("iteration", executionCount[node.ID]).
+					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, executionCount[node.ID])
+
+				emit(WorkflowEvent{
+					Type:     EventNodeFinished,
+					NodeID:   node.ID,
+					NodeType: node.Type,
+					AgentID:  node.AgentID,
+					Status:   result.Status,
+					Message:  msg,
+				})
+				evaluateDownstream(node.ID)
+				mu.Unlock()
+
+				select {
+				case eventCh <- struct{}{}:
+				default:
+				}
+				return nil
 			})
-			// Node-level failures are recorded in results only; returning nil
-			// keeps the errgroup context alive so sibling nodes keep running.
-			return nil
-		})
+		}
+
+		idle := len(readyQueue) == 0 && len(running) == 0
+		mu.Unlock()
+
+		if idle {
+			break
+		}
+
+		select {
+		case <-eventCh:
+		case <-gctx.Done():
+		}
 	}
 
 	_ = g.Wait()
