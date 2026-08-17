@@ -48,17 +48,17 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
 	}
 
-	workflowEngine, err := newWorkflowEngine(conf)
+	s := &Server{
+		conf:        conf,
+		repo:        repo,
+		ttydManager: ttydMgr,
+	}
+
+	workflowEngine, err := newWorkflowEngine(conf, s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
 	}
-
-	s := &Server{
-		conf:           conf,
-		repo:           repo,
-		ttydManager:    ttydMgr,
-		workflowEngine: workflowEngine,
-	}
+	s.workflowEngine = workflowEngine
 
 	if repo != nil {
 		workflowEngine.SetRunStore(newWorkflowRunStore(dbmodels.NewWorkflowRunRepository(dbConn)))

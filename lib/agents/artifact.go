@@ -57,6 +57,11 @@ func IsArtifact(targetPath string, config *AgentConfig, workspaceDir string) boo
 		}
 	}
 
+	// If path is outside the workspace and is under sandbox /tmp/ or .tmp/, it is always an artifact.
+	if cleanTarget == "/tmp" || strings.HasPrefix(cleanTarget, "/tmp/") || cleanTarget == ".tmp" || strings.HasPrefix(cleanTarget, ".tmp/") {
+		return true
+	}
+
 	// Secondary: target outside the workspace, but under a configured RW mount or
 	// RunDir -> auxiliary artifact output area.
 	if config != nil {

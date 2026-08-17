@@ -6,18 +6,13 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 // AgentStatusUpdate is the JSON payload posted by aw to the internal status
 // endpoint whenever the agent produces an incremental transcript update.
-type AgentStatusUpdate struct {
-	ChatID    string         `json:"chat_id"`
-	StepIndex int            `json:"step_index"`
-	Source    string         `json:"source"`
-	EntryType string         `json:"entry_type"`
-	Content   string         `json:"content"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-}
+type AgentStatusUpdate = workflow.AgentStatusUpdate
 
 // statusListenersMu guards statusListeners.
 var statusListenersMu sync.Mutex
@@ -25,12 +20,12 @@ var statusListenersMu sync.Mutex
 // AddStatusListener registers a buffered channel that will receive all
 // AgentStatusUpdate events for the given chatID. The returned cancel function
 // must be called to deregister the channel and free resources.
-func (s *Server) AddStatusListener(chatID string) (<-chan AgentStatusUpdate, func()) {
-	ch := make(chan AgentStatusUpdate, 64)
+func (s *Server) AddStatusListener(chatID string) (<-chan workflow.AgentStatusUpdate, func()) {
+	ch := make(chan workflow.AgentStatusUpdate, 64)
 
 	statusListenersMu.Lock()
 	if s.statusListeners == nil {
-		s.statusListeners = make(map[string][]chan AgentStatusUpdate)
+		s.statusListeners = make(map[string][]chan workflow.AgentStatusUpdate)
 	}
 	s.statusListeners[chatID] = append(s.statusListeners[chatID], ch)
 	statusListenersMu.Unlock()

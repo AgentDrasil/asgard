@@ -39,10 +39,26 @@ const agentStartPrompt = "Read the files your AGENTS.md instructions reference (
 // have updated the referenced files since the previous turn.
 const agentFollowUpPrompt = "This is a follow-up on your existing session. Files referenced by your AGENTS.md instructions may have been updated by other agents since your last turn — re-read them, then follow your instructions for handling this continuation."
 
+// AgentStatusListener can be provided to agentRunner to receive live status updates.
+type AgentStatusListener interface {
+	AddStatusListener(chatID string) (<-chan AgentStatusUpdate, func())
+}
+
+// AgentStatusUpdate mirrors the api.AgentStatusUpdate struct for live streaming.
+type AgentStatusUpdate struct {
+	ChatID    string         `json:"chat_id"`
+	StepIndex int            `json:"step_index"`
+	Source    string         `json:"source"`
+	EntryType string         `json:"entry_type"`
+	Content   string         `json:"content"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 // agentRunner executes agent nodes by invoking CLI agents inside sandboxes.
 type agentRunner struct {
-	loader *agents.Loader
-	conf   *config.Config
+	loader         *agents.Loader
+	conf           *config.Config
+	statusListener AgentStatusListener
 
 	mu     sync.Mutex
 	agents map[string]*agents.Agent
@@ -52,7 +68,12 @@ type agentRunner struct {
 // NewAgentRunner creates the runner for `agent` nodes. The loader resolves
 // agent_id references lazily (and re-resolves after agent reloads on cache miss).
 func NewAgentRunner(loader *agents.Loader, conf *config.Config) NodeRunner {
-	return &agentRunner{loader: loader, conf: conf, agents: make(map[string]*agents.Agent)}
+	return NewAgentRunnerWithListener(loader, conf, nil)
+}
+
+// NewAgentRunnerWithListener creates the runner for `agent` nodes with an optional status listener.
+func NewAgentRunnerWithListener(loader *agents.Loader, conf *config.Config, listener AgentStatusListener) NodeRunner {
+	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agents.Agent)}
 }
 
 func (r *agentRunner) Supports(t NodeType) bool {
@@ -159,7 +180,89 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		Str("policy", node.SessionPolicy).
 		Msgf("[AgentRunner] Starting agent %q for node %q", node.AgentID, node.ID)
 
-	out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
+	var statusCh <-chan AgentStatusUpdate
+	var cancelListener func()
+	if r.statusListener != nil && nctx.SessionID != "" {
+		statusCh, cancelListener = r.statusListener.AddStatusListener(nctx.SessionID)
+		defer cancelListener()
+	}
+
+	type runOutcome struct {
+		out []byte
+		err error
+	}
+	outCh := make(chan runOutcome, 1)
+
+	go func() {
+		out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
+		outCh <- runOutcome{out: out, err: err}
+	}()
+
+	var nodeArtifacts []string
+	seenArtifacts := make(map[string]bool)
+	workspaceDir := nctx.RunDir
+	if runDirOpt.IsSome() {
+		workspaceDir = runDirOpt.Unwrap()
+	}
+
+	var out []byte
+loop:
+	for {
+		select {
+		case update, ok := <-statusCh:
+			if !ok {
+				statusCh = nil
+				continue
+			}
+			var stepArtifacts []string
+			if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
+				for _, tf := range targetFiles {
+					if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
+						vPath := ViewerArtifactPath(tf, nctx.TmpDir)
+						stepArtifacts = append(stepArtifacts, vPath)
+						if !seenArtifacts[vPath] {
+							seenArtifacts[vPath] = true
+							nodeArtifacts = append(nodeArtifacts, vPath)
+						}
+					}
+				}
+			} else if targetFilesAny, ok := update.Metadata["target_files"].([]any); ok {
+				for _, item := range targetFilesAny {
+					if tf, ok := item.(string); ok && tf != "" {
+						if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
+							vPath := ViewerArtifactPath(tf, nctx.TmpDir)
+							stepArtifacts = append(stepArtifacts, vPath)
+							if !seenArtifacts[vPath] {
+								seenArtifacts[vPath] = true
+								nodeArtifacts = append(nodeArtifacts, vPath)
+							}
+						}
+					}
+				}
+			}
+
+			if nctx.EventEmitter != nil {
+				nctx.EventEmitter(WorkflowEvent{
+					Type:      EventNodeStatusUpdate,
+					NodeID:    node.ID,
+					NodeType:  NodeTypeAgent,
+					AgentID:   node.AgentID,
+					AgentName: effectiveAgent.Config.Name,
+					Status:    StatusRunning,
+					Message:   update.Content,
+					EntryType: update.EntryType,
+					Metadata:  update.Metadata,
+					Artifacts: stepArtifacts,
+				})
+			}
+		case outcome := <-outCh:
+			out = outcome.out
+			err = outcome.err
+			break loop
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 
 	lastContent, sessionID := parseAgentOutput(out)
 	if sessionID != "" && node.SessionPolicyInherit() {
@@ -174,9 +277,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 			Str("agent_id", node.AgentID).
 			Msgf("[AgentRunner] Agent %q for node %q FAILED: %v", node.AgentID, node.ID, err)
 		return &NodeResult{
-			Status: StatusFailed,
-			Output: lastContent,
-			Error:  fmt.Errorf("agent %s run failed: %w", node.AgentID, err),
+			Status:    StatusFailed,
+			Output:    lastContent,
+			Artifacts: toArtifactMap(nodeArtifacts),
+			Error:     fmt.Errorf("agent %s run failed: %w", node.AgentID, err),
 		}, nil
 	}
 
@@ -185,7 +289,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
 		Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully", node.AgentID, node.ID)
-	return &NodeResult{Status: StatusSucceeded, Output: lastContent}, nil
+	return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts)}, nil
 }
 
 // agentPromptResult mirrors the JSON structure returned by CLI agents.
@@ -229,4 +333,15 @@ func resolveEffectiveAgent(agent *agents.Agent, nctx *NodeContext) *agents.Agent
 	}
 	effectiveAgent.Config = effectiveConfig
 	return &effectiveAgent
+}
+
+func toArtifactMap(paths []string) map[string]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	m := make(map[string]string, len(paths))
+	for _, p := range paths {
+		m[p] = p
+	}
+	return m
 }

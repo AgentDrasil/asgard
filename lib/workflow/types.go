@@ -170,6 +170,7 @@ type WorkflowEventType string
 const (
 	EventWorkflowStarted   WorkflowEventType = "workflow_started"
 	EventNodeStarted       WorkflowEventType = "node_started"
+	EventNodeStatusUpdate  WorkflowEventType = "node_status_update"
 	EventNodeFinished      WorkflowEventType = "node_finished"
 	EventNodeSkipped       WorkflowEventType = "node_skipped"
 	EventWorkflowSuspended WorkflowEventType = "workflow_suspended"
@@ -188,6 +189,8 @@ type WorkflowEvent struct {
 	Status     NodeStatus
 	SkipReason SkipReason
 	Message    string
+	EntryType  string
+	Metadata   map[string]any
 	// MessageID carries the deterministic ask_user MessageID
 	// (wf-<run_id>-<node_id>) on EventWorkflowSuspended events.
 	MessageID string

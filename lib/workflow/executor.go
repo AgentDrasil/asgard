@@ -192,6 +192,27 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
 		event.SetMeta("node_id", ev.NodeID)
 		return yield(event, nil)
+	case EventNodeStatusUpdate:
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
+		metadata := map[string]any{
+			"node_id":    ev.NodeID,
+			"entry_type": ev.EntryType,
+		}
+		if ev.AgentID != "" {
+			metadata["agent_id"] = ev.AgentID
+		}
+		if ev.AgentName != "" {
+			metadata["agent_name"] = ev.AgentName
+		}
+		for k, v := range ev.Metadata {
+			metadata[k] = v
+		}
+		if len(ev.Artifacts) > 0 {
+			metadata["artifact_files"] = ev.Artifacts
+		}
+		msg.Metadata = metadata
+		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
+		return yield(event, nil)
 	case EventNodeStarted, EventNodeFinished, EventNodeSkipped:
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)

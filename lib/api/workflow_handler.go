@@ -17,11 +17,11 @@ import (
 
 // newWorkflowEngine builds the shared workflow engine with all node runners
 // registered via the IoC registry.
-func newWorkflowEngine(conf *config.Config) (*workflow.Engine, error) {
+func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener) (*workflow.Engine, error) {
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(true))
 	if conf != nil {
-		registry.Register(workflow.NewAgentRunner(agents.NewLoader(conf.AgentDir), conf))
+		registry.Register(workflow.NewAgentRunnerWithListener(agents.NewLoader(conf.AgentDir), conf, statusListener))
 		if conf.GeminiAPIKey != "" {
 			client, err := llm.NewClient(context.Background(), conf.GeminiAPIKey)
 			if err != nil {
@@ -45,7 +45,7 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 	engine := s.workflowEngine
 	if engine == nil {
 		var err error
-		engine, err = newWorkflowEngine(s.conf)
+		engine, err = newWorkflowEngine(s.conf, s)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
 			return nil, nil

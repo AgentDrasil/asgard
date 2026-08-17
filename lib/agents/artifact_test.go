@@ -62,6 +62,12 @@ func TestIsArtifact(t *testing.T) {
 		assert.False(t, IsArtifact("README.md", config, workspaceDir))
 	})
 
+	t.Run("Sandbox Tmp Files", func(t *testing.T) {
+		assert.True(t, IsArtifact("/tmp/intend.md", config, workspaceDir))
+		assert.True(t, IsArtifact("/tmp/plan/plan.md", config, workspaceDir))
+		assert.True(t, IsArtifact(".tmp/intend.md", config, workspaceDir))
+	})
+
 	t.Run("Empty target path", func(t *testing.T) {
 		assert.False(t, IsArtifact("", config, workspaceDir))
 	})

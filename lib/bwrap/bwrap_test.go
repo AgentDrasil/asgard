@@ -114,13 +114,13 @@ func TestBuildSystemPrompt(t *testing.T) {
 				"call-peer",
 			},
 		},
-	{
-		name:         "unknown CLI without AGENTS.md returns empty",
-		cli:          "unknown",
-		agentsMDPath: "",
-		hasTeam:      true,
-		wantContains: nil,
-	},
+		{
+			name:         "unknown CLI without AGENTS.md returns empty",
+			cli:          "unknown",
+			agentsMDPath: "",
+			hasTeam:      true,
+			wantContains: nil,
+		},
 	}
 
 	for _, tt := range tests {

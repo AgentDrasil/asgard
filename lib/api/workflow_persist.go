@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -185,6 +186,36 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	}
 	// Suspended human-node artifacts are registered by suspendWorkflowHuman.
 	if ev.Type == workflow.EventWorkflowSuspended {
+		return
+	}
+	if ev.Type == workflow.EventNodeStatusUpdate {
+		for _, artifact := range ev.Artifacts {
+			if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow status artifact to repo")
+			}
+		}
+		if ev.Message != "" && ev.EntryType != "agent_response" {
+			role := ev.EntryType
+			if role == "" || role == "other" {
+				role = "activity"
+			}
+			stepIdx := 0
+			if idx, ok := ev.Metadata["step_index"].(int); ok {
+				stepIdx = idx
+			}
+			targetFiles := toStringSlice(ev.Metadata["target_files"])
+			_ = s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+				ID:            fmt.Sprintf("wf-step-%s-%d-%d", ev.NodeID, time.Now().UnixMilli(), stepIdx),
+				Role:          role,
+				Content:       ev.Message,
+				AgentName:     ev.AgentName,
+				Timestamp:     time.Now().UnixMilli(),
+				ActivityType:  strings.ToUpper(role),
+				StepIndex:     stepIdx,
+				TargetFiles:   targetFiles,
+				ArtifactFiles: ev.Artifacts,
+			})
+		}
 		return
 	}
 	for _, artifact := range ev.Artifacts {
