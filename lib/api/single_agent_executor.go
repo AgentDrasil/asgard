@@ -192,10 +192,11 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.Execu
 
 		// ── Subscribe to status updates for this chat ─────────────────────────
 		// statusCh receives incremental AgentStatusUpdate events while run.Run executes.
+		// nil match: a plain chat has a single agent, so every update is ours.
 		var statusCh <-chan AgentStatusUpdate
 		var cancelListener func()
 		if e.server != nil && e.conf != nil {
-			statusCh, cancelListener = e.server.AddStatusListener(chatID)
+			statusCh, cancelListener = e.server.AddStatusListener(chatID, nil)
 			defer cancelListener()
 		}
 

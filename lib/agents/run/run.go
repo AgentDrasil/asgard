@@ -68,8 +68,18 @@ type RunResult struct {
 	Err    error
 }
 
+// StatusScope identifies the workflow node invocation that started an agent
+// run. It is injected into the sandbox as ASGARD_NODE_ID / ASGARD_RUN_TOKEN so
+// aw can echo them back in status updates, letting the server attribute each
+// update to the right node when parallel nodes share a chat ID. The zero value
+// (plain single-agent chats) injects nothing.
+type StatusScope struct {
+	NodeID   string
+	RunToken string
+}
+
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
-func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, conf *config.Config) ([]byte, error) {
+func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -93,6 +103,14 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 
 	agentSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
 	cmdSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
+	if statusScope.NodeID != "" {
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_NODE_ID="+statusScope.NodeID)
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_NODE_ID="+statusScope.NodeID)
+	}
+	if statusScope.RunToken != "" {
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
+	}
 	if agent != nil {
 		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
 		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
@@ -201,7 +219,7 @@ const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic 
 // It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
 // If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
 // If selected model has <= 0 quota, it returns an error immediately with NO fallback.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, conf *config.Config) ([]byte, error) {
+func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
@@ -247,5 +265,5 @@ func Run(ctx context.Context, agent *agents.Agent, prompt string, session option
 		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, conf)
+	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, conf)
 }

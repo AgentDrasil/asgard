@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -40,13 +41,21 @@ const agentStartPrompt = "Read the files your AGENTS.md instructions reference (
 const agentFollowUpPrompt = "This is a follow-up on your existing session. Files referenced by your AGENTS.md instructions may have been updated by other agents since your last turn — re-read them, then follow your instructions for handling this continuation."
 
 // AgentStatusListener can be provided to agentRunner to receive live status updates.
+// The match predicate, when non-nil, restricts delivery to updates it accepts;
+// nil delivers every update for the chatID.
 type AgentStatusListener interface {
-	AddStatusListener(chatID string) (<-chan AgentStatusUpdate, func())
+	AddStatusListener(chatID string, match func(AgentStatusUpdate) bool) (<-chan AgentStatusUpdate, func())
 }
 
-// AgentStatusUpdate mirrors the api.AgentStatusUpdate struct for live streaming.
+// AgentStatusUpdate is the JSON payload posted by aw to the internal status
+// endpoint whenever the agent produces an incremental transcript update.
+// NodeID and RunToken identify the invoking workflow node invocation: parallel
+// nodes in the same session share ChatID, so receivers use RunToken to
+// attribute each update to the node invocation that produced it.
 type AgentStatusUpdate struct {
 	ChatID    string         `json:"chat_id"`
+	NodeID    string         `json:"node_id,omitempty"`
+	RunToken  string         `json:"run_token,omitempty"`
 	StepIndex int            `json:"step_index"`
 	Source    string         `json:"source"`
 	EntryType string         `json:"entry_type"`
@@ -180,10 +189,17 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		Str("policy", node.SessionPolicy).
 		Msgf("[AgentRunner] Starting agent %q for node %q", node.AgentID, node.ID)
 
+	// runToken uniquely identifies this node invocation so that, when parallel
+	// agent nodes share a session, each runner only consumes the status updates
+	// its own sandbox reported. It is injected into the sandbox via env and
+	// echoed back by aw in every update payload.
+	runToken := uuid.Must(uuid.NewV7()).String()
 	var statusCh <-chan AgentStatusUpdate
 	var cancelListener func()
 	if r.statusListener != nil && nctx.SessionID != "" {
-		statusCh, cancelListener = r.statusListener.AddStatusListener(nctx.SessionID)
+		statusCh, cancelListener = r.statusListener.AddStatusListener(nctx.SessionID, func(update AgentStatusUpdate) bool {
+			return update.RunToken == runToken
+		})
 		defer cancelListener()
 	}
 
@@ -194,7 +210,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 	outCh := make(chan runOutcome, 1)
 
 	go func() {
-		out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, r.conf)
+		out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken}, r.conf)
 		outCh <- runOutcome{out: out, err: err}
 	}()
 
@@ -212,6 +228,11 @@ loop:
 		case update, ok := <-statusCh:
 			if !ok {
 				statusCh = nil
+				continue
+			}
+			// Defensive: the server-side match should already filter, but never
+			// attribute another node invocation's update to this node.
+			if update.RunToken != runToken {
 				continue
 			}
 			var stepArtifacts []string

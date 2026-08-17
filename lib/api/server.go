@@ -31,7 +31,7 @@ type Server struct {
 	agents          []*agents.Agent
 	mux             *http.ServeMux
 	repo            *dbmodels.SessionRepository
-	statusListeners map[string][]chan AgentStatusUpdate
+	statusListeners map[string][]*statusListener
 	ttydManager     *ttyd.Manager
 	workflowEngine  *workflow.Engine
 }

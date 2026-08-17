@@ -156,9 +156,11 @@ func init() {
 	agyCmd.Flags().BoolVar(&agyAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent")
 }
 
-// agentStatusPayload matches the AgentStatusUpdate struct in lib/api/status_handler.go.
+// agentStatusPayload matches the AgentStatusUpdate struct in lib/workflow/runner_agent.go.
 type agentStatusPayload struct {
 	ChatID    string         `json:"chat_id"`
+	NodeID    string         `json:"node_id,omitempty"`
+	RunToken  string         `json:"run_token,omitempty"`
 	StepIndex int            `json:"step_index"`
 	Source    string         `json:"source"`
 	EntryType string         `json:"entry_type"`
@@ -175,11 +177,18 @@ func buildHTTPReporter() types.ReportFunc {
 		return nil
 	}
 	chatID := os.Getenv("ASGARD_CHAT_ID")
+	// ASGARD_NODE_ID / ASGARD_RUN_TOKEN are set for workflow node invocations so
+	// the server can attribute this update to the right node; plain chats leave
+	// them unset and the fields are omitted.
+	nodeID := os.Getenv("ASGARD_NODE_ID")
+	runToken := os.Getenv("ASGARD_RUN_TOKEN")
 	client := &http.Client{}
 
 	return func(stepIndex int, source, entryType, content string, metadata map[string]any) {
 		payload := agentStatusPayload{
 			ChatID:    chatID,
+			NodeID:    nodeID,
+			RunToken:  runToken,
 			StepIndex: stepIndex,
 			Source:    source,
 			EntryType: entryType,
