@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +29,22 @@ func NewDB(conf *config.Config) (*gorm.DB, error) {
 	}
 
 	if conf.DB == "sqlite" {
-		return gorm.Open(sqlite.Open(conf.DSN), config)
+		dsn := conf.DSN
+		if !strings.Contains(dsn, "_busy_timeout") && !strings.Contains(dsn, "_timeout") {
+			separator := "?"
+			if strings.Contains(dsn, "?") {
+				separator = "&"
+			}
+			dsn = fmt.Sprintf("%s%s_busy_timeout=10000&_journal_mode=WAL&_sync=NORMAL", dsn, separator)
+		}
+		db, err := gorm.Open(sqlite.Open(dsn), config)
+		if err != nil {
+			return nil, err
+		}
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.SetMaxOpenConns(1)
+		}
+		return db, nil
 	} else { // pg
 		return gorm.Open(postgres.Open(conf.DSN), config)
 	}
