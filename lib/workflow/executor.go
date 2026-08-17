@@ -207,7 +207,7 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 			event.SetMeta("agent_name", ev.AgentName)
 		}
 		if len(ev.Artifacts) > 0 {
-			event.SetMeta("artifact_files", ev.Artifacts)
+			event.SetMeta("artifact_files", ToAnySlice(ev.Artifacts))
 		}
 		return yield(event, nil)
 	case EventWorkflowResumed:
@@ -231,9 +231,9 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 			metadata[k] = v
 		}
 		if len(ev.Artifacts) > 0 {
-			metadata["artifact_files"] = ev.Artifacts
+			metadata["artifact_files"] = ToAnySlice(ev.Artifacts)
 		}
-		msg.Metadata = metadata
+		msg.Metadata = SanitizeMetadata(metadata)
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
 		return yield(event, nil)
 	case EventNodeStarted, EventNodeFinished, EventNodeSkipped:
@@ -251,7 +251,7 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 			event.SetMeta("entry_type", "error")
 		}
 		if len(ev.Artifacts) > 0 {
-			event.SetMeta("artifact_files", ev.Artifacts)
+			event.SetMeta("artifact_files", ToAnySlice(ev.Artifacts))
 		}
 		if !yield(event, nil) {
 			return false
@@ -272,9 +272,9 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 				metadata["agent_name"] = ev.AgentName
 			}
 			if len(ev.Artifacts) > 0 {
-				metadata["artifact_files"] = ev.Artifacts
+				metadata["artifact_files"] = ToAnySlice(ev.Artifacts)
 			}
-			outMsg.Metadata = metadata
+			outMsg.Metadata = SanitizeMetadata(metadata)
 			return yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, outMsg), nil)
 		}
 		return true

@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/lib/llm"
+	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 // SingleAgentExecutor handles responding to and processing single-agent tasks,
@@ -302,7 +303,7 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 		update.Metadata = make(map[string]any)
 	}
 	if len(artifactFiles) > 0 {
-		update.Metadata["artifact_files"] = artifactFiles
+		update.Metadata["artifact_files"] = workflow.ToAnySlice(artifactFiles)
 	}
 	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
 		ID:            fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),

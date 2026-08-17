@@ -326,3 +326,56 @@ nodes:
 		})
 	}
 }
+
+func TestAgentRunner_SetAgents(t *testing.T) {
+	t.Parallel()
+
+	runner := NewAgentRunnerWithListener(nil, nil, nil)
+	agentRunnerInstance, ok := runner.(*agentRunner)
+	require.True(t, ok)
+
+	testAgents := []*agents.Agent{
+		{
+			Config: agents.AgentConfig{
+				ID:   "test-agent-1",
+				Name: "Test Agent 1",
+			},
+		},
+		{
+			Config: agents.AgentConfig{
+				ID:   "test-agent-2",
+				Name: "Test Agent 2",
+			},
+		},
+	}
+
+	agentRunnerInstance.SetAgents(testAgents)
+
+	a1, err := agentRunnerInstance.lookup("test-agent-1")
+	require.NoError(t, err)
+	assert.Equal(t, "test-agent-1", a1.Config.ID)
+
+	a2, err := agentRunnerInstance.lookup("test-agent-2")
+	require.NoError(t, err)
+	assert.Equal(t, "test-agent-2", a2.Config.ID)
+
+	_, err = agentRunnerInstance.lookup("non-existent")
+	assert.ErrorContains(t, err, "agent \"non-existent\" not found")
+
+	// Test Engine.SetAgents
+	reg := NewNodeRunnerRegistry()
+	reg.Register(runner)
+	eng := NewEngine(reg)
+	eng.SetAgents([]*agents.Agent{
+		{
+			Config: agents.AgentConfig{
+				ID:   "updated-agent",
+				Name: "Updated",
+			},
+		},
+	})
+
+	updated, err := agentRunnerInstance.lookup("updated-agent")
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", updated.Config.Name)
+}

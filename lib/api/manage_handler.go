@@ -36,6 +36,9 @@ func (s *Server) reload() error {
 
 	s.mu.Lock()
 	s.agents = agents
+	if s.workflowEngine != nil {
+		s.workflowEngine.SetAgents(agents)
+	}
 	s.mux = s.buildMuxLocked()
 	s.mu.Unlock()
 

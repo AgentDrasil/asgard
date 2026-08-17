@@ -89,6 +89,19 @@ func (r *agentRunner) Supports(t NodeType) bool {
 	return t == NodeTypeAgent
 }
 
+// SetAgents preloads or refreshes the agent cache in the runner.
+func (r *agentRunner) SetAgents(agentList []*agents.Agent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.agents = make(map[string]*agents.Agent, len(agentList))
+	for _, a := range agentList {
+		if a != nil && a.Config.ID != "" {
+			r.agents[a.Config.ID] = a
+		}
+	}
+	r.loaded = true
+}
+
 // lookup finds an agent by ID, loading the agent directory on first use.
 func (r *agentRunner) lookup(agentID string) (*agents.Agent, error) {
 	r.mu.Lock()
@@ -266,7 +279,7 @@ loop:
 				if update.Metadata == nil {
 					update.Metadata = make(map[string]any)
 				}
-				update.Metadata["artifact_files"] = stepArtifacts
+				update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
 			}
 
 			if nctx.EventEmitter != nil {
@@ -279,7 +292,7 @@ loop:
 					Status:    StatusRunning,
 					Message:   update.Content,
 					EntryType: update.EntryType,
-					Metadata:  update.Metadata,
+					Metadata:  SanitizeMetadata(update.Metadata),
 					Artifacts: stepArtifacts,
 				})
 			}

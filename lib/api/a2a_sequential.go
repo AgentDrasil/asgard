@@ -13,6 +13,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/lib/agents/run"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 // seqRunResult carries the output of a sequential run.Run call.
@@ -108,7 +109,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 			for k, v := range update.Metadata {
 				metadata[k] = v
 			}
-			updateMsg.Metadata = metadata
+			updateMsg.Metadata = workflow.SanitizeMetadata(metadata)
 			evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
 			if !yield(evt, nil) {
 				return
@@ -178,6 +179,6 @@ func (e *SingleAgentExecutor) handleFinalResult(
 		meta["input_tokens"] = inputTokens
 		meta["max_tokens"] = maxTokens
 	}
-	respMsg.Metadata = meta
+	respMsg.Metadata = workflow.SanitizeMetadata(meta)
 	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
 }

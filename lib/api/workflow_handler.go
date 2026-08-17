@@ -55,6 +55,9 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
 			return nil, nil
 		}
+		if len(s.agents) > 0 {
+			engine.SetAgents(s.agents)
+		}
 	}
 
 	executor := workflow.NewWorkflowExecutor(engine, defn)
