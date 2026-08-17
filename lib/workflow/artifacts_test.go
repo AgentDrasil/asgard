@@ -49,6 +49,8 @@ func TestViewerArtifactPath(t *testing.T) {
 
 	assert.Equal(t, "/tmp/plan/plan.md", ViewerArtifactPath(filepath.Join(tmpDir, "plan", "plan.md"), tmpDir))
 	assert.Equal(t, "/tmp/decision.txt", ViewerArtifactPath(filepath.Join(tmpDir, "decision.txt"), tmpDir))
+	assert.Equal(t, "/tmp/plan/step-4.description.md", ViewerArtifactPath(".tmp/plan/step-4.description.md", tmpDir))
+	assert.Equal(t, "/tmp/intend.md", ViewerArtifactPath("/tmp/intend.md", tmpDir))
 
 	outside := filepath.Join(t.TempDir(), "report.md")
 	assert.Equal(t, outside, ViewerArtifactPath(outside, tmpDir))

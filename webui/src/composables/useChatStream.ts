@@ -19,6 +19,10 @@ export function useChatStream(
 ) {
   const loading = ref(false);
   const isStreaming = ref(false);
+  // Session the active stream belongs to; null when idle. Used to scope UI
+  // updates (messages, error cards, labels) to that session so switching to
+  // another session mid-stream neither blocks it nor pollutes its view.
+  const streamingSessionId = ref<string | null>(null);
   // Label of the sub-agent currently executing (workflow node events); null
   // falls back to the session's active agent name in the UI.
   const workingAgentLabel = ref<string | null>(null);
@@ -62,7 +66,12 @@ export function useChatStream(
 
     if (currentThreadId) {
       const activeSess = sessions.value.find((s) => s.chatID === currentThreadId);
-      if (activeSess?.isRunning || isStreaming.value || loading.value) {
+      if (activeSess?.isRunning) {
+        return;
+      }
+      // Only block sending when THIS session is the one streaming; a stream
+      // running in another (background) session must not lock this chat.
+      if ((isStreaming.value || loading.value) && streamingSessionId.value === currentThreadId) {
         return;
       }
     }
@@ -71,6 +80,7 @@ export function useChatStream(
 
     isStreaming.value = true;
     loading.value = true;
+    streamingSessionId.value = currentThreadId;
     workingAgentLabel.value = null;
 
     if (!currentThreadId) {
@@ -102,8 +112,6 @@ export function useChatStream(
     const assistantMsgId = crypto.randomUUID();
     const reasoningMsgId = `reasoning-${runId}`;
 
-    let hasAssistantMsg = false;
-    let hasReasoningMsg = false;
     let toolLog = "";
 
     if (!currentSession.title && currentThreadId) {
@@ -114,6 +122,11 @@ export function useChatStream(
       (a) => a.id === currentSession.currentAgent || a.name === currentSession.currentAgent,
     );
     const targetAgentId = matchedAgent ? matchedAgent.id : currentSession.currentAgent;
+
+    // Stream UI updates only apply while the user is viewing the stream's own
+    // session; events arriving after switching away are dropped here (the
+    // server persists them, so switching back shows them from the DB).
+    const isViewingStream = () => activeSessionId.value === currentThreadId;
 
     await runAgentStream(
       targetAgentId,
@@ -126,35 +139,39 @@ export function useChatStream(
         model: selectedModel.value || undefined,
       },
       {
-        onText: (textContent, inputTokens, maxTokens) => {
-          if (!hasAssistantMsg) {
-            hasAssistantMsg = true;
-            messages.value.push({
-              id: assistantMsgId,
-              role: "assistant",
-              content: textContent,
-              timestamp: Date.now(),
-              ...(inputTokens ? { inputTokens } : {}),
-              ...(maxTokens ? { maxTokens } : {}),
-            });
-            if (!currentSession.title && currentThreadId) {
+        onText: (textContent, inputTokens, maxTokens, metadata) => {
+          if (!isViewingStream()) return;
+          // Workflow node responses carry node_id metadata: render each
+          // node's final message as its own assistant bubble (attributed to
+          // the sub-agent) instead of all nodes overwriting one shared
+          // bubble that the workflow summary then replaces.
+          const nodeId = metadata?.["node_id"] as string | undefined;
+          const targetId = nodeId ? `assistant-${runId}-${nodeId}` : assistantMsgId;
+          const agentName = nodeId ? resolveAgentName(metadata) : undefined;
+          const exists = messages.value.some((m) => m.id === targetId);
+          const bubble: ChatMessage = {
+            id: targetId,
+            role: "assistant",
+            content: textContent,
+            timestamp: Date.now(),
+            ...(agentName ? { agentName } : {}),
+            ...(inputTokens ? { inputTokens } : {}),
+            ...(maxTokens ? { maxTokens } : {}),
+          };
+          if (!exists) {
+            messages.value.push(bubble);
+            if (targetId === assistantMsgId && !currentSession.title && currentThreadId) {
               refreshSessionTitle(currentThreadId);
             }
           } else {
             messages.value = messages.value.map((m) =>
-              m.id === assistantMsgId
-                ? {
-                    ...m,
-                    content: textContent,
-                    ...(inputTokens ? { inputTokens } : {}),
-                    ...(maxTokens ? { maxTokens } : {}),
-                  }
-                : m,
+              m.id === targetId ? { ...m, ...bubble } : m,
             );
           }
         },
         onStatus: (statusText, entryType, _state, metadata) => {
           if (!statusText) return;
+          if (!isViewingStream()) return;
 
           const agentName = resolveAgentName(metadata) || activeAgent.value?.name || "Agent";
           const targetFiles = (metadata?.["target_files"] as string[] | undefined) || undefined;
@@ -209,17 +226,14 @@ export function useChatStream(
               ...(targetFiles ? { targetFiles } : {}),
               ...(artifactFiles ? { artifactFiles } : {}),
             };
-            if (hasAssistantMsg) {
-              const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
-              if (assistantIdx > -1) {
-                messages.value.splice(assistantIdx, 0, bubble);
-              } else {
-                messages.value.push(bubble);
-              }
+            // Keep the tool log above the run-level assistant bubble when
+            // one already exists.
+            const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
+            if (assistantIdx > -1) {
+              messages.value.splice(assistantIdx, 0, bubble);
             } else {
               messages.value.push(bubble);
             }
-            if (!hasReasoningMsg) hasReasoningMsg = true;
           } else {
             messages.value = messages.value.map((m) => {
               if (m.id !== reasoningMsgId) return m;
@@ -239,16 +253,20 @@ export function useChatStream(
           }
         },
         onError: async (err) => {
-          pushErrorMessage(err.message || "An execution error occurred.");
+          if (isViewingStream()) {
+            pushErrorMessage(err.message || "An execution error occurred.");
+          }
           workingAgentLabel.value = null;
           isStreaming.value = false;
           loading.value = false;
+          streamingSessionId.value = null;
           const updatedSessions = await getSessions();
           sessions.value = updatedSessions;
         },
         onComplete: async () => {
           isStreaming.value = false;
           loading.value = false;
+          streamingSessionId.value = null;
           workingAgentLabel.value = null;
           if (currentThreadId && !currentSession.title) {
             await refreshSessionTitle(currentThreadId);
@@ -264,6 +282,7 @@ export function useChatStream(
     messages,
     loading,
     isStreaming,
+    streamingSessionId,
     workingAgentLabel,
     handleSendMessage,
   };

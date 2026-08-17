@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { ref, watch, computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import { initPushNotifications } from "./lib/push";
@@ -106,17 +106,29 @@ const {
 );
 
 // 3. Chat Stream Composable
-const { loading, isStreaming, workingAgentLabel, handleSendMessage } = useChatStream(
-  activeSessionId,
-  sessions,
-  agents,
-  activeAgent,
-  selectedAgentId,
-  selectedDir,
-  selectedModel,
-  chatInputText,
-  router,
-  messages,
+const { loading, isStreaming, streamingSessionId, workingAgentLabel, handleSendMessage } =
+  useChatStream(
+    activeSessionId,
+    sessions,
+    agents,
+    activeAgent,
+    selectedAgentId,
+    selectedDir,
+    selectedModel,
+    chatInputText,
+    router,
+    messages,
+  );
+
+// The chat input is busy only when the VIEWED session is the one streaming
+// (or reports isRunning); a background session's stream must not lock other
+// chats.
+const isInputBusy = computed(
+  () =>
+    (!!activeSessionId.value && activeSessionId.value === streamingSessionId.value
+      ? loading.value || isStreaming.value
+      : false) ||
+    (activeSession.value?.isRunning ?? false),
 );
 
 watch(
@@ -145,6 +157,22 @@ onUnmounted(() => {
 const handleStartWelcomeChat = () => {
   if (welcomePrompt.value.trim()) {
     handleSendMessage(welcomePrompt.value);
+  }
+};
+
+// An ask-user reply resumes a suspended workflow run. The resumed execution
+// (node outputs, follow-up questions, summary) arrives via persistence rather
+// than the original stream, so poll the session until new messages settle.
+const handleAskReplied = () => {
+  const chatId = activeSessionId.value;
+  if (!chatId) return;
+  const delays = [800, 2500, 5000, 9000, 15000];
+  for (const delay of delays) {
+    setTimeout(() => {
+      if (activeSessionId.value === chatId) {
+        loadSessionData(chatId);
+      }
+    }, delay);
   }
 };
 
@@ -186,7 +214,7 @@ const closeSidebarOnMobile = () => {
         <component
           :is="Component"
           :agents="agents"
-          :loading="loading || isStreaming || (activeSession?.isRunning ?? false)"
+          :loading="isInputBusy"
           :workingAgentLabel="workingAgentLabel"
           :messages="messages"
           :artifacts="activeSession?.artifacts || []"
@@ -215,6 +243,7 @@ const closeSidebarOnMobile = () => {
           @close-diff="showDiffView = false"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
+          @ask-replied="handleAskReplied"
         />
       </router-view>
     </main>

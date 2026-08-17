@@ -78,9 +78,29 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 		}
 
 		events := make(chan WorkflowEvent, 256)
+		// Persistence runs on a dedicated goroutine so DB writes survive
+		// after the A2A event stream ends (e.g. the INPUT_REQUIRED final
+		// event of a human-node suspension terminates the stream while the
+		// engine keeps waiting for the user's reply). The SSE yield loop
+		// below can also stall once its consumer is gone; persistence must
+		// not.
+		persistCh := make(chan WorkflowEvent, 256)
+		persistDone := make(chan struct{})
+		go func() {
+			defer close(persistDone)
+			for ev := range persistCh {
+				if e.OnEvent != nil {
+					e.OnEvent(rc.SessionID, ev)
+				}
+			}
+		}()
 		rc.EmitEvent = func(ev WorkflowEvent) {
-			// Non-blocking: if the consumer is gone, dropping progress events
+			// Non-blocking: if a consumer is gone, dropping progress events
 			// is preferred to stalling engine workers.
+			select {
+			case persistCh <- ev:
+			default:
+			}
 			select {
 			case events <- ev:
 			default:
@@ -94,7 +114,13 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 		outCh := make(chan outcome, 1)
 		go func() {
 			defer close(events)
-			result, err := e.engine.Execute(ctx, e.defn, rc)
+			defer close(persistCh)
+			// The engine must outlive the A2A producer context: the a2asrv
+			// stack cancels that context once a final event (such as the
+			// INPUT_REQUIRED event emitted for human-node suspensions) has
+			// been processed, which would otherwise kill the engine while
+			// it is blocked waiting for the user's reply.
+			result, err := e.engine.Execute(context.WithoutCancel(ctx), e.defn, rc)
 			outCh <- outcome{result: result, err: err}
 		}()
 
@@ -105,22 +131,19 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 					events = nil // closed; wait for the outcome below
 					continue
 				}
-				if e.OnEvent != nil {
-					e.OnEvent(rc.SessionID, ev)
-				}
 				if !yieldNodeEvent(execCtx, ev, yield) {
 					return
 				}
 			case out := <-outCh:
 				// Drain any events buffered before completion.
 				for ev := range events {
-					if e.OnEvent != nil {
-						e.OnEvent(rc.SessionID, ev)
-					}
 					if !yieldNodeEvent(execCtx, ev, yield) {
 						return
 					}
 				}
+				// Wait for the persistence goroutine to drain so DB writes
+				// are complete before the final event is emitted.
+				<-persistDone
 				if out.err != nil {
 					yield(nil, out.err)
 					return
@@ -230,7 +253,31 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 		if len(ev.Artifacts) > 0 {
 			event.SetMeta("artifact_files", ev.Artifacts)
 		}
-		return yield(event, nil)
+		if !yield(event, nil) {
+			return false
+		}
+		// Deliver the node's final response as an agent_response attributed
+		// to the node (node_id metadata) so clients render it as a distinct
+		// assistant message per node instead of overwriting a shared bubble.
+		if ev.Type == EventNodeFinished && ev.Status == StatusSucceeded && ev.Output != "" {
+			outMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Output))
+			metadata := map[string]any{
+				"node_id":    ev.NodeID,
+				"entry_type": "agent_response",
+			}
+			if ev.AgentID != "" {
+				metadata["agent_id"] = ev.AgentID
+			}
+			if ev.AgentName != "" {
+				metadata["agent_name"] = ev.AgentName
+			}
+			if len(ev.Artifacts) > 0 {
+				metadata["artifact_files"] = ev.Artifacts
+			}
+			outMsg.Metadata = metadata
+			return yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, outMsg), nil)
+		}
+		return true
 	default:
 		return true
 	}

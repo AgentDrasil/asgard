@@ -179,7 +179,9 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 // artifacts (e.g. command output_file results) are registered on the session
 // so the frontend artifact viewer can list and open them. Node and workflow
 // failures are appended as error messages so they remain visible in the chat
-// after the stream closes or the page reloads.
+// after the stream closes or the page reloads. Successful node final
+// responses and the workflow summary are appended as assistant messages for
+// the same reason.
 func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent) {
 	if s.repo == nil || sessionID == "" {
 		return
@@ -222,6 +224,33 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow node artifact to repo")
 		}
+	}
+	// Persist a successful node's final response as an assistant message so
+	// node agents' conclusions survive reloads (streamed agent_response
+	// updates are intentionally not persisted to avoid step-level churn).
+	if ev.Type == workflow.EventNodeFinished && ev.Status == workflow.StatusSucceeded && ev.Output != "" {
+		if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+			ID:        fmt.Sprintf("wf-node-%s-%d", ev.NodeID, time.Now().UnixMilli()),
+			Role:      "assistant",
+			Content:   ev.Output,
+			AgentName: ev.AgentName,
+			Timestamp: time.Now().UnixMilli(),
+		}); err != nil {
+			log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow node response to repo")
+		}
+		return
+	}
+	if ev.Type == workflow.EventWorkflowFinished && ev.Status == workflow.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
+		if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+			ID:        fmt.Sprintf("wf-summary-%d", time.Now().UnixMilli()),
+			Role:      "assistant",
+			Content:   ev.Message,
+			AgentName: ev.AgentName,
+			Timestamp: time.Now().UnixMilli(),
+		}); err != nil {
+			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow summary to repo")
+		}
+		return
 	}
 	if ev.Status != workflow.StatusFailed {
 		return
@@ -267,7 +296,19 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 		return
 	}
 	go func() {
-		if _, err := engine.Resume(context.Background(), run.RunID, replyText); err != nil {
+		// Re-driven runs have no live A2A stream, so route their events into
+		// the persistence handler: node outputs, errors, summary and any
+		// follow-up human suspension land in the session transcript instead
+		// of vanishing (only visible after a refresh at worst, lost forever
+		// at best).
+		emit := func(ev workflow.WorkflowEvent) {
+			sid := ev.SessionID
+			if sid == "" {
+				sid = chatID
+			}
+			s.handleWorkflowEvent(sid, ev)
+		}
+		if _, err := engine.ResumeWithEmitter(context.Background(), run.RunID, replyText, emit); err != nil {
 			log.Error().Err(err).Str("run_id", run.RunID).Msg("resuming workflow run failed")
 		}
 	}()

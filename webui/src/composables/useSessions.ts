@@ -79,11 +79,11 @@ export function useSessions(
       chatInputText.value = "";
 
       if (newId && typeof newId === "string") {
-        if (!isStreaming.value) {
-          await loadSessionData(newId);
-        } else {
-          activeSessionId.value = newId;
-        }
+        // Always load the target session's messages. Skipping this while a
+        // stream is active left the previous session's messages (e.g. a
+        // pending ask_user card) rendered under the new session, and the
+        // card's reply would then be sent with the wrong session id.
+        await loadSessionData(newId);
       } else {
         activeSessionId.value = null;
         messages.value = [];

@@ -142,8 +142,15 @@ func humanReplyResult(nctx *NodeContext, reply string) *NodeResult {
 // Resume delivers a user reply to a suspended run. When the run has a live
 // in-process waiter the reply unblocks it and (nil, nil) is returned.
 // Otherwise (e.g. after a server restart) the run is re-driven from its
-// persisted snapshot with the suspended node settled from the reply.
+// persisted snapshot with the suspended node settled from the reply. Re-driven
+// events are only logged.
 func (e *Engine) Resume(ctx context.Context, runID string, replyText string) (*WorkflowRunResult, error) {
+	return e.ResumeWithEmitter(ctx, runID, replyText, nil)
+}
+
+// ResumeWithEmitter is like Resume but forwards every event of a re-driven run
+// to emit (when non-nil) so hosts can persist and surface resume progress.
+func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText string, emit func(WorkflowEvent)) (*WorkflowRunResult, error) {
 	if runID == "" || replyText == "" {
 		return nil, fmt.Errorf("run_id and reply_text are required")
 	}
@@ -185,6 +192,10 @@ func (e *Engine) Resume(ctx context.Context, runID string, replyText string) (*W
 		SeedNodes:    fromPersistedStates(snap.NodeStates),
 		HumanReplies: map[string]string{snap.SuspendedNodeID: replyText},
 		EmitEvent: func(ev WorkflowEvent) {
+			if emit != nil {
+				emit(ev)
+				return
+			}
 			log.Info().Str("run_id", runID).Str("node", ev.NodeID).Str("type", string(ev.Type)).Msg("resumed workflow event")
 		},
 	}

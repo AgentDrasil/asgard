@@ -69,8 +69,20 @@ func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) 
 // are presented as /tmp/<rel> so the file endpoint can remap them back to
 // <home>/tmp/<sessionID>/<rel>; other paths pass through unchanged.
 func ViewerArtifactPath(path, tmpDir string) string {
-	if rel, err := filepath.Rel(tmpDir, path); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-		return filepath.Join("/tmp", rel)
+	clean := filepath.Clean(path)
+	if tmpDir != "" {
+		if rel, err := filepath.Rel(filepath.Clean(tmpDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("/tmp", rel)
+		}
+	}
+	if strings.HasPrefix(clean, ".tmp/") {
+		return "/tmp/" + strings.TrimPrefix(clean, ".tmp/")
+	}
+	if clean == ".tmp" {
+		return "/tmp"
+	}
+	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" {
+		return clean
 	}
 	return path
 }

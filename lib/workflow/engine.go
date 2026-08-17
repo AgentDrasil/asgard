@@ -554,13 +554,24 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Int("iteration", executionCount[node.ID]).
 					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, executionCount[node.ID])
 
+				// Agent / llm nodes carry their final response text so hosts can
+				// display and persist it as a chat message. Command node output
+				// (raw stdout) is intentionally excluded — it stays in artifacts
+				// and the tool log.
+				nodeOutput := result.Output
+				if node.Type == NodeTypeCommand || node.Type == NodeTypeHuman {
+					nodeOutput = ""
+				}
+
 				emit(WorkflowEvent{
 					Type:      EventNodeFinished,
 					NodeID:    node.ID,
 					NodeType:  node.Type,
 					AgentID:   node.AgentID,
+					AgentName: result.AgentName,
 					Status:    result.Status,
 					Message:   msg,
+					Output:    nodeOutput,
 					Artifacts: ArtifactViewerPaths(result.Artifacts, tmpDir),
 				})
 				evaluateDownstream(node.ID)
@@ -603,10 +614,13 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 	}
 
+	// The final event carries the same summary the A2A executor streams to
+	// clients, so hosts persisting events render an identical transcript on
+	// reload.
 	emit(WorkflowEvent{
 		Type:    EventWorkflowFinished,
 		Status:  NodeStatus(run.Status),
-		Message: fmt.Sprintf("workflow %s %s", defn.Name, run.Status),
+		Message: summarizeRun(run),
 	})
 	return run, nil
 }

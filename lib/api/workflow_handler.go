@@ -6,13 +6,16 @@ import (
 	"iter"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/config"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/lib/llm"
 	"github.com/AgentDrasil/asgard/lib/workflow"
 )
@@ -105,9 +108,11 @@ type workflowTitleExecutor struct {
 
 var _ a2asrv.AgentExecutor = (*workflowTitleExecutor)(nil)
 
-// Execute generates the session title on first contact (when the session has
-// no stored title yet) before delegating to the wrapped workflow executor.
+// Execute persists the incoming user message (mirroring the single-agent
+// path), generates the session title on first contact (when the session has
+// no stored title yet), then delegates to the wrapped workflow executor.
 func (e *workflowTitleExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+	e.persistIncomingMessage(execCtx)
 	e.maybeGenerateTitle(ctx, execCtx)
 	return e.inner.Execute(ctx, execCtx)
 }
@@ -115,6 +120,64 @@ func (e *workflowTitleExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 // Cancel delegates cancellation to the wrapped workflow executor.
 func (e *workflowTitleExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return e.inner.Cancel(ctx, execCtx)
+}
+
+// persistIncomingMessage appends the user's prompt to the chat session so it
+// survives reloads and session switches. Without this, workflow chats lost
+// the initiating user message because the workflow engine only records it in
+// the workflow_runs table, never in the session transcript. Agent-to-agent
+// internal messages are stored as CALL_PEER activities instead.
+func (e *workflowTitleExecutor) persistIncomingMessage(execCtx *a2asrv.ExecutorContext) {
+	if e.server == nil || e.server.repo == nil {
+		return
+	}
+	chatID := execCtx.ContextID
+	if chatID == "" || !IsValidChatID(chatID) {
+		return
+	}
+	prompt := messagePromptText(execCtx.Message)
+	if prompt == "" {
+		return
+	}
+	userMsgID := ""
+	isInternal := false
+	callerName := ""
+	if execCtx.Message != nil {
+		userMsgID = execCtx.Message.ID
+		if execCtx.Message.Metadata != nil {
+			if v, ok := execCtx.Message.Metadata["internal"].(bool); ok && v {
+				isInternal = true
+			}
+			if cn, ok := execCtx.Message.Metadata["caller_agent_name"].(string); ok {
+				callerName = cn
+			}
+		}
+	}
+	if userMsgID == "" {
+		userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
+	}
+	role := "user"
+	activityType := ""
+	agentName := ""
+	if isInternal {
+		role = "activity"
+		activityType = "CALL_PEER"
+		if callerName != "" {
+			agentName = callerName
+		} else {
+			agentName = e.agent.Config.Name
+		}
+	}
+	if err := e.server.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID:           userMsgID,
+		Role:         role,
+		ActivityType: activityType,
+		Content:      prompt,
+		AgentName:    agentName,
+		Timestamp:    time.Now().UnixMilli(),
+	}); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append workflow user message to repo")
+	}
 }
 
 // maybeGenerateTitle spawns the background title-generation goroutine when the

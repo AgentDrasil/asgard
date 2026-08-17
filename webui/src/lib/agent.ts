@@ -33,7 +33,12 @@ export async function getAgentClient(agentId: string, customBaseUrl?: string): P
 }
 
 export interface StreamCallbacks {
-  onText: (text: string, inputTokens?: number, maxTokens?: number) => void;
+  onText: (
+    text: string,
+    inputTokens?: number,
+    maxTokens?: number,
+    metadata?: Record<string, any>,
+  ) => void;
   onReasoning?: (text: string) => void;
   onStatus?: (
     statusText: string,
@@ -137,7 +142,7 @@ export async function runAgentStream(
         if (textContent) {
           accumulatedText = textContent;
           const tokens = extractTokens(msg);
-          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
+          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens, msg.metadata);
         }
         continue;
       }
@@ -160,7 +165,12 @@ export async function runAgentStream(
             if (isFinalState(state)) {
               accumulatedText = statusText;
               const tokens = extractTokens(task);
-              callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
+              callbacks.onText(
+                accumulatedText,
+                tokens.inputTokens,
+                tokens.maxTokens,
+                task.metadata || msg?.metadata,
+              );
             } else {
               callbacks.onStatus?.(statusText, entryType, TaskState[state]);
             }
@@ -203,7 +213,12 @@ export async function runAgentStream(
             accumulatedText = statusText;
           }
           const tokens = extractTokens(update);
-          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens);
+          callbacks.onText(
+            accumulatedText,
+            tokens.inputTokens,
+            tokens.maxTokens,
+            update.metadata || msg?.metadata,
+          );
         } else {
           // Tool calls, steps, reasoning, ask_user → status handler
           callbacks.onStatus?.(

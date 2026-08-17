@@ -49,6 +49,9 @@ type NodeResult struct {
 	Output     string
 	Artifacts  map[string]string
 	Error      error
+	// AgentName names the concrete sub-agent that executed an agent node
+	// (empty for other node types); used for chat message attribution.
+	AgentName string
 }
 
 // NodeContext carries the pure runtime data for one node execution. External
@@ -197,6 +200,10 @@ type WorkflowEvent struct {
 	// Artifacts lists viewer-facing artifact paths produced or referenced by
 	// the node (e.g. human prompt file references, output_file results).
 	Artifacts []string
+	// Output carries the node's final response text (agent / llm nodes) on
+	// EventNodeFinished so hosts can render and persist it as a chat
+	// message instead of only the terse lifecycle status line.
+	Output string
 	// AgentName names the workflow agent for chat routing.
 	AgentName string
 	Timestamp time.Time

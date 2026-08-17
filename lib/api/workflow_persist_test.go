@@ -122,9 +122,12 @@ func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 
 	session, err := s.repo.GetSession(chatID)
 	require.NoError(t, err)
-	require.Len(t, session.Messages, 1)
+	require.Len(t, session.Messages, 2)
 	assert.True(t, session.Messages[0].Replied)
 	assert.Equal(t, "Approved", session.Messages[0].ReplyText)
+	// The re-driven run's completion summary is persisted for the transcript.
+	assert.Equal(t, "assistant", session.Messages[1].Role)
+	assert.Contains(t, session.Messages[1].Content, "COMPLETED")
 }
 
 func TestAskUserReplyMismatchedMessageIDDoesNotResume(t *testing.T) {

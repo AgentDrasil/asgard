@@ -37,6 +37,10 @@ const submitInlineReply = async (msgId: string) => {
       targetMsg.replied = true;
       targetMsg.replyText = text;
     }
+    // Notify the parent so it can reload the session: resumed workflows
+    // (and post-reply agent output) arrive via persistence, not the
+    // original stream.
+    emit("ask-replied");
   }
 };
 
@@ -84,7 +88,19 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-artifact-drawer"): void;
+  (e: "ask-replied"): void;
 }>();
+
+// Reset per-message reply state when switching sessions so stale ask_user
+// input/submitted flags never leak into another session's cards.
+watch(
+  () => props.sessionId,
+  () => {
+    inlineInputMap.value = {};
+    inlineSubmittingMap.value = {};
+    inlineSubmittedMap.value = {};
+  },
+);
 
 function formatPath(path: string): string {
   if (!path) return "";

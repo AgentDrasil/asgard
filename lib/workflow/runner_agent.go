@@ -262,6 +262,13 @@ loop:
 				}
 			}
 
+			if len(stepArtifacts) > 0 {
+				if update.Metadata == nil {
+					update.Metadata = make(map[string]any)
+				}
+				update.Metadata["artifact_files"] = stepArtifacts
+			}
+
 			if nctx.EventEmitter != nil {
 				nctx.EventEmitter(WorkflowEvent{
 					Type:      EventNodeStatusUpdate,
@@ -302,6 +309,7 @@ loop:
 			Output:    lastContent,
 			Artifacts: toArtifactMap(nodeArtifacts),
 			Error:     fmt.Errorf("agent %s run failed: %w", node.AgentID, err),
+			AgentName: effectiveAgent.Config.Name,
 		}, nil
 	}
 
@@ -310,7 +318,7 @@ loop:
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
 		Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully", node.AgentID, node.ID)
-	return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts)}, nil
+	return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
 }
 
 // agentPromptResult mirrors the JSON structure returned by CLI agents.
