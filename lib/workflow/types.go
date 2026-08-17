@@ -74,6 +74,8 @@ type NodeContext struct {
 	// Values is a shared per-run key/value store for cross-node runtime state
 	// (e.g. CLI session IDs inherited between agent nodes).
 	Values *RunValues
+	// Iteration records the 1-based execution count for this node (useful for dynamic loops).
+	Iteration int
 	// WorkflowRunDirs carries workflow/parent configured run directories.
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.

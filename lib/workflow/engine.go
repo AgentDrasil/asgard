@@ -527,6 +527,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Upstreams:         upstreams,
 					EventEmitter:      emit,
 					Values:            values,
+					Iteration:         executionCount[node.ID],
 					WorkflowRunDirs:   wfRunDirs,
 					WorkflowMountDirs: wfMountDirs,
 				}

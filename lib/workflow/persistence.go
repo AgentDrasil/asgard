@@ -17,8 +17,11 @@ const (
 )
 
 // HumanMessageID derives the deterministic ask_user MessageID for a suspended
-// human node: wf-<run_id>-<node_id>.
-func HumanMessageID(runID, nodeID string) string {
+// human node: wf-<run_id>-<node_id> (or wf-<run_id>-<node_id>-<iteration> if iteration > 1).
+func HumanMessageID(runID, nodeID string, iteration ...int) string {
+	if len(iteration) > 0 && iteration[0] > 1 {
+		return fmt.Sprintf("wf-%s-%s-%d", runID, nodeID, iteration[0])
+	}
 	return fmt.Sprintf("wf-%s-%s", runID, nodeID)
 }
 

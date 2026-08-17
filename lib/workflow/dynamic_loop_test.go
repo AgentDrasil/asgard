@@ -219,4 +219,10 @@ nodes:
 	assert.Equal(t, 2, executionCounts["code_review_agent"])
 	assert.Equal(t, 1, executionCounts["fix_agent"])
 	assert.Equal(t, 1, executionCounts["git_push_cmd"])
+
+	suspender.mu.Lock()
+	defer suspender.mu.Unlock()
+	require.Len(t, suspender.requests, 2)
+	assert.NotEqual(t, suspender.requests[0].MessageID, suspender.requests[1].MessageID, "each iteration must have unique message ID")
+	assert.Contains(t, suspender.requests[1].MessageID, "-2")
 }

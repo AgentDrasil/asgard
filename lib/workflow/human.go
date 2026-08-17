@@ -35,7 +35,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	if len(node.Options) > 0 {
 		prompt = prompt + "\n\nOptions: " + strings.Join(node.Options, " / ")
 	}
-	messageID := HumanMessageID(rc.RunID, node.ID)
+	messageID := HumanMessageID(rc.RunID, node.ID, nctx.Iteration)
 
 	// Collect artifact files referenced by the prompt so the host app can
 	// register them for the session and surface them to the frontend.
