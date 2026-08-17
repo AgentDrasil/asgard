@@ -321,12 +321,25 @@ func (r *SessionRepository) UpdateSessionTitle(chatID string, title string) erro
 }
 
 // AppendMessage appends a ChatMessage to a session by chat ID.
+// If a message with the same non-empty ID already exists, it updates the existing message in-place.
 func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
 		if err != nil {
 			return err
+		}
+		if msg.ID != "" {
+			for i, m := range session.Messages {
+				if m.ID == msg.ID {
+					if m.Replied && !msg.Replied {
+						msg.Replied = m.Replied
+						msg.ReplyText = m.ReplyText
+					}
+					session.Messages[i] = msg
+					return tx.Save(&session).Error
+				}
+			}
 		}
 		session.Messages = append(session.Messages, msg)
 		return tx.Save(&session).Error

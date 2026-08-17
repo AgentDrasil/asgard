@@ -158,11 +158,14 @@ export async function runAgentStream(
         const msg = status.message;
         const entryType: string =
           task.metadata?.["entry_type"] ?? msg?.metadata?.["entry_type"] ?? "";
+        const nodeId: string = task.metadata?.["node_id"] ?? msg?.metadata?.["node_id"] ?? "";
 
         if (msg) {
           const statusText = extractTextFromParts(msg.parts);
           if (statusText) {
-            if (isFinalState(state)) {
+            // A node-level error carries entry_type (e.g. "error") or node_id.
+            // Only a global workflow/agent final state (without node-level routing) terminates as final accumulatedText.
+            if (isFinalState(state) && !entryType && !nodeId) {
               accumulatedText = statusText;
               const tokens = extractTokens(task);
               callbacks.onText(

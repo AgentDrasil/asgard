@@ -156,3 +156,74 @@ func TestSessionIsRunning(t *testing.T) {
 	s.Agents[1].Status = AgentStatusCompleted
 	assert.False(t, s.IsRunning())
 }
+
+func TestAppendMessage_Deduplication(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	chatID := "test-dedup-chat"
+	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID}))
+
+	// 1. Append first message with ID
+	msg1 := ChatMessage{
+		ID:        "msg-1",
+		Role:      "ask_user",
+		Content:   "Please approve plan",
+		Timestamp: 1000,
+	}
+	require.NoError(t, repo.AppendMessage(chatID, msg1))
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Messages, 1)
+	assert.Equal(t, "Please approve plan", sess.Messages[0].Content)
+
+	// 2. Append duplicate message with same ID but updated content/timestamp
+	msg1Updated := ChatMessage{
+		ID:        "msg-1",
+		Role:      "ask_user",
+		Content:   "Please approve updated plan",
+		Timestamp: 1005,
+	}
+	require.NoError(t, repo.AppendMessage(chatID, msg1Updated))
+
+	sess, err = repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Messages, 1, "Duplicate ID should update in-place instead of appending")
+	assert.Equal(t, "Please approve updated plan", sess.Messages[0].Content)
+	assert.Equal(t, int64(1005), sess.Messages[0].Timestamp)
+
+	// 3. Mark as replied, then append duplicate without Replied flag -> should preserve replied state
+	require.NoError(t, repo.MarkAskUserReplied(chatID, "msg-1", "Approve"))
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
+		ID:        "msg-1",
+		Role:      "ask_user",
+		Content:   "Please approve updated plan",
+		Timestamp: 1010,
+	}))
+
+	sess, err = repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Messages, 1)
+	assert.True(t, sess.Messages[0].Replied)
+	assert.Equal(t, "Approve", sess.Messages[0].ReplyText)
+
+	// 4. Append message without ID -> should append normally
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
+		Role:    "user",
+		Content: "normal message",
+	}))
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
+		Role:    "user",
+		Content: "another message",
+	}))
+
+	sess, err = repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Messages, 3)
+}
