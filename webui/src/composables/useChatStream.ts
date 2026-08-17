@@ -113,7 +113,7 @@ export function useChatStream(
     const assistantMsgId = crypto.randomUUID();
     const reasoningMsgId = `reasoning-${runId}`;
 
-    let toolLog = "";
+    const toolLogs = new Map<string, string>();
 
     if (!currentSession.title && currentThreadId) {
       setTimeout(() => refreshSessionTitle(currentThreadId!), 1500);
@@ -206,30 +206,37 @@ export function useChatStream(
             return;
           }
 
-          if (!toolLog) {
-            toolLog = statusText;
-          } else {
-            // Append incremental status updates with delimiter if not already present in toolLog
-            if (!toolLog.endsWith(statusText)) {
-              toolLog += `\n${TOOL_ITEM_DELIMITER}\n` + statusText;
-            }
+          const nodeId = metadata?.["node_id"] as string | undefined;
+          const key = nodeId || "";
+          const prevLog = toolLogs.get(key) || "";
+          let nextLog = prevLog;
+          if (!nextLog) {
+            nextLog = statusText;
+          } else if (!nextLog.endsWith(statusText)) {
+            nextLog += `\n${TOOL_ITEM_DELIMITER}\n` + statusText;
           }
+          toolLogs.set(key, nextLog);
 
-          const exists = messages.value.some((m) => m.id === reasoningMsgId);
+          const targetReasoningMsgId = nodeId ? `reasoning-${runId}-${nodeId}` : reasoningMsgId;
+          const exists = messages.value.some((m) => m.id === targetReasoningMsgId);
           if (!exists) {
             const bubble: ChatMessage = {
-              id: reasoningMsgId,
+              id: targetReasoningMsgId,
               role: "tool_call",
               activityType: "TOOL",
-              content: toolLog,
+              content: nextLog,
               agentName: agentName,
               timestamp: Date.now(),
               ...(targetFiles ? { targetFiles } : {}),
               ...(artifactFiles ? { artifactFiles } : {}),
             };
-            // Keep the tool log above the run-level assistant bubble when
-            // one already exists.
-            const assistantIdx = messages.value.findIndex((m) => m.id === assistantMsgId);
+            // Keep the tool log above the assistant bubble if it already exists.
+            const correspondingAssistantId = nodeId
+              ? `assistant-${runId}-${nodeId}`
+              : assistantMsgId;
+            const assistantIdx = messages.value.findIndex(
+              (m) => m.id === correspondingAssistantId || m.id === assistantMsgId,
+            );
             if (assistantIdx > -1) {
               messages.value.splice(assistantIdx, 0, bubble);
             } else {
@@ -237,7 +244,7 @@ export function useChatStream(
             }
           } else {
             messages.value = messages.value.map((m) => {
-              if (m.id !== reasoningMsgId) return m;
+              if (m.id !== targetReasoningMsgId) return m;
               const mergedTargetFiles = targetFiles
                 ? Array.from(new Set([...(m.targetFiles || []), ...targetFiles]))
                 : m.targetFiles;
@@ -246,7 +253,8 @@ export function useChatStream(
                 : m.artifactFiles;
               return {
                 ...m,
-                content: toolLog,
+                content: nextLog,
+                agentName: agentName,
                 ...(mergedTargetFiles ? { targetFiles: mergedTargetFiles } : {}),
                 ...(mergedArtifactFiles ? { artifactFiles: mergedArtifactFiles } : {}),
               };
