@@ -6,6 +6,7 @@ nodes:
     type: agent
     agent_id: agy-coder
     session_policy: inherit
+    entry: true
 
   # 2. Build & Test Command
   - id: build_cmd

@@ -17,6 +17,7 @@ const props = defineProps<{
   showDiffView: boolean;
   gitRoot: string;
   terminalType?: "session" | "sidebar";
+  workingAgentLabel?: string | null;
 }>();
 
 const isDetailsOpen = defineModel<boolean>("isDetailsOpen");
@@ -201,6 +202,7 @@ watch(isArtifactDrawerOpen, (open) => {
           :isTerminalOpen="isTerminalOpen"
           :modifiedFiles="modifiedFiles"
           :isArtifactDrawerOpen="isArtifactDrawerOpen"
+          :workingAgentLabel="workingAgentLabel"
           v-model:isDetailsOpen="isDetailsOpen"
           @open-diff="(g) => $emit('open-diff', g)"
           @open-artifact="handleOpenArtifact"

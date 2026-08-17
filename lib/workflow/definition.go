@@ -63,6 +63,10 @@ type NodeSpec struct {
 	AgentID       string `yaml:"agent_id"`
 	SessionPolicy string `yaml:"session_policy"` // inherit | fresh
 	Model         string `yaml:"model"`
+	// Entry marks the agent node that receives the raw user input as its
+	// prompt. Non-entry agent nodes are kicked off with a directive; their
+	// inputs are files produced by earlier nodes.
+	Entry bool `yaml:"entry"`
 
 	// LLM node fields.
 	SystemPrompt string `yaml:"system_prompt"`
@@ -190,6 +194,9 @@ func (d *WorkflowDefinition) Validate() error {
 		default:
 			return fmt.Errorf("node %s: invalid join %q (must be always)", node.ID, node.Join)
 		}
+		if node.Entry && node.Type != NodeTypeAgent {
+			return fmt.Errorf("node %s: entry is only allowed on agent nodes", node.ID)
+		}
 		switch node.OnSkip {
 		case "", "run", "skip":
 		default:
@@ -229,6 +236,21 @@ func (d *WorkflowDefinition) Validate() error {
 	}
 	if err := validateHumanNodes(d); err != nil {
 		return err
+	}
+
+	// Workflows with agent nodes must declare where the raw user input lands;
+	// every other agent node is kicked off with a directive instead.
+	agentCount, entryCount := 0, 0
+	for _, node := range d.Nodes {
+		if node.Type == NodeTypeAgent {
+			agentCount++
+			if node.Entry {
+				entryCount++
+			}
+		}
+	}
+	if agentCount > 0 && entryCount == 0 {
+		return fmt.Errorf("workflow must mark at least one agent node with entry: true to receive the user input")
 	}
 	return nil
 }

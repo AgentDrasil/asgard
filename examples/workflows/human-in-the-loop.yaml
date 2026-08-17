@@ -5,6 +5,7 @@ nodes:
   - id: planner_agent
     type: agent
     agent_id: agy-planner
+    entry: true
 
   # 2. Human Review Gateway (Suspends workflow until user responds via WebUI/A2A)
   - id: plan_approval

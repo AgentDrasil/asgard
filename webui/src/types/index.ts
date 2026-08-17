@@ -24,7 +24,8 @@ export interface ChatMessage {
     | "activity"
     | "tool_call"
     | "tool_result"
-    | "ask_user";
+    | "ask_user"
+    | "error";
   content: string;
   agentName?: string;
   timestamp?: number;

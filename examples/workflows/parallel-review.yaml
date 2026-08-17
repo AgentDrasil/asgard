@@ -5,11 +5,13 @@ nodes:
   - id: sec_reviewer
     type: agent
     agent_id: agy-reviewer
+    entry: true
 
   # 2. Performance Review Agent (Executes concurrently with sec_reviewer)
   - id: perf_reviewer
     type: agent
     agent_id: agy-reviewer
+    entry: true
 
   # 3. Consolidated Summary (Fork-Join aggregate node)
   - id: final_summary

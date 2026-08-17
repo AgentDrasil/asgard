@@ -28,4 +28,3 @@ func TestClient_ExtraArgs(t *testing.T) {
 	client := NewClient()
 	assert.Equal(t, []string{"--add-tmp-to-dir"}, client.ExtraArgs())
 }
-

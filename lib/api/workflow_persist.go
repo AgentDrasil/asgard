@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -175,9 +176,11 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 
 // handleWorkflowEvent persists side effects of workflow node events. Node
 // artifacts (e.g. command output_file results) are registered on the session
-// so the frontend artifact viewer can list and open them.
+// so the frontend artifact viewer can list and open them. Node and workflow
+// failures are appended as error messages so they remain visible in the chat
+// after the stream closes or the page reloads.
 func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent) {
-	if s.repo == nil || sessionID == "" || len(ev.Artifacts) == 0 {
+	if s.repo == nil || sessionID == "" {
 		return
 	}
 	// Suspended human-node artifacts are registered by suspendWorkflowHuman.
@@ -188,6 +191,22 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow node artifact to repo")
 		}
+	}
+	if ev.Status != workflow.StatusFailed {
+		return
+	}
+	nodeRef := ev.NodeID
+	if nodeRef == "" {
+		nodeRef = "workflow"
+	}
+	if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+		ID:        fmt.Sprintf("wf-error-%s-%d", nodeRef, ev.Timestamp.UnixMilli()),
+		Role:      "error",
+		Content:   ev.Message,
+		AgentName: ev.AgentName,
+		Timestamp: time.Now().UnixMilli(),
+	}); err != nil {
+		log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow error message to repo")
 	}
 }
 

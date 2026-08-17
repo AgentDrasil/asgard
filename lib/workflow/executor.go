@@ -196,6 +196,16 @@ func yieldNodeEvent(execCtx *a2asrv.ExecutorContext, ev WorkflowEvent, yield fun
 		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(ev.Message))
 		event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, msg)
 		event.SetMeta("node_id", ev.NodeID)
+		event.SetMeta("node_status", string(ev.Status))
+		if ev.AgentID != "" {
+			event.SetMeta("agent_id", ev.AgentID)
+		}
+		if ev.Status == StatusFailed {
+			// Route failed node updates through the error entry type so the
+			// frontend renders them as prominent error cards instead of
+			// burying them in the tool log.
+			event.SetMeta("entry_type", "error")
+		}
 		if len(ev.Artifacts) > 0 {
 			event.SetMeta("artifact_files", ev.Artifacts)
 		}
@@ -217,7 +227,13 @@ func yieldFinalEvent(execCtx *a2asrv.ExecutorContext, result *WorkflowRunResult,
 	default:
 		state = a2a.TaskStateFailed
 	}
-	yield(a2a.NewStatusUpdateEvent(execCtx, state, msg), nil)
+	event := a2a.NewStatusUpdateEvent(execCtx, state, msg)
+	if state == a2a.TaskStateFailed {
+		// Surface the failure summary through the error entry type so the
+		// frontend renders it as an error card rather than a plain reply.
+		event.SetMeta("entry_type", "error")
+	}
+	yield(event, nil)
 }
 
 func summarizeRun(result *WorkflowRunResult) string {

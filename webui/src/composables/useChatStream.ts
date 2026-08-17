@@ -19,6 +19,33 @@ export function useChatStream(
 ) {
   const loading = ref(false);
   const isStreaming = ref(false);
+  // Label of the sub-agent currently executing (workflow node events); null
+  // falls back to the session's active agent name in the UI.
+  const workingAgentLabel = ref<string | null>(null);
+
+  const resolveAgentName = (metadata?: Record<string, any>): string | undefined => {
+    const agentId = metadata?.["agent_id"] as string | undefined;
+    if (agentId) {
+      const matched = agents.value.find((a) => a.id === agentId);
+      if (matched) return matched.name;
+    }
+    const agentName = metadata?.["agent_name"] as string | undefined;
+    if (agentName) return agentName;
+    return activeAgent.value?.name;
+  };
+
+  const pushErrorMessage = (content: string, agentName?: string) => {
+    if (!content) return;
+    const exists = messages.value.some((m) => m.role === "error" && m.content === content);
+    if (exists) return;
+    messages.value.push({
+      id: `error-${crypto.randomUUID()}`,
+      role: "error",
+      content,
+      agentName: agentName || activeAgent.value?.name,
+      timestamp: Date.now(),
+    });
+  };
 
   const refreshSessionTitle = async (chatID: string) => {
     const sess = await getSession(chatID);
@@ -44,6 +71,7 @@ export function useChatStream(
 
     isStreaming.value = true;
     loading.value = true;
+    workingAgentLabel.value = null;
 
     if (!currentThreadId) {
       const created = await createSession(selectedAgentId.value, selectedDir.value);
@@ -128,10 +156,21 @@ export function useChatStream(
         onStatus: (statusText, entryType, _state, metadata) => {
           if (!statusText) return;
 
-          const agentName =
-            (metadata?.["agent_name"] as string) || activeAgent.value?.name || "Agent";
+          const agentName = resolveAgentName(metadata) || activeAgent.value?.name || "Agent";
           const targetFiles = (metadata?.["target_files"] as string[] | undefined) || undefined;
           const artifactFiles = (metadata?.["artifact_files"] as string[] | undefined) || undefined;
+
+          // Track which sub-agent is currently executing (workflow node events)
+          const nodeStatus = metadata?.["node_status"] as string | undefined;
+          const nodeAgentId = metadata?.["agent_id"] as string | undefined;
+          if (nodeStatus === "RUNNING" && nodeAgentId) {
+            workingAgentLabel.value = resolveAgentName(metadata) || nodeAgentId;
+          }
+
+          if (entryType === "error") {
+            pushErrorMessage(statusText, agentName);
+            return;
+          }
 
           if (entryType === "ask_user") {
             const askMsgId = (metadata?.["message_id"] as string) || `ask-${Date.now()}`;
@@ -200,13 +239,8 @@ export function useChatStream(
           }
         },
         onError: async (err) => {
-          messages.value.push({
-            id: `error-${crypto.randomUUID()}`,
-            role: "activity",
-            activityType: "ERROR",
-            content: err.message || "An execution error occurred.",
-            timestamp: Date.now(),
-          });
+          pushErrorMessage(err.message || "An execution error occurred.");
+          workingAgentLabel.value = null;
           isStreaming.value = false;
           loading.value = false;
           const updatedSessions = await getSessions();
@@ -215,6 +249,7 @@ export function useChatStream(
         onComplete: async () => {
           isStreaming.value = false;
           loading.value = false;
+          workingAgentLabel.value = null;
           if (currentThreadId && !currentSession.title) {
             await refreshSessionTitle(currentThreadId);
           }
@@ -229,6 +264,7 @@ export function useChatStream(
     messages,
     loading,
     isStreaming,
+    workingAgentLabel,
     handleSendMessage,
   };
 }

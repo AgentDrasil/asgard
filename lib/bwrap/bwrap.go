@@ -16,6 +16,8 @@ import (
 // buildSystemPrompt constructs the full system prompt for the given CLI.
 // It starts with the CLI-specific instructions from its SandboxSpec (including SystemPromptPeerHeader if hasTeam is true)
 // and appends the content of agentsMDPath if the file exists.
+// ${tmp_dir} references in the AGENTS.md content are rewritten to /tmp, the
+// sandbox location of the session tmp directory the host binds there.
 func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool) (string, error) {
 	var sb strings.Builder
 
@@ -45,7 +47,7 @@ func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool) (string, e
 		}
 	}
 
-	return sb.String(), nil
+	return strings.ReplaceAll(sb.String(), "${tmp_dir}", "/tmp"), nil
 }
 
 // writeSystemPromptFile writes the combined system prompt for the given CLI to

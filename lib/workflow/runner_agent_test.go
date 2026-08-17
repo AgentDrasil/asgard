@@ -235,3 +235,94 @@ func TestResolveEffectiveAgent_NilHandling(t *testing.T) {
 
 	assert.Nil(t, resolveEffectiveAgent(nil, &NodeContext{}))
 }
+
+func TestEntryValidation(t *testing.T) {
+	t.Parallel()
+
+	const noAgentWorkflow = `
+name: w
+nodes:
+  - id: classify
+    type: llm
+    model: m
+    prompt: classify ${input}
+`
+
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "entry on agent node is valid",
+			yaml: `
+name: w
+nodes:
+  - id: a1
+    type: agent
+    agent_id: agy
+    entry: true
+`,
+		},
+		{
+			name: "multiple entry agents are valid",
+			yaml: `
+name: w
+nodes:
+  - id: a1
+    type: agent
+    agent_id: agy
+    entry: true
+  - id: a2
+    type: agent
+    agent_id: agy
+    entry: true
+`,
+		},
+		{
+			name: "agent workflow without entry is rejected",
+			yaml: `
+name: w
+nodes:
+  - id: a1
+    type: agent
+    agent_id: agy
+`,
+			wantErr: "entry: true",
+		},
+		{
+			name: "entry on llm node is rejected",
+			yaml: `
+name: w
+nodes:
+  - id: a1
+    type: agent
+    agent_id: agy
+    entry: true
+  - id: l1
+    type: llm
+    model: m
+    entry: true
+    prompt: summarize
+`,
+			wantErr: "entry is only allowed on agent nodes",
+		},
+		{
+			name: "workflow without agent nodes needs no entry",
+			yaml: noAgentWorkflow,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseDefinition([]byte(tt.yaml))
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -66,12 +66,14 @@ const props = withDefaults(
     isTerminalOpen?: boolean;
     modifiedFiles?: string[];
     isArtifactDrawerOpen?: boolean;
+    workingAgentLabel?: string | null;
   }>(),
   {
     isDetailsOpen: true,
     isTerminalOpen: false,
     modifiedFiles: () => [],
     isArtifactDrawerOpen: false,
+    workingAgentLabel: null,
   },
 );
 
@@ -350,6 +352,30 @@ const copyMessage = async (id: string, text: string) => {
             </details>
           </div>
 
+          <!-- Error Message Card -->
+          <div
+            v-if="msg.role === 'error' || (msg.role === 'activity' && msg.activityType === 'ERROR')"
+            class="w-full pl-2 pr-2 my-2 min-w-0"
+          >
+            <div class="rounded-lg border border-error/40 bg-error/10 p-3 space-y-1.5 min-w-0">
+              <div class="flex items-center gap-2 select-none min-w-0">
+                <Icon
+                  icon="material-symbols:error-circle-rounded"
+                  class="h-4 w-4 text-error shrink-0"
+                />
+                <span class="text-xs font-bold text-error uppercase tracking-wider shrink-0">
+                  Error
+                </span>
+                <span v-if="msg.agentName" class="text-xs font-mono text-error/70 truncate min-w-0">
+                  {{ msg.agentName }}
+                </span>
+              </div>
+              <pre
+                class="text-xs font-mono text-error/90 whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
+                >{{ msg.content }}</pre>
+            </div>
+          </div>
+
           <!-- Activity / Step / Tool Call Collapsible Box -->
           <div
             v-else-if="
@@ -603,7 +629,9 @@ const copyMessage = async (id: string, text: string) => {
           class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
         >
           <span class="loading loading-ring loading-xs text-primary"></span>
-          <span>Agent is working...</span>
+          <span>
+            Agent ({{ workingAgentLabel || activeAgent?.name || "Agent" }}) is working...
+          </span>
         </div>
 
         <div ref="bottomRef"></div>

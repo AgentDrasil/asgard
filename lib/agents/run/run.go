@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,8 +131,9 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	}
 
 	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
 	agentSandboxCmd.Stdout = &stdoutBuf
-	agentSandboxCmd.Stderr = os.Stderr
+	agentSandboxCmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	if err := agentSandboxCmd.Start(); err != nil {
 		_ = cmdSandboxCmd.Process.Kill()
@@ -171,10 +173,26 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 
 	out := stdoutBuf.Bytes()
 	if agentErr != nil {
-		return out, agentErr
+		return out, fmt.Errorf("%w%s", agentErr, stderrTail(stderrBuf.String()))
 	}
 
 	return out, nil
+}
+
+// stderrTail appends the last non-empty lines of the agent's stderr output to
+// an error message so CLI failures (e.g. missing required flags) are visible
+// to callers instead of only in server logs.
+func stderrTail(stderr string) string {
+	const maxTailLen = 1000
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	tail := strings.Join(lines, "\n")
+	if len(tail) > maxTailLen {
+		tail = tail[len(tail)-maxTailLen:]
+	}
+	if strings.TrimSpace(tail) == "" {
+		return ""
+	}
+	return ": " + tail
 }
 
 const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection

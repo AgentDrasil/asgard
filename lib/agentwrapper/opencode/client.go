@@ -64,4 +64,3 @@ func (c *Client) AuthDirectory(home string) string {
 func (c *Client) ExtraArgs() []string {
 	return nil
 }
-

@@ -28,4 +28,3 @@ func TestClient_ExtraArgs(t *testing.T) {
 	client := NewClient()
 	assert.Nil(t, client.ExtraArgs())
 }
-

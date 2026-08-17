@@ -29,6 +29,16 @@ func agentSessionKey(agentID string) string {
 	return "agent_session:" + agentID
 }
 
+// agentStartPrompt kicks off a non-entry agent node. Its inputs are files
+// produced by earlier nodes, referenced from its AGENTS.md.
+const agentStartPrompt = "Read the files your AGENTS.md instructions reference (they may have been written by earlier steps), then execute your task."
+
+// agentFollowUpPrompt is sent when an agent node resumes an existing CLI
+// session (session_policy: inherit). The agent's AGENTS.md defines how to
+// handle continuation; the re-read reminder matters because other agents may
+// have updated the referenced files since the previous turn.
+const agentFollowUpPrompt = "This is a follow-up on your existing session. Files referenced by your AGENTS.md instructions may have been updated by other agents since your last turn — re-read them, then follow your instructions for handling this continuation."
+
 // agentRunner executes agent nodes by invoking CLI agents inside sandboxes.
 type agentRunner struct {
 	loader *agents.Loader
@@ -87,16 +97,37 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		return nil, err
 	}
 
-	prompt := nctx.Interpolate(node.Prompt)
+	// Agent nodes carry no YAML prompt; the runner seeds the CLI prompt from
+	// the workflow context: entry nodes receive the raw user input, other
+	// fresh nodes get a kickoff directive (their inputs are files produced
+	// by earlier nodes), resumed sessions get a follow-up directive.
+	prompt := strings.TrimSpace(nctx.Interpolate(node.Prompt))
 
 	// Session policy: `fresh` always starts a clean CLI session; `inherit`
 	// (default) resumes the session a previous node opened for this agent.
 	session := optional.None[string]()
+	resuming := false
 	if node.SessionPolicyInherit() {
 		if v, ok := nctx.Values.Get(agentSessionKey(node.AgentID)); ok {
 			if sid, ok := v.(string); ok && sid != "" {
 				session = optional.Some(sid)
+				resuming = true
 			}
+		}
+	}
+
+	if prompt == "" {
+		switch {
+		case resuming:
+			prompt = agentFollowUpPrompt
+		case node.Entry:
+			input := strings.TrimSpace(nctx.Input)
+			if input == "" {
+				return nil, fmt.Errorf("agent node %q has no prompt: the workflow input is empty", node.ID)
+			}
+			prompt = input
+		default:
+			prompt = agentStartPrompt
 		}
 	}
 

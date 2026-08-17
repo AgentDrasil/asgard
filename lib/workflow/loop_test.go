@@ -28,6 +28,7 @@ nodes:
   - id: plan_agent
     type: agent
     agent_id: planner
+    entry: true
     depends:
       - node: human_review
         when: "nodes.human_review.output == 'Request Changes'"

@@ -106,7 +106,7 @@ const {
 );
 
 // 3. Chat Stream Composable
-const { loading, isStreaming, handleSendMessage } = useChatStream(
+const { loading, isStreaming, workingAgentLabel, handleSendMessage } = useChatStream(
   activeSessionId,
   sessions,
   agents,
@@ -187,6 +187,7 @@ const closeSidebarOnMobile = () => {
           :is="Component"
           :agents="agents"
           :loading="loading || isStreaming || (activeSession?.isRunning ?? false)"
+          :workingAgentLabel="workingAgentLabel"
           :messages="messages"
           :artifacts="activeSession?.artifacts || []"
           :activeAgent="activeAgent"
