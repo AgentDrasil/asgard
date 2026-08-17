@@ -43,7 +43,8 @@ const highlightedArtifactContent = computed(() => {
   const highlighted = highlightBlock(fileData.value.content, lang, [
     "rounded-lg",
     "p-4",
-    "overflow-x-auto",
+    "whitespace-pre-wrap",
+    "break-words",
     "border",
     "border-base-300",
     "text-xs",
@@ -53,7 +54,7 @@ const highlightedArtifactContent = computed(() => {
   if (highlighted) return highlighted;
   // Fallback while Shiki loads or when it fails: keep the same wrapping so the
   // layout doesn't jump once highlighting kicks in.
-  return `<pre class="font-mono text-xs text-base-content bg-base-200/80 p-4 rounded-lg border border-base-300 overflow-x-auto leading-relaxed whitespace-pre-wrap break-words"><code>${DOMPurify.sanitize(fileData.value.content)}</code></pre>`;
+  return `<pre class="font-mono text-xs text-base-content bg-base-200/80 p-4 rounded-lg border border-base-300 leading-relaxed whitespace-pre-wrap break-words"><code>${DOMPurify.sanitize(fileData.value.content)}</code></pre>`;
 });
 
 function formatPath(path: string): string {
