@@ -212,21 +212,24 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.Execu
 // goGenerateTitle spawns a background goroutine that generates and persists a
 // session title for the given prompt on first contact.
 func (e *SingleAgentExecutor) goGenerateTitle(ctx context.Context, chatID string, prompt string) {
+	goGenerateSessionTitle(ctx, e.server, e.llmClient, e.repo, chatID, prompt, e.agent.Config.ID, e.agent.Config.Description)
+}
+
+// goGenerateSessionTitle spawns a background goroutine that generates a session
+// title for the given prompt via the Gemini API and persists it to the session
+// repository. It is shared by the single-agent and workflow code paths.
+func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Client, repo *dbmodels.SessionRepository, chatID string, prompt string, agentID string, agentDesc string) {
 	apiKey := ""
 	model := ""
-	if e.server != nil && e.server.conf != nil {
-		apiKey = e.server.conf.GeminiAPIKey
-		model = e.server.conf.GeminiModelForChatTitle
+	if server != nil && server.conf != nil {
+		apiKey = server.conf.GeminiAPIKey
+		model = server.conf.GeminiModelForChatTitle
 	}
-	agentID := e.agent.Config.ID
-	agentDesc := e.agent.Config.Description
-	repo := e.repo
 
 	go func() {
 		titleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		client := e.llmClient
 		if client == nil {
 			if apiKey == "" {
 				apiKey = os.Getenv("GEMINI_API_KEY")
