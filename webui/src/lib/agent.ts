@@ -172,7 +172,12 @@ export async function runAgentStream(
                 task.metadata || msg?.metadata,
               );
             } else if (state !== TaskState.TASK_STATE_SUBMITTED) {
-              callbacks.onStatus?.(statusText, entryType, TaskState[state]);
+              callbacks.onStatus?.(
+                statusText,
+                entryType,
+                TaskState[state],
+                task.metadata || msg?.metadata,
+              );
             }
           }
         }
