@@ -95,6 +95,14 @@ func TestFakebashGRPC_Integration(t *testing.T) {
 			wantStderr:   "",
 			wantExitCode: "0",
 		},
+		{
+			name:         "command exits while background process holds pipe open",
+			args:         []string{"-c", "sleep 10 & echo done"},
+			cwd:          tmpDir,
+			wantStdout:   "done\n",
+			wantStderr:   "",
+			wantExitCode: "0",
+		},
 	}
 
 	for _, tt := range tests {

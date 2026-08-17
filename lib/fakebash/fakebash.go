@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/rs/zerolog/log"
@@ -205,11 +206,37 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		}
 	}()
 
-	wg.Wait()
+	var waitErr error
+	pipesDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(pipesDone)
+	}()
+
+	waitErrCh := make(chan error, 1)
+	go func() {
+		waitErrCh <- cmd.Wait()
+	}()
+
+	select {
+	case <-pipesDone:
+		// Normal case: pipes closed (EOF reached), now collect process exit status
+		waitErr = <-waitErrCh
+	case waitErr = <-waitErrCh:
+		// Process exited, but pipes may still be held open by lingering child processes.
+		// Wait for pipes to finish draining or force close them after a short delay.
+		select {
+		case <-pipesDone:
+		case <-time.After(100 * time.Millisecond):
+			_ = stdoutPipe.Close()
+			_ = stderrPipe.Close()
+			<-pipesDone
+		}
+	}
 
 	exitCode := 0
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
