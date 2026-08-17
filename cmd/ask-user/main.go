@@ -39,16 +39,52 @@ type AgentStatusUpdate struct {
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
+const askUserUsage = `Usage: ask-user <question>
+
+Send a question to the human user and block until they reply.
+The user's reply is printed to stdout, so capture it with command substitution, e.g.:
+
+  ANSWER=$(ask-user "Which database should I use?")
+
+Notes:
+  - The call long-polls and may wait a long time until the user replies.
+  - Ask ONE clear, specific question per call; do not use this for status updates.
+  - -h, --help, or help prints this help and exits without asking the user.
+`
+
 func main() {
 	logger.SetupLogger("ask-user")
 	log.Info().Interface("args", os.Args).Msg("ask-user: command started")
 
 	if len(os.Args) < 2 {
-		log.Error().Msg("Usage: ask-user <question>")
+		fmt.Fprint(os.Stderr, askUserUsage)
 		os.Exit(1)
 	}
 
-	questionText := strings.Join(os.Args[1:], " ")
+	if first := os.Args[1]; first == "-h" || first == "--help" || first == "help" {
+		fmt.Print(askUserUsage)
+		os.Exit(0)
+	}
+
+	nonFlagArgs := make([]string, 0, len(os.Args)-1)
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			fmt.Print(askUserUsage)
+			os.Exit(0)
+		}
+		if strings.HasPrefix(arg, "-") {
+			log.Error().Str("flag", arg).Msg("unknown flag (ask-user takes a plain question, not flags; see --help)")
+			fmt.Fprint(os.Stderr, askUserUsage)
+			os.Exit(2)
+		}
+		nonFlagArgs = append(nonFlagArgs, arg)
+	}
+	if len(nonFlagArgs) == 0 {
+		fmt.Fprint(os.Stderr, askUserUsage)
+		os.Exit(1)
+	}
+
+	questionText := strings.Join(nonFlagArgs, " ")
 
 	chatID := os.Getenv("ASGARD_CHAT_ID")
 	if chatID == "" {
