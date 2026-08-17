@@ -90,8 +90,8 @@ func TestClassifyLineAndContent(t *testing.T) {
 func TestExtractTargetFiles(t *testing.T) {
 	// edit / write: legacy schema exposes "filePath".
 	assert.Equal(t, []string{"/home/user/src/AgentDrasil/asgard/README.md"}, extractTargetFiles("edit", map[string]any{"filePath": "/home/user/src/AgentDrasil/asgard/README.md"}))
-	// write: V2 core schema exposes "path"; "/tmp/" is remapped to ".tmp/".
-	assert.Equal(t, []string{".tmp/test.txt"}, extractTargetFiles("write", map[string]any{"path": "/tmp/test.txt"}))
+	// write: V2 core schema exposes "path"; "/tmp/" is preserved as sandbox temp path.
+	assert.Equal(t, []string{"/tmp/test.txt"}, extractTargetFiles("write", map[string]any{"path": "/tmp/test.txt"}))
 	// apply_patch: single file embedded in patchText headers.
 	assert.Equal(t, []string{"src/main.go"}, extractTargetFiles("apply_patch", map[string]any{"patchText": "*** Update File: src/main.go\n@@\n-old\n+new\n"}))
 	// apply_patch: multi-file patches yield all target files in order.

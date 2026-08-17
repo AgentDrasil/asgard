@@ -28,6 +28,7 @@ func IsArtifact(targetPath string, config *AgentConfig, workspaceDir string) boo
 	}
 
 	cleanTarget := filepath.Clean(targetPath)
+	trimmedTarget := strings.TrimSpace(targetPath)
 
 	absWorkspace := ""
 	if workspaceDir != "" {
@@ -36,15 +37,17 @@ func IsArtifact(targetPath string, config *AgentConfig, workspaceDir string) boo
 		}
 	}
 
-	// Resolve target to absolute (relative to workspace when relative) so membership
-	// and prefix checks are consistent regardless of how the agent reported the path.
-	absTarget := cleanTarget
-	if absWorkspace != "" && !filepath.IsAbs(absTarget) {
+	// Resolve target to absolute if possible, but keep /tmp and .tmp separate from workspace.
+	var absTarget string
+	if filepath.IsAbs(cleanTarget) {
+		absTarget = cleanTarget
+	} else if cleanTarget != "/tmp" && !strings.HasPrefix(cleanTarget, "/tmp/") &&
+		cleanTarget != ".tmp" && !strings.HasPrefix(cleanTarget, ".tmp/") && absWorkspace != "" {
 		absTarget = filepath.Clean(filepath.Join(absWorkspace, cleanTarget))
 	}
 
-	// Primary: target inside the workspace -> gitignore decides.
-	if absWorkspace != "" {
+	// 1. Primary: if target is inside workspaceDir, gitignore decides.
+	if absWorkspace != "" && absTarget != "" {
 		relPath, err := filepath.Rel(absWorkspace, absTarget)
 		if err == nil && !strings.HasPrefix(relPath, "..") && relPath != "." {
 			cmd := exec.Command("git", "-C", absWorkspace, "check-ignore", "-q", relPath)
@@ -57,14 +60,15 @@ func IsArtifact(targetPath string, config *AgentConfig, workspaceDir string) boo
 		}
 	}
 
-	// If path is outside the workspace and is under sandbox /tmp/ or .tmp/, it is always an artifact.
-	if cleanTarget == "/tmp" || strings.HasPrefix(cleanTarget, "/tmp/") || cleanTarget == ".tmp" || strings.HasPrefix(cleanTarget, ".tmp/") {
+	// 2. Sandbox temp files (/tmp/ or .tmp/) outside the workspace are always artifacts.
+	if trimmedTarget == "/tmp" || strings.HasPrefix(trimmedTarget, "/tmp/") ||
+		trimmedTarget == ".tmp" || strings.HasPrefix(trimmedTarget, ".tmp/") {
 		return true
 	}
 
-	// Secondary: target outside the workspace, but under a configured RW mount or
+	// 3. Secondary: target outside the workspace, but under a configured RW mount or
 	// RunDir -> auxiliary artifact output area.
-	if config != nil {
+	if config != nil && absTarget != "" {
 		rwPaths := make([]string, 0, len(config.MountDirs.ReadWrite)+len(config.RunDirs))
 		rwPaths = append(rwPaths, config.MountDirs.ReadWrite...)
 		rwPaths = append(rwPaths, config.RunDirs...)

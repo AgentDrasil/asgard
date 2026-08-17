@@ -149,11 +149,8 @@ func (o *PromptOptions) ResponseDelayOrDefault() time.Duration {
 	return 300 * time.Second
 }
 
-// RemapSandboxPath remaps paths inside the sandbox temp directory (/tmp/) to .tmp/
+// RemapSandboxPath cleans and normalizes target file paths.
+// /tmp/ paths remain /tmp/ so they are treated as sandbox temporary artifacts.
 func RemapSandboxPath(targetPath string) string {
-	targetPath = strings.TrimSpace(targetPath)
-	if strings.HasPrefix(targetPath, "/tmp/") {
-		return ".tmp/" + strings.TrimPrefix(targetPath, "/tmp/")
-	}
-	return targetPath
+	return strings.TrimSpace(targetPath)
 }

@@ -157,13 +157,13 @@ func TestParseStream_ToolFormatting(t *testing.T) {
 
 func TestExtractTargetFiles(t *testing.T) {
 	assert.Equal(t, "main.go", types.RemapSandboxPath("main.go"))
-	assert.Equal(t, ".tmp/test.md", types.RemapSandboxPath("/tmp/test.md"))
+	assert.Equal(t, "/tmp/test.md", types.RemapSandboxPath("/tmp/test.md"))
 
 	infoWrite := &streamToolInfo{
 		Name:       "write_to_file",
 		Parameters: map[string]any{"TargetFile": "/tmp/out.txt"},
 	}
-	assert.Equal(t, []string{".tmp/out.txt"}, extractTargetFiles("write_to_file", infoWrite))
+	assert.Equal(t, []string{"/tmp/out.txt"}, extractTargetFiles("write_to_file", infoWrite))
 
 	infoReplace := &streamToolInfo{
 		Name:       "replace_file_content",
