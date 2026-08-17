@@ -211,3 +211,32 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 	assert.Equal(t, []string{"/tmp/intend.md"}, msg.ArtifactFiles)
 	assert.Equal(t, "Writing requirements to /tmp/intend.md", msg.Content)
 }
+
+func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-wf-suspended-event"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventWorkflowSuspended,
+		NodeID:    "plan_approval",
+		NodeType:  workflow.NodeTypeHuman,
+		AgentName: "Dev Workflow",
+		Status:    workflow.NodeStatus(workflow.RunStatusWaitingHuman),
+		Message:   "Please review Plan (/tmp/plan/plan.md)",
+		MessageID: "wf-run-plan_approval",
+		Artifacts: []string{"/tmp/plan/plan.md", "/tmp/plan/todo.yaml"},
+	})
+
+	session, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.Equal(t, dbmodels.Artifacts{"/tmp/plan/plan.md", "/tmp/plan/todo.yaml"}, session.Artifacts)
+
+	require.Len(t, session.Messages, 1)
+	msg := session.Messages[0]
+	assert.Equal(t, "ask_user", msg.Role)
+	assert.Equal(t, "wf-run-plan_approval", msg.ID)
+	assert.Equal(t, "Dev Workflow", msg.AgentName)
+	assert.Equal(t, []string{"/tmp/plan/plan.md", "/tmp/plan/todo.yaml"}, msg.ArtifactFiles)
+	assert.Equal(t, "Please review Plan (/tmp/plan/plan.md)", msg.Content)
+}

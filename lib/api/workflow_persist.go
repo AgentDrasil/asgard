@@ -186,8 +186,26 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	if s.repo == nil || sessionID == "" {
 		return
 	}
-	// Suspended human-node artifacts are registered by suspendWorkflowHuman.
 	if ev.Type == workflow.EventWorkflowSuspended {
+		for _, artifact := range ev.Artifacts {
+			if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow suspended artifact to repo")
+			}
+		}
+		if ev.Message != "" {
+			msgID := ev.MessageID
+			if msgID == "" {
+				msgID = fmt.Sprintf("wf-suspended-%s-%d", ev.NodeID, time.Now().UnixMilli())
+			}
+			_ = s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+				ID:            msgID,
+				Role:          "ask_user",
+				Content:       ev.Message,
+				AgentName:     ev.AgentName,
+				Timestamp:     time.Now().UnixMilli(),
+				ArtifactFiles: ev.Artifacts,
+			})
+		}
 		return
 	}
 	if ev.Type == workflow.EventNodeStatusUpdate {
