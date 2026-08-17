@@ -79,6 +79,15 @@ export function useSessions(
       chatInputText.value = "";
 
       if (newId && typeof newId === "string") {
+        // If we are already streaming this session (e.g. newly created chat from /newchat),
+        // do not overwrite active in-memory messages with the empty initial session from DB.
+        if (isStreaming.value && activeSessionId.value === newId && messages.value.length > 0) {
+          const session = await getSession(newId);
+          if (session) {
+            activeSession.value = session;
+          }
+          return;
+        }
         // Always load the target session's messages. Skipping this while a
         // stream is active left the previous session's messages (e.g. a
         // pending ask_user card) rendered under the new session, and the

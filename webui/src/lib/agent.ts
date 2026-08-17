@@ -171,7 +171,7 @@ export async function runAgentStream(
                 tokens.maxTokens,
                 task.metadata || msg?.metadata,
               );
-            } else {
+            } else if (state !== TaskState.TASK_STATE_SUBMITTED) {
               callbacks.onStatus?.(statusText, entryType, TaskState[state]);
             }
           }

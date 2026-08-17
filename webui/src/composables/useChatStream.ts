@@ -88,6 +88,7 @@ export function useChatStream(
       if (created && created.chatID) {
         currentThreadId = created.chatID;
         activeSessionId.value = currentThreadId;
+        streamingSessionId.value = currentThreadId;
         sessions.value = [created, ...sessions.value.filter((s) => s.chatID !== created.chatID)];
         await router.push(`/chat/${currentThreadId}`);
       }

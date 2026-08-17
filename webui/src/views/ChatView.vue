@@ -12,6 +12,7 @@ const props = defineProps<{
   artifacts?: string[];
   loading: boolean;
   activeAgent: AgentInfo | null;
+  agents?: AgentInfo[];
   runDir: string;
   sessionId: string;
   showDiffView: boolean;
@@ -198,6 +199,7 @@ watch(isArtifactDrawerOpen, (open) => {
           :messages="messages"
           :loading="loading"
           :activeAgent="activeAgent"
+          :agents="agents"
           :runDir="runDir"
           :sessionId="sessionId"
           :isTerminalOpen="isTerminalOpen"

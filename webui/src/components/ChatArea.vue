@@ -64,6 +64,7 @@ const props = withDefaults(
     messages: ChatMessage[];
     loading: boolean;
     activeAgent: AgentInfo | null;
+    agents?: AgentInfo[];
     runDir: string;
     sessionId?: string | null;
     isDetailsOpen?: boolean;
@@ -80,6 +81,14 @@ const props = withDefaults(
     workingAgentLabel: null,
   },
 );
+
+const getAgentIcon = (agentName?: string) => {
+  if (agentName && props.agents) {
+    const matched = props.agents.find((a) => a.name === agentName || a.id === agentName);
+    if (matched?.icon) return matched.icon;
+  }
+  return props.activeAgent?.icon || "fluent-color:bot-24";
+};
 
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
@@ -400,7 +409,7 @@ const copyMessage = async (id: string, text: string) => {
             class="w-full pl-2 pr-2 my-2 min-w-0"
           >
             <div class="flex items-center gap-2 mb-1.5 select-none">
-              <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
+              <Icon :icon="getAgentIcon(msg.agentName)" class="h-4 w-4 shrink-0" />
               <span class="text-xs font-bold text-base-content/70">
                 {{ msg.agentName || activeAgent?.name || "Agent" }}
               </span>
@@ -467,10 +476,7 @@ const copyMessage = async (id: string, text: string) => {
               class="card bg-warning/10 border border-warning/30 shadow-sm p-4 rounded-xl space-y-3"
             >
               <div class="flex items-center gap-2 select-none">
-                <Icon
-                  :icon="activeAgent?.icon || 'fluent-color:bot-24'"
-                  class="h-5 w-5 shrink-0 text-warning"
-                />
+                <Icon :icon="getAgentIcon(msg.agentName)" class="h-5 w-5 shrink-0 text-warning" />
                 <span class="text-xs font-bold text-base-content">
                   {{ msg.agentName || activeAgent?.name || "Agent" }} is asking:
                 </span>
@@ -576,7 +582,7 @@ const copyMessage = async (id: string, text: string) => {
           <!-- Assistant Message (Full-width markdown without chat bubble) -->
           <div v-else class="w-full pl-2 pr-2 py-2 my-1 min-w-0">
             <div class="flex items-center gap-2 mb-2 select-none">
-              <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-4 w-4 shrink-0" />
+              <Icon :icon="getAgentIcon(msg.agentName)" class="h-4 w-4 shrink-0" />
               <span class="text-xs font-bold text-base-content/70">
                 {{ msg.agentName || activeAgent?.name || "Agent" }}
               </span>
