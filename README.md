@@ -76,7 +76,7 @@ Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates m
 ### Key Capabilities
 - **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
 - **Heterogeneous Node Types**:
-  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. `${tmp_dir}` references in `AGENTS.md` are rewritten to `/tmp` in the sandbox system prompt.
+  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox).
   - `command`: Executes sandboxed or direct bash shell commands.
   - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / A2A (`TaskStateInputRequired`), persisting state across server restarts.

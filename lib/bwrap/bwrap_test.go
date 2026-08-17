@@ -19,8 +19,6 @@ func TestBuildSystemPrompt(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentsMDPath := filepath.Join(tmpDir, "AGENTS.md")
 	require.NoError(t, os.WriteFile(agentsMDPath, []byte("# Custom Instructions\n\nDo stuff."), 0644))
-	agentsMDTmpRefPath := filepath.Join(tmpDir, "AGENTS_TMP_REF.md")
-	require.NoError(t, os.WriteFile(agentsMDTmpRefPath, []byte("Write plans to ${tmp_dir}/plan/plan.md."), 0644))
 
 	tests := []struct {
 		name           string
@@ -116,26 +114,13 @@ func TestBuildSystemPrompt(t *testing.T) {
 				"call-peer",
 			},
 		},
-		{
-			name:         "unknown CLI without AGENTS.md returns empty",
-			cli:          "unknown",
-			agentsMDPath: "",
-			hasTeam:      true,
-			wantContains: nil,
-		},
-		{
-			name:         "agy with AGENTS.md referencing tmp_dir rewrites to /tmp",
-			cli:          "agy",
-			agentsMDPath: agentsMDTmpRefPath,
-			hasTeam:      false,
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"Write plans to /tmp/plan/plan.md.",
-			},
-			wantNotContain: []string{
-				"${tmp_dir}",
-			},
-		},
+	{
+		name:         "unknown CLI without AGENTS.md returns empty",
+		cli:          "unknown",
+		agentsMDPath: "",
+		hasTeam:      true,
+		wantContains: nil,
+	},
 	}
 
 	for _, tt := range tests {
