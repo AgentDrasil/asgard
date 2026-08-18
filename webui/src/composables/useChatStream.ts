@@ -16,13 +16,14 @@ export function useChatStream(
   chatInputText: Ref<string>,
   router: Router,
   messages: Ref<ChatMessage[]>,
+  externalStreamingSessionId?: Ref<string | null>,
 ) {
   const loading = ref(false);
   const isStreaming = ref(false);
   // Session the active stream belongs to; null when idle. Used to scope UI
   // updates (messages, error cards, labels) to that session so switching to
   // another session mid-stream neither blocks it nor pollutes its view.
-  const streamingSessionId = ref<string | null>(null);
+  const streamingSessionId = externalStreamingSessionId ?? ref<string | null>(null);
   // Label of the sub-agent currently executing (workflow node events); null
   // falls back to the session's active agent name in the UI.
   const workingAgentLabel = ref<string | null>(null);
@@ -83,6 +84,14 @@ export function useChatStream(
     streamingSessionId.value = currentThreadId;
     workingAgentLabel.value = null;
 
+    const userMsgId = `user-${crypto.randomUUID()}`;
+    messages.value.push({
+      id: userMsgId,
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    });
+
     if (!currentThreadId) {
       const created = await createSession(selectedAgentId.value, selectedDir.value);
       if (created && created.chatID) {
@@ -91,6 +100,13 @@ export function useChatStream(
         streamingSessionId.value = currentThreadId;
         sessions.value = [created, ...sessions.value.filter((s) => s.chatID !== created.chatID)];
         await router.push(`/chat/${currentThreadId}`);
+      } else {
+        messages.value = messages.value.filter((m) => m.id !== userMsgId);
+        isStreaming.value = false;
+        loading.value = false;
+        streamingSessionId.value = null;
+        pushErrorMessage("Failed to create session. Please try again.");
+        return;
       }
     }
 
@@ -100,14 +116,6 @@ export function useChatStream(
       runDir: selectedDir.value,
       title: "",
     };
-
-    const userMsgId = `user-${crypto.randomUUID()}`;
-    messages.value.push({
-      id: userMsgId,
-      role: "user",
-      content: text,
-      timestamp: Date.now(),
-    });
 
     const runId = crypto.randomUUID();
     const assistantMsgId = crypto.randomUUID();

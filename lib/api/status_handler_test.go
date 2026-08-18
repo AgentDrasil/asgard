@@ -139,3 +139,22 @@ func TestStatusListenerConcurrentRegisterCancelAndPost(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+func TestStatusListener_BufferCapacityAndDrop(t *testing.T) {
+	s := &Server{}
+	chatID := "chat-buffer-test"
+	ch, cancel := s.AddStatusListener(chatID, nil)
+	defer cancel()
+
+	assert.Equal(t, 256, cap(ch), "statusListener channel capacity should be 256")
+
+	// Send 256 items to fill the buffer completely
+	for i := 0; i < 256; i++ {
+		postStatusUpdate(t, s, `{"chat_id":"`+chatID+`","content":"msg"}`)
+	}
+	assert.Equal(t, 256, len(ch))
+
+	// 257th item should not block and should be dropped
+	postStatusUpdate(t, s, `{"chat_id":"`+chatID+`","content":"overflow"}`)
+	assert.Equal(t, 256, len(ch))
+}

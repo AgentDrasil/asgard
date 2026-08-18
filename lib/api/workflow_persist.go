@@ -314,6 +314,18 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 		return
 	}
 	go func() {
+		if s.repo != nil {
+			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil && sess.CurrentAgent != "" {
+				if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusRunning); err != nil {
+					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to update agent status to running on workflow resume")
+				}
+				defer func() {
+					if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusCompleted); err != nil {
+						log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to mark agent status completed on workflow resume finish")
+					}
+				}()
+			}
+		}
 		// Re-driven runs have no live A2A stream, so route their events into
 		// the persistence handler: node outputs, errors, summary and any
 		// follow-up human suspension land in the session transcript instead

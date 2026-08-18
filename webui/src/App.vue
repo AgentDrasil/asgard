@@ -81,6 +81,7 @@ const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useA
 // 2. Chat state shared between composables
 const messages = ref<ChatMessage[]>([]);
 const isStreamingRef = ref(false);
+const streamingSessionId = ref<string | null>(null);
 
 const {
   sessions,
@@ -103,22 +104,23 @@ const {
   welcomePrompt,
   showDiffView,
   chatInputText,
+  streamingSessionId,
 );
 
 // 3. Chat Stream Composable
-const { loading, isStreaming, streamingSessionId, workingAgentLabel, handleSendMessage } =
-  useChatStream(
-    activeSessionId,
-    sessions,
-    agents,
-    activeAgent,
-    selectedAgentId,
-    selectedDir,
-    selectedModel,
-    chatInputText,
-    router,
-    messages,
-  );
+const { loading, isStreaming, workingAgentLabel, handleSendMessage } = useChatStream(
+  activeSessionId,
+  sessions,
+  agents,
+  activeAgent,
+  selectedAgentId,
+  selectedDir,
+  selectedModel,
+  chatInputText,
+  router,
+  messages,
+  streamingSessionId,
+);
 
 // The chat input is busy only when the VIEWED session is the one streaming
 // (or reports isRunning); a background session's stream must not lock other

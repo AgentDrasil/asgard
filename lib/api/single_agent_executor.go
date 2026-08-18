@@ -305,8 +305,14 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 	if len(artifactFiles) > 0 {
 		update.Metadata["artifact_files"] = workflow.ToAnySlice(artifactFiles)
 	}
+	stepID := fmt.Sprintf("step-%s-%d", chatID, update.StepIndex)
+	if update.RunToken != "" {
+		stepID = fmt.Sprintf("step-%s-%s-%d", chatID, update.RunToken, update.StepIndex)
+	} else if update.NodeID != "" {
+		stepID = fmt.Sprintf("step-%s-%s-%d", chatID, update.NodeID, update.StepIndex)
+	}
 	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
-		ID:            fmt.Sprintf("step-%s-%d", chatID, update.StepIndex),
+		ID:            stepID,
 		Role:          role,
 		Content:       update.Content,
 		AgentName:     agentName,

@@ -15,6 +15,7 @@ export function useSessions(
   welcomePrompt: Ref<string>,
   showDiffView: Ref<boolean>,
   chatInputText: Ref<string>,
+  streamingSessionId?: Ref<string | null>,
 ) {
   const sessions = ref<ChatSession[]>([]);
   const activeSessionId = ref<string | null>(null);
@@ -26,11 +27,11 @@ export function useSessions(
     activeSessionId.value = id;
     const myGen = ++loadGen;
     const session = await getSession(id);
+    if (myGen !== loadGen) return;
     if (session) {
       activeSession.value = session;
       isStreaming.value = !!session.isRunning;
     }
-    if (myGen !== loadGen) return;
     messages.value = mergeToolMessages(session?.messages ?? []);
   };
 
@@ -81,7 +82,7 @@ export function useSessions(
       if (newId && typeof newId === "string") {
         // If we are already streaming this session (e.g. newly created chat from /newchat),
         // do not overwrite active in-memory messages with the empty initial session from DB.
-        if (isStreaming.value && activeSessionId.value === newId && messages.value.length > 0) {
+        if (streamingSessionId?.value === newId && activeSessionId.value === newId) {
           const session = await getSession(newId);
           if (session) {
             activeSession.value = session;

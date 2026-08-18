@@ -227,3 +227,66 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.NotNil(t, sess)
 	require.Len(t, sess.Messages, 3)
 }
+
+func TestUpdateAgentSession_DefaultStatus(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	chatID := "test-status-chat"
+	err := repo.UpdateAgentSession(chatID, "agent-1", "cli/model", "sess-1", optional.None[string]())
+	require.NoError(t, err)
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Len(t, sess.Agents, 1)
+	assert.Equal(t, AgentStatusCompleted, sess.Agents[0].Status)
+	assert.False(t, sess.IsRunning())
+}
+
+func TestResetAllRunningAgents(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	// Session 1: running agent
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID: "chat-1",
+		Agents: Agents{
+			{Name: "agent-1", Status: AgentStatusRunning},
+		},
+	}))
+	// Session 2: already completed agent
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID: "chat-2",
+		Agents: Agents{
+			{Name: "agent-2", Status: AgentStatusCompleted},
+		},
+	}))
+	// Session 3: multiple agents with mixed status
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID: "chat-3",
+		Agents: Agents{
+			{Name: "agent-3a", Status: AgentStatusRunning},
+			{Name: "agent-3b", Status: AgentStatusCompleted},
+		},
+	}))
+
+	require.NoError(t, repo.ResetAllRunningAgents())
+
+	sess1, err := repo.GetSession("chat-1")
+	require.NoError(t, err)
+	assert.Equal(t, AgentStatusCompleted, sess1.Agents[0].Status)
+	assert.False(t, sess1.IsRunning())
+
+	sess2, err := repo.GetSession("chat-2")
+	require.NoError(t, err)
+	assert.Equal(t, AgentStatusCompleted, sess2.Agents[0].Status)
+
+	sess3, err := repo.GetSession("chat-3")
+	require.NoError(t, err)
+	assert.Equal(t, AgentStatusCompleted, sess3.Agents[0].Status)
+	assert.Equal(t, AgentStatusCompleted, sess3.Agents[1].Status)
+	assert.False(t, sess3.IsRunning())
+}

@@ -53,9 +53,10 @@ func (e *SingleAgentExecutor) executeSequential(
 	}
 
 	// ── Run the agent in a goroutine, collect result on resultCh ──────────
+	runToken := uuid.Must(uuid.NewV7()).String()
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, modelOpt, chatID, run.StatusScope{}, e.conf)
+		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken}, e.conf)
 		resultCh <- seqRunResult{out, err}
 	}()
 

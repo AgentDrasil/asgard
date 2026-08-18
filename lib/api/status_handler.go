@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog/log"
 
@@ -18,8 +19,9 @@ type AgentStatusUpdate = workflow.AgentStatusUpdate
 // predicate. When match is non-nil only updates it accepts are delivered;
 // nil match delivers everything registered for the chatID.
 type statusListener struct {
-	ch    chan workflow.AgentStatusUpdate
-	match func(workflow.AgentStatusUpdate) bool
+	ch      chan workflow.AgentStatusUpdate
+	match   func(workflow.AgentStatusUpdate) bool
+	dropped atomic.Int64
 }
 
 // statusListenersMu guards statusListeners.
@@ -32,7 +34,7 @@ var statusListenersMu sync.Mutex
 // to deregister the channel and free resources.
 func (s *Server) AddStatusListener(chatID string, match func(workflow.AgentStatusUpdate) bool) (<-chan workflow.AgentStatusUpdate, func()) {
 	l := &statusListener{
-		ch:    make(chan workflow.AgentStatusUpdate, 64),
+		ch:    make(chan workflow.AgentStatusUpdate, 256),
 		match: match,
 	}
 
@@ -98,7 +100,11 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		case l.ch <- update:
 		default:
 			// Drop update if listener buffer is full to avoid blocking the reporter.
-			log.Warn().Str("chat_id", update.ChatID).Msg("status listener buffer full, dropping update")
+			count := l.dropped.Add(1)
+			log.Warn().
+				Str("chat_id", update.ChatID).
+				Int64("dropped_count", count).
+				Msg("status listener buffer full, dropping update")
 		}
 	}
 

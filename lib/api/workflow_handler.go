@@ -113,11 +113,38 @@ var _ a2asrv.AgentExecutor = (*workflowTitleExecutor)(nil)
 
 // Execute persists the incoming user message (mirroring the single-agent
 // path), generates the session title on first contact (when the session has
-// no stored title yet), then delegates to the wrapped workflow executor.
+// no stored title yet), then delegates to the wrapped workflow executor while
+// maintaining the agent's running/completed lifecycle in the session DB.
 func (e *workflowTitleExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	e.persistIncomingMessage(execCtx)
 	e.maybeGenerateTitle(ctx, execCtx)
-	return e.inner.Execute(ctx, execCtx)
+
+	chatID := execCtx.ContextID
+	agentID := ""
+	if e.agent != nil && e.agent.Config.ID != "" {
+		agentID = e.agent.Config.ID
+	}
+
+	return func(yield func(a2a.Event, error) bool) {
+		if e.server != nil && e.server.repo != nil && chatID != "" && agentID != "" {
+			if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
+				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")
+			}
+			defer func() {
+				if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted); err != nil {
+					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to mark workflow agent status completed")
+				}
+			}()
+		}
+		if e.inner == nil {
+			return
+		}
+		for ev, err := range e.inner.Execute(ctx, execCtx) {
+			if !yield(ev, err) {
+				return
+			}
+		}
+	}
 }
 
 // Cancel delegates cancellation to the wrapped workflow executor.

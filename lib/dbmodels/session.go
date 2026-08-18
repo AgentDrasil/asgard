@@ -268,7 +268,7 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 		if !found {
 			newAgent := Agent{
 				Name:   agentID,
-				Status: AgentStatusRunning,
+				Status: AgentStatusCompleted,
 			}
 			if sessionID != "" && cliKey != "" {
 				newAgent.Sessions = map[string]string{cliKey: sessionID}
@@ -277,6 +277,32 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 		}
 
 		return tx.Save(sessPtr).Error
+	})
+}
+
+// ResetAllRunningAgents sets all agents with status AgentStatusRunning to AgentStatusCompleted across all sessions.
+// This is called at server startup to clear stale running states from crashes or unexpected restarts.
+func (r *SessionRepository) ResetAllRunningAgents() error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var sessions []Session
+		if err := tx.Find(&sessions).Error; err != nil {
+			return err
+		}
+		for _, sess := range sessions {
+			modified := false
+			for i, a := range sess.Agents {
+				if a.Status == AgentStatusRunning {
+					sess.Agents[i].Status = AgentStatusCompleted
+					modified = true
+				}
+			}
+			if modified {
+				if err := tx.Save(&sess).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 }
 
