@@ -197,7 +197,11 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	assert.Equal(t, int64(1005), sess.Messages[0].Timestamp)
 
 	// 3. Mark as replied, then append duplicate without Replied flag -> should preserve replied state
-	require.NoError(t, repo.MarkAskUserReplied(chatID, "msg-1", "Approve"))
+	updatedMsg, err := repo.MarkAskUserReplied(chatID, "msg-1", "Approve")
+	require.NoError(t, err)
+	require.NotNil(t, updatedMsg)
+	assert.True(t, updatedMsg.Replied)
+	assert.Equal(t, "Approve", updatedMsg.ReplyText)
 	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
 		ID:        "msg-1",
 		Role:      "ask_user",

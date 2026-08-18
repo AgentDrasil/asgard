@@ -7,9 +7,12 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/rs/zerolog/log"
 )
 
 // WorkflowExecutor adapts the workflow engine to the a2asrv SDK Executor
@@ -31,6 +34,15 @@ type WorkflowExecutor struct {
 	// session (chat) ID. The host application uses it for side effects such
 	// as persisting node artifacts into the session.
 	OnEvent func(sessionID string, ev WorkflowEvent)
+	// persistTimeout is the maximum duration to wait when sending to persistCh. Defaults to 2s if <= 0.
+	persistTimeout time.Duration
+	// persistDropped tracks the number of workflow events dropped due to persistence channel overflow.
+	persistDropped uint64
+}
+
+// PersistDropped returns the total count of dropped persistence events.
+func (e *WorkflowExecutor) PersistDropped() uint64 {
+	return atomic.LoadUint64(&e.persistDropped)
 }
 
 // NewWorkflowExecutor creates an executor for the given engine and definition.
@@ -94,12 +106,26 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 				}
 			}
 		}()
+
+		timeout := e.persistTimeout
+		if timeout <= 0 {
+			timeout = 2 * time.Second
+		}
+
 		rc.EmitEvent = func(ev WorkflowEvent) {
-			// Non-blocking: if a consumer is gone, dropping progress events
-			// is preferred to stalling engine workers.
+			timer := time.NewTimer(timeout)
 			select {
 			case persistCh <- ev:
-			default:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				dropped := atomic.AddUint64(&e.persistDropped, 1)
+				log.Error().
+					Str("session_id", rc.SessionID).
+					Str("event_type", string(ev.Type)).
+					Uint64("dropped_count", dropped).
+					Msg("persistCh channel full, dropped workflow event after timeout")
 			}
 			select {
 			case events <- ev:

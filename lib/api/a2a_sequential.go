@@ -98,7 +98,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 				statusCh = nil
 				continue
 			}
-			recordStatusUpdate(e.repo, chatID, update, &e.agent.Config, workspaceDir)
+			recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
 
 			// Emit an intermediate TaskStatusUpdateEvent.
 			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
@@ -158,7 +158,7 @@ func (e *SingleAgentExecutor) handleFinalResult(
 
 		// Save final assistant response to DB session
 		if respText != "" {
-			if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+			finalMsg := dbmodels.ChatMessage{
 				ID:          fmt.Sprintf("assistant-%s-%s", chatID, uuid.Must(uuid.NewV7()).String()),
 				Role:        "assistant",
 				Content:     respText,
@@ -166,8 +166,14 @@ func (e *SingleAgentExecutor) handleFinalResult(
 				Timestamp:   time.Now().UnixMilli(),
 				InputTokens: inputTokens,
 				MaxTokens:   maxTokens,
-			}); err != nil {
+			}
+			if err := e.repo.AppendMessage(chatID, finalMsg); err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append final assistant response to repo")
+			} else if e.server != nil {
+				e.server.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "message",
+					Message: &finalMsg,
+				})
 			}
 		}
 	}

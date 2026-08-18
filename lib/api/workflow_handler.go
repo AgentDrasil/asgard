@@ -38,13 +38,12 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 	return workflow.NewEngine(registry), nil
 }
 
-// newWorkflowHandler creates the A2A REST handler and agent card for a
-// workflow-type agent.
-func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.AgentCard) {
+// newWorkflowExecutor creates a workflowTitleExecutor for the given workflow agent.
+func (s *Server) newWorkflowExecutor(agent *agents.Agent) a2asrv.AgentExecutor {
 	defn, err := workflow.LoadDefinition(agent.WorkflowPath)
 	if err != nil {
 		log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to load workflow definition")
-		return nil, nil
+		return nil
 	}
 
 	engine := s.workflowEngine
@@ -53,11 +52,15 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 		engine, err = newWorkflowEngine(s.conf, s)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
-			return nil, nil
+			return nil
 		}
+		s.mu.RLock()
 		if len(s.agents) > 0 {
-			engine.SetAgents(s.agents)
+			agentsSnapshot := make([]*agents.Agent, len(s.agents))
+			copy(agentsSnapshot, s.agents)
+			engine.SetAgents(agentsSnapshot)
 		}
+		s.mu.RUnlock()
 	}
 
 	executor := workflow.NewWorkflowExecutor(engine, defn)
@@ -68,11 +71,21 @@ func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.Age
 		ReadWrite: agent.Config.MountDirs.ReadWrite,
 	}
 	executor.OnEvent = s.handleWorkflowEvent
-	handler := a2asrv.NewHandler(&workflowTitleExecutor{
+	return &workflowTitleExecutor{
 		inner:  executor,
 		server: s,
 		agent:  agent,
-	})
+	}
+}
+
+// newWorkflowHandler creates the A2A REST handler and agent card for a
+// workflow-type agent.
+func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.AgentCard) {
+	exec := s.newWorkflowExecutor(agent)
+	if exec == nil {
+		return nil, nil
+	}
+	handler := a2asrv.NewHandler(exec)
 	restHandler := a2asrv.NewRESTHandler(handler)
 
 	host := "http://localhost:8080"
@@ -129,10 +142,24 @@ func (e *workflowTitleExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 		if e.server != nil && e.server.repo != nil && chatID != "" && agentID != "" {
 			if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")
+			} else {
+				e.server.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "status",
+					Payload: map[string]any{"agent": agentID, "isRunning": true},
+				})
 			}
 			defer func() {
 				if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted); err != nil {
 					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to mark workflow agent status completed")
+				} else {
+					e.server.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "status",
+						Payload: map[string]any{"agent": agentID, "isRunning": false},
+					})
+					e.server.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "done",
+						Payload: map[string]any{"agent": agentID},
+					})
 				}
 			}()
 		}
@@ -198,15 +225,21 @@ func (e *workflowTitleExecutor) persistIncomingMessage(execCtx *a2asrv.ExecutorC
 			agentName = e.agent.Config.Name
 		}
 	}
-	if err := e.server.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+	msg := dbmodels.ChatMessage{
 		ID:           userMsgID,
 		Role:         role,
 		ActivityType: activityType,
 		Content:      prompt,
 		AgentName:    agentName,
 		Timestamp:    time.Now().UnixMilli(),
-	}); err != nil {
+	}
+	if err := e.server.repo.AppendMessage(chatID, msg); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append workflow user message to repo")
+	} else {
+		e.server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "message",
+			Message: &msg,
+		})
 	}
 }
 

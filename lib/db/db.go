@@ -42,7 +42,11 @@ func NewDB(conf *config.Config) (*gorm.DB, error) {
 			return nil, err
 		}
 		if sqlDB, err := db.DB(); err == nil {
-			sqlDB.SetMaxOpenConns(1)
+			if strings.Contains(conf.DSN, ":memory:") {
+				sqlDB.SetMaxOpenConns(1)
+			} else {
+				sqlDB.SetMaxOpenConns(4)
+			}
 		}
 		return db, nil
 	} else { // pg

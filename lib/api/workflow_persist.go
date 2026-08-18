@@ -156,21 +156,31 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 			agentName = session.CurrentAgent
 		}
 	}
-	for _, artifact := range req.Artifacts {
-		if err := s.repo.AppendArtifact(req.SessionID, artifact); err != nil {
-			log.Warn().Err(err).Str("chat_id", req.SessionID).Str("artifact", artifact).Msg("failed to append workflow artifact to repo")
+	if len(req.Artifacts) > 0 {
+		if err := s.repo.AppendArtifacts(req.SessionID, req.Artifacts); err != nil {
+			log.Warn().Err(err).Str("chat_id", req.SessionID).Msg("failed to append workflow artifacts to repo")
+		} else {
+			s.PublishSessionEvent(req.SessionID, SessionEvent{
+				Type:    "artifact",
+				Payload: map[string]any{"artifacts": req.Artifacts},
+			})
 		}
 	}
-	if err := s.repo.AppendMessage(req.SessionID, dbmodels.ChatMessage{
+	msg := dbmodels.ChatMessage{
 		ID:            req.MessageID,
 		Role:          "ask_user",
 		Content:       req.Prompt,
 		AgentName:     agentName,
 		Timestamp:     time.Now().UnixMilli(),
 		ArtifactFiles: req.Artifacts,
-	}); err != nil {
+	}
+	if err := s.repo.AppendMessage(req.SessionID, msg); err != nil {
 		return err
 	}
+	s.PublishSessionEvent(req.SessionID, SessionEvent{
+		Type:    "message",
+		Message: &msg,
+	})
 	s.SendPushNotification(req.SessionID, req.Prompt, agentName)
 	return nil
 }
@@ -187,9 +197,14 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Type == workflow.EventWorkflowSuspended {
-		for _, artifact := range ev.Artifacts {
-			if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
-				log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow suspended artifact to repo")
+		if len(ev.Artifacts) > 0 {
+			if err := s.repo.AppendArtifacts(sessionID, ev.Artifacts); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow suspended artifacts to repo")
+			} else {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "artifact",
+					Payload: map[string]any{"artifacts": ev.Artifacts},
+				})
 			}
 		}
 		if ev.Message != "" {
@@ -197,21 +212,34 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 			if msgID == "" {
 				msgID = fmt.Sprintf("wf-suspended-%s-%d", ev.NodeID, time.Now().UnixMilli())
 			}
-			_ = s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+			msg := dbmodels.ChatMessage{
 				ID:            msgID,
 				Role:          "ask_user",
 				Content:       ev.Message,
 				AgentName:     ev.AgentName,
 				Timestamp:     time.Now().UnixMilli(),
 				ArtifactFiles: ev.Artifacts,
-			})
+			}
+			if err := s.repo.AppendMessage(sessionID, msg); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow suspended message to repo")
+			} else {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "message",
+					Message: &msg,
+				})
+			}
 		}
 		return
 	}
 	if ev.Type == workflow.EventNodeStatusUpdate {
-		for _, artifact := range ev.Artifacts {
-			if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
-				log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow status artifact to repo")
+		if len(ev.Artifacts) > 0 {
+			if err := s.repo.AppendArtifacts(sessionID, ev.Artifacts); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow status artifacts to repo")
+			} else {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "artifact",
+					Payload: map[string]any{"artifacts": ev.Artifacts},
+				})
 			}
 		}
 		if ev.Message != "" && ev.EntryType != "agent_response" {
@@ -224,7 +252,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				stepIdx = idx
 			}
 			targetFiles := toStringSlice(ev.Metadata["target_files"])
-			_ = s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+			msg := dbmodels.ChatMessage{
 				ID:            fmt.Sprintf("wf-step-%s-%d-%d", ev.NodeID, time.Now().UnixMilli(), stepIdx),
 				Role:          role,
 				Content:       ev.Message,
@@ -234,39 +262,64 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				StepIndex:     stepIdx,
 				TargetFiles:   targetFiles,
 				ArtifactFiles: ev.Artifacts,
-			})
+			}
+			if err := s.repo.AppendMessage(sessionID, msg); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow step status message to repo")
+			} else {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "message",
+					Message: &msg,
+				})
+			}
 		}
 		return
 	}
-	for _, artifact := range ev.Artifacts {
-		if err := s.repo.AppendArtifact(sessionID, artifact); err != nil {
-			log.Warn().Err(err).Str("chat_id", sessionID).Str("artifact", artifact).Msg("failed to append workflow node artifact to repo")
+	if len(ev.Artifacts) > 0 {
+		if err := s.repo.AppendArtifacts(sessionID, ev.Artifacts); err != nil {
+			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow node artifacts to repo")
+		} else {
+			s.PublishSessionEvent(sessionID, SessionEvent{
+				Type:    "artifact",
+				Payload: map[string]any{"artifacts": ev.Artifacts},
+			})
 		}
 	}
 	// Persist a successful node's final response as an assistant message so
 	// node agents' conclusions survive reloads (streamed agent_response
 	// updates are intentionally not persisted to avoid step-level churn).
 	if ev.Type == workflow.EventNodeFinished && ev.Status == workflow.StatusSucceeded && ev.Output != "" {
-		if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+		msg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("wf-node-%s-%d", ev.NodeID, time.Now().UnixMilli()),
 			Role:      "assistant",
 			Content:   ev.Output,
 			AgentName: ev.AgentName,
 			Timestamp: time.Now().UnixMilli(),
-		}); err != nil {
+		}
+		if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow node response to repo")
+		} else {
+			s.PublishSessionEvent(sessionID, SessionEvent{
+				Type:    "message",
+				Message: &msg,
+			})
 		}
 		return
 	}
 	if ev.Type == workflow.EventWorkflowFinished && ev.Status == workflow.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
-		if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+		msg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("wf-summary-%d", time.Now().UnixMilli()),
 			Role:      "assistant",
 			Content:   ev.Message,
 			AgentName: ev.AgentName,
 			Timestamp: time.Now().UnixMilli(),
-		}); err != nil {
+		}
+		if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow summary to repo")
+		} else {
+			s.PublishSessionEvent(sessionID, SessionEvent{
+				Type:    "message",
+				Message: &msg,
+			})
 		}
 		return
 	}
@@ -277,14 +330,20 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	if nodeRef == "" {
 		nodeRef = "workflow"
 	}
-	if err := s.repo.AppendMessage(sessionID, dbmodels.ChatMessage{
+	msg := dbmodels.ChatMessage{
 		ID:        fmt.Sprintf("wf-error-%s-%d", nodeRef, ev.Timestamp.UnixMilli()),
 		Role:      "error",
 		Content:   ev.Message,
 		AgentName: ev.AgentName,
 		Timestamp: time.Now().UnixMilli(),
-	}); err != nil {
+	}
+	if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 		log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow error message to repo")
+	} else {
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type:    "message",
+			Message: &msg,
+		})
 	}
 }
 
@@ -318,10 +377,24 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil && sess.CurrentAgent != "" {
 				if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusRunning); err != nil {
 					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to update agent status to running on workflow resume")
+				} else {
+					s.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "status",
+						Payload: map[string]any{"agent": sess.CurrentAgent, "isRunning": true},
+					})
 				}
 				defer func() {
 					if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusCompleted); err != nil {
 						log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to mark agent status completed on workflow resume finish")
+					} else {
+						s.PublishSessionEvent(chatID, SessionEvent{
+							Type:    "status",
+							Payload: map[string]any{"agent": sess.CurrentAgent, "isRunning": false},
+						})
+						s.PublishSessionEvent(chatID, SessionEvent{
+							Type:    "done",
+							Payload: map[string]any{"agent": sess.CurrentAgent},
+						})
 					}
 				}()
 			}

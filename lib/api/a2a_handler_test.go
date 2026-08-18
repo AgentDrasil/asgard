@@ -187,7 +187,7 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 		},
 	}
 
-	recordStatusUpdate(repo, chatID, update, agentConfig, workspaceDir)
+	recordStatusUpdate(nil, repo, chatID, update, agentConfig, workspaceDir)
 
 	sess, err := repo.GetSession(chatID)
 	require.NoError(t, err)

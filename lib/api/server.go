@@ -26,14 +26,18 @@ import (
 
 // Server manages the HTTP server hosting A2A agents.
 type Server struct {
-	conf            *config.Config
-	mu              sync.RWMutex
-	agents          []*agents.Agent
-	mux             *http.ServeMux
-	repo            *dbmodels.SessionRepository
-	statusListeners map[string][]*statusListener
-	ttydManager     *ttyd.Manager
-	workflowEngine  *workflow.Engine
+	conf             *config.Config
+	mu               sync.RWMutex
+	agents           []*agents.Agent
+	mux              *http.ServeMux
+	repo             *dbmodels.SessionRepository
+	statusListeners  map[string][]*statusListener
+	ttydManager      *ttyd.Manager
+	workflowEngine   *workflow.Engine
+	eventHub         *SessionEventHub
+	ctx              context.Context
+	cancel           context.CancelFunc
+	activeExecutions sync.Map // chatID -> struct{}
 }
 
 // New creates a new Server instance, loading all agents from the configured directory.
@@ -48,10 +52,14 @@ func New(conf *config.Config, dbConn *gorm.DB) (*Server, error) {
 		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		conf:        conf,
 		repo:        repo,
 		ttydManager: ttydMgr,
+		eventHub:    NewSessionEventHub(),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 
 	workflowEngine, err := newWorkflowEngine(conf, s)
@@ -151,6 +159,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
+	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
+	mux.HandleFunc("POST /api/agents/{id}/message", s.handleTriggerMessage)
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/ask-user", s.handleAskUser)
@@ -221,6 +231,10 @@ func (s *Server) Start() error {
 	case sig := <-shutdownSignals:
 		log.Info().Msgf("Shutdown signal received: %v. Starting graceful shutdown...", sig)
 
+		if s.cancel != nil {
+			s.cancel()
+		}
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
@@ -239,8 +253,32 @@ func (s *Server) Start() error {
 			}
 			return fmt.Errorf("internal server graceful shutdown failed: %w", internalErr)
 		}
+		if s.eventHub != nil {
+			s.eventHub.Close()
+		}
 		log.Info().Msg("Servers gracefully stopped")
 	}
 
 	return nil
+}
+
+// Context returns the Server's root context (canceled on shutdown).
+func (s *Server) Context() context.Context {
+	if s == nil || s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
+}
+
+// EventHub returns the Server's SessionEventHub instance.
+func (s *Server) EventHub() *SessionEventHub {
+	return s.eventHub
+}
+
+// PublishSessionEvent broadcasts a session event if the event hub is initialized.
+func (s *Server) PublishSessionEvent(chatID string, ev SessionEvent) {
+	if s == nil || s.eventHub == nil || chatID == "" {
+		return
+	}
+	s.eventHub.Publish(chatID, ev)
 }

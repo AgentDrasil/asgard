@@ -165,15 +165,21 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.Execu
 						agentName = e.agent.Config.Name
 					}
 				}
-				if err := e.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+				userMsg := dbmodels.ChatMessage{
 					ID:           userMsgID,
 					Role:         role,
 					ActivityType: activityType,
 					Content:      prompt,
 					AgentName:    agentName,
 					Timestamp:    time.Now().UnixMilli(),
-				}); err != nil {
+				}
+				if err := e.repo.AppendMessage(chatID, userMsg); err != nil {
 					log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
+				} else {
+					e.server.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "message",
+						Message: &userMsg,
+					})
 				}
 			}
 
@@ -182,6 +188,11 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.Execu
 				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); err != nil {
 					yield(nil, fmt.Errorf("failed to update agent status to running: %w", err))
 					return
+				} else {
+					e.server.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "status",
+						Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": true},
+					})
 				}
 			}
 
@@ -255,6 +266,11 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 		if title != "" {
 			if err := repo.UpdateSessionTitle(chatID, title); err != nil {
 				log.Warn().Err(err).Msg("failed to update session title in repo")
+			} else if server != nil {
+				server.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "title",
+					Payload: map[string]any{"title": title},
+				})
 			}
 		}
 	}()
@@ -264,17 +280,26 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 // given chat. It is intended to be deferred from Execute so the session's
 // isRunning flag is always cleared after the agent sandbox exits.
 func (e *SingleAgentExecutor) markAgentCompleted(chatID string) {
-	if e.repo == nil {
-		return
+	if e.repo != nil {
+		if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusCompleted); err != nil {
+			log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.ID).Msg("failed to mark agent status completed after run")
+		}
 	}
-	if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusCompleted); err != nil {
-		log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.ID).Msg("failed to mark agent status completed after run")
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": false},
+		})
+		e.server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "done",
+			Payload: map[string]any{"agent": e.agent.Config.ID},
+		})
 	}
 }
 
 // recordStatusUpdate processes an incremental status update from an agent run,
 // saving artifacts and messages to the session database, and logging warnings on error.
-func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agents.AgentConfig, workspaceDir string) {
+func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agents.AgentConfig, workspaceDir string) {
 	if repo == nil || update.Content == "" || update.EntryType == "agent_response" {
 		return
 	}
@@ -294,9 +319,16 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 	for _, tf := range targetFiles {
 		if agents.IsArtifact(tf, agentConfig, workspaceDir) {
 			artifactFiles = append(artifactFiles, tf)
-			if err := repo.AppendArtifact(chatID, tf); err != nil {
-				log.Warn().Err(err).Str("chat_id", chatID).Str("target_file", tf).Msg("failed to append artifact to repo")
-			}
+		}
+	}
+	if len(artifactFiles) > 0 {
+		if err := repo.AppendArtifacts(chatID, artifactFiles); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to append artifacts to repo")
+		} else if server != nil {
+			server.PublishSessionEvent(chatID, SessionEvent{
+				Type:    "artifact",
+				Payload: map[string]any{"artifacts": artifactFiles},
+			})
 		}
 	}
 	if update.Metadata == nil {
@@ -311,7 +343,7 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 	} else if update.NodeID != "" {
 		stepID = fmt.Sprintf("step-%s-%s-%d", chatID, update.NodeID, update.StepIndex)
 	}
-	if err := repo.AppendMessage(chatID, dbmodels.ChatMessage{
+	msg := dbmodels.ChatMessage{
 		ID:            stepID,
 		Role:          role,
 		Content:       update.Content,
@@ -321,8 +353,14 @@ func recordStatusUpdate(repo *dbmodels.SessionRepository, chatID string, update 
 		StepIndex:     update.StepIndex,
 		TargetFiles:   targetFiles,
 		ArtifactFiles: artifactFiles,
-	}); err != nil {
+	}
+	if err := repo.AppendMessage(chatID, msg); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
+	} else if server != nil {
+		server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "message",
+			Message: &msg,
+		})
 	}
 }
 

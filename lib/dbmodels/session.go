@@ -373,8 +373,10 @@ func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error 
 }
 
 // MarkAskUserReplied marks an ask_user ChatMessage as replied and sets its reply text.
-func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// Returns the updated ChatMessage on success.
+func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) (*ChatMessage, error) {
+	var updatedMsg *ChatMessage
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
 		if err != nil {
@@ -386,9 +388,11 @@ func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, 
 
 		found := false
 		for i, m := range session.Messages {
-			if m.ID == messageID || (m.Role == "ask_user" && !m.Replied && messageID == "") {
+			if (messageID != "" && m.ID == messageID) || (messageID == "" && m.Role == "ask_user" && !m.Replied) {
 				session.Messages[i].Replied = true
 				session.Messages[i].ReplyText = replyText
+				msgCopy := session.Messages[i]
+				updatedMsg = &msgCopy
 				found = true
 				break
 			}
@@ -399,6 +403,8 @@ func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, 
 				if session.Messages[i].Role == "ask_user" && !session.Messages[i].Replied {
 					session.Messages[i].Replied = true
 					session.Messages[i].ReplyText = replyText
+					msgCopy := session.Messages[i]
+					updatedMsg = &msgCopy
 					break
 				}
 			}
@@ -406,11 +412,23 @@ func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, 
 
 		return tx.Save(&session).Error
 	})
+	if err != nil {
+		return nil, err
+	}
+	return updatedMsg, nil
 }
 
 // AppendArtifact appends an artifact path to a session's Artifacts list safely and deduplicated.
 func (r *SessionRepository) AppendArtifact(chatID string, artifactPath string) error {
-	if chatID == "" || artifactPath == "" {
+	if artifactPath == "" {
+		return nil
+	}
+	return r.AppendArtifacts(chatID, []string{artifactPath})
+}
+
+// AppendArtifacts appends multiple artifact paths to a session's Artifacts list safely and deduplicated in a single transaction.
+func (r *SessionRepository) AppendArtifacts(chatID string, artifactPaths []string) error {
+	if chatID == "" || len(artifactPaths) == 0 {
 		return nil
 	}
 	return r.db.Transaction(func(tx *gorm.DB) error {
@@ -420,13 +438,23 @@ func (r *SessionRepository) AppendArtifact(chatID string, artifactPath string) e
 			return err
 		}
 
+		existing := make(map[string]bool, len(session.Artifacts))
 		for _, item := range session.Artifacts {
-			if item == artifactPath {
-				return nil // Already present
+			existing[item] = true
+		}
+
+		modified := false
+		for _, item := range artifactPaths {
+			if item != "" && !existing[item] {
+				session.Artifacts = append(session.Artifacts, item)
+				existing[item] = true
+				modified = true
 			}
 		}
 
-		session.Artifacts = append(session.Artifacts, artifactPath)
+		if !modified {
+			return nil
+		}
 		return tx.Save(&session).Error
 	})
 }

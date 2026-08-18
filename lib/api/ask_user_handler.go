@@ -68,13 +68,21 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 				agentName = session.CurrentAgent
 			}
 		}
-		_ = s.repo.AppendMessage(req.ChatID, dbmodels.ChatMessage{
+		msg := dbmodels.ChatMessage{
 			ID:        req.MessageID,
 			Role:      "ask_user",
 			Content:   req.Question,
 			AgentName: agentName,
 			Timestamp: time.Now().UnixMilli(),
-		})
+		}
+		if err := s.repo.AppendMessage(req.ChatID, msg); err == nil {
+			s.PublishSessionEvent(req.ChatID, SessionEvent{
+				Type:    "message",
+				Message: &msg,
+			})
+		} else {
+			log.Error().Err(err).Str("chat_id", req.ChatID).Msg("failed to append ask_user message to repo")
+		}
 		s.SendPushNotification(req.ChatID, req.Question, agentName)
 	} else {
 		s.SendPushNotification(req.ChatID, req.Question, req.AgentName)
@@ -120,7 +128,15 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.repo != nil {
-		_ = s.repo.MarkAskUserReplied(req.ChatID, req.MessageID, req.ReplyText)
+		updatedMsg, err := s.repo.MarkAskUserReplied(req.ChatID, req.MessageID, req.ReplyText)
+		if err != nil {
+			log.Warn().Err(err).Str("chat_id", req.ChatID).Str("message_id", req.MessageID).Msg("failed to mark ask-user replied in repo")
+		} else if updatedMsg != nil {
+			s.PublishSessionEvent(req.ChatID, SessionEvent{
+				Type:    "message",
+				Message: updatedMsg,
+			})
+		}
 	}
 
 	// Route the reply into a suspended workflow run (WAITING_HUMAN), if any.

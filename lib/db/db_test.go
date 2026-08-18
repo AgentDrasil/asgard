@@ -39,6 +39,6 @@ func TestNewDB_SQLiteConfig(t *testing.T) {
 
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
-		assert.Equal(t, 1, sqlDB.Stats().MaxOpenConnections)
+		assert.Equal(t, 4, sqlDB.Stats().MaxOpenConnections)
 	})
 }
