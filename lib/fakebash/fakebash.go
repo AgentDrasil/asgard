@@ -2,6 +2,7 @@ package fakebash
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -74,12 +75,16 @@ func RunClient(args []string) error {
 	cwd, _ := os.Getwd()
 	env := os.Environ()
 
+	log.Info().Interface("args", args).Str("cwd", cwd).Msg("fakebash: forwarding command to fakebashd via gRPC")
+	startTime := time.Now()
+
 	stream, err := client.RunCommand(context.Background(), &pb.CommandRequest{
 		Args: args[1:],
 		Cwd:  cwd,
 		Env:  env,
 	})
 	if err != nil {
+		log.Error().Err(err).Msg("fakebash: RunCommand RPC failed")
 		return fmt.Errorf("run command stream error: %w", err)
 	}
 
@@ -87,8 +92,10 @@ func RunClient(args []string) error {
 		resp, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
+				log.Info().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream received EOF from fakebashd")
 				break
 			}
+			log.Error().Err(err).Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream recv error from fakebashd")
 			return fmt.Errorf("stream recv error: %w", err)
 		}
 
@@ -98,13 +105,15 @@ func RunClient(args []string) error {
 		case pb.CommandResponse_STDERR:
 			_, _ = os.Stderr.Write(resp.Payload)
 		case pb.CommandResponse_EXIT:
+			code := 0
 			if len(resp.Payload) > 0 {
-				code, _ := strconv.Atoi(string(resp.Payload))
-				os.Exit(code)
+				code, _ = strconv.Atoi(string(resp.Payload))
 			}
-			os.Exit(0)
+			log.Info().Int("exitCode", code).Dur("elapsed", time.Since(startTime)).Msg("fakebash: received EXIT frame from fakebashd, exiting")
+			os.Exit(code)
 		}
 	}
+	log.Warn().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream ended without EXIT frame, exiting 0")
 	return nil
 }
 
@@ -127,7 +136,7 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		}
 	}
 
-	log.Debug().Str("command", cmdStr).Interface("args", req.Args).Msg("fakebashd gRPC: command requested")
+	log.Info().Str("command", cmdStr).Interface("args", req.Args).Str("cwd", req.Cwd).Msg("fakebashd: command requested")
 
 	if cmdStr == "" {
 		if err := stream.Send(&pb.CommandResponse{
@@ -147,6 +156,8 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		cmd.Env = os.Environ()
 	}
 
+	cmd.WaitDelay = 200 * time.Millisecond
+
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
@@ -157,8 +168,17 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
+	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start command: %w", err)
+	}
+	log.Info().Str("command", cmdStr).Int("pid", cmd.Process.Pid).Msg("fakebashd: process started")
+
+	var streamMu sync.Mutex
+	sendResponse := func(resp *pb.CommandResponse) error {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		return stream.Send(resp)
 	}
 
 	var wg sync.WaitGroup
@@ -171,7 +191,7 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		for {
 			n, err := stdoutPipe.Read(buf)
 			if n > 0 {
-				if sendErr := stream.Send(&pb.CommandResponse{
+				if sendErr := sendResponse(&pb.CommandResponse{
 					Type:    pb.CommandResponse_STDOUT,
 					Payload: buf[:n],
 				}); sendErr != nil {
@@ -192,7 +212,7 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		for {
 			n, err := stderrPipe.Read(buf)
 			if n > 0 {
-				if sendErr := stream.Send(&pb.CommandResponse{
+				if sendErr := sendResponse(&pb.CommandResponse{
 					Type:    pb.CommandResponse_STDERR,
 					Payload: buf[:n],
 				}); sendErr != nil {
@@ -222,28 +242,35 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 	case <-pipesDone:
 		// Normal case: pipes closed (EOF reached), now collect process exit status
 		waitErr = <-waitErrCh
+		log.Info().Str("command", cmdStr).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: pipes drained normally before/at process exit")
 	case waitErr = <-waitErrCh:
 		// Process exited, but pipes may still be held open by lingering child processes.
 		// Wait for pipes to finish draining or force close them after a short delay.
+		log.Info().Str("command", cmdStr).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: process exited, waiting up to 100ms for pipes to drain")
 		select {
 		case <-pipesDone:
 		case <-time.After(100 * time.Millisecond):
 			_ = stdoutPipe.Close()
 			_ = stderrPipe.Close()
 			<-pipesDone
+			log.Warn().Str("command", cmdStr).Msg("fakebashd: pipes forcibly closed after 100ms grace period")
 		}
 	}
 
 	exitCode := 0
 	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+		if errors.Is(waitErr, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+			exitCode = 0
+		} else if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
 		}
 	}
 
-	if err := stream.Send(&pb.CommandResponse{
+	log.Info().Str("command", cmdStr).Int("exitCode", exitCode).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: command finished")
+
+	if err := sendResponse(&pb.CommandResponse{
 		Type:    pb.CommandResponse_EXIT,
 		Payload: []byte(strconv.Itoa(exitCode)),
 	}); err != nil {
