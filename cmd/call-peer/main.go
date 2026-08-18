@@ -1,17 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"iter"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog/log"
 
@@ -62,94 +60,70 @@ func main() {
 		host = "http://" + host
 	}
 
-	cardURL := fmt.Sprintf("%s/agents/%s/.well-known/agent-card.json?internal=true", host, agentID)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, cardURL, nil)
+	reqPayload := map[string]any{
+		"prompt": messageText,
+		"chatId": chatID,
+		"wait":   true,
+		"metadata": map[string]any{
+			"internal":          true,
+			"source":            "call-peer",
+			"caller_agent_id":   os.Getenv("ASGARD_AGENT_ID"),
+			"caller_agent_name": os.Getenv("ASGARD_AGENT_NAME"),
+		},
+	}
+
+	reqBody, err := json.Marshal(reqPayload)
 	if err != nil {
-		log.Error().Err(err).Msg("Error creating request for agent card")
+		log.Error().Err(err).Msg("Error encoding call-peer request")
 		os.Exit(1)
 	}
 
+	url := fmt.Sprintf("%s/api/agents/%s/message?wait=true", host, agentID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		log.Error().Err(err).Msg("Error creating request for peer agent")
+		os.Exit(1)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		log.Error().Err(err).Msg("Error fetching agent card")
+		log.Error().Err(err).Msg("Error calling peer agent")
 		os.Exit(1)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	var result struct {
+		Status string `json:"status"`
+		Output string `json:"output"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Error().Err(err).Int("http_status", resp.StatusCode).Msg("Error decoding peer agent response")
+		os.Exit(1)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		log.Error().Int("status", resp.StatusCode).Msg("Failed to fetch agent card")
+		log.Error().Int("http_status", resp.StatusCode).Str("status", result.Status).Str("error", result.Error).Msg("Peer agent returned non-200 status")
 		os.Exit(1)
 	}
 
-	var card a2a.AgentCard
-	if err := json.NewDecoder(resp.Body).Decode(&card); err != nil {
-		log.Error().Err(err).Msg("Error decoding agent card")
-		os.Exit(1)
-	}
-
-	httpClient := &http.Client{Timeout: 0}
-	client, err := a2aclient.NewFromCard(ctx, &card,
-		a2aclient.WithRESTTransport(httpClient),
-		a2aclient.WithJSONRPCTransport(httpClient),
-	)
-	if err != nil {
-		log.Error().Err(err).Msg("Error creating A2A client")
-		os.Exit(1)
-	}
-
-	reqMsg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(messageText))
-	reqMsg.ContextID = chatID
-	reqMsg.Metadata = map[string]any{
-		"internal":          true,
-		"source":            "call-peer",
-		"caller_agent_id":   os.Getenv("ASGARD_AGENT_ID"),
-		"caller_agent_name": os.Getenv("ASGARD_AGENT_NAME"),
-	}
-
-	req := &a2a.SendMessageRequest{
-		Message: reqMsg,
-	}
-
-	// Use streaming to receive intermediate status updates in real-time.
-	events := client.SendStreamingMessage(ctx, req)
-	if err := drainEvents(events); err != nil {
-		log.Error().Err(err).Msg("Error from agent stream")
-		os.Exit(1)
-	}
-}
-
-// drainEvents iterates over the SSE event stream, printing intermediate updates
-// to stderr and the final response to stdout.
-func drainEvents(events iter.Seq2[a2a.Event, error]) error {
-	for evt, err := range events {
-		if err != nil {
-			return err
+	if result.Status == "completed" {
+		if result.Output != "" {
+			fmt.Println(result.Output)
 		}
-		switch e := evt.(type) {
-		case *a2a.TaskStatusUpdateEvent:
-			if e.Status.State == a2a.TaskStateCompleted && e.Status.Message != nil {
-				// Final response — print to stdout.
-				fmt.Print(extractText(e.Status.Message))
-				fmt.Println()
-			}
-		}
+		return
 	}
-	return nil
-}
 
-// extractText returns the concatenated text from all TextPart parts of a message.
-func extractText(msg *a2a.Message) string {
-	if msg == nil {
-		return ""
+	if result.Status == "waiting_human" {
+		// Target workflow suspended awaiting human input; exit cleanly without error
+		return
 	}
-	var out string
-	for _, part := range msg.Parts {
-		if part != nil && part.Text() != "" {
-			out += part.Text()
-		}
-	}
-	return out
+
+	log.Error().Str("status", result.Status).Str("error", result.Error).Msg("Peer agent execution failed")
+	os.Exit(1)
 }

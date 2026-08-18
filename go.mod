@@ -5,7 +5,6 @@ go 1.26.5
 require github.com/goccy/go-yaml v1.19.2
 
 require (
-	github.com/a2aproject/a2a-go/v2 v2.4.0
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0

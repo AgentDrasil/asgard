@@ -5,15 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/lib/agents/run"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
-	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 // seqRunResult carries the output of a sequential run.Run call.
@@ -25,8 +22,6 @@ type seqRunResult struct {
 // executeSequential runs the first available CLI target (by quota) and streams results.
 func (e *SingleAgentExecutor) executeSequential(
 	ctx context.Context,
-	yield func(a2a.Event, error) bool,
-	execCtx *a2asrv.ExecutorContext,
 	prompt string,
 	chatID string,
 	runDirOpt optional.Option[string],
@@ -34,7 +29,7 @@ func (e *SingleAgentExecutor) executeSequential(
 	sessionMode string,
 	session *dbmodels.Session,
 	statusCh <-chan AgentStatusUpdate,
-) {
+) (string, error) {
 	// Resolve which session ID to resume (if any).
 	agentSessionID := optional.None[string]()
 	if sessionMode != "fresh" && e.repo != nil && session != nil {
@@ -60,20 +55,18 @@ func (e *SingleAgentExecutor) executeSequential(
 		resultCh <- seqRunResult{out, err}
 	}()
 
-	e.streamAndFinish(ctx, yield, execCtx, chatID, runDirOpt, sessionMode, statusCh, resultCh)
+	return e.streamAndFinish(ctx, chatID, runDirOpt, sessionMode, statusCh, resultCh)
 }
 
 // streamAndFinish drains status events from statusCh until resultCh delivers the final output.
 func (e *SingleAgentExecutor) streamAndFinish(
 	ctx context.Context,
-	yield func(a2a.Event, error) bool,
-	execCtx *a2asrv.ExecutorContext,
 	chatID string,
 	runDirOpt optional.Option[string],
 	sessionMode string,
 	statusCh <-chan AgentStatusUpdate,
 	resultCh <-chan seqRunResult,
-) {
+) (string, error) {
 	workspaceDir := ""
 	if runDirOpt.IsSome() {
 		workspaceDir = runDirOpt.Unwrap()
@@ -82,13 +75,15 @@ func (e *SingleAgentExecutor) streamAndFinish(
 	for {
 		if statusCh == nil {
 			// No listener configured — just wait for result.
-			result := <-resultCh
-			if result.err != nil {
-				yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
-				return
+			select {
+			case result := <-resultCh:
+				if result.err != nil {
+					return "", fmt.Errorf("failed to run agent: %w", result.err)
+				}
+				return e.handleFinalResult(result.out, chatID, runDirOpt, sessionMode)
+			case <-ctx.Done():
+				return "", ctx.Err()
 			}
-			e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt, sessionMode)
-			return
 		}
 
 		select {
@@ -100,47 +95,26 @@ func (e *SingleAgentExecutor) streamAndFinish(
 			}
 			recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
 
-			// Emit an intermediate TaskStatusUpdateEvent.
-			updateMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(update.Content))
-			metadata := map[string]any{
-				"entry_type": update.EntryType,
-				"source":     update.Source,
-				"step_index": update.StepIndex,
-			}
-			for k, v := range update.Metadata {
-				metadata[k] = v
-			}
-			updateMsg.Metadata = workflow.SanitizeMetadata(metadata)
-			evt := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, updateMsg)
-			if !yield(evt, nil) {
-				return
-			}
-
 		case result := <-resultCh:
 			if result.err != nil {
-				yield(nil, fmt.Errorf("failed to run agent: %w", result.err))
-				return
+				return "", fmt.Errorf("failed to run agent: %w", result.err)
 			}
-			e.handleFinalResult(yield, execCtx, result.out, chatID, runDirOpt, sessionMode)
-			return
+			return e.handleFinalResult(result.out, chatID, runDirOpt, sessionMode)
 
 		case <-ctx.Done():
-			yield(nil, ctx.Err())
-			return
+			return "", ctx.Err()
 		}
 	}
 }
 
-// handleFinalResult parses the agent output and emits the final TaskStatusUpdateEvent.
+// handleFinalResult parses the agent output and records final message to DB.
 // sessionMode controls whether the returned session ID is persisted to DB.
 func (e *SingleAgentExecutor) handleFinalResult(
-	yield func(a2a.Event, error) bool,
-	execCtx *a2asrv.ExecutorContext,
 	out []byte,
 	chatID string,
 	runDirOpt optional.Option[string],
 	sessionMode string,
-) {
+) (string, error) {
 	respText, sessionID, inputTokens, maxTokens := parseOutput(out)
 
 	if e.repo != nil {
@@ -152,8 +126,7 @@ func (e *SingleAgentExecutor) handleFinalResult(
 			persistSessionID = sessionID
 		}
 		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, cliKey, persistSessionID, runDirOpt); err != nil {
-			yield(nil, fmt.Errorf("failed to update agent session: %w", err))
-			return
+			return "", fmt.Errorf("failed to update agent session: %w", err)
 		}
 
 		// Save final assistant response to DB session
@@ -178,14 +151,5 @@ func (e *SingleAgentExecutor) handleFinalResult(
 		}
 	}
 
-	respMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respText))
-	meta := map[string]any{
-		"is_final": true,
-	}
-	if inputTokens > 0 || maxTokens > 0 {
-		meta["input_tokens"] = inputTokens
-		meta["max_tokens"] = maxTokens
-	}
-	respMsg.Metadata = workflow.SanitizeMetadata(meta)
-	yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, respMsg), nil)
+	return respText, nil
 }

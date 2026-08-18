@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,18 +33,14 @@ nodes:
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	execCtx := &a2asrv.ExecutorContext{
-		ContextID: "sess-persist-timeout",
-		Message:   a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("hello")),
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// Drain execution events
-	seq := exec.Execute(ctx, execCtx)
-	for range seq {
-	}
+	_, err = exec.Execute(ctx, WorkflowRunParams{
+		SessionID: "sess-persist-timeout",
+		Prompt:    "hello",
+	})
+	require.NoError(t, err)
 
 	// Verify that normal execution did not drop events
 	assert.Equal(t, uint64(0), exec.PersistDropped())
@@ -80,4 +74,37 @@ func TestWorkflowExecutor_PersistCh_DropCounterDirect(t *testing.T) {
 	emit(WorkflowEvent{Type: EventNodeFinished})
 	assert.True(t, dropped)
 	assert.Equal(t, uint64(1), exec.PersistDropped())
+}
+
+func TestWorkflowExecutor_Execute_RunDir(t *testing.T) {
+	t.Parallel()
+
+	defn := &WorkflowDefinition{
+		Name: "test-rundir",
+		Nodes: []*NodeSpec{
+			{ID: "step1", Type: NodeTypeCommand, Command: "echo hello"},
+		},
+	}
+
+	registry := NewNodeRunnerRegistry()
+	registry.Register(NewCommandRunner(false))
+	engine := NewEngine(registry)
+	exec := NewWorkflowExecutor(engine, defn)
+
+	// Test with non-existent RunDir via params.RunDir
+	_, err := exec.Execute(t.Context(), WorkflowRunParams{
+		SessionID: "sess-test",
+		RunDir:    "/tmp/non-existent-dir-12345",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+
+	// Test with valid RunDir via params.RunDir
+	validDir := t.TempDir()
+	res, err := exec.Execute(t.Context(), WorkflowRunParams{
+		SessionID: "sess-test-valid",
+		RunDir:    validDir,
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, res)
 }

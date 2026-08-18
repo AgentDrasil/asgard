@@ -399,11 +399,9 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 				}()
 			}
 		}
-		// Re-driven runs have no live A2A stream, so route their events into
-		// the persistence handler: node outputs, errors, summary and any
-		// follow-up human suspension land in the session transcript instead
-		// of vanishing (only visible after a refresh at worst, lost forever
-		// at best).
+		// Re-driven runs route their events into the persistence handler
+		// and EventHub so node outputs, errors, summary and any follow-up human
+		// suspension land in the session transcript and are published in real-time.
 		emit := func(ev workflow.WorkflowEvent) {
 			sid := ev.SessionID
 			if sid == "" {
@@ -411,6 +409,7 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			}
 			s.handleWorkflowEvent(sid, ev)
 		}
+
 		if _, err := engine.ResumeWithEmitter(context.Background(), run.RunID, replyText, emit); err != nil {
 			log.Error().Err(err).Str("run_id", run.RunID).Msg("resuming workflow run failed")
 		}

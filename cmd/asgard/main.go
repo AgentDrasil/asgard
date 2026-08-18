@@ -85,6 +85,6 @@ func main() {
 	}
 
 	if err := srv.Start(); err != nil {
-		log.Fatal().Err(err).Msg("Failed to start A2A HTTP server")
+		log.Fatal().Err(err).Msg("Failed to start HTTP server")
 	}
 }

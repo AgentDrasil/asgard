@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/config"
 	"github.com/AgentDrasil/asgard/lib/db"
 	"github.com/AgentDrasil/asgard/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
 func TestMessageTriggerHandler(t *testing.T) {
@@ -38,11 +41,36 @@ func TestMessageTriggerHandler(t *testing.T) {
 		Config: agentConfig,
 	}
 
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+
+	tempDir := t.TempDir()
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	require.NoError(t, os.WriteFile(wfFile, []byte(`
+name: test-sync-wf
+tmp_dir: "tmp/${session_id}"
+nodes:
+  - id: step1
+    type: command
+    command: "echo test-sync-done"
+`), 0644))
+
+	wfAgent := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:   "test-wf-agent",
+			Name: "Test Workflow Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
 	server := &Server{
-		conf:     &config.Config{},
-		repo:     repo,
-		eventHub: hub,
-		agents:   []*agents.Agent{agent},
+		conf:           &config.Config{},
+		repo:           repo,
+		eventHub:       hub,
+		workflowEngine: engine,
+		agents:         []*agents.Agent{agent, wfAgent},
 	}
 	server.mux = server.buildMuxLocked()
 
@@ -128,5 +156,58 @@ func TestMessageTriggerHandler(t *testing.T) {
 
 		server.ServeHTTP(rr, req)
 		assert.Equal(t, http.StatusConflict, rr.Code)
+	})
+
+	t.Run("workflow sync wait mode returns 200 with result", func(t *testing.T) {
+		t.Parallel()
+
+		chatID := "chat-sync-wait-1"
+		payload := TriggerMessageRequest{
+			Prompt: "sync prompt",
+			ChatID: chatID,
+			Wait:   true,
+		}
+		data, err := json.Marshal(payload)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/test-wf-agent/message", bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		server.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		var resp map[string]any
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "completed", resp["status"])
+		assert.Equal(t, chatID, resp["chatId"])
+	})
+
+	t.Run("single agent sync wait returns error on execution failure", func(t *testing.T) {
+		t.Parallel()
+
+		chatID := "chat-single-agent-wait-fail"
+		payload := TriggerMessageRequest{
+			Prompt: "single agent fail prompt",
+			ChatID: chatID,
+			Wait:   true,
+		}
+		data, err := json.Marshal(payload)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/message", bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		server.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+
+		var resp map[string]any
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "failed", resp["status"])
+		assert.NotEmpty(t, resp["error"])
+		assert.Equal(t, chatID, resp["chatId"])
 	})
 }

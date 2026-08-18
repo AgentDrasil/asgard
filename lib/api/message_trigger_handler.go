@@ -1,13 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
@@ -21,11 +19,12 @@ type TriggerMessageRequest struct {
 	ChatID   string         `json:"chatId,omitempty"`
 	RunDir   string         `json:"runDir,omitempty"`
 	Model    string         `json:"model,omitempty"`
+	Wait     bool           `json:"wait,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // handleTriggerMessage handles POST /api/agents/{id}/message, launching agent execution
-// asynchronously and draining executor side-effects.
+// either asynchronously (202 Accepted) or synchronously (200 OK when wait=true).
 func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	if agentID == "" {
@@ -88,59 +87,45 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	userMsgID := ""
-	if req.Metadata != nil {
-		if mid, ok := req.Metadata["message_id"].(string); ok && mid != "" {
-			userMsgID = mid
+	wait := req.Wait || r.URL.Query().Get("wait") == "true"
+
+	runTask := func(ctx context.Context) (status string, output string, err error) {
+		if targetAgent.Config.Type == "workflow" {
+			return s.runWorkflow(ctx, targetAgent, chatID, req)
 		}
-	}
-	if userMsgID == "" {
-		userMsgID = fmt.Sprintf("user-%s", uuid.Must(uuid.NewV7()).String())
+		return s.runSingleAgent(ctx, targetAgent, chatID, req)
 	}
 
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(req.Prompt))
-	msg.ID = userMsgID
-	msg.Metadata = req.Metadata
+	if wait {
+		defer s.activeExecutions.Delete(chatID)
+		status, output, err := runTask(s.Context())
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": status,
+				"error":  err.Error(),
+				"chatId": chatID,
+			})
+			return
+		}
 
-	execCtx := &a2asrv.ExecutorContext{
-		ContextID: chatID,
-		Message:   msg,
-		Metadata:  make(map[string]any),
-	}
-	if req.RunDir != "" {
-		execCtx.Metadata["run_dir"] = req.RunDir
-	}
-	if req.Model != "" {
-		execCtx.Metadata["model"] = req.Model
-	}
-	for k, v := range req.Metadata {
-		execCtx.Metadata[k] = v
-	}
-
-	var exec a2asrv.AgentExecutor
-	if targetAgent.Config.Type == "workflow" {
-		exec = s.newWorkflowExecutor(targetAgent)
-	} else {
-		exec = NewSingleAgentExecutor(targetAgent, s.conf, s.repo, s, nil)
-	}
-
-	if exec == nil {
-		s.activeExecutions.Delete(chatID)
-		http.Error(w, `{"error":"failed to create agent executor"}`, http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": status,
+			"output": output,
+			"chatId": chatID,
+		})
 		return
 	}
 
-	// Async mode (State Sync Plan Phase 1):
-	// Drain executor iterator in a background goroutine.
-	// We deliberately discard the yielded SDK execution events here because all real state changes
-	// (user prompt, status updates, agent messages, artifacts, done) are already persisted to DB
-	// and broadcast to SSE subscribers via SessionEventHub emit-after-write hooks.
+	// Async mode:
 	go func() {
 		defer s.activeExecutions.Delete(chatID)
-		for _, err := range exec.Execute(s.Context(), execCtx) {
-			if err != nil {
-				log.Error().Err(err).Str("chat_id", chatID).Str("agent", targetAgent.Config.ID).Msg("async executor execution error")
-			}
+		_, _, err := runTask(s.Context())
+		if err != nil {
+			log.Error().Err(err).Str("chat_id", chatID).Str("agent", targetAgent.Config.ID).Msg("async executor execution error")
 		}
 	}()
 
@@ -150,4 +135,20 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		"status": "accepted",
 		"chatId": chatID,
 	})
+}
+
+// runSingleAgent executes a single CLI agent synchronously, returning its final assistant text.
+func (s *Server) runSingleAgent(ctx context.Context, agent *agents.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
+	exec := NewSingleAgentExecutor(agent, s.conf, s.repo, s, nil)
+	out, err := exec.Execute(ctx, SingleAgentRunParams{
+		ChatID:   chatID,
+		Prompt:   req.Prompt,
+		RunDir:   req.RunDir,
+		Model:    req.Model,
+		Metadata: req.Metadata,
+	})
+	if err != nil {
+		return "failed", "", err
+	}
+	return "completed", out, nil
 }

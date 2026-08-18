@@ -7,9 +7,10 @@ nodes:
     agent_id: agy-planner
     entry: true
 
-  # 2. Human Review Gateway (Suspends workflow until user responds via WebUI/A2A)
+  # 2. Human Review Gateway (Suspends workflow until user responds via WebUI/AskUser)
   - id: plan_approval
     type: human
+
     depends:
       - node: planner_agent
     prompt: "Please review the generated plan file ${tmp_dir}/plan.md and choose Approve or Reject"

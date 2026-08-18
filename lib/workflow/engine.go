@@ -629,13 +629,12 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 	}
 
-	// The final event carries the same summary the A2A executor streams to
-	// clients, so hosts persisting events render an identical transcript on
-	// reload.
+	// The final event carries the workflow summary so hosts persisting events
+	// render an identical transcript on reload.
 	emit(WorkflowEvent{
 		Type:    EventWorkflowFinished,
 		Status:  NodeStatus(run.Status),
-		Message: summarizeRun(run),
+		Message: SummarizeRun(run),
 	})
 	return run, nil
 }

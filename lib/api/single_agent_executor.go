@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"iter"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
@@ -23,8 +20,16 @@ import (
 	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
-// SingleAgentExecutor handles responding to and processing single-agent tasks,
-// directly satisfying the a2asrv handler contract.
+// SingleAgentRunParams carries the parameters for a single agent execution.
+type SingleAgentRunParams struct {
+	ChatID   string
+	Prompt   string
+	RunDir   string
+	Model    string
+	Metadata map[string]any
+}
+
+// SingleAgentExecutor handles responding to and processing single-agent tasks.
 type SingleAgentExecutor struct {
 	agent     *agents.Agent
 	conf      *config.Config
@@ -47,178 +52,157 @@ func NewSingleAgentExecutor(agent *agents.Agent, conf *config.Config, repo *dbmo
 }
 
 // Execute handles the agent execution.
-func (e *SingleAgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	return func(yield func(a2a.Event, error) bool) {
-		if execCtx.StoredTask == nil {
-			if !yield(a2a.NewSubmittedTask(execCtx, execCtx.Message), nil) {
-				return
-			}
-		}
-
-		chatID := execCtx.ContextID
-		if chatID == "" {
-			chatID = uuid.Must(uuid.NewV7()).String()
-		} else if !IsValidChatID(chatID) {
-			yield(nil, fmt.Errorf("invalid chatID format"))
-			return
-		}
-
-		// Resolve session mode from agent config (empty string = default).
-		sessionMode := e.agent.Config.SessionMode // "" or "resume" → resume; "fresh" → fresh
-
-		var session *dbmodels.Session
-		if e.repo != nil {
-			var err error
-			session, err = e.repo.GetSession(chatID)
-			if err != nil {
-				yield(nil, fmt.Errorf("failed to get session: %w", err))
-				return
-			}
-		}
-
-		var promptBuilder strings.Builder
-		if execCtx.Message != nil {
-			for _, part := range execCtx.Message.Parts {
-				if part != nil && part.Text() != "" {
-					if promptBuilder.Len() > 0 {
-						promptBuilder.WriteString("\n")
-					}
-					promptBuilder.WriteString(part.Text())
-				}
-			}
-		}
-		prompt := promptBuilder.String()
-
-		runDirOpt := optional.None[string]()
-		// Always lock to established session.RunDir if session already exists
-		if session != nil && session.RunDir != "" {
-			runDirOpt = optional.Some(session.RunDir)
-		} else if execCtx.Metadata != nil {
-			if rd, ok := execCtx.Metadata["run_dir"].(string); ok && rd != "" {
-				runDirOpt = optional.Some(rd)
-			}
-		}
-		if runDirOpt.IsNone() && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
-			runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
-		}
-
-		modelOpt := optional.None[string]()
-		if execCtx.Metadata != nil {
-			if m, ok := execCtx.Metadata["model"].(string); ok && m != "" {
-				modelOpt = optional.Some(m)
-			}
-		}
-
-		// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
-		if runDirOpt.IsSome() {
-			rd := runDirOpt.Unwrap()
-			if rd != "" {
-				if len(e.agent.Config.RunDirs) > 0 && !run.IsAllowedDir(rd, e.agent.Config.RunDirs) {
-					yield(nil, fmt.Errorf("run directory %q is not allowed by agent configuration", rd))
-					return
-				}
-				info, err := os.Stat(rd)
-				if err != nil {
-					yield(nil, fmt.Errorf("run_dir %q does not exist: %w", rd, err))
-					return
-				}
-				if !info.IsDir() {
-					yield(nil, fmt.Errorf("run_dir %q is not a directory", rd))
-					return
-				}
-			}
-		}
-
-		if e.repo != nil {
-			if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
-				yield(nil, fmt.Errorf("failed to pre-update agent session: %w", err))
-				return
-			}
-			// Save incoming message to session in DB
-			if prompt != "" {
-				userMsgID := ""
-				isInternal := false
-				callerName := ""
-				if execCtx.Message != nil {
-					userMsgID = execCtx.Message.ID
-					if execCtx.Message.Metadata != nil {
-						if v, ok := execCtx.Message.Metadata["internal"].(bool); ok && v {
-							isInternal = true
-						}
-						if cn, ok := execCtx.Message.Metadata["caller_agent_name"].(string); ok {
-							callerName = cn
-						}
-					}
-				}
-				if userMsgID == "" {
-					userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
-				}
-				role := "user"
-				activityType := ""
-				agentName := ""
-				if isInternal {
-					role = "activity"
-					activityType = "CALL_PEER"
-					if callerName != "" {
-						agentName = callerName
-					} else {
-						agentName = e.agent.Config.Name
-					}
-				}
-				userMsg := dbmodels.ChatMessage{
-					ID:           userMsgID,
-					Role:         role,
-					ActivityType: activityType,
-					Content:      prompt,
-					AgentName:    agentName,
-					Timestamp:    time.Now().UnixMilli(),
-				}
-				if err := e.repo.AppendMessage(chatID, userMsg); err != nil {
-					log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
-				} else {
-					e.server.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "message",
-						Message: &userMsg,
-					})
-				}
-			}
-
-			// Only update status if this is the primary/entry agent for the session
-			if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name || session.CurrentAgent == e.agent.Config.ID {
-				if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); err != nil {
-					yield(nil, fmt.Errorf("failed to update agent status to running: %w", err))
-					return
-				} else {
-					e.server.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "status",
-						Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": true},
-					})
-				}
-			}
-
-			// Generate title on first request if session has no title
-			if session == nil || session.Title == "" {
-				e.goGenerateTitle(ctx, chatID, prompt)
-			}
-		}
-
-		// ── Subscribe to status updates for this chat ─────────────────────────
-		// statusCh receives incremental AgentStatusUpdate events while run.Run executes.
-		// nil match: a plain chat has a single agent, so every update is ours.
-		var statusCh <-chan AgentStatusUpdate
-		var cancelListener func()
-		if e.server != nil && e.conf != nil {
-			statusCh, cancelListener = e.server.AddStatusListener(chatID, nil)
-			defer cancelListener()
-		}
-
-		// Always mark the agent as completed once the sandbox execution
-		// finishes, regardless of success, error, client disconnect, or
-		// context cancellation. This guarantees the session's isRunning
-		// state is cleared after the agent sandbox exits.
-		defer e.markAgentCompleted(chatID)
-		e.executeSequential(ctx, yield, execCtx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
+func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRunParams) (string, error) {
+	chatID := params.ChatID
+	if chatID == "" {
+		chatID = uuid.Must(uuid.NewV7()).String()
+	} else if !IsValidChatID(chatID) {
+		return "", fmt.Errorf("invalid chatID format")
 	}
+
+	// Resolve session mode from agent config (empty string = default).
+	sessionMode := e.agent.Config.SessionMode // "" or "resume" → resume; "fresh" → fresh
+
+	var session *dbmodels.Session
+	if e.repo != nil {
+		var err error
+		session, err = e.repo.GetSession(chatID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get session: %w", err)
+		}
+	}
+
+	prompt := params.Prompt
+
+	runDirOpt := optional.None[string]()
+	// Always lock to established session.RunDir if session already exists
+	if session != nil && session.RunDir != "" {
+		runDirOpt = optional.Some(session.RunDir)
+	} else if params.RunDir != "" {
+		runDirOpt = optional.Some(params.RunDir)
+	} else if params.Metadata != nil {
+		if rd, ok := params.Metadata["run_dir"].(string); ok && rd != "" {
+			runDirOpt = optional.Some(rd)
+		}
+	}
+	if runDirOpt.IsNone() && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
+		runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
+	}
+
+	modelOpt := optional.None[string]()
+	if params.Model != "" {
+		modelOpt = optional.Some(params.Model)
+	} else if params.Metadata != nil {
+		if m, ok := params.Metadata["model"].(string); ok && m != "" {
+			modelOpt = optional.Some(m)
+		}
+	}
+
+	// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
+	if runDirOpt.IsSome() {
+		rd := runDirOpt.Unwrap()
+		if rd != "" {
+			if len(e.agent.Config.RunDirs) > 0 && !run.IsAllowedDir(rd, e.agent.Config.RunDirs) {
+				return "", fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
+			}
+			info, err := os.Stat(rd)
+			if err != nil {
+				return "", fmt.Errorf("run_dir %q does not exist: %w", rd, err)
+			}
+			if !info.IsDir() {
+				return "", fmt.Errorf("run_dir %q is not a directory", rd)
+			}
+		}
+	}
+
+	if e.repo != nil {
+		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
+			return "", fmt.Errorf("failed to pre-update agent session: %w", err)
+		}
+		// Save incoming message to session in DB
+		if prompt != "" {
+			userMsgID := ""
+			isInternal := false
+			callerName := ""
+			if params.Metadata != nil {
+				if v, ok := params.Metadata["internal"].(bool); ok && v {
+					isInternal = true
+				}
+				if cn, ok := params.Metadata["caller_agent_name"].(string); ok {
+					callerName = cn
+				}
+				if mid, ok := params.Metadata["message_id"].(string); ok && mid != "" {
+					userMsgID = mid
+				}
+			}
+			if userMsgID == "" {
+				userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
+			}
+
+			role := "user"
+			activityType := ""
+			agentName := ""
+			if isInternal {
+				role = "activity"
+				activityType = "CALL_PEER"
+				if callerName != "" {
+					agentName = callerName
+				} else {
+					agentName = e.agent.Config.Name
+				}
+			}
+			userMsg := dbmodels.ChatMessage{
+				ID:           userMsgID,
+				Role:         role,
+				ActivityType: activityType,
+				Content:      prompt,
+				AgentName:    agentName,
+				Timestamp:    time.Now().UnixMilli(),
+			}
+			if err := e.repo.AppendMessage(chatID, userMsg); err != nil {
+				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
+			} else if e.server != nil {
+				e.server.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "message",
+					Message: &userMsg,
+				})
+			}
+		}
+
+		// Only update status if this is the primary/entry agent for the session
+		if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name || session.CurrentAgent == e.agent.Config.ID {
+			if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); err != nil {
+				return "", fmt.Errorf("failed to update agent status to running: %w", err)
+			}
+			if e.server != nil {
+				e.server.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "status",
+					Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": true},
+				})
+			}
+		}
+
+		// Generate title on first request if session has no title
+		if session == nil || session.Title == "" {
+			e.goGenerateTitle(ctx, chatID, prompt)
+		}
+	}
+
+	// ── Subscribe to status updates for this chat ─────────────────────────
+	// statusCh receives incremental AgentStatusUpdate events while run.Run executes.
+	var statusCh <-chan AgentStatusUpdate
+	var cancelListener func()
+	if e.server != nil && e.conf != nil {
+		statusCh, cancelListener = e.server.AddStatusListener(chatID, nil)
+		defer cancelListener()
+	}
+
+	// Always mark the agent as completed once the sandbox execution
+	// finishes, regardless of success, error, client disconnect, or
+	// context cancellation. This guarantees the session's isRunning
+	// state is cleared after the agent sandbox exits.
+	defer e.markAgentCompleted(chatID)
+	return e.executeSequential(ctx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
 }
 
 // goGenerateTitle spawns a background goroutine that generates and persists a
@@ -405,14 +389,6 @@ func parseOutput(out []byte) (lastContent string, sessionID string, inputTokens 
 		return result.LastContent, result.SessionID, result.InputTokens, result.MaxTokens
 	}
 	return strings.TrimSpace(string(out)), "", 0, 0
-}
-
-// Cancel handles canceling an execution.
-func (e *SingleAgentExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	return func(yield func(a2a.Event, error) bool) {
-		// Emit TaskStatusUpdateEvent with TaskStateCanceled.
-		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, nil), nil)
-	}
 }
 
 func generateSessionTitle(ctx context.Context, client llm.Client, model string, req string, agentID string, agentDesc string) (string, error) {

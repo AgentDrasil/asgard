@@ -9,6 +9,7 @@ When working on frontend code, refer to [webui/AGENTS.md](webui/AGENTS.md) for w
 The [README.md](README.md) contains critical documentation regarding:
 1. **System Architecture**: Go orchestration layer, CLI-based agents, and Docker runtimes.
 2. **Sandbox Architecture**: The dual-sandbox execution environment, Bubblewrap (`bwrap`) parameters, credential masking, and the `fakebash`/`fakebashd` gRPC socketpair communication protocol.
-3. **API Endpoints**: The Agent-to-Agent (A2A) protocol implementation, dynamic reload APIs, and team routing structures.
+3. **API Endpoints**: REST trigger and SSE SessionEvents endpoints, dynamic reload APIs, and team routing structures.
 
 Please refer to [README.md](README.md) for all architectural definitions and security constraints before making any codebase edits.
+

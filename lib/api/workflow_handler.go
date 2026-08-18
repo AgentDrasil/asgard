@@ -3,13 +3,8 @@ package api
 import (
 	"context"
 	"fmt"
-	"iter"
-	"net/http"
-	"strings"
 	"time"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
@@ -38,12 +33,41 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 	return workflow.NewEngine(registry), nil
 }
 
-// newWorkflowExecutor creates a workflowTitleExecutor for the given workflow agent.
-func (s *Server) newWorkflowExecutor(agent *agents.Agent) a2asrv.AgentExecutor {
+// runWorkflow executes a workflow agent synchronously, returning its settled status and summary output.
+func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
+	s.persistIncomingWorkflowMessage(agent, chatID, req)
+	s.maybeGenerateWorkflowTitle(ctx, agent, chatID, req.Prompt)
+
+	agentID := agent.Config.ID
+	if s.repo != nil && chatID != "" && agentID != "" {
+		if err := s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")
+		} else {
+			s.PublishSessionEvent(chatID, SessionEvent{
+				Type:    "status",
+				Payload: map[string]any{"agent": agentID, "isRunning": true},
+			})
+		}
+		defer func() {
+			if err := s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted); err != nil {
+				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to mark workflow agent status completed")
+			} else {
+				s.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "status",
+					Payload: map[string]any{"agent": agentID, "isRunning": false},
+				})
+				s.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "done",
+					Payload: map[string]any{"agent": agentID},
+				})
+			}
+		}()
+	}
+
 	defn, err := workflow.LoadDefinition(agent.WorkflowPath)
 	if err != nil {
 		log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to load workflow definition")
-		return nil
+		return "failed", "", fmt.Errorf("failed to load workflow definition: %w", err)
 	}
 
 	engine := s.workflowEngine
@@ -52,7 +76,7 @@ func (s *Server) newWorkflowExecutor(agent *agents.Agent) a2asrv.AgentExecutor {
 		engine, err = newWorkflowEngine(s.conf, s)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
-			return nil
+			return "failed", "", fmt.Errorf("failed to create workflow engine: %w", err)
 		}
 		s.mu.RLock()
 		if len(s.agents) > 0 {
@@ -70,144 +94,70 @@ func (s *Server) newWorkflowExecutor(agent *agents.Agent) a2asrv.AgentExecutor {
 		ReadOnly:  agent.Config.MountDirs.ReadOnly,
 		ReadWrite: agent.Config.MountDirs.ReadWrite,
 	}
-	executor.OnEvent = s.handleWorkflowEvent
-	return &workflowTitleExecutor{
-		inner:  executor,
-		server: s,
-		agent:  agent,
-	}
-}
-
-// newWorkflowHandler creates the A2A REST handler and agent card for a
-// workflow-type agent.
-func (s *Server) newWorkflowHandler(agent *agents.Agent) (http.Handler, *a2a.AgentCard) {
-	exec := s.newWorkflowExecutor(agent)
-	if exec == nil {
-		return nil, nil
-	}
-	handler := a2asrv.NewHandler(exec)
-	restHandler := a2asrv.NewRESTHandler(handler)
-
-	host := "http://localhost:8080"
-	if s.conf != nil && s.conf.Host != "" {
-		host = s.conf.Host
-	}
-
-	card := &a2a.AgentCard{
-		Name:        agent.Config.Name,
-		Description: agent.Config.Description,
-		Version:     "1.0.0",
-		Capabilities: a2a.AgentCapabilities{
-			Streaming: true,
-		},
-		SupportedInterfaces: []*a2a.AgentInterface{
-			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", host, agent.Config.ID), a2a.TransportProtocolHTTPJSON),
-		},
-		DefaultInputModes:  []string{"text"},
-		DefaultOutputModes: []string{"text"},
-	}
-
-	return restHandler, card
-}
-
-// workflowTitleExecutor wraps the workflow executor so workflow chats get a
-// Gemini-generated session title on first contact, mirroring the single-agent
-// code path.
-type workflowTitleExecutor struct {
-	inner  a2asrv.AgentExecutor
-	server *Server
-	agent  *agents.Agent
-	// llmClient may be nil; in that case a genai-backed client is created
-	// lazily using the configured (or env) API key.
-	llmClient llm.Client
-}
-
-var _ a2asrv.AgentExecutor = (*workflowTitleExecutor)(nil)
-
-// Execute persists the incoming user message (mirroring the single-agent
-// path), generates the session title on first contact (when the session has
-// no stored title yet), then delegates to the wrapped workflow executor while
-// maintaining the agent's running/completed lifecycle in the session DB.
-func (e *workflowTitleExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	e.persistIncomingMessage(execCtx)
-	e.maybeGenerateTitle(ctx, execCtx)
-
-	chatID := execCtx.ContextID
-	agentID := ""
-	if e.agent != nil && e.agent.Config.ID != "" {
-		agentID = e.agent.Config.ID
-	}
-
-	return func(yield func(a2a.Event, error) bool) {
-		if e.server != nil && e.server.repo != nil && chatID != "" && agentID != "" {
-			if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
-				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")
-			} else {
-				e.server.PublishSessionEvent(chatID, SessionEvent{
-					Type:    "status",
-					Payload: map[string]any{"agent": agentID, "isRunning": true},
-				})
-			}
-			defer func() {
-				if err := e.server.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted); err != nil {
-					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to mark workflow agent status completed")
-				} else {
-					e.server.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "status",
-						Payload: map[string]any{"agent": agentID, "isRunning": false},
-					})
-					e.server.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "done",
-						Payload: map[string]any{"agent": agentID},
-					})
-				}
-			}()
-		}
-		if e.inner == nil {
-			return
-		}
-		for ev, err := range e.inner.Execute(ctx, execCtx) {
-			if !yield(ev, err) {
-				return
+	suspendCh := make(chan struct{}, 1)
+	executor.OnEvent = func(sessionID string, ev workflow.WorkflowEvent) {
+		s.handleWorkflowEvent(sessionID, ev)
+		if ev.Type == workflow.EventWorkflowSuspended {
+			select {
+			case suspendCh <- struct{}{}:
+			default:
 			}
 		}
 	}
+
+	type runResult struct {
+		result *workflow.WorkflowRunResult
+		err    error
+	}
+	resultCh := make(chan runResult, 1)
+	go func() {
+		res, err := executor.Execute(ctx, workflow.WorkflowRunParams{
+			SessionID: chatID,
+			Prompt:    req.Prompt,
+			RunDir:    req.RunDir,
+			Metadata:  req.Metadata,
+		})
+		resultCh <- runResult{result: res, err: err}
+	}()
+
+	select {
+	case <-suspendCh:
+		return "waiting_human", "", nil
+	case res := <-resultCh:
+		if res.err != nil {
+			return "failed", "", res.err
+		}
+		summary := workflow.SummarizeRun(res.result)
+		switch res.result.Status {
+		case workflow.RunStatusWaitingHuman:
+			return "waiting_human", "", nil
+		case workflow.RunStatusCompleted:
+			return "completed", summary, nil
+		case workflow.RunStatusCanceled:
+			return "cancelled", summary, nil
+		default:
+			return "failed", summary, fmt.Errorf("workflow execution failed with status %s", res.result.Status)
+		}
+	}
 }
 
-// Cancel delegates cancellation to the wrapped workflow executor.
-func (e *workflowTitleExecutor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	return e.inner.Cancel(ctx, execCtx)
-}
-
-// persistIncomingMessage appends the user's prompt to the chat session so it
-// survives reloads and session switches. Without this, workflow chats lost
-// the initiating user message because the workflow engine only records it in
-// the workflow_runs table, never in the session transcript. Agent-to-agent
-// internal messages are stored as CALL_PEER activities instead.
-func (e *workflowTitleExecutor) persistIncomingMessage(execCtx *a2asrv.ExecutorContext) {
-	if e.server == nil || e.server.repo == nil {
-		return
-	}
-	chatID := execCtx.ContextID
-	if chatID == "" || !IsValidChatID(chatID) {
-		return
-	}
-	prompt := messagePromptText(execCtx.Message)
-	if prompt == "" {
+// persistIncomingWorkflowMessage appends the user's prompt to the chat session.
+func (s *Server) persistIncomingWorkflowMessage(agent *agents.Agent, chatID string, req TriggerMessageRequest) {
+	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) || req.Prompt == "" {
 		return
 	}
 	userMsgID := ""
 	isInternal := false
 	callerName := ""
-	if execCtx.Message != nil {
-		userMsgID = execCtx.Message.ID
-		if execCtx.Message.Metadata != nil {
-			if v, ok := execCtx.Message.Metadata["internal"].(bool); ok && v {
-				isInternal = true
-			}
-			if cn, ok := execCtx.Message.Metadata["caller_agent_name"].(string); ok {
-				callerName = cn
-			}
+	if req.Metadata != nil {
+		if mid, ok := req.Metadata["message_id"].(string); ok && mid != "" {
+			userMsgID = mid
+		}
+		if v, ok := req.Metadata["internal"].(bool); ok && v {
+			isInternal = true
+		}
+		if cn, ok := req.Metadata["caller_agent_name"].(string); ok {
+			callerName = cn
 		}
 	}
 	if userMsgID == "" {
@@ -222,38 +172,33 @@ func (e *workflowTitleExecutor) persistIncomingMessage(execCtx *a2asrv.ExecutorC
 		if callerName != "" {
 			agentName = callerName
 		} else {
-			agentName = e.agent.Config.Name
+			agentName = agent.Config.Name
 		}
 	}
 	msg := dbmodels.ChatMessage{
 		ID:           userMsgID,
 		Role:         role,
 		ActivityType: activityType,
-		Content:      prompt,
+		Content:      req.Prompt,
 		AgentName:    agentName,
 		Timestamp:    time.Now().UnixMilli(),
 	}
-	if err := e.server.repo.AppendMessage(chatID, msg); err != nil {
+	if err := s.repo.AppendMessage(chatID, msg); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append workflow user message to repo")
 	} else {
-		e.server.PublishSessionEvent(chatID, SessionEvent{
+		s.PublishSessionEvent(chatID, SessionEvent{
 			Type:    "message",
 			Message: &msg,
 		})
 	}
 }
 
-// maybeGenerateTitle spawns the background title-generation goroutine when the
-// chat session exists and has no title yet.
-func (e *workflowTitleExecutor) maybeGenerateTitle(ctx context.Context, execCtx *a2asrv.ExecutorContext) {
-	if e.server == nil || e.server.repo == nil {
+// maybeGenerateWorkflowTitle spawns title-generation if session has no title yet.
+func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agents.Agent, chatID string, prompt string) {
+	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) || prompt == "" {
 		return
 	}
-	chatID := execCtx.ContextID
-	if chatID == "" || !IsValidChatID(chatID) {
-		return
-	}
-	session, err := e.server.repo.GetSession(chatID)
+	session, err := s.repo.GetSession(chatID)
 	if err != nil {
 		log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to get session for workflow title generation")
 		return
@@ -261,22 +206,5 @@ func (e *workflowTitleExecutor) maybeGenerateTitle(ctx context.Context, execCtx 
 	if session != nil && session.Title != "" {
 		return
 	}
-	goGenerateSessionTitle(ctx, e.server, e.llmClient, e.server.repo, chatID, messagePromptText(execCtx.Message), e.agent.Config.ID, e.agent.Config.Description)
-}
-
-// messagePromptText concatenates the text parts of an A2A message.
-func messagePromptText(msg *a2a.Message) string {
-	if msg == nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, part := range msg.Parts {
-		if part != nil && part.Text() != "" {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(part.Text())
-		}
-	}
-	return sb.String()
+	goGenerateSessionTitle(ctx, s, nil, s.repo, chatID, prompt, agent.Config.ID, agent.Config.Description)
 }

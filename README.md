@@ -79,17 +79,17 @@ Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates m
   - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox).
   - `command`: Executes sandboxed or direct bash shell commands.
   - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
-  - `human`: Pauses workflow execution for user review via WebUI / A2A (`TaskStateInputRequired`), persisting state across server restarts.
+  - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.
 - **Smart Edge Conditions & Join Rules**:
   - `when`: Dot-notation expressions (e.g. `nodes.build_cmd.exit_code != 0`) to trigger conditional repair or fallback branches.
   - `join: always`: Runs summary or clean-up nodes regardless of upstream skips or failures.
 - **Sandbox-Friendly Workspaces**: Isolates intermediate step files under `tmp_dir` (defaults to `/tmp/${session_id}`).
 
 ### Example Workflows (`examples/workflows/`)
-Ready-to-use workflow definitions are located in [`examples/workflows/`](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/):
-- **[build-and-fix.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/build-and-fix.yaml)**: Runs code generation, executes build checks, and conditionally triggers a fix agent if the build fails.
-- **[human-in-the-loop.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/human-in-the-loop.yaml)**: Generates a plan, pauses for human approval, uses a lightweight LLM classifier to parse natural language feedback, and conditionally proceeds with code execution.
-- **[parallel-review.yaml](file:///home/chao/src/AgentDrasil/asgard/examples/workflows/parallel-review.yaml)**: Concurrently runs security and performance review agents and consolidates their reports.
+Ready-to-use workflow definitions are located in [`examples/workflows/`](examples/workflows/):
+- **[build-and-fix.yaml](examples/workflows/build-and-fix.yaml)**: Runs code generation, executes build checks, and conditionally triggers a fix agent if the build fails.
+- **[human-in-the-loop.yaml](examples/workflows/human-in-the-loop.yaml)**: Generates a plan, pauses for human approval, uses a lightweight LLM classifier to parse natural language feedback, and conditionally proceeds with code execution.
+- **[parallel-review.yaml](examples/workflows/parallel-review.yaml)**: Concurrently runs security and performance review agents and consolidates their reports.
 
 ### Validating Workflow & Agent Definitions (`agent-validate`)
 Use the `agent-validate` CLI utility to validate workflow YAML syntax, DAG topology (cycle detection), edge expressions, and agent configs:
@@ -104,12 +104,12 @@ go run ./cmd/agent-validate .agents/agents/my-workflow-agent/
 
 ## API Endpoints
 
-Asgard serves an HTTP API for agent orchestration, team discovery, and system management:
+Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, team discovery, and system management:
 
-### 1. A2A Agent Interface
-Each configured agent is exposed as an individual endpoint based on the **Agent-to-Agent (A2A)** protocol:
-*   `/agents/{agent_id}/`: Root path for executing commands and querying agent status.
-*   `/agents/{agent_id}/.well-known/agent-card.json`: Returns the agent card metadata.
+### 1. Agent Execution & Real-Time Events API
+*   **Trigger Execution** (`POST /api/agents/{agent_id}/message`): Triggers single agent or workflow execution. Returns `202 Accepted` asynchronously by default; supports `?wait=true` synchronous mode for CLI consumers (e.g., `call-peer`).
+*   **Real-Time Events Stream** (`GET /api/sessions/{session_id}/events`): Server-Sent Events (SSE) stream for real-time `SessionEvent` delivery (messages, activities, artifacts, status, done) with `Last-Event-ID` reconnection catch-up.
+*   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents.
 
 ### 2. Management & Coordination API
 *   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).

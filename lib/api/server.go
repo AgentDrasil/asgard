@@ -7,13 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
@@ -24,7 +21,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/workflow"
 )
 
-// Server manages the HTTP server hosting A2A agents.
+// Server manages the HTTP server hosting agents.
 type Server struct {
 	conf             *config.Config
 	mu               sync.RWMutex
@@ -108,46 +105,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	for _, agent := range s.agents {
-		var restHandler http.Handler
-		var card *a2a.AgentCard
-
-		switch agent.Config.Type {
-		case "workflow":
-			restHandler, card = s.newWorkflowHandler(agent)
-		default:
-			restHandler, card = NewAgentHandler(agent, s.conf, s.repo, s)
-		}
-
-		if restHandler == nil || card == nil {
-			log.Error().Str("agent", agent.Config.ID).Msg("skipping registration of agent due to handler creation failure")
-			continue
-		}
-
-		prefix := fmt.Sprintf("/agents/%s/", agent.Config.ID)
-		agentBase := fmt.Sprintf("/agents/%s", agent.Config.ID)
-
-		// Standard routes: /agents/{id}/message:stream etc.
-		mux.Handle(prefix, http.StripPrefix(agentBase, restHandler))
-
-		internalHost := s.conf.APIHost()
-		internalCard := *card
-		internalCard.SupportedInterfaces = []*a2a.AgentInterface{
-			a2a.NewAgentInterface(fmt.Sprintf("%s/agents/%s", internalHost, agent.Config.ID), a2a.TransportProtocolHTTPJSON),
-		}
-
-		cardHandler := a2asrv.NewStaticAgentCardHandler(card)
-		internalCardHandler := a2asrv.NewStaticAgentCardHandler(&internalCard)
-
-		cardPath := prefix + strings.TrimPrefix(a2asrv.WellKnownAgentCardPath, "/")
-		mux.HandleFunc("GET "+cardPath, func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("internal") == "true" || r.Header.Get("X-Internal") == "true" {
-				internalCardHandler.ServeHTTP(w, r)
-			} else {
-				cardHandler.ServeHTTP(w, r)
-			}
-		})
-
-		log.Info().Msgf("Registered agent %s at /agents/%s/", agent.Config.Name, agent.Config.ID)
+		log.Info().Msgf("Registered agent %s (%s)", agent.Config.Name, agent.Config.ID)
 	}
 
 	mux.HandleFunc("GET /team", s.handleTeam)

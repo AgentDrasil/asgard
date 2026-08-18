@@ -18,7 +18,7 @@ func ToAnySlice[T any](s []T) []any {
 }
 
 // SanitizeMetadataValue recursively converts values (especially typed slices like []string)
-// into types permitted by the a2a metadata specification:
+// into standard JSON-serializable types:
 // nil, bool, int, float, string, []any, map[string]any.
 func SanitizeMetadataValue(v any) any {
 	if v == nil {
@@ -73,11 +73,12 @@ func SanitizeMetadataValue(v any) any {
 	}
 }
 
-// SanitizeMetadata recursively ensures that all map entries adhere to a2a metadata restrictions.
+// SanitizeMetadata recursively ensures that all map entries adhere to JSON-serializable types.
 func SanitizeMetadata(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
+
 	res := make(map[string]any, len(m))
 	for k, v := range m {
 		res[k] = SanitizeMetadataValue(v)
