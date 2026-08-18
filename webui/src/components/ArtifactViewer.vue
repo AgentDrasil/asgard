@@ -135,6 +135,7 @@ interface FileData {
 const fileData = ref<FileData | null>(null);
 const loading = ref(false);
 const errorMsg = ref<string | null>(null);
+const markdownViewMode = ref<"rendered" | "source">("rendered");
 
 const isMarkdown = computed(() => {
   if (!fileData.value) return false;
@@ -292,6 +293,35 @@ function onFileSelectChange(event: Event) {
       </div>
 
       <div class="flex items-center gap-1.5 shrink-0">
+        <div v-if="isMarkdown" class="join bg-base-300/60 p-0.5 rounded-lg">
+          <button
+            @click="markdownViewMode = 'rendered'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1',
+              markdownViewMode === 'rendered'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+            title="Rendered Markdown Preview"
+          >
+            <Icon icon="material-symbols:preview" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">Preview</span>
+          </button>
+          <button
+            @click="markdownViewMode = 'source'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1',
+              markdownViewMode === 'source'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+            title="Raw Markdown Source"
+          >
+            <Icon icon="material-symbols:code" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">Source</span>
+          </button>
+        </div>
+
         <button
           @click="fetchFile(activeFilePath || '')"
           class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300"
@@ -329,7 +359,7 @@ function onFileSelectChange(event: Event) {
 
       <div v-else-if="fileData" class="h-full">
         <div
-          v-if="isMarkdown"
+          v-if="isMarkdown && markdownViewMode === 'rendered'"
           v-html="renderedMarkdownContent"
           :class="MARKDOWN_PROSE_CLASSES"
           class="w-full h-full min-w-0"
