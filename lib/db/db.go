@@ -30,12 +30,12 @@ func NewDB(conf *config.Config) (*gorm.DB, error) {
 
 	if conf.DB == "sqlite" {
 		dsn := conf.DSN
-		if !strings.Contains(dsn, "_busy_timeout") && !strings.Contains(dsn, "_timeout") {
+		if !strings.Contains(dsn, "busy_timeout") && !strings.Contains(dsn, "_timeout") {
 			separator := "?"
 			if strings.Contains(dsn, "?") {
 				separator = "&"
 			}
-			dsn = fmt.Sprintf("%s%s_busy_timeout=10000&_journal_mode=WAL&_sync=NORMAL", dsn, separator)
+			dsn = fmt.Sprintf("%s%s_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_busy_timeout=10000&_journal_mode=WAL&_sync=NORMAL", dsn, separator)
 		}
 		db, err := gorm.Open(sqlite.Open(dsn), config)
 		if err != nil {

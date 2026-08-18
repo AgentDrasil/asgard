@@ -72,6 +72,24 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     if (incoming.artifactFiles && incoming.artifactFiles.length > 0) {
       mergeArtifactsList(incoming.artifactFiles);
     }
+
+    if (incoming.role === "ask_user") {
+      isRunning.value = false;
+      loading.value = false;
+      workingAgentLabel.value = null;
+      if (activeSession.value) {
+        activeSession.value.isRunning = false;
+      }
+      const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
+      if (sIdx > -1) {
+        sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: false };
+      }
+    } else if (incoming.agentName && incoming.role !== "user" && isRunning.value) {
+      const matched = agents.value.find(
+        (a) => a.id === incoming.agentName || a.name === incoming.agentName,
+      );
+      workingAgentLabel.value = matched?.name || incoming.agentName;
+    }
   };
 
   const handleSessionStatusEvent = (ev: SessionEvent) => {
@@ -221,6 +239,17 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       loading.value = running;
       if (!running) {
         workingAgentLabel.value = null;
+      } else if (!workingAgentLabel.value) {
+        const lastMsg = snapshotMsgs
+          .slice()
+          .reverse()
+          .find((m) => m.role !== "user" && m.agentName);
+        if (lastMsg?.agentName) {
+          const matched = agents.value.find(
+            (a) => a.id === lastMsg.agentName || a.name === lastMsg.agentName,
+          );
+          workingAgentLabel.value = matched?.name || lastMsg.agentName;
+        }
       }
 
       const idx = sessions.value.findIndex((s) => s.chatID === id);

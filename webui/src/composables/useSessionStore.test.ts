@@ -357,4 +357,101 @@ describe("useSessionStore", () => {
     expect(store.messages.value[0].replied).toBe(true);
     expect(store.messages.value[0].replyText).toBe("main.go");
   });
+
+  it("should update workingAgentLabel from activity messages and clear on ask_user", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-wf",
+      title: "Workflow Chat",
+      currentAgent: "dev-workflow",
+      runDir: "/workspace",
+      isRunning: true,
+      messages: [],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "dev-workflow", name: "Dev Workflow", description: "", run_dirs: [] },
+      { id: "plan-reviewer", name: "Plan Reviewer", description: "", run_dirs: [] },
+      { id: "coder", name: "Code Developer", description: "", run_dirs: [] },
+    ]);
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+    const store = useSessionStore({ agents });
+    await store.openSession("session-wf");
+
+    expect(store.isRunning.value).toBe(true);
+
+    const es = MockEventSource.instances[0];
+
+    // 1. Initial workflow status event
+    es.emit("status", {
+      eventId: 1,
+      chatId: "session-wf",
+      type: "status",
+      payload: { agent: "dev-workflow", isRunning: true },
+      timestamp: 1000,
+    });
+    expect(store.workingAgentLabel.value).toBe("Dev Workflow");
+
+    // 2. Node started event for plan-reviewer
+    es.emit("status", {
+      eventId: 2,
+      chatId: "session-wf",
+      type: "status",
+      payload: { agent: "plan-reviewer", node_id: "plan_review_agent", isRunning: true },
+      timestamp: 1100,
+    });
+    expect(store.workingAgentLabel.value).toBe("Plan Reviewer");
+
+    // 3. Activity message from plan-reviewer updates workingAgentLabel
+    es.emit("message", {
+      eventId: 3,
+      chatId: "session-wf",
+      type: "message",
+      message: {
+        id: "step-1",
+        role: "activity",
+        agentName: "plan-reviewer",
+        content: "Checking files",
+        timestamp: 1200,
+      },
+      timestamp: 1200,
+    });
+    expect(store.workingAgentLabel.value).toBe("Plan Reviewer");
+
+    // 4. Activity message from next node coder
+    es.emit("message", {
+      eventId: 4,
+      chatId: "session-wf",
+      type: "message",
+      message: {
+        id: "step-2",
+        role: "activity",
+        agentName: "coder",
+        content: "Writing code",
+        timestamp: 1300,
+      },
+      timestamp: 1300,
+    });
+    expect(store.workingAgentLabel.value).toBe("Code Developer");
+
+    // 5. Ask user message suspends execution and clears isRunning / workingAgentLabel
+    es.emit("message", {
+      eventId: 5,
+      chatId: "session-wf",
+      type: "message",
+      message: {
+        id: "ask-1",
+        role: "ask_user",
+        agentName: "plan-reviewer",
+        content: "Please approve plan",
+        timestamp: 1400,
+      },
+      timestamp: 1400,
+    });
+    expect(store.isRunning.value).toBe(false);
+    expect(store.loading.value).toBe(false);
+    expect(store.workingAgentLabel.value).toBeNull();
+    expect(store.isInputBusy.value).toBe(false);
+  });
 });

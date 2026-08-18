@@ -181,6 +181,10 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 		Type:    "message",
 		Message: &msg,
 	})
+	s.PublishSessionEvent(req.SessionID, SessionEvent{
+		Type:    "status",
+		Payload: map[string]any{"agent": req.AgentName, "isRunning": false},
+	})
 	s.SendPushNotification(req.SessionID, req.Prompt, agentName)
 	return nil
 }
@@ -196,7 +200,31 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	if s.repo == nil || sessionID == "" {
 		return
 	}
+	if ev.Type == workflow.EventNodeStarted {
+		agentIdentifier := ev.AgentID
+		if agentIdentifier == "" {
+			agentIdentifier = ev.NodeID
+		}
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type: "status",
+			Payload: map[string]any{
+				"agent":      agentIdentifier,
+				"agent_name": ev.AgentName,
+				"node_id":    ev.NodeID,
+				"isRunning":  true,
+			},
+		})
+		return
+	}
 	if ev.Type == workflow.EventWorkflowSuspended {
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type: "status",
+			Payload: map[string]any{
+				"agent":     ev.AgentName,
+				"node_id":   ev.NodeID,
+				"isRunning": false,
+			},
+		})
 		if len(ev.Artifacts) > 0 {
 			if err := s.repo.AppendArtifacts(sessionID, ev.Artifacts); err != nil {
 				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow suspended artifacts to repo")
