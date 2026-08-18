@@ -22,6 +22,20 @@ describe("useMermaid composable", () => {
     expect(id1.startsWith("diagram-")).toBe(true);
   });
 
+  it("handles empty or whitespace-only code gracefully", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render");
+    const resultEmpty = await renderDiagram("");
+    expect(resultEmpty.svg).toBeUndefined();
+    expect(resultEmpty.error).toBeUndefined();
+
+    const resultWhitespace = await renderDiagram("   \n\t  ");
+    expect(resultWhitespace.svg).toBeUndefined();
+    expect(resultWhitespace.error).toBeUndefined();
+
+    expect(renderSpy).not.toHaveBeenCalled();
+    renderSpy.mockRestore();
+  });
+
   it("renders a valid mermaid diagram successfully", async () => {
     const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValue({
       svg: "<svg>mock svg</svg>",

@@ -121,6 +121,11 @@ export function generateUniqueId(prefix: string = "mermaid-svg"): string {
  * Catches syntax and rendering errors without throwing uncaught exceptions.
  */
 export async function renderDiagram(code: string, idPrefix?: string): Promise<RenderResult> {
+  const trimmed = code?.trim();
+  if (!trimmed) {
+    return {};
+  }
+
   const mermaid = await loadMermaid();
   if (!isInitialized.value) {
     await initMermaid();
