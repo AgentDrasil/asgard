@@ -1,55 +1,22 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
+import { ref, watch, toRef } from "vue";
 import { Icon } from "@iconify/vue";
-import DOMPurify from "dompurify";
 import type { ChatMessage, AgentInfo } from "../types";
-import { getDirInfo, sendAskUserReply } from "../lib/api";
-import { formatContextUsage, getContextColorClass } from "../lib/format";
-import { TOOL_ITEM_DELIMITER, getMessageArtifactFiles } from "../utils/messageUtils";
-import { useShiki } from "../composables/useShiki";
+import { formatPath } from "../utils/agentUtils";
+import { getDirInfo } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
-import MarkdownContent from "./MarkdownContent.vue";
+import { useChatScroll } from "../composables/useChatScroll";
+import UserMessage from "./chat/UserMessage.vue";
+import AssistantMessage from "./chat/AssistantMessage.vue";
+import ActivityMessage from "./chat/ActivityMessage.vue";
+import AskUserCard from "./chat/AskUserCard.vue";
 
-const { highlightBlock } = useShiki();
 const {
   toggleSidebarShortcut,
   toggleArtifactsShortcut,
   toggleDiffShortcut,
   toggleTerminalShortcut,
 } = useShortcuts();
-
-const inlineInputMap = ref<Record<string, string>>({});
-const inlineSubmittingMap = ref<Record<string, boolean>>({});
-const inlineSubmittedMap = ref<Record<string, boolean>>({});
-
-const submitInlineReply = async (msgId: string) => {
-  const text = inlineInputMap.value[msgId]?.trim();
-  if (!text || !props.sessionId || inlineSubmittingMap.value[msgId]) return;
-
-  inlineSubmittingMap.value[msgId] = true;
-  const ok = await sendAskUserReply(props.sessionId, msgId, text);
-  inlineSubmittingMap.value[msgId] = false;
-
-  if (ok) {
-    inlineSubmittedMap.value[msgId] = true;
-    emit("ask-replied", msgId, text);
-  }
-};
-
-const parseOptions = (content: string): string[] => {
-  if (!content) return [];
-  const match = content.match(/Options:\s*([^\n\r]+)/i);
-  if (!match || !match[1]) return [];
-  return match[1]
-    .split("/")
-    .map((s) => s.trim())
-    .filter(Boolean);
-};
-
-const selectOptionAndReply = (msgId: string, option: string) => {
-  inlineInputMap.value[msgId] = option;
-  submitInlineReply(msgId);
-};
 
 const props = withDefaults(
   defineProps<{
@@ -74,14 +41,6 @@ const props = withDefaults(
   },
 );
 
-const getAgentIcon = (agentName?: string) => {
-  if (agentName && props.agents) {
-    const matched = props.agents.find((a) => a.name === agentName || a.id === agentName);
-    if (matched?.icon) return matched.icon;
-  }
-  return props.activeAgent?.icon || "fluent-color:bot-24";
-};
-
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
   (e: "open-diff", gitRoot: string): void;
@@ -91,22 +50,6 @@ const emit = defineEmits<{
   (e: "toggle-artifact-drawer"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
 }>();
-
-// Reset per-message reply state when switching sessions so stale ask_user
-// input/submitted flags never leak into another session's cards.
-watch(
-  () => props.sessionId,
-  () => {
-    inlineInputMap.value = {};
-    inlineSubmittingMap.value = {};
-    inlineSubmittedMap.value = {};
-  },
-);
-
-function formatPath(path: string): string {
-  if (!path) return "";
-  return path.replace(/^\/home\/[^/]+/, "~");
-}
 
 const gitRoot = ref("");
 
@@ -123,113 +66,12 @@ watch(
   { immediate: true },
 );
 
-const bottomRef = ref<HTMLDivElement | null>(null);
-const scrollContainerRef = ref<HTMLDivElement | null>(null);
-const showScrollBottom = ref(false);
-let lastAtTopState = props.isDetailsOpen;
-let ticking = false;
-
-const checkScrollPosition = () => {
-  if (!scrollContainerRef.value) return;
-  const el = scrollContainerRef.value;
-  const atTop = el.scrollTop <= 5;
-  if (atTop !== lastAtTopState) {
-    lastAtTopState = atTop;
-    emit("update:isDetailsOpen", atTop);
-  }
-  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-  showScrollBottom.value = distanceFromBottom > 120;
-};
-
-const scrollToBottom = () => {
-  bottomRef.value?.scrollIntoView({ behavior: "smooth" });
-};
-
-const handleScroll = () => {
-  if (!ticking) {
-    requestAnimationFrame(() => {
-      checkScrollPosition();
-      ticking = false;
-    });
-    ticking = true;
-  }
-};
-
-watch(
-  () => props.isDetailsOpen,
-  (newVal) => {
-    lastAtTopState = newVal;
-  },
-);
-
-onMounted(() => {
-  const el = scrollContainerRef.value;
-  if (el) {
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    nextTick(() => {
-      checkScrollPosition();
-    });
-  }
+const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
+  messages: toRef(props, "messages"),
+  sessionId: toRef(props, "sessionId"),
+  isDetailsOpen: toRef(props, "isDetailsOpen"),
+  onUpdateDetailsOpen: (open) => emit("update:isDetailsOpen", open),
 });
-
-onUnmounted(() => {
-  const el = scrollContainerRef.value;
-  if (el) {
-    el.removeEventListener("scroll", handleScroll);
-  }
-});
-
-// Auto scroll to bottom when new messages arrive and re-check scroll position
-watch(
-  [() => props.sessionId, () => props.messages],
-  async () => {
-    await nextTick();
-    bottomRef.value?.scrollIntoView({ behavior: "smooth" });
-    checkScrollPosition();
-    setTimeout(() => {
-      checkScrollPosition();
-    }, 150);
-  },
-  { deep: true, immediate: true },
-);
-
-const BLOCK_CLASSES = [
-  "rounded-lg",
-  "p-4",
-  "overflow-x-auto",
-  "my-2",
-  "border",
-  "border-base-300",
-  "text-xs",
-  "font-mono",
-] as const;
-
-const formatRawMarkdown = (content: string) => {
-  if (!content) return "";
-  const highlighted = highlightBlock(content, "markdown", [...BLOCK_CLASSES]);
-  if (highlighted) return highlighted;
-  return `<pre class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"><code class="whitespace-pre-wrap break-words [word-break:break-word]">${DOMPurify.sanitize(content)}</code></pre>`;
-};
-
-// Track which messages are toggled to show raw Markdown text
-const showRawMap = ref<Record<string, boolean>>({});
-const toggleRaw = (id: string) => {
-  showRawMap.value[id] = !showRawMap.value[id];
-};
-
-// Track copy feedback state per message
-const copiedMap = ref<Record<string, boolean>>({});
-const copyMessage = async (id: string, text: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    copiedMap.value[id] = true;
-    setTimeout(() => {
-      copiedMap.value[id] = false;
-    }, 2000);
-  } catch (e) {
-    console.error("Failed to copy text:", e);
-  }
-};
 </script>
 
 <template>
@@ -335,287 +177,37 @@ const copyMessage = async (id: string, text: string) => {
     >
       <div class="max-w-4xl w-full mx-auto space-y-4 min-w-0">
         <div v-for="msg in messages" :key="msg.id" class="w-full min-w-0">
-          <!-- Reasoning / Thinking Balloon -->
-          <div v-if="msg.role === 'reasoning'" class="w-full sm:pl-2 sm:pr-12 my-2 min-w-0">
-            <details
-              open
-              class="collapse collapse-arrow bg-base-200/50 border border-dashed border-base-300 rounded-lg min-w-0"
-            >
-              <summary
-                class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
-              >
-                <span>💭</span> Thinking Process
-              </summary>
-              <div
-                class="collapse-content text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed break-words [word-break:break-word]"
-              >
-                {{ msg.content }}
-              </div>
-            </details>
-          </div>
-
-          <!-- Error Message Card -->
-          <div
-            v-if="msg.role === 'error' || (msg.role === 'activity' && msg.activityType === 'ERROR')"
-            class="w-full pl-2 pr-2 my-2 min-w-0"
-          >
-            <div class="rounded-lg border border-error/40 bg-error/10 p-3 space-y-1.5 min-w-0">
-              <div class="flex items-center gap-2 select-none min-w-0">
-                <Icon
-                  icon="material-symbols:error-circle-rounded"
-                  class="h-4 w-4 text-error shrink-0"
-                />
-                <span class="text-xs font-bold text-error uppercase tracking-wider shrink-0">
-                  Error
-                </span>
-                <span v-if="msg.agentName" class="text-xs font-mono text-error/70 truncate min-w-0">
-                  {{ msg.agentName }}
-                </span>
-              </div>
-              <pre
-                class="text-xs font-mono text-error/90 whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
-                >{{ msg.content }}</pre>
-            </div>
-          </div>
-
-          <!-- Activity / Step / Tool Call Collapsible Box -->
-          <div
-            v-else-if="
-              msg.role === 'activity' || msg.role === 'tool_call' || msg.role === 'tool_result'
-            "
-            class="w-full pl-2 pr-2 my-2 min-w-0"
-          >
-            <div class="flex items-center gap-2 mb-1.5 select-none">
-              <Icon :icon="getAgentIcon(msg.agentName)" class="h-4 w-4 shrink-0" />
-              <span class="text-xs font-bold text-base-content/70">
-                {{ msg.agentName || activeAgent?.name || "Agent" }}
-              </span>
-            </div>
-            <details
-              class="collapse collapse-arrow bg-base-200/40 border border-base-300 rounded-lg text-xs w-full min-w-0"
-            >
-              <summary
-                class="collapse-title font-mono font-medium text-base-content/70 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
-              >
-                <span class="text-primary">⚙️</span>
-                <span
-                  class="badge badge-sm badge-ghost text-[10px] uppercase tracking-wider font-semibold font-sans"
-                >
-                  {{
-                    (msg.activityType || msg.role) === "TOOL_CALL" ||
-                    (msg.activityType || msg.role) === "tool_call" ||
-                    (msg.activityType || msg.role) === "tool_result"
-                      ? "TOOL"
-                      : msg.activityType || msg.role
-                  }}
-                </span>
-              </summary>
-              <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
-                <!-- TargetFiles Artifact Card (click a file to open it in the artifact viewer) -->
-                <div
-                  v-if="getMessageArtifactFiles(msg).length > 0"
-                  class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2 space-y-1.5"
-                >
-                  <div class="text-emerald-400 font-bold text-xs select-none">
-                    📄 Target File{{ getMessageArtifactFiles(msg).length > 1 ? "s" : "" }}:
-                  </div>
-                  <div class="flex flex-wrap gap-1.5">
-                    <button
-                      v-for="file in getMessageArtifactFiles(msg)"
-                      :key="file"
-                      @click="emit('open-artifact', file)"
-                      class="btn btn-xs gap-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white border-none font-mono normal-case h-6 min-h-0 px-2 max-w-full"
-                      :title="`Open artifact: ${file}`"
-                    >
-                      <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0" />
-                      <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
-                    </button>
-                  </div>
-                </div>
-                <template
-                  v-for="(item, idx) in msg.content.includes(TOOL_ITEM_DELIMITER)
-                    ? msg.content.split(TOOL_ITEM_DELIMITER)
-                    : msg.content.split('\n\n')"
-                  :key="idx"
-                >
-                  <pre
-                    v-if="item.trim()"
-                    class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"
-                  ><code class="whitespace-pre-wrap break-words [word-break:break-word]">{{ item.trim() }}</code></pre>
-                </template>
-              </div>
-            </details>
-          </div>
-
-          <!-- Ask User Question Box with Inline Reply -->
-          <div v-else-if="msg.role === 'ask_user'" class="w-full pl-2 pr-2 my-3 min-w-0">
-            <div
-              class="card bg-warning/10 border border-warning/30 shadow-sm p-4 rounded-xl space-y-3"
-            >
-              <div class="flex items-center gap-2 select-none">
-                <Icon :icon="getAgentIcon(msg.agentName)" class="h-5 w-5 shrink-0 text-warning" />
-                <span class="text-xs font-bold text-base-content">
-                  {{ msg.agentName || activeAgent?.name || "Agent" }} is asking:
-                </span>
-              </div>
-              <div
-                class="text-sm font-medium text-base-content whitespace-pre-wrap leading-relaxed"
-              >
-                {{ msg.content }}
-              </div>
-
-              <!-- Referenced Artifact Files (click to open in artifact viewer) -->
-              <div v-if="getMessageArtifactFiles(msg).length > 0" class="space-y-1.5 pt-1">
-                <div
-                  class="text-[11px] font-bold uppercase tracking-wider text-base-content/50 select-none"
-                >
-                  Files to review
-                </div>
-                <div class="flex flex-wrap gap-2">
-                  <button
-                    v-for="file in getMessageArtifactFiles(msg)"
-                    :key="file"
-                    @click="emit('open-artifact', file)"
-                    class="btn btn-xs gap-1.5 bg-base-200/80 hover:bg-warning/20 border border-warning/40 text-base-content font-mono normal-case h-7 min-h-0 px-2.5 max-w-full"
-                    :title="`Open artifact: ${file}`"
-                  >
-                    <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0 text-warning" />
-                    <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
-                    <span class="text-warning">➔</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Quick Action Option Buttons -->
-              <div
-                v-if="
-                  !msg.replied &&
-                  !inlineSubmittedMap[msg.id] &&
-                  parseOptions(msg.content).length > 0
-                "
-                class="flex flex-wrap gap-2 pt-1"
-              >
-                <button
-                  v-for="opt in parseOptions(msg.content)"
-                  :key="opt"
-                  @click="selectOptionAndReply(msg.id, opt)"
-                  class="btn btn-xs btn-outline btn-warning hover:btn-warning font-medium transition-all"
-                  :disabled="inlineSubmittingMap[msg.id]"
-                >
-                  {{ opt }}
-                </button>
-              </div>
-
-              <!-- Inline Reply Box -->
-              <div
-                v-if="!msg.replied && !inlineSubmittedMap[msg.id]"
-                class="flex items-center gap-2 pt-2 border-t border-warning/20"
-              >
-                <input
-                  v-model="inlineInputMap[msg.id]"
-                  @keydown.enter="submitInlineReply(msg.id)"
-                  type="text"
-                  placeholder="Type your reply to agent..."
-                  class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
-                  :disabled="inlineSubmittingMap[msg.id]"
-                />
-                <button
-                  @click="submitInlineReply(msg.id)"
-                  class="btn btn-sm btn-warning gap-1 text-xs"
-                  :disabled="!inlineInputMap[msg.id]?.trim() || inlineSubmittingMap[msg.id]"
-                >
-                  <span
-                    v-if="inlineSubmittingMap[msg.id]"
-                    class="loading loading-spinner loading-xs"
-                  ></span>
-                  <Icon v-else icon="fluent:send-24-filled" class="h-3.5 w-3.5" />
-                  Reply
-                </button>
-              </div>
-              <div
-                v-else
-                class="text-xs font-semibold text-success flex items-center gap-1.5 pt-2 border-t border-warning/20"
-              >
-                <Icon icon="fluent:checkmark-circle-24-filled" class="h-4 w-4" />
-                <span>Replied: {{ msg.replyText || inlineInputMap[msg.id] }}</span>
-              </div>
-            </div>
-          </div>
+          <!-- Ask User Question Box -->
+          <AskUserCard
+            v-if="msg.role === 'ask_user'"
+            :message="msg"
+            :session-id="sessionId"
+            :active-agent="activeAgent"
+            :agents="agents"
+            @open-artifact="emit('open-artifact', $event)"
+            @ask-replied="(id, text) => emit('ask-replied', id, text)"
+          />
 
           <!-- User Chat Bubble -->
-          <div v-else-if="msg.role === 'user'" class="chat chat-end min-w-0">
-            <div
-              class="chat-header text-[10px] uppercase font-bold text-base-content/40 mb-1 select-none flex items-center gap-1"
-            >
-              You
-            </div>
-            <div
-              class="chat-bubble chat-bubble-primary text-primary-content border border-primary/20 text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
-            >
-              {{ msg.content }}
-            </div>
-          </div>
+          <UserMessage v-else-if="msg.role === 'user'" :message="msg" />
 
-          <!-- Assistant Message (Full-width markdown without chat bubble) -->
-          <div v-else class="w-full pl-2 pr-2 py-2 my-1 min-w-0">
-            <div class="flex items-center gap-2 mb-2 select-none">
-              <Icon :icon="getAgentIcon(msg.agentName)" class="h-4 w-4 shrink-0" />
-              <span class="text-xs font-bold text-base-content/70">
-                {{ msg.agentName || activeAgent?.name || "Agent" }}
-              </span>
-            </div>
+          <!-- Activity / Tool / Reasoning / Error -->
+          <ActivityMessage
+            v-else-if="
+              msg.role === 'activity' ||
+              msg.role === 'tool_call' ||
+              msg.role === 'tool_result' ||
+              msg.role === 'reasoning' ||
+              msg.role === 'error'
+            "
+            :message="msg"
+            :active-agent="activeAgent"
+            :agents="agents"
+            @open-artifact="emit('open-artifact', $event)"
+          />
 
-            <!-- Raw Markdown vs Rendered HTML -->
-            <div
-              v-if="showRawMap[msg.id]"
-              v-html="formatRawMarkdown(msg.content)"
-              class="my-2 min-w-0 font-mono text-xs overflow-x-auto"
-            ></div>
-            <MarkdownContent v-else :content="msg.content" />
-
-            <!-- Action Buttons at bottom: Flip View & Copy (Icon-only) -->
-            <div class="flex items-center gap-1 mt-2 select-none">
-              <button
-                @click="toggleRaw(msg.id)"
-                class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
-                :title="showRawMap[msg.id] ? 'Show Rendered HTML' : 'Show Raw Markdown'"
-              >
-                <Icon
-                  :icon="
-                    showRawMap[msg.id]
-                      ? 'material-symbols:html-rounded'
-                      : 'material-symbols:markdown-outline-rounded'
-                  "
-                  class="w-5 h-5 text-base-content/75"
-                />
-              </button>
-
-              <button
-                @click="copyMessage(msg.id, msg.content)"
-                class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
-                :title="copiedMap[msg.id] ? 'Copied!' : 'Copy message content'"
-              >
-                <Icon
-                  :icon="
-                    copiedMap[msg.id]
-                      ? 'material-symbols:check-circle-outline-rounded'
-                      : 'mage:copy'
-                  "
-                  class="w-5 h-5"
-                  :class="copiedMap[msg.id] ? 'text-success' : 'text-base-content/75'"
-                />
-              </button>
-
-              <span
-                v-if="msg.inputTokens && msg.maxTokens"
-                class="text-xs font-mono ml-1.5 px-2 py-0.5 rounded cursor-default select-none transition-colors"
-                :class="getContextColorClass(msg.inputTokens, msg.maxTokens)"
-                :title="`${msg.inputTokens.toLocaleString()} / ${msg.maxTokens.toLocaleString()} tokens`"
-              >
-                {{ formatContextUsage(msg.inputTokens, msg.maxTokens) }}
-              </span>
-            </div>
-          </div>
+          <!-- Assistant Message -->
+          <AssistantMessage v-else :message="msg" :active-agent="activeAgent" :agents="agents" />
         </div>
 
         <!-- Agent Working state -->

@@ -286,6 +286,47 @@ describe("useSessionStore", () => {
     // Optimistic user message rolled back and error card pushed
     expect(store.messages.value.some((m) => m.role === "error")).toBe(true);
     expect(store.messages.value.some((m) => m.content === "Concurrent prompt")).toBe(false);
+    expect(store.loading.value).toBe(false);
+    expect(store.isRunning.value).toBe(false);
+  });
+
+  it("should preserve pending optimistic user messages on resync", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-resync",
+      title: "Chat Resync",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      isRunning: false,
+      messages: [{ id: "msg-1", role: "assistant", content: "Snapshot msg", timestamp: 1000 }],
+    };
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+    vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "accepted",
+      chatId: "session-resync",
+    });
+
+    const store = useSessionStore();
+    await store.openSession("session-resync");
+
+    // Send an optimistic message that has not yet landed in snapshot
+    await store.sendMessage("Optimistic in flight");
+    expect(store.messages.value.some((m) => m.content === "Optimistic in flight")).toBe(true);
+
+    // Emit resync event
+    const es = MockEventSource.instances[0];
+    es.emit("resync", {
+      eventId: 99,
+      chatId: "session-resync",
+      type: "resync",
+      timestamp: 3000,
+    });
+
+    // Wait for async resync
+    await vi.waitFor(() => {
+      expect(store.messages.value.some((m) => m.content === "Snapshot msg")).toBe(true);
+      expect(store.messages.value.some((m) => m.content === "Optimistic in flight")).toBe(true);
+    });
   });
 
   it("should update message reply state", async () => {

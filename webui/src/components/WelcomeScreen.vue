@@ -39,7 +39,6 @@ const baseDir = ref("");
 const subSegments = ref<string[]>([]);
 const levelSubdirs = ref<string[][]>([]);
 const loadingLevels = ref<boolean[]>([]);
-const isSyncingFromProps = ref(false);
 const selectedGitRoot = ref("");
 
 const mainAgents = computed(() => {
@@ -64,17 +63,17 @@ const baseFolderName = computed(() => {
   return parts.length > 0 ? parts[parts.length - 1] : baseDir.value;
 });
 
-const computedSelectedDir = computed(() => {
-  let combined = baseDir.value;
-  if (subSegments.value.length > 0) {
-    const sub = subSegments.value.join("/");
+const computePath = (base: string, segments: string[]) => {
+  let combined = base;
+  if (segments.length > 0) {
+    const sub = segments.join("/");
     combined = combined.endsWith("/") ? `${combined}${sub}` : `${combined}/${sub}`;
   }
   return combined;
-});
+};
 
 watch(
-  computedSelectedDir,
+  () => props.selectedDir,
   async (newDir) => {
     if (!newDir) {
       selectedGitRoot.value = "";
@@ -86,8 +85,8 @@ watch(
   { immediate: true },
 );
 
-const loadSubdirsForLevel = async (levelIndex: number) => {
-  const currentPath = [baseDir.value, ...subSegments.value.slice(0, levelIndex)]
+const loadSubdirsForLevel = async (currentBase: string, segments: string[], levelIndex: number) => {
+  const currentPath = [currentBase, ...segments.slice(0, levelIndex)]
     .join("/")
     .replace(/\/+/g, "/");
 
@@ -106,14 +105,12 @@ const loadSubdirsForLevel = async (levelIndex: number) => {
   loadingLevels.value = doneLoading;
 };
 
-const loadSubdirsUntil = async (targetSegments: string[]) => {
+const loadSubdirsUntil = async (currentBase: string, targetSegments: string[]) => {
   const newLevelSubdirs: string[][] = [];
   const newLoadingLevels: boolean[] = [];
 
   for (let i = 0; i <= targetSegments.length; i++) {
-    const currentPath = [baseDir.value, ...targetSegments.slice(0, i)]
-      .join("/")
-      .replace(/\/+/g, "/");
+    const currentPath = [currentBase, ...targetSegments.slice(0, i)].join("/").replace(/\/+/g, "/");
     newLoadingLevels[i] = true;
     loadingLevels.value = [...newLoadingLevels];
     const subdirs = await getSubdirs(currentPath);
@@ -128,73 +125,74 @@ const loadSubdirsUntil = async (targetSegments: string[]) => {
   levelSubdirs.value = newLevelSubdirs;
 };
 
+// Sync internal cascader state when props.selectedDir or runDirs change from outside
 watch(
   [() => props.selectedDir, runDirs],
   async ([newSelectedDir, newRunDirs]) => {
-    if (isSyncingFromProps.value) return;
-    isSyncingFromProps.value = true;
-    try {
-      let bestMatch = "";
-      for (const dir of newRunDirs) {
-        if (newSelectedDir.startsWith(dir) && dir.length > bestMatch.length) {
-          bestMatch = dir;
-        }
+    // Skip redundant fetch if external props already match current internal cascader path
+    if (baseDir.value && newSelectedDir === computePath(baseDir.value, subSegments.value)) {
+      return;
+    }
+
+    let bestMatch = "";
+    for (const dir of newRunDirs) {
+      if (newSelectedDir.startsWith(dir) && dir.length > bestMatch.length) {
+        bestMatch = dir;
       }
-      if (bestMatch) {
-        baseDir.value = bestMatch;
-        let remaining = newSelectedDir.slice(bestMatch.length);
-        if (remaining.startsWith("/")) {
-          remaining = remaining.slice(1);
-        }
-        const segments = remaining ? remaining.split("/").filter(Boolean) : [];
-        subSegments.value = segments;
-        await loadSubdirsUntil(segments);
+    }
+    if (bestMatch) {
+      baseDir.value = bestMatch;
+      let remaining = newSelectedDir.slice(bestMatch.length);
+      if (remaining.startsWith("/")) {
+        remaining = remaining.slice(1);
+      }
+      const segments = remaining ? remaining.split("/").filter(Boolean) : [];
+      subSegments.value = segments;
+      await loadSubdirsUntil(bestMatch, segments);
+    } else {
+      baseDir.value = newRunDirs[0] || "";
+      subSegments.value = [];
+      if (baseDir.value) {
+        await loadSubdirsForLevel(baseDir.value, [], 0);
       } else {
-        baseDir.value = newRunDirs[0] || "";
-        subSegments.value = [];
-        if (baseDir.value) {
-          await loadSubdirsForLevel(0);
-        } else {
-          levelSubdirs.value = [];
-        }
+        levelSubdirs.value = [];
       }
-    } finally {
-      isSyncingFromProps.value = false;
     }
   },
   { immediate: true },
 );
 
-watch(baseDir, async (newBaseDir, oldBaseDir) => {
-  if (isSyncingFromProps.value || newBaseDir === oldBaseDir) return;
+const handleBaseDirChange = async (event: Event) => {
+  const newBase = (event.target as HTMLSelectElement).value;
+  baseDir.value = newBase;
   subSegments.value = [];
   levelSubdirs.value = [];
-  if (newBaseDir) {
-    await loadSubdirsForLevel(0);
+  emit("update:selectedDir", newBase);
+  if (newBase) {
+    await loadSubdirsForLevel(newBase, [], 0);
   }
-});
-
-watch(computedSelectedDir, (newDir) => {
-  if (!isSyncingFromProps.value) {
-    emit("update:selectedDir", newDir);
-  }
-});
+};
 
 const handleSelectSegment = async (levelIndex: number, event: Event) => {
   const val = (event.target as HTMLSelectElement).value;
+  let newSegments: string[];
   if (!val) {
-    subSegments.value = subSegments.value.slice(0, levelIndex);
+    newSegments = subSegments.value.slice(0, levelIndex);
+    subSegments.value = newSegments;
     levelSubdirs.value = levelSubdirs.value.slice(0, levelIndex + 1);
   } else {
-    subSegments.value = [...subSegments.value.slice(0, levelIndex), val];
+    newSegments = [...subSegments.value.slice(0, levelIndex), val];
+    subSegments.value = newSegments;
     levelSubdirs.value = levelSubdirs.value.slice(0, levelIndex + 1);
-    await loadSubdirsForLevel(levelIndex + 1);
+    await loadSubdirsForLevel(baseDir.value, newSegments, levelIndex + 1);
   }
+  emit("update:selectedDir", computePath(baseDir.value, newSegments));
 };
 
 const resetSubSegments = () => {
   subSegments.value = [];
   levelSubdirs.value = levelSubdirs.value.slice(0, 1);
+  emit("update:selectedDir", baseDir.value);
 };
 
 const localPrompt = computed({
@@ -303,7 +301,8 @@ const handleSubmit = () => {
             <span class="label-text text-base-content">Workspace (Run Directory)</span>
           </label>
           <select
-            v-model="baseDir"
+            :value="baseDir"
+            @change="handleBaseDirChange"
             class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none"
             :disabled="runDirs.length === 0"
           >

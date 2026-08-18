@@ -66,6 +66,9 @@ export function useSessionEvents(callbacks: SessionEventsCallbacks = {}) {
 
     es.onerror = (err) => {
       callbacks.onError?.(err);
+      if (es.readyState === EventSource.CLOSED) {
+        disconnect();
+      }
     };
   };
 

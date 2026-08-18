@@ -162,9 +162,11 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 				}
 			case out := <-outCh:
 				// Drain any events buffered before completion.
-				for ev := range events {
-					if !yieldNodeEvent(execCtx, ev, yield) {
-						return
+				if events != nil {
+					for ev := range events {
+						if !yieldNodeEvent(execCtx, ev, yield) {
+							return
+						}
 					}
 				}
 				// Wait for the persistence goroutine to drain so DB writes

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
-import SessionItem from "./SessionItem.vue";
+import SessionList from "./sidebar/SessionList.vue";
+import QuotaModal from "./sidebar/QuotaModal.vue";
+import ThemeSelector from "./sidebar/ThemeSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
 
 const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     sessions: ChatSession[];
     agents?: AgentInfo[];
@@ -29,30 +31,13 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
 }>();
 
-const currentTheme = ref("dark");
 const isReloading = ref(false);
 const viewMode = ref<"list" | "agent">("list");
-
-// Collapsed state tracking
-const collapsedAgents = ref<Record<string, boolean>>({});
-const collapsedWorkspaces = ref<Record<string, boolean>>({});
-
-const toggleAgentCollapse = (agentName: string) => {
-  collapsedAgents.value[agentName] = !collapsedAgents.value[agentName];
-};
-
-const toggleWorkspaceCollapse = (key: string) => {
-  collapsedWorkspaces.value[key] = !collapsedWorkspaces.value[key];
-};
+const showQuotaModal = ref(false);
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
   localStorage.setItem("asgard_sidebar_view_mode", mode);
-};
-
-const getAgentIcon = (agentName: string): string => {
-  const matched = props.agents?.find((a) => a.name === agentName || a.id === agentName);
-  return matched?.icon || "fluent-color:bot-24";
 };
 
 // Resizable sidebar width logic
@@ -89,62 +74,6 @@ const stopResize = () => {
   }
 };
 
-// Helper for display path of runDir / workspace
-const formatWorkspaceName = (runDir?: string): string => {
-  if (!runDir) return "Default Workspace";
-  const trimmed = runDir.replace(/[/\\]+$/, "");
-  const parts = trimmed.split(/[/\\]/);
-  return parts[parts.length - 1] || runDir;
-};
-
-// Nested 3-level structure: Agent -> Workspace -> Sessions
-interface WorkspaceGroup {
-  runDir: string;
-  displayName: string;
-  sessions: ChatSession[];
-}
-
-interface AgentNestedGroup {
-  agentName: string;
-  workspaces: WorkspaceGroup[];
-  totalSessions: number;
-}
-
-const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
-  const agentMap: Record<string, Record<string, ChatSession[]>> = {};
-
-  for (const session of props.sessions) {
-    const agentKey = session.currentAgent || "Unknown Agent";
-    const dirKey = session.runDir || "Default Workspace";
-
-    if (!agentMap[agentKey]) {
-      agentMap[agentKey] = {};
-    }
-    if (!agentMap[agentKey][dirKey]) {
-      agentMap[agentKey][dirKey] = [];
-    }
-    agentMap[agentKey][dirKey].push(session);
-  }
-
-  return Object.entries(agentMap).map(([agentName, workspacesObj]) => {
-    let totalSessions = 0;
-    const workspaces: WorkspaceGroup[] = Object.entries(workspacesObj).map(([runDir, sessions]) => {
-      totalSessions += sessions.length;
-      return {
-        runDir,
-        displayName: formatWorkspaceName(runDir),
-        sessions,
-      };
-    });
-
-    return {
-      agentName,
-      workspaces,
-      totalSessions,
-    };
-  });
-});
-
 const reloadApp = async () => {
   if (isReloading.value) return;
   isReloading.value = true;
@@ -157,91 +86,9 @@ const reloadApp = async () => {
   }
 };
 
-// Quota Modal state & methods
-interface QuotaLimit {
-  name: string;
-  remaining: number;
-  refresh_date?: number;
-}
-
-interface ModelUsage {
-  model: string;
-  remaining: number;
-  refresh_date?: number;
-  limits?: QuotaLimit[];
-}
-
-const showQuotaModal = ref(false);
-const quotaLoading = ref(false);
-const quotaError = ref("");
-const quotas = ref<Record<string, ModelUsage[]>>({});
-
-const fetchQuotas = async () => {
-  quotaLoading.value = true;
-  quotaError.value = "";
-  try {
-    const res = await apiFetch("/api/quota");
-    if (!res.ok) {
-      throw new Error(`Server returned status ${res.status}`);
-    }
-    const data = await res.json();
-    quotas.value = data;
-  } catch (err: any) {
-    console.error("Failed to fetch quotas:", err);
-    quotaError.value = err.message || "Failed to load quota information";
-  } finally {
-    quotaLoading.value = false;
-  }
-};
-
 const openQuotaModal = () => {
   showQuotaModal.value = true;
-  fetchQuotas();
 };
-
-const closeQuotaModal = () => {
-  showQuotaModal.value = false;
-};
-
-const getProgressClass = (fraction: number) => {
-  if (fraction <= 0.2) return "progress-error";
-  if (fraction <= 0.5) return "progress-warning";
-  return "progress-success";
-};
-
-const getTextColorClass = (fraction: number) => {
-  if (fraction <= 0.2) return "text-error";
-  if (fraction <= 0.5) return "text-warning";
-  return "text-success";
-};
-
-const formatRefreshDate = (timestamp?: number) => {
-  if (!timestamp) return "No reset pending";
-  const date = new Date(timestamp * 1000);
-  return date.toLocaleString();
-};
-
-const getRelativeTime = (timestamp?: number) => {
-  if (!timestamp) return "";
-  const diffMs = timestamp * 1000 - Date.now();
-  if (diffMs <= 0) return "(resets now)";
-  const diffSec = Math.floor(diffMs / 1000);
-  const hours = Math.floor(diffSec / 3600);
-  const minutes = Math.floor((diffSec % 3600) / 60);
-  if (hours > 24) {
-    const days = Math.floor(hours / 24);
-    return `(in ${days}d ${hours % 24}h)`;
-  }
-  if (hours > 0) {
-    return `(in ${hours}h ${minutes}m)`;
-  }
-  return `(in ${minutes}m)`;
-};
-
-import { APP_THEMES } from "../themes/terminal";
-
-const daisyUiThemes = computed(() => APP_THEMES.filter((t) => t.group === "DaisyUI Themes"));
-const catppuccinThemes = computed(() => APP_THEMES.filter((t) => t.group === "Catppuccin Themes"));
 
 onMounted(() => {
   const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
@@ -256,33 +103,12 @@ onMounted(() => {
       sidebarWidth.value = parsed;
     }
   }
-
-  const saved = localStorage.getItem("theme");
-  if (saved && APP_THEMES.some((t) => t.id === saved)) {
-    currentTheme.value = saved;
-  } else {
-    const docTheme = document.documentElement.getAttribute("data-theme");
-    if (docTheme && APP_THEMES.some((t) => t.id === docTheme)) {
-      currentTheme.value = docTheme;
-    }
-  }
-  document.documentElement.setAttribute("data-theme", currentTheme.value);
 });
 
 onUnmounted(() => {
   document.removeEventListener("mousemove", handleMouseMove);
   document.removeEventListener("mouseup", stopResize);
 });
-
-const selectTheme = (themeId: string) => {
-  currentTheme.value = themeId;
-  document.documentElement.setAttribute("data-theme", themeId);
-  localStorage.setItem("theme", themeId);
-
-  if (document.activeElement instanceof HTMLElement) {
-    document.activeElement.blur();
-  }
-};
 </script>
 
 <template>
@@ -378,116 +204,15 @@ const selectTheme = (themeId: string) => {
     <!-- Sessions List -->
     <div class="flex-1 overflow-y-auto p-2 space-y-1 w-full flex flex-col items-center">
       <template v-if="isOpen">
-        <div v-if="sessions.length === 0" class="text-xs text-base-content/50 text-center py-6">
-          No active sessions
-        </div>
-
-        <!-- 1. List Mode -->
-        <template v-else-if="viewMode === 'list'">
-          <SessionItem
-            v-for="session in sessions"
-            :key="session.chatID"
-            :session="session"
-            :is-active="activeSessionId === session.chatID"
-            @select-session="emit('select-session', $event)"
-            @delete-session="emit('delete-session', $event)"
-          />
-        </template>
-
-        <!-- 2. Group by Agent & Workspace Mode (3-Level Collapsible) -->
-        <template v-else-if="viewMode === 'agent'">
-          <div
-            v-for="agentGroup in nestedGroupedSessions"
-            :key="agentGroup.agentName"
-            class="w-full space-y-1 mb-2"
-          >
-            <!-- Level 1: Agent Header -->
-            <div
-              @click="toggleAgentCollapse(agentGroup.agentName)"
-              class="px-2 py-1 flex items-center justify-between text-sm font-semibold text-primary/90 select-none cursor-pointer hover:bg-base-200/50 rounded-md transition-colors"
-            >
-              <div class="flex items-center gap-1.5 min-w-0">
-                <Icon
-                  icon="mynaui:chevron-down"
-                  :class="[
-                    'h-4 w-4 fill-current shrink-0 transition-transform duration-200',
-                    collapsedAgents[agentGroup.agentName] ? '-rotate-90' : '',
-                  ]"
-                />
-                <Icon :icon="getAgentIcon(agentGroup.agentName)" class="h-4.5 w-4.5 shrink-0" />
-                <span class="truncate">{{ agentGroup.agentName }}</span>
-              </div>
-              <div class="flex items-center gap-1.5 shrink-0">
-                <button
-                  @click.stop="emit('new-chat', agentGroup.agentName)"
-                  class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
-                  title="New chat with this agent"
-                >
-                  <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
-                </button>
-                <span class="text-xs text-base-content/40 font-normal"
-                  >({{ agentGroup.totalSessions }})</span
-                >
-              </div>
-            </div>
-
-            <!-- Level 2: Workspaces List -->
-            <template v-if="!collapsedAgents[agentGroup.agentName]">
-              <div
-                v-for="wsGroup in agentGroup.workspaces"
-                :key="wsGroup.runDir"
-                class="pl-2 space-y-1"
-              >
-                <!-- Workspace Header -->
-                <div
-                  @click="toggleWorkspaceCollapse(`${agentGroup.agentName}:${wsGroup.runDir}`)"
-                  class="px-2 py-1 flex items-center justify-between text-xs font-medium text-base-content/80 select-none cursor-pointer hover:bg-base-200/40 rounded-md transition-colors"
-                  :title="wsGroup.runDir"
-                >
-                  <div class="flex items-center gap-1.5 min-w-0">
-                    <Icon
-                      icon="mynaui:chevron-down"
-                      :class="[
-                        'h-3.5 w-3.5 fill-current shrink-0 transition-transform duration-200 opacity-70',
-                        collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]
-                          ? '-rotate-90'
-                          : '',
-                      ]"
-                    />
-                    <Icon icon="mynaui:folder" class="h-4 w-4 shrink-0 opacity-70" />
-                    <span class="truncate">{{ wsGroup.displayName }}</span>
-                  </div>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    <button
-                      @click.stop="emit('new-chat', agentGroup.agentName, wsGroup.runDir)"
-                      class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
-                      title="New chat with this agent and workspace"
-                    >
-                      <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
-                    </button>
-                    <span class="text-xs text-base-content/40"
-                      >({{ wsGroup.sessions.length }})</span
-                    >
-                  </div>
-                </div>
-
-                <!-- Level 3: Sessions List under Workspace -->
-                <template v-if="!collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]">
-                  <div class="pl-2 space-y-0.5">
-                    <SessionItem
-                      v-for="session in wsGroup.sessions"
-                      :key="session.chatID"
-                      :session="session"
-                      :is-active="activeSessionId === session.chatID"
-                      @select-session="emit('select-session', $event)"
-                      @delete-session="emit('delete-session', $event)"
-                    />
-                  </div>
-                </template>
-              </div>
-            </template>
-          </div>
-        </template>
+        <SessionList
+          :sessions="sessions"
+          :agents="agents"
+          :active-session-id="activeSessionId"
+          :view-mode="viewMode"
+          @select-session="emit('select-session', $event)"
+          @delete-session="emit('delete-session', $event)"
+          @new-chat="(agentId, dir) => emit('new-chat', agentId, dir)"
+        />
       </template>
     </div>
 
@@ -517,53 +242,7 @@ const selectTheme = (themeId: string) => {
       </button>
 
       <!-- Theme Selector Dropdown -->
-      <div class="dropdown dropdown-top">
-        <button
-          tabindex="0"
-          role="button"
-          class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-          title="Select Theme"
-        >
-          <Icon icon="mdi:paint-outline" class="h-5 w-5 fill-current" />
-        </button>
-        <ul
-          tabindex="0"
-          class="dropdown-content menu menu-sm bg-base-200 border border-base-100 rounded-box z-50 w-52 p-1.5 shadow-xl max-h-60 overflow-y-auto mb-1"
-        >
-          <li class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1">
-            DaisyUI Themes
-          </li>
-          <li v-for="t in daisyUiThemes" :key="t.id">
-            <button
-              @click="selectTheme(t.id)"
-              :class="[
-                'flex items-center justify-between py-1 px-2 text-xs rounded-md',
-                currentTheme === t.id ? 'active font-medium' : '',
-              ]"
-            >
-              <span>{{ t.name }}</span>
-              <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
-            </button>
-          </li>
-          <li
-            class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1 mt-1"
-          >
-            Catppuccin Themes
-          </li>
-          <li v-for="t in catppuccinThemes" :key="t.id">
-            <button
-              @click="selectTheme(t.id)"
-              :class="[
-                'flex items-center justify-between py-1 px-2 text-xs rounded-md',
-                currentTheme === t.id ? 'active font-medium' : '',
-              ]"
-            >
-              <span>{{ t.name }}</span>
-              <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
-            </button>
-          </li>
-        </ul>
-      </div>
+      <ThemeSelector />
 
       <button
         @click="emit('toggle-terminal')"
@@ -576,165 +255,5 @@ const selectTheme = (themeId: string) => {
   </aside>
 
   <!-- Quota Modal -->
-  <Transition name="fade">
-    <div
-      v-if="showQuotaModal"
-      class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-      @click.self="closeQuotaModal"
-    >
-      <div
-        class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden transition-all transform scale-100"
-      >
-        <!-- Header -->
-        <div
-          class="px-6 py-4 border-b border-base-100 flex items-center justify-between bg-base-300/50"
-        >
-          <div class="flex items-center gap-2">
-            <Icon icon="mynaui:chart-bar-one" class="h-6 w-6 text-primary" />
-            <h2 class="text-lg font-bold text-base-content">Model Quota Details</h2>
-          </div>
-          <button
-            @click="closeQuotaModal"
-            class="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-base-content hover:bg-base-100/50"
-          >
-            <Icon icon="mynaui:x" class="h-5 w-5 fill-current" />
-          </button>
-        </div>
-
-        <!-- Body -->
-        <div class="p-6 overflow-y-auto flex-1 space-y-6">
-          <div
-            v-if="quotaLoading"
-            class="flex flex-col items-center justify-center py-12 space-y-3"
-          >
-            <span class="loading loading-spinner loading-lg text-primary"></span>
-            <span class="text-sm text-base-content/70">Fetching current quota data...</span>
-          </div>
-
-          <div v-else-if="quotaError" class="alert alert-error flex items-start gap-3">
-            <Icon icon="mynaui:danger" class="h-6 w-6 shrink-0" />
-            <div>
-              <h3 class="font-bold">Error loading quota</h3>
-              <div class="text-xs">{{ quotaError }}</div>
-            </div>
-          </div>
-
-          <div v-else class="space-y-6">
-            <div v-for="(models, cliName) in quotas" :key="cliName" class="space-y-3">
-              <div class="flex items-center gap-2 border-b border-base-100/60 pb-1.5">
-                <span class="text-xs font-bold uppercase tracking-wider text-primary/80">CLI:</span>
-                <span
-                  class="text-sm font-semibold capitalize bg-primary/10 text-primary px-2.5 py-0.5 rounded-full"
-                  >{{ cliName }}</span
-                >
-              </div>
-
-              <div class="space-y-4">
-                <div
-                  v-for="m in models"
-                  :key="m.model"
-                  class="bg-base-300/40 border border-base-100/30 rounded-xl p-4 space-y-3"
-                >
-                  <div class="flex justify-between items-start">
-                    <h4 class="font-medium text-sm text-base-content">{{ m.model }}</h4>
-                    <span
-                      class="text-xs font-semibold px-2 py-0.5 rounded-md"
-                      :class="[
-                        m.remaining <= 0.2
-                          ? 'bg-error/10 text-error'
-                          : m.remaining <= 0.5
-                            ? 'bg-warning/10 text-warning'
-                            : 'bg-success/10 text-success',
-                      ]"
-                    >
-                      {{ Math.round(m.remaining * 100) }}% remaining
-                    </span>
-                  </div>
-
-                  <!-- Single Progress Bar (when no multi-tier breakdown limits exist) -->
-                  <div v-if="!m.limits || m.limits.length === 0" class="space-y-1">
-                    <progress
-                      class="progress w-full"
-                      :class="getProgressClass(m.remaining)"
-                      :value="m.remaining * 100"
-                      max="100"
-                    ></progress>
-                    <div class="flex justify-between text-[11px] text-base-content/50">
-                      <span>0%</span>
-                      <span v-if="m.refresh_date" class="italic text-right truncate max-w-[80%]">
-                        Resets {{ formatRefreshDate(m.refresh_date) }}
-                        {{ getRelativeTime(m.refresh_date) }}
-                      </span>
-                      <span>100%</span>
-                    </div>
-                  </div>
-
-                  <!-- Specific Detailed Limits (if any) -->
-                  <div v-else class="space-y-2">
-                    <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
-                      Quota Limits Breakdown
-                    </h5>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div
-                        v-for="lim in m.limits"
-                        :key="lim.name"
-                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-2.5 space-y-1.5"
-                      >
-                        <div class="flex justify-between items-center">
-                          <span class="text-xs font-semibold text-base-content/80 capitalize">{{
-                            lim.name
-                          }}</span>
-                          <span
-                            class="text-[11px] font-medium"
-                            :class="getTextColorClass(lim.remaining)"
-                          >
-                            {{ Math.round(lim.remaining * 100) }}%
-                          </span>
-                        </div>
-                        <progress
-                          class="progress progress-xs w-full"
-                          :class="getProgressClass(lim.remaining)"
-                          :value="lim.remaining * 100"
-                          max="100"
-                        ></progress>
-                        <div
-                          v-if="lim.refresh_date"
-                          class="text-[9px] text-base-content/40 truncate"
-                        >
-                          Reset: {{ formatRefreshDate(lim.refresh_date) }}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div
-              v-if="Object.keys(quotas).length === 0"
-              class="text-center py-8 text-base-content/50 text-sm"
-            >
-              No quota information returned from CLI.
-            </div>
-          </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="px-6 py-4 border-t border-base-100 flex justify-between bg-base-300/30">
-          <button
-            @click="fetchQuotas"
-            class="btn btn-outline btn-sm gap-2"
-            :disabled="quotaLoading"
-          >
-            <Icon
-              icon="mynaui:refresh"
-              :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading }]"
-            />
-            Refresh
-          </button>
-          <button @click="closeQuotaModal" class="btn btn-primary btn-sm">Close</button>
-        </div>
-      </div>
-    </div>
-  </Transition>
+  <QuotaModal v-model="showQuotaModal" />
 </template>

@@ -35,6 +35,12 @@ func TestSessionEventsHandler_SSEStream(t *testing.T) {
 	server.mux = server.buildMuxLocked()
 
 	chatID := "chat-sse-1"
+	err = repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+		RunDir:       "/workspace",
+	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -93,6 +99,12 @@ func TestSessionEventsHandler_LastEventIDReplay(t *testing.T) {
 	server.mux = server.buildMuxLocked()
 
 	chatID := "chat-replay-sse"
+	err = repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+		RunDir:       "/workspace",
+	})
+	require.NoError(t, err)
 
 	initialSub, _, initCancel := hub.Subscribe(chatID, 0)
 
@@ -158,6 +170,12 @@ func TestSessionEventsHandler_EvictedResync(t *testing.T) {
 	server.mux = server.buildMuxLocked()
 
 	chatID := "chat-resync-sse"
+	err = repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+		RunDir:       "/workspace",
+	})
+	require.NoError(t, err)
 
 	// Publish 6 events into a capacity-3 ring buffer
 	for i := 1; i <= 6; i++ {

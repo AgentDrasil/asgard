@@ -147,7 +147,14 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       const session = await getSession(activeSessionId.value);
       if (session && activeSessionId.value === ev.chatId) {
         activeSession.value = session;
-        rawMessages.value = session.messages ? [...session.messages] : [];
+        const snapshotMsgs = session.messages || [];
+        const pendingOptimistic = rawMessages.value.filter(
+          (m) =>
+            m.role === "user" &&
+            m.id.startsWith("user-") &&
+            !snapshotMsgs.some((sm) => sm.id === m.id),
+        );
+        rawMessages.value = [...snapshotMsgs, ...pendingOptimistic];
         artifacts.value = session.artifacts ? [...session.artifacts] : [];
         isRunning.value = !!session.isRunning;
         loading.value = !!session.isRunning;
@@ -196,7 +203,10 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         const merged: ChatMessage[] = [];
         for (const sm of snapshotMsgs) {
           const existing = existingMap.get(sm.id);
-          merged.push(existing ? { ...existing, ...sm } : sm);
+          // Precedence: { ...sm, ...existing } ensures live state updates (such as replied status
+          // or incremental streaming info) received from SSE during the initial connect-to-fetch
+          // window are not overwritten by a slightly stale initial snapshot response.
+          merged.push(existing ? { ...sm, ...existing } : sm);
           existingMap.delete(sm.id);
         }
         for (const remaining of existingMap.values()) {
@@ -323,6 +333,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
     if (res?.conflict) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
+      loading.value = false;
+      isRunning.value = false;
       pushErrorMessage("Session is already running a task. Please wait.");
     } else if (!res) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);

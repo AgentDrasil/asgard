@@ -27,6 +27,16 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sess, err := s.repo.GetSession(id)
+	if err != nil {
+		http.Error(w, `{"error":"failed to fetch session"}`, http.StatusInternalServerError)
+		return
+	}
+	if sess == nil {
+		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		return
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
