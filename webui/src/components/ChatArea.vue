@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
-import { marked } from "marked";
 import DOMPurify from "dompurify";
 import type { ChatMessage, AgentInfo } from "../types";
 import { getDirInfo, sendAskUserReply } from "../lib/api";
@@ -9,8 +8,9 @@ import { formatContextUsage, getContextColorClass } from "../lib/format";
 import { TOOL_ITEM_DELIMITER, getMessageArtifactFiles } from "../utils/messageUtils";
 import { useShiki } from "../composables/useShiki";
 import { useShortcuts } from "../composables/useShortcuts";
+import MarkdownContent from "./MarkdownContent.vue";
 
-const { highlightBlock, highlightHtmlCodeBlocks } = useShiki();
+const { highlightBlock } = useShiki();
 const {
   toggleSidebarShortcut,
   toggleArtifactsShortcut,
@@ -201,11 +201,6 @@ watch(
   { deep: true, immediate: true },
 );
 
-marked.setOptions({
-  gfm: true,
-  breaks: true,
-});
-
 const BLOCK_CLASSES = [
   "rounded-lg",
   "p-4",
@@ -216,16 +211,6 @@ const BLOCK_CLASSES = [
   "text-xs",
   "font-mono",
 ] as const;
-
-const formatContent = (content: string) => {
-  if (!content) return "";
-  const rawHtml = marked.parse(content) as string;
-  const sanitized = DOMPurify.sanitize(rawHtml);
-  // Highlight every fenced code block. While Shiki is still loading this is a
-  // no-op (highlightHtmlCodeBlocks returns the input unchanged) and the
-  // render re-runs automatically once the highlighter becomes ready.
-  return highlightHtmlCodeBlocks(sanitized, [...BLOCK_CLASSES]);
-};
 
 const formatRawMarkdown = (content: string) => {
   if (!content) return "";
@@ -594,11 +579,7 @@ const copyMessage = async (id: string, text: string) => {
               v-html="formatRawMarkdown(msg.content)"
               class="my-2 min-w-0 font-mono text-xs overflow-x-auto"
             ></div>
-            <div
-              v-else
-              v-html="formatContent(msg.content)"
-              class="font-sans prose prose-sm max-w-none text-base-content leading-relaxed min-w-0 break-words [word-break:break-word] [&_p]:mb-3 [&_hr]:my-4 [&_hr]:border-t [&_hr]:border-base-content/20 [&_pre]:bg-base-200/80 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-base-300 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:bg-base-200/80 [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded [&_code]:text-warning [&_code]:break-words [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_a]:text-primary [&_a]:underline [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full"
-            ></div>
+            <MarkdownContent v-else :content="msg.content" />
 
             <!-- Action Buttons at bottom: Flip View & Copy (Icon-only) -->
             <div class="flex items-center gap-1 mt-2 select-none">
