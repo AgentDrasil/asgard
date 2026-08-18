@@ -129,7 +129,7 @@ export async function runAgentStream(
 
     const stream = client.sendMessageStream(sendParams);
 
-    let accumulatedText = "";
+    const accumulatedTextByNode = new Map<string, string>();
 
     for await (const event of stream) {
       const payload = event.payload;
@@ -140,9 +140,10 @@ export async function runAgentStream(
         const msg = payload.value;
         const textContent = extractTextFromParts(msg.parts);
         if (textContent) {
-          accumulatedText = textContent;
+          const nodeId: string = (msg.metadata?.["node_id"] as string) || "";
+          accumulatedTextByNode.set(nodeId, textContent);
           const tokens = extractTokens(msg);
-          callbacks.onText(accumulatedText, tokens.inputTokens, tokens.maxTokens, msg.metadata);
+          callbacks.onText(textContent, tokens.inputTokens, tokens.maxTokens, msg.metadata);
         }
         continue;
       }
@@ -166,10 +167,10 @@ export async function runAgentStream(
             // A node-level error carries entry_type (e.g. "error") or node_id.
             // Only a global workflow/agent final state (without node-level routing) terminates as final accumulatedText.
             if (isFinalState(state) && !entryType && !nodeId) {
-              accumulatedText = statusText;
+              accumulatedTextByNode.set(nodeId, statusText);
               const tokens = extractTokens(task);
               callbacks.onText(
-                accumulatedText,
+                statusText,
                 tokens.inputTokens,
                 tokens.maxTokens,
                 task.metadata || msg?.metadata,
@@ -199,6 +200,7 @@ export async function runAgentStream(
         // entry_type is carried in metadata at event or message level
         const entryType: string =
           update.metadata?.["entry_type"] ?? msg?.metadata?.["entry_type"] ?? "";
+        const nodeId: string = update.metadata?.["node_id"] ?? msg?.metadata?.["node_id"] ?? "";
 
         let statusText = "";
         if (msg?.parts) {
@@ -215,14 +217,16 @@ export async function runAgentStream(
 
         if (isAgentResponse || isFinalResult) {
           // Agent response text → assistant bubble
+          let text: string;
           if (isAppend) {
-            accumulatedText += statusText;
+            text = (accumulatedTextByNode.get(nodeId) || "") + statusText;
           } else {
-            accumulatedText = statusText;
+            text = statusText;
           }
+          accumulatedTextByNode.set(nodeId, text);
           const tokens = extractTokens(update);
           callbacks.onText(
-            accumulatedText,
+            text,
             tokens.inputTokens,
             tokens.maxTokens,
             update.metadata || msg?.metadata,
