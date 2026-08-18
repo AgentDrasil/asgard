@@ -74,3 +74,20 @@ export interface FirebaseWebpushWebConfig {
   appId?: string;
   vapidKey?: string;
 }
+
+export interface SessionEvent {
+  eventId: number;
+  chatId: string;
+  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "auth_expired";
+  message?: ChatMessage;
+  payload?: Record<string, any>;
+  timestamp: number;
+}
+
+export interface TriggerAgentMessageParams {
+  prompt: string;
+  chatId?: string;
+  runDir?: string;
+  model?: string;
+  metadata?: Record<string, any>;
+}

@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import { initPushNotifications } from "./lib/push";
 
 import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
-import { useChatStream } from "./composables/useChatStream";
-import type { ChatMessage } from "./types";
+import { useSessionStore } from "./composables/useSessionStore";
 
 const route = useRoute();
 const router = useRouter();
@@ -38,8 +37,6 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   if (ctrlKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
     e.preventDefault();
     e.stopPropagation();
-    // Toggle off whatever terminal is currently open (session or sidebar);
-    // open the session terminal when none is open.
     if (isTerminalOpen.value) {
       isTerminalOpen.value = false;
     } else {
@@ -48,7 +45,6 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     return;
   }
 
-  // Guard: ignore editing shortcuts when focused on input fields or contenteditable elements
   const target = e.target as HTMLElement | null;
   if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) {
     return;
@@ -78,65 +74,47 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 // 1. Agents Composable
 const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
-// 2. Chat state shared between composables
-const messages = ref<ChatMessage[]>([]);
-const isStreamingRef = ref(false);
-const streamingSessionId = ref<string | null>(null);
-
+// 2. Session Store (Single Source of Truth)
+const store = useSessionStore({ agents, router });
 const {
   sessions,
   activeSessionId,
   activeSession,
   activeAgent,
+  messages,
+  artifacts,
+  workingAgentLabel,
+  isInputBusy,
+  openSession,
+  closeSession,
   loadSessions,
-  loadSessionData,
-  handleSelectSession,
-  handleNewChat,
-  handleDeleteSession,
-} = useSessions(
+  sendMessage,
+  updateMessageReply,
+} = store;
+
+// 3. Sessions Navigation & Operations
+const { handleSelectSession, handleNewChat, handleDeleteSession } = useSessions(
   route,
   router,
   agents,
   selectedAgentId,
   selectedDir,
-  isStreamingRef,
-  messages,
-  welcomePrompt,
-  showDiffView,
-  chatInputText,
-  streamingSessionId,
-);
-
-// 3. Chat Stream Composable
-const { loading, isStreaming, workingAgentLabel, handleSendMessage } = useChatStream(
   activeSessionId,
-  sessions,
-  agents,
-  activeAgent,
-  selectedAgentId,
-  selectedDir,
-  selectedModel,
-  chatInputText,
-  router,
-  messages,
-  streamingSessionId,
+  loadSessions,
 );
 
-// The chat input is busy only when the VIEWED session is the one streaming
-// (or reports isRunning); a background session's stream must not lock other
-// chats.
-const isInputBusy = computed(
-  () =>
-    (!!activeSessionId.value && activeSessionId.value === streamingSessionId.value
-      ? loading.value || isStreaming.value
-      : false) ||
-    (activeSession.value?.isRunning ?? false),
-);
-
+// Route watcher to open or close session
 watch(
-  isStreaming,
-  (val) => {
-    isStreamingRef.value = val;
+  () => route.params.id,
+  async (newId) => {
+    showDiffView.value = false;
+    chatInputText.value = "";
+    if (newId && typeof newId === "string") {
+      await openSession(newId);
+    } else {
+      closeSession();
+      welcomePrompt.value = "";
+    }
   },
   { immediate: true },
 );
@@ -146,10 +124,6 @@ onMounted(async () => {
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
   await loadAgents();
   await loadSessions();
-
-  if (route.params.id && typeof route.params.id === "string") {
-    await loadSessionData(route.params.id);
-  }
 });
 
 onUnmounted(() => {
@@ -158,23 +132,25 @@ onUnmounted(() => {
 
 const handleStartWelcomeChat = () => {
   if (welcomePrompt.value.trim()) {
-    handleSendMessage(welcomePrompt.value);
+    sendMessage(welcomePrompt.value, {
+      selectedAgentId: selectedAgentId.value,
+      selectedDir: selectedDir.value,
+      selectedModel: selectedModel.value,
+    });
   }
 };
 
-// An ask-user reply resumes a suspended workflow run. The resumed execution
-// (node outputs, follow-up questions, summary) arrives via persistence rather
-// than the original stream, so poll the session until new messages settle.
-const handleAskReplied = () => {
-  const chatId = activeSessionId.value;
-  if (!chatId) return;
-  const delays = [800, 2500, 5000, 9000, 15000];
-  for (const delay of delays) {
-    setTimeout(() => {
-      if (activeSessionId.value === chatId) {
-        loadSessionData(chatId);
-      }
-    }, delay);
+const handleSendMessage = (text: string) => {
+  sendMessage(text, {
+    selectedAgentId: selectedAgentId.value,
+    selectedDir: selectedDir.value,
+    selectedModel: selectedModel.value,
+  });
+};
+
+const handleAskReplied = (msgId?: string, text?: string) => {
+  if (msgId && text) {
+    updateMessageReply(msgId, text);
   }
 };
 
@@ -219,7 +195,7 @@ const closeSidebarOnMobile = () => {
           :loading="isInputBusy"
           :workingAgentLabel="workingAgentLabel"
           :messages="messages"
-          :artifacts="activeSession?.artifacts || []"
+          :artifacts="artifacts"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId || ''"

@@ -32,15 +32,7 @@ const submitInlineReply = async (msgId: string) => {
 
   if (ok) {
     inlineSubmittedMap.value[msgId] = true;
-    const targetMsg = props.messages.find((m) => m.id === msgId);
-    if (targetMsg) {
-      targetMsg.replied = true;
-      targetMsg.replyText = text;
-    }
-    // Notify the parent so it can reload the session: resumed workflows
-    // (and post-reply agent output) arrive via persistence, not the
-    // original stream.
-    emit("ask-replied");
+    emit("ask-replied", msgId, text);
   }
 };
 
@@ -97,7 +89,7 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-artifact-drawer"): void;
-  (e: "ask-replied"): void;
+  (e: "ask-replied", msgId?: string, text?: string): void;
 }>();
 
 // Reset per-message reply state when switching sessions so stale ask_user

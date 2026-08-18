@@ -93,7 +93,7 @@ const emit = defineEmits<{
   (e: "close-diff"): void;
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
-  (e: "ask-replied"): void;
+  (e: "ask-replied", msgId?: string, text?: string): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -212,7 +212,7 @@ watch(isArtifactDrawerOpen, (open) => {
           @toggle-terminal="emit('toggle-terminal')"
           @toggle-sidebar="emit('toggle-sidebar')"
           @toggle-artifact-drawer="toggleArtifactDrawer"
-          @ask-replied="emit('ask-replied')"
+          @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
         />
       </div>
 

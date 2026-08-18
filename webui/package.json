@@ -14,7 +14,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@a2a-js/sdk": "1.0.1",
     "@git-diff-view/file": "^0.1.7",
     "@git-diff-view/vue": "^0.1.7",
     "@types/dompurify": "^3.0.5",

@@ -4,6 +4,7 @@ import type {
   DirInfo,
   FirebaseWebpushWebConfig,
   GitDiffFile,
+  TriggerAgentMessageParams,
 } from "../types";
 
 // Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
@@ -157,4 +158,30 @@ export async function getBackendConfig(): Promise<{
     console.error("getBackendConfig error:", err);
   }
   return {};
+}
+
+export async function triggerAgentMessage(
+  agentId: string,
+  params: TriggerAgentMessageParams,
+): Promise<{ status: string; chatId: string; conflict?: boolean } | null> {
+  try {
+    const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: params.prompt,
+        chatId: params.chatId,
+        runDir: params.runDir,
+        model: params.model,
+        metadata: params.metadata,
+      }),
+    });
+    if (res.status === 409) {
+      return { status: "conflict", chatId: params.chatId || "", conflict: true };
+    }
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.error("Failed to trigger agent message:", err);
+  }
+  return null;
 }
