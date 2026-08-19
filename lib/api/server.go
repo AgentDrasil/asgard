@@ -129,6 +129,9 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/push/tokens", s.handleRegisterPushToken)
 	mux.HandleFunc("/api/ttyd/{session_id...}", s.handleTTYD)
 	mux.HandleFunc("GET /api/v1/workspace/file", s.handleWorkspaceFile)
+	mux.HandleFunc("GET /api/files/tree", s.handleFilesTree)
+	mux.HandleFunc("GET /api/files/content", s.handleFilesContent)
+	mux.HandleFunc("GET /api/files/search", s.handleFilesSearch)
 
 	if s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))
