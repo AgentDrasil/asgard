@@ -273,6 +273,7 @@ onUnmounted(() => {
             :session-id="sessionId"
             :active-agent="activeAgent"
             :agents="agents"
+            :readonly="activeAgent?.type === 'workflow'"
             @open-artifact="emit('open-artifact', $event)"
             @ask-replied="(id, text) => emit('ask-replied', id, text)"
           />

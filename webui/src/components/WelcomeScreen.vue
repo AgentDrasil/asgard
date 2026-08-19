@@ -261,7 +261,7 @@ const handleSubmit = () => {
               :value="agent.id"
               class="bg-base-100 text-base-content"
             >
-              {{ agent.name }} ({{ agent.id }})
+              {{ agent.type === "workflow" ? "[Workflow] " : "" }}{{ agent.name }} ({{ agent.id }})
             </option>
           </select>
           <label class="label text-xs text-base-content/60" v-if="currentAgent">
@@ -436,7 +436,9 @@ const handleSubmit = () => {
           :disabled="!localPrompt.trim() || loading || !selectedDir"
         >
           <span v-if="loading" class="loading loading-spinner loading-xs"></span>
-          <span>Start Agent Run</span>
+          <span>{{
+            currentAgent?.type === "workflow" ? "Start Workflow Run" : "Start Agent Run"
+          }}</span>
         </button>
       </div>
     </div>

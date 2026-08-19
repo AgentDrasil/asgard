@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import ChatArea from "../components/ChatArea.vue";
 import ChatInput from "../components/ChatInput.vue";
+import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
@@ -284,14 +285,26 @@ watch(isArtifactDrawerOpen, (open) => {
       </div>
     </div>
 
-    <!-- Bottom Area: ChatInput (Chat View only) & TerminalPanel -->
+    <!-- Bottom Area: WorkflowControlPanel / ChatInput (Chat View only) & TerminalPanel -->
     <div class="w-full shrink-0 flex flex-col z-20">
-      <ChatInput
-        v-if="activeView === 'chat'"
-        @send="(text) => emit('send', text)"
-        :loading="loading"
-        v-model="chatInputText"
-      />
+      <template v-if="activeView === 'chat'">
+        <WorkflowControlPanel
+          v-if="activeAgent?.type === 'workflow'"
+          :activeAgent="activeAgent"
+          :loading="loading"
+          :workingAgentLabel="workingAgentLabel"
+          :messages="messages"
+          :sessionId="sessionId"
+          @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
+          @open-artifact="(file) => handleOpenArtifact(file)"
+        />
+        <ChatInput
+          v-else
+          @send="(text) => emit('send', text)"
+          :loading="loading"
+          v-model="chatInputText"
+        />
+      </template>
       <TerminalPanel
         :sessionId="sessionId"
         :terminalType="terminalType"
