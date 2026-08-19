@@ -355,6 +355,9 @@ func TestCommandForCommandExec(t *testing.T) {
 	argStr := strings.Join(cmd.Args, " ")
 
 	expectedTmpDir := filepath.Join(tmpDir, "tmp", "test-chat")
+	if !strings.Contains(argStr, "--die-with-parent") {
+		t.Errorf("expected '--die-with-parent' in args, got: %s", argStr)
+	}
 	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
 		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
 	}
