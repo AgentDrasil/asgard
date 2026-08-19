@@ -166,15 +166,6 @@ onUnmounted(() => {
         </div>
 
         <div class="flex items-center gap-1 shrink-0">
-          <!-- Search trigger button -->
-          <button
-            @click="emit('open-search')"
-            class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-            :title="`Quick Search Files (${fileSearchShortcut})`"
-          >
-            <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
-          </button>
-
           <!-- Refresh button -->
           <button
             @click="handleRefresh"
