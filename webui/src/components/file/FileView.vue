@@ -6,6 +6,7 @@ import FileCodeViewer from "./FileCodeViewer.vue";
 import { useShortcuts } from "../../composables/useShortcuts";
 import { rebuildChatInputFromComments, commentKey } from "../../utils/commentUtils";
 import { humanfriendly } from "../../lib/format";
+import { getFileIcon } from "../../utils/fileUtils";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
@@ -117,7 +118,17 @@ const breadcrumbParts = computed(() => {
     >
       <!-- Left: File Path / Breadcrumbs & File Metadata / Refresh -->
       <div class="flex items-center gap-2 min-w-0 font-mono text-xs">
-        <Icon icon="octicon:file-directory-24" class="h-4 w-4 text-primary shrink-0" />
+        <Icon
+          :icon="
+            selectedFilePath && currentFileData
+              ? getFileIcon(currentFileData.ext, currentFileData.path)
+              : selectedFilePath
+                ? getFileIcon(undefined, selectedFilePath)
+                : 'octicon:file-directory-24'
+          "
+          class="h-4 w-4 shrink-0"
+          :class="!selectedFilePath ? 'text-primary' : ''"
+        />
         <template v-if="selectedFilePath">
           <div class="flex items-center gap-1 truncate text-base-content/80">
             <span

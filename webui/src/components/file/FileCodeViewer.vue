@@ -225,20 +225,8 @@ watch([() => fileData.value, markdownMode], () => {
     <!-- Subheader / Toolbar for Code Viewer -->
     <div
       v-if="fileData"
-      class="px-3 py-1.5 bg-base-200/60 border-b border-base-300 flex items-center justify-between text-xs font-mono shrink-0 gap-2"
+      class="px-3 py-1.5 bg-base-200/60 border-b border-base-300 flex items-center justify-end text-xs font-mono shrink-0 gap-2"
     >
-      <!-- File Metadata -->
-      <div class="flex items-center gap-2 truncate min-w-0">
-        <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 text-primary shrink-0" />
-        <span class="font-semibold text-base-content truncate">{{ fileData.path }}</span>
-        <span class="text-base-content/50 text-[11px] shrink-0"
-          >({{ humanfriendly(fileData.size) }}B)</span
-        >
-        <span v-if="fileData.updatedAt" class="text-base-content/40 text-[11px] shrink-0"
-          >· {{ new Date(fileData.updatedAt).toLocaleString() }}</span
-        >
-      </div>
-
       <div class="flex items-center gap-1.5 shrink-0">
         <!-- Markdown Preview Toggle (if markdown file) -->
         <div

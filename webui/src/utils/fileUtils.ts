@@ -90,7 +90,7 @@ export function getFileIcon(ext?: string, path?: string): string {
       return "vscode-icons:file-type-html";
     case "yaml":
     case "yml":
-      return "vscode-icons:file-type-yaml";
+      return "file-icons:yaml";
     case "sh":
     case "bash":
     case "zsh":
