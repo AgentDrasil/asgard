@@ -599,6 +599,97 @@ nodes:
 	assert.Equal(t, StatusSkipped, res.Nodes["fixer"].Status)
 }
 
+func TestConditionFalseSkipGuardBlocksConditionalEdge(t *testing.T) {
+	yamlSpec := `
+name: condfalse-guard
+nodes:
+  - id: gate
+    type: command
+    command: "echo gate"
+  - id: branch
+    type: command
+    command: "echo branch"
+    depends:
+      - node: gate
+        when: "nodes.gate.exit_code == 0"
+  - id: trap
+    type: command
+    command: "echo trap"
+    depends:
+      - node: branch
+        when: "nodes.branch.exit_code == 0"
+`
+	// gate fails: branch is condition-false skipped; the skipped branch's
+	// zero-valued exit code must not satisfy trap's `exit_code == 0`.
+	res, stub := runEngine(t, yamlSpec, map[string]stubOutcome{
+		"gate": {exitCode: 1},
+	})
+
+	assert.Equal(t, RunStatusFailed, res.Status)
+	assert.False(t, stub.hasRun("branch"))
+	assert.False(t, stub.hasRun("trap"), "condition-false skipped parent must never trigger a conditional edge")
+	require.NotNil(t, res.Nodes["trap"])
+	assert.Equal(t, StatusSkipped, res.Nodes["trap"].Status)
+	assert.Equal(t, SkipReasonConditionFalse, res.Nodes["trap"].SkipReason)
+}
+
+func TestLoopExhaustionStaleSuccessorDoesNotAbsorbFailure(t *testing.T) {
+	yamlSpec := `
+name: stale-absorption
+loops:
+  - id: fix_loop
+    nodes: [review, verdict, fixer]
+    max_iterations: 2
+nodes:
+  - id: coding
+    type: command
+    command: "echo code"
+  - id: review
+    type: command
+    command: "echo review"
+    depends:
+      - node: coding
+      - node: fixer
+    join: always
+  - id: verdict
+    type: command
+    command: "echo verdict"
+    depends:
+      - node: review
+  - id: fixer
+    type: command
+    command: "echo fix"
+    depends:
+      - node: verdict
+        when: "nodes.verdict.exit_code == 0"
+        counts_loop: fix_loop
+  - id: consumer
+    type: command
+    command: "echo consume"
+    depends:
+      - node: fixer
+        when: "nodes.fixer.exit_code == 0"
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	// verdict demands fixes forever; consumer succeeds in every iteration.
+	// When fix_loop exhausts and fixer is failed, consumer's stale
+	// iteration-2 success must NOT absorb the failure into a green COMPLETED.
+	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "stale-session"})
+	require.NoError(t, err)
+
+	assert.Equal(t, RunStatusFailed, res.Status, "stale successor success must not absorb the exhaustion failure")
+	assert.Equal(t, 2, runner.count("fixer"))
+	assert.Equal(t, 2, runner.count("consumer"))
+	require.NotNil(t, res.Nodes["fixer"])
+	assert.Equal(t, StatusFailed, res.Nodes["fixer"].Status)
+	assert.Nil(t, res.Nodes["consumer"], "stale successor result must be invalidated")
+}
+
 func TestSeedReplaySuppressesReenqueueAndCounting(t *testing.T) {
 	defn, err := ParseDefinition([]byte(fixLoopYAML))
 	require.NoError(t, err)

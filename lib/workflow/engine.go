@@ -129,10 +129,10 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 		// 1. A dependency edge with an explicit `when` only arbitrates that
 		// edge; parent failure does not block a matching when-branch.
 		if dep.When != "" {
-			// Fail-closed cascade guard: a cascaded-failure parent produced
-			// no result; its zero-valued exit code must never satisfy the
-			// condition (e.g. `exit_code == 0`).
-			if parentResult != nil && parentResult.Status == StatusSkipped && parentResult.SkipReason == SkipReasonCascadedFailure {
+			// Fail-closed skip guard: a skipped parent (any skip reason)
+			// produced no result; its zero-valued exit code must never
+			// satisfy the condition (e.g. `exit_code == 0`).
+			if parentResult != nil && parentResult.Status == StatusSkipped {
 				hasConditionFalseEdge = true
 				continue
 			}
@@ -444,10 +444,25 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			// never ran. A loop backedge target is already settled: its
 			// downstream holds results from the prior iteration, and
 			// re-driving them (notably join: always nodes) would relive
-			// the exhausted loop forever. The FAILED settlement alone
-			// makes the run fail-closed.
+			// the exhausted loop forever. Instead, invalidate the stale
+			// results of the target's conditional successors so global
+			// settlement cannot mistake them for failure absorption
+			// (fail-closed).
 			if !wasSettled {
 				evaluateDownstream(targetID)
+			} else {
+				for _, depNode := range dependents[targetID] {
+					hasWhenEdge := false
+					for _, dep := range depNode.Depends {
+						if dep.NodeID == targetID && dep.When != "" {
+							hasWhenEdge = true
+							break
+						}
+					}
+					if hasWhenEdge {
+						delete(results, depNode.ID)
+					}
+				}
 			}
 			return
 		}
@@ -468,12 +483,13 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonConditionFalse {
 			skipIsDeadBranch = true
 		}
-		// Cascade-skip guard: a node skipped by cascaded failure produced no
-		// result of its own; its zero-valued exit code must never satisfy a
-		// downstream `when` expression (fail-closed).
-		parentCascadedSkip := false
-		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonCascadedFailure {
-			parentCascadedSkip = true
+		// Fail-closed skip guard: a skipped node (any skip reason — cascaded
+		// failure, condition-false, never-activated) produced no result of
+		// its own; its zero-valued exit code must never satisfy a
+		// downstream `when` expression.
+		parentSkipped := false
+		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped {
+			parentSkipped = true
 		}
 		for _, depNode := range dependents[settledNodeID] {
 			if skipIsDeadBranch {
@@ -488,7 +504,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					continue
 				}
 				match := false
-				if !parentCascadedSkip {
+				if !parentSkipped {
 					var err error
 					match, err = EvaluateSimpleExpr(cond.When, results, nil)
 					if err != nil {
