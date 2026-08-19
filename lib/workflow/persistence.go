@@ -45,12 +45,27 @@ type RunSnapshot struct {
 	Input     string `json:"input"`
 	// NodeStates holds the settled node results at snapshot time.
 	NodeStates map[string]PersistedNodeState `json:"node_states"`
+	// LoopIterations persists the per-loop iteration counters so loop
+	// circuit breakers survive restarts (resume seeds them back).
+	LoopIterations map[string]int `json:"loop_iterations,omitempty"`
+	// ExecutionCounts persists the per-node execution counts so quota caps
+	// and deterministic human MessageIDs stay stable across restarts.
+	ExecutionCounts map[string]int `json:"execution_counts,omitempty"`
 	// SuspendedNodeID / SuspendedMessageID identify the active human node
 	// while Status is WAITING_HUMAN.
 	SuspendedNodeID    string `json:"suspended_node_id,omitempty"`
 	SuspendedMessageID string `json:"suspended_message_id,omitempty"`
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// snapshotCapture bundles the state MarkWaitingHuman persists: settled node
+// results plus the loop iteration / execution counters, deep-copied under the
+// engine lock.
+type snapshotCapture struct {
+	nodeStates      map[string]PersistedNodeState
+	loopIterations  map[string]int
+	executionCounts map[string]int
 }
 
 // RunStore persists workflow run snapshots for pause/resume and crash
@@ -132,6 +147,15 @@ func fromPersistedStates(states map[string]PersistedNodeState) map[string]*NodeR
 		results[id] = res
 	}
 	return results
+}
+
+// copyIntMap deep-copies a string→int map (nil-safe).
+func copyIntMap(m map[string]int) map[string]int {
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // persistStatus maps an engine run status to its persisted spelling.

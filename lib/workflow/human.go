@@ -15,7 +15,7 @@ import (
 // WAITING_HUMAN snapshot is persisted, the suspension is delivered to the host
 // application and the worker blocks until Resume delivers the user reply or
 // the run is cancelled.
-func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeContext, store RunStore, dagSpec string, snapshotStates func() map[string]PersistedNodeState) *NodeResult {
+func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeContext, store RunStore, dagSpec string, snapshotStates func() snapshotCapture) *NodeResult {
 	node := nctx.Node
 	emit := nctx.EventEmitter
 
@@ -72,6 +72,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 
 	if store != nil {
+		captured := snapshotStates()
 		if err := store.MarkWaitingHuman(&RunSnapshot{
 			RunID:              rc.RunID,
 			SessionID:          rc.SessionID,
@@ -79,7 +80,9 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 			DAGSpec:            dagSpec,
 			RunDir:             rc.RunDir,
 			Input:              rc.Input,
-			NodeStates:         snapshotStates(),
+			NodeStates:         captured.nodeStates,
+			LoopIterations:     captured.loopIterations,
+			ExecutionCounts:    captured.executionCounts,
 			SuspendedNodeID:    node.ID,
 			SuspendedMessageID: messageID,
 		}); err != nil {
@@ -148,6 +151,40 @@ func (e *Engine) Resume(ctx context.Context, runID string, replyText string) (*W
 	return e.ResumeWithEmitter(ctx, runID, replyText, nil)
 }
 
+// buildResumeContext assembles the RunContext that re-drives a suspended run
+// from its persisted snapshot: seeded node results, restored loop/execution
+// counters and direct activation of the suspended node. An empty replyText
+// leaves the suspended node without a pre-supplied answer so it suspends
+// again instead of settling immediately.
+func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit func(WorkflowEvent)) RunContext {
+	rc := RunContext{
+		RunID:               snap.RunID,
+		SessionID:           snap.SessionID,
+		RunDir:              snap.RunDir,
+		Input:               snap.Input,
+		DAGSpec:             snap.DAGSpec,
+		Store:               e.store,
+		SuspendHuman:        e.suspendHuman,
+		SeedNodes:           fromPersistedStates(snap.NodeStates),
+		SeedLoopIterations:  copyIntMap(snap.LoopIterations),
+		SeedExecutionCounts: copyIntMap(snap.ExecutionCounts),
+		EmitEvent: func(ev WorkflowEvent) {
+			if emit != nil {
+				emit(ev)
+				return
+			}
+			log.Info().Str("run_id", snap.RunID).Str("node", ev.NodeID).Str("type", string(ev.Type)).Msg("resumed workflow event")
+		},
+	}
+	if snap.SuspendedNodeID != "" {
+		rc.ActivateNodes = []string{snap.SuspendedNodeID}
+		if replyText != "" {
+			rc.HumanReplies = map[string]string{snap.SuspendedNodeID: replyText}
+		}
+	}
+	return rc
+}
+
 // ResumeWithEmitter is like Resume but forwards every event of a re-driven run
 // to emit (when non-nil) so hosts can persist and surface resume progress.
 func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText string, emit func(WorkflowEvent)) (*WorkflowRunResult, error) {
@@ -181,24 +218,7 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", runID, err)
 	}
 
-	rc := RunContext{
-		RunID:        snap.RunID,
-		SessionID:    snap.SessionID,
-		RunDir:       snap.RunDir,
-		Input:        snap.Input,
-		DAGSpec:      snap.DAGSpec,
-		Store:        store,
-		SuspendHuman: e.suspendHuman,
-		SeedNodes:    fromPersistedStates(snap.NodeStates),
-		HumanReplies: map[string]string{snap.SuspendedNodeID: replyText},
-		EmitEvent: func(ev WorkflowEvent) {
-			if emit != nil {
-				emit(ev)
-				return
-			}
-			log.Info().Str("run_id", runID).Str("node", ev.NodeID).Str("type", string(ev.Type)).Msg("resumed workflow event")
-		},
-	}
+	rc := e.buildResumeContext(snap, replyText, emit)
 	return e.Execute(ctx, defn, rc)
 }
 

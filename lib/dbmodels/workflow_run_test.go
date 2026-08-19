@@ -25,6 +25,10 @@ func TestWorkflowRunRepository(t *testing.T) {
 		"prep": {Status: "SUCCEEDED", ExitCode: 0},
 	})
 	require.NoError(t, err)
+	loopIters, err := EncodeIntMap(map[string]int{"fix_loop": 2})
+	require.NoError(t, err)
+	execCounts, err := EncodeIntMap(map[string]int{"fixer": 2, "fix_fallback": 1})
+	require.NoError(t, err)
 
 	run1 := &WorkflowRun{
 		RunID:              "run-1",
@@ -32,6 +36,8 @@ func TestWorkflowRunRepository(t *testing.T) {
 		Status:             WorkflowStatusRunning,
 		DAGSpec:            "name: wf\n",
 		NodeStates:         states,
+		LoopIterations:     loopIters,
+		ExecutionCounts:    execCounts,
 		SuspendedNodeID:    "approval",
 		SuspendedMessageID: "wf-run-1-approval",
 	}
@@ -46,6 +52,14 @@ func TestWorkflowRunRepository(t *testing.T) {
 	decoded, err := DecodeNodeStates(loaded.NodeStates)
 	require.NoError(t, err)
 	assert.Equal(t, "SUCCEEDED", decoded["prep"].Status)
+
+	decodedLoops, err := DecodeIntMap(loaded.LoopIterations)
+	require.NoError(t, err)
+	assert.Equal(t, 2, decodedLoops["fix_loop"])
+	decodedExec, err := DecodeIntMap(loaded.ExecutionCounts)
+	require.NoError(t, err)
+	assert.Equal(t, 2, decodedExec["fixer"])
+	assert.Equal(t, 1, decodedExec["fix_fallback"])
 
 	// No waiting run yet.
 	waiting, err := repo.FindWaitingHumanBySession("chat-1")

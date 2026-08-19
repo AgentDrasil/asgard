@@ -41,12 +41,22 @@ func (s *workflowRunStore) MarkWaitingHuman(run *workflow.RunSnapshot) error {
 	if err != nil {
 		return err
 	}
+	loopIterations, err := dbmodels.EncodeIntMap(run.LoopIterations)
+	if err != nil {
+		return err
+	}
+	executionCounts, err := dbmodels.EncodeIntMap(run.ExecutionCounts)
+	if err != nil {
+		return err
+	}
 	return s.repo.SaveRun(&dbmodels.WorkflowRun{
 		RunID:              run.RunID,
 		SessionID:          run.SessionID,
 		Status:             dbmodels.WorkflowStatusWaitingHuman,
 		DAGSpec:            run.DAGSpec,
 		NodeStates:         states,
+		LoopIterations:     loopIterations,
+		ExecutionCounts:    executionCounts,
 		SuspendedNodeID:    run.SuspendedNodeID,
 		SuspendedMessageID: run.SuspendedMessageID,
 		RunDir:             run.RunDir,
@@ -101,6 +111,14 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	loopIterations, err := dbmodels.DecodeIntMap(run.LoopIterations)
+	if err != nil {
+		return nil, err
+	}
+	executionCounts, err := dbmodels.DecodeIntMap(run.ExecutionCounts)
+	if err != nil {
+		return nil, err
+	}
 	snap := &workflow.RunSnapshot{
 		RunID:              run.RunID,
 		SessionID:          run.SessionID,
@@ -108,6 +126,8 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 		DAGSpec:            run.DAGSpec,
 		RunDir:             run.RunDir,
 		Input:              run.Input,
+		LoopIterations:     loopIterations,
+		ExecutionCounts:    executionCounts,
 		SuspendedNodeID:    run.SuspendedNodeID,
 		SuspendedMessageID: run.SuspendedMessageID,
 		CreatedAt:          run.CreatedAt,

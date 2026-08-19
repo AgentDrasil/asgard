@@ -50,6 +50,15 @@ type RunContext struct {
 	// SeedNodes are pre-settled node results restored from a snapshot; their
 	// workers complete immediately without re-execution.
 	SeedNodes map[string]*NodeResult
+	// SeedLoopIterations / SeedExecutionCounts restore the loop iteration
+	// counters and per-node execution counts from a persisted snapshot so
+	// circuit-breaker quotas and human MessageIDs survive restarts.
+	SeedLoopIterations  map[string]int
+	SeedExecutionCounts map[string]int
+	// ActivateNodes are enqueued directly after seed replay; they wake the
+	// suspended node (e.g. an on_exhausted orphan human node that seed
+	// replay cannot reach because it has no static in-edges).
+	ActivateNodes []string
 	// HumanReplies maps human node IDs to pre-supplied user replies (resume).
 	HumanReplies map[string]string
 	// WorkflowRunDirs carries workflow/parent configured run directories.
@@ -263,17 +272,14 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 	values := &RunValues{}
 
-	snapshotStates := func() map[string]PersistedNodeState {
-		mu.Lock()
-		defer mu.Unlock()
-		return toPersistedStates(results)
-	}
-
 	maxNodeExecutions := defn.MaxNodeExecutions
 	if maxNodeExecutions <= 0 {
 		maxNodeExecutions = 100
 	}
 	executionCount := make(map[string]int, len(defn.Nodes))
+	for id, n := range rc.SeedExecutionCounts {
+		executionCount[id] = n
+	}
 
 	// Loop bookkeeping: per-loop iteration counters, the child-loop index and
 	// the set of on_exhausted orphan nodes (excluded from roots, swept as
@@ -291,6 +297,21 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 	}
 	loopIter := make(map[string]int, len(defn.Loops))
+	for id, n := range rc.SeedLoopIterations {
+		loopIter[id] = n
+	}
+
+	// snapshotStates deep-copies everything MarkWaitingHuman persists
+	// (settled results + loop/execution counters) under the engine lock.
+	snapshotStates := func() snapshotCapture {
+		mu.Lock()
+		defer mu.Unlock()
+		return snapshotCapture{
+			nodeStates:      toPersistedStates(results),
+			loopIterations:  copyIntMap(loopIter),
+			executionCounts: copyIntMap(executionCount),
+		}
+	}
 
 	nodeByID := make(map[string]*NodeSpec, len(defn.Nodes))
 	for _, n := range defn.Nodes {
@@ -624,6 +645,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 		// Seed replay is over: downstream admissions behave normally again.
 		replaying = false
+		// Wake the suspended node recorded in the snapshot. on_exhausted
+		// orphan human nodes have no static in-edges, so seed replay can
+		// never reach them; only this explicit activation re-enters them.
+		for _, nodeID := range rc.ActivateNodes {
+			if _, settled := results[nodeID]; settled {
+				continue
+			}
+			enqueue(nodeID)
+		}
 	} else {
 		for _, node := range defn.Nodes {
 			// on_exhausted orphans have no static in-edges; they activate

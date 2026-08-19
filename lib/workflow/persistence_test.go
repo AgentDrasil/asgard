@@ -343,3 +343,194 @@ nodes:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "prompt is required for human nodes")
 }
+
+// fallbackResumeYAML drives fix_loop to exhaustion, suspends at the human
+// on_exhausted orphan, and re-enters the fixer via a resets_loop edge when
+// the user replies "Retry (reset counter)".
+const fallbackResumeYAML = `
+name: fallback-resume
+loops:
+  - id: fix_loop
+    nodes: [review, verdict, fixer]
+    max_iterations: 2
+    on_exhausted: fix_fallback
+nodes:
+  - id: coding
+    type: command
+    command: "echo code"
+  - id: review
+    type: command
+    command: "echo review"
+    depends:
+      - node: coding
+      - node: fixer
+    join: always
+  - id: verdict
+    type: command
+    command: "echo verdict"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review
+  - id: fixer
+    type: command
+    command: "echo fix"
+    depends:
+      - node: verdict
+        when: "nodes.verdict.exit_code == 0"
+        counts_loop: fix_loop
+      - node: fix_fallback
+        when: "nodes.fix_fallback.output == 'Retry (reset counter)'"
+        resets_loop: fix_loop
+    join: always
+  - id: fix_fallback
+    type: human
+    prompt: "Auto-fix exhausted. Retry, skip or abort?"
+    options: ["Retry (reset counter)", "Skip This Step", "Abort Workflow"]
+`
+
+// newLoopPersistenceEngine builds an engine whose command nodes are served by
+// runner and whose snapshots land in the given store.
+func newLoopPersistenceEngine(t *testing.T, runner NodeRunner, store RunStore) (*Engine, *suspendRecorder) {
+	t.Helper()
+	registry := NewNodeRunnerRegistry()
+	registry.Register(runner)
+	rec := &suspendRecorder{}
+	engine := NewEngine(registry)
+	engine.SetRunStore(store)
+	engine.SetHumanSuspender(func(req SuspendRequest) error {
+		rec.record(req)
+		return nil
+	})
+	return engine, rec
+}
+
+// runUntilFallbackSuspended executes the fallback-resume workflow on engine
+// until fix_fallback suspends, then simulates a process crash (cancel + settle
+// CANCELLED) and restores the WAITING_HUMAN snapshot, mimicking crash recovery.
+func runUntilFallbackSuspended(t *testing.T, engine *Engine, store *memStore, defn *WorkflowDefinition, runID, sessionID, runDir string) *RunSnapshot {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine.Execute(ctx, defn, RunContext{
+			SessionID: sessionID,
+			RunID:     runID,
+			RunDir:    runDir,
+		})
+	}()
+
+	waitFor(t, func() bool {
+		return store.get(runID) != nil && store.get(runID).Status == PersistStatusWaitingHuman
+	}, "run should suspend at fix_fallback")
+	suspendedSnap := store.get(runID)
+	require.Equal(t, "fix_fallback", suspendedSnap.SuspendedNodeID)
+
+	cancel()
+	waitFor(t, func() bool {
+		return store.get(runID).Status == PersistStatusCancelled
+	}, "cancelled run settles")
+	require.NoError(t, store.MarkWaitingHuman(suspendedSnap))
+	return suspendedSnap
+}
+
+// passAfterVerdictRuns makes verdict demand a fix (exit 0) for its first
+// three invocations and pass (exit 1) afterwards.
+func passAfterVerdictRuns() func(nodeID string, n int) int {
+	return func(nodeID string, n int) int {
+		if nodeID == "verdict" && n > 3 {
+			return 1
+		}
+		return 0
+	}
+}
+
+func TestFixFallbackResumeAfterRestart(t *testing.T) {
+	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(passAfterVerdictRuns())
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, runner, store)
+	suspendedSnap := runUntilFallbackSuspended(t, engine1, store, defn, "runfb", "fb-chat", t.TempDir())
+
+	assert.Equal(t, "wf-runfb-fix_fallback", suspendedSnap.SuspendedMessageID)
+	// Circuit-breaker counters persisted at suspension time.
+	assert.Equal(t, 2, suspendedSnap.LoopIterations["fix_loop"], "loop counter must persist at the quota")
+	assert.Equal(t, 1, suspendedSnap.ExecutionCounts["coding"])
+	assert.Equal(t, 3, suspendedSnap.ExecutionCounts["review"])
+	assert.Equal(t, 3, suspendedSnap.ExecutionCounts["verdict"])
+	assert.Equal(t, 2, suspendedSnap.ExecutionCounts["fixer"])
+	assert.Equal(t, 1, suspendedSnap.ExecutionCounts["fix_fallback"])
+
+	// A brand-new engine (fresh process) sharing only the store resumes the
+	// orphan human node from the snapshot reply.
+	engine2, _ := newLoopPersistenceEngine(t, runner, store)
+	result, err := engine2.Resume(context.Background(), "runfb", "Retry (reset counter)")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, RunStatusCompleted, result.Status)
+	require.NotNil(t, result.Nodes["fix_fallback"])
+	assert.Equal(t, "Retry (reset counter)", result.Nodes["fix_fallback"].Output)
+
+	// Seeded nodes never re-executed; the retry added exactly one fix round.
+	assert.Equal(t, 1, runner.count("coding"), "seeded nodes must not re-execute after restart")
+	assert.Equal(t, 4, runner.count("review"))
+	assert.Equal(t, 4, runner.count("verdict"))
+	assert.Equal(t, 3, runner.count("fixer"), "resets_loop edge re-admits fixer exactly once after resume")
+	assert.Equal(t, PersistStatusCompleted, store.get("runfb").Status)
+}
+
+func TestResumeRestoresCountersAndStableMessageIDs(t *testing.T) {
+	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(passAfterVerdictRuns())
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, runner, store)
+	suspendedSnap := runUntilFallbackSuspended(t, engine1, store, defn, "runfb2", "fb2-chat", t.TempDir())
+
+	// Re-drive WITHOUT a pre-supplied reply: the orphan human node has no
+	// static in-edges, so only the snapshot's ActivateNodes can wake it. It
+	// suspends again — with a fresh, collision-free MessageID derived from
+	// the restored execution counts.
+	engine2, _ := newLoopPersistenceEngine(t, runner, store)
+	rc := engine2.buildResumeContext(suspendedSnap, "", nil)
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		result, err := engine2.Execute(context.Background(), defn, rc)
+		outCh <- outcome{result: result, err: err}
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("runfb2")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && snap.SuspendedMessageID == "wf-runfb2-fix_fallback-2"
+	}, "re-driven run should re-suspend with an iteration-2 message id")
+
+	resumedSnap := store.get("runfb2")
+	assert.Equal(t, "fix_fallback", resumedSnap.SuspendedNodeID)
+	assert.Equal(t, 2, resumedSnap.LoopIterations["fix_loop"], "seed replay must not inflate the restored loop counter")
+	assert.Equal(t, 3, resumedSnap.ExecutionCounts["verdict"])
+	assert.Equal(t, 2, resumedSnap.ExecutionCounts["fixer"])
+	assert.Equal(t, 2, resumedSnap.ExecutionCounts["fix_fallback"])
+
+	// Nothing re-executed while re-suspending.
+	assert.Equal(t, 1, runner.count("coding"))
+	assert.Equal(t, 3, runner.count("review"))
+	assert.Equal(t, 3, runner.count("verdict"))
+	assert.Equal(t, 2, runner.count("fixer"))
+
+	// Delivering the reply to the live re-driven run completes it.
+	_, err = engine2.Resume(context.Background(), "runfb2", "Retry (reset counter)")
+	require.NoError(t, err)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	assert.Equal(t, 3, runner.count("fixer"))
+	assert.Equal(t, 4, runner.count("verdict"))
+	assert.Equal(t, PersistStatusCompleted, store.get("runfb2").Status)
+}

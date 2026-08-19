@@ -30,6 +30,13 @@ type WorkflowRun struct {
 	DAGSpec string `gorm:"column:dag_spec;type:text"`
 	// NodeStates is a JSON map[node_id]NodeState (status, exit_code, output_path).
 	NodeStates string `gorm:"column:node_states;type:text"`
+	// LoopIterations is a JSON map[loop_id]iteration_count captured at
+	// suspension time; it re-seeds loop circuit breakers on resume.
+	LoopIterations string `gorm:"column:loop_iterations;type:text"`
+	// ExecutionCounts is a JSON map[node_id]execution_count captured at
+	// suspension time; it keeps quota caps and human MessageIDs stable
+	// across restarts.
+	ExecutionCounts string `gorm:"column:execution_counts;type:text"`
 	// SuspendedNodeID is the human node currently suspending the run
 	// (single active human node per run in Phase 3).
 	SuspendedNodeID string `gorm:"column:suspended_node_id;size:64"`
@@ -76,6 +83,30 @@ func DecodeNodeStates(raw string) (map[string]NodeState, error) {
 		return nil, err
 	}
 	return states, nil
+}
+
+// EncodeIntMap serializes a string→int map into a JSON text column.
+func EncodeIntMap(m map[string]int) (string, error) {
+	if m == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// DecodeIntMap parses a JSON text column back into a string→int map.
+func DecodeIntMap(raw string) (map[string]int, error) {
+	if raw == "" {
+		return map[string]int{}, nil
+	}
+	var m map[string]int
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 type WorkflowRunRepository struct {
