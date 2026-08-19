@@ -7,6 +7,7 @@ import { gitPush, gitPull } from "../../lib/api";
 import type { GitDiffFile, GitCommit } from "../../types";
 
 const props = defineProps<{
+  sessionId?: string;
   runDir: string;
   files: GitDiffFile[];
   selectedIndex: number;
@@ -41,11 +42,11 @@ function setActionFeedback(type: "success" | "error", text: string) {
 }
 
 async function handlePush() {
-  if (isPushing.value || !props.runDir) return;
+  if (isPushing.value || !props.sessionId) return;
   isPushing.value = true;
   actionMessage.value = null;
   try {
-    const res = await gitPush(props.runDir);
+    const res = await gitPush(props.sessionId);
     if (res.success) {
       setActionFeedback("success", res.output || "Pushed successfully");
       emit("refresh");
@@ -60,11 +61,11 @@ async function handlePush() {
 }
 
 async function handlePull() {
-  if (isPulling.value || !props.runDir) return;
+  if (isPulling.value || !props.sessionId) return;
   isPulling.value = true;
   actionMessage.value = null;
   try {
-    const res = await gitPull(props.runDir);
+    const res = await gitPull(props.sessionId);
     if (res.success) {
       setActionFeedback("success", res.output || "Pulled successfully");
       emit("refresh");

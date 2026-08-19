@@ -18,6 +18,7 @@ const {
 } = useShortcuts();
 
 const props = defineProps<{
+  sessionId?: string;
   runDir: string;
   gitRoot: string;
   chatInputText: string;
@@ -105,12 +106,12 @@ const stopSidebarResize = () => {
 };
 
 async function loadGitData() {
-  if (!props.runDir) return;
+  if (!props.sessionId) return;
   loading.value = true;
   errorMsg.value = "";
   try {
     // 1. Fetch git log metadata (commits, branch, ahead/behind, unstashed count)
-    const logData = await getGitLog(props.runDir);
+    const logData = await getGitLog(props.sessionId);
     if (logData) {
       commits.value = logData.commits || [];
       currentBranch.value = logData.currentBranch || "main";
@@ -131,8 +132,12 @@ async function loadGitData() {
 
 async function loadDiffOnly() {
   activeWidget.value = null;
+  if (!props.sessionId) {
+    files.value = [];
+    return;
+  }
   try {
-    const result = await getGitDiff(props.runDir, selectedCommit.value || undefined);
+    const result = await getGitDiff(props.sessionId, selectedCommit.value || undefined);
     files.value = result;
     if (selectedIndex.value >= result.length) {
       selectedIndex.value = 0;
@@ -680,6 +685,7 @@ const commentedFileList = computed(() => {
         <!-- Sidebar Content Component -->
         <VCSSidebar
           class="w-full h-full"
+          :sessionId="sessionId"
           :runDir="runDir"
           :files="files"
           :selectedIndex="selectedIndex"

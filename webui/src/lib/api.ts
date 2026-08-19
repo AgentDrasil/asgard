@@ -104,14 +104,17 @@ export async function getSubdirs(dir: string): Promise<string[]> {
   return info.subdirs;
 }
 
-export async function getGitDiff(dir: string, commit?: string): Promise<GitDiffFile[]> {
-  if (!dir) return [];
+export async function getGitDiff(sessionId: string, commit?: string): Promise<GitDiffFile[]> {
+  if (!sessionId) return [];
+  const params = new URLSearchParams();
+  params.set("session_id", sessionId);
+
+  if (commit) {
+    params.set("commit", commit);
+  }
+
   try {
-    let url = `/api/git/diff?dir=${encodeURIComponent(dir)}`;
-    if (commit) {
-      url += `&commit=${encodeURIComponent(commit)}`;
-    }
-    const res = await apiFetch(url);
+    const res = await apiFetch(`/api/git/diff?${params.toString()}`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.files || [];
@@ -121,10 +124,12 @@ export async function getGitDiff(dir: string, commit?: string): Promise<GitDiffF
   }
 }
 
-export async function getGitLog(dir: string, limit = 10): Promise<GitLogResponse | null> {
-  if (!dir) return null;
+export async function getGitLog(sessionId: string, limit = 10): Promise<GitLogResponse | null> {
+  if (!sessionId) return null;
   try {
-    const res = await apiFetch(`/api/git/log?dir=${encodeURIComponent(dir)}&limit=${limit}`);
+    const res = await apiFetch(
+      `/api/git/log?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
+    );
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -133,13 +138,13 @@ export async function getGitLog(dir: string, limit = 10): Promise<GitLogResponse
   }
 }
 
-export async function gitPush(dir: string): Promise<GitActionResult> {
-  if (!dir) return { success: false, error: "Directory is required" };
+export async function gitPush(sessionId: string): Promise<GitActionResult> {
+  if (!sessionId) return { success: false, error: "Session ID is required" };
   try {
     const res = await apiFetch("/api/git/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir }),
+      body: JSON.stringify({ session_id: sessionId }),
     });
     const data = await res.json();
     return {
@@ -153,13 +158,13 @@ export async function gitPush(dir: string): Promise<GitActionResult> {
   }
 }
 
-export async function gitPull(dir: string): Promise<GitActionResult> {
-  if (!dir) return { success: false, error: "Directory is required" };
+export async function gitPull(sessionId: string): Promise<GitActionResult> {
+  if (!sessionId) return { success: false, error: "Session ID is required" };
   try {
     const res = await apiFetch("/api/git/pull", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir }),
+      body: JSON.stringify({ session_id: sessionId }),
     });
     const data = await res.json();
     return {

@@ -51,7 +51,7 @@ type GitLogResponse struct {
 
 // GitActionRequest is the request payload for git actions like push/pull.
 type GitActionRequest struct {
-	Dir string `json:"dir"`
+	SessionID string `json:"session_id"`
 }
 
 // GitActionResponse is the response payload for git push/pull.
@@ -67,25 +67,28 @@ type GitActionResponse struct {
 func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	dirParam := r.URL.Query().Get("dir")
-	if dirParam == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "dir parameter is required"})
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		writeJSONError(w, http.StatusBadRequest, "session_id is required")
 		return
 	}
 
-	cleanDir := filepath.Clean(dirParam)
+	targetDir, code, err := s.resolveSessionWorkspace(sessionID)
+	if err != nil {
+		writeJSONError(w, code, err.Error())
+		return
+	}
+
+	cleanDir := filepath.Clean(targetDir)
 	if _, err := os.Stat(cleanDir); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "directory does not exist"})
+		writeJSONError(w, http.StatusBadRequest, "directory does not exist")
 		return
 	}
 
 	// Get git root for the directory
 	gitRoot := findGitRoot(cleanDir)
 	if gitRoot == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "directory is not inside a git repository"})
+		writeJSONError(w, http.StatusBadRequest, "directory is not inside a git repository")
 		return
 	}
 
@@ -95,8 +98,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		files, err := getCommitDiff(gitRoot, commitParam)
 		if err != nil {
 			log.Error().Err(err).Str("dir", gitRoot).Str("commit", commitParam).Msg("failed to get commit diff")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("failed to get commit diff: %v", err)})
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get commit diff: %v", err))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -212,28 +214,31 @@ func getCommitDiff(gitRoot, commit string) ([]GitDiffFile, error) {
 	return files, nil
 }
 
-// handleGitLog handles GET /api/git/log?dir=<path>&limit=10.
+// handleGitLog handles GET /api/git/log?session_id=<id>&limit=10.
 func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	dirParam := r.URL.Query().Get("dir")
-	if dirParam == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "dir parameter is required"})
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		writeJSONError(w, http.StatusBadRequest, "session_id is required")
 		return
 	}
 
-	cleanDir := filepath.Clean(dirParam)
+	targetDir, code, err := s.resolveSessionWorkspace(sessionID)
+	if err != nil {
+		writeJSONError(w, code, err.Error())
+		return
+	}
+
+	cleanDir := filepath.Clean(targetDir)
 	if _, err := os.Stat(cleanDir); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "directory does not exist"})
+		writeJSONError(w, http.StatusBadRequest, "directory does not exist")
 		return
 	}
 
 	gitRoot := findGitRoot(cleanDir)
 	if gitRoot == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "directory is not inside a git repository"})
+		writeJSONError(w, http.StatusBadRequest, "directory is not inside a git repository")
 		return
 	}
 
@@ -328,13 +333,20 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req GitActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Dir == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: "dir is required in request body"})
+		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: "session_id is required in request body"})
 		return
 	}
 
-	cleanDir := filepath.Clean(req.Dir)
+	targetDir, code, err := s.resolveSessionWorkspace(req.SessionID)
+	if err != nil {
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	cleanDir := filepath.Clean(targetDir)
 	gitRoot := findGitRoot(cleanDir)
 	if gitRoot == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -363,13 +375,20 @@ func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req GitActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Dir == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: "dir is required in request body"})
+		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: "session_id is required in request body"})
 		return
 	}
 
-	cleanDir := filepath.Clean(req.Dir)
+	targetDir, code, err := s.resolveSessionWorkspace(req.SessionID)
+	if err != nil {
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(GitActionResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	cleanDir := filepath.Clean(targetDir)
 	gitRoot := findGitRoot(cleanDir)
 	if gitRoot == "" {
 		w.WriteHeader(http.StatusBadRequest)

@@ -199,6 +199,7 @@ watch(isArtifactDrawerOpen, (open) => {
         <!-- VCS View -->
         <DiffView
           v-if="activeView === 'vcs'"
+          :sessionId="sessionId"
           :runDir="runDir"
           :gitRoot="gitRoot"
           :isTerminalOpen="isTerminalOpen"

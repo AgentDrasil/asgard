@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/lib/db"
+	"github.com/AgentDrasil/asgard/lib/dbmodels"
 )
 
 // initTestGitRepo creates a valid git repository with an initial commit in a temp dir.
@@ -80,11 +85,33 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 	err = os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("untracked file\n"), 0644)
 	require.NoError(t, err)
 
-	srv := &Server{}
+	// Setup test server with repository for session tests
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	srvWithRepo := &Server{repo: sessionRepo}
+
+	validSessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(validSessionID, "test-agent", "", "", nil))
+	sess, err := sessionRepo.GetSession(validSessionID)
+	require.NoError(t, err)
+	sess.RunDir = repoDir
+	require.NoError(t, sessionRepo.SaveSession(sess))
+
+	nonExistentSessionID := uuid.Must(uuid.NewV7()).String()
+
+	// Session whose RunDir is not inside a git repository
+	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
+	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
+	require.NoError(t, err)
+	nonGitSess.RunDir = t.TempDir()
+	require.NoError(t, sessionRepo.SaveSession(nonGitSess))
 
 	tests := []struct {
 		name          string
-		dirParam      string
+		server        *Server
+		sessionParam  string
 		commitParam   string
 		expectStatus  int
 		expectFiles   int
@@ -92,8 +119,9 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 		checkFilename string
 	}{
 		{
-			name:          "working tree diff (unstaged + untracked)",
-			dirParam:      repoDir,
+			name:          "working tree diff with session_id param",
+			server:        srvWithRepo,
+			sessionParam:  validSessionID,
 			commitParam:   "",
 			expectStatus:  http.StatusOK,
 			expectFiles:   2,
@@ -101,8 +129,9 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 			checkFilename: "README.md",
 		},
 		{
-			name:          "commit specific diff",
-			dirParam:      repoDir,
+			name:          "commit specific diff with session_id param",
+			server:        srvWithRepo,
+			sessionParam:  validSessionID,
 			commitParam:   secondCommitHash,
 			expectStatus:  http.StatusOK,
 			expectFiles:   1,
@@ -110,14 +139,37 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 			checkFilename: "feature.txt",
 		},
 		{
-			name:         "missing dir param",
-			dirParam:     "",
+			name:         "nil repo with session_id returns 500",
+			server:       &Server{},
+			sessionParam: validSessionID,
+			expectStatus: http.StatusInternalServerError,
+			expectError:  true,
+		},
+		{
+			name:         "invalid session_id format",
+			server:       srvWithRepo,
+			sessionParam: "invalid/session/id",
 			expectStatus: http.StatusBadRequest,
 			expectError:  true,
 		},
 		{
-			name:         "non git dir",
-			dirParam:     t.TempDir(),
+			name:         "non-existent session_id",
+			server:       srvWithRepo,
+			sessionParam: nonExistentSessionID,
+			expectStatus: http.StatusNotFound,
+			expectError:  true,
+		},
+		{
+			name:         "session rundir not inside git repository",
+			server:       srvWithRepo,
+			sessionParam: nonGitSessionID,
+			expectStatus: http.StatusBadRequest,
+			expectError:  true,
+		},
+		{
+			name:         "missing session_id param returns 400",
+			server:       &Server{},
+			sessionParam: "",
 			expectStatus: http.StatusBadRequest,
 			expectError:  true,
 		},
@@ -127,18 +179,28 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			reqURL := "/api/git/diff"
-			if tt.dirParam != "" {
-				reqURL += "?dir=" + tt.dirParam
+			testSrv := srvWithRepo
+			if tt.server != nil {
+				testSrv = tt.server
+			}
+
+			q := url.Values{}
+			if tt.sessionParam != "" {
+				q.Set("session_id", tt.sessionParam)
 			}
 			if tt.commitParam != "" {
-				reqURL += "&commit=" + tt.commitParam
+				q.Set("commit", tt.commitParam)
+			}
+
+			reqURL := "/api/git/diff"
+			if encoded := q.Encode(); encoded != "" {
+				reqURL += "?" + encoded
 			}
 
 			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
 			w := httptest.NewRecorder()
 
-			srv.handleGitDiff(w, req)
+			testSrv.handleGitDiff(w, req)
 
 			assert.Equal(t, tt.expectStatus, w.Code)
 			if tt.expectError {
@@ -190,11 +252,30 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 	err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("modified\n"), 0644)
 	require.NoError(t, err)
 
-	srv := &Server{}
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	srvWithRepo := &Server{repo: sessionRepo}
+
+	validSessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(validSessionID, "test-agent", "", "", nil))
+	sess, err := sessionRepo.GetSession(validSessionID)
+	require.NoError(t, err)
+	sess.RunDir = repoDir
+	require.NoError(t, sessionRepo.SaveSession(sess))
+
+	// Session whose RunDir is not inside a git repository
+	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
+	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
+	require.NoError(t, err)
+	nonGitSess.RunDir = t.TempDir()
+	require.NoError(t, sessionRepo.SaveSession(nonGitSess))
 
 	tests := []struct {
 		name          string
-		dirParam      string
+		server        *Server
+		sessionParam  string
 		limitParam    string
 		expectStatus  int
 		expectCommits int
@@ -203,7 +284,8 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 	}{
 		{
 			name:          "valid git log with 3 commits and 1 unstashed",
-			dirParam:      repoDir,
+			server:        srvWithRepo,
+			sessionParam:  validSessionID,
 			limitParam:    "10",
 			expectStatus:  http.StatusOK,
 			expectCommits: 3,
@@ -212,7 +294,8 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 		},
 		{
 			name:          "limit commits to 2",
-			dirParam:      repoDir,
+			server:        srvWithRepo,
+			sessionParam:  validSessionID,
 			limitParam:    "2",
 			expectStatus:  http.StatusOK,
 			expectCommits: 2,
@@ -220,8 +303,23 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name:         "missing dir param",
-			dirParam:     "",
+			name:         "missing session_id param",
+			server:       srvWithRepo,
+			sessionParam: "",
+			expectStatus: http.StatusBadRequest,
+			expectError:  true,
+		},
+		{
+			name:         "invalid session_id format",
+			server:       srvWithRepo,
+			sessionParam: "invalid/id",
+			expectStatus: http.StatusBadRequest,
+			expectError:  true,
+		},
+		{
+			name:         "session rundir not inside git repository",
+			server:       srvWithRepo,
+			sessionParam: nonGitSessionID,
 			expectStatus: http.StatusBadRequest,
 			expectError:  true,
 		},
@@ -231,18 +329,23 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			reqURL := "/api/git/log"
-			if tt.dirParam != "" {
-				reqURL += "?dir=" + tt.dirParam
+			q := url.Values{}
+			if tt.sessionParam != "" {
+				q.Set("session_id", tt.sessionParam)
 			}
 			if tt.limitParam != "" {
-				reqURL += "&limit=" + tt.limitParam
+				q.Set("limit", tt.limitParam)
+			}
+
+			reqURL := "/api/git/log"
+			if encoded := q.Encode(); encoded != "" {
+				reqURL += "?" + encoded
 			}
 
 			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
 			w := httptest.NewRecorder()
 
-			srv.handleGitLog(w, req)
+			tt.server.handleGitLog(w, req)
 
 			assert.Equal(t, tt.expectStatus, w.Code)
 			if tt.expectError {
@@ -269,7 +372,7 @@ func TestHandleGitPushPull_Validation(t *testing.T) {
 
 	srv := &Server{}
 
-	t.Run("missing dir in push body", func(t *testing.T) {
+	t.Run("missing session_id in push body", func(t *testing.T) {
 		t.Parallel()
 		body := bytes.NewBufferString(`{}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/git/push", body)
@@ -279,7 +382,7 @@ func TestHandleGitPushPull_Validation(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("missing dir in pull body", func(t *testing.T) {
+	t.Run("missing session_id in pull body", func(t *testing.T) {
 		t.Parallel()
 		body := bytes.NewBufferString(`{}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/git/pull", body)
@@ -288,4 +391,41 @@ func TestHandleGitPushPull_Validation(t *testing.T) {
 		srv.handleGitPull(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	// Sessions with a RunDir that is not inside a git repository must be
+	// rejected before invoking git push/pull.
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	srvWithRepo := &Server{repo: sessionRepo}
+
+	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
+	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
+	require.NoError(t, err)
+	nonGitSess.RunDir = t.TempDir()
+	require.NoError(t, sessionRepo.SaveSession(nonGitSess))
+
+	for _, action := range []struct {
+		name    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"push", srvWithRepo.handleGitPush},
+		{"pull", srvWithRepo.handleGitPull},
+	} {
+		t.Run("non-git rundir "+action.name, func(t *testing.T) {
+			t.Parallel()
+			body := bytes.NewBufferString(`{"session_id":"` + nonGitSessionID + `"}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/git/"+action.name, body)
+			w := httptest.NewRecorder()
+
+			action.handler(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+
+			var resp GitActionResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.False(t, resp.Success)
+			assert.Contains(t, resp.Error, "not inside a git repository")
+		})
+	}
 }
