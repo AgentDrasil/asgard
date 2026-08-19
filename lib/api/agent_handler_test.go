@@ -22,12 +22,22 @@ func TestHandleAgents(t *testing.T) {
 		agents: []*agents.Agent{
 			{
 				Config: agents.AgentConfig{
+					ID:   "agent-alpha",
 					Name: "Agent Alpha",
 				},
 			},
 			{
 				Config: agents.AgentConfig{
+					ID:   "agent-beta",
+					Type: "agent",
 					Name: "Agent Beta",
+				},
+			},
+			{
+				Config: agents.AgentConfig{
+					ID:   "workflow-gamma",
+					Type: "workflow",
+					Name: "Workflow Gamma",
 				},
 			},
 		},
@@ -44,9 +54,16 @@ func TestHandleAgents(t *testing.T) {
 	var res []AgentInfo
 	err := json.Unmarshal(w.Body.Bytes(), &res)
 	assert.NoError(t, err)
-	assert.Len(t, res, 2)
+	assert.Len(t, res, 3)
 	assert.Equal(t, "Agent Alpha", res[0].Name)
+	assert.Equal(t, "agent", res[0].Type)
 	assert.Equal(t, "Agent Beta", res[1].Name)
+	assert.Equal(t, "agent", res[1].Type)
+	assert.Equal(t, "Workflow Gamma", res[2].Name)
+	assert.Equal(t, "workflow", res[2].Type)
+
+	assert.Contains(t, w.Body.String(), "\"type\":\"workflow\"")
+	assert.Contains(t, w.Body.String(), "\"type\":\"agent\"")
 }
 
 func TestExecuteValidation(t *testing.T) {

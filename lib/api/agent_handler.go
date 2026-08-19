@@ -8,6 +8,7 @@ import (
 // AgentInfo holds details about an agent for the frontend UI.
 type AgentInfo struct {
 	ID          string   `json:"id"`
+	Type        string   `json:"type"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Icon        string   `json:"icon"`
@@ -30,8 +31,14 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		agentType := agent.Config.Type
+		if agentType == "" {
+			agentType = "agent"
+		}
+
 		richAgents = append(richAgents, AgentInfo{
 			ID:          agent.Config.ID,
+			Type:        agentType,
 			Name:        agent.Config.Name,
 			Description: agent.Config.Description,
 			Icon:        agent.Config.Icon,
