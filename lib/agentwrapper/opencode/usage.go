@@ -130,37 +130,12 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 					var qr zaiQuotaResponse
 					if err := json.NewDecoder(resp.Body).Decode(&qr); err != nil {
 						log.Debug().Err(err).Msg("failed to decode zai quota response JSON")
-					} else if !qr.Success {
+					} else if !qr.Success && qr.Code != 200 && (qr.Code != 0 || len(qr.Data.Limits) == 0) {
 						log.Debug().Int("code", qr.Code).Str("msg", qr.Msg).Msg("zai quota API returned failure")
 					} else {
-						var remainingVal = 1.0
-						var refreshDate int64 = 0
-						foundLimit := false
-						var limits []types.QuotaLimit
-						for _, limit := range qr.Data.Limits {
-							var remVal float64
-							if limit.Usage > 0 {
-								remVal = limit.Remaining / limit.Usage
-							} else {
-								remVal = 1.0 - (limit.Percentage / 100.0)
-							}
-							refDate := limit.NextResetTime / 1000
+						remainingVal, refreshDate, limits := parseZaiLimits(qr.Data.Limits, opts.Detailed)
+						log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
 
-							limits = append(limits, types.QuotaLimit{
-								Name:        limit.Type,
-								Remaining:   remVal,
-								RefreshDate: refDate,
-							})
-
-							if limit.Type == "TIME_LIMIT" {
-								remainingVal = remVal
-								refreshDate = refDate
-								foundLimit = true
-							}
-						}
-						if foundLimit {
-							log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
-						}
 						// If we fetched limits, apply them to the matching model(s)
 						for i := range result {
 							if strings.HasPrefix(result[i].Model, "zai-coding-plan") {
@@ -180,4 +155,50 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	}
 
 	return result, nil
+}
+
+func parseZaiLimits(limitsData []struct {
+	Type          string  `json:"type"`
+	Usage         float64 `json:"usage"`
+	Remaining     float64 `json:"remaining"`
+	Percentage    float64 `json:"percentage"`
+	NextResetTime int64   `json:"nextResetTime"`
+}, detailed bool) (float64, int64, []types.QuotaLimit) {
+	var remainingVal = 1.0
+	var refreshDate int64 = 0
+	var foundTokensLimit bool
+	var foundAnyLimit bool
+
+	var limits []types.QuotaLimit
+	for _, limit := range limitsData {
+		remVal := 1.0 - (limit.Percentage / 100.0)
+		if remVal < 0 {
+			remVal = 0
+		} else if remVal > 1.0 {
+			remVal = 1.0
+		}
+		refDate := limit.NextResetTime / 1000
+
+		if detailed {
+			limits = append(limits, types.QuotaLimit{
+				Name:        limit.Type,
+				Remaining:   remVal,
+				RefreshDate: refDate,
+			})
+		}
+
+		if limit.Type == "TOKENS_LIMIT" {
+			if !foundTokensLimit || remVal < remainingVal {
+				remainingVal = remVal
+				refreshDate = refDate
+				foundTokensLimit = true
+			}
+		} else if !foundTokensLimit && !foundAnyLimit {
+			remainingVal = remVal
+			refreshDate = refDate
+			foundAnyLimit = true
+		}
+	}
+
+	return remainingVal, refreshDate, limits
 }
