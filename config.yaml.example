@@ -7,6 +7,10 @@ db: sqlite
 dsn: /home/user/data.db
 gemini_api_key: [GCP_API_KEY]
 gemini_model_for_chat_title: gemini-3.1-flash-lite
+# Language preferences for agents (default: English (US))
+chat_lang: English (US)
+doc_lang: English (US)
+comment_lang: English (US)
 webui_path: /opt/asgard/webui
 firebase_webpush_web:
   api_key: [FIREBASE_API_KEY]

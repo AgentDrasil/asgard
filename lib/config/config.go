@@ -18,6 +18,8 @@ type FirebaseWebpushWebConfig struct {
 	VapidKey          string `yaml:"vapid_key" json:"vapidKey"`
 }
 
+const DefaultLanguage = "English (US)"
+
 type Config struct {
 	Debug                   bool                      `yaml:"debug"`
 	DB                      string                    `yaml:"db"`
@@ -30,6 +32,38 @@ type Config struct {
 	GeminiAPIKey            string                    `yaml:"gemini_api_key"`
 	GeminiModelForChatTitle string                    `yaml:"gemini_model_for_chat_title"`
 	FirebaseWebpushWeb      *FirebaseWebpushWebConfig `yaml:"firebase_webpush_web"`
+	ChatLang                string                    `yaml:"chat_lang"`
+	DocLang                 string                    `yaml:"doc_lang"`
+	CommentLang             string                    `yaml:"comment_lang"`
+}
+
+func (c *Config) GetChatLang() string {
+	if c == nil || c.ChatLang == "" {
+		return DefaultLanguage
+	}
+	return c.ChatLang
+}
+
+func (c *Config) GetDocLang() string {
+	if c == nil || c.DocLang == "" {
+		return DefaultLanguage
+	}
+	return c.DocLang
+}
+
+func (c *Config) GetCommentLang() string {
+	if c == nil || c.CommentLang == "" {
+		return DefaultLanguage
+	}
+	return c.CommentLang
+}
+
+func (c *Config) LanguageRules() string {
+	return fmt.Sprintf(`## Language Preferences
+
+- Responses/Conversations: %s
+- Documents and Artifacts: %s
+- Code Comments and Docstrings: %s`, c.GetChatLang(), c.GetDocLang(), c.GetCommentLang())
 }
 
 func (c *Config) APIHost() string {
@@ -117,6 +151,18 @@ func LoadConfig(path string) (*Config, error) {
 
 	if cfg.InternalPort <= 0 {
 		cfg.InternalPort = 8081
+	}
+
+	if cfg.ChatLang == "" {
+		cfg.ChatLang = DefaultLanguage
+	}
+
+	if cfg.DocLang == "" {
+		cfg.DocLang = DefaultLanguage
+	}
+
+	if cfg.CommentLang == "" {
+		cfg.CommentLang = DefaultLanguage
 	}
 
 	if err := cfg.validate(); err != nil {
