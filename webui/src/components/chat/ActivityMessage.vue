@@ -3,6 +3,7 @@ import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { TOOL_ITEM_DELIMITER, getMessageArtifactFiles } from "../../utils/messageUtils";
 import { getAgentIcon, formatPath } from "../../utils/agentUtils";
+import { formatTimestamp } from "../../lib/format";
 
 defineProps<{
   message: ChatMessage;
@@ -26,6 +27,12 @@ const emit = defineEmits<{
         class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
       >
         <span>💭</span> Thinking Process
+        <span
+          v-if="message.timestamp"
+          class="text-[10px] font-mono font-normal text-base-content/40 ml-auto mr-4"
+        >
+          {{ formatTimestamp(message.timestamp) }}
+        </span>
       </summary>
       <div
         class="collapse-content text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed break-words [word-break:break-word]"
@@ -49,6 +56,9 @@ const emit = defineEmits<{
         <span v-if="message.agentName" class="text-xs font-mono text-error/70 truncate min-w-0">
           {{ message.agentName }}
         </span>
+        <span v-if="message.timestamp" class="text-[10px] font-mono text-error/60 ml-auto">
+          {{ formatTimestamp(message.timestamp) }}
+        </span>
       </div>
       <pre
         class="text-xs font-mono text-error/90 whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
@@ -67,6 +77,9 @@ const emit = defineEmits<{
       <Icon :icon="getAgentIcon(message.agentName, agents, activeAgent)" class="h-4 w-4 shrink-0" />
       <span class="text-xs font-bold text-base-content/70">
         {{ message.agentName || activeAgent?.name || "Agent" }}
+      </span>
+      <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
+        {{ formatTimestamp(message.timestamp) }}
       </span>
     </div>
     <details

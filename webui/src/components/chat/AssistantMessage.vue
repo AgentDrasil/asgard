@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import type { ChatMessage, AgentInfo } from "../../types";
-import { formatContextUsage, getContextColorClass } from "../../lib/format";
+import { formatContextUsage, getContextColorClass, formatTimestamp } from "../../lib/format";
 import { getAgentIcon } from "../../utils/agentUtils";
 import { useShiki } from "../../composables/useShiki";
 import MarkdownContent from "../MarkdownContent.vue";
@@ -59,6 +59,9 @@ const formatRawMarkdown = (content: string) => {
       <Icon :icon="getAgentIcon(message.agentName, agents, activeAgent)" class="h-4 w-4 shrink-0" />
       <span class="text-xs font-bold text-base-content/70">
         {{ message.agentName || activeAgent?.name || "Agent" }}
+      </span>
+      <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
+        {{ formatTimestamp(message.timestamp) }}
       </span>
     </div>
 

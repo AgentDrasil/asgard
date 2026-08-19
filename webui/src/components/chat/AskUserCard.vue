@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
 import { getAgentIcon, formatPath } from "../../utils/agentUtils";
+import { formatTimestamp } from "../../lib/format";
 import { sendAskUserReply } from "../../lib/api";
 
 const props = defineProps<{
@@ -65,7 +66,11 @@ const selectOptionAndReply = (option: string) => {
         <span class="text-xs font-bold text-base-content">
           {{ message.agentName || activeAgent?.name || "Agent" }} is asking:
         </span>
+        <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
+          {{ formatTimestamp(message.timestamp) }}
+        </span>
       </div>
+
       <div class="text-sm font-medium text-base-content whitespace-pre-wrap leading-relaxed">
         {{ message.content }}
       </div>

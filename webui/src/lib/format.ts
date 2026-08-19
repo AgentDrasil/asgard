@@ -41,3 +41,57 @@ export function getContextColorClass(inputTokens: number, maxTokens: number): st
   }
   return "text-base-content/60";
 }
+
+/**
+ * Formats a timestamp (epoch ms or s) into "YYYY-MM-DD HH:mm:ss.TZ".
+ * e.g. "2026-08-19 03:45:21.EDT" or "2026-08-19 03:45:21.UTC"
+ */
+export function formatTimestamp(timestamp?: number | string | Date): string {
+  if (!timestamp) return "";
+  let date: Date;
+  if (timestamp instanceof Date) {
+    date = timestamp;
+  } else if (typeof timestamp === "number") {
+    // If timestamp is in seconds (< 10^11), convert to milliseconds
+    date = new Date(timestamp < 1e11 ? timestamp * 1000 : timestamp);
+  } else {
+    const num = Number(timestamp);
+    if (!isNaN(num)) {
+      date = new Date(num < 1e11 ? num * 1000 : num);
+    } else {
+      date = new Date(timestamp);
+    }
+  }
+
+  if (isNaN(date.getTime())) return "";
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+
+  let tz = "";
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(date);
+    const tzPart = parts.find((p) => p.type === "timeZoneName");
+    if (tzPart && tzPart.value) {
+      tz = tzPart.value;
+    }
+  } catch {
+    // fallback
+  }
+
+  if (!tz) {
+    const offset = -date.getTimezoneOffset();
+    const sign = offset >= 0 ? "+" : "-";
+    const absOffset = Math.abs(offset);
+    const offsetHours = pad(Math.floor(absOffset / 60));
+    const offsetMins = pad(absOffset % 60);
+    tz = `UTC${sign}${offsetHours}:${offsetMins}`;
+  }
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${tz}`;
+}

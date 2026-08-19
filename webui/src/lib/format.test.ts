@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { humanfriendly, formatContextUsage, getContextColorClass } from "./format";
+import { humanfriendly, formatContextUsage, getContextColorClass, formatTimestamp } from "./format";
 
 describe("humanfriendly format tests", () => {
   it("formats numbers smaller than 1024", () => {
@@ -37,5 +37,19 @@ describe("getContextColorClass tests", () => {
     // >= 80%
     expect(getContextColorClass(800, 1000)).toBe("text-error font-bold");
     expect(getContextColorClass(950, 1000)).toBe("text-error font-bold");
+  });
+});
+
+describe("formatTimestamp tests", () => {
+  it("returns empty string for missing or invalid timestamps", () => {
+    expect(formatTimestamp(undefined)).toBe("");
+    expect(formatTimestamp(0)).toBe("");
+    expect(formatTimestamp("invalid")).toBe("");
+  });
+
+  it("formats epoch timestamp into YYYY-MM-DD HH:mm:ss.TZ format", () => {
+    const fixedDate = new Date("2026-08-19T03:45:21Z");
+    const formatted = formatTimestamp(fixedDate.getTime());
+    expect(formatted).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\..+$/);
   });
 });
