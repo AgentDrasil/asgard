@@ -1,5 +1,6 @@
 export interface AgentInfo {
   id: string;
+  type?: "agent" | "workflow" | (string & {});
   name: string;
   description: string;
   icon?: string;

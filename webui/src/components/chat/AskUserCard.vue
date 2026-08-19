@@ -6,13 +6,20 @@ import { getMessageArtifactFiles } from "../../utils/messageUtils";
 import { getAgentIcon, formatPath } from "../../utils/agentUtils";
 import { formatTimestamp } from "../../lib/format";
 import { sendAskUserReply } from "../../lib/api";
+import { parseOptions } from "../../utils/askUserOptions";
 
-const props = defineProps<{
-  message: ChatMessage;
-  sessionId?: string | null;
-  activeAgent: AgentInfo | null;
-  agents?: AgentInfo[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    message: ChatMessage;
+    sessionId?: string | null;
+    activeAgent: AgentInfo | null;
+    agents?: AgentInfo[];
+    readonly?: boolean;
+  }>(),
+  {
+    readonly: false,
+  },
+);
 
 const emit = defineEmits<{
   (e: "open-artifact", file: string): void;
@@ -23,16 +30,6 @@ const inlineInput = ref("");
 const isSubmitting = ref(false);
 const isSubmitted = ref(false);
 const submittedText = ref("");
-
-const parseOptions = (content: string): string[] => {
-  if (!content) return [];
-  const match = content.match(/Options:\s*([^\n\r]+)/i);
-  if (!match || !match[1]) return [];
-  return match[1]
-    .split("/")
-    .map((s) => s.trim())
-    .filter(Boolean);
-};
 
 const submitReply = async (textToSubmit?: string) => {
   const text = (textToSubmit ?? inlineInput.value).trim();
@@ -99,7 +96,9 @@ const selectOptionAndReply = (option: string) => {
 
       <!-- Quick Action Option Buttons -->
       <div
-        v-if="!message.replied && !isSubmitted && parseOptions(message.content).length > 0"
+        v-if="
+          !readonly && !message.replied && !isSubmitted && parseOptions(message.content).length > 0
+        "
         class="flex flex-wrap gap-2 pt-1"
       >
         <button
@@ -115,7 +114,7 @@ const selectOptionAndReply = (option: string) => {
 
       <!-- Inline Reply Box -->
       <div
-        v-if="!message.replied && !isSubmitted"
+        v-if="!readonly && !message.replied && !isSubmitted"
         class="flex items-center gap-2 pt-2 border-t border-warning/20"
       >
         <input
@@ -137,7 +136,7 @@ const selectOptionAndReply = (option: string) => {
         </button>
       </div>
       <div
-        v-else
+        v-else-if="message.replied || isSubmitted"
         class="text-xs font-semibold text-success flex items-center gap-1.5 pt-2 border-t border-warning/20"
       >
         <Icon icon="fluent:checkmark-circle-24-filled" class="h-4 w-4" />
