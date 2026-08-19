@@ -3,9 +3,10 @@ import { ref, watch, onMounted, onUnmounted } from "vue";
 import ChatArea from "../components/ChatArea.vue";
 import ChatInput from "../components/ChatInput.vue";
 import DiffView from "../components/DiffView.vue";
+import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
 import ArtifactViewer from "../components/ArtifactViewer.vue";
-import type { ChatMessage, AgentInfo } from "../types";
+import type { ChatMessage, AgentInfo, ActiveView } from "../types";
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -15,12 +16,14 @@ const props = defineProps<{
   agents?: AgentInfo[];
   runDir: string;
   sessionId: string;
-  showDiffView: boolean;
   gitRoot: string;
   terminalType?: "session" | "sidebar";
   workingAgentLabel?: string | null;
 }>();
 
+const activeView = defineModel<ActiveView>("activeView", { default: "chat" });
+const selectedFilePath = defineModel<string | null>("selectedFilePath", { default: null });
+const isFileTreeOpen = defineModel<boolean>("isFileTreeOpen", { default: true });
 const isDetailsOpen = defineModel<boolean>("isDetailsOpen");
 const chatInputText = defineModel<string>("chatInputText");
 const isTerminalOpen = defineModel<boolean>("isTerminalOpen", { default: false });
@@ -94,6 +97,7 @@ const emit = defineEmits<{
   (e: "close-diff"): void;
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
+  (e: "open-search"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
 }>();
 
@@ -181,26 +185,46 @@ watch(isArtifactDrawerOpen, (open) => {
 
 <template>
   <div class="flex-1 flex flex-col h-full overflow-hidden relative">
-    <!-- Top Area: Split ChatArea / DiffView & ArtifactViewer -->
+    <!-- Top Area: Split ChatArea / DiffView / FileView & ArtifactViewer -->
     <div class="flex-1 flex h-full overflow-hidden relative min-h-0">
-      <!-- Left: Chat Area (Messages) or DiffView (VCS View) -->
+      <!-- Left: VCS / File / Chat Area -->
       <div
         class="flex-1 flex flex-col h-full overflow-hidden relative min-w-0"
         :class="
-          !showDiffView && isArtifactDrawerOpen && activeArtifactPath ? 'hidden md:flex' : 'flex'
+          activeView === 'chat' && isArtifactDrawerOpen && activeArtifactPath
+            ? 'hidden md:flex'
+            : 'flex'
         "
       >
         <!-- VCS View -->
         <DiffView
-          v-if="showDiffView"
+          v-if="activeView === 'vcs'"
           :runDir="runDir"
           :gitRoot="gitRoot"
           :isTerminalOpen="isTerminalOpen"
           v-model:chatInputText="chatInputText"
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
-          @close="$emit('close-diff')"
-          @toggle-terminal="$emit('toggle-terminal')"
+          @close="activeView = 'chat'"
+          @open-file-view="activeView = 'file'"
+          @toggle-terminal="emit('toggle-terminal')"
         />
+
+        <!-- File View -->
+        <FileView
+          v-else-if="activeView === 'file'"
+          :sessionId="sessionId"
+          :runDir="runDir"
+          :gitRoot="gitRoot"
+          :isTerminalOpen="isTerminalOpen"
+          v-model:isFileTreeOpen="isFileTreeOpen"
+          v-model:chatInputText="chatInputText"
+          v-model:selectedFilePath="selectedFilePath"
+          @close="activeView = 'chat'"
+          @open-vcs="activeView = 'vcs'"
+          @toggle-terminal="emit('toggle-terminal')"
+          @open-search="emit('open-search')"
+        />
+
         <!-- Chat View -->
         <ChatArea
           v-else
@@ -215,7 +239,13 @@ watch(isArtifactDrawerOpen, (open) => {
           :isArtifactDrawerOpen="isArtifactDrawerOpen"
           :workingAgentLabel="workingAgentLabel"
           v-model:isDetailsOpen="isDetailsOpen"
-          @open-diff="(g) => $emit('open-diff', g)"
+          @open-diff="
+            (g) => {
+              activeView = 'vcs';
+              emit('open-diff', g);
+            }
+          "
+          @open-file-view="activeView = 'file'"
           @open-artifact="handleOpenArtifact"
           @toggle-terminal="emit('toggle-terminal')"
           @toggle-sidebar="emit('toggle-sidebar')"
@@ -226,7 +256,7 @@ watch(isArtifactDrawerOpen, (open) => {
 
       <!-- Right: Resizable Artifact Panel (Only in Chat View) -->
       <div
-        v-if="!showDiffView && isArtifactDrawerOpen && activeArtifactPath"
+        v-if="activeView === 'chat' && isArtifactDrawerOpen && activeArtifactPath"
         class="w-full md:w-auto h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
         :class="{
           'transition-none': isResizingArtifact,
@@ -256,8 +286,8 @@ watch(isArtifactDrawerOpen, (open) => {
     <!-- Bottom Area: ChatInput (Chat View only) & TerminalPanel -->
     <div class="w-full shrink-0 flex flex-col z-20">
       <ChatInput
-        v-if="!showDiffView"
-        @send="(text) => $emit('send', text)"
+        v-if="activeView === 'chat'"
+        @send="(text) => emit('send', text)"
         :loading="loading"
         v-model="chatInputText"
       />

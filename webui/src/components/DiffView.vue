@@ -10,7 +10,12 @@ import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
 import { commentKey, rebuildChatInputFromComments } from "../utils/commentUtils";
 
-const { toggleDiffShortcut, toggleTerminalShortcut, toggleArtifactsShortcut } = useShortcuts();
+const {
+  toggleDiffShortcut,
+  toggleTerminalShortcut,
+  toggleArtifactsShortcut,
+  toggleFileViewShortcut,
+} = useShortcuts();
 
 const props = defineProps<{
   runDir: string;
@@ -23,6 +28,7 @@ const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: tru
 
 const emit = defineEmits<{
   (e: "close"): void;
+  (e: "open-file-view"): void;
   (e: "update:chatInputText", val: string): void;
   (e: "toggle-terminal"): void;
 }>();
@@ -378,7 +384,7 @@ const commentedFileList = computed(() => {
 
       <!-- Right: View Switcher Join Group & Layout Controls Join Group -->
       <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-        <!-- View Switcher Join Group (Chat / VCS) - consistent with Chat View -->
+        <!-- View Switcher Join Group (Chat / VCS / Files) - consistent with Chat View -->
         <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
             @click="emit('close')"
@@ -394,6 +400,14 @@ const commentedFileList = computed(() => {
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
             <span class="hidden sm:inline">VCS</span>
+          </button>
+          <button
+            @click="emit('open-file-view')"
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
+            :title="`Switch to File View (${toggleFileViewShortcut})`"
+          >
+            <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">Files</span>
           </button>
         </div>
 

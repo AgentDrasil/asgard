@@ -2,7 +2,9 @@
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
+import FileSearchModal from "./components/file/FileSearchModal.vue";
 import { initPushNotifications } from "./lib/push";
+import type { ActiveView } from "./types";
 
 import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
@@ -12,7 +14,10 @@ const route = useRoute();
 const router = useRouter();
 
 const welcomePrompt = ref("");
-const showDiffView = ref(false);
+const activeView = ref<ActiveView>("chat");
+const isFileSearchOpen = ref(false);
+const selectedFilePath = ref<string | null>(null);
+const isFileTreeOpen = ref(true);
 const chatInputText = ref("");
 const currentGitRoot = ref("");
 const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 768);
@@ -46,6 +51,19 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     return;
   }
 
+  // Ctrl+P / Cmd+P (Open file search modal before input guard)
+  if (
+    ctrlKey &&
+    !e.altKey &&
+    !e.shiftKey &&
+    (e.code === "KeyP" || e.key === "p" || e.key === "P")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    isFileSearchOpen.value = true;
+    return;
+  }
+
   const target = e.target as HTMLElement | null;
   if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) {
     return;
@@ -58,21 +76,33 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyB") {
     e.preventDefault();
     e.stopPropagation();
-    if (showDiffView.value) {
+    if (activeView.value === "vcs") {
       isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
+    } else if (activeView.value === "file") {
+      isFileTreeOpen.value = !isFileTreeOpen.value;
     } else {
       isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
     }
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
     e.preventDefault();
     e.stopPropagation();
-    if (!showDiffView.value) {
+    if (activeView.value === "vcs") {
+      activeView.value = "chat";
+    } else {
       const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
       if (gitRootCandidate) {
         currentGitRoot.value = gitRootCandidate;
       }
+      activeView.value = "vcs";
     }
-    showDiffView.value = !showDiffView.value;
+  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyF") {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeView.value === "file") {
+      activeView.value = "chat";
+    } else {
+      activeView.value = "file";
+    }
   }
 };
 
@@ -112,7 +142,8 @@ const { handleSelectSession, handleNewChat, handleDeleteSession } = useSessions(
 watch(
   () => route.params.id,
   async (newId) => {
-    showDiffView.value = false;
+    activeView.value = "chat";
+    selectedFilePath.value = null;
     chatInputText.value = "";
     if (newId && typeof newId === "string") {
       await openSession(newId);
@@ -191,6 +222,7 @@ const closeSidebarOnMobile = () => {
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="toggleTerminal('sidebar')"
     />
+
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
       <router-view v-slot="{ Component }">
@@ -204,9 +236,11 @@ const closeSidebarOnMobile = () => {
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
           :sessionId="activeSessionId || ''"
-          :showDiffView="showDiffView"
           :gitRoot="currentGitRoot"
           :terminalType="terminalType"
+          v-model:activeView="activeView"
+          v-model:selectedFilePath="selectedFilePath"
+          v-model:isFileTreeOpen="isFileTreeOpen"
           v-model:selectedAgentId="selectedAgentId"
           v-model:selectedDir="selectedDir"
           v-model:selectedModel="selectedModel"
@@ -221,15 +255,31 @@ const closeSidebarOnMobile = () => {
           @open-diff="
             (gitRoot) => {
               currentGitRoot = gitRoot;
-              showDiffView = true;
+              activeView = 'vcs';
             }
           "
-          @close-diff="showDiffView = false"
+          @close-diff="activeView = 'chat'"
+          @open-search="isFileSearchOpen = true"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
           @ask-replied="handleAskReplied"
         />
       </router-view>
     </main>
+
+    <!-- File Search Modal (Ctrl+P / Cmd+P) -->
+    <FileSearchModal
+      :isOpen="isFileSearchOpen"
+      :sessionId="activeSessionId || ''"
+      :runDir="activeSession?.runDir || selectedDir"
+      @close="isFileSearchOpen = false"
+      @select-file="
+        (path) => {
+          selectedFilePath = path;
+          activeView = 'file';
+          isFileSearchOpen = false;
+        }
+      "
+    />
   </div>
 </template>

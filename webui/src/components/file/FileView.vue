@@ -27,11 +27,18 @@ const emit = defineEmits<{
   (e: "open-search"): void;
 }>();
 
-const { toggleTerminalShortcut, toggleArtifactsShortcut } = useShortcuts();
+const {
+  toggleTerminalShortcut,
+  toggleArtifactsShortcut,
+  toggleDiffShortcut,
+  toggleFileViewShortcut,
+} = useShortcuts();
 
 // ── Responsive Layout & Mobile Tabs ──────────────────────────────────────────
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
-const mobileActiveTab = ref<"files" | "code">(props.initialFilePath ? "code" : "files");
+const mobileActiveTab = ref<"files" | "code">(
+  props.initialFilePath || selectedFilePath.value ? "code" : "files",
+);
 
 const updateWindowWidth = () => {
   isDesktop.value = window.innerWidth >= 768;
@@ -39,7 +46,7 @@ const updateWindowWidth = () => {
 
 onMounted(() => {
   window.addEventListener("resize", updateWindowWidth);
-  if (props.initialFilePath) {
+  if (props.initialFilePath && !selectedFilePath.value) {
     selectedFilePath.value = props.initialFilePath;
   }
 });
@@ -193,7 +200,7 @@ const breadcrumbParts = computed(() => {
           <button
             @click="emit('close')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            title="Switch to Chat View"
+            :title="`Switch to Chat View (${toggleFileViewShortcut})`"
           >
             <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
             <span class="hidden sm:inline">Chat</span>
@@ -202,7 +209,7 @@ const breadcrumbParts = computed(() => {
             v-if="gitRoot"
             @click="emit('open-vcs')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            title="Switch to VCS View"
+            :title="`Switch to VCS View (${toggleDiffShortcut})`"
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
             <span class="hidden sm:inline">VCS</span>
@@ -211,7 +218,7 @@ const breadcrumbParts = computed(() => {
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
             title="Files View"
           >
-            <Icon icon="octicon:file-directory-24" class="h-3.5 w-3.5" />
+            <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
             <span class="hidden sm:inline">Files</span>
           </button>
         </div>

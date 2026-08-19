@@ -16,6 +16,7 @@ const {
   toggleArtifactsShortcut,
   toggleDiffShortcut,
   toggleTerminalShortcut,
+  toggleFileViewShortcut,
 } = useShortcuts();
 
 const props = withDefaults(
@@ -44,6 +45,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "update:isDetailsOpen", val: boolean): void;
   (e: "open-diff", gitRoot: string): void;
+  (e: "open-file-view"): void;
   (e: "open-artifact", file: string): void;
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
@@ -124,7 +126,7 @@ const { showScrollBottom, scrollToBottom } = useChatScroll({
       </div>
 
       <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 h-7 sm:h-8">
-        <!-- View Switcher Join Group (Chat / VCS) -->
+        <!-- View Switcher Join Group (Chat / VCS / Files) -->
         <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
@@ -141,6 +143,14 @@ const { showScrollBottom, scrollToBottom } = useChatScroll({
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
             <span class="hidden sm:inline">VCS</span>
+          </button>
+          <button
+            @click="emit('open-file-view')"
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
+            :title="`Switch to File View (${toggleFileViewShortcut})`"
+          >
+            <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">Files</span>
           </button>
         </div>
 
