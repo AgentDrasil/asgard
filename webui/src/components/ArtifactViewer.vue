@@ -52,11 +52,13 @@ const highlightedArtifactContent = computed(() => {
     "text-xs",
     "font-mono",
     "leading-relaxed",
+    "min-h-[120px]",
+    "w-full",
   ]);
   if (highlighted) return highlighted;
   // Fallback while Shiki loads or when it fails: keep the same wrapping so the
   // layout doesn't jump once highlighting kicks in.
-  return `<pre class="font-mono text-xs text-base-content bg-base-200/80 p-4 rounded-lg border border-base-300 leading-relaxed whitespace-pre-wrap break-words"><code>${DOMPurify.sanitize(fileData.value.content)}</code></pre>`;
+  return `<pre class="font-mono text-xs text-base-content bg-base-200/80 p-4 rounded-lg border border-base-300 leading-relaxed whitespace-pre-wrap break-words min-h-[120px] w-full"><code>${DOMPurify.sanitize(fileData.value.content)}</code></pre>`;
 });
 
 function formatPath(path: string): string {
@@ -133,7 +135,7 @@ function onFileSelectChange(event: Event) {
 
 <template>
   <div
-    class="h-full flex flex-col bg-base-100 border-l border-base-300 text-base-content select-text overflow-hidden shadow-2xl"
+    class="w-full h-full flex flex-col bg-base-100 border-l border-base-300 text-base-content select-text overflow-hidden shadow-2xl"
   >
     <!-- Header & Dropdown File Selection Bar -->
     <div
