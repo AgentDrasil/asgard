@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -749,4 +750,13 @@ nodes:
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestParseDevWorkflowYAML(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("../../tmp/agents/dev-workflow/workflow.yaml")
+	require.NoError(t, err)
+	defn, err := ParseDefinition(content)
+	require.NoError(t, err)
+	assert.Equal(t, "dev-workflow", defn.Name)
 }
