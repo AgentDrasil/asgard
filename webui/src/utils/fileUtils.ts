@@ -1,7 +1,16 @@
 /**
  * File utility functions for icon resolution, syntax language detection,
- * HTML escaping, and syntax-highlighted HTML line extraction.
+ * HTML escaping, syntax-highlighted HTML line extraction, and directory tree relationships.
  */
+
+export function isAncestorDir(dirPath: string, targetPath: string): boolean {
+  if (!dirPath || !targetPath) return false;
+  const normalizedDir = dirPath.endsWith("/") ? dirPath : dirPath + "/";
+  const normalizedTarget = targetPath.endsWith("/") ? targetPath.slice(0, -1) : targetPath;
+  const strippedDir = normalizedDir.slice(0, -1);
+  if (strippedDir === normalizedTarget) return false;
+  return targetPath.startsWith(normalizedDir);
+}
 
 export function mapExtToLang(ext?: string): string {
   const e = (ext || "").toLowerCase();

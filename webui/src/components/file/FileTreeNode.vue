@@ -2,7 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import { getFileTree } from "../../lib/api";
-import { getFileIcon } from "../../utils/fileUtils";
+import { getFileIcon, isAncestorDir } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
 
 const props = withDefaults(
@@ -70,6 +70,19 @@ async function toggleExpand() {
     await loadDir();
   }
 }
+
+watch(
+  () => props.selectedPath,
+  (targetPath) => {
+    if (props.node.isDir && targetPath && isAncestorDir(props.node.path, targetPath)) {
+      isExpanded.value = true;
+      if (!isLoaded.value && !isLoading.value) {
+        loadDir();
+      }
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => [props.node, props.treeVersion],

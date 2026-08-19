@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 import FileTreeSidebar from "./FileTreeSidebar.vue";
 import FileCodeViewer from "./FileCodeViewer.vue";
@@ -7,7 +8,11 @@ import { useShortcuts } from "../../composables/useShortcuts";
 import { rebuildChatInputFromComments, commentKey } from "../../utils/commentUtils";
 import { humanfriendly } from "../../lib/format";
 import { getFileIcon } from "../../utils/fileUtils";
+import { buildFilesRoute, resolveViewFromRoute } from "../../utils/routeUtils";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
+
+const route = useRoute();
+const router = useRouter();
 
 const props = defineProps<{
   sessionId: string;
@@ -82,9 +87,21 @@ function handleClearComments() {
 }
 
 function handleSelectFile(path: string) {
-  selectedFilePath.value = path;
+  if (selectedFilePath.value !== path) {
+    selectedFilePath.value = path;
+  }
   if (!isDesktop.value) {
     mobileActiveTab.value = "code";
+  }
+  if (props.sessionId) {
+    const resolved = resolveViewFromRoute(
+      route.path,
+      route.params,
+      route.name ? String(route.name) : null,
+    );
+    if (resolved.filePath !== path) {
+      router.replace(buildFilesRoute(props.sessionId, path));
+    }
   }
 }
 
@@ -92,17 +109,11 @@ function handleRefreshFile() {
   codeViewerRef.value?.loadContent();
 }
 
-watch(
-  () => props.initialFilePath,
-  (newPath) => {
-    if (newPath) {
-      selectedFilePath.value = newPath;
-      if (!isDesktop.value) {
-        mobileActiveTab.value = "code";
-      }
-    }
-  },
-);
+watch(selectedFilePath, (newPath) => {
+  if (newPath && !isDesktop.value) {
+    mobileActiveTab.value = "code";
+  }
+});
 
 const breadcrumbParts = computed(() => {
   if (!selectedFilePath.value) return [];

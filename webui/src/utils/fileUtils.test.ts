@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { mapExtToLang, getFileIcon, escapeHtml, extractHighlightedLines } from "./fileUtils";
+import {
+  mapExtToLang,
+  getFileIcon,
+  escapeHtml,
+  extractHighlightedLines,
+  isAncestorDir,
+} from "./fileUtils";
 
 describe("fileUtils", () => {
   describe("mapExtToLang", () => {
@@ -86,6 +92,32 @@ describe("fileUtils", () => {
 
     it("returns empty array for empty string", () => {
       expect(extractHighlightedLines("")).toEqual([]);
+    });
+  });
+
+  describe("isAncestorDir", () => {
+    it("identifies direct and nested parent directories accurately", () => {
+      expect(isAncestorDir("src", "src/main.ts")).toBe(true);
+      expect(isAncestorDir("src", "src/components/file/FileView.vue")).toBe(true);
+      expect(isAncestorDir("src/components", "src/components/file/FileView.vue")).toBe(true);
+      expect(isAncestorDir("src/components/", "src/components/file/FileView.vue")).toBe(true);
+      expect(isAncestorDir("/home/user/src", "/home/user/src/components/File.vue")).toBe(true);
+    });
+
+    it("distinguishes same-prefix sibling directories correctly (e.g. /src/app vs /src/app-2)", () => {
+      expect(isAncestorDir("/src/app", "/src/app-2/main.ts")).toBe(false);
+      expect(isAncestorDir("src/app", "src/app-2/main.ts")).toBe(false);
+      expect(isAncestorDir("src/app", "src/app/main.ts")).toBe(true);
+      expect(isAncestorDir("components", "components-extra/test.ts")).toBe(false);
+    });
+
+    it("handles empty paths, trailing slashes, and identical paths safely", () => {
+      expect(isAncestorDir("", "src/main.ts")).toBe(false);
+      expect(isAncestorDir("src", "")).toBe(false);
+      expect(isAncestorDir("", "")).toBe(false);
+      expect(isAncestorDir("src/main.ts", "src/main.ts")).toBe(false);
+      expect(isAncestorDir("src", "src")).toBe(false);
+      expect(isAncestorDir("src/", "src/")).toBe(false);
     });
   });
 });

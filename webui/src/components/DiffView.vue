@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { DiffView, DiffModeEnum, SplitSide } from "@git-diff-view/vue";
 import { DiffFile } from "@git-diff-view/vue";
 import "@git-diff-view/vue/styles/diff-view.css";
@@ -9,6 +10,10 @@ import VCSSidebar from "./vcs/VCSSidebar.vue";
 import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
 import { commentKey, rebuildChatInputFromComments } from "../utils/commentUtils";
+import { buildVcsRoute, resolveViewFromRoute } from "../utils/routeUtils";
+
+const route = useRoute();
+const router = useRouter();
 
 const {
   toggleDiffShortcut,
@@ -21,16 +26,30 @@ const props = defineProps<{
   sessionId?: string;
   runDir: string;
   gitRoot: string;
-  chatInputText: string;
+  initialCommit?: string | null;
+  initialFilePath?: string | null;
   isTerminalOpen?: boolean;
 }>();
 
 const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: true });
+const chatInputText = defineModel<string>("chatInputText", { default: "" });
+const selectedCommit = defineModel<string | null>("selectedCommit", {
+  default: null,
+});
+const selectedFilePath = defineModel<string | null>("selectedFilePath", {
+  default: null,
+});
+
+if (selectedCommit.value === null && props.initialCommit) {
+  selectedCommit.value = props.initialCommit;
+}
+if (selectedFilePath.value === null && props.initialFilePath) {
+  selectedFilePath.value = props.initialFilePath;
+}
 
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "open-file-view"): void;
-  (e: "update:chatInputText", val: string): void;
   (e: "toggle-terminal"): void;
 }>();
 
@@ -42,11 +61,12 @@ const trackingBranch = ref("");
 const ahead = ref(0);
 const behind = ref(0);
 const unstashedCount = ref(0);
-const selectedCommit = ref<string | null>(null); // null represents "unstash" (working copy)
 
 const loading = ref(false);
 const errorMsg = ref("");
 const selectedIndex = ref(0);
+
+let lastLoadedCommit: string | null | undefined = undefined;
 
 const selectedFile = computed(() => files.value[selectedIndex.value] ?? null);
 
@@ -136,11 +156,46 @@ async function loadDiffOnly() {
     files.value = [];
     return;
   }
+  lastLoadedCommit = selectedCommit.value ?? null;
   try {
     const result = await getGitDiff(props.sessionId, selectedCommit.value || undefined);
     files.value = result;
-    if (selectedIndex.value >= result.length) {
-      selectedIndex.value = 0;
+
+    const targetFilePath = selectedFilePath.value ?? props.initialFilePath;
+    if (targetFilePath && files.value.length > 0) {
+      const idx = files.value.findIndex(
+        (f) => f.newPath === targetFilePath || f.oldPath === targetFilePath,
+      );
+      if (idx > -1) {
+        selectedIndex.value = idx;
+        selectedFilePath.value = files.value[idx].newPath;
+      } else {
+        // 未命中降级：回落为首个文件并纠正 URL
+        selectedIndex.value = 0;
+        selectedFilePath.value = files.value[0]?.newPath ?? null;
+        if (props.sessionId) {
+          const resolved = resolveViewFromRoute(
+            route.path,
+            route.params,
+            route.name ? String(route.name) : null,
+          );
+          if (
+            resolved.filePath !== (files.value[0]?.newPath ?? null) ||
+            resolved.commitId !== selectedCommit.value
+          ) {
+            router.replace(
+              buildVcsRoute(props.sessionId, selectedCommit.value, files.value[0]?.newPath),
+            );
+          }
+        }
+      }
+    } else {
+      if (selectedIndex.value >= files.value.length) {
+        selectedIndex.value = 0;
+      }
+      if (files.value.length > 0) {
+        selectedFilePath.value = files.value[selectedIndex.value]?.newPath ?? null;
+      }
     }
   } catch (e: any) {
     errorMsg.value = e?.message ?? "Failed to load diff";
@@ -148,9 +203,21 @@ async function loadDiffOnly() {
 }
 
 async function handleSelectCommit(hash: string | null) {
+  if (selectedCommit.value === hash && files.value.length > 0) return;
   selectedCommit.value = hash;
   selectedIndex.value = 0;
   await loadDiffOnly();
+  if (props.sessionId) {
+    const currentTarget = files.value[selectedIndex.value]?.newPath;
+    const resolved = resolveViewFromRoute(
+      route.path,
+      route.params,
+      route.name ? String(route.name) : null,
+    );
+    if (resolved.commitId !== hash || resolved.filePath !== (currentTarget ?? null)) {
+      router.replace(buildVcsRoute(props.sessionId, hash, currentTarget));
+    }
+  }
   if (!isDesktop.value) {
     mobileActiveTab.value = "diff";
   }
@@ -159,6 +226,18 @@ async function handleSelectCommit(hash: string | null) {
 function handleSelectFile(index: number) {
   selectedIndex.value = index;
   activeWidget.value = null;
+  const newPath = files.value[index]?.newPath;
+  selectedFilePath.value = newPath ?? null;
+  if (props.sessionId && newPath) {
+    const resolved = resolveViewFromRoute(
+      route.path,
+      route.params,
+      route.name ? String(route.name) : null,
+    );
+    if (resolved.filePath !== newPath) {
+      router.replace(buildVcsRoute(props.sessionId, selectedCommit.value, newPath));
+    }
+  }
   if (!isDesktop.value) {
     mobileActiveTab.value = "diff";
   }
@@ -180,7 +259,27 @@ onUnmounted(() => {
   window.removeEventListener("resize", updateWindowWidth);
 });
 
-watch(() => props.runDir, loadGitData);
+watch([() => props.runDir, () => props.sessionId], loadGitData);
+
+watch([() => props.initialCommit, () => selectedCommit.value], async () => {
+  const targetCommit =
+    props.initialCommit !== undefined ? props.initialCommit : selectedCommit.value;
+  if (targetCommit !== undefined && targetCommit !== lastLoadedCommit) {
+    selectedCommit.value = targetCommit;
+    await loadDiffOnly();
+  }
+});
+
+watch([() => props.initialFilePath, () => selectedFilePath.value], () => {
+  const targetFile =
+    props.initialFilePath !== undefined ? props.initialFilePath : selectedFilePath.value;
+  if (targetFile && files.value.length > 0) {
+    const idx = files.value.findIndex((f) => f.newPath === targetFile || f.oldPath === targetFile);
+    if (idx > -1 && idx !== selectedIndex.value) {
+      selectedIndex.value = idx;
+    }
+  }
+});
 
 // ── View mode ────────────────────────────────────────────────────────────────
 // Default: Split on desktop, Unified on mobile
@@ -272,7 +371,7 @@ function deleteComment(key: string) {
 }
 
 function rebuildChatInput() {
-  emit("update:chatInputText", rebuildChatInputFromComments(comments.value));
+  chatInputText.value = rebuildChatInputFromComments(comments.value);
 }
 
 function hasComment(side: SplitSide, lineNumber: number): boolean {
@@ -646,7 +745,7 @@ const commentedFileList = computed(() => {
           <button
             @click="
               comments.clear();
-              emit('update:chatInputText', '');
+              chatInputText = '';
             "
             class="btn btn-ghost btn-xs text-warning/70 hover:text-error ml-auto shrink-0"
             title="Clear all comments"
