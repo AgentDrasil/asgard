@@ -17,6 +17,16 @@ const routes: RouteRecordRaw[] = [
     name: "chat",
     component: ChatView,
   },
+  {
+    path: "/chat/:id/files/:filePath(.*)*",
+    name: "chat-files",
+    component: ChatView,
+  },
+  {
+    path: "/chat/:id/vcs/:commitId?/:filePath(.*)*",
+    name: "chat-vcs",
+    component: ChatView,
+  },
 ];
 
 export const router = createRouter({
