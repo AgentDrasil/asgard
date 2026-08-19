@@ -14,13 +14,21 @@ import (
 )
 
 // buildSystemPrompt constructs the full system prompt for the given CLI.
-// It starts with the CLI-specific instructions from its SandboxSpec (including SystemPromptPeerHeader if hasTeam is true)
+// It starts with the global language rules (if non-empty), followed by CLI-specific instructions
+// from its SandboxSpec (including SystemPromptPeerHeader if hasTeam is true)
 // and appends the content of agentsMDPath if the file exists.
-func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool) (string, error) {
+func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool, langRules string) (string, error) {
 	var sb strings.Builder
+
+	if trimmed := strings.TrimSpace(langRules); trimmed != "" {
+		sb.WriteString(trimmed)
+	}
 
 	if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
 		if header := spec.SystemPromptHeader(); header != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
 			sb.WriteString(header)
 		}
 		if hasTeam {
@@ -50,8 +58,8 @@ func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool) (string, e
 
 // writeSystemPromptFile writes the combined system prompt for the given CLI to
 // a file named ".asgard_system_prompt" inside dir, and returns the host path.
-func writeSystemPromptFile(dir string, cli string, agentsMDPath string, hasTeam bool) (string, error) {
-	content, err := buildSystemPrompt(cli, agentsMDPath, hasTeam)
+func writeSystemPromptFile(dir string, cli string, agentsMDPath string, hasTeam bool, langRules string) (string, error) {
+	content, err := buildSystemPrompt(cli, agentsMDPath, hasTeam, langRules)
 	if err != nil {
 		return "", err
 	}
@@ -178,7 +186,7 @@ func appendSSHSandboxArgs(args []string, home string) []string {
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) ([]string, error) {
+func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -301,7 +309,7 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 
 		if spec != nil {
 			hasTeam := cfg != nil && strings.TrimSpace(cfg.Team) != ""
-			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath, hasTeam)
+			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath, hasTeam, langRules)
 			if err != nil {
 				return nil, err
 			}
@@ -342,8 +350,8 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID)
+func CommandForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules)
 	if err != nil {
 		return nil, err
 	}

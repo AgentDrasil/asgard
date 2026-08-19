@@ -12,6 +12,7 @@ import (
 	"github.com/AgentDrasil/asgard/lib/agents"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/lib/config"
 )
 
 func TestRun(t *testing.T) {
@@ -207,5 +208,33 @@ func TestRun(t *testing.T) {
 		t.Error("expected error for model with zero quota when explicitly selected, but got nil")
 	} else if !strings.Contains(err.Error(), "has no quota remaining") {
 		t.Errorf("expected 'has no quota remaining' error, got: %v", err)
+	}
+
+	// 8. Test case: run with custom config injecting language rules into prompt file
+	confWithLangs := &config.Config{
+		ChatLang:    "Japanese",
+		DocLang:     "Japanese",
+		CommentLang: "English",
+	}
+	out, err = Run(context.Background(), agent, "hello agent", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat-lang", StatusScope{}, confWithLangs)
+	if err != nil {
+		t.Fatalf("unexpected error running agent with custom language config: %v", err)
+	}
+	if !strings.Contains(string(out), "mock bwrap execution succeeded") {
+		t.Errorf("expected mock output, got: %q", string(out))
+	}
+	langPromptPath := filepath.Join(tmpDir, "tmp", "test-chat-lang", ".asgard_system_prompt")
+	langPromptContent, err := os.ReadFile(langPromptPath)
+	if err != nil {
+		t.Fatalf("failed to read generated prompt file: %v", err)
+	}
+	if !strings.Contains(string(langPromptContent), "Responses/Conversations: Japanese") {
+		t.Errorf("expected prompt file to contain 'Responses/Conversations: Japanese', got: %s", string(langPromptContent))
+	}
+	if !strings.Contains(string(langPromptContent), "Documents and Artifacts: Japanese") {
+		t.Errorf("expected prompt file to contain 'Documents and Artifacts: Japanese', got: %s", string(langPromptContent))
+	}
+	if !strings.Contains(string(langPromptContent), "Code Comments and Docstrings: English") {
+		t.Errorf("expected prompt file to contain 'Code Comments and Docstrings: English', got: %s", string(langPromptContent))
 	}
 }

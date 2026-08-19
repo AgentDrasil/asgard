@@ -25,14 +25,31 @@ func TestBuildSystemPrompt(t *testing.T) {
 		cli            string
 		agentsMDPath   string
 		hasTeam        bool
+		langRules      string
 		wantContains   []string
 		wantNotContain []string
 	}{
+		{
+			name:         "agy with AGENTS.md, team and langRules",
+			cli:          "agy",
+			agentsMDPath: agentsMDPath,
+			hasTeam:      true,
+			langRules:    "## Language Preferences\n\n- Responses/Conversations: Chinese (Simplified)",
+			wantContains: []string{
+				"## Language Preferences",
+				"Responses/Conversations: Chinese (Simplified)",
+				"/bin/ask-user <question>",
+				"call-peer",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+		},
 		{
 			name:         "agy with AGENTS.md and team",
 			cli:          "agy",
 			agentsMDPath: agentsMDPath,
 			hasTeam:      true,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
@@ -45,6 +62,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "agy",
 			agentsMDPath: agentsMDPath,
 			hasTeam:      false,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"# Custom Instructions",
@@ -59,6 +77,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "agy",
 			agentsMDPath: "",
 			hasTeam:      true,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
@@ -69,6 +88,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "agy",
 			agentsMDPath: "",
 			hasTeam:      false,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 			},
@@ -77,10 +97,26 @@ func TestBuildSystemPrompt(t *testing.T) {
 			},
 		},
 		{
+			name:         "opencode with AGENTS.md with team and langRules",
+			cli:          "opencode",
+			agentsMDPath: agentsMDPath,
+			hasTeam:      true,
+			langRules:    "## Language Preferences\n\n- Responses/Conversations: English (US)",
+			wantContains: []string{
+				"## Language Preferences",
+				"Responses/Conversations: English (US)",
+				"/bin/ask-user <question>",
+				"call-peer",
+				"# Custom Instructions",
+				"Do stuff.",
+			},
+		},
+		{
 			name:         "opencode with AGENTS.md with team",
 			cli:          "opencode",
 			agentsMDPath: agentsMDPath,
 			hasTeam:      true,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"call-peer",
@@ -93,6 +129,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "opencode",
 			agentsMDPath: agentsMDPath,
 			hasTeam:      false,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 				"# Custom Instructions",
@@ -107,6 +144,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "opencode",
 			agentsMDPath: "",
 			hasTeam:      false,
+			langRules:    "",
 			wantContains: []string{
 				"/bin/ask-user <question>",
 			},
@@ -119,7 +157,19 @@ func TestBuildSystemPrompt(t *testing.T) {
 			cli:          "unknown",
 			agentsMDPath: "",
 			hasTeam:      true,
+			langRules:    "",
 			wantContains: nil,
+		},
+		{
+			name:         "unknown CLI with langRules returns langRules",
+			cli:          "unknown",
+			agentsMDPath: "",
+			hasTeam:      true,
+			langRules:    "## Language Preferences\n\n- Responses/Conversations: English (US)",
+			wantContains: []string{
+				"## Language Preferences",
+				"Responses/Conversations: English (US)",
+			},
 		},
 	}
 
@@ -127,7 +177,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath, tt.hasTeam)
+			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath, tt.hasTeam, tt.langRules)
 			require.NoError(t, err)
 
 			for _, want := range tt.wantContains {
@@ -180,13 +230,14 @@ func TestBuildArgs(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(agentPath, "skills"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644))
 
-	// Test case 1: agy CLITarget with session and team
+	// Test case 1: agy CLITarget with session, team and langRules
 	targetAgy := agents.CLITarget{
 		CLI:   "agy",
 		Model: "some-model",
 	}
 
-	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat")
+	langRules := "## Language Preferences\n\n- Responses/Conversations: Chinese (Simplified)"
+	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat", langRules)
 	require.NoError(t, err)
 
 	argStr := strings.Join(args, " ")
@@ -213,9 +264,11 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStr, "--ro-bind "+expectedTmpDir+"/.asgard_system_prompt "+expectedAgyDest)
 	assert.Contains(t, argStr, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedAgySkills)
 
-	// Verify the generated prompt file contains our instructions and the AGENTS.md content
+	// Verify the generated prompt file contains language rules, tool instructions and the AGENTS.md content
 	promptContent, readErr := os.ReadFile(filepath.Join(expectedTmpDir, ".asgard_system_prompt"))
 	require.NoError(t, readErr)
+	assert.Contains(t, string(promptContent), "## Language Preferences")
+	assert.Contains(t, string(promptContent), "Chinese (Simplified)")
 	assert.Contains(t, string(promptContent), "/bin/ask-user <question>")
 	assert.Contains(t, string(promptContent), "/bin/call-peer <agent-id> <message>")
 	assert.Contains(t, string(promptContent), "agents instructions")
@@ -237,7 +290,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfgNoTeam, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "")
+	argsOpencode, err := buildArgsForAgent(cfgNoTeam, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "", "")
 	require.NoError(t, err)
 
 	argStrOpencode := strings.Join(argsOpencode, " ")

@@ -90,7 +90,12 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID)
+	var langRules string
+	if conf != nil {
+		langRules = conf.LanguageRules()
+	}
+
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
