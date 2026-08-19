@@ -281,7 +281,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 			}
 			targetFiles := toStringSlice(ev.Metadata["target_files"])
 			msg := dbmodels.ChatMessage{
-				ID:            fmt.Sprintf("wf-step-%s-%d-%d", ev.NodeID, time.Now().UnixMilli(), stepIdx),
+				ID:            fmt.Sprintf("wf-step-%s-%d", ev.NodeID, stepIdx),
 				Role:          role,
 				Content:       ev.Message,
 				AgentName:     ev.AgentName,

@@ -35,18 +35,14 @@ func NewDB(conf *config.Config) (*gorm.DB, error) {
 			if strings.Contains(dsn, "?") {
 				separator = "&"
 			}
-			dsn = fmt.Sprintf("%s%s_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_busy_timeout=10000&_journal_mode=WAL&_sync=NORMAL", dsn, separator)
+			dsn = fmt.Sprintf("%s%s_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=_txlock(immediate)&_busy_timeout=10000&_journal_mode=WAL&_sync=NORMAL", dsn, separator)
 		}
 		db, err := gorm.Open(sqlite.Open(dsn), config)
 		if err != nil {
 			return nil, err
 		}
 		if sqlDB, err := db.DB(); err == nil {
-			if strings.Contains(conf.DSN, ":memory:") {
-				sqlDB.SetMaxOpenConns(1)
-			} else {
-				sqlDB.SetMaxOpenConns(4)
-			}
+			sqlDB.SetMaxOpenConns(1)
 		}
 		return db, nil
 	} else { // pg
