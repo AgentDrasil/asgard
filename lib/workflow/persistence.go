@@ -152,8 +152,11 @@ func fromPersistedStates(states map[string]PersistedNodeState) map[string]*NodeR
 	return results
 }
 
-// copyIntMap deep-copies a string→int map (nil-safe).
+// copyIntMap deep-copies a string→int map (nil-safe, preserves nil).
 func copyIntMap(m map[string]int) map[string]int {
+	if m == nil {
+		return nil
+	}
 	out := make(map[string]int, len(m))
 	for k, v := range m {
 		out[k] = v

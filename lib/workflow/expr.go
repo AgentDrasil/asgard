@@ -38,6 +38,21 @@ func Interpolate(text string, resolve func(key string) (string, bool)) string {
 	return b.String()
 }
 
+// ParseExprTarget parses an expression and returns the referenced node ID and field name.
+// E.g. `nodes.foo.status == 'SKIPPED'` -> ("foo", "status", true).
+func ParseExprTarget(expr string) (nodeID, field string, ok bool) {
+	m := exprPattern.FindStringSubmatch(expr)
+	if m == nil {
+		return "", "", false
+	}
+	leftPath := m[1]
+	parts := strings.Split(leftPath, ".")
+	if len(parts) < 3 || parts[0] != "nodes" {
+		return "", "", false
+	}
+	return parts[1], strings.Join(parts[2:], "."), true
+}
+
 // EvaluateSimpleExpr evaluates a `when` condition such as
 // `nodes.build_cmd.exit_code != 0` or `nodes.build_cmd.status == 'FAILED'`
 // against the settled upstream node results.

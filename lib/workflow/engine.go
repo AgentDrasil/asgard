@@ -141,10 +141,11 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 			// Fail-closed skip guard: a skipped parent (any skip reason)
 			// produced no execution result; its zero-valued exit code/output must never
 			// satisfy an exit_code condition (e.g. `exit_code == 0`).
-			// However, if the condition explicitly queries `.status` or `.skip_reason`,
-			// allow evaluation against the settled skipped result.
+			// However, if the condition explicitly queries `status` or `skip_reason` on
+			// the target node, allow evaluation against the settled skipped result.
 			if parentResult != nil && parentResult.Status == StatusSkipped {
-				isStatusQuery := strings.Contains(dep.When, ".status") || strings.Contains(dep.When, ".skip_reason")
+				_, field, ok := ParseExprTarget(dep.When)
+				isStatusQuery := ok && (field == "status" || field == "skip_reason")
 				if !isStatusQuery {
 					hasConditionFalseEdge = true
 					continue
@@ -557,7 +558,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					continue
 				}
 				match := false
-				isStatusQuery := strings.Contains(cond.When, ".status") || strings.Contains(cond.When, ".skip_reason")
+				_, field, ok := ParseExprTarget(cond.When)
+				isStatusQuery := ok && (field == "status" || field == "skip_reason")
 				if !parentSkipped || isStatusQuery {
 					var err error
 					match, err = EvaluateSimpleExpr(cond.When, results, nil)
@@ -904,6 +906,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				Type:       EventNodeSkipped,
 				NodeID:     nodeID,
 				NodeType:   nodeByID[nodeID].Type,
+				AgentID:    nodeByID[nodeID].AgentID,
 				Status:     StatusSkipped,
 				SkipReason: SkipReasonNeverActivated,
 				Message:    fmt.Sprintf("node %s skipped (%s)", nodeID, SkipReasonNeverActivated),
@@ -952,9 +955,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 
 	// Explicit abort semantics: an activated on_exhausted orphan whose reply
-	// signals abort (e.g. the human option "Abort Workflow") terminates the
-	// run as CANCELLED — never a green COMPLETED. Restrict to human nodes to avoid
-	// accidental cancellation from command stdout / agent explanations.
+	// signals abort (e.g. selecting "Abort Workflow" or replying "abort") terminates the
+	// run as CANCELLED — never a green COMPLETED. Restrict to human nodes and check
+	// for explicit option selection or exact "abort" reply.
 	if ctx.Err() == nil {
 		for _, loop := range defn.Loops {
 			if loop.OnExhausted == "" {
@@ -964,7 +967,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			if node == nil || node.Type != NodeTypeHuman {
 				continue
 			}
-			if res := results[loop.OnExhausted]; res != nil && strings.Contains(strings.ToLower(res.Output), "abort") {
+			if res := results[loop.OnExhausted]; res != nil && isHumanAbortReply(res.Output, node.Options) {
 				run.Status = RunStatusCanceled
 				run.Error = fmt.Errorf("workflow aborted by user at node %s", loop.OnExhausted)
 				break
@@ -987,6 +990,27 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		Message: SummarizeRun(run),
 	})
 	return run, nil
+}
+
+// isHumanAbortReply checks whether a human node's reply matches an abort option
+// or an exact abort keyword, avoiding false positives on substring matches like "don't abort".
+func isHumanAbortReply(output string, options []string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(output))
+	if trimmed == "" {
+		return false
+	}
+	if trimmed == "abort" || trimmed == "abort workflow" || trimmed == "cancel" || trimmed == "cancelled" || trimmed == "canceled" {
+		return true
+	}
+	for _, opt := range options {
+		optLower := strings.TrimSpace(strings.ToLower(opt))
+		if strings.Contains(optLower, "abort") || strings.Contains(optLower, "cancel") {
+			if trimmed == optLower {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // normalizeResult coerces runner output into a well-formed NodeResult.

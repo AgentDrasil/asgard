@@ -995,13 +995,122 @@ func TestPersistedNodeState_LoopIterationsRoundtrip(t *testing.T) {
 			Output:         "fixed",
 			LoopIterations: map[string]int{"fix_loop": 2},
 		},
+		"skipped_node": {
+			Status:         StatusSkipped,
+			SkipReason:     SkipReasonConditionFalse,
+			LoopIterations: nil,
+		},
 	}
 
 	states := toPersistedStates(results)
 	require.Contains(t, states, "fixer")
 	assert.Equal(t, map[string]int{"fix_loop": 2}, states["fixer"].LoopIterations)
+	assert.Nil(t, states["skipped_node"].LoopIterations, "nil LoopIterations must remain nil in persisted state")
 
 	restored := fromPersistedStates(states)
 	require.Contains(t, restored, "fixer")
 	assert.Equal(t, map[string]int{"fix_loop": 2}, restored["fixer"].LoopIterations)
+	assert.Nil(t, restored["skipped_node"].LoopIterations, "nil LoopIterations must remain nil when restored")
+}
+
+func TestSkipGuard_NoEvasionOnStatusNodeID(t *testing.T) {
+	t.Parallel()
+
+	// A node whose ID is "status" is skipped. Downstream checks `nodes.status.exit_code == 0`.
+	// The skip guard MUST block it (not evading via substring match).
+	yamlSpec := `
+name: test-status-node-id
+nodes:
+  - id: start
+    type: command
+    command: "echo start"
+  - id: status
+    type: command
+    command: "echo status"
+    depends:
+      - node: start
+        when: "nodes.start.exit_code == 99"
+  - id: trap
+    type: command
+    command: "echo trap"
+    depends:
+      - node: status
+        when: "nodes.status.exit_code == 0"
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(nil)
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "status-id-sess"})
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusSkipped, res.Nodes["status"].Status)
+	assert.Equal(t, 0, runner.count("trap"), "trap must NOT run because nodes.status.exit_code queries exit_code on a skipped node")
+	assert.Equal(t, StatusSkipped, res.Nodes["trap"].Status)
+}
+
+func TestAbortCheck_HumanPhrasing(t *testing.T) {
+	t.Parallel()
+
+	// Human replying "don't abort" must NOT cancel the workflow.
+	yamlSpec := `
+name: test-human-dont-abort
+loops:
+  - id: fix_loop
+    nodes: [check, fix]
+    max_iterations: 1
+    on_exhausted: fix_fallback
+
+nodes:
+  - id: check
+    type: command
+    command: "echo check"
+  - id: fix
+    type: command
+    command: "echo fix"
+    depends:
+      - node: check
+        when: "nodes.check.exit_code == 0"
+        counts_loop: fix_loop
+  - id: fix_fallback
+    type: human
+    prompt: "Exhausted"
+    options: ["Retry", "Abort Workflow"]
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	engine, _, suspender := newTestEngine(t)
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(10 * time.Millisecond):
+				suspender.mu.Lock()
+				n := len(suspender.requests)
+				var req SuspendRequest
+				if n > 0 {
+					req = suspender.requests[n-1]
+				}
+				suspender.mu.Unlock()
+
+				if req.RunID != "" {
+					_, _ = engine.Resume(context.Background(), req.RunID, "don't abort")
+					return
+				}
+			}
+		}
+	}()
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "human-dont-abort-sess"})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, RunStatusCanceled, res.Status, "human reply 'don't abort' must not cancel workflow")
 }

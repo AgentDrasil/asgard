@@ -665,7 +665,7 @@ nodes:
 `, baseLoops)
 	_, err = ParseDefinition([]byte(specWithStaticDeps))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "on_exhausted human node must have no static dependencies")
+	assert.Contains(t, err.Error(), "on_exhausted human node must have no incoming dependency edges (must be an orphan)")
 }
 
 func TestValidateCommand_AllowedExitCodes(t *testing.T) {
