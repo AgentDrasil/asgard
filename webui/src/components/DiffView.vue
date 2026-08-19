@@ -9,7 +9,7 @@ import VCSSidebar from "./vcs/VCSSidebar.vue";
 import type { GitDiffFile, GitCommit } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
 
-const { toggleDiffShortcut, toggleTerminalShortcut } = useShortcuts();
+const { toggleDiffShortcut, toggleTerminalShortcut, toggleArtifactsShortcut } = useShortcuts();
 
 const props = defineProps<{
   runDir: string;
@@ -17,6 +17,8 @@ const props = defineProps<{
   chatInputText: string;
   isTerminalOpen?: boolean;
 }>();
+
+const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: true });
 
 const emit = defineEmits<{
   (e: "close"): void;
@@ -62,7 +64,6 @@ const MAX_VCS_WIDTH = 800;
 
 const vcsSidebarWidth = ref(DEFAULT_VCS_WIDTH);
 const isResizingSidebar = ref(false);
-const isVCSSidebarOpen = ref(true);
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 const mobileActiveTab = ref<"files" | "diff">("diff");
 
@@ -299,28 +300,10 @@ const commentedFileList = computed(() => {
     <header
       class="px-3 py-2 sm:px-4 sm:py-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between gap-2 shrink-0 shadow-sm"
     >
-      <!-- Left: View Switcher Join Group & VCS Title -->
-      <div class="flex items-center gap-1.5 sm:gap-2 min-w-0">
-        <!-- View Switcher Join Group (Chat / VCS) -->
-        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
-          <button
-            @click="emit('close')"
-            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to Chat View (${toggleDiffShortcut})`"
-          >
-            <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
-            <span>Chat</span>
-          </button>
-          <button
-            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
-            title="VCS View"
-          >
-            <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
-            <span>VCS</span>
-          </button>
-        </div>
-
-        <div class="flex items-center gap-1.5 font-mono text-xs truncate pl-1">
+      <!-- Left: Branch Name & Refresh Button -->
+      <div class="flex items-center gap-1.5 min-w-0">
+        <div class="flex items-center gap-1.5 font-mono text-xs truncate">
+          <Icon icon="octicon:git-branch-24" class="h-4 w-4 text-primary shrink-0" />
           <span class="font-bold text-base-content truncate">{{ currentBranch }}</span>
           <span
             v-if="selectedCommit"
@@ -334,6 +317,16 @@ const commentedFileList = computed(() => {
           >
             Unstash
           </span>
+
+          <!-- Refresh Button right next to branch name -->
+          <button
+            @click="loadGitData"
+            :disabled="loading"
+            class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content shrink-0 ml-0.5"
+            title="Refresh Git Diff & Log"
+          >
+            <Icon icon="mynaui:refresh" :class="['h-3.5 w-3.5', { 'animate-spin': loading }]" />
+          </button>
         </div>
       </div>
 
@@ -403,17 +396,26 @@ const commentedFileList = computed(() => {
         </div>
       </div>
 
-      <!-- Right: VS Code layout controls & Refresh -->
+      <!-- Right: View Switcher Join Group & Layout Controls Join Group -->
       <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-        <!-- Refresh Button -->
-        <button
-          @click="loadGitData"
-          :disabled="loading"
-          class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-          title="Refresh Git Diff & Log"
-        >
-          <Icon icon="mynaui:refresh" :class="['h-4 w-4', { 'animate-spin': loading }]" />
-        </button>
+        <!-- View Switcher Join Group (Chat / VCS) - consistent with Chat View -->
+        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <button
+            @click="emit('close')"
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
+            :title="`Switch to Chat View (${toggleDiffShortcut})`"
+          >
+            <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">Chat</span>
+          </button>
+          <button
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
+            title="VCS View"
+          >
+            <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
+            <span class="hidden sm:inline">VCS</span>
+          </button>
+        </div>
 
         <!-- Layout Controls Join Group (Bottom Panel / Right Sidebar) -->
         <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
@@ -432,7 +434,7 @@ const commentedFileList = computed(() => {
             <span class="hidden xl:inline">Terminal</span>
           </button>
 
-          <!-- Toggle VCS Right Sidebar Button (VS Code style) -->
+          <!-- Toggle VCS Right Sidebar Button (VS Code style with same shortcut as Chat View) -->
           <button
             @click="isVCSSidebarOpen = !isVCSSidebarOpen"
             class="hidden md:inline-flex join-item btn btn-xs border-none gap-1"
@@ -441,7 +443,7 @@ const commentedFileList = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            title="Toggle VCS Right Sidebar"
+            :title="`Toggle VCS Sidebar (${toggleArtifactsShortcut})`"
           >
             <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
             <span class="hidden xl:inline">Sidebar</span>

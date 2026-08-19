@@ -25,6 +25,7 @@ const isDetailsOpen = defineModel<boolean>("isDetailsOpen");
 const chatInputText = defineModel<string>("chatInputText");
 const isTerminalOpen = defineModel<boolean>("isTerminalOpen", { default: false });
 const isArtifactDrawerOpen = defineModel<boolean>("isArtifactDrawerOpen", { default: false });
+const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: true });
 
 // Artifacts state management
 const activeArtifactPath = ref<string | null>(null);
@@ -196,6 +197,7 @@ watch(isArtifactDrawerOpen, (open) => {
           :gitRoot="gitRoot"
           :isTerminalOpen="isTerminalOpen"
           v-model:chatInputText="chatInputText"
+          v-model:isVCSSidebarOpen="isVCSSidebarOpen"
           @close="$emit('close-diff')"
           @toggle-terminal="$emit('toggle-terminal')"
         />

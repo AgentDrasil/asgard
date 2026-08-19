@@ -19,6 +19,7 @@ const isSidebarOpen = ref(typeof window !== "undefined" && window.innerWidth >= 
 const isWorkspaceDetailsOpen = ref(true);
 const isTerminalOpen = ref(false);
 const isArtifactDrawerOpen = ref(false);
+const isVCSSidebarOpen = ref(true);
 const terminalType = ref<"session" | "sidebar">("session");
 
 const toggleTerminal = (type: "session" | "sidebar" = "session") => {
@@ -57,7 +58,11 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyB") {
     e.preventDefault();
     e.stopPropagation();
-    isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
+    if (showDiffView.value) {
+      isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
+    } else {
+      isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
+    }
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
     e.preventDefault();
     e.stopPropagation();
@@ -210,6 +215,7 @@ const closeSidebarOnMobile = () => {
           v-model:chatInputText="chatInputText"
           v-model:isTerminalOpen="isTerminalOpen"
           v-model:isArtifactDrawerOpen="isArtifactDrawerOpen"
+          v-model:isVCSSidebarOpen="isVCSSidebarOpen"
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
           @open-diff="
