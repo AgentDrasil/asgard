@@ -68,7 +68,7 @@ watch(
   { immediate: true },
 );
 
-const { showScrollBottom, scrollToBottom } = useChatScroll({
+const { scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
   messages: toRef(props, "messages"),
   sessionId: toRef(props, "sessionId"),
   isDetailsOpen: toRef(props, "isDetailsOpen"),
