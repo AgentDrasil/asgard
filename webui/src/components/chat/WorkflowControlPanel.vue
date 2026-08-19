@@ -133,18 +133,21 @@ const getOptionButtonClass = (opt: string): string => {
         <div
           class="flex items-center justify-between gap-2 border-b border-warning/20 pb-2 select-none"
         >
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 min-w-0">
             <Icon icon="fluent:pause-circle-24-filled" class="h-5 w-5 text-warning shrink-0" />
-            <span class="text-sm font-bold text-base-content"> Workflow 暂停 · 等待人工决策 </span>
+            <span class="text-sm font-bold text-base-content truncate">
+              Workflow 暂停 · 等待人工决策
+            </span>
+            <span
+              v-if="state.pendingMessage?.agentName"
+              class="text-xs text-base-content/60 font-mono shrink-0 hidden sm:inline"
+            >
+              ({{ state.pendingMessage.agentName }})
+            </span>
           </div>
-          <span class="badge badge-warning badge-sm font-semibold uppercase">Waiting Human</span>
-        </div>
-
-        <div
-          v-if="state.pendingMessage"
-          class="text-xs text-base-content whitespace-pre-wrap leading-relaxed"
-        >
-          {{ state.pendingMessage.content }}
+          <span class="badge badge-warning badge-sm font-semibold uppercase shrink-0"
+            >Waiting Human</span
+          >
         </div>
 
         <!-- Files to review if present in pendingMessage -->

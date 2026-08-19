@@ -96,7 +96,10 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     if (ev.chatId && ev.chatId !== activeSessionId.value) return;
 
     if (ev.payload?.isRunning !== undefined) {
-      const running = !!ev.payload.isRunning;
+      const hasUnrepliedAskUser = rawMessages.value.some(
+        (m) => m.role === "ask_user" && !m.replied,
+      );
+      const running = !hasUnrepliedAskUser && !!ev.payload.isRunning;
       isRunning.value = running;
       loading.value = running;
       if (activeSession.value) {
@@ -109,12 +112,12 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
 
     const agentIdOrName = (ev.payload?.agent_name || ev.payload?.agent) as string | undefined;
-    if (agentIdOrName) {
+    if (agentIdOrName && isRunning.value) {
       const matched = agents.value.find((a) => a.id === agentIdOrName || a.name === agentIdOrName);
       workingAgentLabel.value = matched?.name || agentIdOrName;
     }
 
-    if (ev.payload?.isRunning === false) {
+    if (ev.payload?.isRunning === false || !isRunning.value) {
       workingAgentLabel.value = null;
       loading.value = false;
       isRunning.value = false;
@@ -174,8 +177,15 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         );
         rawMessages.value = [...snapshotMsgs, ...pendingOptimistic];
         artifacts.value = session.artifacts ? [...session.artifacts] : [];
-        isRunning.value = !!session.isRunning;
-        loading.value = !!session.isRunning;
+        const hasUnrepliedAskUser = rawMessages.value.some(
+          (m) => m.role === "ask_user" && !m.replied,
+        );
+        const running = !hasUnrepliedAskUser && !!session.isRunning;
+        isRunning.value = running;
+        loading.value = running;
+        if (!running) {
+          workingAgentLabel.value = null;
+        }
       }
     }
   };
@@ -234,7 +244,10 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       }
 
       artifacts.value = session.artifacts ? [...session.artifacts] : [];
-      const running = isRunning.value || !!session.isRunning;
+      const hasUnrepliedAskUser = rawMessages.value.some(
+        (m) => m.role === "ask_user" && !m.replied,
+      );
+      const running = !hasUnrepliedAskUser && (isRunning.value || !!session.isRunning);
       isRunning.value = running;
       loading.value = running;
       if (!running) {

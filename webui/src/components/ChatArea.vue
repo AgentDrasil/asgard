@@ -82,6 +82,22 @@ const scrollButtonLabel = computed(() =>
   hasNewMessages.value ? "New messages below (Click to scroll)" : "Scroll to bottom",
 );
 
+const hasUnrepliedAskUser = computed(() => {
+  return props.messages.some((m) => m.role === "ask_user" && !m.replied);
+});
+
+const showAgentWorking = computed(() => {
+  // Workflow mode displays its running status via WorkflowControlPanel at the bottom
+  if (props.activeAgent?.type === "workflow") {
+    return false;
+  }
+  // When an unreplied question is present, the agent is paused waiting for user input
+  if (hasUnrepliedAskUser.value) {
+    return false;
+  }
+  return props.loading;
+});
+
 const findState = useInPageFind(scrollContainerRef);
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
@@ -306,7 +322,7 @@ onUnmounted(() => {
 
         <!-- Agent Working state -->
         <div
-          v-if="loading"
+          v-if="showAgentWorking"
           class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
         >
           <span class="loading loading-ring loading-xs text-primary"></span>

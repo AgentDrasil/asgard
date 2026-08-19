@@ -453,5 +453,50 @@ describe("useSessionStore", () => {
     expect(store.loading.value).toBe(false);
     expect(store.workingAgentLabel.value).toBeNull();
     expect(store.isInputBusy.value).toBe(false);
+
+    // 6. Incoming status event while waiting for ask_user reply does NOT reactivate loading
+    es.emit("status", {
+      eventId: 6,
+      chatId: "session-wf",
+      type: "status",
+      payload: { agent: "plan-reviewer", isRunning: true },
+      timestamp: 1500,
+    });
+    expect(store.isRunning.value).toBe(false);
+    expect(store.loading.value).toBe(false);
+    expect(store.workingAgentLabel.value).toBeNull();
+  });
+
+  it("should not set isRunning or loading when opening a session with unreplied ask_user", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-waiting-human",
+      title: "Waiting Human Session",
+      currentAgent: "intent-analyst",
+      runDir: "/workspace",
+      isRunning: true, // Backend DB might still be isRunning=true while waiting on HTTP handler
+      messages: [
+        {
+          id: "ask-99",
+          role: "ask_user",
+          agentName: "Intent Analyst",
+          content: "Please confirm routing details",
+          replied: false,
+          timestamp: 1000,
+        },
+      ],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "intent-analyst", name: "Intent Analyst", description: "", run_dirs: [] },
+    ]);
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+    const store = useSessionStore({ agents });
+    await store.openSession("session-waiting-human");
+
+    expect(store.isRunning.value).toBe(false);
+    expect(store.loading.value).toBe(false);
+    expect(store.workingAgentLabel.value).toBeNull();
   });
 });
