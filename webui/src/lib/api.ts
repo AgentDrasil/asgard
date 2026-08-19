@@ -253,12 +253,15 @@ export async function getFileTree(sessionId: string, subPath = ""): Promise<File
     let url = `/api/files/tree?session_id=${encodeURIComponent(sessionId)}`;
     if (subPath) url += `&path=${encodeURIComponent(subPath)}`;
     const res = await apiFetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `Failed to load file tree (${res.status})`);
+    }
     const data = await res.json();
     return data.entries || [];
   } catch (err) {
     console.error("getFileTree error:", err);
-    return [];
+    throw err;
   }
 }
 
@@ -271,11 +274,14 @@ export async function getFileContent(
     const res = await apiFetch(
       `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `Failed to load file (${res.status})`);
+    }
     return await res.json();
   } catch (err) {
     console.error("getFileContent error:", err);
-    return null;
+    throw err;
   }
 }
 

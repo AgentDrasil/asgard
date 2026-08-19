@@ -63,14 +63,14 @@ describe("API Library", () => {
       );
     });
 
-    it("returns empty array on non-ok response or error", async () => {
+    it("throws error with backend error message on non-ok response", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue({
         ok: false,
         status: 404,
+        json: async () => ({ error: "Directory not found" }),
       } as Response);
 
-      const res = await getFileTree("sess-123");
-      expect(res).toEqual([]);
+      await expect(getFileTree("sess-123")).rejects.toThrow("Directory not found");
     });
   });
 
@@ -106,14 +106,16 @@ describe("API Library", () => {
       );
     });
 
-    it("returns null on 500 error", async () => {
+    it("throws error with backend error message on non-ok response", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue({
         ok: false,
-        status: 500,
+        status: 400,
+        json: async () => ({ error: "file size exceeds maximum allowed limit (5MB)" }),
       } as Response);
 
-      const res = await getFileContent("sess-123", "bad.txt");
-      expect(res).toBeNull();
+      await expect(getFileContent("sess-123", "bad.txt")).rejects.toThrow(
+        "file size exceeds maximum allowed limit (5MB)",
+      );
     });
   });
 

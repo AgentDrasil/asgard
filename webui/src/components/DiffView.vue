@@ -6,8 +6,9 @@ import "@git-diff-view/vue/styles/diff-view.css";
 import { Icon } from "@iconify/vue";
 import { getGitDiff, getGitLog } from "../lib/api";
 import VCSSidebar from "./vcs/VCSSidebar.vue";
-import type { GitDiffFile, GitCommit } from "../types";
+import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
+import { commentKey, rebuildChatInputFromComments } from "../utils/commentUtils";
 
 const { toggleDiffShortcut, toggleTerminalShortcut, toggleArtifactsShortcut } = useShortcuts();
 
@@ -191,14 +192,6 @@ onMounted(() => {
 onUnmounted(() => observer.disconnect());
 
 // ── Line comments (in-memory) ────────────────────────────────────────────────
-interface CommentEntry {
-  filePath: string;
-  side: SplitSide;
-  lineNumber: number;
-  lineContent: string;
-  comment: string;
-}
-
 const comments = ref<Map<string, CommentEntry>>(new Map());
 
 interface ActiveWidget {
@@ -208,13 +201,9 @@ interface ActiveWidget {
 const activeWidget = ref<ActiveWidget | null>(null);
 const widgetInput = ref("");
 
-function commentKey(filePath: string, side: SplitSide, lineNumber: number) {
-  return `${filePath}:${side}:${lineNumber}`;
-}
-
 // Called by DiffView via @on-add-widget-click
 function handleAddWidgetClick(lineNumber: number, side: SplitSide) {
-  const key = commentKey(selectedFile.value?.newPath ?? "", side, lineNumber);
+  const key = commentKey(selectedFile.value?.newPath ?? "", lineNumber, sideName(side));
   const existing = comments.value.get(key);
   widgetInput.value = existing?.comment ?? "";
   if (activeWidget.value?.side === side && activeWidget.value?.lineNumber === lineNumber) {
@@ -239,7 +228,7 @@ function getLineContent(side: SplitSide, lineNumber: number): string {
   return lines[lineNumber - 1] ?? "";
 }
 
-function sideName(side: SplitSide): string {
+function sideName(side: SplitSide): "old" | "new" {
   return side === SplitSide.old ? "old" : "new";
 }
 
@@ -247,7 +236,7 @@ function submitComment() {
   if (!activeWidget.value || !selectedFile.value) return;
   const { side, lineNumber } = activeWidget.value;
   const filePath = selectedFile.value.newPath;
-  const key = commentKey(filePath, side, lineNumber);
+  const key = commentKey(filePath, lineNumber, sideName(side));
   const lineContent = getLineContent(side, lineNumber);
 
   if (!widgetInput.value.trim()) {
@@ -255,7 +244,7 @@ function submitComment() {
   } else {
     comments.value.set(key, {
       filePath,
-      side,
+      side: sideName(side),
       lineNumber,
       lineContent,
       comment: widgetInput.value.trim(),
@@ -271,22 +260,13 @@ function deleteComment(key: string) {
   rebuildChatInput();
 }
 
-function formatCommentBlock(entry: CommentEntry): string {
-  return `${entry.filePath} line ${entry.lineNumber}\n${entry.lineContent}\n---\n\nuser comment:\n\n${entry.comment}\n---`;
-}
-
 function rebuildChatInput() {
-  if (comments.value.size === 0) {
-    emit("update:chatInputText", "");
-    return;
-  }
-  const blocks = Array.from(comments.value.values()).map(formatCommentBlock);
-  emit("update:chatInputText", blocks.join("\n\n"));
+  emit("update:chatInputText", rebuildChatInputFromComments(comments.value));
 }
 
 function hasComment(side: SplitSide, lineNumber: number): boolean {
   const filePath = selectedFile.value?.newPath ?? "";
-  return comments.value.has(commentKey(filePath, side, lineNumber));
+  return comments.value.has(commentKey(filePath, lineNumber, sideName(side)));
 }
 
 const commentedFileList = computed(() => {
@@ -586,7 +566,9 @@ const commentedFileList = computed(() => {
                       <button
                         v-if="hasComment(side, lineNumber)"
                         @click="
-                          deleteComment(commentKey(selectedFile?.newPath ?? '', side, lineNumber));
+                          deleteComment(
+                            commentKey(selectedFile?.newPath ?? '', lineNumber, sideName(side)),
+                          );
                           onClose();
                         "
                         class="btn btn-ghost btn-xs text-error hover:bg-error/10 gap-1"
