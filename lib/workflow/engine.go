@@ -416,9 +416,10 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				enqueue(loop.OnExhausted)
 				return
 			}
-			if _, settled := results[targetID]; settled {
-				return
-			}
+			// No fallback declared: the quota breach fails the re-entry
+			// target so the run settles FAILED (fail-closed), even though
+			// the target's earlier iterations succeeded.
+			_, wasSettled := results[targetID]
 			res := &NodeResult{
 				Status: StatusFailed,
 				Error:  fmt.Errorf("loop %q exhausted after %d iterations; node %s not re-entered", loop.ID, loop.MaxIterations, targetID),
@@ -439,7 +440,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				Status:   StatusFailed,
 				Message:  fmt.Sprintf("node %s FAILED: %v", targetID, res.Error),
 			})
-			evaluateDownstream(targetID)
+			// Only cascade into downstream evaluation for a target that
+			// never ran. A loop backedge target is already settled: its
+			// downstream holds results from the prior iteration, and
+			// re-driving them (notably join: always nodes) would relive
+			// the exhausted loop forever. The FAILED settlement alone
+			// makes the run fail-closed.
+			if !wasSettled {
+				evaluateDownstream(targetID)
+			}
 			return
 		}
 

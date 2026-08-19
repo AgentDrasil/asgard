@@ -544,13 +544,20 @@ nodes:
 
 	// check always demands an inner fix; inner exhausts after 2 attempts and
 	// inner_fb advances the outer loop, which must reset the inner counter.
+	// The outer loop itself has no on_exhausted: its quota breach must fail
+	// the re-entry target (step) and settle the run FAILED (fail-closed)
+	// without re-driving the join: always downstream (no livelock).
 	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
 	engine := NewEngineWithRunner(runner)
 
 	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "nested-session"})
 	require.NoError(t, err)
 
-	assert.Equal(t, RunStatusCompleted, res.Status)
+	assert.Equal(t, RunStatusFailed, res.Status, "outer loop exhaustion without on_exhausted must settle FAILED")
+	require.NotNil(t, res.Nodes["step"])
+	assert.Equal(t, StatusFailed, res.Nodes["step"].Status)
+	require.NotNil(t, res.Nodes["step"].Error)
+	assert.Contains(t, res.Nodes["step"].Error.Error(), "loop \"outer\" exhausted")
 	assert.Equal(t, 6, runner.count("fixer"), "inner loop must run 2 fixes per outer iteration (3 outer steps)")
 	assert.Equal(t, 3, runner.count("inner_fb"), "inner loop exhausts once per outer iteration")
 	assert.Equal(t, 3, runner.count("step"))
