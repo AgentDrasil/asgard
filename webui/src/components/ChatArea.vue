@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, toRef, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, toRef, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../types";
 import { formatPath } from "../utils/agentUtils";
@@ -77,6 +77,10 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom, hasNewMessages } =
   isDetailsOpen: toRef(props, "isDetailsOpen"),
   onUpdateDetailsOpen: (open) => emit("update:isDetailsOpen", open),
 });
+
+const scrollButtonLabel = computed(() =>
+  hasNewMessages.value ? "New messages below (Click to scroll)" : "Scroll to bottom",
+);
 
 const findState = useInPageFind(scrollContainerRef);
 
@@ -331,8 +335,8 @@ onUnmounted(() => {
             ? 'btn-primary shadow-xl shadow-primary/40'
             : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
         "
-        :title="hasNewMessages ? 'New messages below (Click to scroll)' : 'Scroll to bottom'"
-        :aria-label="hasNewMessages ? 'New messages below (Click to scroll)' : 'Scroll to bottom'"
+        :title="scrollButtonLabel"
+        :aria-label="scrollButtonLabel"
       >
         <span
           v-if="hasNewMessages"

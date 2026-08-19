@@ -20,6 +20,17 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let lastAtTopState = isDetailsOpen.value ?? true;
   let ticking = false;
   let switchingSession = false;
+  let recheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleRecheck = () => {
+    if (recheckTimer !== null) {
+      clearTimeout(recheckTimer);
+    }
+    recheckTimer = setTimeout(() => {
+      recheckTimer = null;
+      checkScrollPosition();
+    }, 150);
+  };
 
   const checkScrollPosition = () => {
     if (!scrollContainerRef.value) return;
@@ -86,6 +97,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     });
 
     onUnmounted(() => {
+      if (recheckTimer !== null) {
+        clearTimeout(recheckTimer);
+        recheckTimer = null;
+      }
       const el = scrollContainerRef.value;
       if (el) {
         el.removeEventListener("scroll", handleScroll);
@@ -99,13 +114,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
     async () => {
       switchingSession = true;
       hasNewMessages.value = false;
-      await nextTick();
-      stickToBottom();
-      checkScrollPosition();
-      switchingSession = false;
-      setTimeout(() => {
+      try {
+        await nextTick();
+        stickToBottom();
         checkScrollPosition();
-      }, 150);
+      } finally {
+        switchingSession = false;
+      }
+      scheduleRecheck();
     },
     { immediate: true },
   );
@@ -125,9 +141,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         stickToBottom();
         checkScrollPosition();
         hasNewMessages.value = false;
-        setTimeout(() => {
-          checkScrollPosition();
-        }, 150);
+        scheduleRecheck();
       } else {
         hasNewMessages.value = true;
       }

@@ -10,6 +10,7 @@ describe("useChatScroll", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("exports BOTTOM_THRESHOLD and initializes with default values", () => {
@@ -264,5 +265,41 @@ describe("useChatScroll", () => {
       top: 1000,
       behavior: "auto",
     });
+  });
+
+  it("triggers delayed re-check after 150ms timer expires", async () => {
+    const messages = ref<ChatMessage[]>([]);
+    const sessionId = ref<string | null>("sess-1");
+    const isDetailsOpen = ref<boolean | undefined>(true);
+    const onUpdateDetailsOpen = vi.fn<(open: boolean) => void>();
+
+    const { scrollContainerRef, showScrollBottom } = useChatScroll({
+      messages,
+      sessionId,
+      isDetailsOpen,
+      onUpdateDetailsOpen,
+    });
+
+    const el = {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 500,
+      scrollTo: vi.fn<(o?: ScrollToOptions) => void>(),
+    };
+    scrollContainerRef.value = el as unknown as HTMLDivElement;
+
+    // Trigger message update while at bottom (scrollTop at 500)
+    el.scrollTop = 500;
+    messages.value = [{ id: "1", role: "user", content: "hello", timestamp: Date.now() }];
+    await nextTick();
+    await nextTick();
+
+    // Now simulate height expansion occurring asynchronously after images/DOM render
+    el.scrollHeight = 2000;
+    // Before timer fires, showScrollBottom hasn't refreshed for the async layout change
+    vi.advanceTimersByTime(150);
+
+    // After 150ms recheck timer, showScrollBottom is updated based on new scrollHeight
+    expect(showScrollBottom.value).toBe(true);
   });
 });
