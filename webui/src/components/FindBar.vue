@@ -66,7 +66,7 @@ onMounted(() => {
           @keydown.shift.enter.prevent="emit('prev')"
           @keydown.esc.prevent="emit('close')"
           placeholder="Find in page..."
-          class="input input-xs input-bordered bg-base-100 pl-7 pr-2 font-mono text-xs text-base-content focus:outline-none focus:border-primary w-36 sm:w-44 h-7 rounded-lg"
+          class="input input-xs input-bordered bg-base-100 pl-2 pr-2 font-mono text-xs text-base-content focus:outline-none focus:border-primary w-36 sm:w-44 h-7 rounded-lg"
         />
       </div>
 
