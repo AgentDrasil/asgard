@@ -17,6 +17,12 @@ func MatchesModel(cli, model, known string) bool {
 	return false
 }
 
+// HasModelVariant reports whether the model string carries a recognized
+// variant (thinking level) suffix for the given CLI.
+func HasModelVariant(cli, model string) bool {
+	return len(ModelCandidates(cli, model)) > 1
+}
+
 // ModelCandidates returns the model names that the requested model string
 // should be matched against, most specific first. For opencode and agy, a model with
 // a variant suffix also matches its base model name.

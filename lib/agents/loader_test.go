@@ -353,7 +353,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 	// Setup mock clients to make tests independent of installed CLIs
 	mockClients := map[string]types.CLIClient{
 		"agy":      &mockClient{models: []string{"gemini-2.5-flash"}},
-		"opencode": &mockClient{models: []string{"deepseek-chat"}},
+		"opencode": &mockClient{models: []string{"deepseek-chat", "zai-coding-plan/glm-5.3"}},
 	}
 	agentwrapper.SetClients(mockClients)
 	t.Cleanup(func() {
@@ -592,6 +592,45 @@ func TestAgentConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid opencode model with provider slash in base model",
+			config: AgentConfig{
+				ID:          "agent-opencode-base",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "zai-coding-plan/glm-5.3"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid opencode model with variant matching base",
+			config: AgentConfig{
+				ID:          "agent-opencode-4",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "zai-coding-plan/glm-5.3/high"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid opencode model with variant",
+			config: AgentConfig{
+				ID:          "agent-opencode-5",
+				Name:        "agent-opencode",
+				Description: "Test Agent Opencode",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "unsupported-provider/model/high"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid opencode model",
 			config: AgentConfig{
 				ID:          "agent-opencode-3",
@@ -639,7 +678,7 @@ func TestAgentConfig_ValidateWithCLIs(t *testing.T) {
 
 	supportedCLIs := map[string][]string{
 		"agy":      {"gemini-2.5-flash"},
-		"opencode": {"deepseek-chat"},
+		"opencode": {"deepseek-chat", "zai-coding-plan/glm-5.3"},
 	}
 
 	tests := []struct {
@@ -681,6 +720,58 @@ func TestAgentConfig_ValidateWithCLIs(t *testing.T) {
 				Description: "Test Agent 1",
 				CLI: []CLITarget{
 					{CLI: "agy", Model: "unknown-model"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid opencode base model with slash in name",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "zai-coding-plan/glm-5.3"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid opencode variant model matching supported base model",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "zai-coding-plan/glm-5.3/high"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unsupported opencode variant model checked against supported CLIs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "opencode", Model: "unsupported-provider/model/high"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "agy variant model still checked against supported CLIs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "unknown-model-low"},
 				},
 				RunDirs: []string{"/tmp/run"},
 			},
