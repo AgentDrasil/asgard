@@ -56,3 +56,21 @@ body,
   font-family: ui-sans-serif, system-ui, sans-serif;
   overflow: hidden;
 }
+
+/* In-page Find Highlights */
+.asgard-find-match {
+  background-color: color-mix(in oklab, var(--color-warning, #f59e0b) 35%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  transition: background-color 0.15s ease;
+}
+
+.asgard-find-match.asgard-find-active {
+  background-color: var(--color-warning, #f59e0b);
+  color: var(--color-warning-content, #000);
+  font-weight: 600;
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 1px;
+  border-radius: 2px;
+}

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, toRef } from "vue";
+import { ref, watch, toRef, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../types";
 import { formatPath } from "../utils/agentUtils";
 import { getDirInfo } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useChatScroll } from "../composables/useChatScroll";
+import { useInPageFind } from "../composables/useInPageFind";
+import FindBar from "./FindBar.vue";
 import UserMessage from "./chat/UserMessage.vue";
 import AssistantMessage from "./chat/AssistantMessage.vue";
 import ActivityMessage from "./chat/ActivityMessage.vue";
@@ -17,6 +19,7 @@ const {
   toggleDiffShortcut,
   toggleTerminalShortcut,
   toggleFileViewShortcut,
+  findShortcut,
 } = useShortcuts();
 
 const props = withDefaults(
@@ -74,6 +77,32 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
   isDetailsOpen: toRef(props, "isDetailsOpen"),
   onUpdateDetailsOpen: (open) => emit("update:isDetailsOpen", open),
 });
+
+const findState = useInPageFind(scrollContainerRef);
+
+const handleGlobalKeydown = (e: KeyboardEvent) => {
+  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+  if (
+    ctrlKey &&
+    !e.altKey &&
+    !e.shiftKey &&
+    (e.code === "KeyF" || e.key === "f" || e.key === "F")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    findState.open();
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleGlobalKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown);
+});
 </script>
 
 <template>
@@ -126,6 +155,21 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
       </div>
 
       <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 h-7 sm:h-8">
+        <!-- Find in Chat Button -->
+        <button
+          @click="findState.toggle()"
+          class="btn btn-xs border-none font-medium gap-1 text-[11px]"
+          :class="
+            findState.isOpen.value
+              ? 'btn-primary shadow-xs'
+              : 'btn-ghost text-base-content/70 hover:text-base-content bg-base-300/60'
+          "
+          :title="`Find in chat (${findShortcut})`"
+        >
+          <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
+          <span class="hidden xl:inline">Find</span>
+        </button>
+
         <!-- View Switcher Join Group (Chat / VCS / Files) -->
         <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
@@ -203,6 +247,17 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
         </div>
       </div>
     </header>
+
+    <!-- Floating In-Page Find Bar -->
+    <FindBar
+      v-model="findState.query.value"
+      :isOpen="findState.isOpen.value"
+      :currentIndex="findState.currentIndex.value"
+      :totalMatches="findState.totalMatches.value"
+      @next="findState.findNext"
+      @prev="findState.findPrev"
+      @close="findState.close"
+    />
 
     <!-- Message List -->
     <div

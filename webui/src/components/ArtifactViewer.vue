@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import { useShiki } from "../composables/useShiki";
+import { useInPageFind } from "../composables/useInPageFind";
 import MarkdownContent from "./MarkdownContent.vue";
+import FindBar from "./FindBar.vue";
 
 const { highlightBlock } = useShiki();
 
@@ -131,11 +133,25 @@ function onFileSelectChange(event: Event) {
     emit("select-file", target.value);
   }
 }
+
+const contentContainerRef = ref<HTMLElement | null>(null);
+const findState = useInPageFind(contentContainerRef);
+
+// When file content or markdown view mode changes, re-run active search if find bar is open
+watch([() => fileData.value, markdownViewMode], () => {
+  if (findState.isOpen.value && findState.query.value.trim()) {
+    nextTick(() => {
+      findState.performSearch();
+    });
+  } else {
+    findState.clearHighlights();
+  }
+});
 </script>
 
 <template>
   <div
-    class="w-full h-full flex flex-col bg-base-100 border-l border-base-300 text-base-content select-text overflow-hidden shadow-2xl"
+    class="w-full h-full flex flex-col bg-base-100 border-l border-base-300 text-base-content select-text overflow-hidden shadow-2xl relative"
   >
     <!-- Header & Dropdown File Selection Bar -->
     <div
@@ -208,6 +224,20 @@ function onFileSelectChange(event: Event) {
           </button>
         </div>
 
+        <!-- Find Button -->
+        <button
+          @click="findState.toggle()"
+          :class="[
+            'p-1.5 text-xs rounded transition-colors border',
+            findState.isOpen.value
+              ? 'bg-primary text-primary-content border-primary shadow-xs'
+              : 'bg-base-300 hover:bg-base-300/80 text-base-content border-base-300',
+          ]"
+          title="Find in artifact"
+        >
+          <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
+        </button>
+
         <button
           @click="fetchFile(activeFilePath || '')"
           class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300"
@@ -218,8 +248,19 @@ function onFileSelectChange(event: Event) {
       </div>
     </div>
 
+    <!-- Floating In-Page Find Bar -->
+    <FindBar
+      v-model="findState.query.value"
+      :isOpen="findState.isOpen.value"
+      :currentIndex="findState.currentIndex.value"
+      :totalMatches="findState.totalMatches.value"
+      @next="findState.findNext"
+      @prev="findState.findPrev"
+      @close="findState.close"
+    />
+
     <!-- Content Preview Area -->
-    <div class="flex-1 overflow-y-auto p-3 sm:p-4 relative bg-base-100">
+    <div ref="contentContainerRef" class="flex-1 overflow-y-auto p-3 sm:p-4 relative bg-base-100">
       <div
         v-if="loading"
         class="flex items-center justify-center h-full text-base-content/60 text-sm gap-2"

@@ -15,6 +15,7 @@ export function useShortcuts() {
   const sendShortcut = computed(() => `${modKey.value}+Enter`);
   const fileSearchShortcut = computed(() => `${modKey.value}+P`);
   const toggleFileViewShortcut = computed(() => `${modKey.value}+${altKey.value}+F`);
+  const findShortcut = computed(() => `${modKey.value}+F`);
 
   return {
     isMac,
@@ -27,5 +28,6 @@ export function useShortcuts() {
     sendShortcut,
     fileSearchShortcut,
     toggleFileViewShortcut,
+    findShortcut,
   };
 }

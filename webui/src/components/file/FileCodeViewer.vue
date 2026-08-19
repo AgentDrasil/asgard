@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
 import { getFileContent } from "../../lib/api";
 import { useShiki } from "../../composables/useShiki";
 import { useShortcuts } from "../../composables/useShortcuts";
+import { useInPageFind } from "../../composables/useInPageFind";
 import { humanfriendly } from "../../lib/format";
 import { commentKey } from "../../utils/commentUtils";
 import { mapExtToLang, escapeHtml, extractHighlightedLines } from "../../utils/fileUtils";
 import MarkdownContent from "../MarkdownContent.vue";
+import FindBar from "../FindBar.vue";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
@@ -24,7 +26,7 @@ const emit = defineEmits<{
   (e: "file-loaded", data: WorkspaceFileContent | null): void;
 }>();
 
-const { fileSearchShortcut } = useShortcuts();
+const { fileSearchShortcut, findShortcut } = useShortcuts();
 const { highlightToHtml } = useShiki();
 
 const fileData = ref<WorkspaceFileContent | null>(null);
@@ -178,6 +180,44 @@ function handleDeleteComment(lineNum: number) {
   emit("delete-comment", commentKey(props.filePath, lineNum));
   closeWidget();
 }
+
+const codeContainerRef = ref<HTMLElement | null>(null);
+const findState = useInPageFind(codeContainerRef);
+
+const handleGlobalKeydown = (e: KeyboardEvent) => {
+  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+  if (
+    ctrlKey &&
+    !e.altKey &&
+    !e.shiftKey &&
+    (e.code === "KeyF" || e.key === "f" || e.key === "F")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    findState.open();
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleGlobalKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown);
+});
+
+// Watch fileData & markdownMode to re-run or clear find highlights
+watch([() => fileData.value, markdownMode], () => {
+  if (findState.isOpen.value && findState.query.value.trim()) {
+    nextTick(() => {
+      findState.performSearch();
+    });
+  } else {
+    findState.clearHighlights();
+  }
+});
 </script>
 
 <template>
@@ -199,40 +239,69 @@ function handleDeleteComment(lineNum: number) {
         >
       </div>
 
-      <!-- Markdown Preview Toggle (if markdown file) -->
-      <div
-        v-if="isMarkdownFile && !fileData.isBinary"
-        class="join bg-base-300/60 p-0.5 rounded-lg shrink-0"
-      >
-        <button
-          @click="markdownMode = 'preview'"
-          :class="[
-            'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
-            markdownMode === 'preview'
-              ? 'btn-primary shadow-xs'
-              : 'btn-ghost text-base-content/70 hover:text-base-content',
-          ]"
+      <div class="flex items-center gap-1.5 shrink-0">
+        <!-- Markdown Preview Toggle (if markdown file) -->
+        <div
+          v-if="isMarkdownFile && !fileData.isBinary"
+          class="join bg-base-300/60 p-0.5 rounded-lg shrink-0"
         >
-          <Icon icon="octicon:markdown-24" class="h-3 w-3" />
-          <span>Preview</span>
-        </button>
+          <button
+            @click="markdownMode = 'preview'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              markdownMode === 'preview'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+          >
+            <Icon icon="octicon:markdown-24" class="h-3 w-3" />
+            <span>Preview</span>
+          </button>
+          <button
+            @click="markdownMode = 'source'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              markdownMode === 'source'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+          >
+            <Icon icon="octicon:code-24" class="h-3 w-3" />
+            <span>Source</span>
+          </button>
+        </div>
+
+        <!-- Find in File Button -->
         <button
-          @click="markdownMode = 'source'"
-          :class="[
-            'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
-            markdownMode === 'source'
+          v-if="!fileData.isBinary"
+          @click="findState.toggle()"
+          class="btn btn-xs border-none font-medium gap-1 text-[11px]"
+          :class="
+            findState.isOpen.value
               ? 'btn-primary shadow-xs'
-              : 'btn-ghost text-base-content/70 hover:text-base-content',
-          ]"
+              : 'btn-ghost text-base-content/70 hover:text-base-content bg-base-300/60'
+          "
+          :title="`Find in file (${findShortcut})`"
         >
-          <Icon icon="octicon:code-24" class="h-3 w-3" />
-          <span>Source</span>
+          <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
+          <span class="hidden sm:inline">Find</span>
         </button>
       </div>
     </div>
 
+    <!-- Floating In-Page Find Bar -->
+    <FindBar
+      v-model="findState.query.value"
+      :isOpen="findState.isOpen.value"
+      :currentIndex="findState.currentIndex.value"
+      :totalMatches="findState.totalMatches.value"
+      @next="findState.findNext"
+      @prev="findState.findPrev"
+      @close="findState.close"
+    />
+
     <!-- Main Content Area -->
-    <div class="flex-1 overflow-auto min-w-0 relative">
+    <div ref="codeContainerRef" class="flex-1 overflow-auto min-w-0 relative">
       <!-- Loading State -->
       <div
         v-if="isLoading"
