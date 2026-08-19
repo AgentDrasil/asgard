@@ -18,7 +18,7 @@ defineProps<{
       <span class="uppercase font-bold">You</span>
     </div>
     <div
-      class="chat-bubble chat-bubble-primary text-primary-content border border-primary/20 text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
+      class="chat-bubble chat-bubble-primary text-primary-content text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
     >
       {{ message.content }}
     </div>

@@ -281,8 +281,8 @@ const breadcrumbParts = computed(() => {
       <!-- Right Area: File Tree Sidebar -->
       <div
         v-if="isFileTreeOpen"
-        class="h-full flex relative shrink-0 z-20 md:z-auto"
-        :class="[!isDesktop && mobileActiveTab === 'code' ? 'hidden' : 'flex']"
+        class="h-full flex relative shrink-0 z-20 md:z-auto min-w-0"
+        :class="[!isDesktop && mobileActiveTab === 'code' ? 'hidden' : 'flex w-full md:w-auto']"
       >
         <FileTreeSidebar
           ref="treeSidebarRef"

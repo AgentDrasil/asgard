@@ -94,14 +94,16 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
 
   <!-- 1. List Mode -->
   <template v-else-if="viewMode === 'list'">
-    <SessionItem
-      v-for="session in sessions"
-      :key="session.chatID"
-      :session="session"
-      :is-active="activeSessionId === session.chatID"
-      @select-session="emit('select-session', $event)"
-      @delete-session="emit('delete-session', $event)"
-    />
+    <div class="w-full space-y-1 rounded-lg overflow-hidden">
+      <SessionItem
+        v-for="session in sessions"
+        :key="session.chatID"
+        :session="session"
+        :is-active="activeSessionId === session.chatID"
+        @select-session="emit('select-session', $event)"
+        @delete-session="emit('delete-session', $event)"
+      />
+    </div>
   </template>
 
   <!-- 2. Group by Agent & Workspace Mode (3-Level Collapsible) -->

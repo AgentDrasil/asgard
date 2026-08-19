@@ -125,8 +125,10 @@ const handleDelete = () => {
       @touchend="handleTouchEnd"
       @click="handleClick"
       :class="[
-        'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium w-full relative bg-base-300 gap-2',
-        isActive ? 'bg-primary text-primary-content' : 'hover:bg-base-200 text-base-content/85',
+        'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium w-full relative gap-2',
+        isActive
+          ? 'bg-primary text-primary-content'
+          : 'bg-base-300 hover:bg-base-200 text-base-content/85',
         isSwiping ? 'transition-none' : 'transition-transform duration-200 ease-out',
       ]"
       :style="{ transform: `translateX(${swipeOffset}px)` }"

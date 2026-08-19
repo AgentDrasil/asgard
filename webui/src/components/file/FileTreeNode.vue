@@ -88,14 +88,14 @@ watch(
 </script>
 
 <template>
-  <div class="select-none text-xs font-mono">
+  <div class="select-none text-xs font-mono w-full min-w-0">
     <!-- Row -->
     <button
       type="button"
       @click="toggleExpand"
       :style="{ paddingLeft: `${depth * 14 + 6}px` }"
       :class="[
-        'w-full text-left py-1 pr-2 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer group',
+        'w-full text-left py-1 pr-2 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer group min-w-0',
         isSelected
           ? 'bg-primary/15 text-primary font-semibold shadow-xs'
           : 'text-base-content/80 hover:bg-base-300/50 hover:text-base-content',
