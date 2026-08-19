@@ -98,7 +98,12 @@ const handleDelete = () => {
 </script>
 
 <template>
-  <div class="relative overflow-hidden w-full">
+  <div
+    :class="[
+      'relative overflow-hidden rounded-lg w-full',
+      isActive ? 'shadow-md shadow-primary/10' : '',
+    ]"
+  >
     <!-- Action / Delete Background Layer -->
     <div
       class="absolute inset-y-0 right-0 flex items-center justify-center bg-error/15 dark:bg-error/25 rounded-lg"
@@ -121,9 +126,7 @@ const handleDelete = () => {
       @click="handleClick"
       :class="[
         'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium w-full relative bg-base-300 gap-2',
-        isActive
-          ? 'bg-primary text-primary-content shadow-md shadow-primary/10'
-          : 'hover:bg-base-200 text-base-content/85',
+        isActive ? 'bg-primary text-primary-content' : 'hover:bg-base-200 text-base-content/85',
         isSwiping ? 'transition-none' : 'transition-transform duration-200 ease-out',
       ]"
       :style="{ transform: `translateX(${swipeOffset}px)` }"
