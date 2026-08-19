@@ -299,20 +299,28 @@ const commentedFileList = computed(() => {
     <header
       class="px-3 py-2 sm:px-4 sm:py-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between gap-2 shrink-0 shadow-sm"
     >
-      <!-- Left: Chat return button & VCS Title -->
+      <!-- Left: View Switcher Join Group & VCS Title -->
       <div class="flex items-center gap-1.5 sm:gap-2 min-w-0">
-        <!-- Return to Chat Button (Button label: Chat) -->
-        <button
-          @click="emit('close')"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs font-semibold"
-          :title="`Return to Chat (${toggleDiffShortcut})`"
-        >
-          <Icon icon="material-symbols:chat-outline" class="h-4 w-4" />
-          <span>Chat</span>
-        </button>
+        <!-- View Switcher Join Group (Chat / VCS) -->
+        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <button
+            @click="emit('close')"
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
+            :title="`Switch to Chat View (${toggleDiffShortcut})`"
+          >
+            <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
+            <span>Chat</span>
+          </button>
+          <button
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
+            title="VCS View"
+          >
+            <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
+            <span>VCS</span>
+          </button>
+        </div>
 
         <div class="flex items-center gap-1.5 font-mono text-xs truncate pl-1">
-          <Icon icon="octicon:git-branch-24" class="h-4 w-4 text-primary shrink-0" />
           <span class="font-bold text-base-content truncate">{{ currentBranch }}</span>
           <span
             v-if="selectedCommit"
@@ -396,38 +404,49 @@ const commentedFileList = computed(() => {
       </div>
 
       <!-- Right: VS Code layout controls & Refresh -->
-      <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <!-- Refresh Button -->
         <button
           @click="loadGitData"
           :disabled="loading"
-          class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
+          class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
           title="Refresh Git Diff & Log"
         >
           <Icon icon="mynaui:refresh" :class="['h-4 w-4', { 'animate-spin': loading }]" />
         </button>
 
-        <!-- Toggle Terminal Bottom Panel Button (VS Code style) -->
-        <button
-          @click="emit('toggle-terminal')"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 text-xs"
-          :class="{ 'btn-active btn-primary': isTerminalOpen }"
-          :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
-        >
-          <Icon icon="codicon:layout-panel" class="h-4 w-4" />
-          <span class="hidden xl:inline">Terminal</span>
-        </button>
+        <!-- Layout Controls Join Group (Bottom Panel / Right Sidebar) -->
+        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <!-- Toggle Terminal Bottom Panel Button (VS Code style) -->
+          <button
+            @click="emit('toggle-terminal')"
+            class="join-item btn btn-xs border-none gap-1"
+            :class="
+              isTerminalOpen
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content'
+            "
+            :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
+          >
+            <Icon icon="codicon:layout-panel" class="h-3.5 w-3.5" />
+            <span class="hidden xl:inline">Terminal</span>
+          </button>
 
-        <!-- Toggle VCS Right Sidebar Button (VS Code style) -->
-        <button
-          @click="isVCSSidebarOpen = !isVCSSidebarOpen"
-          class="hidden md:flex btn btn-xs sm:btn-sm gap-1 text-xs"
-          :class="isVCSSidebarOpen ? 'btn-active btn-primary' : 'btn-outline text-base-content/80'"
-          title="Toggle VCS Right Sidebar"
-        >
-          <Icon icon="codicon:layout-sidebar-right" class="h-4 w-4" />
-          <span class="hidden xl:inline">Sidebar</span>
-        </button>
+          <!-- Toggle VCS Right Sidebar Button (VS Code style) -->
+          <button
+            @click="isVCSSidebarOpen = !isVCSSidebarOpen"
+            class="hidden md:inline-flex join-item btn btn-xs border-none gap-1"
+            :class="
+              isVCSSidebarOpen
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content'
+            "
+            title="Toggle VCS Right Sidebar"
+          >
+            <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
+            <span class="hidden xl:inline">Sidebar</span>
+          </button>
+        </div>
       </div>
     </header>
 

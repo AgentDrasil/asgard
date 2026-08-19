@@ -11,7 +11,6 @@ export interface UseChatScrollOptions {
 export function useChatScroll(options: UseChatScrollOptions) {
   const { messages, sessionId, isDetailsOpen, onUpdateDetailsOpen } = options;
 
-  const bottomRef = ref<HTMLDivElement | null>(null);
   const scrollContainerRef = ref<HTMLDivElement | null>(null);
   const showScrollBottom = ref(false);
 
@@ -31,7 +30,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
   };
 
   const scrollToBottom = () => {
-    bottomRef.value?.scrollIntoView({ behavior: "smooth" });
+    if (scrollContainerRef.value) {
+      scrollContainerRef.value.scrollTo({
+        top: scrollContainerRef.value.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   };
 
   const handleScroll = () => {
@@ -75,7 +79,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     [sessionId, messages],
     async () => {
       await nextTick();
-      bottomRef.value?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottom();
       checkScrollPosition();
       setTimeout(() => {
         checkScrollPosition();
@@ -85,7 +89,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
   );
 
   return {
-    bottomRef,
     scrollContainerRef,
     showScrollBottom,
     scrollToBottom,

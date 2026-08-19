@@ -66,7 +66,7 @@ watch(
   { immediate: true },
 );
 
-const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
+const { showScrollBottom, scrollToBottom } = useChatScroll({
   messages: toRef(props, "messages"),
   sessionId: toRef(props, "sessionId"),
   isDetailsOpen: toRef(props, "isDetailsOpen"),
@@ -123,48 +123,74 @@ const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useC
         </div>
       </div>
 
-      <div class="flex items-center gap-1 sm:gap-1.5 shrink-0 h-7 sm:h-8">
-        <!-- VCS View Button (only in git repos) -->
-        <button
-          v-if="gitRoot"
-          @click="emit('open-diff', gitRoot)"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs font-semibold"
-          :title="`Switch to VCS View (${toggleDiffShortcut})`"
-        >
-          <Icon icon="octicon:git-branch-24" class="h-4 w-4" />
-          <span class="hidden sm:inline">VCS</span>
-        </button>
-
-        <!-- Toggle Artifacts Right Sidebar Button -->
-        <button
-          v-if="modifiedFiles && modifiedFiles.length > 0"
-          @click="emit('toggle-artifact-drawer')"
-          class="btn btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs"
-          :class="
-            isArtifactDrawerOpen ? 'btn-active btn-primary' : 'btn-outline text-base-content/80'
-          "
-          :title="`Toggle Artifacts Sidebar (${toggleArtifactsShortcut})`"
-        >
-          <Icon icon="codicon:layout-sidebar-right" class="h-4 w-4" />
-          <span class="hidden xl:inline">Artifacts</span>
-          <span
-            class="badge badge-xs sm:badge-sm font-bold bg-base-100/20 text-current border-none"
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 h-7 sm:h-8">
+        <!-- View Switcher Join Group (Chat / VCS) -->
+        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <button
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
+            title="Chat View"
           >
-            {{ modifiedFiles.length }}
-          </span>
-        </button>
+            <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
+            <span>Chat</span>
+          </button>
+          <button
+            v-if="gitRoot"
+            @click="emit('open-diff', gitRoot)"
+            class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
+            :title="`Switch to VCS View (${toggleDiffShortcut})`"
+          >
+            <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
+            <span>VCS</span>
+          </button>
+        </div>
 
-        <!-- Toggle Terminal Bottom Panel Button (VS Code style) -->
-        <button
-          v-if="sessionId"
-          @click="emit('toggle-terminal')"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs"
-          :class="{ 'btn-active btn-primary': isTerminalOpen }"
-          :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
-        >
-          <Icon icon="codicon:layout-panel" class="h-4 w-4" />
-          <span class="hidden xl:inline">Terminal</span>
-        </button>
+        <!-- Layout Controls Join Group (Bottom Panel / Right Sidebar) -->
+        <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <!-- Toggle Terminal Bottom Panel Button (VS Code style) -->
+          <button
+            v-if="sessionId"
+            @click="emit('toggle-terminal')"
+            class="join-item btn btn-xs border-none gap-1"
+            :class="
+              isTerminalOpen
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content'
+            "
+            :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
+          >
+            <Icon icon="codicon:layout-panel" class="h-3.5 w-3.5" />
+            <span class="hidden xl:inline">Terminal</span>
+          </button>
+
+          <!-- Toggle Artifacts Right Sidebar Button -->
+          <button
+            v-if="sessionId"
+            @click="emit('toggle-artifact-drawer')"
+            class="join-item btn btn-xs border-none gap-1"
+            :class="
+              isArtifactDrawerOpen
+                ? 'btn-primary shadow-xs'
+                : modifiedFiles && modifiedFiles.length > 0
+                  ? 'btn-secondary text-secondary-content shadow-xs font-semibold'
+                  : 'btn-ghost text-base-content/50 hover:text-base-content'
+            "
+            :title="`Toggle Artifacts Sidebar (${toggleArtifactsShortcut})`"
+          >
+            <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
+            <span class="hidden xl:inline">Artifacts</span>
+            <span
+              v-if="modifiedFiles && modifiedFiles.length > 0"
+              class="badge badge-xs font-bold"
+              :class="
+                isArtifactDrawerOpen
+                  ? 'bg-base-100/30 text-current border-none'
+                  : 'bg-secondary-content/20 text-secondary-content border-none'
+              "
+            >
+              {{ modifiedFiles.length }}
+            </span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -218,8 +244,6 @@ const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useC
             Agent ({{ workingAgentLabel || activeAgent?.name || "Agent" }}) is working...
           </span>
         </div>
-
-        <div ref="bottomRef"></div>
       </div>
     </div>
 

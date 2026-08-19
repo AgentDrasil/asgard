@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
 import VCSFileList from "./VCSFileList.vue";
 import VCSCommitTree from "./VCSCommitTree.vue";
@@ -77,10 +77,67 @@ async function handlePull() {
     isPulling.value = false;
   }
 }
+
+// ── Vertical Resizer (Files vs Commits height split) ────────────────────────
+const DEFAULT_COMMITS_HEIGHT = 240;
+const MIN_COMMITS_HEIGHT = 100;
+const MIN_FILES_HEIGHT = 100;
+
+const commitsHeight = ref(DEFAULT_COMMITS_HEIGHT);
+const isResizingVertical = ref(false);
+const sidebarContainerRef = ref<HTMLDivElement | null>(null);
+
+const startVerticalResize = (e: MouseEvent) => {
+  e.preventDefault();
+  isResizingVertical.value = true;
+  const startY = e.clientY;
+  const startHeight = commitsHeight.value;
+
+  const handleMouseMove = (moveEvent: MouseEvent) => {
+    if (!isResizingVertical.value) return;
+    const deltaY = moveEvent.clientY - startY;
+    const containerHeight = sidebarContainerRef.value?.clientHeight || 600;
+    const maxCommitsHeight = Math.max(MIN_COMMITS_HEIGHT, containerHeight - MIN_FILES_HEIGHT - 100);
+    const newHeight = Math.min(
+      Math.max(startHeight - deltaY, MIN_COMMITS_HEIGHT),
+      maxCommitsHeight,
+    );
+    commitsHeight.value = newHeight;
+  };
+
+  const stopResize = () => {
+    if (isResizingVertical.value) {
+      isResizingVertical.value = false;
+      localStorage.setItem("asgard_vcs_commits_height", commitsHeight.value.toString());
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", stopResize);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    }
+  };
+
+  document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("mouseup", stopResize);
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = "row-resize";
+};
+
+onMounted(() => {
+  const savedHeight = localStorage.getItem("asgard_vcs_commits_height");
+  if (savedHeight) {
+    const parsed = parseInt(savedHeight, 10);
+    if (!isNaN(parsed) && parsed >= MIN_COMMITS_HEIGHT) {
+      commitsHeight.value = parsed;
+    }
+  }
+});
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden bg-base-200 border-l border-base-300 min-w-0">
+  <div
+    ref="sidebarContainerRef"
+    class="flex flex-col h-full overflow-hidden bg-base-200 border-l border-base-300 min-w-0"
+  >
     <!-- Top Action Bar (Buttons: Push / Pull / Refresh / Branch info) -->
     <div class="p-2.5 bg-base-200 border-b border-base-300 shrink-0 space-y-2">
       <!-- Top Row: Branch & Ahead/Behind Status -->
@@ -92,10 +149,14 @@ async function handlePull() {
           </span>
           <span
             v-if="ahead > 0 || behind > 0"
-            class="badge badge-xs badge-neutral gap-1 font-mono text-[10px] shrink-0"
+            class="badge badge-sm bg-base-300 text-base-content border border-base-content/15 px-1.5 py-0.5 gap-1 font-mono text-[11px] font-bold shrink-0 shadow-xs"
           >
-            <span v-if="ahead > 0" class="text-success">↑{{ ahead }}</span>
-            <span v-if="behind > 0" class="text-error">↓{{ behind }}</span>
+            <span v-if="ahead > 0" class="text-success flex items-center gap-0.5 font-bold">
+              <span>↑</span><span>{{ ahead }}</span>
+            </span>
+            <span v-if="behind > 0" class="text-error flex items-center gap-0.5 font-bold">
+              <span>↓</span><span>{{ behind }}</span>
+            </span>
           </span>
         </div>
 
@@ -164,8 +225,8 @@ async function handlePull() {
       </div>
     </div>
 
-    <!-- Middle Section: Changed Files list (Top half) -->
-    <div class="flex-1 flex flex-col min-h-0 border-b border-base-300">
+    <!-- Middle Section: Changed Files list (Top resizable part) -->
+    <div class="flex-1 flex flex-col min-h-[100px] overflow-hidden">
       <div
         class="px-3 py-1.5 bg-base-300/40 border-b border-base-300/60 flex items-center justify-between shrink-0"
       >
@@ -185,8 +246,23 @@ async function handlePull() {
       </div>
     </div>
 
-    <!-- Bottom Section: Commit History Tree (Bottom half) -->
-    <div class="h-1/2 min-h-[220px] flex flex-col min-h-0 overflow-hidden">
+    <!-- Horizontal Resizer Handle between Files and Commits -->
+    <div
+      @mousedown="startVerticalResize"
+      class="h-1.5 w-full cursor-row-resize bg-base-300 hover:bg-primary/50 active:bg-primary transition-colors z-20 shrink-0 border-y border-base-content/10 flex items-center justify-center group select-none"
+      title="Drag to resize Files and Commits panels"
+    >
+      <div class="w-8 h-0.5 bg-base-content/20 group-hover:bg-primary-content/80 rounded"></div>
+    </div>
+
+    <!-- Bottom Section: Commit History Tree (Bottom resizable part) -->
+    <div
+      :style="{ height: `${commitsHeight}px` }"
+      :class="[
+        'shrink-0 flex flex-col min-h-[100px] overflow-hidden',
+        isResizingVertical ? 'transition-none' : 'transition-[height] duration-150',
+      ]"
+    >
       <VCSCommitTree
         :commits="commits"
         :unstashedCount="unstashedCount"

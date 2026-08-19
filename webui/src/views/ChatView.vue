@@ -251,9 +251,14 @@ watch(isArtifactDrawerOpen, (open) => {
       </div>
     </div>
 
-    <!-- Bottom Area: ChatInput & TerminalPanel (Always Full Width across entire window) -->
+    <!-- Bottom Area: ChatInput (Chat View only) & TerminalPanel -->
     <div class="w-full shrink-0 flex flex-col z-20">
-      <ChatInput @send="(text) => $emit('send', text)" :loading="loading" v-model="chatInputText" />
+      <ChatInput
+        v-if="!showDiffView"
+        @send="(text) => $emit('send', text)"
+        :loading="loading"
+        v-model="chatInputText"
+      />
       <TerminalPanel
         :sessionId="sessionId"
         :terminalType="terminalType"
