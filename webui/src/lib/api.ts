@@ -3,7 +3,9 @@ import type {
   ChatSession,
   DirInfo,
   FirebaseWebpushWebConfig,
+  GitActionResult,
   GitDiffFile,
+  GitLogResponse,
   TriggerAgentMessageParams,
 } from "../types";
 
@@ -99,16 +101,72 @@ export async function getSubdirs(dir: string): Promise<string[]> {
   return info.subdirs;
 }
 
-export async function getGitDiff(dir: string): Promise<GitDiffFile[]> {
+export async function getGitDiff(dir: string, commit?: string): Promise<GitDiffFile[]> {
   if (!dir) return [];
   try {
-    const res = await apiFetch(`/api/git/diff?dir=${encodeURIComponent(dir)}`);
+    let url = `/api/git/diff?dir=${encodeURIComponent(dir)}`;
+    if (commit) {
+      url += `&commit=${encodeURIComponent(commit)}`;
+    }
+    const res = await apiFetch(url);
     if (!res.ok) return [];
     const data = await res.json();
     return data.files || [];
   } catch (err) {
     console.error("getGitDiff error:", err);
     return [];
+  }
+}
+
+export async function getGitLog(dir: string, limit = 10): Promise<GitLogResponse | null> {
+  if (!dir) return null;
+  try {
+    const res = await apiFetch(`/api/git/log?dir=${encodeURIComponent(dir)}&limit=${limit}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("getGitLog error:", err);
+    return null;
+  }
+}
+
+export async function gitPush(dir: string): Promise<GitActionResult> {
+  if (!dir) return { success: false, error: "Directory is required" };
+  try {
+    const res = await apiFetch("/api/git/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir }),
+    });
+    const data = await res.json();
+    return {
+      success: res.ok && data.success,
+      output: data.output,
+      error: data.error,
+    };
+  } catch (err: any) {
+    console.error("gitPush error:", err);
+    return { success: false, error: err?.message || "Failed to push" };
+  }
+}
+
+export async function gitPull(dir: string): Promise<GitActionResult> {
+  if (!dir) return { success: false, error: "Directory is required" };
+  try {
+    const res = await apiFetch("/api/git/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir }),
+    });
+    const data = await res.json();
+    return {
+      success: res.ok && data.success,
+      output: data.output,
+      error: data.error,
+    };
+  } catch (err: any) {
+    console.error("gitPull error:", err);
+    return { success: false, error: err?.message || "Failed to pull" };
   }
 }
 

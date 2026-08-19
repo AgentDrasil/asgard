@@ -65,6 +65,32 @@ export interface GitDiffFile {
   hunks: string[];
 }
 
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  authorEmail: string;
+  date: string;
+  relativeDate: string;
+  refs?: string;
+  message: string;
+}
+
+export interface GitLogResponse {
+  commits: GitCommit[];
+  currentBranch: string;
+  trackingBranch?: string;
+  ahead: number;
+  behind: number;
+  unstashedCount: number;
+}
+
+export interface GitActionResult {
+  success: boolean;
+  output?: string;
+  error?: string;
+}
+
 export interface FirebaseWebpushWebConfig {
   apiKey?: string;
   authDomain?: string;

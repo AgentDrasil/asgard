@@ -123,18 +123,29 @@ const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useC
         </div>
       </div>
 
-      <div class="flex items-center gap-1 sm:gap-2 shrink-0 h-7 sm:h-8">
-        <!-- Open Artifacts Button -->
+      <div class="flex items-center gap-1 sm:gap-1.5 shrink-0 h-7 sm:h-8">
+        <!-- VCS View Button (only in git repos) -->
+        <button
+          v-if="gitRoot"
+          @click="emit('open-diff', gitRoot)"
+          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs font-semibold"
+          :title="`Switch to VCS View (${toggleDiffShortcut})`"
+        >
+          <Icon icon="octicon:git-branch-24" class="h-4 w-4" />
+          <span class="hidden sm:inline">VCS</span>
+        </button>
+
+        <!-- Toggle Artifacts Right Sidebar Button -->
         <button
           v-if="modifiedFiles && modifiedFiles.length > 0"
           @click="emit('toggle-artifact-drawer')"
-          class="btn btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
+          class="btn btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs"
           :class="
-            isArtifactDrawerOpen ? 'btn-active btn-primary' : 'btn-secondary text-secondary-content'
+            isArtifactDrawerOpen ? 'btn-active btn-primary' : 'btn-outline text-base-content/80'
           "
-          :title="`Toggle Artifacts View (${toggleArtifactsShortcut})`"
+          :title="`Toggle Artifacts Sidebar (${toggleArtifactsShortcut})`"
         >
-          <Icon icon="octicon:file-code-24" class="h-4 w-4" />
+          <Icon icon="codicon:layout-sidebar-right" class="h-4 w-4" />
           <span class="hidden xl:inline">Artifacts</span>
           <span
             class="badge badge-xs sm:badge-sm font-bold bg-base-100/20 text-current border-none"
@@ -143,29 +154,16 @@ const { bottomRef, scrollContainerRef, showScrollBottom, scrollToBottom } = useC
           </span>
         </button>
 
-        <!-- Open Diff (only in git repos) -->
-        <button
-          v-if="gitRoot"
-          @click="emit('open-diff', gitRoot)"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
-          :title="`Toggle Git Diff View (${toggleDiffShortcut})`"
-        >
-          <Icon icon="octicon:file-diff-24" class="h-4 w-4" />
-          <span class="hidden xl:inline">Open Diff</span>
-        </button>
-
-        <!-- Open Terminal -->
+        <!-- Toggle Terminal Bottom Panel Button (VS Code style) -->
         <button
           v-if="sessionId"
           @click="emit('toggle-terminal')"
-          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-2 text-xs"
+          class="btn btn-outline btn-xs sm:btn-sm gap-1 sm:gap-1.5 text-xs"
           :class="{ 'btn-active btn-primary': isTerminalOpen }"
-          :title="`Toggle Agent Workspace Terminal (${toggleTerminalShortcut})`"
+          :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
         >
-          <Icon icon="mynaui:terminal" class="h-4 w-4" />
-          <span class="hidden xl:inline">{{
-            isTerminalOpen ? "Hide Terminal" : "Open Terminal"
-          }}</span>
+          <Icon icon="codicon:layout-panel" class="h-4 w-4" />
+          <span class="hidden xl:inline">Terminal</span>
         </button>
       </div>
     </header>

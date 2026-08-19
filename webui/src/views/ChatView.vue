@@ -182,18 +182,24 @@ watch(isArtifactDrawerOpen, (open) => {
   <div class="flex-1 flex flex-col h-full overflow-hidden relative">
     <!-- Top Area: Split ChatArea / DiffView & ArtifactViewer -->
     <div class="flex-1 flex h-full overflow-hidden relative min-h-0">
-      <!-- Left: Chat Area (Messages) or DiffView -->
+      <!-- Left: Chat Area (Messages) or DiffView (VCS View) -->
       <div
         class="flex-1 flex flex-col h-full overflow-hidden relative min-w-0"
-        :class="isArtifactDrawerOpen && activeArtifactPath ? 'hidden md:flex' : 'flex'"
+        :class="
+          !showDiffView && isArtifactDrawerOpen && activeArtifactPath ? 'hidden md:flex' : 'flex'
+        "
       >
+        <!-- VCS View -->
         <DiffView
           v-if="showDiffView"
           :runDir="runDir"
           :gitRoot="gitRoot"
+          :isTerminalOpen="isTerminalOpen"
           v-model:chatInputText="chatInputText"
           @close="$emit('close-diff')"
+          @toggle-terminal="$emit('toggle-terminal')"
         />
+        <!-- Chat View -->
         <ChatArea
           v-else
           :messages="messages"
@@ -216,9 +222,9 @@ watch(isArtifactDrawerOpen, (open) => {
         />
       </div>
 
-      <!-- Right: Resizable Artifact Panel -->
+      <!-- Right: Resizable Artifact Panel (Only in Chat View) -->
       <div
-        v-if="isArtifactDrawerOpen && activeArtifactPath"
+        v-if="!showDiffView && isArtifactDrawerOpen && activeArtifactPath"
         class="w-full md:w-auto h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
         :class="{
           'transition-none': isResizingArtifact,
