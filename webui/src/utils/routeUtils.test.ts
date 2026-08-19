@@ -238,4 +238,61 @@ describe("routeUtils", () => {
       expect(shouldResetSessionState("session-1", "session-2")).toBe(true);
     });
   });
+
+  describe("route synchronization and state derivation", () => {
+    it("restores activeView='chat' from /chat/:id", () => {
+      const resolved = router.resolve("/chat/sess-123");
+      const state = resolveViewFromRoute(
+        resolved.path,
+        resolved.params,
+        resolved.name ? String(resolved.name) : null,
+      );
+      expect(state.activeView).toBe("chat");
+      expect(state.filePath).toBeNull();
+      expect(state.commitId).toBeNull();
+    });
+
+    it("restores activeView='file' and selectedFilePath from /chat/:id/files/:filePath", () => {
+      const resolved = router.resolve("/chat/sess-123/files/src/main.ts");
+      const state = resolveViewFromRoute(
+        resolved.path,
+        resolved.params,
+        resolved.name ? String(resolved.name) : null,
+      );
+      expect(state.activeView).toBe("file");
+      expect(state.filePath).toBe("src/main.ts");
+      expect(state.commitId).toBeNull();
+    });
+
+    it("restores activeView='vcs', selectedCommit, and filePath from /chat/:id/vcs/:commitId/:filePath", () => {
+      const resolved = router.resolve("/chat/sess-123/vcs/a1b2c3d/src/components/App.vue");
+      const state = resolveViewFromRoute(
+        resolved.path,
+        resolved.params,
+        resolved.name ? String(resolved.name) : null,
+      );
+      expect(state.activeView).toBe("vcs");
+      expect(state.commitId).toBe("a1b2c3d");
+      expect(state.filePath).toBe("src/components/App.vue");
+    });
+
+    it("accurately detects when session ID changes vs view changes via shouldResetSessionState", () => {
+      expect(shouldResetSessionState("session-A", "session-B")).toBe(true);
+      expect(shouldResetSessionState("session-A", "session-A")).toBe(false);
+      expect(shouldResetSessionState(null, "session-A")).toBe(false);
+      expect(shouldResetSessionState("session-A", null)).toBe(false);
+    });
+
+    it("normalizes naked /chat/:id/vcs with undefined commitId to commitId=null and activeView='vcs'", () => {
+      const resolved = router.resolve("/chat/sess-123/vcs");
+      const state = resolveViewFromRoute(
+        resolved.path,
+        resolved.params,
+        resolved.name ? String(resolved.name) : null,
+      );
+      expect(state.activeView).toBe("vcs");
+      expect(state.commitId).toBeNull();
+      expect(state.filePath).toBeNull();
+    });
+  });
 });

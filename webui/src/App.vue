@@ -5,6 +5,12 @@ import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import { initPushNotifications } from "./lib/push";
 import type { ActiveView } from "./types";
+import {
+  resolveViewFromRoute,
+  buildChatRoute,
+  buildFilesRoute,
+  buildVcsRoute,
+} from "./utils/routeUtils";
 
 import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
@@ -17,6 +23,7 @@ const welcomePrompt = ref("");
 const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
 const selectedFilePath = ref<string | null>(null);
+const selectedCommit = ref<string | null>(null);
 const isFileTreeOpen = ref(true);
 const chatInputText = ref("");
 const currentGitRoot = ref("");
@@ -86,22 +93,44 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
     e.preventDefault();
     e.stopPropagation();
-    if (activeView.value === "vcs") {
-      activeView.value = "chat";
-    } else {
-      const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
-      if (gitRootCandidate) {
-        currentGitRoot.value = gitRootCandidate;
+    const sessionId = activeSessionId.value || (route.params.id as string);
+    if (sessionId) {
+      if (activeView.value === "vcs") {
+        router.push(buildChatRoute(sessionId));
+      } else {
+        const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
+        if (gitRootCandidate) {
+          currentGitRoot.value = gitRootCandidate;
+        }
+        router.push(buildVcsRoute(sessionId, selectedCommit.value, selectedFilePath.value));
       }
-      activeView.value = "vcs";
+    } else {
+      if (activeView.value === "vcs") {
+        activeView.value = "chat";
+      } else {
+        const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
+        if (gitRootCandidate) {
+          currentGitRoot.value = gitRootCandidate;
+        }
+        activeView.value = "vcs";
+      }
     }
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyF") {
     e.preventDefault();
     e.stopPropagation();
-    if (activeView.value === "file") {
-      activeView.value = "chat";
+    const sessionId = activeSessionId.value || (route.params.id as string);
+    if (sessionId) {
+      if (activeView.value === "file") {
+        router.push(buildChatRoute(sessionId));
+      } else {
+        router.push(buildFilesRoute(sessionId, selectedFilePath.value));
+      }
     } else {
-      activeView.value = "file";
+      if (activeView.value === "file") {
+        activeView.value = "chat";
+      } else {
+        activeView.value = "file";
+      }
     }
   }
 };
@@ -138,21 +167,45 @@ const { handleSelectSession, handleNewChat, handleDeleteSession } = useSessions(
   loadSessions,
 );
 
-// Route watcher to open or close session
+let prevSessionId: string | null = null;
+
+// Route watcher to synchronize session, view, and parameters
 watch(
-  () => route.params.id,
-  async (newId) => {
-    activeView.value = "chat";
-    selectedFilePath.value = null;
-    chatInputText.value = "";
-    if (newId && typeof newId === "string") {
-      await openSession(newId);
-    } else {
-      closeSession();
-      welcomePrompt.value = "";
+  [() => route.path, () => route.params],
+  async () => {
+    const rawId = route.params.id;
+    const newSessionId = typeof rawId === "string" && rawId.trim() !== "" ? rawId : null;
+
+    if (newSessionId !== prevSessionId) {
+      if (newSessionId) {
+        chatInputText.value = "";
+        welcomePrompt.value = "";
+        await openSession(newSessionId);
+      } else {
+        closeSession();
+        welcomePrompt.value = "";
+        chatInputText.value = "";
+      }
+      prevSessionId = newSessionId;
+    }
+
+    const resolved = resolveViewFromRoute(
+      route.path,
+      route.params,
+      route.name ? String(route.name) : null,
+    );
+
+    if (activeView.value !== resolved.activeView) {
+      activeView.value = resolved.activeView;
+    }
+    if (selectedFilePath.value !== resolved.filePath) {
+      selectedFilePath.value = resolved.filePath;
+    }
+    if (selectedCommit.value !== resolved.commitId) {
+      selectedCommit.value = resolved.commitId;
     }
   },
-  { immediate: true },
+  { immediate: true, deep: true },
 );
 
 onMounted(async () => {
@@ -240,6 +293,7 @@ const closeSidebarOnMobile = () => {
           :terminalType="terminalType"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
+          v-model:selectedCommit="selectedCommit"
           v-model:isFileTreeOpen="isFileTreeOpen"
           v-model:selectedAgentId="selectedAgentId"
           v-model:selectedDir="selectedDir"
@@ -255,10 +309,24 @@ const closeSidebarOnMobile = () => {
           @open-diff="
             (gitRoot) => {
               currentGitRoot = gitRoot;
-              activeView = 'vcs';
+              const sessionId = activeSessionId || (route.params.id as string);
+              if (sessionId) {
+                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
+              } else {
+                activeView = 'vcs';
+              }
             }
           "
-          @close-diff="activeView = 'chat'"
+          @close-diff="
+            () => {
+              const sessionId = activeSessionId || (route.params.id as string);
+              if (sessionId) {
+                router.push(buildChatRoute(sessionId));
+              } else {
+                activeView = 'chat';
+              }
+            }
+          "
           @open-search="isFileSearchOpen = true"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
@@ -276,8 +344,13 @@ const closeSidebarOnMobile = () => {
       @select-file="
         (path) => {
           selectedFilePath = path;
-          activeView = 'file';
           isFileSearchOpen = false;
+          const sessionId = activeSessionId || (route.params.id as string);
+          if (sessionId) {
+            router.push(buildFilesRoute(sessionId, path));
+          } else {
+            activeView = 'file';
+          }
         }
       "
     />

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
+import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
 import ChatInput from "../components/ChatInput.vue";
 import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
@@ -8,6 +9,9 @@ import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
 import ArtifactViewer from "../components/ArtifactViewer.vue";
 import type { ChatMessage, AgentInfo, ActiveView } from "../types";
+import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
+
+const router = useRouter();
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -24,6 +28,7 @@ const props = defineProps<{
 
 const activeView = defineModel<ActiveView>("activeView", { default: "chat" });
 const selectedFilePath = defineModel<string | null>("selectedFilePath", { default: null });
+const selectedCommit = defineModel<string | null>("selectedCommit", { default: null });
 const isFileTreeOpen = defineModel<boolean>("isFileTreeOpen", { default: true });
 const isDetailsOpen = defineModel<boolean>("isDetailsOpen");
 const chatInputText = defineModel<string>("chatInputText");
@@ -204,10 +209,28 @@ watch(isArtifactDrawerOpen, (open) => {
           :runDir="runDir"
           :gitRoot="gitRoot"
           :isTerminalOpen="isTerminalOpen"
+          v-model:selectedCommit="selectedCommit"
+          v-model:selectedFilePath="selectedFilePath"
           v-model:chatInputText="chatInputText"
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
-          @close="activeView = 'chat'"
-          @open-file-view="activeView = 'file'"
+          @close="
+            () => {
+              if (sessionId) {
+                router.push(buildChatRoute(sessionId));
+              } else {
+                activeView = 'chat';
+              }
+            }
+          "
+          @open-file-view="
+            () => {
+              if (sessionId) {
+                router.push(buildFilesRoute(sessionId, selectedFilePath));
+              } else {
+                activeView = 'file';
+              }
+            }
+          "
           @toggle-terminal="emit('toggle-terminal')"
         />
 
@@ -221,8 +244,24 @@ watch(isArtifactDrawerOpen, (open) => {
           v-model:isFileTreeOpen="isFileTreeOpen"
           v-model:chatInputText="chatInputText"
           v-model:selectedFilePath="selectedFilePath"
-          @close="activeView = 'chat'"
-          @open-vcs="activeView = 'vcs'"
+          @close="
+            () => {
+              if (sessionId) {
+                router.push(buildChatRoute(sessionId));
+              } else {
+                activeView = 'chat';
+              }
+            }
+          "
+          @open-vcs="
+            () => {
+              if (sessionId) {
+                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
+              } else {
+                activeView = 'vcs';
+              }
+            }
+          "
           @toggle-terminal="emit('toggle-terminal')"
           @open-search="emit('open-search')"
         />
@@ -243,11 +282,23 @@ watch(isArtifactDrawerOpen, (open) => {
           v-model:isDetailsOpen="isDetailsOpen"
           @open-diff="
             (g) => {
-              activeView = 'vcs';
               emit('open-diff', g);
+              if (sessionId) {
+                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
+              } else {
+                activeView = 'vcs';
+              }
             }
           "
-          @open-file-view="activeView = 'file'"
+          @open-file-view="
+            () => {
+              if (sessionId) {
+                router.push(buildFilesRoute(sessionId, selectedFilePath));
+              } else {
+                activeView = 'file';
+              }
+            }
+          "
           @open-artifact="handleOpenArtifact"
           @toggle-terminal="emit('toggle-terminal')"
           @toggle-sidebar="emit('toggle-sidebar')"
