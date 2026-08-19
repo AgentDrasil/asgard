@@ -123,7 +123,7 @@ describe("useChatScroll", () => {
       scrollTop: 500,
       scrollHeight: 1000,
       clientHeight: 500,
-      scrollTo: vi.fn((o?: ScrollToOptions) => {
+      scrollTo: vi.fn<(o?: ScrollToOptions) => void>((o?: ScrollToOptions) => {
         if (o && typeof o.top === "number") el.scrollTop = o.top;
       }),
     };

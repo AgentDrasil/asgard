@@ -71,7 +71,7 @@ watch(
   { immediate: true },
 );
 
-const { scrollContainerRef, showScrollBottom, scrollToBottom } = useChatScroll({
+const { scrollContainerRef, showScrollBottom, scrollToBottom, hasNewMessages } = useChatScroll({
   messages: toRef(props, "messages"),
   sessionId: toRef(props, "sessionId"),
   isDetailsOpen: toRef(props, "isDetailsOpen"),
@@ -325,10 +325,25 @@ onUnmounted(() => {
       <button
         v-if="showScrollBottom"
         @click="scrollToBottom"
-        class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content"
-        title="Scroll to bottom"
-        aria-label="Scroll to bottom"
+        class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md"
+        :class="
+          hasNewMessages
+            ? 'btn-primary shadow-xl shadow-primary/40'
+            : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
+        "
+        :title="hasNewMessages ? 'New messages below (Click to scroll)' : 'Scroll to bottom'"
+        :aria-label="hasNewMessages ? 'New messages below (Click to scroll)' : 'Scroll to bottom'"
       >
+        <span
+          v-if="hasNewMessages"
+          class="absolute -top-1 -right-1 flex h-3 w-3 pointer-events-none"
+          aria-hidden="true"
+        >
+          <span
+            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"
+          ></span>
+          <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+        </span>
         <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
       </button>
     </Transition>
