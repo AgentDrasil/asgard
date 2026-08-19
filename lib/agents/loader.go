@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/AgentDrasil/asgard/lib/agentwrapper"
 )
 
 type Loader struct {
@@ -56,6 +58,8 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 		validTeams[t] = true
 	}
 
+	supportedCLIs := agentwrapper.GetSupportedCLIsAndModels()
+
 	var agents []*Agent
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -89,7 +93,7 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			cfg.Name = entry.Name()
 		}
 
-		if err := cfg.Validate(); err != nil {
+		if err := cfg.ValidateWithCLIs(supportedCLIs); err != nil {
 			return nil, fmt.Errorf("invalid config for agent %s: %w", entry.Name(), err)
 		}
 

@@ -64,6 +64,12 @@ func (cfg *AgentConfig) IsMainAgent() bool {
 
 // Validate checks the AgentConfig fields for correctness.
 func (cfg *AgentConfig) Validate() error {
+	supportedCLIs := agentwrapper.GetSupportedCLIsAndModels()
+	return cfg.ValidateWithCLIs(supportedCLIs)
+}
+
+// ValidateWithCLIs checks the AgentConfig fields for correctness against a provided map of supported CLIs and models.
+func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) error {
 	if cfg.MainAgent == nil {
 		def := true
 		cfg.MainAgent = &def
@@ -91,7 +97,6 @@ func (cfg *AgentConfig) Validate() error {
 		return fmt.Errorf("cli list cannot be empty")
 	}
 
-	supportedCLIs := agentwrapper.GetSupportedCLIsAndModels()
 	for _, target := range cfg.CLI {
 		if target.CLI == "" {
 			return fmt.Errorf("cli target name cannot be empty")

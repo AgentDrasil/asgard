@@ -634,6 +634,74 @@ func TestAgentConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestAgentConfig_ValidateWithCLIs(t *testing.T) {
+	t.Parallel()
+
+	supportedCLIs := map[string][]string{
+		"agy":      {"gemini-2.5-flash"},
+		"opencode": {"deepseek-chat"},
+	}
+
+	tests := []struct {
+		name    string
+		config  AgentConfig
+		wantErr bool
+	}{
+		{
+			name: "valid configuration with pre-fetched supported CLIs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unsupported CLI with pre-fetched supported CLIs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "unsupported-cli", Model: "some-model"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "unsupported model with pre-fetched supported CLIs",
+			config: AgentConfig{
+				ID:          "agent-one",
+				Name:        "agent1",
+				Description: "Test Agent 1",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "unknown-model"},
+				},
+				RunDirs: []string{"/tmp/run"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.config.ValidateWithCLIs(supportedCLIs)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func boolPtr(b bool) *bool {
 	return &b
 }
