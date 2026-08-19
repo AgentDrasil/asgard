@@ -843,3 +843,165 @@ nodes:
 	assert.Equal(t, RunStatusCompleted, res.Status)
 	assert.Equal(t, 2, runner.count("spin"), "definition-level max_node_executions caps re-entry")
 }
+
+func TestSweepDormantOrphans_DeepUnconditionalDownstream(t *testing.T) {
+	t.Parallel()
+
+	// An on_exhausted fallback that is NEVER activated has deep downstream nodes
+	// connected via unconditional edges (orphan -> child1 -> child2).
+	// All should be swept to SKIPPED(never_activated) and workflow should settle COMPLETED.
+	yamlSpec := `
+name: test-dormant-orphan-deep-sweep
+loops:
+  - id: fix_loop
+    nodes: [check, fix]
+    max_iterations: 5
+    on_exhausted: orphan_fallback
+
+nodes:
+  - id: check
+    type: command
+    command: "echo ok"
+  - id: fix
+    type: command
+    command: "echo fix"
+    depends:
+      - node: check
+        when: "nodes.check.exit_code == 1"
+        counts_loop: fix_loop
+  - id: orphan_fallback
+    type: command
+    command: "echo fallback"
+  - id: child1
+    type: command
+    command: "echo child1"
+    depends:
+      - node: orphan_fallback
+  - id: child2
+    type: command
+    command: "echo child2"
+    depends:
+      - node: child1
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(nil)
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "dormant-deep-sess"})
+	require.NoError(t, err)
+
+	assert.Equal(t, RunStatusCompleted, res.Status)
+	assert.Equal(t, StatusSkipped, res.Nodes["orphan_fallback"].Status)
+	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["orphan_fallback"].SkipReason)
+	assert.Equal(t, StatusSkipped, res.Nodes["child1"].Status)
+	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["child1"].SkipReason)
+	assert.Equal(t, StatusSkipped, res.Nodes["child2"].Status)
+	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["child2"].SkipReason)
+}
+
+func TestAbortCheck_OnlyHumanNodes(t *testing.T) {
+	t.Parallel()
+
+	// A command node serving as on_exhausted produces output containing "abort".
+	// Because it is not a human node, the workflow must settle COMPLETED (or FAILED if command failed),
+	// but NEVER CANCELED.
+	yamlSpec := `
+name: test-command-abort-not-canceled
+loops:
+  - id: retry_loop
+    nodes: [step1, step2]
+    max_iterations: 1
+    on_exhausted: fallback_cmd
+
+nodes:
+  - id: step1
+    type: command
+    command: "echo step1"
+  - id: step2
+    type: command
+    command: "echo step2"
+    depends:
+      - node: step1
+        when: "nodes.step1.exit_code == 0"
+        counts_loop: retry_loop
+  - id: fallback_cmd
+    type: command
+    command: "echo 'aborting obsolete branch'"
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+		if nctx.Node.ID == "fallback_cmd" {
+			return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: "aborting obsolete branch"}, nil
+		}
+		return &NodeResult{Status: StatusSucceeded, ExitCode: 0}, nil
+	}}
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "cmd-abort-sess"})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, RunStatusCanceled, res.Status)
+	assert.Equal(t, RunStatusCompleted, res.Status)
+}
+
+func TestSkipGuard_AllowsStatusAndSkipReasonWhenExpressions(t *testing.T) {
+	t.Parallel()
+
+	yamlSpec := `
+name: test-skip-status-matching
+nodes:
+  - id: start
+    type: command
+    command: "echo start"
+  - id: branch_a
+    type: command
+    command: "echo a"
+    depends:
+      - node: start
+        when: "nodes.start.exit_code == 99"
+  - id: handle_skip
+    type: command
+    command: "echo handle skip"
+    depends:
+      - node: branch_a
+        when: "nodes.branch_a.status == 'SKIPPED'"
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(nil)
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "skip-match-sess"})
+	require.NoError(t, err)
+
+	assert.Equal(t, RunStatusCompleted, res.Status)
+	assert.Equal(t, StatusSkipped, res.Nodes["branch_a"].Status)
+	assert.Equal(t, 1, runner.count("handle_skip"), "handle_skip must run when branch_a is SKIPPED")
+	assert.Equal(t, StatusSucceeded, res.Nodes["handle_skip"].Status)
+}
+
+func TestPersistedNodeState_LoopIterationsRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	results := map[string]*NodeResult{
+		"fixer": {
+			Status:         StatusSucceeded,
+			ExitCode:       0,
+			Output:         "fixed",
+			LoopIterations: map[string]int{"fix_loop": 2},
+		},
+	}
+
+	states := toPersistedStates(results)
+	require.Contains(t, states, "fixer")
+	assert.Equal(t, map[string]int{"fix_loop": 2}, states["fixer"].LoopIterations)
+
+	restored := fromPersistedStates(states)
+	require.Contains(t, restored, "fixer")
+	assert.Equal(t, map[string]int{"fix_loop": 2}, restored["fixer"].LoopIterations)
+}

@@ -139,11 +139,16 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 		// edge; parent failure does not block a matching when-branch.
 		if dep.When != "" {
 			// Fail-closed skip guard: a skipped parent (any skip reason)
-			// produced no result; its zero-valued exit code must never
-			// satisfy the condition (e.g. `exit_code == 0`).
+			// produced no execution result; its zero-valued exit code/output must never
+			// satisfy an exit_code condition (e.g. `exit_code == 0`).
+			// However, if the condition explicitly queries `.status` or `.skip_reason`,
+			// allow evaluation against the settled skipped result.
 			if parentResult != nil && parentResult.Status == StatusSkipped {
-				hasConditionFalseEdge = true
-				continue
+				isStatusQuery := strings.Contains(dep.When, ".status") || strings.Contains(dep.When, ".skip_reason")
+				if !isStatusQuery {
+					hasConditionFalseEdge = true
+					continue
+				}
 			}
 			match, err := EvaluateSimpleExpr(dep.When, upstreams, nil)
 			if err != nil {
@@ -552,7 +557,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					continue
 				}
 				match := false
-				if !parentSkipped {
+				isStatusQuery := strings.Contains(cond.When, ".status") || strings.Contains(cond.When, ".skip_reason")
+				if !parentSkipped || isStatusQuery {
 					var err error
 					match, err = EvaluateSimpleExpr(cond.When, results, nil)
 					if err != nil {
@@ -670,6 +676,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		// orphan human nodes have no static in-edges, so seed replay can
 		// never reach them; only this explicit activation re-enters them.
 		for _, nodeID := range rc.ActivateNodes {
+			if _, exists := nodeByID[nodeID]; !exists {
+				continue
+			}
 			if _, settled := results[nodeID]; settled {
 				continue
 			}
@@ -868,17 +877,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	_ = g.Wait()
 
 	// Dormant Orphan Sweep: on_exhausted orphans that never fired (and their
-	// pure conditional downstream) are marked SKIPPED (never_activated) so a
+	// downstream subtrees) are marked SKIPPED (never_activated) so a
 	// happy path settles COMPLETED instead of a phantom FAILED. Requires mu:
 	// reads results and dependents metadata.
 	mu.Lock()
 	sweepDormantOrphans := func() {
-		conditionalDependents := make(map[string][]string, len(defn.Nodes))
+		downstreamDependents := make(map[string][]string, len(defn.Nodes))
 		for _, node := range defn.Nodes {
 			for _, dep := range node.Depends {
-				if dep.When != "" {
-					conditionalDependents[dep.NodeID] = append(conditionalDependents[dep.NodeID], node.ID)
-				}
+				downstreamDependents[dep.NodeID] = append(downstreamDependents[dep.NodeID], node.ID)
 			}
 		}
 		var mark func(nodeID string)
@@ -901,7 +908,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				SkipReason: SkipReasonNeverActivated,
 				Message:    fmt.Sprintf("node %s skipped (%s)", nodeID, SkipReasonNeverActivated),
 			})
-			for _, next := range conditionalDependents[nodeID] {
+			for _, next := range downstreamDependents[nodeID] {
 				mark(next)
 			}
 		}
@@ -931,14 +938,30 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				run.Error = fmt.Errorf("workflow failed: loop quota exhausted without an on_exhausted fallback")
 			}
 		}
+		if run.Status == RunStatusFailed && run.Error == nil {
+			for _, node := range defn.Nodes {
+				if res := results[node.ID]; res != nil && res.Status == StatusFailed && res.Error != nil {
+					run.Error = fmt.Errorf("workflow failed: node %s failed: %w", node.ID, res.Error)
+					break
+				}
+			}
+			if run.Error == nil {
+				run.Error = fmt.Errorf("workflow failed: unhandled failure or unexecuted node")
+			}
+		}
 	}
 
 	// Explicit abort semantics: an activated on_exhausted orphan whose reply
 	// signals abort (e.g. the human option "Abort Workflow") terminates the
-	// run as CANCELLED — never a green COMPLETED.
+	// run as CANCELLED — never a green COMPLETED. Restrict to human nodes to avoid
+	// accidental cancellation from command stdout / agent explanations.
 	if ctx.Err() == nil {
 		for _, loop := range defn.Loops {
 			if loop.OnExhausted == "" {
+				continue
+			}
+			node := nodeByID[loop.OnExhausted]
+			if node == nil || node.Type != NodeTypeHuman {
 				continue
 			}
 			if res := results[loop.OnExhausted]; res != nil && strings.Contains(strings.ToLower(res.Output), "abort") {

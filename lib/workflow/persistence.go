@@ -27,12 +27,13 @@ func HumanMessageID(runID, nodeID string, iteration ...int) string {
 
 // PersistedNodeState is the serializable settled state of one node.
 type PersistedNodeState struct {
-	Status     string `json:"status"`
-	ExitCode   int    `json:"exit_code,omitempty"`
-	Output     string `json:"output,omitempty"`
-	OutputPath string `json:"output_path,omitempty"`
-	SkipReason string `json:"skip_reason,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Status         string         `json:"status"`
+	ExitCode       int            `json:"exit_code,omitempty"`
+	Output         string         `json:"output,omitempty"`
+	OutputPath     string         `json:"output_path,omitempty"`
+	SkipReason     string         `json:"skip_reason,omitempty"`
+	Error          string         `json:"error,omitempty"`
+	LoopIterations map[string]int `json:"loop_iterations,omitempty"`
 }
 
 // RunSnapshot is the persisted state of one workflow run.
@@ -114,10 +115,11 @@ func toPersistedStates(results map[string]*NodeResult) map[string]PersistedNodeS
 			continue
 		}
 		state := PersistedNodeState{
-			Status:     string(res.Status),
-			ExitCode:   res.ExitCode,
-			Output:     res.Output,
-			SkipReason: string(res.SkipReason),
+			Status:         string(res.Status),
+			ExitCode:       res.ExitCode,
+			Output:         res.Output,
+			SkipReason:     string(res.SkipReason),
+			LoopIterations: copyIntMap(res.LoopIterations),
 		}
 		if res.Error != nil {
 			state.Error = res.Error.Error()
@@ -136,10 +138,11 @@ func fromPersistedStates(states map[string]PersistedNodeState) map[string]*NodeR
 	results := make(map[string]*NodeResult, len(states))
 	for id, state := range states {
 		res := &NodeResult{
-			Status:     NodeStatus(state.Status),
-			SkipReason: SkipReason(state.SkipReason),
-			ExitCode:   state.ExitCode,
-			Output:     state.Output,
+			Status:         NodeStatus(state.Status),
+			SkipReason:     SkipReason(state.SkipReason),
+			ExitCode:       state.ExitCode,
+			Output:         state.Output,
+			LoopIterations: copyIntMap(state.LoopIterations),
 		}
 		if state.Error != "" {
 			res.Error = errors.New(state.Error)

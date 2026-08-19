@@ -153,7 +153,10 @@ func resolveNodeValue(path string, upstreams map[string]*NodeResult, defn *Workf
 			return "", fmt.Errorf("path %q must be nodes.<id>.loop_iteration.<loop_id>", path)
 		}
 		if res.LoopIterations == nil {
-			return "", fmt.Errorf("node %q has no loop iteration snapshot", nodeID)
+			if res.Status == StatusSkipped {
+				return "", fmt.Errorf("node %q was skipped (%s) and has no loop iteration snapshot", nodeID, res.SkipReason)
+			}
+			return "", fmt.Errorf("node %q has no loop iteration snapshot (did not execute within a loop)", nodeID)
 		}
 		n, ok := res.LoopIterations[loopID]
 		if !ok {

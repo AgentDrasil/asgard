@@ -224,8 +224,20 @@ func (d *WorkflowDefinition) Validate() error {
 			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command or human)", node.ID, node.Type)
 		}
 
-		if len(node.AllowedExitCodes) > 0 && node.Type != NodeTypeCommand {
-			return fmt.Errorf("node %s: allowed_exit_codes is only allowed on command nodes", node.ID)
+		if len(node.AllowedExitCodes) > 0 {
+			if node.Type != NodeTypeCommand {
+				return fmt.Errorf("node %s: allowed_exit_codes is only allowed on command nodes", node.ID)
+			}
+			seenExitCodes := make(map[int]bool, len(node.AllowedExitCodes))
+			for _, code := range node.AllowedExitCodes {
+				if code < 0 || code > 255 {
+					return fmt.Errorf("node %s: allowed_exit_codes entry %d out of valid exit code range (0-255)", node.ID, code)
+				}
+				if seenExitCodes[code] {
+					return fmt.Errorf("node %s: duplicate entry %d in allowed_exit_codes", node.ID, code)
+				}
+				seenExitCodes[code] = true
+			}
 		}
 
 		switch node.Join {
@@ -312,7 +324,13 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 
 	var humans []string
 	for _, node := range d.Nodes {
-		if node.Type == NodeTypeHuman && !exempt[node.ID] {
+		if node.Type == NodeTypeHuman {
+			if exempt[node.ID] {
+				if len(node.Depends) > 0 {
+					return fmt.Errorf("node %s: on_exhausted human node must have no static dependencies", node.ID)
+				}
+				continue
+			}
 			humans = append(humans, node.ID)
 		}
 	}
@@ -364,6 +382,7 @@ func validateLoops(d *WorkflowDefinition) error {
 		nodeIDs[node.ID] = true
 	}
 
+	allLoopNodes := make(map[string]string) // nodeID -> owning loopID
 	loops := make(map[string]*LoopSpec, len(d.Loops))
 	for _, loop := range d.Loops {
 		if loop.ID == "" {
@@ -377,13 +396,22 @@ func validateLoops(d *WorkflowDefinition) error {
 		if len(loop.Nodes) == 0 {
 			return fmt.Errorf("loop %s: nodes list cannot be empty", loop.ID)
 		}
+		seenInLoop := make(map[string]bool, len(loop.Nodes))
 		for _, id := range loop.Nodes {
 			if !nodeIDs[id] {
 				return fmt.Errorf("loop %s: references unknown node %q", loop.ID, id)
 			}
+			if seenInLoop[id] {
+				return fmt.Errorf("loop %s: duplicate node %q in nodes list", loop.ID, id)
+			}
+			seenInLoop[id] = true
+			allLoopNodes[id] = loop.ID
 		}
 		if loop.MaxIterations < 0 {
 			return fmt.Errorf("loop %s: max_iterations cannot be negative", loop.ID)
+		}
+		if loop.MaxIterations == 0 && loop.OnExhausted != "" {
+			return fmt.Errorf("loop %s: max_iterations: 0 (unlimited) cannot declare on_exhausted fallback", loop.ID)
 		}
 		if loop.OnExhausted != "" && !nodeIDs[loop.OnExhausted] {
 			return fmt.Errorf("loop %s: on_exhausted references unknown node %q", loop.ID, loop.OnExhausted)
@@ -482,10 +510,12 @@ func validateLoops(d *WorkflowDefinition) error {
 		}
 	}
 
-	// on_exhausted targets must live outside their loop.
+	// on_exhausted targets must live outside ALL loops.
 	for _, loop := range d.Loops {
-		if loop.OnExhausted != "" && loopContainsNode(loop, loop.OnExhausted) {
-			return fmt.Errorf("loop %s: on_exhausted node %s must be outside the loop", loop.ID, loop.OnExhausted)
+		if loop.OnExhausted != "" {
+			if owningLoop, inLoop := allLoopNodes[loop.OnExhausted]; inLoop {
+				return fmt.Errorf("loop %s: on_exhausted node %s must not belong to any loop (found in %s)", loop.ID, loop.OnExhausted, owningLoop)
+			}
 		}
 	}
 	return nil

@@ -208,7 +208,11 @@ func runSandboxedCommand(ctx context.Context, command, runDir, chatID string, st
 			stderr.Write(resp.Payload)
 		case pb.CommandResponse_EXIT:
 			if len(resp.Payload) > 0 {
-				exitCode, _ = strconv.Atoi(string(resp.Payload))
+				var err error
+				exitCode, err = strconv.Atoi(string(resp.Payload))
+				if err != nil {
+					return -1, fmt.Errorf("malformed exit code payload %q: %w", string(resp.Payload), err)
+				}
 			}
 		}
 	}

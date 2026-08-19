@@ -207,8 +207,7 @@ func (r *e2eAgentRunner) count(nodeID string) int {
 	return r.counts[nodeID]
 }
 
-// replyScript maps human node IDs to the ordered replies the responder
-// delivers (the last entry repeats when exhausted).
+// replyScript maps human node IDs to the ordered replies the responder delivers.
 type replyScript map[string][]string
 
 type e2eOutcome struct {
@@ -307,6 +306,8 @@ func runDevWorkflowE2E(t *testing.T, totalSteps int, verdictFor func(reviewN int
 	}
 }
 
+// suspendedNodes returns the wait-prefixed settlement entries (e.g. "wait:<runID>")
+// recorded in store.order during human node suspensions.
 func (o *e2eOutcome) suspendedNodes() []string {
 	var nodes []string
 	for _, entry := range o.store.order {

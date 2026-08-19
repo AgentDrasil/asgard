@@ -89,10 +89,9 @@ Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates m
 
   loops:
     - id: fix_loop                # unique loop identifier
-      parent: step_loop           # optional parent loop (nesting; child nodes must be a subset)
       nodes: [review, verdict, fixer]   # member nodes of the loop scope
-      max_iterations: 5           # iteration quota (0 = unlimited)
-      on_exhausted: fix_fallback  # node activated when the quota is exhausted
+      max_iterations: 5           # iteration quota (> 0 with on_exhausted)
+      on_exhausted: fix_fallback  # node activated when the quota is exhausted (must not belong to any loop)
 
   nodes:
     - id: fixer

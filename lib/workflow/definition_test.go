@@ -376,6 +376,72 @@ loops:
 			wantErr: `loop fix_loop: on_exhausted references unknown node "ghost_fallback"`,
 		},
 		{
+			name:      "duplicate node in loop nodes list",
+			nodesBody: baseLoopNodes,
+			loopsBody: `
+loops:
+  - id: fix_loop
+    nodes: [check, fix, check]
+    max_iterations: 5
+    on_exhausted: fix_fallback
+`,
+			wantErr: `loop fix_loop: duplicate node "check" in nodes list`,
+		},
+		{
+			name:      "max_iterations 0 with on_exhausted is dead config",
+			nodesBody: baseLoopNodes,
+			loopsBody: `
+loops:
+  - id: fix_loop
+    nodes: [check, fix]
+    max_iterations: 0
+    on_exhausted: fix_fallback
+`,
+			wantErr: "loop fix_loop: max_iterations: 0 (unlimited) cannot declare on_exhausted fallback",
+		},
+		{
+			name: "on_exhausted node belongs to another loop",
+			nodesBody: `
+nodes:
+  - id: start
+    type: command
+    command: "true"
+  - id: check
+    type: command
+    command: "true"
+    depends:
+      - node: start
+  - id: fix
+    type: command
+    command: "true"
+    depends:
+      - node: check
+        when: "nodes.check.exit_code == 0"
+        counts_loop: fix_loop
+  - id: step_start
+    type: command
+    command: "true"
+  - id: step_check
+    type: command
+    command: "true"
+    depends:
+      - node: step_start
+        when: "nodes.step_start.exit_code == 0"
+        counts_loop: step_loop
+`,
+			loopsBody: `
+loops:
+  - id: step_loop
+    nodes: [step_start, step_check]
+    max_iterations: 3
+  - id: fix_loop
+    nodes: [check, fix]
+    max_iterations: 5
+    on_exhausted: step_check
+`,
+			wantErr: "loop fix_loop: on_exhausted node step_check must not belong to any loop (found in step_loop)",
+		},
+		{
 			name:      "on_exhausted node inside the loop",
 			nodesBody: baseLoopNodes,
 			loopsBody: `
@@ -385,7 +451,7 @@ loops:
     max_iterations: 5
     on_exhausted: fix_fallback
 `,
-			wantErr: "loop fix_loop: on_exhausted node fix_fallback must be outside the loop",
+			wantErr: "loop fix_loop: on_exhausted node fix_fallback must not belong to any loop (found in fix_loop)",
 		},
 		{
 			name:      "negative max_iterations",
@@ -572,4 +638,115 @@ loops:
 	_, err = ParseDefinition([]byte(specNoExemption))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parallel human nodes are not supported")
+
+	// An on_exhausted human node with static in-edges must be rejected.
+	specWithStaticDeps := loopTestWorkflow(`
+nodes:
+  - id: start
+    type: command
+    command: "true"
+  - id: check
+    type: command
+    command: "true"
+    depends:
+      - node: start
+  - id: fix
+    type: command
+    command: "true"
+    depends:
+      - node: check
+        when: "nodes.check.exit_code == 0"
+        counts_loop: fix_loop
+  - id: fix_fallback
+    type: human
+    prompt: "Auto-fix exhausted."
+    depends:
+      - node: start
+`, baseLoops)
+	_, err = ParseDefinition([]byte(specWithStaticDeps))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "on_exhausted human node must have no static dependencies")
+}
+
+func TestValidateCommand_AllowedExitCodes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr string
+	}{
+		{
+			name: "valid allowed_exit_codes",
+			spec: `
+name: test-exit-codes
+nodes:
+  - id: check
+    type: command
+    command: "grep foo bar"
+    allowed_exit_codes: [0, 1]
+`,
+		},
+		{
+			name: "negative allowed_exit_code",
+			spec: `
+name: test-exit-codes
+nodes:
+  - id: check
+    type: command
+    command: "grep foo bar"
+    allowed_exit_codes: [-1]
+`,
+			wantErr: "allowed_exit_codes entry -1 out of valid exit code range (0-255)",
+		},
+		{
+			name: "allowed_exit_code out of range",
+			spec: `
+name: test-exit-codes
+nodes:
+  - id: check
+    type: command
+    command: "grep foo bar"
+    allowed_exit_codes: [256]
+`,
+			wantErr: "allowed_exit_codes entry 256 out of valid exit code range (0-255)",
+		},
+		{
+			name: "duplicate allowed_exit_code",
+			spec: `
+name: test-exit-codes
+nodes:
+  - id: check
+    type: command
+    command: "grep foo bar"
+    allowed_exit_codes: [1, 1]
+`,
+			wantErr: "duplicate entry 1 in allowed_exit_codes",
+		},
+		{
+			name: "allowed_exit_codes on non-command node",
+			spec: `
+name: test-exit-codes
+nodes:
+  - id: ask
+    type: human
+    prompt: "Ready?"
+    allowed_exit_codes: [0]
+`,
+			wantErr: "allowed_exit_codes is only allowed on command nodes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseDefinition([]byte(tt.spec))
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
