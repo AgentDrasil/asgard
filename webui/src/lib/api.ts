@@ -2,11 +2,14 @@ import type {
   AgentInfo,
   ChatSession,
   DirInfo,
+  FileSearchResult,
+  FileTreeEntry,
   FirebaseWebpushWebConfig,
   GitActionResult,
   GitDiffFile,
   GitLogResponse,
   TriggerAgentMessageParams,
+  WorkspaceFileContent,
 } from "../types";
 
 // Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
@@ -242,4 +245,59 @@ export async function triggerAgentMessage(
     console.error("Failed to trigger agent message:", err);
   }
   return null;
+}
+
+export async function getFileTree(sessionId: string, subPath = ""): Promise<FileTreeEntry[]> {
+  if (!sessionId) return [];
+  try {
+    let url = `/api/files/tree?session_id=${encodeURIComponent(sessionId)}`;
+    if (subPath) url += `&path=${encodeURIComponent(subPath)}`;
+    const res = await apiFetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.entries || [];
+  } catch (err) {
+    console.error("getFileTree error:", err);
+    return [];
+  }
+}
+
+export async function getFileContent(
+  sessionId: string,
+  path: string,
+): Promise<WorkspaceFileContent | null> {
+  if (!sessionId || !path) return null;
+  try {
+    const res = await apiFetch(
+      `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("getFileContent error:", err);
+    return null;
+  }
+}
+
+export async function searchFiles(
+  sessionId: string,
+  query: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<FileSearchResult[]> {
+  if (!sessionId) return [];
+  try {
+    const res = await apiFetch(
+      `/api/files/search?session_id=${encodeURIComponent(sessionId)}&query=${encodeURIComponent(query)}&limit=${limit}`,
+      { signal },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.files || [];
+  } catch (err: any) {
+    if (err?.name !== "AbortError") {
+      console.error("searchFiles error:", err);
+    }
+    return [];
+  }
 }

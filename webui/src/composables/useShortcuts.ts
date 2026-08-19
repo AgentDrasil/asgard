@@ -13,6 +13,8 @@ export function useShortcuts() {
   const toggleDiffShortcut = computed(() => `${modKey.value}+${altKey.value}+D`);
   const toggleTerminalShortcut = computed(() => `${modKey.value}+\``);
   const sendShortcut = computed(() => `${modKey.value}+Enter`);
+  const fileSearchShortcut = computed(() => `${modKey.value}+P`);
+  const toggleFileViewShortcut = computed(() => `${modKey.value}+${altKey.value}+F`);
 
   return {
     isMac,
@@ -23,5 +25,7 @@ export function useShortcuts() {
     toggleDiffShortcut,
     toggleTerminalShortcut,
     sendShortcut,
+    fileSearchShortcut,
+    toggleFileViewShortcut,
   };
 }

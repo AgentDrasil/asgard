@@ -117,3 +117,41 @@ export interface TriggerAgentMessageParams {
   model?: string;
   metadata?: Record<string, any>;
 }
+
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size?: number;
+  ext?: string;
+  children?: FileTreeEntry[];
+  isLoaded?: boolean;
+  isExpanded?: boolean;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  name: string;
+  ext: string;
+  size: number;
+  content: string;
+  isBinary?: boolean;
+  updatedAt: string;
+}
+
+export interface FileSearchResult {
+  path: string;
+  name: string;
+  ext: string;
+  size: number;
+}
+
+export interface CommentEntry {
+  filePath: string;
+  lineNumber: number;
+  lineContent: string;
+  comment: string;
+  side?: "old" | "new";
+}
+
+export type ActiveView = "chat" | "vcs" | "file";
