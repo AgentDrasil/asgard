@@ -364,6 +364,11 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	// must not consume loop iterations.
 	replaying := len(rc.SeedNodes) > 0
 
+	// exhaustedNoFallback records that a loop quota was breached with no
+	// on_exhausted fallback: the run must settle FAILED no matter what
+	// in-flight successors report (fail-closed, race-free).
+	exhaustedNoFallback := false
+
 	// evaluateDownstream checks dependents of settled nodes; declared early
 	// because admitViaEdge may recursively settle exhausted-loop targets.
 	var evaluateDownstream func(settledNodeID string)
@@ -419,6 +424,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			// No fallback declared: the quota breach fails the re-entry
 			// target so the run settles FAILED (fail-closed), even though
 			// the target's earlier iterations succeeded.
+			exhaustedNoFallback = true
 			_, wasSettled := results[targetID]
 			res := &NodeResult{
 				Status: StatusFailed,
@@ -855,6 +861,18 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		run.Error = ctx.Err()
 	} else {
 		run.Status = settleGlobalStatus(defn, results)
+		// A loop quota breached without an on_exhausted fallback fails the
+		// run deterministically: successors still in flight when the breach
+		// was recorded may re-settle stale successes that would otherwise
+		// absorb the failure into a green COMPLETED.
+		if exhaustedNoFallback {
+			if run.Status == RunStatusCompleted {
+				run.Status = RunStatusFailed
+			}
+			if run.Error == nil {
+				run.Error = fmt.Errorf("workflow failed: loop quota exhausted without an on_exhausted fallback")
+			}
+		}
 	}
 
 	// Explicit abort semantics: an activated on_exhausted orphan whose reply
