@@ -327,9 +327,7 @@ onUnmounted(() => {
           @click="handleCopy"
         >
           <Icon
-            :icon="
-              isCopied ? 'material-symbols:check-rounded' : 'material-symbols:content-copy-outline'
-            "
+            :icon="isCopied ? 'iconamoon:check' : 'iconamoon:copy'"
             class="h-3.5 w-3.5"
             :class="{ 'text-success': isCopied }"
           />
@@ -345,7 +343,7 @@ onUnmounted(() => {
             type="button"
             @click="handleZoomIn"
           >
-            <Icon icon="fluent:zoom-in-24-regular" class="h-3.5 w-3.5" />
+            <Icon icon="iconamoon:zoom-in" class="h-3.5 w-3.5" />
           </button>
 
           <!-- Zoom Out -->
@@ -355,7 +353,7 @@ onUnmounted(() => {
             type="button"
             @click="handleZoomOut"
           >
-            <Icon icon="fluent:zoom-out-24-regular" class="h-3.5 w-3.5" />
+            <Icon icon="iconamoon:zoom-out" class="h-3.5 w-3.5" />
           </button>
 
           <!-- Reset Zoom -->
@@ -365,7 +363,7 @@ onUnmounted(() => {
             type="button"
             @click="handleResetZoom"
           >
-            <Icon icon="fluent:arrow-reset-24-regular" class="h-3.5 w-3.5" />
+            <Icon icon="iconamoon:restart" class="h-3.5 w-3.5" />
           </button>
 
           <!-- Fullscreen -->
@@ -375,7 +373,7 @@ onUnmounted(() => {
             type="button"
             @click="handleToggleFullscreen"
           >
-            <Icon icon="fluent:full-screen-maximize-24-regular" class="h-3.5 w-3.5" />
+            <Icon icon="iconamoon:screen-full" class="h-3.5 w-3.5" />
           </button>
         </template>
       </div>
@@ -462,7 +460,7 @@ onUnmounted(() => {
             type="button"
             @click="handleZoomIn"
           >
-            <Icon icon="fluent:zoom-in-24-regular" class="h-4 w-4" />
+            <Icon icon="iconamoon:zoom-in" class="h-4 w-4" />
           </button>
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
@@ -470,7 +468,7 @@ onUnmounted(() => {
             type="button"
             @click="handleZoomOut"
           >
-            <Icon icon="fluent:zoom-out-24-regular" class="h-4 w-4" />
+            <Icon icon="iconamoon:zoom-out" class="h-4 w-4" />
           </button>
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
@@ -478,7 +476,7 @@ onUnmounted(() => {
             type="button"
             @click="handleResetZoom"
           >
-            <Icon icon="fluent:arrow-reset-24-regular" class="h-4 w-4" />
+            <Icon icon="iconamoon:restart" class="h-4 w-4" />
           </button>
 
           <div class="h-4 w-px bg-base-300 mx-1" />
@@ -491,11 +489,7 @@ onUnmounted(() => {
             @click="handleCopy"
           >
             <Icon
-              :icon="
-                isCopied
-                  ? 'material-symbols:check-rounded'
-                  : 'material-symbols:content-copy-outline'
-              "
+              :icon="isCopied ? 'iconamoon:check' : 'iconamoon:copy'"
               class="h-4 w-4"
               :class="{ 'text-success': isCopied }"
             />

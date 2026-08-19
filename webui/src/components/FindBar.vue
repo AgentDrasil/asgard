@@ -57,10 +57,6 @@ onMounted(() => {
     >
       <!-- Search Input Container -->
       <div class="relative flex items-center">
-        <Icon
-          icon="material-symbols:search"
-          class="absolute left-2 h-3.5 w-3.5 text-base-content/50 pointer-events-none"
-        />
         <input
           ref="inputRef"
           type="text"
