@@ -81,8 +81,43 @@ Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates m
   - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.
 - **Smart Edge Conditions & Join Rules**:
-  - `when`: Dot-notation expressions (e.g. `nodes.build_cmd.exit_code != 0`) to trigger conditional repair or fallback branches.
+  - `when`: Dot-notation expressions (e.g. `nodes.build_cmd.exit_code != 0`) to trigger conditional repair or fallback branches. Node result fields addressable in expressions: `status`, `exit_code`, `output`, `error`, `skip_reason`, and `loop_iteration.<loop_id>` (the owning loop's iteration counter snapshotted when the node settled).
   - `join: always`: Runs summary or clean-up nodes regardless of upstream skips or failures.
+- **Declarative Loop Primitives (`loops`)**: First-class circuit breakers for self-healing pipelines while keeping the flat DAG architecture. Loops are declared as top-level metadata with per-edge counting markers:
+  ```yaml
+  max_node_executions: 500        # optional global per-node execution cap (default 100)
+
+  loops:
+    - id: fix_loop                # unique loop identifier
+      parent: step_loop           # optional parent loop (nesting; child nodes must be a subset)
+      nodes: [review, verdict, fixer]   # member nodes of the loop scope
+      max_iterations: 5           # iteration quota (0 = unlimited)
+      on_exhausted: fix_fallback  # node activated when the quota is exhausted
+
+  nodes:
+    - id: fixer
+      depends:
+        - node: verdict
+          when: "nodes.verdict.exit_code == 0"
+          counts_loop: fix_loop   # consuming this edge increments the loop counter
+                                 # (and resets all descendant loop counters);
+                                 # on exhaustion the re-entry is suppressed and
+                                 # on_exhausted is activated instead
+        - node: fix_fallback
+          when: "nodes.fix_fallback.output == 'Retry (reset counter)'"
+          resets_loop: fix_loop   # consuming this edge resets the loop counter
+  ```
+  - Counting edges fire when they drive an enqueue: conditional edges when their `when` matches, unconditional edges when the parent succeeded (or `join: always` allows it). A no-op re-entry (target already queued/running) never consumes an iteration.
+  - Loop counters are persisted in `WAITING_HUMAN` snapshots and re-seeded on resume, so circuit breakers survive server restarts. Prompts and commands can interpolate the current counters via `${loops.<id>.iteration}`.
+  - An `on_exhausted` target is an orphan: it has no static in-edges, is excluded from initial roots, and — when the quota is never exhausted — is swept to `SKIPPED (NEVER_ACTIVATED)` at settlement so happy paths stay `COMPLETED`. Human nodes serving as `on_exhausted` targets are exempt from the pairwise ordering validation. When a loop has no `on_exhausted`, a quota breach fails the re-entry target and settles the run `FAILED` (fail-closed). A reply containing "abort" from an activated `on_exhausted` human node settles the run `CANCELED`.
+- **Command Exit Code Whitelist (`allowed_exit_codes`)**: Unix commands use non-zero exits for ordinary boolean results (e.g. `grep` exits 1 on no match). Command nodes can whitelist such codes as success:
+  ```yaml
+  - id: check_pending_steps
+    type: command
+    command: "grep -q 'status: pending' ${tmp_dir}/plan/todo.yaml"
+    allowed_exit_codes: [0, 1]   # 1 is a normal, routable outcome here
+  ```
+  The real exit code is always preserved in the node result (success or failure), so downstream `when` edges route on the precise value; codes outside the whitelist settle the node `FAILED`. Only `type: command` nodes may declare the whitelist.
 - **Sandbox-Friendly Workspaces**: Isolates intermediate step files under `tmp_dir` (defaults to `/tmp/${session_id}`).
 
 ### Example Workflows (`examples/workflows/`)
