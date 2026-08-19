@@ -125,7 +125,7 @@ const getOptionButtonClass = (opt: string): string => {
         class="flex items-center gap-3 py-1 text-sm font-medium text-base-content"
       >
         <span class="loading loading-spinner loading-sm text-primary"></span>
-        <span>正在恢复工作流并执行下一步...</span>
+        <span>Resuming workflow and executing next step...</span>
       </div>
 
       <!-- Stage: Waiting Human Decision -->
@@ -136,7 +136,7 @@ const getOptionButtonClass = (opt: string): string => {
           <div class="flex items-center gap-2 min-w-0">
             <Icon icon="fluent:pause-circle-24-filled" class="h-5 w-5 text-warning shrink-0" />
             <span class="text-sm font-bold text-base-content truncate">
-              Workflow 暂停 · 等待人工决策
+              Workflow Paused · Waiting for Human Decision
             </span>
             <span
               v-if="state.pendingMessage?.agentName"
@@ -155,7 +155,7 @@ const getOptionButtonClass = (opt: string): string => {
           <div
             class="text-[11px] font-bold uppercase tracking-wider text-base-content/60 select-none"
           >
-            待审阅产物 (Files to review)
+            Files to review
           </div>
           <div class="flex flex-wrap gap-2">
             <button
@@ -195,7 +195,7 @@ const getOptionButtonClass = (opt: string): string => {
             v-model="customInput"
             @keydown.enter="handleReply(customInput)"
             type="text"
-            placeholder="输入自定义反馈或附加要求..."
+            placeholder="Enter custom feedback or additional instructions..."
             class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
             :disabled="isSubmitting"
           />
@@ -217,7 +217,7 @@ const getOptionButtonClass = (opt: string): string => {
         class="flex items-center gap-3 py-1 text-sm font-medium text-base-content"
       >
         <span class="loading loading-spinner loading-sm text-primary"></span>
-        <span>{{ workingAgentLabel || activeAgent?.name || "Workflow" }} 正在运行中...</span>
+        <span>{{ workingAgentLabel || activeAgent?.name || "Workflow" }} is running...</span>
       </div>
 
       <!-- Stage: Failed -->
@@ -239,7 +239,7 @@ const getOptionButtonClass = (opt: string): string => {
       >
         <div class="flex items-center gap-2 text-sm font-medium text-success">
           <Icon icon="fluent:checkmark-circle-24-filled" class="h-5 w-5 shrink-0" />
-          <span>工作流执行完成</span>
+          <span>Workflow completed</span>
         </div>
         <span class="badge badge-success badge-sm font-semibold uppercase">Completed</span>
       </div>
@@ -248,7 +248,7 @@ const getOptionButtonClass = (opt: string): string => {
       <div v-else class="flex items-center justify-between gap-2 py-1 text-sm text-base-content/70">
         <div class="flex items-center gap-2 font-medium">
           <Icon icon="fluent:play-circle-24-filled" class="h-5 w-5 text-base-content/50 shrink-0" />
-          <span>{{ activeAgent?.name || "工作流" }} 尚未启动</span>
+          <span>{{ activeAgent?.name || "Workflow" }} not started</span>
         </div>
         <span class="badge badge-ghost badge-sm uppercase">Idle</span>
       </div>
