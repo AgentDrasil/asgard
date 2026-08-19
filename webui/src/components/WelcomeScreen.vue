@@ -45,6 +45,11 @@ const mainAgents = computed(() => {
   return props.agents.filter((a) => a.main_agent !== false);
 });
 
+const agentDisplayName = (agent: AgentInfo): string => {
+  const prefix = agent.type === "workflow" ? "[Workflow] " : "";
+  return `${prefix}${agent.name} (${agent.id})`;
+};
+
 const currentAgent = computed(() => {
   return props.agents.find((a) => a.id === props.selectedAgentId) || null;
 });
@@ -261,7 +266,7 @@ const handleSubmit = () => {
               :value="agent.id"
               class="bg-base-100 text-base-content"
             >
-              {{ agent.type === "workflow" ? "[Workflow] " : "" }}{{ agent.name }} ({{ agent.id }})
+              {{ agentDisplayName(agent) }}
             </option>
           </select>
           <label class="label text-xs text-base-content/60" v-if="currentAgent">

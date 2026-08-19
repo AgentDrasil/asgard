@@ -40,11 +40,11 @@ watch(
   },
 );
 
-// Reset submitting state when stage transitions to running or a new waiting_human message arrives
+// Reset submitting state when stage transitions or a new waiting_human message arrives
 watch(
   () => [state.value.stage, state.value.pendingMessage?.id] as const,
   ([newStage, newMsgId], [, oldMsgId]) => {
-    if (newStage === "running") {
+    if (newStage === "running" || newStage === "completed" || newStage === "failed") {
       isSubmitting.value = false;
     }
     if (newStage === "waiting_human" && newMsgId !== oldMsgId) {
@@ -99,7 +99,7 @@ const getOptionButtonClass = (opt: string): string => {
   ) {
     return "btn-warning text-warning-content";
   }
-  return "btn-primary text-primary-content";
+  return "btn-outline text-base-content";
 };
 </script>
 
