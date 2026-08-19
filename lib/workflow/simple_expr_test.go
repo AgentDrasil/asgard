@@ -61,6 +61,43 @@ func TestEvaluateSimpleExprSyntaxOnly(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestEvaluateSimpleExprLoopIteration(t *testing.T) {
+	upstreams := map[string]*NodeResult{
+		"fixer": {
+			Status:         StatusSucceeded,
+			ExitCode:       0,
+			LoopIterations: map[string]int{"fix_loop": 2, "step_loop": 4},
+		},
+		"root": {Status: StatusSucceeded, ExitCode: 0},
+	}
+
+	tests := []struct {
+		name    string
+		expr    string
+		want    bool
+		wantErr bool
+	}{
+		{"loop iteration equality", "nodes.fixer.loop_iteration.fix_loop == 2", true, false},
+		{"loop iteration mismatch", "nodes.fixer.loop_iteration.fix_loop == 1", false, false},
+		{"loop iteration numeric compare", "nodes.fixer.loop_iteration.fix_loop >= 2", true, false},
+		{"second loop id", "nodes.fixer.loop_iteration.step_loop < 5", true, false},
+		{"unknown loop id", "nodes.fixer.loop_iteration.other_loop == 1", false, true},
+		{"node without loop snapshot", "nodes.root.loop_iteration.fix_loop == 1", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := EvaluateSimpleExpr(tt.expr, upstreams, nil)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestInterpolate(t *testing.T) {
 	vars := map[string]string{
 		"session_id":              "sess-1",
@@ -83,4 +120,26 @@ func TestInterpolate(t *testing.T) {
 	)
 	// Unterminated placeholder passes through.
 	assert.Equal(t, "broken ${session_id", Interpolate("broken ${session_id", resolve))
+}
+
+func TestNodeContextInterpolateLoopIteration(t *testing.T) {
+	nctx := &NodeContext{
+		SessionID: "sess-1",
+		Node:      &NodeSpec{ID: "fixer"},
+		Defn:      &WorkflowDefinition{Name: "t"},
+		LoopIterations: map[string]int{
+			"fix_loop":  2,
+			"step_loop": 4,
+		},
+	}
+
+	assert.Equal(t,
+		"attempt 2 of fix loop, step 4",
+		nctx.Interpolate("attempt ${loops.fix_loop.iteration} of fix loop, step ${loops.step_loop.iteration}"),
+	)
+	// Unknown loop ids pass through verbatim (mirroring ${HOME} semantics).
+	assert.Equal(t,
+		"keep ${loops.unknown.iteration} intact",
+		nctx.Interpolate("keep ${loops.unknown.iteration} intact"),
+	)
 }

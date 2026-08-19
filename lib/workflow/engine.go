@@ -313,6 +313,27 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 	}
 
+	// nodeLoops indexes the loop IDs each node belongs to; settling a node
+	// snapshots those loops' iteration counters into its NodeResult. Must be
+	// called while holding mu.
+	nodeLoops := make(map[string][]string, len(defn.Nodes))
+	for _, loop := range defn.Loops {
+		for _, nid := range loop.Nodes {
+			nodeLoops[nid] = append(nodeLoops[nid], loop.ID)
+		}
+	}
+	snapshotNodeLoops := func(nodeID string) map[string]int {
+		ids := nodeLoops[nodeID]
+		if len(ids) == 0 {
+			return nil
+		}
+		m := make(map[string]int, len(ids))
+		for _, id := range ids {
+			m[id] = loopIter[id]
+		}
+		return m
+	}
+
 	nodeByID := make(map[string]*NodeSpec, len(defn.Nodes))
 	for _, n := range defn.Nodes {
 		nodeByID[n.ID] = n
@@ -678,7 +699,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 		for _, nodeID := range toLaunch {
 			running[nodeID] = true
-			executionCount[nodeID]++
+			iteration := executionCount[nodeID] + 1
+			executionCount[nodeID] = iteration
 			node := nodeByID[nodeID]
 
 			g.Go(func() error {
@@ -687,6 +709,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				for k, v := range results {
 					upstreams[k] = v
 				}
+				loopSnapshot := copyIntMap(loopIter)
 				mu.Unlock()
 
 				action, reason := EvaluateNodeReadiness(node, upstreams)
@@ -727,8 +750,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Str("node_id", node.ID).
 					Str("node_type", string(node.Type)).
 					Str("agent_id", node.AgentID).
-					Int("iteration", executionCount[node.ID]).
-					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) STARTED (iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, executionCount[node.ID])
+					Int("iteration", iteration).
+					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) STARTED (iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, iteration)
 
 				emit(WorkflowEvent{
 					Type:     EventNodeStarted,
@@ -751,7 +774,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Upstreams:         upstreams,
 					EventEmitter:      emit,
 					Values:            values,
-					Iteration:         executionCount[node.ID],
+					Iteration:         iteration,
+					LoopIterations:    loopSnapshot,
 					WorkflowRunDirs:   wfRunDirs,
 					WorkflowMountDirs: wfMountDirs,
 				}
@@ -771,6 +795,10 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				result = normalizeResult(result, err)
 
 				mu.Lock()
+				// Snapshot the owning loops' iteration counters (loopIter was
+				// incremented at admission, so this is the iteration the node
+				// ran in) for nodes.<id>.loop_iteration.<loop_id> expressions.
+				result.LoopIterations = snapshotNodeLoops(node.ID)
 				results[node.ID] = result
 				delete(running, node.ID)
 				msg := fmt.Sprintf("node %s %s", node.ID, result.Status)
@@ -790,8 +818,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Str("agent_id", node.AgentID).
 					Str("status", string(result.Status)).
 					Int("exit_code", result.ExitCode).
-					Int("iteration", executionCount[node.ID]).
-					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, executionCount[node.ID])
+					Int("iteration", iteration).
+					Msgf("[Workflow %s] Node %q (type=%s, agent=%s) FINISHED: %s (exit=%d, iteration %d)", defn.Name, node.ID, node.Type, node.AgentID, result.Status, result.ExitCode, iteration)
 
 				// Agent / llm nodes carry their final response text so hosts can
 				// display and persist it as a chat message. Command node output

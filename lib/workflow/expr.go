@@ -117,7 +117,8 @@ func parseLiteral(raw string) (string, error) {
 
 // resolveNodeValue resolves a dot-notation path against node results.
 // Supported paths: nodes.<id>.status | exit_code | output | error | skip_reason
-// plus spec fields such as nodes.<id>.output_file (resolved via defn).
+// | loop_iteration.<loop_id> plus spec fields such as nodes.<id>.output_file
+// (resolved via defn).
 func resolveNodeValue(path string, upstreams map[string]*NodeResult, defn *WorkflowDefinition) (string, error) {
 	parts := strings.Split(path, ".")
 	if len(parts) < 3 || parts[0] != "nodes" {
@@ -145,6 +146,20 @@ func resolveNodeValue(path string, upstreams map[string]*NodeResult, defn *Workf
 			return res.Error.Error(), nil
 		}
 		return "", nil
+	}
+
+	if loopID, ok := strings.CutPrefix(field, "loop_iteration."); ok {
+		if loopID == "" {
+			return "", fmt.Errorf("path %q must be nodes.<id>.loop_iteration.<loop_id>", path)
+		}
+		if res.LoopIterations == nil {
+			return "", fmt.Errorf("node %q has no loop iteration snapshot", nodeID)
+		}
+		n, ok := res.LoopIterations[loopID]
+		if !ok {
+			return "", fmt.Errorf("node %q does not belong to loop %q", nodeID, loopID)
+		}
+		return strconv.Itoa(n), nil
 	}
 
 	// Fall back to spec fields on the definition (e.g. output_file).

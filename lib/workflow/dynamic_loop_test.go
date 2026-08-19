@@ -721,6 +721,99 @@ func TestSeedReplaySuppressesReenqueueAndCounting(t *testing.T) {
 	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["fallback"].SkipReason)
 }
 
+func TestLoopIterationSnapshotInNodeResult(t *testing.T) {
+	defn, err := ParseDefinition([]byte(fixLoopYAML))
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var ctxSnapshots []map[string]int
+	var interpolated []string
+
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+		if nctx.Node.ID == "fixer" {
+			mu.Lock()
+			ctxSnapshots = append(ctxSnapshots, copyIntMap(nctx.LoopIterations))
+			interpolated = append(interpolated, nctx.Interpolate("attempt ${loops.fix_loop.iteration}"))
+			mu.Unlock()
+		}
+		return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: nctx.Node.ID}, nil
+	}}
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "snap-session"})
+	require.NoError(t, err)
+	assert.Equal(t, RunStatusCompleted, res.Status)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, ctxSnapshots, 2, "fixer admitted exactly max_iterations times")
+	assert.Equal(t, 1, ctxSnapshots[0]["fix_loop"], "launch context carries the iteration the node runs in")
+	assert.Equal(t, 2, ctxSnapshots[1]["fix_loop"])
+	assert.Equal(t, []string{"attempt 1", "attempt 2"}, interpolated, "${loops.<id>.iteration} interpolates in node context")
+
+	require.NotNil(t, res.Nodes["fixer"])
+	require.NotNil(t, res.Nodes["fixer"].LoopIterations)
+	assert.Equal(t, 2, res.Nodes["fixer"].LoopIterations["fix_loop"], "settled result snapshots the owning loop's counter")
+	assert.Nil(t, res.Nodes["coding"].LoopIterations, "nodes outside any loop carry no snapshot")
+}
+
+func TestLoopIterationExpressionGatesDownstream(t *testing.T) {
+	yamlSpec := `
+name: loop-iter-gate
+loops:
+  - id: fix_loop
+    nodes: [review, verdict, fixer]
+    max_iterations: 2
+    on_exhausted: fallback
+nodes:
+  - id: coding
+    type: command
+    command: "echo code"
+  - id: review
+    type: command
+    command: "echo review"
+    depends:
+      - node: coding
+      - node: fixer
+    join: always
+  - id: verdict
+    type: command
+    command: "echo verdict"
+    depends:
+      - node: review
+  - id: fixer
+    type: command
+    command: "echo fix"
+    depends:
+      - node: verdict
+        when: "nodes.verdict.exit_code == 0"
+        counts_loop: fix_loop
+  - id: second_attempt
+    type: command
+    command: "echo second"
+    depends:
+      - node: fixer
+        when: "nodes.fixer.loop_iteration.fix_loop == 2"
+  - id: fallback
+    type: command
+    command: "echo fallback"
+`
+	defn, err := ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
+	engine := NewEngineWithRunner(runner)
+
+	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "gate-session"})
+	require.NoError(t, err)
+
+	assert.Equal(t, RunStatusCompleted, res.Status)
+	assert.Equal(t, 2, runner.count("fixer"))
+	assert.Equal(t, 1, runner.count("second_attempt"), "loop_iteration expression fires only on the 2nd fixer attempt")
+	require.NotNil(t, res.Nodes["second_attempt"])
+	assert.Equal(t, StatusSucceeded, res.Nodes["second_attempt"].Status)
+}
+
 func TestMaxNodeExecutionsDefinitionCap(t *testing.T) {
 	yamlSpec := `
 name: max-exec-cap

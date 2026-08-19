@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,6 +58,10 @@ type NodeResult struct {
 	// AgentName names the concrete sub-agent that executed an agent node
 	// (empty for other node types); used for chat message attribution.
 	AgentName string
+	// LoopIterations snapshots the iteration counters of the loops this node
+	// belongs to at settle time; addressable in `when` expressions as
+	// nodes.<id>.loop_iteration.<loop_id>.
+	LoopIterations map[string]int
 }
 
 // NodeContext carries the pure runtime data for one node execution. External
@@ -80,6 +86,9 @@ type NodeContext struct {
 	Values *RunValues
 	// Iteration records the 1-based execution count for this node (useful for dynamic loops).
 	Iteration int
+	// LoopIterations carries the run's loop iteration counters at launch time
+	// (interpolated as ${loops.<id>.iteration} in prompts and commands).
+	LoopIterations map[string]int
 	// WorkflowRunDirs carries workflow/parent configured run directories.
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.
@@ -105,6 +114,14 @@ func (nctx *NodeContext) resolveVar(key string) (string, bool) {
 		return nctx.Input, true
 	case "node.id":
 		return nctx.Node.ID, true
+	}
+	if loopID, ok := strings.CutPrefix(key, "loops."); ok {
+		if id, ok := strings.CutSuffix(loopID, ".iteration"); ok {
+			if n, ok := nctx.LoopIterations[id]; ok {
+				return strconv.Itoa(n), true
+			}
+			return "", false
+		}
 	}
 	if value, err := resolveNodeValue(key, nctx.Upstreams, nctx.Defn); err == nil {
 		return value, true
