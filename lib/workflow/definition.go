@@ -21,11 +21,32 @@ type WorkflowDefinition struct {
 	TmpDir    string          `yaml:"tmp_dir"`
 	RunDirs   []string        `yaml:"run_dirs"`
 	MountDirs MountDirsConfig `yaml:"mount_dirs"`
-	Nodes     []*NodeSpec     `yaml:"nodes"`
+	// MaxNodeExecutions is the global per-node execution cap (default 100).
+	MaxNodeExecutions int         `yaml:"max_node_executions"`
+	Loops             []*LoopSpec `yaml:"loops"`
+	Nodes             []*NodeSpec `yaml:"nodes"`
 
 	// raw is the YAML source this definition was parsed from; it is persisted
 	// as the DAG snapshot for pause/resume and crash recovery.
 	raw string
+}
+
+// LoopSpec declares a named loop scope with an iteration quota. Counting and
+// resetting are anchored on specific dependency edges via counts_loop /
+// resets_loop rather than implicit backedge detection.
+type LoopSpec struct {
+	// ID is the unique loop identifier referenced by edge-level metadata.
+	ID string `yaml:"id"`
+	// Nodes lists the node IDs belonging to this loop's scope.
+	Nodes []string `yaml:"nodes"`
+	// Parent names an enclosing loop (for nested loop declarations).
+	Parent string `yaml:"parent"`
+	// MaxIterations is the circuit-breaker quota; 0 means unlimited.
+	MaxIterations int `yaml:"max_iterations"`
+	// OnExhausted names the node activated (instead of re-entering the loop)
+	// when MaxIterations is reached. It must live outside the loop and has
+	// no static in-edges (an "orphan" node).
+	OnExhausted string `yaml:"on_exhausted"`
 }
 
 // RawSpec returns the YAML source the definition was parsed from (may be empty
@@ -40,6 +61,13 @@ type NodeDependency struct {
 	// When is an optional dot-notation condition guarding only this edge,
 	// e.g. `nodes.build_cmd.exit_code != 0`.
 	When string `yaml:"when"`
+	// CountsLoop names the loop counted each time this edge fires and
+	// enqueues its target; descendant loop counters are reset as well.
+	CountsLoop string `yaml:"counts_loop"`
+	// ResetsLoop names the loop whose counter (and its descendants') this
+	// edge resets to zero before enqueueing its target, bypassing the
+	// exhaustion check.
+	ResetsLoop string `yaml:"resets_loop"`
 }
 
 // NodeSpec is the YAML specification of a single workflow node.
@@ -150,6 +178,9 @@ func (d *WorkflowDefinition) Validate() error {
 	if len(d.Nodes) == 0 {
 		return fmt.Errorf("workflow must contain at least one node")
 	}
+	if d.MaxNodeExecutions < 0 {
+		return fmt.Errorf("max_node_executions cannot be negative")
+	}
 
 	ids := make(map[string]*NodeSpec, len(d.Nodes))
 	for _, node := range d.Nodes {
@@ -242,6 +273,9 @@ func (d *WorkflowDefinition) Validate() error {
 	if err := detectCycle(d); err != nil {
 		return err
 	}
+	if err := validateLoops(d); err != nil {
+		return err
+	}
 	if err := validateHumanNodes(d); err != nil {
 		return err
 	}
@@ -265,11 +299,20 @@ func (d *WorkflowDefinition) Validate() error {
 
 // validateHumanNodes enforces the Phase 3 single-active-human-node constraint:
 // human nodes must be totally ordered by the dependency graph. Two human nodes
-// placed on branches that may execute concurrently are rejected.
+// placed on branches that may execute concurrently are rejected. Humans that
+// are only activated via a loop's on_exhausted routing have no static in-edges
+// and are exempt from this check.
 func validateHumanNodes(d *WorkflowDefinition) error {
+	exempt := make(map[string]bool)
+	for _, loop := range d.Loops {
+		if loop.OnExhausted != "" {
+			exempt[loop.OnExhausted] = true
+		}
+	}
+
 	var humans []string
 	for _, node := range d.Nodes {
-		if node.Type == NodeTypeHuman {
+		if node.Type == NodeTypeHuman && !exempt[node.ID] {
 			humans = append(humans, node.ID)
 		}
 	}
@@ -311,6 +354,171 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 		}
 	}
 	return nil
+}
+
+// validateLoops statically validates the declared loops metadata and the
+// edge-level counts_loop / resets_loop references.
+func validateLoops(d *WorkflowDefinition) error {
+	nodeIDs := make(map[string]bool, len(d.Nodes))
+	for _, node := range d.Nodes {
+		nodeIDs[node.ID] = true
+	}
+
+	loops := make(map[string]*LoopSpec, len(d.Loops))
+	for _, loop := range d.Loops {
+		if loop.ID == "" {
+			return fmt.Errorf("loop id cannot be empty")
+		}
+		if _, dup := loops[loop.ID]; dup {
+			return fmt.Errorf("duplicate loop id: %s", loop.ID)
+		}
+		loops[loop.ID] = loop
+
+		if len(loop.Nodes) == 0 {
+			return fmt.Errorf("loop %s: nodes list cannot be empty", loop.ID)
+		}
+		for _, id := range loop.Nodes {
+			if !nodeIDs[id] {
+				return fmt.Errorf("loop %s: references unknown node %q", loop.ID, id)
+			}
+		}
+		if loop.MaxIterations < 0 {
+			return fmt.Errorf("loop %s: max_iterations cannot be negative", loop.ID)
+		}
+		if loop.OnExhausted != "" && !nodeIDs[loop.OnExhausted] {
+			return fmt.Errorf("loop %s: on_exhausted references unknown node %q", loop.ID, loop.OnExhausted)
+		}
+	}
+
+	// Parent references must be valid and acyclic; a child loop's nodes must
+	// be a subset of its parent's nodes (transitively implied by checking the
+	// direct parent only).
+	for _, loop := range d.Loops {
+		if loop.Parent == "" {
+			continue
+		}
+		parent, ok := loops[loop.Parent]
+		if !ok {
+			return fmt.Errorf("loop %s: unknown parent loop %q", loop.ID, loop.Parent)
+		}
+		seen := map[string]bool{loop.ID: true}
+		cur := loop.Parent
+		for cur != "" {
+			if seen[cur] {
+				return fmt.Errorf("loop %s: parent cycle detected at %s", loop.ID, cur)
+			}
+			seen[cur] = true
+			if ancestor := loops[cur]; ancestor != nil {
+				cur = ancestor.Parent
+			} else {
+				break
+			}
+		}
+		parentNodes := make(map[string]bool, len(parent.Nodes))
+		for _, id := range parent.Nodes {
+			parentNodes[id] = true
+		}
+		for _, id := range loop.Nodes {
+			if !parentNodes[id] {
+				return fmt.Errorf("loop %s: node %q is not part of parent loop %s", loop.ID, id, parent.ID)
+			}
+		}
+	}
+
+	// Loops without an ancestor/descendant relation must not share nodes.
+	for i := 0; i < len(d.Loops); i++ {
+		for j := i + 1; j < len(d.Loops); j++ {
+			a, b := d.Loops[i], d.Loops[j]
+			if loopsRelated(a, b, loops) {
+				continue
+			}
+			bNodes := make(map[string]bool, len(b.Nodes))
+			for _, id := range b.Nodes {
+				bNodes[id] = true
+			}
+			for _, id := range a.Nodes {
+				if bNodes[id] {
+					return fmt.Errorf("loops %s and %s share node %q but have no parent/child relation", a.ID, b.ID, id)
+				}
+			}
+		}
+	}
+
+	// Edge-level loop references.
+	countingEdges := make(map[string]int, len(loops))
+	for _, node := range d.Nodes {
+		for _, dep := range node.Depends {
+			if dep.CountsLoop != "" && dep.ResetsLoop != "" {
+				return fmt.Errorf("node %s: dependency on %s cannot declare both counts_loop and resets_loop", node.ID, dep.NodeID)
+			}
+			if dep.CountsLoop != "" {
+				loop, ok := loops[dep.CountsLoop]
+				if !ok {
+					return fmt.Errorf("node %s: counts_loop references unknown loop %q", node.ID, dep.CountsLoop)
+				}
+				countingEdges[dep.CountsLoop]++
+				if !loopContainsNode(loop, dep.NodeID) || !loopContainsNode(loop, node.ID) {
+					return fmt.Errorf("node %s: counts_loop %q requires both edge source %s and target %s inside loop %s",
+						node.ID, loop.ID, dep.NodeID, node.ID, loop.ID)
+				}
+			}
+			if dep.ResetsLoop != "" {
+				loop, ok := loops[dep.ResetsLoop]
+				if !ok {
+					return fmt.Errorf("node %s: resets_loop references unknown loop %q", node.ID, dep.ResetsLoop)
+				}
+				if !loopContainsNode(loop, node.ID) {
+					return fmt.Errorf("node %s: resets_loop %q requires edge target %s inside loop %s",
+						node.ID, loop.ID, node.ID, loop.ID)
+				}
+			}
+		}
+	}
+
+	// Every declared loop needs at least one counting edge.
+	for _, loop := range d.Loops {
+		if countingEdges[loop.ID] == 0 {
+			return fmt.Errorf("loop %s: no dependency edge declares counts_loop: %s", loop.ID, loop.ID)
+		}
+	}
+
+	// on_exhausted targets must live outside their loop.
+	for _, loop := range d.Loops {
+		if loop.OnExhausted != "" && loopContainsNode(loop, loop.OnExhausted) {
+			return fmt.Errorf("loop %s: on_exhausted node %s must be outside the loop", loop.ID, loop.OnExhausted)
+		}
+	}
+	return nil
+}
+
+// loopsRelated reports whether a and b are in the same ancestor chain.
+func loopsRelated(a, b *LoopSpec, loops map[string]*LoopSpec) bool {
+	return loopInChain(a, b.ID, loops) || loopInChain(b, a.ID, loops)
+}
+
+// loopInChain walks loop's parent chain looking for targetID.
+func loopInChain(loop *LoopSpec, targetID string, loops map[string]*LoopSpec) bool {
+	cur := loop.Parent
+	for cur != "" {
+		if cur == targetID {
+			return true
+		}
+		if ancestor := loops[cur]; ancestor != nil {
+			cur = ancestor.Parent
+		} else {
+			break
+		}
+	}
+	return false
+}
+
+func loopContainsNode(loop *LoopSpec, nodeID string) bool {
+	for _, id := range loop.Nodes {
+		if id == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 // detectCycle runs a Kahn topological sort; if nodes remain unprocessed there
