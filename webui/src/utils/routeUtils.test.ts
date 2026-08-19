@@ -121,11 +121,16 @@ describe("routeUtils", () => {
       expect(buildVcsRoute("sess-1")).toBe("/chat/sess-1/vcs/unstash");
       expect(buildVcsRoute("sess-1", null)).toBe("/chat/sess-1/vcs/unstash");
       expect(buildVcsRoute("sess-1", "unstash")).toBe("/chat/sess-1/vcs/unstash");
+      expect(buildVcsRoute("sess-1", "UNSTASH")).toBe("/chat/sess-1/vcs/unstash");
+      expect(buildVcsRoute("sess-1", "Unstash")).toBe("/chat/sess-1/vcs/unstash");
       expect(buildVcsRoute("sess-1", "a1b2c3d")).toBe("/chat/sess-1/vcs/a1b2c3d");
       expect(buildVcsRoute("sess-1", "a1b2c3d", "src/App.vue")).toBe(
         "/chat/sess-1/vcs/a1b2c3d/src/App.vue",
       );
       expect(buildVcsRoute("sess-1", null, "src/App.vue")).toBe(
+        "/chat/sess-1/vcs/unstash/src/App.vue",
+      );
+      expect(buildVcsRoute("sess-1", "UNSTASH", "src/App.vue")).toBe(
         "/chat/sess-1/vcs/unstash/src/App.vue",
       );
     });
@@ -232,8 +237,12 @@ describe("routeUtils", () => {
   describe("shouldResetSessionState", () => {
     it("identifies session transitions accurately via shouldResetSessionState", () => {
       expect(shouldResetSessionState(null, "session-1")).toBe(false);
+      expect(shouldResetSessionState(undefined, "session-1")).toBe(false);
       expect(shouldResetSessionState("session-1", null)).toBe(false);
+      expect(shouldResetSessionState("session-1", undefined)).toBe(false);
       expect(shouldResetSessionState(null, null)).toBe(false);
+      expect(shouldResetSessionState(undefined, undefined)).toBe(false);
+      expect(shouldResetSessionState(null, undefined)).toBe(false);
       expect(shouldResetSessionState("session-1", "session-1")).toBe(false);
       expect(shouldResetSessionState("session-1", "session-2")).toBe(true);
     });

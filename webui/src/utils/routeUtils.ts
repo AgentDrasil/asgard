@@ -1,3 +1,5 @@
+import type { RouteParamsGeneric } from "vue-router";
+
 /**
  * Utility functions for frontend route parsing, building, and view resolution.
  */
@@ -6,7 +8,7 @@
  * Parses and decodes file path parameters from route params.
  * Handles string or array parameter forms and filters empty segments.
  */
-export function parseFilePath(param: string | string[] | undefined): string | null {
+export function parseFilePath(param: string | string[] | null | undefined): string | null {
   if (param === undefined || param === null) {
     return null;
   }
@@ -24,11 +26,12 @@ export function parseFilePath(param: string | string[] | undefined): string | nu
  * Parses and normalizes commit IDs from route params case-insensitively.
  * Treats 'unstash', empty, or undefined as null (representing uncommitted workspace changes).
  */
-export function parseCommitId(param: string | string[] | undefined): string | null {
+export function parseCommitId(param: string | string[] | null | undefined): string | null {
   if (param === undefined || param === null) {
     return null;
   }
 
+  // Defensively handle array form by picking first segment if delivered as string[]
   const raw = Array.isArray(param) ? param[0] : param;
   if (!raw) {
     return null;
@@ -79,13 +82,18 @@ export function buildFilesRoute(sessionId: string, filePath?: string | null): st
 
 /**
  * Builds the URL path for the VCS / diff view.
+ * Note: Callers must always generate VCS routes using this builder rather than manual concatenation,
+ * because omitting the commitId segment manually (e.g. `/chat/:id/vcs/src/main.go`) would cause
+ * the first path segment to be parsed as the commit ID.
  */
 export function buildVcsRoute(
   sessionId: string,
   commitId?: string | null,
   filePath?: string | null,
 ): string {
-  const commitSegment = commitId ? encodeURIComponent(commitId) : "unstash";
+  const normalizedCommit =
+    commitId && commitId.trim().toLowerCase() !== "unstash" ? commitId.trim() : null;
+  const commitSegment = normalizedCommit ? encodeURIComponent(normalizedCommit) : "unstash";
   const base = `/chat/${encodeURIComponent(sessionId)}/vcs/${commitSegment}`;
   if (!filePath) {
     return base;
@@ -99,13 +107,15 @@ export function buildVcsRoute(
  * based on transitioning across different session IDs.
  */
 export function shouldResetSessionState(
-  prevSessionId: string | null,
-  nextSessionId: string | null,
+  prevSessionId: string | null | undefined,
+  nextSessionId: string | null | undefined,
 ): boolean {
-  if (!prevSessionId || !nextSessionId) {
+  const prev = prevSessionId ?? null;
+  const next = nextSessionId ?? null;
+  if (!prev || !next) {
     return false;
   }
-  return prevSessionId !== nextSessionId;
+  return prev !== next;
 }
 
 export interface ResolvedRouteView {
@@ -119,7 +129,7 @@ export interface ResolvedRouteView {
  */
 export function resolveViewFromRoute(
   path: string,
-  params: Record<string, any>,
+  params: RouteParamsGeneric | Record<string, any>,
   routeName?: string | null,
 ): ResolvedRouteView {
   let activeView: "chat" | "file" | "vcs" = "chat";
@@ -142,8 +152,9 @@ export function resolveViewFromRoute(
     }
   }
 
-  const filePath = parseFilePath(params.filePath);
-  const commitId = activeView === "vcs" ? parseCommitId(params.commitId) : null;
+  const filePath = parseFilePath(params.filePath as string | string[] | undefined);
+  const commitId =
+    activeView === "vcs" ? parseCommitId(params.commitId as string | string[] | undefined) : null;
 
   return {
     activeView,

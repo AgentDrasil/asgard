@@ -26,7 +26,9 @@ const props = defineProps<{
   sessionId?: string;
   runDir: string;
   gitRoot: string;
+  /** Initial commit hash or null (unstash). Alternatively provided via v-model:selectedCommit */
   initialCommit?: string | null;
+  /** Initial file path to focus. Alternatively provided via v-model:selectedFilePath */
   initialFilePath?: string | null;
   isTerminalOpen?: boolean;
 }>();
@@ -53,6 +55,10 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
 }>();
 
+function currentRouteState() {
+  return resolveViewFromRoute(route.path, route.params, route.name ? String(route.name) : null);
+}
+
 // ── Git data ────────────────────────────────────────────────────────────────
 const files = ref<GitDiffFile[]>([]);
 const commits = ref<GitCommit[]>([]);
@@ -67,6 +73,7 @@ const errorMsg = ref("");
 const selectedIndex = ref(0);
 
 let lastLoadedCommit: string | null | undefined = undefined;
+let diffReqId = 0;
 
 const selectedFile = computed(() => files.value[selectedIndex.value] ?? null);
 
@@ -156,9 +163,11 @@ async function loadDiffOnly() {
     files.value = [];
     return;
   }
+  const currentReq = ++diffReqId;
   lastLoadedCommit = selectedCommit.value ?? null;
   try {
     const result = await getGitDiff(props.sessionId, selectedCommit.value || undefined);
+    if (currentReq !== diffReqId) return;
     files.value = result;
 
     const targetFilePath = selectedFilePath.value ?? props.initialFilePath;
@@ -174,11 +183,7 @@ async function loadDiffOnly() {
         selectedIndex.value = 0;
         selectedFilePath.value = files.value[0]?.newPath ?? null;
         if (props.sessionId) {
-          const resolved = resolveViewFromRoute(
-            route.path,
-            route.params,
-            route.name ? String(route.name) : null,
-          );
+          const resolved = currentRouteState();
           if (
             resolved.filePath !== (files.value[0]?.newPath ?? null) ||
             resolved.commitId !== selectedCommit.value
@@ -195,9 +200,12 @@ async function loadDiffOnly() {
       }
       if (files.value.length > 0) {
         selectedFilePath.value = files.value[selectedIndex.value]?.newPath ?? null;
+      } else {
+        selectedFilePath.value = null;
       }
     }
   } catch (e: any) {
+    if (currentReq !== diffReqId) return;
     errorMsg.value = e?.message ?? "Failed to load diff";
   }
 }
@@ -209,11 +217,7 @@ async function handleSelectCommit(hash: string | null) {
   await loadDiffOnly();
   if (props.sessionId) {
     const currentTarget = files.value[selectedIndex.value]?.newPath;
-    const resolved = resolveViewFromRoute(
-      route.path,
-      route.params,
-      route.name ? String(route.name) : null,
-    );
+    const resolved = currentRouteState();
     if (resolved.commitId !== hash || resolved.filePath !== (currentTarget ?? null)) {
       router.replace(buildVcsRoute(props.sessionId, hash, currentTarget));
     }
@@ -229,11 +233,7 @@ function handleSelectFile(index: number) {
   const newPath = files.value[index]?.newPath;
   selectedFilePath.value = newPath ?? null;
   if (props.sessionId && newPath) {
-    const resolved = resolveViewFromRoute(
-      route.path,
-      route.params,
-      route.name ? String(route.name) : null,
-    );
+    const resolved = currentRouteState();
     if (resolved.filePath !== newPath) {
       router.replace(buildVcsRoute(props.sessionId, selectedCommit.value, newPath));
     }
@@ -275,8 +275,13 @@ watch([() => props.initialFilePath, () => selectedFilePath.value], () => {
     props.initialFilePath !== undefined ? props.initialFilePath : selectedFilePath.value;
   if (targetFile && files.value.length > 0) {
     const idx = files.value.findIndex((f) => f.newPath === targetFile || f.oldPath === targetFile);
-    if (idx > -1 && idx !== selectedIndex.value) {
-      selectedIndex.value = idx;
+    if (idx > -1) {
+      if (idx !== selectedIndex.value) {
+        selectedIndex.value = idx;
+      }
+      if (selectedFilePath.value !== files.value[idx].newPath) {
+        selectedFilePath.value = files.value[idx].newPath;
+      }
     }
   }
 });

@@ -93,45 +93,58 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
     e.preventDefault();
     e.stopPropagation();
-    const sessionId = activeSessionId.value || (route.params.id as string);
-    if (sessionId) {
-      if (activeView.value === "vcs") {
-        router.push(buildChatRoute(sessionId));
-      } else {
-        const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
-        if (gitRootCandidate) {
-          currentGitRoot.value = gitRootCandidate;
-        }
-        router.push(buildVcsRoute(sessionId, selectedCommit.value, selectedFilePath.value));
-      }
-    } else {
-      if (activeView.value === "vcs") {
-        activeView.value = "chat";
-      } else {
-        const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
-        if (gitRootCandidate) {
-          currentGitRoot.value = gitRootCandidate;
-        }
-        activeView.value = "vcs";
-      }
-    }
+    navigateToVcs();
   } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyF") {
     e.preventDefault();
     e.stopPropagation();
-    const sessionId = activeSessionId.value || (route.params.id as string);
+    navigateToFiles();
+  }
+};
+
+const navigateToVcs = () => {
+  const sessionId = activeSessionId.value || (route.params.id as string);
+  if (activeView.value === "vcs") {
     if (sessionId) {
-      if (activeView.value === "file") {
-        router.push(buildChatRoute(sessionId));
-      } else {
-        router.push(buildFilesRoute(sessionId, selectedFilePath.value));
-      }
+      router.push(buildChatRoute(sessionId));
     } else {
-      if (activeView.value === "file") {
-        activeView.value = "chat";
-      } else {
-        activeView.value = "file";
-      }
+      activeView.value = "chat";
     }
+  } else {
+    const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
+    if (gitRootCandidate) {
+      currentGitRoot.value = gitRootCandidate;
+    }
+    if (sessionId) {
+      router.push(buildVcsRoute(sessionId, selectedCommit.value, selectedFilePath.value));
+    } else {
+      activeView.value = "vcs";
+    }
+  }
+};
+
+const navigateToFiles = () => {
+  const sessionId = activeSessionId.value || (route.params.id as string);
+  if (activeView.value === "file") {
+    if (sessionId) {
+      router.push(buildChatRoute(sessionId));
+    } else {
+      activeView.value = "chat";
+    }
+  } else {
+    if (sessionId) {
+      router.push(buildFilesRoute(sessionId, selectedFilePath.value));
+    } else {
+      activeView.value = "file";
+    }
+  }
+};
+
+const navigateToChat = () => {
+  const sessionId = activeSessionId.value || (route.params.id as string);
+  if (sessionId) {
+    router.push(buildChatRoute(sessionId));
+  } else {
+    activeView.value = "chat";
   }
 };
 
@@ -205,7 +218,7 @@ watch(
       selectedCommit.value = resolved.commitId;
     }
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 );
 
 onMounted(async () => {
@@ -309,24 +322,9 @@ const closeSidebarOnMobile = () => {
           @open-diff="
             (gitRoot) => {
               currentGitRoot = gitRoot;
-              const sessionId = activeSessionId || (route.params.id as string);
-              if (sessionId) {
-                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
-              } else {
-                activeView = 'vcs';
-              }
             }
           "
-          @close-diff="
-            () => {
-              const sessionId = activeSessionId || (route.params.id as string);
-              if (sessionId) {
-                router.push(buildChatRoute(sessionId));
-              } else {
-                activeView = 'chat';
-              }
-            }
-          "
+          @close-diff="navigateToChat"
           @open-search="isFileSearchOpen = true"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"

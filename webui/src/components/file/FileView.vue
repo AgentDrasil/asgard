@@ -18,6 +18,7 @@ const props = defineProps<{
   sessionId: string;
   runDir: string;
   gitRoot: string;
+  /** Initial file path to display. Alternatively provided via v-model:selectedFilePath */
   initialFilePath?: string | null;
   isTerminalOpen?: boolean;
 }>();
@@ -32,6 +33,10 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
   (e: "open-search"): void;
 }>();
+
+function currentRouteState() {
+  return resolveViewFromRoute(route.path, route.params, route.name ? String(route.name) : null);
+}
 
 const {
   toggleTerminalShortcut,
@@ -94,11 +99,7 @@ function handleSelectFile(path: string) {
     mobileActiveTab.value = "code";
   }
   if (props.sessionId) {
-    const resolved = resolveViewFromRoute(
-      route.path,
-      route.params,
-      route.name ? String(route.name) : null,
-    );
+    const resolved = currentRouteState();
     if (resolved.filePath !== path) {
       router.replace(buildFilesRoute(props.sessionId, path));
     }

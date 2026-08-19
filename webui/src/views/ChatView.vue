@@ -182,11 +182,32 @@ function toggleArtifactDrawer() {
   }
 }
 
-watch(isArtifactDrawerOpen, (open) => {
-  if (open && !activeArtifactPath.value && modifiedFiles.value.length > 0) {
-    activeArtifactPath.value = modifiedFiles.value[modifiedFiles.value.length - 1];
+function navigateToChat() {
+  if (props.sessionId) {
+    router.push(buildChatRoute(props.sessionId));
+  } else {
+    activeView.value = "chat";
   }
-});
+}
+
+function navigateToFiles() {
+  if (props.sessionId) {
+    router.push(buildFilesRoute(props.sessionId, selectedFilePath.value));
+  } else {
+    activeView.value = "file";
+  }
+}
+
+function navigateToVcs(gitRoot?: string) {
+  if (gitRoot) {
+    emit("open-diff", gitRoot);
+  }
+  if (props.sessionId) {
+    router.push(buildVcsRoute(props.sessionId, selectedCommit.value, selectedFilePath.value));
+  } else {
+    activeView.value = "vcs";
+  }
+}
 </script>
 
 <template>
@@ -213,24 +234,8 @@ watch(isArtifactDrawerOpen, (open) => {
           v-model:selectedFilePath="selectedFilePath"
           v-model:chatInputText="chatInputText"
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
-          @close="
-            () => {
-              if (sessionId) {
-                router.push(buildChatRoute(sessionId));
-              } else {
-                activeView = 'chat';
-              }
-            }
-          "
-          @open-file-view="
-            () => {
-              if (sessionId) {
-                router.push(buildFilesRoute(sessionId, selectedFilePath));
-              } else {
-                activeView = 'file';
-              }
-            }
-          "
+          @close="navigateToChat"
+          @open-file-view="navigateToFiles"
           @toggle-terminal="emit('toggle-terminal')"
         />
 
@@ -244,24 +249,8 @@ watch(isArtifactDrawerOpen, (open) => {
           v-model:isFileTreeOpen="isFileTreeOpen"
           v-model:chatInputText="chatInputText"
           v-model:selectedFilePath="selectedFilePath"
-          @close="
-            () => {
-              if (sessionId) {
-                router.push(buildChatRoute(sessionId));
-              } else {
-                activeView = 'chat';
-              }
-            }
-          "
-          @open-vcs="
-            () => {
-              if (sessionId) {
-                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
-              } else {
-                activeView = 'vcs';
-              }
-            }
-          "
+          @close="navigateToChat"
+          @open-vcs="navigateToVcs()"
           @toggle-terminal="emit('toggle-terminal')"
           @open-search="emit('open-search')"
         />
@@ -280,25 +269,8 @@ watch(isArtifactDrawerOpen, (open) => {
           :isArtifactDrawerOpen="isArtifactDrawerOpen"
           :workingAgentLabel="workingAgentLabel"
           v-model:isDetailsOpen="isDetailsOpen"
-          @open-diff="
-            (g) => {
-              emit('open-diff', g);
-              if (sessionId) {
-                router.push(buildVcsRoute(sessionId, selectedCommit, selectedFilePath));
-              } else {
-                activeView = 'vcs';
-              }
-            }
-          "
-          @open-file-view="
-            () => {
-              if (sessionId) {
-                router.push(buildFilesRoute(sessionId, selectedFilePath));
-              } else {
-                activeView = 'file';
-              }
-            }
-          "
+          @open-diff="navigateToVcs"
+          @open-file-view="navigateToFiles"
           @open-artifact="handleOpenArtifact"
           @toggle-terminal="emit('toggle-terminal')"
           @toggle-sidebar="emit('toggle-sidebar')"
