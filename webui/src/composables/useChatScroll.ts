@@ -1,5 +1,7 @@
-import { ref, watch, nextTick, onMounted, onUnmounted, type Ref } from "vue";
+import { ref, watch, nextTick, onMounted, onUnmounted, getCurrentInstance, type Ref } from "vue";
 import type { ChatMessage } from "../types";
+
+export const BOTTOM_THRESHOLD = 120;
 
 export interface UseChatScrollOptions {
   messages: Ref<ChatMessage[]>;
@@ -13,9 +15,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
   const scrollContainerRef = ref<HTMLDivElement | null>(null);
   const showScrollBottom = ref(false);
+  const hasNewMessages = ref(false);
 
   let lastAtTopState = isDetailsOpen.value ?? true;
   let ticking = false;
+  let switchingSession = false;
 
   const checkScrollPosition = () => {
     if (!scrollContainerRef.value) return;
@@ -26,7 +30,19 @@ export function useChatScroll(options: UseChatScrollOptions) {
       onUpdateDetailsOpen?.(atTop);
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    showScrollBottom.value = distanceFromBottom > 120;
+    showScrollBottom.value = distanceFromBottom > BOTTOM_THRESHOLD;
+    if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+      hasNewMessages.value = false;
+    }
+  };
+
+  const stickToBottom = () => {
+    if (scrollContainerRef.value) {
+      scrollContainerRef.value.scrollTo({
+        top: scrollContainerRef.value.scrollHeight,
+        behavior: "auto",
+      });
+    }
   };
 
   const scrollToBottom = () => {
@@ -36,6 +52,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         behavior: "smooth",
       });
     }
+    hasNewMessages.value = false;
   };
 
   const handleScroll = () => {
@@ -57,40 +74,71 @@ export function useChatScroll(options: UseChatScrollOptions) {
     },
   );
 
-  onMounted(() => {
-    const el = scrollContainerRef.value;
-    if (el) {
-      el.addEventListener("scroll", handleScroll, { passive: true });
-      nextTick(() => {
-        checkScrollPosition();
-      });
-    }
-  });
+  if (getCurrentInstance()) {
+    onMounted(() => {
+      const el = scrollContainerRef.value;
+      if (el) {
+        el.addEventListener("scroll", handleScroll, { passive: true });
+        nextTick(() => {
+          checkScrollPosition();
+        });
+      }
+    });
 
-  onUnmounted(() => {
-    const el = scrollContainerRef.value;
-    if (el) {
-      el.removeEventListener("scroll", handleScroll);
-    }
-  });
+    onUnmounted(() => {
+      const el = scrollContainerRef.value;
+      if (el) {
+        el.removeEventListener("scroll", handleScroll);
+      }
+    });
+  }
 
-  // Auto scroll to bottom when new messages arrive and re-check scroll position
+  // 1. Session ID watcher: triggers on mount and session change
   watch(
-    [sessionId, messages],
+    sessionId,
     async () => {
+      switchingSession = true;
+      hasNewMessages.value = false;
       await nextTick();
-      scrollToBottom();
+      stickToBottom();
       checkScrollPosition();
+      switchingSession = false;
       setTimeout(() => {
         checkScrollPosition();
       }, 150);
     },
-    { deep: true, immediate: true },
+    { immediate: true },
+  );
+
+  // 2. Messages watcher: auto-scroll if at bottom, otherwise mark hasNewMessages
+  watch(
+    messages,
+    async () => {
+      const el = scrollContainerRef.value;
+      const isAtBottom =
+        switchingSession ||
+        !el ||
+        el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD;
+
+      if (isAtBottom) {
+        await nextTick();
+        stickToBottom();
+        checkScrollPosition();
+        hasNewMessages.value = false;
+        setTimeout(() => {
+          checkScrollPosition();
+        }, 150);
+      } else {
+        hasNewMessages.value = true;
+      }
+    },
+    { deep: true },
   );
 
   return {
     scrollContainerRef,
     showScrollBottom,
+    hasNewMessages,
     scrollToBottom,
     checkScrollPosition,
   };
