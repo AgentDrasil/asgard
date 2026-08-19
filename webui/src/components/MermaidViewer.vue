@@ -34,10 +34,29 @@ let panStartX = 0;
 let panStartY = 0;
 let initialPanX = 0;
 let initialPanY = 0;
+let panPointerId: number | null = null;
+const activePointers = new Map<number, { x: number; y: number }>();
+let pinchStartDistance = 0;
+let pinchStartZoom = 1;
+let pinchBasePanX = 0;
+let pinchBasePanY = 0;
+let pinchStartMidX = 0;
+let pinchStartMidY = 0;
+let pinchCenterX = 0;
+let pinchCenterY = 0;
+let isPinching = false;
 let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let renderToken = 0;
 let latestBindFunctions: ((element: Element) => void) | undefined;
+
+// Mirrors mermaid's internal sanitizer options so <foreignObject> node labels
+// (mermaid v11 renders all text as HTML inside foreignObject) survive sanitization.
+const SANITIZE_OPTIONS = {
+  USE_PROFILES: { svg: true, svgFilters: true, html: true },
+  ADD_TAGS: ["foreignobject"],
+  HTML_INTEGRATION_POINTS: { foreignobject: true },
+};
 
 async function renderChart(): Promise<void> {
   const token = ++renderToken;
@@ -63,9 +82,7 @@ async function renderChart(): Promise<void> {
       svgHtml.value = "";
       latestBindFunctions = undefined;
     } else {
-      svgHtml.value = DOMPurify.sanitize(result.svg || "", {
-        USE_PROFILES: { svg: true, svgFilters: true, html: true },
-      });
+      svgHtml.value = DOMPurify.sanitize(result.svg || "", SANITIZE_OPTIONS);
       errorMessage.value = null;
       latestBindFunctions = result.bindFunctions;
 
@@ -110,32 +127,94 @@ function handleResetZoom(): void {
 function handleWheel(e: WheelEvent): void {
   e.preventDefault();
   const delta = e.deltaY < 0 ? 1.15 : 0.85;
-  const next = Math.min(5.0, Math.max(0.2, Number((zoomLevel.value * delta).toFixed(2))));
-  zoomLevel.value = next;
+  zoomLevel.value = clampZoom(zoomLevel.value * delta);
 }
 
-function handleMouseDown(e: MouseEvent): void {
-  if (e.button !== 0) return; // Only primary button
-  isPanning.value = true;
-  panStartX = e.clientX;
-  panStartY = e.clientY;
-  initialPanX = panX.value;
-  initialPanY = panY.value;
-
-  window.addEventListener("mousemove", handleMouseMove);
-  window.addEventListener("mouseup", handleMouseUp);
+function clampZoom(value: number): number {
+  return Math.min(5.0, Math.max(0.2, Number(value.toFixed(2))));
 }
 
-function handleMouseMove(e: MouseEvent): void {
-  if (!isPanning.value) return;
-  panX.value = initialPanX + (e.clientX - panStartX);
-  panY.value = initialPanY + (e.clientY - panStartY);
+function getPointerDistance(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  return Math.hypot(p1.x - p2.x, p1.y - p2.y);
 }
 
-function handleMouseUp(): void {
-  isPanning.value = false;
-  window.removeEventListener("mousemove", handleMouseMove);
-  window.removeEventListener("mouseup", handleMouseUp);
+function handlePointerDown(e: PointerEvent): void {
+  if (e.button !== 0 && e.pointerType === "mouse") return; // Only primary button
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (activePointers.size === 1) {
+    isPanning.value = true;
+    panPointerId = e.pointerId;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    initialPanX = panX.value;
+    initialPanY = panY.value;
+  } else if (activePointers.size === 2) {
+    // Switch from single-pointer pan to two-pointer pinch
+    const [p1, p2] = [...activePointers.values()];
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    isPinching = true;
+    isPanning.value = false;
+    pinchStartDistance = getPointerDistance(p1, p2);
+    pinchStartZoom = zoomLevel.value;
+    pinchBasePanX = panX.value;
+    pinchBasePanY = panY.value;
+    pinchStartMidX = (p1.x + p2.x) / 2;
+    pinchStartMidY = (p1.y + p2.y) / 2;
+    pinchCenterX = rect.left + rect.width / 2;
+    pinchCenterY = rect.top + rect.height / 2;
+  }
+
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", handlePointerEnd);
+  window.addEventListener("pointercancel", handlePointerEnd);
+}
+
+function handlePointerMove(e: PointerEvent): void {
+  if (!activePointers.has(e.pointerId)) return;
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (isPinching && activePointers.size >= 2) {
+    const [p1, p2] = [...activePointers.values()];
+    const distance = getPointerDistance(p1, p2);
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    if (pinchStartDistance > 0) {
+      const nextZoom = clampZoom(pinchStartZoom * (distance / pinchStartDistance));
+      // Keep the diagram point under the initial pinch midpoint anchored
+      // under the current midpoint (transform-origin is the canvas center).
+      const scale = nextZoom / pinchStartZoom;
+      panX.value = midX - pinchCenterX - (pinchStartMidX - pinchCenterX - pinchBasePanX) * scale;
+      panY.value = midY - pinchCenterY - (pinchStartMidY - pinchCenterY - pinchBasePanY) * scale;
+      zoomLevel.value = nextZoom;
+    }
+  } else if (isPanning.value && e.pointerId === panPointerId) {
+    panX.value = initialPanX + (e.clientX - panStartX);
+    panY.value = initialPanY + (e.clientY - panStartY);
+  }
+}
+
+function handlePointerEnd(e: PointerEvent): void {
+  activePointers.delete(e.pointerId);
+
+  if (activePointers.size === 0) {
+    isPanning.value = false;
+    isPinching = false;
+    panPointerId = null;
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerEnd);
+    window.removeEventListener("pointercancel", handlePointerEnd);
+  } else if (activePointers.size === 1) {
+    // Pinch released one finger: resume panning with the remaining pointer
+    const [id, p] = [...activePointers.entries()][0];
+    isPinching = false;
+    isPanning.value = true;
+    panPointerId = id;
+    panStartX = p.x;
+    panStartY = p.y;
+    initialPanX = panX.value;
+    initialPanY = panY.value;
+  }
 }
 
 function handleToggleFullscreen(): void {
@@ -196,8 +275,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("mousemove", handleMouseMove);
-  window.removeEventListener("mouseup", handleMouseUp);
+  window.removeEventListener("pointermove", handlePointerMove);
+  window.removeEventListener("pointerup", handlePointerEnd);
+  window.removeEventListener("pointercancel", handlePointerEnd);
   window.removeEventListener("keydown", handleKeyDown);
   if (copyTimeout) clearTimeout(copyTimeout);
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -323,12 +403,14 @@ onUnmounted(() => {
     </div>
 
     <!-- Diagram Canvas View -->
+    <!-- touch-action: keep page scroll at 1x (pan-y), capture all gestures once zoomed -->
     <div
       v-else
       ref="canvasRef"
       class="relative flex min-h-[180px] max-h-[500px] w-full items-center justify-center overflow-hidden bg-base-100/30 select-none"
       :class="[isPanning ? 'cursor-grabbing' : 'cursor-grab']"
-      @mousedown="handleMouseDown"
+      :style="{ touchAction: zoomLevel > 1 ? 'none' : 'pan-y' }"
+      @pointerdown="handlePointerDown"
       @wheel="handleWheel"
     >
       <!-- Loading indicator -->
@@ -434,9 +516,9 @@ onUnmounted(() => {
       <!-- Fullscreen Canvas -->
       <div
         ref="fullscreenCanvasRef"
-        class="relative flex flex-1 w-full items-center justify-center overflow-hidden select-none"
+        class="relative flex flex-1 w-full items-center justify-center overflow-hidden select-none touch-none"
         :class="[isPanning ? 'cursor-grabbing' : 'cursor-grab']"
-        @mousedown="handleMouseDown"
+        @pointerdown="handlePointerDown"
         @wheel="handleWheel"
       >
         <!-- Loading indicator in fullscreen -->
