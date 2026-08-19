@@ -39,6 +39,10 @@ const (
 	// an upstream node failed and the failure was not absorbed by a `when`
 	// edge. This propagates global workflow failure.
 	SkipReasonCascadedFailure SkipReason = "CASCADED_FAILURE"
+	// SkipReasonNeverActivated means the node is an on_exhausted orphan (or
+	// its pure conditional downstream) that legitimately never fired during
+	// the run. Benign: it does not fail the global workflow settlement.
+	SkipReasonNeverActivated SkipReason = "NEVER_ACTIVATED"
 )
 
 // NodeResult is the outcome of executing (or skipping) a single node.

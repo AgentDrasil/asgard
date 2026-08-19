@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,6 +129,13 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 		// 1. A dependency edge with an explicit `when` only arbitrates that
 		// edge; parent failure does not block a matching when-branch.
 		if dep.When != "" {
+			// Fail-closed cascade guard: a cascaded-failure parent produced
+			// no result; its zero-valued exit code must never satisfy the
+			// condition (e.g. `exit_code == 0`).
+			if parentResult != nil && parentResult.Status == StatusSkipped && parentResult.SkipReason == SkipReasonCascadedFailure {
+				hasConditionFalseEdge = true
+				continue
+			}
 			match, err := EvaluateSimpleExpr(dep.When, upstreams, nil)
 			if err != nil {
 				log.Warn().Err(err).Str("node", node.ID).Msgf("when expression %q evaluation failed; treating as false", dep.When)
@@ -261,8 +269,28 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		return toPersistedStates(results)
 	}
 
-	const maxNodeExecutions = 100
+	maxNodeExecutions := defn.MaxNodeExecutions
+	if maxNodeExecutions <= 0 {
+		maxNodeExecutions = 100
+	}
 	executionCount := make(map[string]int, len(defn.Nodes))
+
+	// Loop bookkeeping: per-loop iteration counters, the child-loop index and
+	// the set of on_exhausted orphan nodes (excluded from roots, swept as
+	// SKIPPED (never_activated) when they never fire).
+	loopsByID := make(map[string]*LoopSpec, len(defn.Loops))
+	childLoops := make(map[string][]string, len(defn.Loops))
+	onExhaustedTargets := make(map[string]bool, len(defn.Loops))
+	for _, loop := range defn.Loops {
+		loopsByID[loop.ID] = loop
+		if loop.Parent != "" {
+			childLoops[loop.Parent] = append(childLoops[loop.Parent], loop.ID)
+		}
+		if loop.OnExhausted != "" {
+			onExhaustedTargets[loop.OnExhausted] = true
+		}
+	}
+	loopIter := make(map[string]int, len(defn.Loops))
 
 	nodeByID := make(map[string]*NodeSpec, len(defn.Nodes))
 	for _, n := range defn.Nodes {
@@ -270,7 +298,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 
 	// Classify dependencies
-	unconditionalDeps := make(map[string][]string, len(defn.Nodes))
+	unconditionalDeps := make(map[string][]NodeDependency, len(defn.Nodes))
 	conditionalDeps := make(map[string][]NodeDependency, len(defn.Nodes))
 	dependents := make(map[string][]*NodeSpec, len(defn.Nodes))
 
@@ -280,7 +308,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			if dep.When != "" {
 				conditionalDeps[node.ID] = append(conditionalDeps[node.ID], dep)
 			} else {
-				unconditionalDeps[node.ID] = append(unconditionalDeps[node.ID], dep.NodeID)
+				unconditionalDeps[node.ID] = append(unconditionalDeps[node.ID], dep)
 			}
 		}
 	}
@@ -289,24 +317,139 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	running := make(map[string]bool)
 	eventCh := make(chan struct{}, 100)
 
-	enqueue := func(nodeID string) {
+	// enqueue admits a node for execution unless it is already queued or
+	// running, or the global per-node execution cap is reached. It reports
+	// whether the node was actually admitted.
+	enqueue := func(nodeID string) bool {
 		if running[nodeID] {
-			return
+			return false
 		}
 		for _, id := range readyQueue {
 			if id == nodeID {
-				return
+				return false
 			}
 		}
 		if executionCount[nodeID] >= maxNodeExecutions {
 			log.Warn().Str("node", nodeID).Msg("max execution count reached, skipping loop re-entry")
-			return
+			return false
 		}
 		readyQueue = append(readyQueue, nodeID)
+		return true
+	}
+
+	// isPending reports whether the node is queued or currently running.
+	isPending := func(nodeID string) bool {
+		if running[nodeID] {
+			return true
+		}
+		for _, id := range readyQueue {
+			if id == nodeID {
+				return true
+			}
+		}
+		return false
+	}
+
+	// resetDescendantLoops zeroes the counters of every descendant loop.
+	var resetDescendantLoops func(loopID string)
+	resetDescendantLoops = func(loopID string) {
+		for _, childID := range childLoops[loopID] {
+			loopIter[childID] = 0
+			resetDescendantLoops(childID)
+		}
+	}
+
+	// replaying marks the seed-replay phase: nodes already settled from a
+	// restored snapshot must not be re-enqueued, and their counting edges
+	// must not consume loop iterations.
+	replaying := len(rc.SeedNodes) > 0
+
+	// evaluateDownstream checks dependents of settled nodes; declared early
+	// because admitViaEdge may recursively settle exhausted-loop targets.
+	var evaluateDownstream func(settledNodeID string)
+
+	// admitViaEdge applies the edge-level loop metadata (counts_loop /
+	// resets_loop) before enqueueing the edge target. Counting edges first
+	// check the loop quota: an exhausted loop suppresses the re-entry and
+	// routes to the loop's on_exhausted orphan (or fails the target when no
+	// fallback is declared).
+	admitViaEdge := func(dep NodeDependency, targetID string) {
+		// Seed-replay settled guard: already-settled nodes are neither
+		// re-enqueued nor counted.
+		if replaying {
+			if _, settled := results[targetID]; settled {
+				return
+			}
+		}
+
+		if dep.ResetsLoop != "" {
+			loopIter[dep.ResetsLoop] = 0
+			resetDescendantLoops(dep.ResetsLoop)
+			enqueue(targetID)
+			return
+		}
+
+		if dep.CountsLoop == "" {
+			enqueue(targetID)
+			return
+		}
+		loop := loopsByID[dep.CountsLoop]
+		if loop == nil {
+			enqueue(targetID)
+			return
+		}
+
+		// A no-op re-entry (target already queued/running) must neither
+		// consume an iteration nor trigger exhaustion routing.
+		if isPending(targetID) {
+			return
+		}
+
+		if loop.MaxIterations > 0 && loopIter[loop.ID] >= loop.MaxIterations {
+			log.Warn().
+				Str("workflow", defn.Name).
+				Str("session_id", rc.SessionID).
+				Str("loop", loop.ID).
+				Str("node", targetID).
+				Msgf("loop %s exhausted after %d iterations", loop.ID, loop.MaxIterations)
+			if loop.OnExhausted != "" {
+				enqueue(loop.OnExhausted)
+				return
+			}
+			if _, settled := results[targetID]; settled {
+				return
+			}
+			res := &NodeResult{
+				Status: StatusFailed,
+				Error:  fmt.Errorf("loop %q exhausted after %d iterations; node %s not re-entered", loop.ID, loop.MaxIterations, targetID),
+			}
+			results[targetID] = res
+			log.Error().
+				Str("workflow", defn.Name).
+				Str("session_id", rc.SessionID).
+				Str("node_id", targetID).
+				Str("status", string(res.Status)).
+				Err(res.Error).
+				Msgf("[Workflow %s] Node %q FINISHED: %s (loop %s exhausted)", defn.Name, targetID, res.Status, loop.ID)
+			emit(WorkflowEvent{
+				Type:     EventNodeFinished,
+				NodeID:   targetID,
+				NodeType: nodeByID[targetID].Type,
+				AgentID:  nodeByID[targetID].AgentID,
+				Status:   StatusFailed,
+				Message:  fmt.Sprintf("node %s FAILED: %v", targetID, res.Error),
+			})
+			evaluateDownstream(targetID)
+			return
+		}
+
+		if enqueue(targetID) {
+			loopIter[loop.ID]++
+			resetDescendantLoops(loop.ID)
+		}
 	}
 
 	// evaluateDownstream checks dependents of settled nodes
-	var evaluateDownstream func(settledNodeID string)
 	evaluateDownstream = func(settledNodeID string) {
 		// A condition-false skip is a dead branch end: the branch did no
 		// work, so already-settled dependents (e.g. loop join nodes) must
@@ -316,6 +459,13 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonConditionFalse {
 			skipIsDeadBranch = true
 		}
+		// Cascade-skip guard: a node skipped by cascaded failure produced no
+		// result of its own; its zero-valued exit code must never satisfy a
+		// downstream `when` expression (fail-closed).
+		parentCascadedSkip := false
+		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonCascadedFailure {
+			parentCascadedSkip = true
+		}
 		for _, depNode := range dependents[settledNodeID] {
 			if skipIsDeadBranch {
 				if _, settled := results[depNode.ID]; settled {
@@ -323,39 +473,44 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				}
 			}
 			// 1. Check if any conditional edge from settledNodeID triggered
-			hasMatchingConditional := false
-			for _, cond := range conditionalDeps[depNode.ID] {
-				if cond.NodeID == settledNodeID {
-					match, err := EvaluateSimpleExpr(cond.When, results, nil)
+			var matchingEdge *NodeDependency
+			for i, cond := range conditionalDeps[depNode.ID] {
+				if cond.NodeID != settledNodeID {
+					continue
+				}
+				match := false
+				if !parentCascadedSkip {
+					var err error
+					match, err = EvaluateSimpleExpr(cond.When, results, nil)
 					if err != nil {
 						log.Warn().Err(err).Str("node", depNode.ID).Msgf("when expression %q evaluation failed", cond.When)
 						match = false
 					}
-					if match {
-						hasMatchingConditional = true
-						break
-					}
 				}
-			}
-
-			if hasMatchingConditional {
-				enqueue(depNode.ID)
-				continue
-			}
-
-			// 2. Check if settledNodeID is an unconditional parent of depNode
-			isUnconditionalParent := false
-			for _, parentID := range unconditionalDeps[depNode.ID] {
-				if parentID == settledNodeID {
-					isUnconditionalParent = true
+				if match {
+					matchingEdge = &conditionalDeps[depNode.ID][i]
 					break
 				}
 			}
 
-			if isUnconditionalParent {
+			if matchingEdge != nil {
+				admitViaEdge(*matchingEdge, depNode.ID)
+				continue
+			}
+
+			// 2. Check if settledNodeID is an unconditional parent of depNode
+			var unconditionalEdge *NodeDependency
+			for i, dep := range unconditionalDeps[depNode.ID] {
+				if dep.NodeID == settledNodeID {
+					unconditionalEdge = &unconditionalDeps[depNode.ID][i]
+					break
+				}
+			}
+
+			if unconditionalEdge != nil {
 				allUnconditionalSettled := true
-				for _, parentID := range unconditionalDeps[depNode.ID] {
-					if _, ok := results[parentID]; !ok {
+				for _, dep := range unconditionalDeps[depNode.ID] {
+					if _, ok := results[dep.NodeID]; !ok {
 						allUnconditionalSettled = false
 						break
 					}
@@ -390,7 +545,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 							evaluateDownstream(depNode.ID)
 						}
 					} else {
-						enqueue(depNode.ID)
+						admitViaEdge(*unconditionalEdge, depNode.ID)
 					}
 				}
 			} else if len(unconditionalDeps[depNode.ID]) == 0 {
@@ -436,8 +591,16 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		for id := range rc.SeedNodes {
 			evaluateDownstream(id)
 		}
+		// Seed replay is over: downstream admissions behave normally again.
+		replaying = false
 	} else {
 		for _, node := range defn.Nodes {
+			// on_exhausted orphans have no static in-edges; they activate
+			// exclusively via loop-exhaustion routing and must not run as
+			// initial roots.
+			if onExhaustedTargets[node.ID] {
+				continue
+			}
 			if len(node.Depends) == 0 || (len(unconditionalDeps[node.ID]) == 0 && len(conditionalDeps[node.ID]) == 0) {
 				enqueue(node.ID)
 			}
@@ -615,6 +778,52 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 	_ = g.Wait()
 
+	// Dormant Orphan Sweep: on_exhausted orphans that never fired (and their
+	// pure conditional downstream) are marked SKIPPED (never_activated) so a
+	// happy path settles COMPLETED instead of a phantom FAILED. Requires mu:
+	// reads results and dependents metadata.
+	mu.Lock()
+	sweepDormantOrphans := func() {
+		conditionalDependents := make(map[string][]string, len(defn.Nodes))
+		for _, node := range defn.Nodes {
+			for _, dep := range node.Depends {
+				if dep.When != "" {
+					conditionalDependents[dep.NodeID] = append(conditionalDependents[dep.NodeID], node.ID)
+				}
+			}
+		}
+		var mark func(nodeID string)
+		mark = func(nodeID string) {
+			if _, activated := results[nodeID]; activated {
+				return
+			}
+			results[nodeID] = &NodeResult{Status: StatusSkipped, SkipReason: SkipReasonNeverActivated}
+			log.Info().
+				Str("workflow", defn.Name).
+				Str("session_id", rc.SessionID).
+				Str("node_id", nodeID).
+				Str("skip_reason", string(SkipReasonNeverActivated)).
+				Msgf("[Workflow %s] Node %q SKIPPED (never activated on_exhausted branch)", defn.Name, nodeID)
+			emit(WorkflowEvent{
+				Type:       EventNodeSkipped,
+				NodeID:     nodeID,
+				NodeType:   nodeByID[nodeID].Type,
+				Status:     StatusSkipped,
+				SkipReason: SkipReasonNeverActivated,
+				Message:    fmt.Sprintf("node %s skipped (%s)", nodeID, SkipReasonNeverActivated),
+			})
+			for _, next := range conditionalDependents[nodeID] {
+				mark(next)
+			}
+		}
+		for _, loop := range defn.Loops {
+			if loop.OnExhausted != "" {
+				mark(loop.OnExhausted)
+			}
+		}
+	}
+	sweepDormantOrphans()
+
 	run := &WorkflowRunResult{Nodes: results}
 	if ctx.Err() != nil {
 		run.Status = RunStatusCanceled
@@ -622,6 +831,23 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	} else {
 		run.Status = settleGlobalStatus(defn, results)
 	}
+
+	// Explicit abort semantics: an activated on_exhausted orphan whose reply
+	// signals abort (e.g. the human option "Abort Workflow") terminates the
+	// run as CANCELLED — never a green COMPLETED.
+	if ctx.Err() == nil {
+		for _, loop := range defn.Loops {
+			if loop.OnExhausted == "" {
+				continue
+			}
+			if res := results[loop.OnExhausted]; res != nil && strings.Contains(strings.ToLower(res.Output), "abort") {
+				run.Status = RunStatusCanceled
+				run.Error = fmt.Errorf("workflow aborted by user at node %s", loop.OnExhausted)
+				break
+			}
+		}
+	}
+	mu.Unlock()
 
 	if store != nil {
 		if err := store.SettleRun(rc.RunID, persistStatus(run.Status), toPersistedStates(results)); err != nil {
