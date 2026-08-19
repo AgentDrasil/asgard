@@ -76,13 +76,29 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult
 		result.Error = err
 		return result, nil
 	}
-	if exitCode != 0 {
+	// ExitCode always keeps the real process exit code (even on success) so
+	// downstream `when: "nodes.<id>.exit_code == N"` edges match precisely.
+	if !exitCodeAllowed(node, exitCode) {
 		result.Status = StatusFailed
 		result.Error = fmt.Errorf("command exited with code %d: %s", exitCode, truncate(stderr.String(), 2000))
 		return result, nil
 	}
 	result.Status = StatusSucceeded
 	return result, nil
+}
+
+// exitCodeAllowed reports whether the exit code counts as success: zero or a
+// member of the node's allowed_exit_codes whitelist.
+func exitCodeAllowed(node *NodeSpec, exitCode int) bool {
+	if exitCode == 0 {
+		return true
+	}
+	for _, code := range node.AllowedExitCodes {
+		if exitCode == code {
+			return true
+		}
+	}
+	return false
 }
 
 // collectArtifact registers the node's declared output_file (relative to the

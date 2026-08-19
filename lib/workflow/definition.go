@@ -75,6 +75,10 @@ type NodeSpec struct {
 	Command    string `yaml:"command"`
 	OutputFile string `yaml:"output_file"`
 	Sandbox    *bool  `yaml:"sandbox"`
+	// AllowedExitCodes lists exit codes (besides 0) that count as
+	// StatusSucceeded for command nodes; useful for Unix commands where a
+	// non-zero code encodes a normal boolean result (e.g. grep exit 1).
+	AllowedExitCodes []int `yaml:"allowed_exit_codes"`
 
 	// Human node fields. Options is the optional list of canned replies
 	// offered to the user; when empty any free-form text is accepted.
@@ -187,6 +191,10 @@ func (d *WorkflowDefinition) Validate() error {
 			}
 		default:
 			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command or human)", node.ID, node.Type)
+		}
+
+		if len(node.AllowedExitCodes) > 0 && node.Type != NodeTypeCommand {
+			return fmt.Errorf("node %s: allowed_exit_codes is only allowed on command nodes", node.ID)
 		}
 
 		switch node.Join {
