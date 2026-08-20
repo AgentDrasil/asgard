@@ -69,7 +69,6 @@ onUnmounted(() => {
 const comments = ref<Map<string, CommentEntry>>(new Map());
 const currentFileData = ref<WorkspaceFileContent | null>(null);
 const codeViewerRef = ref<InstanceType<typeof FileCodeViewer> | null>(null);
-const treeSidebarRef = ref<InstanceType<typeof FileTreeSidebar> | null>(null);
 
 const commentedFileList = computed(() => {
   return [...new Set(Array.from(comments.value.values()).map((c) => c.filePath))];
@@ -308,7 +307,6 @@ const breadcrumbParts = computed(() => {
         :class="[!isDesktop && mobileActiveTab === 'code' ? 'hidden' : 'flex w-full md:w-auto']"
       >
         <FileTreeSidebar
-          ref="treeSidebarRef"
           :sessionId="sessionId"
           :runDir="runDir"
           :selectedPath="selectedFilePath"
