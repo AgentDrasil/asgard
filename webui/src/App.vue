@@ -422,7 +422,7 @@ const commandList = computed<CommandItem[]>(() => [
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
           @open-diff="
-            (gitRoot) => {
+            (gitRoot: string) => {
               currentGitRoot = gitRoot;
             }
           "

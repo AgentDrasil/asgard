@@ -7,10 +7,10 @@ defineProps<{
   loading: boolean;
 }>();
 
-const selectedAgentId = defineModel<string>("selectedAgentId");
-const selectedDir = defineModel<string>("selectedDir");
+const selectedAgentId = defineModel<string>("selectedAgentId", { required: true });
+const selectedDir = defineModel<string>("selectedDir", { required: true });
 const selectedModel = defineModel<string>("selectedModel");
-const prompt = defineModel<string>("prompt");
+const prompt = defineModel<string>("prompt", { required: true });
 
 defineEmits<{
   (e: "submit"): void;

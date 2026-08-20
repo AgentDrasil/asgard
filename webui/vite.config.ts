@@ -4,6 +4,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  build: {
+    chunkSizeWarningLimit: 3000,
+  },
   server: {
     port: 8082,
     host: "127.0.0.1",
