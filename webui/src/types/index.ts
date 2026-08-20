@@ -158,3 +158,13 @@ export interface CommentEntry {
 }
 
 export type ActiveView = "chat" | "vcs" | "file";
+
+export interface CommandItem {
+  id: string;
+  title: string;
+  category?: string;
+  icon?: string;
+  shortcut?: string;
+  keywords?: string[];
+  action: () => void | Promise<void>;
+}

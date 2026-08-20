@@ -12,6 +12,8 @@ describe("useShortcuts", () => {
       toggleTerminalShortcut,
       sendShortcut,
       fileSearchShortcut,
+      commandPaletteShortcut,
+      commandPaletteF1Shortcut,
       toggleFileViewShortcut,
     } = useShortcuts();
 
@@ -21,6 +23,8 @@ describe("useShortcuts", () => {
     expect(toggleTerminalShortcut.value).toBe(`${modKey.value}+\``);
     expect(sendShortcut.value).toBe(`${modKey.value}+Enter`);
     expect(fileSearchShortcut.value).toBe(`${modKey.value}+P`);
+    expect(commandPaletteShortcut.value).toBe(`${modKey.value}+Shift+P`);
+    expect(commandPaletteF1Shortcut.value).toBe("F1");
     expect(toggleFileViewShortcut.value).toBe(`${modKey.value}+${altKey.value}+F`);
   });
 });
