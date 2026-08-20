@@ -206,10 +206,35 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 
 	require.Len(t, session.Messages, 1)
 	msg := session.Messages[0]
+	assert.Equal(t, "wf-step-intend_agent-1", msg.ID)
 	assert.Equal(t, "tool_call", msg.Role)
 	assert.Equal(t, "Intent Analyst", msg.AgentName)
+	assert.Equal(t, 1, msg.StepIndex)
 	assert.Equal(t, []string{"/tmp/intend.md"}, msg.ArtifactFiles)
 	assert.Equal(t, "Writing requirements to /tmp/intend.md", msg.Content)
+
+	// Second step update with different step_index should append a new message, not overwrite
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeStatusUpdate,
+		NodeID:    "intend_agent",
+		NodeType:  workflow.NodeTypeAgent,
+		AgentName: "Intent Analyst",
+		Status:    workflow.StatusRunning,
+		Message:   "Requirements written successfully",
+		EntryType: "tool_result",
+		Metadata: map[string]any{
+			"step_index": 2,
+		},
+	})
+
+	session, err = s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.Len(t, session.Messages, 2)
+	assert.Equal(t, "wf-step-intend_agent-1", session.Messages[0].ID)
+	assert.Equal(t, "wf-step-intend_agent-2", session.Messages[1].ID)
+	assert.Equal(t, "tool_result", session.Messages[1].Role)
+	assert.Equal(t, 2, session.Messages[1].StepIndex)
+	assert.Equal(t, "Requirements written successfully", session.Messages[1].Content)
 }
 
 func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {

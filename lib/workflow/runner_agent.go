@@ -300,10 +300,11 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 					}
 				}
 
+				if update.Metadata == nil {
+					update.Metadata = make(map[string]any)
+				}
+				update.Metadata["step_index"] = update.StepIndex
 				if len(stepArtifacts) > 0 {
-					if update.Metadata == nil {
-						update.Metadata = make(map[string]any)
-					}
 					update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
 				}
 
