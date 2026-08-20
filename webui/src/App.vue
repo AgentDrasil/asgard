@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
+import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import { initPushNotifications } from "./lib/push";
-import type { ActiveView } from "./types";
+import type { ActiveView, CommandItem } from "./types";
 import {
   resolveViewFromRoute,
   buildChatRoute,
@@ -15,6 +16,7 @@ import {
 import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
 import { useSessionStore } from "./composables/useSessionStore";
+import { useShortcuts } from "./composables/useShortcuts";
 
 const route = useRoute();
 const router = useRouter();
@@ -22,6 +24,7 @@ const router = useRouter();
 const welcomePrompt = ref("");
 const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
+const isCommandPaletteOpen = ref(false);
 const selectedFilePath = ref<string | null>(null);
 const selectedCommit = ref<string | null>(null);
 const isFileTreeOpen = ref(true);
@@ -33,6 +36,14 @@ const isTerminalOpen = ref(false);
 const isArtifactDrawerOpen = ref(false);
 const isVCSSidebarOpen = ref(true);
 const terminalType = ref<"session" | "sidebar">("session");
+
+const {
+  toggleSidebarShortcut,
+  toggleArtifactsShortcut,
+  toggleDiffShortcut,
+  toggleTerminalShortcut,
+  toggleFileViewShortcut,
+} = useShortcuts();
 
 const toggleTerminal = (type: "session" | "sidebar" = "session") => {
   if (isTerminalOpen.value && terminalType.value === type) {
@@ -46,6 +57,19 @@ const toggleTerminal = (type: "session" | "sidebar" = "session") => {
 const handleGlobalKeydown = (e: KeyboardEvent) => {
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+  const isCommandPaletteKey =
+    e.code === "F1" ||
+    e.key === "F1" ||
+    (ctrlKey && e.shiftKey && !e.altKey && (e.code === "KeyP" || e.key === "P" || e.key === "p"));
+
+  if (isCommandPaletteKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    isFileSearchOpen.value = false;
+    isCommandPaletteOpen.value = true;
+    return;
+  }
 
   if (ctrlKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
     e.preventDefault();
@@ -67,6 +91,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   ) {
     e.preventDefault();
     e.stopPropagation();
+    isCommandPaletteOpen.value = false;
     isFileSearchOpen.value = true;
     return;
   }
@@ -265,6 +290,90 @@ const closeSidebarOnMobile = () => {
     isSidebarOpen.value = false;
   }
 };
+
+const commandList = computed<CommandItem[]>(() => [
+  {
+    id: "toggle-left-panel",
+    title: "Toggle left panel",
+    icon: "mynaui:sidebar",
+    shortcut: toggleSidebarShortcut.value,
+    keywords: ["sidebar", "left", "menu", "panel", "collapse", "expand"],
+    action: () => toggleSidebar(),
+  },
+  {
+    id: "toggle-right-panel",
+    title: "Toggle right panel",
+    icon: "codicon:layout-sidebar-right",
+    shortcut: toggleArtifactsShortcut.value,
+    keywords: ["right", "panel", "artifact", "drawer", "tree", "vcs"],
+    action: () => {
+      if (activeView.value === "vcs") {
+        isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
+      } else if (activeView.value === "file") {
+        isFileTreeOpen.value = !isFileTreeOpen.value;
+      } else {
+        isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
+      }
+    },
+  },
+  {
+    id: "toggle-terminal-session",
+    title: "Toggle terminal (current session)",
+    icon: "codicon:layout-panel",
+    shortcut: toggleTerminalShortcut.value,
+    keywords: ["terminal", "console", "session", "shell", "bottom"],
+    action: () => toggleTerminal("session"),
+  },
+  {
+    id: "toggle-terminal-global",
+    title: "Toggle terminal (global)",
+    icon: "mynaui:terminal",
+    keywords: ["terminal", "global", "sidebar", "console", "shell"],
+    action: () => toggleTerminal("sidebar"),
+  },
+  {
+    id: "switch-chat-view",
+    title: "Switch to chat view",
+    icon: "material-symbols:chat-outline",
+    keywords: ["chat", "messages", "view", "conversation"],
+    action: () => navigateToChat(),
+  },
+  {
+    id: "switch-vcs-view",
+    title: "Switch to vcs view",
+    icon: "octicon:git-branch-24",
+    shortcut: toggleDiffShortcut.value,
+    keywords: ["vcs", "git", "diff", "commits", "history", "version"],
+    action: () => navigateToVcs(),
+  },
+  {
+    id: "switch-files-view",
+    title: "Switch to files view",
+    icon: "octicon:file-code-24",
+    shortcut: toggleFileViewShortcut.value,
+    keywords: ["files", "file", "tree", "explorer", "workspace", "code"],
+    action: () => navigateToFiles(),
+  },
+  {
+    id: "new-chat",
+    title: "New chat",
+    icon: "mynaui:edit-one",
+    keywords: ["new", "chat", "create", "session", "conversation", "reset"],
+    action: () => handleNewChat(closeSidebarOnMobile),
+  },
+  {
+    id: "new-chat-same-current",
+    title: "New chat same with current",
+    icon: "mynaui:copy",
+    keywords: ["new", "chat", "same", "current", "clone", "duplicate", "agent", "workspace"],
+    action: () =>
+      handleNewChat(
+        closeSidebarOnMobile,
+        activeSession.value?.currentAgent || selectedAgentId.value,
+        activeSession.value?.runDir || selectedDir.value,
+      ),
+  },
+]);
 </script>
 
 <template>
@@ -351,6 +460,13 @@ const closeSidebarOnMobile = () => {
           }
         }
       "
+    />
+
+    <!-- Command Palette Modal (F1 / Ctrl+Shift+P / Cmd+Shift+P) -->
+    <CommandPaletteModal
+      :isOpen="isCommandPaletteOpen"
+      :commands="commandList"
+      @close="isCommandPaletteOpen = false"
     />
   </div>
 </template>
