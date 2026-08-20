@@ -296,14 +296,14 @@ const closeSidebarOnMobile = () => {
 const commandList = computed<CommandItem[]>(() => [
   {
     id: "toggle-left-panel",
-    title: "Toggle left panel",
+    title: "Toggle Left Panel",
     icon: "mynaui:sidebar",
     shortcut: toggleSidebarShortcut.value,
     action: () => toggleSidebar(),
   },
   {
     id: "toggle-right-panel",
-    title: "Toggle right panel",
+    title: "Toggle Right Panel",
     icon: "codicon:layout-sidebar-right",
     shortcut: toggleArtifactsShortcut.value,
     action: () => {
@@ -318,46 +318,46 @@ const commandList = computed<CommandItem[]>(() => [
   },
   {
     id: "toggle-terminal-session",
-    title: "Toggle terminal (current session)",
+    title: "Toggle Terminal (Current Session)",
     icon: "codicon:layout-panel",
     shortcut: toggleTerminalShortcut.value,
     action: () => toggleTerminal("session"),
   },
   {
     id: "toggle-terminal-global",
-    title: "Toggle terminal (global)",
+    title: "Toggle Terminal (Global)",
     icon: "mynaui:terminal",
     action: () => toggleTerminal("sidebar"),
   },
   {
     id: "switch-chat-view",
-    title: "Switch to chat view",
+    title: "Switch to Chat View",
     icon: "material-symbols:chat-outline",
     action: () => navigateToChat(),
   },
   {
     id: "switch-vcs-view",
-    title: "Switch to vcs view",
+    title: "Switch to VCS View",
     icon: "octicon:git-branch-24",
     shortcut: toggleDiffShortcut.value,
     action: () => navigateToVcs(),
   },
   {
     id: "switch-files-view",
-    title: "Switch to files view",
+    title: "Switch to Files View",
     icon: "octicon:file-code-24",
     shortcut: toggleFileViewShortcut.value,
     action: () => navigateToFiles(),
   },
   {
     id: "new-chat",
-    title: "New chat",
+    title: "New Chat",
     icon: "mynaui:edit-one",
     action: () => handleNewChat(closeSidebarOnMobile),
   },
   {
     id: "new-chat-same-current",
-    title: "New chat same with current",
+    title: "New Chat (Same with Current)",
     icon: "mynaui:copy",
     action: () =>
       handleNewChat(
