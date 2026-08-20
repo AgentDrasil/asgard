@@ -56,7 +56,7 @@ function isCommented(path: string): boolean {
     <div class="p-2 border-b border-base-300 bg-base-200/40 shrink-0">
       <div class="relative flex items-center">
         <Icon
-          icon="material-symbols:search-rounded"
+          icon="iconamoon:search"
           class="absolute left-2.5 h-3.5 w-3.5 text-base-content/50 pointer-events-none"
         />
         <input

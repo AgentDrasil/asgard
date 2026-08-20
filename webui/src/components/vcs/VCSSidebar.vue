@@ -152,8 +152,8 @@ onMounted(() => {
             v-if="ahead > 0 || behind > 0"
             class="badge badge-xs badge-neutral gap-1 font-mono text-[10px] shrink-0"
           >
-            <span v-if="ahead > 0" class="text-success font-semibold">↑{{ ahead }}</span>
-            <span v-if="behind > 0" class="text-error font-semibold">↓{{ behind }}</span>
+            <span v-if="ahead > 0" class="text font-semibold">↑{{ ahead }}</span>
+            <span v-if="behind > 0" class="text font-semibold">↓{{ behind }}</span>
           </span>
         </div>
 
