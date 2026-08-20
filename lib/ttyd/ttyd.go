@@ -106,9 +106,9 @@ func (m *Manager) GetOrStart(sessionID string, workingDir string) (*Instance, er
 
 	// Create reverse proxy targeting unix socket
 	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = "unix"
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.Out.URL.Scheme = "http"
+			r.Out.URL.Host = "unix"
 		},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
