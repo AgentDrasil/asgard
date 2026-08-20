@@ -158,20 +158,38 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 
 	cmd.WaitDelay = 200 * time.Millisecond
 
-	stdoutPipe, err := cmd.StdoutPipe()
+	// Use pipes we own instead of StdoutPipe/StderrPipe: exec.Cmd.Wait closes
+	// those pipes as soon as the process exits, discarding any output the
+	// reader goroutines have not consumed yet (WaitDelay does not help because
+	// StdoutPipe registers no copy goroutines for awaitGoroutines to wait on).
+	stdoutPipe, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	stderrPipe, err := cmd.StderrPipe()
+	stderrPipe, stderrWrite, err := os.Pipe()
 	if err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWrite.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = stderrWrite
+
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWrite.Close()
+		_ = stderrPipe.Close()
+		_ = stderrWrite.Close()
 		return fmt.Errorf("failed to start command: %w", err)
 	}
+	// The child holds its own duplicates of the write ends; close the parent
+	// copies so EOF is delivered once the child (and any processes holding the
+	// inherited fds) exit.
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
 	log.Info().Str("command", cmdStr).Int("pid", cmd.Process.Pid).Msg("fakebashd: process started")
 
 	var streamMu sync.Mutex
@@ -256,6 +274,10 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 			log.Warn().Str("command", cmdStr).Msg("fakebashd: pipes forcibly closed after 100ms grace period")
 		}
 	}
+
+	// Readers have returned by this point, so closing cannot race with reads.
+	_ = stdoutPipe.Close()
+	_ = stderrPipe.Close()
 
 	exitCode := 0
 	if waitErr != nil {
