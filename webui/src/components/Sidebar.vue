@@ -4,7 +4,6 @@ import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../lib/api";
 import SessionList from "./sidebar/SessionList.vue";
-import QuotaModal from "./sidebar/QuotaModal.vue";
 import ThemeSelector from "./sidebar/ThemeSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
 
@@ -29,11 +28,11 @@ const emit = defineEmits<{
   (e: "delete-session", id: string): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-terminal"): void;
+  (e: "open-quota"): void;
 }>();
 
 const isReloading = ref(false);
 const viewMode = ref<"list" | "agent">("list");
-const showQuotaModal = ref(false);
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
@@ -84,10 +83,6 @@ const reloadApp = async () => {
   } finally {
     isReloading.value = false;
   }
-};
-
-const openQuotaModal = () => {
-  showQuotaModal.value = true;
 };
 
 onMounted(() => {
@@ -234,7 +229,7 @@ onUnmounted(() => {
       </button>
 
       <button
-        @click="openQuotaModal"
+        @click="emit('open-quota')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
         title="Check Quota"
       >
@@ -253,7 +248,4 @@ onUnmounted(() => {
       </button>
     </div>
   </aside>
-
-  <!-- Quota Modal -->
-  <QuotaModal v-model="showQuotaModal" />
 </template>

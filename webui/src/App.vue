@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
+import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import { initPushNotifications } from "./lib/push";
 import type { ActiveView, CommandItem } from "./types";
 import {
@@ -25,6 +26,7 @@ const welcomePrompt = ref("");
 const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
 const isCommandPaletteOpen = ref(false);
+const isQuotaModalOpen = ref(false);
 const selectedFilePath = ref<string | null>(null);
 const selectedCommit = ref<string | null>(null);
 const isFileTreeOpen = ref(true);
@@ -366,6 +368,14 @@ const commandList = computed<CommandItem[]>(() => [
         activeSession.value?.runDir || selectedDir.value,
       ),
   },
+  {
+    id: "show-quota",
+    title: "Show Quota (Usage)",
+    icon: "mynaui:chart-bar-one",
+    action: () => {
+      isQuotaModalOpen.value = true;
+    },
+  },
 ]);
 </script>
 
@@ -389,6 +399,7 @@ const commandList = computed<CommandItem[]>(() => [
       @delete-session="handleDeleteSession"
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="toggleTerminal('sidebar')"
+      @open-quota="isQuotaModalOpen = true"
     />
 
     <!-- Main Content Area -->
@@ -461,5 +472,8 @@ const commandList = computed<CommandItem[]>(() => [
       :commands="commandList"
       @close="isCommandPaletteOpen = false"
     />
+
+    <!-- Quota Modal -->
+    <QuotaModal v-model="isQuotaModalOpen" />
   </div>
 </template>
