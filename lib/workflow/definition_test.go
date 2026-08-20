@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -752,11 +751,243 @@ nodes:
 	}
 }
 
+const sampleDevWorkflowYAML = `
+name: dev-workflow
+max_node_executions: 500
+
+loops:
+  - id: step_loop
+    nodes:
+      - coding_agent
+      - commit_agent
+      - code_review_agent
+      - check_review_verdict
+      - fix_agent
+      - check_pending_steps
+      - mark_step_skipped
+    max_iterations: 50
+
+  - id: fix_loop
+    parent: step_loop
+    nodes:
+      - code_review_agent
+      - check_review_verdict
+      - fix_agent
+    max_iterations: 5
+    on_exhausted: fix_fallback
+
+  - id: final_review_loop
+    nodes:
+      - final_cleaner
+      - final_commit
+      - final_review_agent
+      - check_final_verdict
+    max_iterations: 3
+    on_exhausted: final_fallback
+
+nodes:
+  - id: check_justfile
+    type: command
+    sandbox: true
+    working_dir: "${run_dir}"
+    command: "mkdir -p ${tmp_dir}/plan && git rev-parse HEAD > ${tmp_dir}/plan/base_commit.txt && just --summary | grep -w build && just --summary | grep -w test && just --summary | grep -w fmt && just --summary | grep -w lint"
+    allowed_exit_codes: [0, 1]
+
+  - id: init_justfile_agent
+    type: agent
+    depends:
+      - node: check_justfile
+        when: "nodes.check_justfile.exit_code != 0"
+    agent_id: justfile-init
+    session_policy: fresh
+
+  - id: intend_agent
+    type: agent
+    depends:
+      - node: check_justfile
+      - node: init_justfile_agent
+    join: always
+    agent_id: intend
+    session_policy: fresh
+    entry: true
+    required_outputs:
+      - "${tmp_dir}/intend.md"
+
+  - id: plan_agent
+    type: agent
+    depends:
+      - node: intend_agent
+      - node: plan_approval
+        when: "nodes.plan_approval.output != 'Approve'"
+    join: always
+    agent_id: planner
+    session_policy: inherit
+    required_outputs:
+      - "${tmp_dir}/plan/plan.md"
+      - "${tmp_dir}/plan/todo.yaml"
+
+  - id: plan_review_agent
+    type: agent
+    depends:
+      - node: plan_agent
+    agent_id: plan-reviewer
+    session_policy: fresh
+
+  - id: plan_approval
+    type: human
+    depends:
+      - node: plan_review_agent
+    prompt: "Please review Plan (${tmp_dir}/plan/plan.md) and Review Feedback (${tmp_dir}/plan/review_feedback.md). Choose Approve or Request Changes."
+    options: ["Approve", "Request Changes"]
+    output_file: "plan_user_decision.txt"
+
+  - id: coding_agent
+    type: agent
+    depends:
+      - node: plan_approval
+        when: "nodes.plan_approval.output == 'Approve'"
+      - node: check_pending_steps
+        when: "nodes.check_pending_steps.exit_code == 0"
+        counts_loop: step_loop
+    join: always
+    agent_id: coder
+    session_policy: fresh
+
+  - id: commit_agent
+    type: agent
+    depends:
+      - node: coding_agent
+    agent_id: commit-agent
+    session_policy: fresh
+
+  - id: code_review_agent
+    type: agent
+    depends:
+      - node: commit_agent
+      - node: fix_agent
+    join: always
+    agent_id: code-reviewer
+    session_policy: fresh
+    required_outputs:
+      - "${tmp_dir}/review_verdict.txt"
+
+  - id: check_review_verdict
+    type: command
+    sandbox: false
+    command: >
+      if grep -qx 'FIX' ${tmp_dir}/review_verdict.txt; then exit 0;
+      elif grep -qx 'PASS' ${tmp_dir}/review_verdict.txt; then exit 1;
+      else exit 2; fi
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: code_review_agent
+
+  - id: fix_agent
+    type: agent
+    depends:
+      - node: check_review_verdict
+        when: "nodes.check_review_verdict.exit_code == 0"
+        counts_loop: fix_loop
+      - node: fix_fallback
+        when: "nodes.fix_fallback.output == 'Retry (reset counter)'"
+        resets_loop: fix_loop
+    join: always
+    agent_id: fix-agent
+    session_policy: fresh
+
+  - id: check_pending_steps
+    type: command
+    sandbox: false
+    command: "grep -q 'status: pending' ${tmp_dir}/plan/todo.yaml"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: check_review_verdict
+        when: "nodes.check_review_verdict.exit_code == 1"
+      - node: mark_step_skipped
+        when: "nodes.mark_step_skipped.exit_code == 0"
+    join: always
+
+  - id: fix_fallback
+    type: human
+    prompt: "Auto-fix exhausted after 5 attempts for the current step. Please review Code Review Report (${tmp_dir}/code_review.md) and Fix Attempts Log (${tmp_dir}/plan/fix_attempts.md)."
+    options: ["Retry (reset counter)", "Skip This Step", "Abort Workflow"]
+    output_file: "fix_fallback_decision.txt"
+
+  - id: mark_step_skipped
+    type: command
+    sandbox: false
+    command: "sed -i '0,/status: in_review/s//status: skipped (known-broken)/' ${tmp_dir}/plan/todo.yaml && rm -f ${tmp_dir}/review_verdict.txt"
+    allowed_exit_codes: [0]
+    depends:
+      - node: fix_fallback
+        when: "nodes.fix_fallback.output == 'Skip This Step'"
+
+  - id: final_cleaner
+    type: agent
+    depends:
+      - node: check_pending_steps
+        when: "nodes.check_pending_steps.exit_code == 1"
+      - node: check_final_verdict
+        when: "nodes.check_final_verdict.exit_code == 0"
+        counts_loop: final_review_loop
+      - node: final_approval
+        when: "nodes.final_approval.output == 'Request Changes'"
+      - node: final_fallback
+        when: "nodes.final_fallback.output == 'Retry (reset counter)'"
+        resets_loop: final_review_loop
+    join: always
+    agent_id: final-cleaner
+    session_policy: fresh
+
+  - id: final_commit
+    type: agent
+    depends:
+      - node: final_cleaner
+    agent_id: commit-agent
+    session_policy: fresh
+
+  - id: final_review_agent
+    type: agent
+    depends:
+      - node: final_commit
+    agent_id: final-reviewer
+    session_policy: fresh
+    required_outputs:
+      - "${tmp_dir}/final_verdict.txt"
+
+  - id: check_final_verdict
+    type: command
+    sandbox: false
+    command: >
+      if grep -qx 'FIX' ${tmp_dir}/final_verdict.txt; then exit 0;
+      elif grep -qx 'PASS' ${tmp_dir}/final_verdict.txt; then exit 1;
+      else exit 2; fi
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: final_review_agent
+
+  - id: final_fallback
+    type: human
+    prompt: "Final review auto-fix exhausted after 3 attempts. Please inspect Final Audit Report (${tmp_dir}/final_review.md)."
+    options: ["Retry (reset counter)", "Proceed to Approval", "Abort Workflow"]
+    output_file: "final_fallback_decision.txt"
+
+  - id: final_approval
+    type: human
+    depends:
+      - node: check_final_verdict
+        when: "nodes.check_final_verdict.exit_code == 1"
+      - node: final_fallback
+        when: "nodes.final_fallback.output == 'Proceed to Approval'"
+    join: always
+    prompt: "All steps completed, minor issues cleaned, and final audit passed. Please review Final Audit Report (${tmp_dir}/final_review.md)."
+    options: ["Accept & Deliver", "Request Changes"]
+    output_file: "final_decision.txt"
+`
+
 func TestParseDevWorkflowYAML(t *testing.T) {
 	t.Parallel()
-	content, err := os.ReadFile("../../tmp/agents/dev-workflow/workflow.yaml")
-	require.NoError(t, err)
-	defn, err := ParseDefinition(content)
+	defn, err := ParseDefinition([]byte(sampleDevWorkflowYAML))
 	require.NoError(t, err)
 	assert.Equal(t, "dev-workflow", defn.Name)
 }
