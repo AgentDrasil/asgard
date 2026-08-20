@@ -5,6 +5,8 @@ import type { ChatMessage, AgentInfo } from "../../types";
 import { computeWorkflowPanelState } from "../../utils/workflowPanelState";
 import { formatPath } from "../../utils/agentUtils";
 import { sendAskUserReply } from "../../lib/api";
+import { parseOptions } from "../../utils/askUserOptions";
+import { getMessageArtifactFiles } from "../../utils/messageUtils";
 
 const props = defineProps<{
   activeAgent: AgentInfo | null;
@@ -20,7 +22,10 @@ const emit = defineEmits<{
 }>();
 
 const isSubmitting = ref(false);
-const customInput = ref("");
+const selectedIndex = ref(0);
+
+// Per-message input drafts to preserve uncommitted text when paginating between questions
+const drafts = ref<Record<string, string>>({});
 
 const state = computed(() =>
   computeWorkflowPanelState({
@@ -31,39 +36,88 @@ const state = computed(() =>
   }),
 );
 
-// Reset submitting state when session changes
+// Keep selectedIndex within valid range when pendingMessages list changes
+watch(
+  () => state.value.pendingMessages.length,
+  (len) => {
+    if (len === 0) {
+      selectedIndex.value = 0;
+    } else if (selectedIndex.value >= len) {
+      selectedIndex.value = len - 1;
+    }
+  },
+  { immediate: true },
+);
+
+// Current pending message being answered
+const currentPending = computed<ChatMessage | null>(() => {
+  if (state.value.pendingMessages.length === 0) return null;
+  const idx = Math.min(Math.max(0, selectedIndex.value), state.value.pendingMessages.length - 1);
+  return state.value.pendingMessages[idx] || null;
+});
+
+const currentOptions = computed<string[]>(() => {
+  return currentPending.value ? parseOptions(currentPending.value.content) : [];
+});
+
+const currentArtifactFiles = computed<string[]>(() => {
+  return currentPending.value ? getMessageArtifactFiles(currentPending.value) : [];
+});
+
+// Display specific agent name in header only if a real agentName is provided on the message
+const currentAgentName = computed<string | null>(() => {
+  return currentPending.value?.agentName || null;
+});
+
+const customInput = computed<string>({
+  get: () => {
+    const msgId = currentPending.value?.id;
+    return msgId ? drafts.value[msgId] || "" : "";
+  },
+  set: (val: string) => {
+    const msgId = currentPending.value?.id;
+    if (msgId) {
+      drafts.value[msgId] = val;
+    }
+  },
+});
+
+// Reset submitting state and drafts when session changes
 watch(
   () => props.sessionId,
   () => {
     isSubmitting.value = false;
-    customInput.value = "";
+    drafts.value = {};
+    selectedIndex.value = 0;
   },
 );
 
-// Reset submitting state when stage transitions or a new waiting_human message arrives
+// Reset submitting state when stage transitions or when switching active pending question.
+// Note: In multi-question scenarios, replying to one question transitions currentPending.id to
+// the next pending question. Resetting isSubmitting here intentionally dismisses the submitting
+// spinner immediately so the user can proceed to answer the next pending decision without delay.
 watch(
-  () => [state.value.stage, state.value.pendingMessage?.id] as const,
+  () => [state.value.stage, currentPending.value?.id] as const,
   ([newStage, newMsgId], [, oldMsgId]) => {
     if (newStage === "running" || newStage === "completed" || newStage === "failed") {
       isSubmitting.value = false;
     }
     if (newStage === "waiting_human" && newMsgId !== oldMsgId) {
       isSubmitting.value = false;
-      customInput.value = "";
     }
   },
 );
 
 const handleReply = async (text: string) => {
   const replyContent = text.trim();
-  const msgId = state.value.pendingMessage?.id;
+  const msgId = currentPending.value?.id;
   if (!replyContent || !props.sessionId || !msgId || isSubmitting.value) return;
 
   isSubmitting.value = true;
   try {
     const ok = await sendAskUserReply(props.sessionId, msgId, replyContent);
     if (ok) {
-      customInput.value = "";
+      delete drafts.value[msgId];
       emit("ask-replied", msgId, replyContent);
     } else {
       isSubmitting.value = false;
@@ -139,19 +193,51 @@ const getOptionButtonClass = (opt: string): string => {
               Workflow Paused · Waiting for Human Decision
             </span>
             <span
-              v-if="state.pendingMessage?.agentName"
+              v-if="currentAgentName"
               class="text-xs text-base-content/60 font-mono shrink-0 hidden sm:inline"
             >
-              ({{ state.pendingMessage.agentName }})
+              ({{ currentAgentName }})
             </span>
           </div>
-          <span class="badge badge-warning badge-sm font-semibold uppercase shrink-0"
-            >Waiting Human</span
-          >
+
+          <div class="flex items-center gap-2 shrink-0">
+            <!-- Left / Right buttons if multiple questions pending -->
+            <div
+              v-if="state.pendingMessages.length > 1"
+              class="flex items-center gap-1 bg-warning/20 rounded-lg px-1.5 py-0.5"
+            >
+              <button
+                type="button"
+                @click="selectedIndex = Math.max(0, selectedIndex - 1)"
+                :disabled="selectedIndex <= 0 || isSubmitting"
+                class="btn btn-ghost btn-xs btn-square h-5 w-5 min-h-0 text-base-content/70 hover:text-base-content disabled:opacity-30"
+                title="Previous decision"
+              >
+                <Icon icon="lucide:chevron-left" class="h-3.5 w-3.5" />
+              </button>
+              <span class="text-[11px] font-mono font-bold text-warning-content px-1">
+                {{ selectedIndex + 1 }} / {{ state.pendingMessages.length }}
+              </span>
+              <button
+                type="button"
+                @click="
+                  selectedIndex = Math.min(state.pendingMessages.length - 1, selectedIndex + 1)
+                "
+                :disabled="selectedIndex >= state.pendingMessages.length - 1 || isSubmitting"
+                class="btn btn-ghost btn-xs btn-square h-5 w-5 min-h-0 text-base-content/70 hover:text-base-content disabled:opacity-30"
+                title="Next decision"
+              >
+                <Icon icon="lucide:chevron-right" class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <span class="badge badge-warning badge-sm font-semibold uppercase shrink-0"
+              >Waiting Human</span
+            >
+          </div>
         </div>
 
-        <!-- Files to review if present in pendingMessage -->
-        <div v-if="state.artifactFiles.length > 0" class="space-y-1.5 pt-1">
+        <!-- Files to review if present in currentPending -->
+        <div v-if="currentArtifactFiles.length > 0" class="space-y-1.5 pt-1">
           <div
             class="text-[11px] font-bold uppercase tracking-wider text-base-content/60 select-none"
           >
@@ -159,7 +245,7 @@ const getOptionButtonClass = (opt: string): string => {
           </div>
           <div class="flex flex-wrap gap-2">
             <button
-              v-for="file in state.artifactFiles"
+              v-for="file in currentArtifactFiles"
               :key="file"
               type="button"
               @click="emit('open-artifact', file)"
@@ -174,9 +260,9 @@ const getOptionButtonClass = (opt: string): string => {
         </div>
 
         <!-- Decision Quick Action Buttons -->
-        <div v-if="state.options.length > 0" class="flex flex-wrap items-center gap-2 pt-1">
+        <div v-if="currentOptions.length > 0" class="flex flex-wrap items-center gap-2 pt-1">
           <button
-            v-for="opt in state.options"
+            v-for="opt in currentOptions"
             :key="opt"
             type="button"
             @click="handleReply(opt)"

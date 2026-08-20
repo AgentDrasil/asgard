@@ -7,6 +7,7 @@ export type WorkflowStage = "running" | "waiting_human" | "completed" | "failed"
 export interface WorkflowPanelState {
   stage: WorkflowStage;
   pendingMessage?: ChatMessage | null;
+  pendingMessages: ChatMessage[];
   options: string[];
   statusText: string;
   targetFiles: string[];
@@ -34,23 +35,23 @@ export function computeWorkflowPanelState(
 ): WorkflowPanelState {
   const { running, messages, workingAgentLabel, activeAgentName } = params;
 
-  // 1. waiting_human (highest priority): Look for latest unreplied ask_user message from the end
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === "ask_user" && !msg.replied) {
-      const options = parseOptions(msg.content);
-      const targetFiles = msg.targetFiles || [];
-      const artifactFiles = getMessageArtifactFiles(msg);
-      const agentLabel = msg.agentName || activeAgentName || "Workflow";
-      return {
-        stage: "waiting_human",
-        pendingMessage: msg,
-        options,
-        statusText: `${agentLabel} is waiting for human input`,
-        targetFiles,
-        artifactFiles,
-      };
-    }
+  // 1. waiting_human (highest priority): Look for all unreplied ask_user messages
+  const pendingMessages = messages.filter((m) => m.role === "ask_user" && !m.replied);
+  if (pendingMessages.length > 0) {
+    const latest = pendingMessages[pendingMessages.length - 1];
+    const options = parseOptions(latest.content);
+    const targetFiles = latest.targetFiles || [];
+    const artifactFiles = getMessageArtifactFiles(latest);
+    const agentLabel = latest.agentName || activeAgentName || "Workflow";
+    return {
+      stage: "waiting_human",
+      pendingMessage: latest,
+      pendingMessages,
+      options,
+      statusText: `${agentLabel} is waiting for human input`,
+      targetFiles,
+      artifactFiles,
+    };
   }
 
   // 2. running: if running is true and no unreplied ask_user exists
@@ -59,6 +60,7 @@ export function computeWorkflowPanelState(
     return {
       stage: "running",
       pendingMessage: null,
+      pendingMessages: [],
       options: [],
       statusText: `${agentLabel} is running...`,
       targetFiles: [],
@@ -81,6 +83,7 @@ export function computeWorkflowPanelState(
       return {
         stage: "failed",
         pendingMessage: null,
+        pendingMessages: [],
         options: [],
         statusText: lastBusinessMsg.content || "Workflow execution failed",
         targetFiles: lastBusinessMsg.targetFiles || [],
@@ -90,6 +93,7 @@ export function computeWorkflowPanelState(
     return {
       stage: "completed",
       pendingMessage: null,
+      pendingMessages: [],
       options: [],
       statusText: "Workflow completed",
       targetFiles: [],
@@ -101,6 +105,7 @@ export function computeWorkflowPanelState(
   return {
     stage: "idle",
     pendingMessage: null,
+    pendingMessages: [],
     options: [],
     statusText: `${activeAgentName || "Workflow"} is ready`,
     targetFiles: [],

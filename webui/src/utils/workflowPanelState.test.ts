@@ -47,9 +47,38 @@ describe("workflowPanelState", () => {
       });
       expect(state.stage).toBe("waiting_human");
       expect(state.pendingMessage?.id).toBe("2");
+      expect(state.pendingMessages.length).toBe(1);
       expect(state.options).toEqual(["Approve", "Request Changes"]);
       expect(state.artifactFiles).toEqual(["plan.md"]);
       expect(state.statusText).toBe("Architect is waiting for human input");
+    });
+
+    it("collects all unreplied ask_user messages in pendingMessages when multiple exist", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "user", content: "Start review" },
+        {
+          id: "2",
+          role: "ask_user",
+          agentName: "Intent Analyst",
+          content: "Question 1?\nOptions: A / B",
+          replied: false,
+        },
+        {
+          id: "3",
+          role: "ask_user",
+          agentName: "Architect",
+          content: "Question 2?\nOptions: Yes / No",
+          replied: false,
+        },
+      ];
+      const state = computeWorkflowPanelState({
+        running: false,
+        messages,
+      });
+      expect(state.stage).toBe("waiting_human");
+      expect(state.pendingMessages.length).toBe(2);
+      expect(state.pendingMessages[0].id).toBe("2");
+      expect(state.pendingMessages[1].id).toBe("3");
     });
 
     it("ignores replied ask_user messages for waiting_human stage", () => {
