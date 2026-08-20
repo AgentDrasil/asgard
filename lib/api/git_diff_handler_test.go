@@ -228,6 +228,109 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 	}
 }
 
+func TestHandleGitDiff_DeletedFiles(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initTestGitRepo(t)
+
+	currentHash := func() string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+		require.NoError(t, err)
+		return string(bytes.TrimSpace(out))
+	}
+
+	// Commit 2: add feature.txt
+	err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("line 1\nline 2\n"), 0644)
+	require.NoError(t, err)
+	out, err := exec.Command("git", "-C", repoDir, "add", "feature.txt").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	out, err = exec.Command("git", "-C", repoDir, "commit", "-m", "Add feature.txt").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	addCommitHash := currentHash()
+
+	// Commit 3: delete feature.txt
+	err = os.Remove(filepath.Join(repoDir, "feature.txt"))
+	require.NoError(t, err)
+	out, err = exec.Command("git", "-C", repoDir, "add", "-A").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	out, err = exec.Command("git", "-C", repoDir, "commit", "-m", "Delete feature.txt").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	deleteCommitHash := currentHash()
+
+	// Working tree: delete README.md (uncommitted)
+	err = os.Remove(filepath.Join(repoDir, "README.md"))
+	require.NoError(t, err)
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	srv := &Server{repo: sessionRepo}
+
+	sessionID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, sessionRepo.UpdateAgentSession(sessionID, "test-agent", "", "", nil))
+	sess, err := sessionRepo.GetSession(sessionID)
+	require.NoError(t, err)
+	sess.RunDir = repoDir
+	require.NoError(t, sessionRepo.SaveSession(sess))
+
+	doRequest := func(commitParam string) GitDiffResponse {
+		t.Helper()
+		reqURL := "/api/git/diff?session_id=" + sessionID
+		if commitParam != "" {
+			reqURL += "&commit=" + url.QueryEscape(commitParam)
+		}
+		req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+		w := httptest.NewRecorder()
+		srv.handleGitDiff(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp GitDiffResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp
+	}
+
+	findFile := func(files []GitDiffFile, path string) *GitDiffFile {
+		for i := range files {
+			if files[i].NewPath == path {
+				return &files[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("working tree includes deleted file", func(t *testing.T) {
+		resp := doRequest("")
+		f := findFile(resp.Files, "README.md")
+		if assert.NotNil(t, f, "deleted README.md should be listed") {
+			assert.Equal(t, "D", f.Status)
+			assert.Equal(t, "README.md", f.OldPath)
+			assert.Contains(t, f.OldContent, "Initial content")
+			assert.Empty(t, f.NewContent)
+			assert.NotEmpty(t, f.Hunks)
+			assert.Contains(t, f.Hunks[0], "-Initial content")
+		}
+	})
+
+	t.Run("commit diff includes deleted file", func(t *testing.T) {
+		resp := doRequest(deleteCommitHash)
+		f := findFile(resp.Files, "feature.txt")
+		if assert.NotNil(t, f, "deleted feature.txt should be listed in commit diff") {
+			assert.Equal(t, "D", f.Status)
+			assert.Contains(t, f.OldContent, "line 1")
+			assert.Empty(t, f.NewContent)
+			assert.NotEmpty(t, f.Hunks)
+		}
+	})
+
+	t.Run("commit diff reports added file status", func(t *testing.T) {
+		resp := doRequest(addCommitHash)
+		f := findFile(resp.Files, "feature.txt")
+		if assert.NotNil(t, f) {
+			assert.Equal(t, "A", f.Status)
+		}
+	})
+}
+
 func TestHandleGitLog_TableDriven(t *testing.T) {
 	t.Parallel()
 

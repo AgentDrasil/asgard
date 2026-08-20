@@ -17,6 +17,7 @@ import (
 type GitDiffFile struct {
 	OldPath    string   `json:"oldPath"`
 	NewPath    string   `json:"newPath"`
+	Status     string   `json:"status"` // "A" | "M" | "D" | "R"
 	OldContent string   `json:"oldContent"`
 	NewContent string   `json:"newContent"`
 	Hunks      []string `json:"hunks"`
@@ -126,7 +127,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	changedFiles := parseNameStatus(string(nameStatusOut))
 	stagedFiles := parseNameStatus(string(stagedOut))
-	merged := mergeFileMaps(changedFiles, stagedFiles)
+	merged := mergeNameStatusEntries(changedFiles, stagedFiles)
 
 	// ── Untracked new files ───────────────────────────────────────────────────
 	lsCmd := exec.Command("git", "-C", gitRoot, "ls-files", "--others", "--exclude-standard")
@@ -140,13 +141,13 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	// Build diff entries for tracked files
 	files := make([]GitDiffFile, 0, len(merged)+len(untrackedPaths))
-	for newPath, oldPath := range merged {
-		entry, err := buildDiffEntry(gitRoot, oldPath, newPath)
+	for _, entry := range merged {
+		file, err := buildDiffEntry(gitRoot, entry)
 		if err != nil {
-			log.Warn().Err(err).Str("file", newPath).Msg("skipping file in git diff")
+			log.Warn().Err(err).Str("file", entry.newPath).Msg("skipping file in git diff")
 			continue
 		}
-		files = append(files, entry)
+		files = append(files, file)
 	}
 
 	// Build diff entries for untracked files (show entire file as additions)
@@ -180,31 +181,32 @@ func getCommitDiff(gitRoot, commit string) ([]GitDiffFile, error) {
 	changedFiles := parseNameStatus(string(diffTreeOut))
 	files := make([]GitDiffFile, 0, len(changedFiles))
 
-	for newPath, oldPath := range changedFiles {
+	for _, entry := range changedFiles {
 		// Old content: commit~1:<oldPath>
 		oldContent := ""
-		oldShowCmd := exec.Command("git", "-C", gitRoot, "show", fmt.Sprintf("%s~1:%s", commit, oldPath))
+		oldShowCmd := exec.Command("git", "-C", gitRoot, "show", fmt.Sprintf("%s~1:%s", commit, entry.oldPath))
 		if out, err := oldShowCmd.Output(); err == nil {
 			oldContent = string(out)
 		}
 
-		// New content: commit:<newPath>
+		// New content: commit:<newPath> (missing for deletions)
 		newContent := ""
-		newShowCmd := exec.Command("git", "-C", gitRoot, "show", fmt.Sprintf("%s:%s", commit, newPath))
+		newShowCmd := exec.Command("git", "-C", gitRoot, "show", fmt.Sprintf("%s:%s", commit, entry.newPath))
 		if out, err := newShowCmd.Output(); err == nil {
 			newContent = string(out)
 		}
 
 		// Unified diff for this file in the commit
 		hunks := []string{}
-		diffCmd := exec.Command("git", "-C", gitRoot, "show", "--pretty=format:", "--patch", commit, "--", newPath)
+		diffCmd := exec.Command("git", "-C", gitRoot, "show", "--pretty=format:", "--patch", commit, "--", entry.newPath)
 		if diffOut, err := diffCmd.Output(); err == nil && len(diffOut) > 0 {
 			hunks = []string{strings.TrimSpace(string(diffOut))}
 		}
 
 		files = append(files, GitDiffFile{
-			OldPath:    oldPath,
-			NewPath:    newPath,
+			OldPath:    entry.oldPath,
+			NewPath:    entry.newPath,
+			Status:     entry.status,
 			OldContent: oldContent,
 			NewContent: newContent,
 			Hunks:      hunks,
@@ -412,10 +414,17 @@ func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(GitActionResponse{Success: true, Output: strings.TrimSpace(string(out))})
 }
 
-// parseNameStatus parses the output of `git diff --name-status` into a map of newPath → oldPath.
-// For renames: oldPath != newPath. For add/modify/delete: oldPath == newPath.
-func parseNameStatus(output string) map[string]string {
-	result := make(map[string]string)
+// nameStatusEntry is one changed file parsed from `git diff --name-status` output.
+type nameStatusEntry struct {
+	status  string // "A" | "M" | "D" | "R" (rename/copy keep their letter)
+	oldPath string
+	newPath string
+}
+
+// parseNameStatus parses the output of `git diff --name-status` into entries,
+// including deletions. For renames: oldPath != newPath.
+func parseNameStatus(output string) []nameStatusEntry {
+	var entries []nameStatusEntry
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line == "" {
 			continue
@@ -425,30 +434,32 @@ func parseNameStatus(output string) map[string]string {
 			continue
 		}
 		status := parts[0]
-		// Skip deleted files (no new content)
-		if strings.HasPrefix(status, "D") {
+		// Rename/Copy: R<score> old new
+		if (strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C")) && len(parts) >= 3 {
+			entries = append(entries, nameStatusEntry{status: status[:1], oldPath: parts[1], newPath: parts[2]})
 			continue
 		}
-		// Rename: R<score> old new
-		if strings.HasPrefix(status, "R") && len(parts) >= 3 {
-			result[parts[2]] = parts[1]
-			continue
-		}
-		// Add / Modify / Copy
-		newPath := parts[1]
-		result[newPath] = newPath
+		// Add / Modify / Delete: single path
+		entries = append(entries, nameStatusEntry{status: status[:1], oldPath: parts[1], newPath: parts[1]})
 	}
-	return result
+	return entries
 }
 
-// mergeFileMaps merges two newPath→oldPath maps, preferring entries from a over b.
-func mergeFileMaps(a, b map[string]string) map[string]string {
-	merged := make(map[string]string)
-	for k, v := range b {
-		merged[k] = v
+// mergeNameStatusEntries merges two entry slices keyed by newPath, preferring entries from a.
+func mergeNameStatusEntries(a, b []nameStatusEntry) []nameStatusEntry {
+	merged := make([]nameStatusEntry, 0, len(a)+len(b))
+	seen := make(map[string]int, len(a)+len(b))
+	for _, e := range b {
+		seen[e.newPath] = len(merged)
+		merged = append(merged, e)
 	}
-	for k, v := range a {
-		merged[k] = v
+	for _, e := range a {
+		if idx, ok := seen[e.newPath]; ok {
+			merged[idx] = e
+		} else {
+			seen[e.newPath] = len(merged)
+			merged = append(merged, e)
+		}
 	}
 	return merged
 }
@@ -457,16 +468,16 @@ func mergeFileMaps(a, b map[string]string) map[string]string {
 // then returns the full unified diff output as a single string in the hunks slice.
 // The @git-diff-view library's DiffParser.parse() requires a complete unified diff
 // (including the --- +++ header lines); splitting by @@ would break parsing.
-func buildDiffEntry(gitRoot, oldPath, newPath string) (GitDiffFile, error) {
+func buildDiffEntry(gitRoot string, entry nameStatusEntry) (GitDiffFile, error) {
 	// Get old content via `git show HEAD:<oldPath>`
 	oldContent := ""
-	showCmd := exec.Command("git", "-C", gitRoot, "show", "HEAD:"+oldPath)
+	showCmd := exec.Command("git", "-C", gitRoot, "show", "HEAD:"+entry.oldPath)
 	if out, err := showCmd.Output(); err == nil {
 		oldContent = string(out)
 	}
 
-	// Get new content from the working-tree file on disk
-	newAbsPath := filepath.Join(gitRoot, newPath)
+	// Get new content from the working-tree file on disk (missing for deletions)
+	newAbsPath := filepath.Join(gitRoot, entry.newPath)
 	newBytes, err := os.ReadFile(newAbsPath)
 	newContent := ""
 	if err == nil {
@@ -476,20 +487,21 @@ func buildDiffEntry(gitRoot, oldPath, newPath string) (GitDiffFile, error) {
 	// Get the complete unified diff for this file.
 	// Pass it as a single element so DiffParser.parse() sees the full diff string.
 	hunks := []string{}
-	diffCmd := exec.Command("git", "-C", gitRoot, "diff", "HEAD", "--", newPath)
+	diffCmd := exec.Command("git", "-C", gitRoot, "diff", "HEAD", "--", entry.newPath)
 	if diffOut, err := diffCmd.Output(); err == nil && len(diffOut) > 0 {
 		hunks = []string{string(diffOut)}
 	} else {
 		// Fall back to staged changes
-		diffCmd2 := exec.Command("git", "-C", gitRoot, "diff", "--cached", "--", newPath)
+		diffCmd2 := exec.Command("git", "-C", gitRoot, "diff", "--cached", "--", entry.newPath)
 		if diffOut2, err2 := diffCmd2.Output(); err2 == nil && len(diffOut2) > 0 {
 			hunks = []string{string(diffOut2)}
 		}
 	}
 
 	return GitDiffFile{
-		OldPath:    oldPath,
-		NewPath:    newPath,
+		OldPath:    entry.oldPath,
+		NewPath:    entry.newPath,
+		Status:     entry.status,
 		OldContent: oldContent,
 		NewContent: newContent,
 		Hunks:      hunks,
@@ -525,6 +537,7 @@ func buildUntrackedEntry(gitRoot, relPath string) (GitDiffFile, error) {
 	return GitDiffFile{
 		OldPath:    "/dev/null",
 		NewPath:    relPath,
+		Status:     "A",
 		OldContent: "",
 		NewContent: newContent,
 		Hunks:      hunks,

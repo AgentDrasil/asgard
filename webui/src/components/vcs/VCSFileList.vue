@@ -26,6 +26,15 @@ const filteredFiles = computed(() => {
 });
 
 function getFileStatus(file: GitDiffFile): { label: string; badgeClass: string } {
+  switch (file.status) {
+    case "A":
+      return { label: "A", badgeClass: "badge-success text-success-content" };
+    case "D":
+      return { label: "D", badgeClass: "badge-error text-error-content" };
+    case "R":
+      return { label: "R", badgeClass: "badge-info text-info-content" };
+  }
+  // Fallback for payloads without a status field
   if (file.oldPath === "/dev/null") {
     return { label: "A", badgeClass: "badge-success text-success-content" };
   }

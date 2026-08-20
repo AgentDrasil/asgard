@@ -61,6 +61,8 @@ export interface DirInfo {
 export interface GitDiffFile {
   oldPath: string;
   newPath: string;
+  /** Change type from git: "A" | "M" | "D" | "R" */
+  status?: string;
   oldContent: string;
   newContent: string;
   hunks: string[];
