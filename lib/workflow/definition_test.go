@@ -760,3 +760,93 @@ func TestParseDevWorkflowYAML(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "dev-workflow", defn.Name)
 }
+
+func TestValidateRequiredOutputs_TableDriven(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr string
+	}{
+		{
+			name: "valid required_outputs and max_retries",
+			spec: `
+name: test-required-outputs
+nodes:
+  - id: agent1
+    type: agent
+    agent_id: agy
+    entry: true
+    required_outputs:
+      - "${tmp_dir}/out.md"
+    max_retries: 3
+`,
+		},
+		{
+			name: "negative max_retries rejected",
+			spec: `
+name: test-required-outputs
+nodes:
+  - id: agent1
+    type: agent
+    agent_id: agy
+    entry: true
+    max_retries: -1
+`,
+			wantErr: "max_retries cannot be negative",
+		},
+		{
+			name: "empty required_outputs entry rejected",
+			spec: `
+name: test-required-outputs
+nodes:
+  - id: agent1
+    type: agent
+    agent_id: agy
+    entry: true
+    required_outputs:
+      - "  "
+`,
+			wantErr: "required_outputs entry cannot be empty",
+		},
+		{
+			name: "required_outputs on command node rejected",
+			spec: `
+name: test-required-outputs
+nodes:
+  - id: cmd1
+    type: command
+    command: "ls"
+    required_outputs:
+      - "${tmp_dir}/out.md"
+`,
+			wantErr: "required_outputs is only allowed on agent nodes",
+		},
+		{
+			name: "max_retries on human node rejected",
+			spec: `
+name: test-required-outputs
+nodes:
+  - id: ask1
+    type: human
+    prompt: "Ready?"
+    max_retries: 2
+`,
+			wantErr: "max_retries is only allowed on agent nodes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseDefinition([]byte(tt.spec))
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

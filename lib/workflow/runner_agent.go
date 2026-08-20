@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -195,74 +196,86 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 
 	effectiveAgent := resolveEffectiveAgent(agent, nctx)
 
-	log.Info().
-		Str("session_id", nctx.SessionID).
-		Str("node_id", node.ID).
-		Str("agent_id", node.AgentID).
-		Str("policy", node.SessionPolicy).
-		Msgf("[AgentRunner] Starting agent %q for node %q", node.AgentID, node.ID)
+	initialPrompt := prompt
 
-	// runToken uniquely identifies this node invocation so that, when parallel
-	// agent nodes share a session, each runner only consumes the status updates
-	// its own sandbox reported. It is injected into the sandbox via env and
-	// echoed back by aw in every update payload.
-	runToken := uuid.Must(uuid.NewV7()).String()
-	var statusCh <-chan AgentStatusUpdate
-	var cancelListener func()
-	if r.statusListener != nil && nctx.SessionID != "" {
-		statusCh, cancelListener = r.statusListener.AddStatusListener(nctx.SessionID, func(update AgentStatusUpdate) bool {
-			return update.RunToken == runToken
-		})
-		defer cancelListener()
-	}
-
-	type runOutcome struct {
-		out []byte
-		err error
-	}
-	outCh := make(chan runOutcome, 1)
-
-	go func() {
-		out, err := run.Run(ctx, effectiveAgent, prompt, session, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken}, r.conf)
-		outCh <- runOutcome{out: out, err: err}
-	}()
-
-	var nodeArtifacts []string
-	seenArtifacts := make(map[string]bool)
-	workspaceDir := nctx.RunDir
-	if runDirOpt.IsSome() {
-		workspaceDir = runDirOpt.Unwrap()
+	maxRetries := 0
+	if node.MaxRetries != nil {
+		maxRetries = *node.MaxRetries
+	} else if len(node.RequiredOutputs) > 0 {
+		maxRetries = 2 // Default to 2 retries when required_outputs are specified and max_retries is not explicitly set
 	}
 
 	var out []byte
-loop:
-	for {
-		select {
-		case update, ok := <-statusCh:
-			if !ok {
-				statusCh = nil
-				continue
-			}
-			// Defensive: the server-side match should already filter, but never
-			// attribute another node invocation's update to this node.
-			if update.RunToken != runToken {
-				continue
-			}
-			var stepArtifacts []string
-			if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
-				for _, tf := range targetFiles {
-					if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
-						vPath := ViewerArtifactPath(tf, nctx.TmpDir)
-						stepArtifacts = append(stepArtifacts, vPath)
-						if !seenArtifacts[vPath] {
-							seenArtifacts[vPath] = true
-							nodeArtifacts = append(nodeArtifacts, vPath)
-						}
-					}
+	var lastContent string
+	var currentSessionID string
+	var executionErr error
+	var qualityGateErr error
+	var nodeArtifacts []string
+
+	totalAttempts := maxRetries + 1
+	for attempt := 1; attempt <= totalAttempts; attempt++ {
+		executionErr = nil
+		qualityGateErr = nil
+
+		log.Info().
+			Str("session_id", nctx.SessionID).
+			Str("node_id", node.ID).
+			Str("agent_id", node.AgentID).
+			Str("policy", node.SessionPolicy).
+			Int("attempt", attempt).
+			Int("max_attempts", totalAttempts).
+			Msgf("[AgentRunner] Starting agent %q for node %q (attempt %d/%d)", node.AgentID, node.ID, attempt, totalAttempts)
+
+		// runToken uniquely identifies this node invocation so that, when parallel
+		// agent nodes share a session, each runner only consumes the status updates
+		// its own sandbox reported. It is injected into the sandbox via env and
+		// echoed back by aw in every update payload.
+		runToken := uuid.Must(uuid.NewV7()).String()
+		var statusCh <-chan AgentStatusUpdate
+		var cancelListener func()
+		if r.statusListener != nil && nctx.SessionID != "" {
+			statusCh, cancelListener = r.statusListener.AddStatusListener(nctx.SessionID, func(update AgentStatusUpdate) bool {
+				return update.RunToken == runToken
+			})
+		}
+
+		type runOutcome struct {
+			out []byte
+			err error
+		}
+		outCh := make(chan runOutcome, 1)
+
+		go func(currentPrompt string, currentSession optional.Option[string]) {
+			runOut, runErr := run.Run(ctx, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken}, r.conf)
+			outCh <- runOutcome{out: runOut, err: runErr}
+		}(prompt, session)
+
+		seenArtifacts := make(map[string]bool)
+		for _, a := range nodeArtifacts {
+			seenArtifacts[a] = true
+		}
+		workspaceDir := nctx.RunDir
+		if runDirOpt.IsSome() {
+			workspaceDir = runDirOpt.Unwrap()
+		}
+
+	innerLoop:
+		for {
+			select {
+			case update, ok := <-statusCh:
+				if !ok {
+					statusCh = nil
+					continue
 				}
-			} else if targetFilesAny, ok := update.Metadata["target_files"].([]any); ok {
-				for _, item := range targetFilesAny {
-					if tf, ok := item.(string); ok && tf != "" {
+				// Defensive: the server-side match should already filter, but never
+				// attribute another node invocation's update to this node.
+				if update.RunToken != runToken {
+					continue
+				}
+
+				var stepArtifacts []string
+				if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
+					for _, tf := range targetFiles {
 						if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
 							vPath := ViewerArtifactPath(tf, nctx.TmpDir)
 							stepArtifacts = append(stepArtifacts, vPath)
@@ -272,14 +285,108 @@ loop:
 							}
 						}
 					}
+				} else if targetFilesAny, ok := update.Metadata["target_files"].([]any); ok {
+					for _, item := range targetFilesAny {
+						if tf, ok := item.(string); ok && tf != "" {
+							if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
+								vPath := ViewerArtifactPath(tf, nctx.TmpDir)
+								stepArtifacts = append(stepArtifacts, vPath)
+								if !seenArtifacts[vPath] {
+									seenArtifacts[vPath] = true
+									nodeArtifacts = append(nodeArtifacts, vPath)
+								}
+							}
+						}
+					}
 				}
-			}
 
-			if len(stepArtifacts) > 0 {
-				if update.Metadata == nil {
-					update.Metadata = make(map[string]any)
+				if len(stepArtifacts) > 0 {
+					if update.Metadata == nil {
+						update.Metadata = make(map[string]any)
+					}
+					update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
 				}
-				update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
+
+				if nctx.EventEmitter != nil {
+					nctx.EventEmitter(WorkflowEvent{
+						Type:      EventNodeStatusUpdate,
+						NodeID:    node.ID,
+						NodeType:  NodeTypeAgent,
+						AgentID:   node.AgentID,
+						AgentName: effectiveAgent.Config.Name,
+						Status:    StatusRunning,
+						Message:   update.Content,
+						EntryType: update.EntryType,
+						Metadata:  SanitizeMetadata(update.Metadata),
+						Artifacts: stepArtifacts,
+					})
+				}
+			case outcome := <-outCh:
+				out = outcome.out
+				executionErr = outcome.err
+				if cancelListener != nil {
+					cancelListener()
+				}
+				break innerLoop
+			case <-ctx.Done():
+				if cancelListener != nil {
+					cancelListener()
+				}
+				return nil, ctx.Err()
+			}
+		}
+
+		parsedContent, parsedSessionID := parseAgentOutput(out)
+		lastContent = parsedContent
+		if parsedSessionID != "" {
+			currentSessionID = parsedSessionID
+			if node.SessionPolicyInherit() {
+				nctx.Values.Set(agentSessionKey(node.AgentID), currentSessionID)
+			}
+		}
+
+		if executionErr != nil {
+			log.Error().
+				Err(executionErr).
+				Str("session_id", nctx.SessionID).
+				Str("node_id", node.ID).
+				Str("agent_id", node.AgentID).
+				Int("attempt", attempt).
+				Msgf("[AgentRunner] Agent %q for node %q execution error on attempt %d: %v", node.AgentID, node.ID, attempt, executionErr)
+			break
+		}
+
+		// Quality gate: check required outputs
+		missing := checkRequiredOutputs(node.RequiredOutputs, nctx)
+		if len(missing) == 0 {
+			log.Info().
+				Str("session_id", nctx.SessionID).
+				Str("node_id", node.ID).
+				Str("agent_id", node.AgentID).
+				Int("attempt", attempt).
+				Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully (required outputs satisfied)", node.AgentID, node.ID)
+			return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
+		}
+
+		log.Warn().
+			Str("session_id", nctx.SessionID).
+			Str("node_id", node.ID).
+			Str("agent_id", node.AgentID).
+			Strs("missing_files", missing).
+			Int("attempt", attempt).
+			Int("max_attempts", totalAttempts).
+			Msgf("[AgentRunner] Required output check failed for node %q (missing %v)", node.ID, missing)
+
+		if attempt < totalAttempts {
+			correctiveNotice := fmt.Sprintf("System Notice: Required output file(s) %s are missing or empty. You must write and complete these files now before concluding your turn.", strings.Join(missing, ", "))
+
+			if currentSessionID != "" {
+				session = optional.Some(currentSessionID)
+				prompt = correctiveNotice
+			} else {
+				// When no CLI session was returned to resume, keep initial prompt context with the corrective notice appended.
+				session = optional.None[string]()
+				prompt = initialPrompt + "\n\n" + correctiveNotice
 			}
 
 			if nctx.EventEmitter != nil {
@@ -290,48 +397,72 @@ loop:
 					AgentID:   node.AgentID,
 					AgentName: effectiveAgent.Config.Name,
 					Status:    StatusRunning,
-					Message:   update.Content,
-					EntryType: update.EntryType,
-					Metadata:  SanitizeMetadata(update.Metadata),
-					Artifacts: stepArtifacts,
+					Message:   fmt.Sprintf("Required outputs missing (%s). Retrying (attempt %d/%d)...", strings.Join(missing, ", "), attempt+1, totalAttempts),
+					EntryType: "activity",
 				})
 			}
-		case outcome := <-outCh:
-			out = outcome.out
-			err = outcome.err
-			break loop
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		} else {
+			qualityGateErr = fmt.Errorf("required outputs missing or empty after %d attempt(s): %s", totalAttempts, strings.Join(missing, ", "))
 		}
 	}
 
-	lastContent, sessionID := parseAgentOutput(out)
-	if sessionID != "" && node.SessionPolicyInherit() {
-		nctx.Values.Set(agentSessionKey(node.AgentID), sessionID)
-	}
-
-	if err != nil {
+	if executionErr != nil {
 		log.Error().
-			Err(err).
+			Err(executionErr).
 			Str("session_id", nctx.SessionID).
 			Str("node_id", node.ID).
 			Str("agent_id", node.AgentID).
-			Msgf("[AgentRunner] Agent %q for node %q FAILED: %v", node.AgentID, node.ID, err)
+			Msgf("[AgentRunner] Agent %q for node %q execution FAILED: %v", node.AgentID, node.ID, executionErr)
 		return &NodeResult{
 			Status:    StatusFailed,
 			Output:    lastContent,
 			Artifacts: toArtifactMap(nodeArtifacts),
-			Error:     fmt.Errorf("agent %s run failed: %w", node.AgentID, err),
+			Error:     fmt.Errorf("agent %s run execution failed: %w", node.AgentID, executionErr),
 			AgentName: effectiveAgent.Config.Name,
 		}, nil
 	}
 
-	log.Info().
+	log.Error().
+		Err(qualityGateErr).
 		Str("session_id", nctx.SessionID).
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
-		Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully", node.AgentID, node.ID)
-	return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
+		Msgf("[AgentRunner] Agent %q for node %q quality gate FAILED: %v", node.AgentID, node.ID, qualityGateErr)
+	return &NodeResult{
+		Status:    StatusFailed,
+		Output:    lastContent,
+		Artifacts: toArtifactMap(nodeArtifacts),
+		Error:     fmt.Errorf("agent %s quality gate failed: %w", node.AgentID, qualityGateErr),
+		AgentName: effectiveAgent.Config.Name,
+	}, nil
+}
+
+// checkRequiredOutputs checks if all required output file paths exist and are non-empty.
+// Paths are interpolated against the node context and evaluated against the host filesystem.
+// Note: Variable paths like ${tmp_dir} and ${run_dir} correspond to directories mounted
+// into the sandbox container.
+// Returns a slice of missing or empty file paths.
+func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string {
+	if len(requiredOutputs) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, raw := range requiredOutputs {
+		interpolated := strings.TrimSpace(nctx.Interpolate(raw))
+		if interpolated == "" || strings.Contains(interpolated, "${") {
+			missing = append(missing, raw)
+			continue
+		}
+		path := interpolated
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(nctx.RunDir, path)
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() || info.Size() == 0 {
+			missing = append(missing, interpolated)
+		}
+	}
+	return missing
 }
 
 // agentPromptResult mirrors the JSON structure returned by CLI agents.

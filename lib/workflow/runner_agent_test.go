@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -378,4 +380,68 @@ func TestAgentRunner_SetAgents(t *testing.T) {
 	updated, err := agentRunnerInstance.lookup("updated-agent")
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", updated.Config.Name)
+}
+
+func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	validFile := filepath.Join(tempDir, "output.md")
+	require.NoError(t, os.WriteFile(validFile, []byte("# Valid Output"), 0644))
+
+	emptyFile := filepath.Join(tempDir, "empty.md")
+	require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0644))
+
+	nctx := &NodeContext{
+		RunDir:    tempDir,
+		TmpDir:    tempDir,
+		SessionID: "sess-123",
+	}
+
+	tests := []struct {
+		name            string
+		requiredOutputs []string
+		wantMissing     []string
+	}{
+		{
+			name:            "empty required outputs returns nil",
+			requiredOutputs: nil,
+			wantMissing:     nil,
+		},
+		{
+			name:            "all files exist and non-empty",
+			requiredOutputs: []string{"${tmp_dir}/output.md"},
+			wantMissing:     nil,
+		},
+		{
+			name:            "file does not exist",
+			requiredOutputs: []string{"${tmp_dir}/missing.md"},
+			wantMissing:     []string{filepath.Join(tempDir, "missing.md")},
+		},
+		{
+			name:            "file exists but is empty",
+			requiredOutputs: []string{"${tmp_dir}/empty.md"},
+			wantMissing:     []string{filepath.Join(tempDir, "empty.md")},
+		},
+		{
+			name:            "mixed existing, empty and missing files",
+			requiredOutputs: []string{"${tmp_dir}/output.md", "${tmp_dir}/empty.md", "${tmp_dir}/nonexistent.md"},
+			wantMissing:     []string{filepath.Join(tempDir, "empty.md"), filepath.Join(tempDir, "nonexistent.md")},
+		},
+		{
+			name:            "empty or unresolved variable interpolation entry is caught as missing",
+			requiredOutputs: []string{"${unknown_variable}"},
+			wantMissing:     []string{"${unknown_variable}"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			missing := checkRequiredOutputs(tt.requiredOutputs, nctx)
+			assert.Equal(t, tt.wantMissing, missing)
+		})
+	}
 }

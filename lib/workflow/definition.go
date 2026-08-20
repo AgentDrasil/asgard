@@ -111,6 +111,14 @@ type NodeSpec struct {
 	// Human node fields. Options is the optional list of canned replies
 	// offered to the user; when empty any free-form text is accepted.
 	Options []string `yaml:"options"`
+
+	// Output quality gate & retry fields.
+	// RequiredOutputs lists file paths (supporting ${tmp_dir}, ${run_dir}, ${session_id})
+	// that must exist and be non-empty upon node completion.
+	RequiredOutputs []string `yaml:"required_outputs"`
+	// MaxRetries specifies the maximum self-correction retry attempts if required outputs are missing.
+	// Defaults to 2 if required_outputs is non-empty and max_retries is not explicitly specified.
+	MaxRetries *int `yaml:"max_retries"`
 }
 
 // TimeoutDuration parses the node timeout (e.g. "300s"). Zero means no timeout.
@@ -261,6 +269,25 @@ func (d *WorkflowDefinition) Validate() error {
 		if node.Timeout != "" {
 			if _, err := time.ParseDuration(node.Timeout); err != nil {
 				return fmt.Errorf("node %s: invalid timeout %q: %w", node.ID, node.Timeout, err)
+			}
+		}
+
+		if node.MaxRetries != nil {
+			if node.Type != NodeTypeAgent {
+				return fmt.Errorf("node %s: max_retries is only allowed on agent nodes", node.ID)
+			}
+			if *node.MaxRetries < 0 {
+				return fmt.Errorf("node %s: max_retries cannot be negative", node.ID)
+			}
+		}
+		if len(node.RequiredOutputs) > 0 {
+			if node.Type != NodeTypeAgent {
+				return fmt.Errorf("node %s: required_outputs is only allowed on agent nodes", node.ID)
+			}
+			for _, ro := range node.RequiredOutputs {
+				if strings.TrimSpace(ro) == "" {
+					return fmt.Errorf("node %s: required_outputs entry cannot be empty", node.ID)
+				}
 			}
 		}
 	}
