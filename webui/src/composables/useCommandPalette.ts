@@ -24,6 +24,18 @@ export function useCommandPalette(commandsSource: CommandPaletteCommandsSource) 
     { flush: "sync" },
   );
 
+  watch(
+    filteredCommands,
+    (newList) => {
+      if (newList.length === 0) {
+        selectedIndex.value = 0;
+      } else if (selectedIndex.value >= newList.length) {
+        selectedIndex.value = newList.length - 1;
+      }
+    },
+    { flush: "sync" },
+  );
+
   const navigateNext = () => {
     const len = filteredCommands.value.length;
     if (len === 0) {

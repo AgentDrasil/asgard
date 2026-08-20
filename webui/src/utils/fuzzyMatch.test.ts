@@ -37,6 +37,12 @@ describe("fuzzyMatch", () => {
     const distant = fuzzyMatch("git", "Organize imports and format");
     expect(prefix.score).toBeGreaterThan(distant.score);
   });
+
+  it("scores consecutive subsequence matches higher than non-consecutive matches", () => {
+    const consecutive = fuzzyMatch("git", "git status");
+    const nonConsecutive = fuzzyMatch("git", "go into terminal");
+    expect(consecutive.score).toBeGreaterThan(nonConsecutive.score);
+  });
 });
 
 describe("filterCommands", () => {
@@ -96,12 +102,16 @@ describe("filterCommands", () => {
   it("sorts results by relevance score and preserves stable order for ties", () => {
     const customList: CommandItem[] = [
       { id: "sub", title: "Open sub directory", action: dummyAction },
+      { id: "tie1", title: "Open doc A", action: dummyAction },
+      { id: "tie2", title: "Open doc B", action: dummyAction },
       { id: "exact", title: "Open", action: dummyAction },
       { id: "prefix", title: "Open file", action: dummyAction },
     ];
     const res = filterCommands(customList, "Open");
     expect(res[0].id).toBe("exact");
     expect(res[1].id).toBe("prefix");
-    expect(res[2].id).toBe("sub");
+    expect(res[2].id).toBe("tie1");
+    expect(res[3].id).toBe("tie2");
+    expect(res[4].id).toBe("sub");
   });
 });

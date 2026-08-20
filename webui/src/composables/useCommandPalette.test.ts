@@ -44,6 +44,18 @@ describe("useCommandPalette", () => {
     expect(filteredCommands.value[0].id).toBe("cmd-new");
   });
 
+  it("clamps selectedIndex when commands source shrinks", () => {
+    const sourceRef = ref<CommandItem[]>([...commandsList]);
+    const { selectedIndex, navigateNext } = useCommandPalette(sourceRef);
+
+    navigateNext();
+    navigateNext();
+    expect(selectedIndex.value).toBe(2);
+
+    sourceRef.value = [{ id: "cmd-1", title: "Single remaining", action: () => {} }];
+    expect(selectedIndex.value).toBe(0);
+  });
+
   it("cycles navigation forward and backward correctly", () => {
     const { selectedIndex, navigateNext, navigatePrevious } = useCommandPalette(commandsList);
 

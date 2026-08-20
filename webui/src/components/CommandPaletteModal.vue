@@ -57,6 +57,11 @@ function handleSelectCurrent() {
     handleSelect(current);
   }
 }
+
+function handleClear() {
+  query.value = "";
+  inputRef.value?.focus();
+}
 </script>
 
 <template>
@@ -68,6 +73,9 @@ function handleSelectCurrent() {
       @keydown.esc.prevent="emit('close')"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command Palette"
         class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-2xl max-h-[70vh] flex flex-col shadow-2xl overflow-hidden transition-all transform scale-100"
       >
         <!-- Search Input Bar -->
@@ -86,7 +94,7 @@ function handleSelectCurrent() {
           />
           <button
             v-if="query"
-            @click="query = ''"
+            @click="handleClear"
             class="btn btn-ghost btn-xs btn-circle text-base-content/60 hover:text-base-content"
             title="Clear search"
           >

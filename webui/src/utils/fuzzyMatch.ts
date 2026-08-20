@@ -5,6 +5,8 @@ export interface FuzzyMatchResult {
   score: number;
 }
 
+const WORD_BOUNDARY_REGEX = /[\s\-_/.:]/;
+
 export function fuzzyMatch(query: string, target: string): FuzzyMatchResult {
   const q = query.trim().toLowerCase();
   const t = target.toLowerCase();
@@ -47,7 +49,7 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatchResult {
       // Word boundary bonus
       const isWordStart =
         tIdx === 0 ||
-        /[\s\-_/.:]/.test(target[tIdx - 1]) ||
+        WORD_BOUNDARY_REGEX.test(target[tIdx - 1]) ||
         (target[tIdx] >= "A" &&
           target[tIdx] <= "Z" &&
           target[tIdx - 1] >= "a" &&

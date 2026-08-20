@@ -58,9 +58,11 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
 
+  const isBareF1 =
+    (e.code === "F1" || e.key === "F1") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+
   const isCommandPaletteKey =
-    e.code === "F1" ||
-    e.key === "F1" ||
+    isBareF1 ||
     (ctrlKey && e.shiftKey && !e.altKey && (e.code === "KeyP" || e.key === "P" || e.key === "p"));
 
   if (isCommandPaletteKey) {
