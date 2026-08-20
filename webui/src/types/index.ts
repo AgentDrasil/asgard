@@ -165,6 +165,5 @@ export interface CommandItem {
   category?: string;
   icon?: string;
   shortcut?: string;
-  keywords?: string[];
   action: () => void | Promise<void>;
 }

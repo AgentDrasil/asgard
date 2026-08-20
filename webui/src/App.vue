@@ -299,7 +299,6 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Toggle left panel",
     icon: "mynaui:sidebar",
     shortcut: toggleSidebarShortcut.value,
-    keywords: ["sidebar", "left", "menu", "panel", "collapse", "expand"],
     action: () => toggleSidebar(),
   },
   {
@@ -307,7 +306,6 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Toggle right panel",
     icon: "codicon:layout-sidebar-right",
     shortcut: toggleArtifactsShortcut.value,
-    keywords: ["right", "panel", "artifact", "drawer", "tree", "vcs"],
     action: () => {
       if (activeView.value === "vcs") {
         isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
@@ -323,21 +321,18 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Toggle terminal (current session)",
     icon: "codicon:layout-panel",
     shortcut: toggleTerminalShortcut.value,
-    keywords: ["terminal", "console", "session", "shell", "bottom"],
     action: () => toggleTerminal("session"),
   },
   {
     id: "toggle-terminal-global",
     title: "Toggle terminal (global)",
     icon: "mynaui:terminal",
-    keywords: ["terminal", "global", "sidebar", "console", "shell"],
     action: () => toggleTerminal("sidebar"),
   },
   {
     id: "switch-chat-view",
     title: "Switch to chat view",
     icon: "material-symbols:chat-outline",
-    keywords: ["chat", "messages", "view", "conversation"],
     action: () => navigateToChat(),
   },
   {
@@ -345,7 +340,6 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Switch to vcs view",
     icon: "octicon:git-branch-24",
     shortcut: toggleDiffShortcut.value,
-    keywords: ["vcs", "git", "diff", "commits", "history", "version"],
     action: () => navigateToVcs(),
   },
   {
@@ -353,21 +347,18 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Switch to files view",
     icon: "octicon:file-code-24",
     shortcut: toggleFileViewShortcut.value,
-    keywords: ["files", "file", "tree", "explorer", "workspace", "code"],
     action: () => navigateToFiles(),
   },
   {
     id: "new-chat",
     title: "New chat",
     icon: "mynaui:edit-one",
-    keywords: ["new", "chat", "create", "session", "conversation", "reset"],
     action: () => handleNewChat(closeSidebarOnMobile),
   },
   {
     id: "new-chat-same-current",
     title: "New chat same with current",
     icon: "mynaui:copy",
-    keywords: ["new", "chat", "same", "current", "clone", "duplicate", "agent", "workspace"],
     action: () =>
       handleNewChat(
         closeSidebarOnMobile,
