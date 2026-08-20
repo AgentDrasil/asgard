@@ -192,26 +192,26 @@ const breadcrumbParts = computed(() => {
           <button
             @click="mobileActiveTab = 'files'"
             :class="[
-              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              'join-item btn btn-xs border-none',
               mobileActiveTab === 'files'
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
+            title="Files"
           >
-            <Icon icon="octicon:file-directory-24" class="h-3 w-3" />
-            <span>Files</span>
+            <Icon icon="mdi:file-tree" class="h-3.5 w-3.5" />
           </button>
           <button
             @click="mobileActiveTab = 'code'"
             :class="[
-              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              'join-item btn btn-xs border-none',
               mobileActiveTab === 'code'
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
+            title="Code"
           >
-            <Icon icon="octicon:file-code-24" class="h-3 w-3" />
-            <span>Code</span>
+            <Icon icon="mdi:file-outline" class="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

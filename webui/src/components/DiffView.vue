@@ -432,29 +432,26 @@ const commentedFileList = computed(() => {
           <button
             @click="mobileActiveTab = 'files'"
             :class="[
-              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              'join-item btn btn-xs border-none',
               mobileActiveTab === 'files'
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
+            title="Files"
           >
-            <Icon icon="octicon:file-diff-24" class="h-3 w-3" />
-            <span>Files</span>
-            <span class="badge badge-xs text-[9px] bg-base-100/30 text-current">{{
-              files.length
-            }}</span>
+            <Icon icon="mdi:git" class="h-3.5 w-3.5" />
           </button>
           <button
             @click="mobileActiveTab = 'diff'"
             :class="[
-              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              'join-item btn btn-xs border-none',
               mobileActiveTab === 'diff'
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
+            title="Diff"
           >
-            <Icon icon="material-symbols:difference-outline" class="h-3 w-3" />
-            <span>Diff</span>
+            <Icon icon="material-symbols:difference-outline" class="h-3.5 w-3.5" />
           </button>
         </div>
 
