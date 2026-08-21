@@ -59,6 +59,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get update && apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Install pnpm (version pinned to match webui/package.json packageManager)
+RUN npm install -g pnpm@11.3.0 && pnpm --version
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -73,13 +76,15 @@ CMD ["tail", "-f", "/dev/null"]
 # Stage 3: webui-builder
 FROM node:${NODE_VERSION}-alpine AS webui-builder
 
+RUN npm install -g pnpm@11.3.0
+
 WORKDIR /webui
 
-COPY webui/package*.json ./
-RUN npm ci
+COPY webui/package.json webui/pnpm-lock.yaml webui/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY webui/ .
-RUN npm run build
+RUN pnpm run build
 
 # Stage 4: go-builder
 FROM golang:${GO_VERSION}-alpine AS go-builder

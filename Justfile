@@ -5,22 +5,22 @@ default:
 # Format code with goimports
 fmt:
     cd backend && goimports -w -local "github.com/AgentDrasil/asgard/backend" .
-    cd webui && npm run fmt
+    cd webui && pnpm run fmt
 
 # Run golangci-lint
 lint:
     cd backend && golangci-lint run
-    cd webui && npm run lint
+    cd webui && pnpm run lint
 
 # Build backend and webui
 build:
     cd backend && go build -o build ./...
-    cd webui && npm run build
+    cd webui && pnpm run build
 
 # Test backend and webui
 test:
     cd backend && go test -v ./...
-    cd webui && npm run test
+    cd webui && pnpm run test
 
 # Run e2e tests
 e2e-test:

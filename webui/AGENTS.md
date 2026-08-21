@@ -11,18 +11,18 @@ This directory contains the Vue 3 frontend for Asgard.
 
 ## Development Commands
 
-When working in `webui/`, use the following npm scripts:
+When working in `webui/`, use the following pnpm scripts:
 
-- `npm run dev`: Start Vite development server
-- `npm run build`: Type-check and build for production
-- `npm run lint`: Run code linter (`oxlint`)
-- `npm run lint:fix`: Automatically fix lint issues
-- `npm run fmt`: Format code with `oxfmt`
-- `npm run fmt:check`: Check code formatting
+- `pnpm run dev`: Start Vite development server
+- `pnpm run build`: Type-check and build for production
+- `pnpm run lint`: Run code linter (`oxlint`)
+- `pnpm run lint:fix`: Automatically fix lint issues
+- `pnpm run fmt`: Format code with `oxfmt`
+- `pnpm run fmt:check`: Check code formatting
 
 ## Guidelines
 
-1. Run `npm run lint` and `npm run fmt:check` (or `npm run build`) to verify changes before submitting.
+1. Run `pnpm run lint` and `pnpm run fmt:check` (or `pnpm run build`) to verify changes before submitting.
 2. Use standard Vue 3 Composition API `<script setup lang="ts">` patterns.
 3. Keep styling consistent with DaisyUI themes and Tailwind CSS conventions.
 4. Prefer Iconify icons (`@iconify/vue`) instead of raw inline SVGs for icons in webpage.
