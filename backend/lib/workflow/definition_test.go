@@ -985,6 +985,97 @@ nodes:
     output_file: "final_decision.txt"
 `
 
+func TestValidateFunctionNodes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		spec      string
+		wantErr   string
+		checkFunc func(t *testing.T, defn *WorkflowDefinition)
+	}{
+		{
+			name: "valid function node",
+			spec: `
+name: test-function-node
+nodes:
+  - id: fn1
+    type: function
+    function: my_transform
+    prompt: "transform ${input}"
+    timeout: 30s
+`,
+			checkFunc: func(t *testing.T, defn *WorkflowDefinition) {
+				require.Len(t, defn.Nodes, 1)
+				assert.Equal(t, NodeTypeFunction, defn.Nodes[0].Type)
+				assert.Equal(t, "my_transform", defn.Nodes[0].Function)
+				assert.Equal(t, "30s", defn.Nodes[0].Timeout)
+				assert.Equal(t, "transform ${input}", defn.Nodes[0].Prompt)
+			},
+		},
+		{
+			name: "missing function field",
+			spec: `
+name: test-function-node
+nodes:
+  - id: fn1
+    type: function
+`,
+			wantErr: "node fn1: function is required for function nodes",
+		},
+		{
+			name: "invalid type message includes function",
+			spec: `
+name: test-function-node
+nodes:
+  - id: weird
+    type: quantum
+`,
+			wantErr: `node weird: invalid type "quantum" (must be agent, llm, command, human or function)`,
+		},
+		{
+			name: "allowed_exit_codes still rejected on function nodes",
+			spec: `
+name: test-function-node
+nodes:
+  - id: fn1
+    type: function
+    function: my_transform
+    allowed_exit_codes: [0, 1]
+`,
+			wantErr: "allowed_exit_codes is only allowed on command nodes",
+		},
+		{
+			name: "entry rejected on function nodes",
+			spec: `
+name: test-function-node
+nodes:
+  - id: fn1
+    type: function
+    function: my_transform
+    entry: true
+`,
+			wantErr: "entry is only allowed on agent nodes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			defn, err := ParseDefinition([]byte(tt.spec))
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkFunc != nil {
+				tt.checkFunc(t, defn)
+			}
+		})
+	}
+}
+
 func TestParseDevWorkflowYAML(t *testing.T) {
 	t.Parallel()
 	defn, err := ParseDefinition([]byte(sampleDevWorkflowYAML))

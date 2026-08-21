@@ -112,6 +112,10 @@ type NodeSpec struct {
 	// offered to the user; when empty any free-form text is accepted.
 	Options []string `yaml:"options"`
 
+	// Function node fields. Function is the name of the Go function
+	// registered in a workflow FunctionRegistry.
+	Function string `yaml:"function"`
+
 	// Output quality gate & retry fields.
 	// RequiredOutputs lists file paths (supporting ${tmp_dir}, ${run_dir}, ${session_id})
 	// that must exist and be non-empty upon node completion.
@@ -228,8 +232,12 @@ func (d *WorkflowDefinition) Validate() error {
 					return fmt.Errorf("node %s: human node options cannot be empty", node.ID)
 				}
 			}
+		case NodeTypeFunction:
+			if node.Function == "" {
+				return fmt.Errorf("node %s: function is required for function nodes", node.ID)
+			}
 		default:
-			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command or human)", node.ID, node.Type)
+			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command, human or function)", node.ID, node.Type)
 		}
 
 		if len(node.AllowedExitCodes) > 0 {

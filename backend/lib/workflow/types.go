@@ -16,6 +16,8 @@ const (
 	NodeTypeLLM     NodeType = "llm"
 	NodeTypeCommand NodeType = "command"
 	NodeTypeHuman   NodeType = "human"
+	// NodeTypeFunction invokes a natively registered Go function.
+	NodeTypeFunction NodeType = "function"
 )
 
 // NodeStatus is the lifecycle status of a single workflow node.
@@ -154,7 +156,7 @@ func (r *NodeRunnerRegistry) Register(runner NodeRunner) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman} {
+	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman, NodeTypeFunction} {
 		if runner.Supports(t) {
 			r.runners[t] = runner
 		}
