@@ -86,10 +86,10 @@ FROM golang:${GO_VERSION}-alpine AS go-builder
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY backend/ .
 
 RUN mkdir -p /app/bin && \
     for d in cmd/*; do \

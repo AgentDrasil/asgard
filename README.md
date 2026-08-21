@@ -19,7 +19,7 @@ Asgard is designed to be a self-hosted AI coding solution that:
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).
 
-The sandbox execution is managed by the orchestrator in [run.go](lib/agents/run/run.go).
+The sandbox execution is managed by the orchestrator in [run.go](backend/lib/agents/run/run.go).
 
 ```mermaid
 graph TD
@@ -54,8 +54,8 @@ When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
     *   System directories (`/bin`, `/usr/bin`, etc.) are mounted read-only.
-    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](cmd/fakebash/main.go) to intercept any shell command executions by the agent.
-*   **Command Execution Sandbox**: Runs the [fakebashd](cmd/fakebashd/main.go) daemon.
+    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](backend/cmd/fakebash/main.go) to intercept any shell command executions by the agent.
+*   **Command Execution Sandbox**: Runs the [fakebashd](backend/cmd/fakebashd/main.go) daemon.
     *   This is where actual shell commands requested by the agent are executed.
     *   It mounts the active `runDir` read-write, allowing commands to read/write workspace files.
     *   **Credential Masking**: To prevent credential theft, sensitive directories such as `~/.gemini` and `~/.local/share/opencode` are masked with empty `tmpfs` mounts, ensuring that commands executed by the agent cannot read authentication keys.
@@ -71,7 +71,7 @@ The host process initializes a temporary host directory and bind-mounts it to `/
 
 ## Workflow Orchestration Engine
 
-Asgard includes a DAG-based workflow engine (`lib/workflow`) that orchestrates multi-step AI development pipelines combining autonomous coding agents, raw LLM calls, shell commands, and human-in-the-loop approvals.
+Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestrates multi-step AI development pipelines combining autonomous coding agents, raw LLM calls, shell commands, and human-in-the-loop approvals.
 
 ### Key Capabilities
 - **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
@@ -130,10 +130,10 @@ Use the `agent-validate` CLI utility to validate workflow YAML syntax, DAG topol
 
 ```bash
 # Validate a standalone workflow definition
-go run ./cmd/agent-validate ./examples/workflows/build-and-fix.yaml
+cd backend && go run ./cmd/agent-validate ../examples/workflows/build-and-fix.yaml
 
 # Validate an agent directory containing config.yaml & workflow.yaml
-go run ./cmd/agent-validate .agents/agents/my-workflow-agent/
+cd backend && go run ./cmd/agent-validate ../.agents/agents/my-workflow-agent/
 ```
 
 ## API Endpoints
