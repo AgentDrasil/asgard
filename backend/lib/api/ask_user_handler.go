@@ -144,13 +144,21 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 
 	askWaitersMu.Lock()
 	waiter, exists := askWaiters[req.MessageID]
-	if !exists {
+	if !exists && req.MessageID == "" {
+		// If no messageID is provided, fall back only if there is exactly 1 waiter for this chat.
+		var matchedWaiter *askUserWaiter
+		count := 0
 		for _, w := range askWaiters {
 			if w.chatID == req.ChatID {
-				waiter = w
-				exists = true
-				break
+				matchedWaiter = w
+				count++
 			}
+		}
+		if count == 1 {
+			waiter = matchedWaiter
+			exists = true
+		} else if count > 1 {
+			log.Warn().Str("chat_id", req.ChatID).Int("count", count).Msg("multiple ask-user waiters in chat; cannot disambiguate reply without message_id")
 		}
 	}
 	askWaitersMu.Unlock()

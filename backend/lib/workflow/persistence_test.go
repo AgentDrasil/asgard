@@ -342,7 +342,7 @@ func TestResumeRejectsNonWaitingRun(t *testing.T) {
 	assert.Contains(t, err.Error(), "not waiting for human input")
 }
 
-func TestParallelHumanNodesRejected(t *testing.T) {
+func TestParallelHumanNodesAllowed(t *testing.T) {
 	yaml := `
 name: parallel-human
 nodes:
@@ -367,8 +367,7 @@ nodes:
     command: "echo done"
 `
 	_, err := ParseDefinition([]byte(yaml))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parallel human nodes are not supported in Phase 3")
+	require.NoError(t, err)
 }
 
 func TestSequentialHumanNodesAllowed(t *testing.T) {

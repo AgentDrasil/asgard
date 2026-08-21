@@ -134,7 +134,11 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		if err := repo.ResetAllRunningAgents(); err != nil {
 			log.Warn().Err(err).Msg("failed to reset stale running agents on startup")
 		}
-		workflowEngine.SetRunStore(newWorkflowRunStore(dbmodels.NewWorkflowRunRepository(dbConn)))
+		wfRepo := dbmodels.NewWorkflowRunRepository(dbConn)
+		if err := wfRepo.ResetAllRunningWorkflows(); err != nil {
+			log.Warn().Err(err).Msg("failed to reset stale running workflows on startup")
+		}
+		workflowEngine.SetRunStore(newWorkflowRunStore(wfRepo))
 		workflowEngine.SetHumanSuspender(s.suspendWorkflowHuman)
 	}
 

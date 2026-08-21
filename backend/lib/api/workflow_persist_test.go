@@ -428,3 +428,234 @@ func TestSuspendedNodeInfoTagsMatchAcrossPackages(t *testing.T) {
 
 	assert.JSONEq(t, string(dbRaw), string(wfRaw))
 }
+
+func TestAskUserReply_MultipleConcurrentWaitingRunsInSession(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-multi-runs"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+	msg1 := workflow.HumanMessageID("run1", "plan_approval")
+	msg2 := workflow.HumanMessageID("run2", "plan_approval")
+
+	require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID: msg1, Role: "ask_user", Content: "please approve plan 1",
+	}))
+	require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID: msg2, Role: "ask_user", Content: "please approve plan 2",
+	}))
+
+	seedWaitingRun(t, store, chatID, "run1", runDir)
+	seedWaitingRun(t, store, chatID, "run2", runDir)
+
+	// 1. Reply to run1
+	rec1 := postAskUserReply(t, s, chatID, msg1, "Approve 1")
+	assert.Equal(t, http.StatusOK, rec1.Code)
+
+	// Wait for run1 to complete
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r1, err := store.GetRun("run1")
+		require.NoError(t, err)
+		if r1 != nil && r1.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run1 did not complete; status=%v", r1)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Verify run2 is still WAITING_HUMAN
+	r2, err := store.GetRun("run2")
+	require.NoError(t, err)
+	require.NotNil(t, r2)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, r2.Status)
+
+	// 2. Reply to run2
+	rec2 := postAskUserReply(t, s, chatID, msg2, "Approve 2")
+	assert.Equal(t, http.StatusOK, rec2.Code)
+
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		r2, err = store.GetRun("run2")
+		require.NoError(t, err)
+		if r2 != nil && r2.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run2 did not complete; status=%v", r2)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAskUserReply_CrossChatSessionHijackDefense(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatA := "chat-A"
+	chatB := "chat-B"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatA, CurrentAgent: "wf-agent"}))
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatB, CurrentAgent: "wf-agent"}))
+
+	msgA := workflow.HumanMessageID("run-A", "plan_approval")
+	require.NoError(t, s.repo.AppendMessage(chatA, dbmodels.ChatMessage{
+		ID: msgA, Role: "ask_user", Content: "approve A",
+	}))
+
+	seedWaitingRun(t, store, chatA, "run-A", runDir)
+
+	// Attempt to resume run-A from chatB
+	rec := postAskUserReply(t, s, chatB, msgA, "Malicious Reply")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify run-A is still waiting and was not hijacked
+	rA, err := store.GetRun("run-A")
+	require.NoError(t, err)
+	require.NotNil(t, rA)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, rA.Status)
+
+	// Check that chatB received no resume events or artifact modifications
+	_, err = os.Stat(filepath.Join(runDir, "tmp", chatA, "user_feedback.md"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestAskUserReply_EmptyMessageID_SingleRunFallback(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-single-fallback"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+	seedWaitingRun(t, store, chatID, "run-single", runDir)
+
+	// Send reply with empty message_id
+	rec := postAskUserReply(t, s, chatID, "", "Approved Single")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err := store.GetRun("run-single")
+		require.NoError(t, err)
+		if run != nil && run.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run-single did not complete; status=%v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Approved Single", string(feedback))
+}
+
+func TestAskUserReply_EmptyMessageID_SingleRunMultipleNodes_GracefulNoop(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-single-run-multi-nodes"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
+
+	// Seed run with 2 suspended nodes
+	require.NoError(t, store.MarkWaitingHuman(&workflow.RunSnapshot{
+		RunID:     "run-multi-nodes",
+		SessionID: chatID,
+		Status:    workflow.PersistStatusWaitingHuman,
+		DAGSpec:   askUserReplyTestYAML,
+		RunDir:    runDir,
+		SuspendedNodes: map[string]workflow.SuspendedNodeInfo{
+			"node1": {MessageID: "wf-run-multi-nodes-node1"},
+			"node2": {MessageID: "wf-run-multi-nodes-node2"},
+		},
+	}))
+
+	// Send reply with empty message_id -> totalWaiting == 2 -> graceful noop
+	rec := postAskUserReply(t, s, chatID, "", "Should Noop")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	time.Sleep(200 * time.Millisecond)
+
+	run, err := store.GetRun("run-multi-nodes")
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
+}
+
+func TestAskUserReply_EmptyMessageID_MultipleRuns_GracefulNoop(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-multi-runs-noop"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
+
+	seedWaitingRun(t, store, chatID, "run-a", runDir)
+	seedWaitingRun(t, store, chatID, "run-b", runDir)
+
+	// Send reply with empty message_id -> totalWaiting == 2 -> graceful noop
+	rec := postAskUserReply(t, s, chatID, "", "Should Noop")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	time.Sleep(200 * time.Millisecond)
+
+	ra, err := store.GetRun("run-a")
+	require.NoError(t, err)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, ra.Status)
+
+	rb, err := store.GetRun("run-b")
+	require.NoError(t, err)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, rb.Status)
+}
+
+func TestAskUserReply_UnknownMessageID_SafeNoop(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-unknown-msg"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
+	seedWaitingRun(t, store, chatID, "run-active", runDir)
+
+	// Send reply with non-existent message_id
+	rec := postAskUserReply(t, s, chatID, "wf-nonexistent-message", "Should Safe Noop")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	time.Sleep(200 * time.Millisecond)
+
+	run, err := store.GetRun("run-active")
+	require.NoError(t, err)
+	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
+}
+
+func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
+	s, store, runDir := newAskReplyTestServer(t)
+	chatID := "chat-stale-defense"
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
+
+	// Seed one COMPLETED run (stale record) and one WAITING_HUMAN run
+	require.NoError(t, store.StartRun(&workflow.RunSnapshot{
+		RunID:     "run-completed",
+		SessionID: chatID,
+	}))
+	require.NoError(t, store.SettleRun("run-completed", workflow.PersistStatusCompleted, map[string]workflow.PersistedNodeState{}))
+
+	seedWaitingRun(t, store, chatID, "run-live", runDir)
+
+	// Empty message_id reply should ignore completed run and fall back to run-live (totalWaiting == 1)
+	rec := postAskUserReply(t, s, chatID, "", "Approve Live")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err := store.GetRun("run-live")
+		require.NoError(t, err)
+		if run != nil && run.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run-live did not complete; status=%v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Approve Live", string(feedback))
+}

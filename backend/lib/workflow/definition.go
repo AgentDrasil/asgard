@@ -416,11 +416,11 @@ func (d *WorkflowDefinition) validateNoHumanAndSchedule() error {
 	return nil
 }
 
-// validateHumanNodes enforces the Phase 3 single-active-human-node constraint:
-// human nodes must be totally ordered by the dependency graph. Two human nodes
-// placed on branches that may execute concurrently are rejected. Humans that
-// are only activated via a loop's on_exhausted routing have no static in-edges
-// and are exempt from this check.
+// validateHumanNodes validates human node placement. Parallel human nodes are
+// fully supported: concurrent branches may suspend simultaneously and every
+// suspension is delivered and resumed independently by its deterministic
+// MessageID. Human nodes activated only via a loop's on_exhausted routing
+// have no static in-edges by design and must stay orphans.
 func validateHumanNodes(d *WorkflowDefinition) error {
 	exempt := make(map[string]bool)
 	for _, loop := range d.Loops {
@@ -429,52 +429,12 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 		}
 	}
 
-	var humans []string
 	for _, node := range d.Nodes {
 		if node.Type == NodeTypeHuman {
 			if exempt[node.ID] {
 				if len(node.Depends) > 0 {
 					return fmt.Errorf("node %s: on_exhausted human node must have no incoming dependency edges (must be an orphan)", node.ID)
 				}
-				continue
-			}
-			humans = append(humans, node.ID)
-		}
-	}
-	if len(humans) < 2 {
-		return nil
-	}
-
-	deps := make(map[string][]string, len(d.Nodes))
-	for _, node := range d.Nodes {
-		for _, dep := range node.Depends {
-			deps[node.ID] = append(deps[node.ID], dep.NodeID)
-		}
-	}
-
-	reaches := func(from, to string) bool {
-		seen := map[string]bool{from: true}
-		stack := append([]string{}, deps[from]...)
-		for len(stack) > 0 {
-			id := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			if id == to {
-				return true
-			}
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			stack = append(stack, deps[id]...)
-		}
-		return false
-	}
-
-	for i := 0; i < len(humans); i++ {
-		for j := i + 1; j < len(humans); j++ {
-			a, b := humans[i], humans[j]
-			if !reaches(a, b) && !reaches(b, a) {
-				return fmt.Errorf("parallel human nodes are not supported in Phase 3: nodes %s and %s may run concurrently", a, b)
 			}
 		}
 	}

@@ -492,31 +492,106 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	}
 }
 
-// tryResumeWorkflow routes an ask-user reply to a suspended workflow run for
-// the chat. The reply's message_id must match the run's deterministic
-// suspended_message_id; an empty message_id falls back to the single waiting
-// run for the chat.
+// tryResumeWorkflow routes an ask-user reply to a suspended workflow run.
+// When messageID is provided, it uses ResumeByMessageID with session ownership validation (m9).
+// When messageID is empty, it counts totalWaiting across all suspended runs in the chat;
+// if totalWaiting == 1, it gracefully falls back to resuming that interaction; otherwise it Warns/no-ops.
 func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText string) {
 	engine := s.workflowEngine
 	if engine == nil {
 		return
 	}
-	run, err := engine.FindWaitingRun(chatID)
-	if err != nil {
-		log.Error().Err(err).Str("chat_id", chatID).Msg("looking up waiting workflow run failed")
-		return
+
+	var targetMessageID string
+
+	if messageID != "" {
+		// Branch 1: Precise routing mode.
+		// Check snapshot first
+		snap, err := engine.FindWaitingRunByMessageID(messageID)
+		if err != nil {
+			log.Error().Err(err).Str("message_id", messageID).Msg("looking up waiting workflow run by message id failed")
+			return
+		}
+		if snap != nil {
+			// Validate session ownership to prevent cross-session hijacking (m9)
+			if snap.SessionID != chatID {
+				log.Warn().
+					Str("chat_id", chatID).
+					Str("snapshot_session_id", snap.SessionID).
+					Str("message_id", messageID).
+					Msg("ask-user reply session does not match workflow session; skipping resume")
+				return
+			}
+			targetMessageID = messageID
+		} else {
+			// If snapshot not found, check memory runs in chat
+			runs, err := engine.FindWaitingRuns(chatID)
+			if err != nil {
+				log.Error().Err(err).Str("chat_id", chatID).Msg("looking up waiting workflow runs failed")
+				return
+			}
+			matched := false
+			for _, r := range runs {
+				if r.SuspendedMessageID == messageID {
+					matched = true
+					break
+				}
+				for _, n := range r.SuspendedNodes {
+					if n.MessageID == messageID {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+			}
+			if !matched {
+				log.Warn().
+					Str("chat_id", chatID).
+					Str("message_id", messageID).
+					Msg("ask-user reply does not match any suspended workflow interaction in session; skipping resume")
+				return
+			}
+			targetMessageID = messageID
+		}
+	} else {
+		// Branch 2: Fallback mode (messageID == "")
+		runs, err := engine.FindWaitingRuns(chatID)
+		if err != nil {
+			log.Error().Err(err).Str("chat_id", chatID).Msg("looking up waiting workflow runs failed")
+			return
+		}
+		if len(runs) == 0 {
+			return
+		}
+
+		totalWaiting := 0
+		for _, r := range runs {
+			if len(r.SuspendedNodes) > 0 {
+				totalWaiting += len(r.SuspendedNodes)
+				for _, n := range r.SuspendedNodes {
+					targetMessageID = n.MessageID
+				}
+			} else if r.SuspendedMessageID != "" {
+				totalWaiting += 1
+				targetMessageID = r.SuspendedMessageID
+			}
+		}
+
+		if totalWaiting == 0 {
+			return
+		}
+		if totalWaiting > 1 {
+			log.Warn().
+				Str("chat_id", chatID).
+				Int("total_waiting", totalWaiting).
+				Msg("multiple suspended workflow interactions in chat; cannot disambiguate reply without message_id")
+			return
+		}
+		// totalWaiting == 1: targetMessageID is uniquely determined.
 	}
-	if run == nil {
-		return
-	}
-	if messageID != "" && messageID != run.SuspendedMessageID {
-		log.Info().
-			Str("chat_id", chatID).
-			Str("message_id", messageID).
-			Str("suspended_message_id", run.SuspendedMessageID).
-			Msg("ask-user reply does not match suspended workflow message; skipping workflow resume")
-		return
-	}
+
 	go func() {
 		if s.repo != nil {
 			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil && sess.CurrentAgent != "" {
@@ -555,8 +630,8 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			s.handleWorkflowEvent(sid, ev)
 		}
 
-		if _, err := engine.ResumeWithEmitter(context.Background(), run.RunID, replyText, emit); err != nil {
-			log.Error().Err(err).Str("run_id", run.RunID).Msg("resuming workflow run failed")
+		if _, err := engine.ResumeByMessageID(context.Background(), targetMessageID, replyText, emit); err != nil {
+			log.Warn().Err(err).Str("message_id", targetMessageID).Msg("resuming workflow by message id failed")
 		}
 	}()
 }

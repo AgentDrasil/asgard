@@ -288,6 +288,15 @@ func (r *WorkflowRunRepository) RefreshSuspension(runID string, states map[strin
 		}).Error
 }
 
+// ResetAllRunningWorkflows sets all workflow runs with status WorkflowStatusRunning
+// to WorkflowStatusFailed across all sessions.
+// This is called at server startup to clear stale running states from crashes or unexpected restarts.
+func (r *WorkflowRunRepository) ResetAllRunningWorkflows() error {
+	return r.db.Model(&WorkflowRun{}).
+		Where("status = ?", WorkflowStatusRunning).
+		Update("status", WorkflowStatusFailed).Error
+}
+
 // compatSuspendedColumns picks the legacy single-suspension compatibility
 // values for a suspended node set: the previous node when still present,
 // otherwise the lexicographically first node of the set.

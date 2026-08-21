@@ -81,12 +81,62 @@ func TestWorkflowRunRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, waiting)
 
-	// Settled runs are no longer waiting.
 	loaded.Status = WorkflowStatusCompleted
 	require.NoError(t, repo.SaveRun(loaded))
 	waiting, err = repo.FindWaitingHumanBySession("chat-1")
 	require.NoError(t, err)
 	assert.Nil(t, waiting)
+}
+
+func TestWorkflowRun_StartupCleanup_RunningToFailed(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&WorkflowRun{}))
+
+	repo := NewWorkflowRunRepository(testDB)
+
+	// Seed 3 runs: RUNNING, WAITING_HUMAN, COMPLETED
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-running-1",
+		SessionID: "chat-1",
+		Status:    WorkflowStatusRunning,
+	}))
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-running-2",
+		SessionID: "chat-2",
+		Status:    WorkflowStatusRunning,
+	}))
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:              "run-waiting",
+		SessionID:          "chat-1",
+		Status:             WorkflowStatusWaitingHuman,
+		SuspendedNodeID:    "node-a",
+		SuspendedMessageID: "wf-run-waiting-node-a",
+	}))
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-completed",
+		SessionID: "chat-1",
+		Status:    WorkflowStatusCompleted,
+	}))
+
+	// Execute startup reset
+	require.NoError(t, repo.ResetAllRunningWorkflows())
+
+	// Assertions
+	r1, err := repo.GetRun("run-running-1")
+	require.NoError(t, err)
+	assert.Equal(t, WorkflowStatusFailed, r1.Status)
+
+	r2, err := repo.GetRun("run-running-2")
+	require.NoError(t, err)
+	assert.Equal(t, WorkflowStatusFailed, r2.Status)
+
+	rw, err := repo.GetRun("run-waiting")
+	require.NoError(t, err)
+	assert.Equal(t, WorkflowStatusWaitingHuman, rw.Status)
+
+	rc, err := repo.GetRun("run-completed")
+	require.NoError(t, err)
+	assert.Equal(t, WorkflowStatusCompleted, rc.Status)
 }
 
 func TestWorkflowRunRepository_FindWaitingHumansBySession(t *testing.T) {

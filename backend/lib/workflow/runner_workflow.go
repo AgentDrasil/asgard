@@ -94,12 +94,6 @@ func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeRe
 		return nil, fmt.Errorf("node %s: sub-workflow %q validation failed: %w", node.ID, node.Workflow, err)
 	}
 
-	for _, subNode := range subDefn.Nodes {
-		if subNode.Type == NodeTypeHuman {
-			return nil, fmt.Errorf("node %s: sub-workflow %q contains human node %q (not allowed in sub-workflows)", node.ID, node.Workflow, subNode.ID)
-		}
-	}
-
 	// Apply node timeout
 	childCtx, cancel := withNodeTimeout(childCtx, node)
 	defer cancel()
@@ -126,7 +120,8 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 		WorkflowRunDirs:   nctx.WorkflowRunDirs,
 		WorkflowMountDirs: nctx.WorkflowMountDirs,
 		Inline:            true,
-		Headless:          true,
+		Headless:          nctx.Headless,
+		ParentRunID:       nctx.RunID,
 		EmitEvent: func(ev WorkflowEvent) {
 			if nctx.EventEmitter == nil {
 				return
@@ -307,7 +302,8 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				WorkflowRunDirs:   nctx.WorkflowRunDirs,
 				WorkflowMountDirs: nctx.WorkflowMountDirs,
 				Inline:            true,
-				Headless:          true,
+				Headless:          nctx.Headless,
+				ParentRunID:       nctx.RunID,
 				EmitEvent: func(ev WorkflowEvent) {
 					if nctx.EventEmitter == nil {
 						return

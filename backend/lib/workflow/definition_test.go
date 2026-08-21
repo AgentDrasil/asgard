@@ -565,8 +565,8 @@ loops:
 }
 
 // TestValidateHumanNodes_OnExhaustedExemption verifies that a human node
-// activated only via on_exhausted routing does not participate in the pairwise
-// total-order reachability check (it has no static in-edges by design).
+// activated only via on_exhausted routing must remain an orphan (no static
+// in-edges), while parallel human nodes are otherwise fully supported.
 func TestValidateHumanNodes_OnExhaustedExemption(t *testing.T) {
 	t.Parallel()
 
@@ -602,8 +602,8 @@ nodes:
 	_, err := ParseDefinition([]byte(spec))
 	require.NoError(t, err)
 
-	// Without the exemption the same pair must be rejected: declare the loop
-	// without on_exhausted so fix_fallback becomes a regular human node.
+	// Parallel human nodes are fully supported: even without the
+	// on_exhausted exemption, statically unordered humans are allowed.
 	specNoExemption := loopTestWorkflow(`
 nodes:
   - id: start
@@ -637,8 +637,7 @@ loops:
 `)
 
 	_, err = ParseDefinition([]byte(specNoExemption))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parallel human nodes are not supported")
+	require.NoError(t, err)
 
 	// An on_exhausted human node with static in-edges must be rejected.
 	specWithStaticDeps := loopTestWorkflow(`
@@ -667,6 +666,50 @@ nodes:
 	_, err = ParseDefinition([]byte(specWithStaticDeps))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "on_exhausted human node must have no incoming dependency edges (must be an orphan)")
+}
+
+// TestValidateHumanNodes_ParallelHumanAllowed verifies that multi-branch
+// workflows containing parallel (statically unordered) human nodes parse and
+// validate successfully.
+func TestValidateHumanNodes_ParallelHumanAllowed(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: parallel-human-branches
+nodes:
+  - id: start
+    type: command
+    command: "true"
+  - id: review_a
+    type: human
+    prompt: "Review branch A"
+    depends:
+      - node: start
+  - id: fix_a
+    type: command
+    command: "true"
+    depends:
+      - node: review_a
+  - id: review_b
+    type: human
+    prompt: "Review branch B"
+    depends:
+      - node: start
+  - id: fix_b
+    type: command
+    command: "true"
+    depends:
+      - node: review_b
+  - id: join
+    type: command
+    command: "true"
+    depends:
+      - node: fix_a
+      - node: fix_b
+`
+	defn, err := ParseDefinition([]byte(spec))
+	require.NoError(t, err)
+	require.NoError(t, defn.Validate())
 }
 
 func TestValidateCommand_AllowedExitCodes(t *testing.T) {

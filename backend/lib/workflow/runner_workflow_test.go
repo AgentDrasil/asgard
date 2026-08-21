@@ -636,7 +636,7 @@ func TestSubWorkflowRunner_RecursionDepthAndCycleDetection(t *testing.T) {
 	})
 }
 
-func TestSubWorkflowRunner_RejectsHumanNodeInSubWorkflow(t *testing.T) {
+func TestSubWorkflowRunner_HumanNodeAllowedInSubWorkflow(t *testing.T) {
 	t.Parallel()
 
 	childYAML := `
@@ -648,6 +648,7 @@ nodes:
 
 	childDefn, err := ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
+	require.NoError(t, childDefn.Validate())
 
 	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
 		return childDefn, nil
@@ -668,8 +669,114 @@ nodes:
 		TmpDir: t.TempDir(),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, RunStatusFailed, res.Status)
-	assert.ErrorContains(t, res.Nodes["sub"].Error, "contains human node \"ask\" (not allowed in sub-workflows)")
+	// Static parsing and loading succeed; without a suspension gateway the
+	// human node itself fails, but never with the removed sub-workflow ban.
+	assert.ErrorContains(t, res.Nodes["sub"].Error, "no human suspension gateway configured")
+}
+
+func TestSubWorkflowRunner_HumanNode_SuspensionAndResume(t *testing.T) {
+	t.Parallel()
+
+	childYAML := `
+name: child-human
+nodes:
+  - id: prep
+    type: command
+    command: "echo ready"
+  - id: ask
+    type: human
+    depends:
+      - node: prep
+    prompt: "Approve?"
+    options: ["Approve", "Reject"]`
+
+	childDefn, err := ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+		if name == "child-human" {
+			return childDefn, nil
+		}
+		return nil, fmt.Errorf("unknown workflow: %s", name)
+	})
+	store := newMemStore()
+	engine.SetRunStore(store)
+	var suspendMu sync.Mutex
+	var suspended SuspendRequest
+	suspendCh := make(chan struct{}, 1)
+	engine.SetHumanSuspender(func(req SuspendRequest) error {
+		suspendMu.Lock()
+		suspended = req
+		suspendMu.Unlock()
+		select {
+		case suspendCh <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	parentYAML := `
+name: parent-wf
+nodes:
+  - id: sub
+    type: workflow
+    workflow: child-human`
+
+	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	require.NoError(t, err)
+
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		result, err := engine.Execute(context.Background(), parentDefn, RunContext{
+			SessionID: "chat-sub",
+			RunID:     "parent-run",
+			RunDir:    t.TempDir(),
+			TmpDir:    t.TempDir(),
+		})
+		outCh <- outcome{result: result, err: err}
+	}()
+
+	<-suspendCh
+	suspendMu.Lock()
+	msgID := suspended.MessageID
+	childRunID := suspended.RunID
+	suspendMu.Unlock()
+	require.NotEmpty(t, msgID)
+	require.NotEmpty(t, childRunID)
+	require.NotEqual(t, "parent-run", childRunID)
+
+	// The inline child run persisted its own WAITING_HUMAN snapshot linked to
+	// the parent run.
+	waitFor(t, func() bool {
+		snap := store.get(childRunID)
+		return snap != nil && snap.Status == PersistStatusWaitingHuman
+	}, "child run should reach WAITING_HUMAN")
+	childSnap := store.get(childRunID)
+	assert.Equal(t, "parent-run", childSnap.ParentRunID)
+
+	// Delivering the reply to the live waiter unblocks the in-process
+	// suspension; both the child and the parent run complete afterwards.
+	res, err := engine.ResumeByMessageID(context.Background(), msgID, "Approve", nil)
+	require.NoError(t, err)
+	require.Nil(t, res)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	subRes := out.result.Nodes["sub"]
+	require.NotNil(t, subRes)
+	assert.Equal(t, StatusSucceeded, subRes.Status)
+
+	// The settled child snapshot must not linger in WAITING_HUMAN (no stale
+	// residue for later resume attempts).
+	settled := store.get(childRunID)
+	require.NotNil(t, settled)
+	assert.Equal(t, PersistStatusCompleted, settled.Status)
 }
 
 func TestSubWorkflowRunner_HeadlessDefense_BlocksHumanNode(t *testing.T) {
