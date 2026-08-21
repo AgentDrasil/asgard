@@ -122,7 +122,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		}
 	}
 
-	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.customRunners...)
+	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
 	}

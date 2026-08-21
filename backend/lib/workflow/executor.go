@@ -17,7 +17,10 @@ type WorkflowRunParams struct {
 	SessionID string
 	Prompt    string
 	RunDir    string
-	Metadata  map[string]any
+	// Headless marks no-interaction execution; human nodes fail fast
+	// instead of suspending (cron / scheduled runs).
+	Headless bool
+	Metadata map[string]any
 }
 
 // WorkflowExecutor adapts the workflow engine to handle execution and persistence.
@@ -67,6 +70,7 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 		AgentName:         e.AgentName,
 		WorkflowRunDirs:   e.WorkflowRunDirs,
 		WorkflowMountDirs: e.WorkflowMountDirs,
+		Headless:          params.Headless,
 	}
 	if rc.RunDir == "" && params.RunDir != "" {
 
@@ -115,6 +119,11 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 				Msg("persistCh channel full, dropped workflow event after timeout")
 		}
 	}
+
+	// Seed the root workflow name into the context call chain so a
+	// self-referencing sub-workflow (A -> A) is detected before the first
+	// inline execution even happens.
+	ctx = context.WithValue(ctx, wfCallChainKey{}, []string{e.defn.Name})
 
 	result, err := e.engine.Execute(context.WithoutCancel(ctx), e.defn, rc)
 	close(persistCh)

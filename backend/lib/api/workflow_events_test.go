@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,4 +244,141 @@ func waitForRunStatus(t *testing.T, gdb *gorm.DB, chatID, want string) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out SSE Event Metadata Propagation Tests (§2.7)
+// ---------------------------------------------------------------------------
+
+func TestWorkflowEvents_Fanout_MetadataPropagated(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+
+	childYAML := `
+name: child-event-wf
+nodes:
+  - id: child_cmd
+    type: command
+    sandbox: false
+    command: "echo child-${input}"
+`
+	childDefn, err := workflow.ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflow.WorkflowDefinition, error) {
+		if name == "child-event-wf" {
+			return childDefn, nil
+		}
+		return nil, fmt.Errorf("unknown workflow: %s", name)
+	})
+	registry.Register(wfRunner)
+
+	engine := workflow.NewEngine(registry)
+	wfRunner.SetEngine(engine)
+	engine.SetRunStore(newWorkflowRunStore(wfRepo))
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	tempDir := t.TempDir()
+	itemsFile := filepath.Join(tempDir, "items.txt")
+	require.NoError(t, os.WriteFile(itemsFile, []byte("item1\nitem2"), 0644))
+
+	parentYAML := fmt.Sprintf(`
+name: parent-event-wf
+tmp_dir: "%s"
+nodes:
+  - id: fanout_task
+    type: workflow
+    workflow: child-event-wf
+    fanout:
+      items_file: "%s"
+      output_file: "output.jsonl"
+`, tempDir, itemsFile)
+
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	require.NoError(t, os.WriteFile(wfFile, []byte(parentYAML), 0644))
+
+	agent := &agents.Agent{
+		Config: agents.AgentConfig{
+			ID:   "wf-fanout-event-agent",
+			Name: "Workflow Fanout Event Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
+	s := &Server{
+		conf:           &config.Config{},
+		repo:           repo,
+		eventHub:       hub,
+		workflowEngine: engine,
+		agents:         []*agents.Agent{agent},
+	}
+	s.mux = s.buildMuxLocked()
+
+	chatID := "chat-wf-fanout-events"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-fanout-event-agent"}))
+
+	// Subscribe to SSE hub
+	subCh, _, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	// Trigger workflow message asynchronously
+	triggerPayload := map[string]any{
+		"prompt": "start fanout",
+		"chatId": chatID,
+	}
+	raw, err := json.Marshal(triggerPayload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/wf-fanout-event-agent/message", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusAccepted, rec.Code)
+
+	// Collect SSE events and assert metadata
+	var fanoutProgressEvents []SessionEvent
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case ev := <-subCh:
+			if ev.Type == "message" && ev.Message != nil {
+				// Check for bubbled fanout progress messages
+				if strings.Contains(ev.Message.ID, "fanout_task") && strings.Contains(ev.Message.ID, "child_cmd") {
+					fanoutProgressEvents = append(fanoutProgressEvents, ev)
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+		if len(fanoutProgressEvents) >= 2 {
+			break
+		}
+	}
+
+	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)
+
+	// Verify we received bubbled fanout progress events with item indices in the Message IDs
+	require.NotEmpty(t, fanoutProgressEvents, "expected at least one fanout progress event delivered via SSE")
+	var foundItem1, foundItem2 bool
+	for _, ev := range fanoutProgressEvents {
+		if strings.Contains(ev.Message.ID, "fanout_task-1-child_cmd") {
+			foundItem1 = true
+		}
+		if strings.Contains(ev.Message.ID, "fanout_task-2-child_cmd") {
+			foundItem2 = true
+		}
+	}
+	assert.True(t, foundItem1, "expected item 1 fanout progress event")
+	assert.True(t, foundItem2, "expected item 2 fanout progress event")
 }

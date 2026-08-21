@@ -17,9 +17,10 @@ import (
 
 // newWorkflowEngine builds the shared workflow engine with all node runners
 // registered via the IoC registry. funcRegistry backs the `function` node
-// runner (nil falls back to the process-wide default registry); extraRunners
-// replace the default runner for the node types they support.
-func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
+// runner (nil falls back to the process-wide default registry); resolveDefn
+// resolves sub-workflow definitions by name for the `workflow` node runner;
+// extraRunners replace the default runner for the node types they support.
+func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, resolveDefn workflow.ResolveDefnFunc, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(true))
 	registry.Register(workflow.NewFunctionRunner(funcRegistry))
@@ -36,7 +37,41 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 	for _, runner := range extraRunners {
 		registry.Register(runner)
 	}
-	return workflow.NewEngine(registry), nil
+	subRunner := workflow.NewSubWorkflowRunner(resolveDefn)
+	registry.Register(subRunner)
+	engine := workflow.NewEngine(registry)
+	subRunner.SetEngine(engine)
+	return engine, nil
+}
+
+// resolveWorkflowDefinition resolves a sub-workflow definition by name against
+// the server's registered agents. Agents are matched first by config ID or
+// display name; if none matches, all workflow agents' definitions are loaded
+// and compared by definition name.
+func (s *Server) resolveWorkflowDefinition(name string) (*workflow.WorkflowDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var fallbacks []*agents.Agent
+	for _, agent := range s.agents {
+		if agent.Config.Type != "workflow" || agent.WorkflowPath == "" {
+			continue
+		}
+		if agent.Config.ID == name || agent.Config.Name == name {
+			return workflow.LoadDefinition(agent.WorkflowPath)
+		}
+		fallbacks = append(fallbacks, agent)
+	}
+	for _, agent := range fallbacks {
+		defn, err := workflow.LoadDefinition(agent.WorkflowPath)
+		if err != nil {
+			log.Warn().Err(err).Str("agent", agent.Config.ID).Msg("failed to load candidate sub-workflow definition")
+			continue
+		}
+		if defn.Name == name {
+			return defn, nil
+		}
+	}
+	return nil, fmt.Errorf("sub-workflow %q not found among registered workflow agents", name)
 }
 
 // runWorkflow executes a workflow agent synchronously, returning its settled status and summary output.
@@ -79,7 +114,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 	engine := s.workflowEngine
 	if engine == nil {
 		var err error
-		engine, err = newWorkflowEngine(s.conf, s, s.funcRegistry, s.customRunners...)
+		engine, err = newWorkflowEngine(s.conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
 			return "failed", "", fmt.Errorf("failed to create workflow engine: %w", err)
@@ -121,6 +156,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 			SessionID: chatID,
 			Prompt:    req.Prompt,
 			RunDir:    req.RunDir,
+			Headless:  req.Headless,
 			Metadata:  req.Metadata,
 		})
 		resultCh <- runResult{result: res, err: err}

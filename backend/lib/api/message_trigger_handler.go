@@ -15,11 +15,13 @@ import (
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.
 type TriggerMessageRequest struct {
-	Prompt   string         `json:"prompt"`
-	ChatID   string         `json:"chatId,omitempty"`
-	RunDir   string         `json:"runDir,omitempty"`
-	Model    string         `json:"model,omitempty"`
-	Wait     bool           `json:"wait,omitempty"`
+	Prompt   string `json:"prompt"`
+	ChatID   string `json:"chatId,omitempty"`
+	RunDir   string `json:"runDir,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Wait     bool   `json:"wait,omitempty"`
+	Headless bool   `json:"headless,omitempty"`
+
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 

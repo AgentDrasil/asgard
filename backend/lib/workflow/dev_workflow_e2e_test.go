@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -460,4 +461,337 @@ func TestDevWorkflowE2EScenarioH_FinalRejectionReconverges(t *testing.T) {
 	assert.Equal(t, RunStatusCompleted, out.result.Status)
 	assert.Equal(t, 2, out.runner.count("final_cleaner"), "rejection re-drives the final cleaner")
 	assert.Equal(t, 2, out.runner.count("final_commit"))
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out Notebook E2E Tests (§2.5)
+// ---------------------------------------------------------------------------
+
+// countingRunStore wraps memStore to count StartRun, SettleRun, and MarkWaitingHuman calls.
+type countingRunStore struct {
+	*memStore
+	mu               sync.Mutex
+	startRunCount    int
+	settleRunCount   int
+	markWaitingCount int
+}
+
+func newCountingRunStore() *countingRunStore {
+	return &countingRunStore{memStore: newMemStore()}
+}
+
+func (c *countingRunStore) StartRun(run *RunSnapshot) error {
+	c.mu.Lock()
+	c.startRunCount++
+	c.mu.Unlock()
+	return c.memStore.StartRun(run)
+}
+
+func (c *countingRunStore) MarkWaitingHuman(run *RunSnapshot) error {
+	c.mu.Lock()
+	c.markWaitingCount++
+	c.mu.Unlock()
+	return c.memStore.MarkWaitingHuman(run)
+}
+
+func (c *countingRunStore) SettleRun(runID string, status string, states map[string]PersistedNodeState) error {
+	c.mu.Lock()
+	c.settleRunCount++
+	c.mu.Unlock()
+	return c.memStore.SettleRun(runID, status, states)
+}
+
+func (c *countingRunStore) counts() (start, settle, waiting int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.startRunCount, c.settleRunCount, c.markWaitingCount
+}
+
+func setupNotebookE2EEngine(t *testing.T, childDefn *WorkflowDefinition, store RunStore) *Engine {
+	t.Helper()
+	registry := NewNodeRunnerRegistry()
+	registry.Register(NewCommandRunner(false))
+
+	wfRunner := NewSubWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+		if name == "notes-child-wf" {
+			return childDefn, nil
+		}
+		return nil, fmt.Errorf("unknown sub-workflow: %s", name)
+	})
+	registry.Register(wfRunner)
+
+	engine := NewEngine(registry)
+	wfRunner.SetEngine(engine)
+	if store != nil {
+		engine.SetRunStore(store)
+	}
+	return engine
+}
+
+// TestDevWorkflow_FanoutNotebook_FullPipeline_Success verifies full pipeline execution:
+// scan (generates pending.jsonl) -> group (generates groups/items.jsonl with 3 groups) ->
+// notes (fan-out 3 groups) -> commit_hashes (join: always, reads notes_results.jsonl, commits all 3 hashes).
+func TestDevWorkflow_FanoutNotebook_FullPipeline_Success(t *testing.T) {
+	t.Parallel()
+
+	childYAML := `
+name: notes-child-wf
+nodes:
+  - id: generate_note
+    type: command
+    sandbox: false
+    command: "echo processed-${input}"
+`
+	childDefn, err := ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	engine := setupNotebookE2EEngine(t, childDefn, nil)
+
+	parentYAML := `
+name: notebook-pipeline
+tmp_dir: "tmp/${session_id}"
+nodes:
+  - id: scan
+    type: command
+    sandbox: false
+    command: |
+      mkdir -p ${tmp_dir}/groups
+      echo '{"id":"item1"}' > ${tmp_dir}/pending.jsonl
+      echo '{"id":"item2"}' >> ${tmp_dir}/pending.jsonl
+      echo '{"id":"item3"}' >> ${tmp_dir}/pending.jsonl
+  - id: group
+    type: command
+    sandbox: false
+    depends:
+      - node: scan
+    command: |
+      echo "group-1" > ${tmp_dir}/groups/items.jsonl
+      echo "group-2" >> ${tmp_dir}/groups/items.jsonl
+      echo "group-3" >> ${tmp_dir}/groups/items.jsonl
+  - id: notes
+    type: workflow
+    workflow: notes-child-wf
+    depends:
+      - node: group
+    fanout:
+      items_file: "groups/items.jsonl"
+      output_file: "notes_results.jsonl"
+  - id: commit_hashes
+    type: command
+    sandbox: false
+    depends:
+      - node: notes
+    join: always
+    command: |
+      cat ${tmp_dir}/notes_results.jsonl | grep '"status":"SUCCEEDED"' | wc -l > ${tmp_dir}/committed_hashes.txt
+`
+	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	require.NoError(t, err)
+
+	runDir := t.TempDir()
+	sessionID := "test-notebook-success"
+	res, err := engine.Execute(t.Context(), parentDefn, RunContext{
+		SessionID: sessionID,
+		RunID:     "run-notebook-success",
+		RunDir:    runDir,
+	})
+	require.NoError(t, err)
+	require.Equal(t, RunStatusCompleted, res.Status)
+
+	tmpDir := filepath.Join(runDir, "tmp", sessionID)
+
+	// Assert intermediate artifacts
+	_, err = os.Stat(filepath.Join(tmpDir, "pending.jsonl"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(tmpDir, "groups", "items.jsonl"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(tmpDir, "notes_results.jsonl"))
+	require.NoError(t, err)
+
+	committedHashes, err := os.ReadFile(filepath.Join(tmpDir, "committed_hashes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "3", strings.TrimSpace(string(committedHashes)))
+
+	// Check final node statuses
+	assert.Equal(t, StatusSucceeded, res.Nodes["scan"].Status)
+	assert.Equal(t, StatusSucceeded, res.Nodes["group"].Status)
+	assert.Equal(t, StatusSucceeded, res.Nodes["notes"].Status)
+	assert.Equal(t, StatusSucceeded, res.Nodes["commit_hashes"].Status)
+}
+
+// TestDevWorkflow_FanoutNotebook_PartialFailureIdempotent verifies partial failure:
+// group 2 fails, group 1 & 3 succeed; notes node is FAILED; commit_hashes runs due to join: always
+// and commits hashes only for succeeded groups (group 1 & 3).
+func TestDevWorkflow_FanoutNotebook_PartialFailureIdempotent(t *testing.T) {
+	t.Parallel()
+
+	childYAML := `
+name: notes-child-wf
+nodes:
+  - id: generate_note
+    type: command
+    sandbox: false
+    command: |
+      if [ "${input}" = "group-2" ]; then
+        exit 1
+      else
+        echo "ok-${input}"
+      fi
+`
+	childDefn, err := ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	engine := setupNotebookE2EEngine(t, childDefn, nil)
+
+	parentYAML := `
+name: notebook-partial-failure
+tmp_dir: "tmp/${session_id}"
+nodes:
+  - id: scan
+    type: command
+    sandbox: false
+    command: |
+      mkdir -p ${tmp_dir}/groups
+      echo '{"id":"item1"}' > ${tmp_dir}/pending.jsonl
+  - id: group
+    type: command
+    sandbox: false
+    depends:
+      - node: scan
+    command: |
+      echo "group-1" > ${tmp_dir}/groups/items.jsonl
+      echo "group-2" >> ${tmp_dir}/groups/items.jsonl
+      echo "group-3" >> ${tmp_dir}/groups/items.jsonl
+  - id: notes
+    type: workflow
+    workflow: notes-child-wf
+    depends:
+      - node: group
+    fanout:
+      items_file: "groups/items.jsonl"
+      output_file: "notes_results.jsonl"
+  - id: commit_hashes
+    type: command
+    sandbox: false
+    depends:
+      - node: notes
+    join: always
+    command: |
+      grep '"status":"SUCCEEDED"' ${tmp_dir}/notes_results.jsonl | wc -l > ${tmp_dir}/committed_hashes.txt
+      grep '"status":"FAILED"' ${tmp_dir}/notes_results.jsonl | wc -l > ${tmp_dir}/failed_hashes.txt
+`
+	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	require.NoError(t, err)
+
+	runDir := t.TempDir()
+	sessionID := "test-notebook-partial"
+	res, err := engine.Execute(t.Context(), parentDefn, RunContext{
+		SessionID: sessionID,
+		RunID:     "run-notebook-partial",
+		RunDir:    runDir,
+	})
+	require.NoError(t, err)
+	// Global run status should be FAILED because notes failed
+	require.Equal(t, RunStatusFailed, res.Status)
+
+	assert.Equal(t, StatusFailed, res.Nodes["notes"].Status)
+	assert.Equal(t, StatusSucceeded, res.Nodes["commit_hashes"].Status, "commit_hashes should run due to join: always")
+
+	tmpDir := filepath.Join(runDir, "tmp", sessionID)
+	committed, err := os.ReadFile(filepath.Join(tmpDir, "committed_hashes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "2", strings.TrimSpace(string(committed)), "only succeeded groups 1 and 3 should be committed")
+
+	failed, err := os.ReadFile(filepath.Join(tmpDir, "failed_hashes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "1", strings.TrimSpace(string(failed)), "group 2 failed and was not committed")
+}
+
+// TestDevWorkflow_FanoutNotebook_ZeroExtraPersistence asserts zero extra persistence contract:
+// exactly 1 StartRun, 1 SettleRun, 0 MarkWaitingHuman calls across the entire fan-out run,
+// and PersistedNodeState.Output for parent node contains complete ordered JSONL.
+func TestDevWorkflow_FanoutNotebook_ZeroExtraPersistence(t *testing.T) {
+	t.Parallel()
+
+	childYAML := `
+name: notes-child-wf
+nodes:
+  - id: process
+    type: command
+    sandbox: false
+    command: "echo processed-${input}"
+`
+	childDefn, err := ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	cStore := newCountingRunStore()
+	engine := setupNotebookE2EEngine(t, childDefn, cStore)
+
+	parentYAML := `
+name: notebook-zero-persist
+tmp_dir: "tmp/${session_id}"
+nodes:
+  - id: group
+    type: command
+    sandbox: false
+    command: |
+      mkdir -p ${tmp_dir}
+      echo "alpha" > ${tmp_dir}/items.txt
+      echo "beta" >> ${tmp_dir}/items.txt
+      echo "gamma" >> ${tmp_dir}/items.txt
+  - id: fanout_notes
+    type: workflow
+    workflow: notes-child-wf
+    depends:
+      - node: group
+    fanout:
+      items_file: "items.txt"
+      output_file: "output.jsonl"
+`
+	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	require.NoError(t, err)
+
+	runDir := t.TempDir()
+	sessionID := "test-zero-persist"
+	runID := "run-zero-persist-1"
+	res, err := engine.Execute(t.Context(), parentDefn, RunContext{
+		SessionID: sessionID,
+		RunID:     runID,
+		RunDir:    runDir,
+		Store:     cStore,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, RunStatusCompleted, res.Status)
+
+	startCount, settleCount, waitCount := cStore.counts()
+	assert.Equal(t, 1, startCount, "exactly 1 StartRun call for top-level workflow")
+	assert.Equal(t, 1, settleCount, "exactly 1 SettleRun call for top-level workflow")
+	assert.Equal(t, 0, waitCount, "0 MarkWaitingHuman calls during headless fan-out")
+
+	// Verify PersistedNodeState.Output on settled snapshot
+	snap, err := cStore.GetRun(runID)
+	require.NoError(t, err)
+	require.NotNil(t, snap)
+	fanoutState, ok := snap.NodeStates["fanout_notes"]
+	require.True(t, ok)
+	assert.Equal(t, "SUCCEEDED", fanoutState.Status)
+
+	lines := strings.Split(strings.TrimSpace(fanoutState.Output), "\n")
+	require.Len(t, lines, 3)
+
+	type entry struct {
+		ItemIndex int    `json:"item_index"`
+		Item      string `json:"item"`
+		Status    string `json:"status"`
+		Output    string `json:"output"`
+	}
+	expectedItems := []string{"alpha", "beta", "gamma"}
+	for i, l := range lines {
+		var e entry
+		require.NoError(t, json.Unmarshal([]byte(l), &e))
+		assert.Equal(t, i+1, e.ItemIndex)
+		assert.Equal(t, expectedItems[i], e.Item)
+		assert.Equal(t, "SUCCEEDED", e.Status)
+		assert.Equal(t, "processed-"+expectedItems[i], strings.TrimSpace(e.Output))
+	}
 }

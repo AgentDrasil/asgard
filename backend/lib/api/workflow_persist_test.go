@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -264,4 +265,152 @@ func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {
 	assert.Equal(t, "Dev Workflow", msg.AgentName)
 	assert.Equal(t, []string{"/tmp/plan/plan.md", "/tmp/plan/todo.yaml"}, msg.ArtifactFiles)
 	assert.Equal(t, "Please review Plan (/tmp/plan/plan.md)", msg.Content)
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out DB Persistence & Message Deconfliction Tests (§2.6)
+// ---------------------------------------------------------------------------
+
+func TestWorkflowPersist_Fanout_ZeroExtraRunRecordsAndMessageDeconfliction(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	childYAML := `
+name: fanout-child-persist
+nodes:
+  - id: step_child
+    type: command
+    sandbox: false
+    command: "echo result-${input}"
+`
+	childDefn, err := workflow.ParseDefinition([]byte(childYAML))
+	require.NoError(t, err)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflow.WorkflowDefinition, error) {
+		if name == "fanout-child-persist" {
+			return childDefn, nil
+		}
+		return nil, fmt.Errorf("unknown workflow: %s", name)
+	})
+	registry.Register(wfRunner)
+	engine := workflow.NewEngine(registry)
+	wfRunner.SetEngine(engine)
+	engine.SetRunStore(store)
+
+	s := &Server{
+		repo:           repo,
+		workflowEngine: engine,
+		eventHub:       NewSessionEventHubWithCapacity(50),
+	}
+	t.Cleanup(s.eventHub.Close)
+
+	chatID := "chat-fanout-persist"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-persist-agent"}))
+
+	tmpDir := t.TempDir()
+	itemsFile := filepath.Join(tmpDir, "items.txt")
+	require.NoError(t, os.WriteFile(itemsFile, []byte("item1\nitem2\nitem3"), 0644))
+
+	parentYAML := fmt.Sprintf(`
+name: fanout-parent-persist
+tmp_dir: "%s"
+nodes:
+  - id: fanout_node
+    type: workflow
+    workflow: fanout-child-persist
+    fanout:
+      items_file: %s
+      output_file: output.jsonl
+`, tmpDir, itemsFile)
+
+	parentDefn, err := workflow.ParseDefinition([]byte(parentYAML))
+	require.NoError(t, err)
+
+	runID := "run-fanout-persist-top"
+	res, err := engine.Execute(t.Context(), parentDefn, workflow.RunContext{
+		SessionID: chatID,
+		RunID:     runID,
+		RunDir:    tmpDir,
+		TmpDir:    tmpDir,
+		Store:     store,
+		EmitEvent: func(ev workflow.WorkflowEvent) {
+			s.handleWorkflowEvent(chatID, ev)
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, workflow.RunStatusCompleted, res.Status)
+
+	// 1. Assert DB level: exactly 1 WorkflowRun record (no child Run records)
+	var runs []dbmodels.WorkflowRun
+	require.NoError(t, testDB.Where("session_id = ?", chatID).Find(&runs).Error)
+	assert.Len(t, runs, 1, "only top-level workflow run should be persisted in DB")
+	assert.Equal(t, runID, runs[0].RunID)
+	assert.Equal(t, workflow.PersistStatusCompleted, runs[0].Status)
+
+	// 2. Simulate / verify bubbled status update events with item_index & sub_node_id
+	// emit multiple bubbled events to test derived msgID deconfliction
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeStatusUpdate,
+		NodeID:    "fanout_node",
+		NodeType:  workflow.NodeTypeWorkflow,
+		Status:    workflow.StatusRunning,
+		Message:   "Item 1 child started",
+		EntryType: "tool_call",
+		Metadata: map[string]any{
+			"item_index":  1,
+			"sub_node_id": "step_child",
+			"step_index":  1,
+		},
+	})
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeStatusUpdate,
+		NodeID:    "fanout_node",
+		NodeType:  workflow.NodeTypeWorkflow,
+		Status:    workflow.StatusRunning,
+		Message:   "Item 2 child started",
+		EntryType: "tool_call",
+		Metadata: map[string]any{
+			"item_index":  2,
+			"sub_node_id": "step_child",
+			"step_index":  1,
+		},
+	})
+	// High-frequency fanout_progress should NOT be appended to DB session messages
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeStatusUpdate,
+		NodeID:    "fanout_node",
+		NodeType:  workflow.NodeTypeWorkflow,
+		Status:    workflow.StatusRunning,
+		Message:   "Item 1 child progress ticker",
+		EntryType: "fanout_progress",
+		Metadata: map[string]any{
+			"item_index":  1,
+			"sub_node_id": "step_child",
+			"step_index":  1,
+		},
+	})
+
+	session, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+
+	// Check messages in session
+	msgIDs := make(map[string]int)
+	for _, m := range session.Messages {
+		msgIDs[m.ID]++
+		assert.NotEqual(t, "fanout_progress", m.Role, "fanout_progress events must not be persisted into DB messages")
+	}
+
+	assert.Contains(t, msgIDs, "wf-step-fanout_node-1-step_child-1")
+	assert.Contains(t, msgIDs, "wf-step-fanout_node-2-step_child-1")
+	assert.Equal(t, 1, msgIDs["wf-step-fanout_node-1-step_child-1"], "no collision/overwriting for item 1")
+	assert.Equal(t, 1, msgIDs["wf-step-fanout_node-2-step_child-1"], "no collision/overwriting for item 2")
 }

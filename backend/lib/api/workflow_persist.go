@@ -300,8 +300,20 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				stepIdx = idx
 			}
 			targetFiles := toStringSlice(ev.Metadata["target_files"])
+
+			// Derived message ID: concurrent fan-out sub-items share the same
+			// parent NodeID and step_index, so their bubbled status updates
+			// must be keyed by item_index / sub_node_id to avoid overwriting
+			// each other in the session transcript.
+			msgID := fmt.Sprintf("wf-step-%s-%d", ev.NodeID, stepIdx)
+			_, hasItemIndex := ev.Metadata["item_index"]
+			_, hasSubNodeID := ev.Metadata["sub_node_id"]
+			if hasItemIndex || hasSubNodeID {
+				msgID = fmt.Sprintf("wf-step-%s-%v-%s-%d", ev.NodeID, ev.Metadata["item_index"], ev.Metadata["sub_node_id"], stepIdx)
+			}
+
 			msg := dbmodels.ChatMessage{
-				ID:            fmt.Sprintf("wf-step-%s-%d", ev.NodeID, stepIdx),
+				ID:            msgID,
 				Role:          role,
 				Content:       ev.Message,
 				AgentName:     ev.AgentName,
@@ -310,6 +322,16 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				StepIndex:     stepIdx,
 				TargetFiles:   targetFiles,
 				ArtifactFiles: ev.Artifacts,
+			}
+			// High-frequency fan-out progress events are broadcast via SSE
+			// only; persisting them would flood the session transcript. Only
+			// the aggregated node status update is persisted.
+			if ev.EntryType == "fanout_progress" {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "message",
+					Message: &msg,
+				})
+				return
 			}
 			if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow step status message to repo")

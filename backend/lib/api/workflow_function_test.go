@@ -49,7 +49,7 @@ func TestNewWorkflowEngine_InjectsRegistryAndRunners(t *testing.T) {
 	cmdStub := &stubRunner{supports: workflow.NodeTypeCommand}
 
 	conf := &config.Config{AgentDir: t.TempDir()}
-	engine, err := newWorkflowEngine(conf, nil, funcRegistry, llmStub, cmdStub)
+	engine, err := newWorkflowEngine(conf, nil, funcRegistry, nil, llmStub, cmdStub)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 
@@ -78,7 +78,7 @@ func TestNewWorkflowEngine_InjectsRegistryAndRunners(t *testing.T) {
 func TestNewWorkflowEngine_NilRegistryFallsBackToDefault(t *testing.T) {
 	t.Parallel()
 
-	engine, err := newWorkflowEngine(nil, nil, nil)
+	engine, err := newWorkflowEngine(nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	fnRunner, ok := engine.Registry().Get(workflow.NodeTypeFunction)
@@ -334,7 +334,7 @@ func newFunctionTestServer(t *testing.T, workflowYAML string, register func(reg 
 	require.NoError(t, os.WriteFile(wfFile, []byte(workflowYAML), 0644))
 
 	conf := &config.Config{AgentDir: tempDir}
-	engine, err := newWorkflowEngine(conf, nil, funcRegistry)
+	engine, err := newWorkflowEngine(conf, nil, funcRegistry, nil)
 	require.NoError(t, err)
 	engine.SetRunStore(newWorkflowRunStore(wfRepo))
 
