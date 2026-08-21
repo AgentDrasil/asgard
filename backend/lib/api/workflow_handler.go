@@ -16,10 +16,13 @@ import (
 )
 
 // newWorkflowEngine builds the shared workflow engine with all node runners
-// registered via the IoC registry.
-func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener) (*workflow.Engine, error) {
+// registered via the IoC registry. funcRegistry backs the `function` node
+// runner (nil falls back to the process-wide default registry); extraRunners
+// replace the default runner for the node types they support.
+func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(true))
+	registry.Register(workflow.NewFunctionRunner(funcRegistry))
 	if conf != nil {
 		registry.Register(workflow.NewAgentRunnerWithListener(agents.NewLoader(conf.AgentDir), conf, statusListener))
 		if conf.GeminiAPIKey != "" {
@@ -29,6 +32,9 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 			}
 			registry.Register(workflow.NewLLMRunner(client))
 		}
+	}
+	for _, runner := range extraRunners {
+		registry.Register(runner)
 	}
 	return workflow.NewEngine(registry), nil
 }
@@ -73,7 +79,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 	engine := s.workflowEngine
 	if engine == nil {
 		var err error
-		engine, err = newWorkflowEngine(s.conf, s)
+		engine, err = newWorkflowEngine(s.conf, s, s.funcRegistry, s.customRunners...)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
 			return "failed", "", fmt.Errorf("failed to create workflow engine: %w", err)
