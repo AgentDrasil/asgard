@@ -22,6 +22,9 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 )
 
+// ErrServerShutdownBeforeStart is returned by Start when Shutdown was called before or during Start.
+var ErrServerShutdownBeforeStart = errors.New("server shut down before start completed")
+
 // Server manages the HTTP server hosting agents.
 type Server struct {
 	conf             *config.Config
@@ -239,7 +242,7 @@ func (s *Server) Start() error {
 		// Shutdown was called before or during handle registration; clean up immediately.
 		_ = publicSrv.Close()
 		_ = internalSrv.Close()
-		return fmt.Errorf("server shut down before start completed")
+		return ErrServerShutdownBeforeStart
 	default:
 	}
 

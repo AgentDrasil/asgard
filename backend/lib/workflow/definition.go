@@ -240,6 +240,10 @@ func (d *WorkflowDefinition) Validate() error {
 			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command, human or function)", node.ID, node.Type)
 		}
 
+		if node.Function != "" && node.Type != NodeTypeFunction {
+			return fmt.Errorf("node %s: function is only allowed on function nodes", node.ID)
+		}
+
 		if len(node.AllowedExitCodes) > 0 {
 			if node.Type != NodeTypeCommand {
 				return fmt.Errorf("node %s: allowed_exit_codes is only allowed on command nodes", node.ID)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -141,8 +142,15 @@ func TestApp_Run_GracefulShutdownAndCleanup(t *testing.T) {
 		)
 	}()
 
-	// Allow server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to start by polling the public port
+	require.Eventually(t, func() bool {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(conf.Host, fmt.Sprintf("%d", conf.Port)), 50*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond, "server did not bind port in time")
 
 	// Cancel context to trigger graceful shutdown
 	cancel()

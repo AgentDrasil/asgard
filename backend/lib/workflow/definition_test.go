@@ -1057,6 +1057,18 @@ nodes:
 `,
 			wantErr: "entry is only allowed on agent nodes",
 		},
+		{
+			name: "function field rejected on non-function node",
+			spec: `
+name: test-function-node
+nodes:
+  - id: cmd1
+    type: command
+    command: "echo hello"
+    function: my_transform
+`,
+			wantErr: "function is only allowed on function nodes",
+		},
 	}
 
 	for _, tt := range tests {

@@ -245,7 +245,7 @@ cli:
 	}
 }
 
-func TestServer_ShutdownBeforeOrConcurrentWithStart(t *testing.T) {
+func TestServer_ShutdownBeforeStart(t *testing.T) {
 	t.Parallel()
 
 	mockClients := map[string]types.CLIClient{

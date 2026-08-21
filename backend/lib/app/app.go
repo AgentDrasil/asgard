@@ -61,6 +61,9 @@ func WithDB(db *gorm.DB) Option {
 // WithFunction registers a custom workflow function.
 func WithFunction(name string, fn workflow.WorkflowFunction) Option {
 	return func(o *Options) {
+		if fn == nil {
+			return
+		}
 		if o.Functions == nil {
 			o.Functions = make(map[string]workflow.WorkflowFunction)
 		}
@@ -220,6 +223,22 @@ func New(opts ...Option) (*App, error) {
 	}, nil
 }
 
+// Config returns the resolved configuration of the App.
+func (a *App) Config() *config.Config {
+	if a == nil {
+		return nil
+	}
+	return a.conf
+}
+
+// DB returns the underlying database connection of the App.
+func (a *App) DB() *gorm.DB {
+	if a == nil {
+		return nil
+	}
+	return a.db
+}
+
 // Start starts the underlying HTTP server and blocks until exit.
 func (a *App) Start() error {
 	if a == nil || a.server == nil {
@@ -278,6 +297,9 @@ func Run(ctx context.Context, opts ...Option) error {
 	stopErr := a.Stop(shutdownCtx)
 
 	if startErr != nil {
+		if ctx.Err() != nil && errors.Is(startErr, api.ErrServerShutdownBeforeStart) {
+			return nil
+		}
 		return startErr
 	}
 	return stopErr
