@@ -42,6 +42,10 @@ func (s *Server) reload() error {
 	s.mux = s.buildMuxLocked()
 	s.mu.Unlock()
 
+	if s.cronManager != nil {
+		s.cronManager.Reload(agents)
+	}
+
 	return nil
 }
 

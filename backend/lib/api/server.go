@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/trigger"
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 )
@@ -35,6 +36,7 @@ type Server struct {
 	statusListeners  map[string][]*statusListener
 	ttydManager      *ttyd.Manager
 	workflowEngine   *workflow.Engine
+	cronManager      *trigger.WorkflowCronManager
 	eventHub         *SessionEventHub
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -137,6 +139,12 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	}
 
 	CheckPushNotificationSetup()
+
+	cronMgr, err := trigger.NewWorkflowCronManager(repo, s.runWorkflowCronTrigger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize workflow cron manager: %w", err)
+	}
+	s.cronManager = cronMgr
 
 	if err := s.reload(); err != nil {
 
@@ -337,10 +345,27 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if s.eventHub != nil {
 			s.eventHub.Close()
 		}
+		if s.cronManager != nil {
+			if err := s.cronManager.Shutdown(); err != nil {
+				errs = append(errs, fmt.Errorf("cron manager shutdown failed: %w", err))
+			}
+		}
 
 		s.shutdownErr = errors.Join(errs...)
 	})
 	return s.shutdownErr
+}
+
+// runWorkflowCronTrigger executes a scheduled workflow on behalf of WorkflowCronManager,
+// participating in the activeExecutions mutual-exclusion guard.
+func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agents.Agent, chatID, prompt string, headless bool) error {
+	if _, running := s.activeExecutions.LoadOrStore(chatID, struct{}{}); running {
+		log.Warn().Str("chatId", chatID).Msg("skip cron cycle: execution already in flight")
+		return nil
+	}
+	defer s.activeExecutions.Delete(chatID)
+	_, _, err := s.runWorkflow(ctx, agent, chatID, TriggerMessageRequest{Prompt: prompt, Headless: headless})
+	return err
 }
 
 // Context returns the Server's root context (canceled on shutdown).

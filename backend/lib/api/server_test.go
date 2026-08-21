@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 )
@@ -65,4 +68,38 @@ func TestServer_WebUIHostingAndFallback(t *testing.T) {
 	if string(body) != "<html><body>Frontend Root</body></html>" {
 		t.Errorf("expected index.html fallback content, got %s", string(body))
 	}
+}
+
+func TestServer_WorkflowCronIntegration(t *testing.T) {
+	tempDir := t.TempDir()
+	agentsDir := filepath.Join(tempDir, "agents")
+	require.NoError(t, os.MkdirAll(filepath.Join(agentsDir, "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "agent_father", "config.yaml"), []byte(`
+id: "agent_father"
+name: "Agent Father"
+description: "Father"
+team: "my-team"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`), 0644))
+
+	cfg := &config.Config{
+		AgentDir: tempDir,
+	}
+	srv, err := New(cfg, nil)
+	require.NoError(t, err)
+	require.NotNil(t, srv.cronManager)
+
+	// Verify runWorkflowCronTrigger activeExecutions mutex guard
+	chatID := "test-cron-guard"
+	srv.activeExecutions.Store(chatID, struct{}{})
+	err = srv.runWorkflowCronTrigger(context.Background(), nil, chatID, "", true)
+	require.NoError(t, err) // Should skip silently
+	srv.activeExecutions.Delete(chatID)
+
+	// Verify Shutdown cleans up cronManager
+	require.NoError(t, srv.Shutdown(context.Background()))
 }

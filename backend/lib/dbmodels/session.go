@@ -195,6 +195,28 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 	return r.db.Save(session).Error
 }
 
+// UpsertSession creates the session if it does not exist; if it already exists,
+// only metadata columns (Title, CurrentAgent, RunDir, UpdatedAt) are updated so
+// that existing Messages, Agents and Artifacts are preserved.
+func (r *SessionRepository) UpsertSession(session *Session) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var existing Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, "chat_id = ?", session.ChatID).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return tx.Create(session).Error
+			}
+			return err
+		}
+		return tx.Model(&existing).Updates(map[string]any{
+			"title":         session.Title,
+			"current_agent": session.CurrentAgent,
+			"run_dir":       session.RunDir,
+			"updated_at":    time.Now(),
+		}).Error
+	})
+}
+
 // UpdateAgentStatus updates the status for a specific agent in a session.
 func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, status AgentStatus) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
