@@ -25,6 +25,7 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     openssh-client \
     python3 \
     sqlite3 \
+    less \
     && rm -rf /var/lib/apt/lists/*
 
 # Install agy

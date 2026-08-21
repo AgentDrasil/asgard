@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
 )
 
 func TestParsePromptOutput(t *testing.T) {
@@ -155,6 +157,72 @@ func TestSplitModelVariant(t *testing.T) {
 			base, variant := SplitModelVariant(tt.input)
 			assert.Equal(t, tt.wantBase, base)
 			assert.Equal(t, tt.wantVar, variant)
+		})
+	}
+}
+
+func TestBuildPromptArgv_TableDriven(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		prompt   string
+		opts     types.PromptOptions
+		wantArgv []string
+	}{
+		{
+			name:   "basic prompt without options",
+			prompt: "hello world",
+			opts:   types.PromptOptions{},
+			wantArgv: []string{
+				"run", "--format", "json", "--auto", "--", "hello world",
+			},
+		},
+		{
+			name:   "prompt starting with hyphen (markdown list)",
+			prompt: "- first item\n- second item",
+			opts:   types.PromptOptions{},
+			wantArgv: []string{
+				"run", "--format", "json", "--auto", "--", "- first item\n- second item",
+			},
+		},
+		{
+			name:   "prompt with session ID and base model",
+			prompt: "continue task",
+			opts: types.PromptOptions{
+				SessionID: "ses_123456",
+				Model:     "deepseek-chat",
+			},
+			wantArgv: []string{
+				"run", "--format", "json", "--auto",
+				"--session", "ses_123456",
+				"--model", "deepseek-chat",
+				"--", "continue task",
+			},
+		},
+		{
+			name:   "prompt with model and variant",
+			prompt: "run query",
+			opts: types.PromptOptions{
+				SessionID: "ses_abc",
+				Model:     "zai-coding-plan/glm-5.3/low",
+			},
+			wantArgv: []string{
+				"run", "--format", "json", "--auto",
+				"--session", "ses_abc",
+				"--model", "zai-coding-plan/glm-5.3",
+				"--variant", "low",
+				"--", "run query",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			argv := buildPromptArgv(tt.prompt, tt.opts)
+			assert.Equal(t, tt.wantArgv, argv)
 		})
 	}
 }

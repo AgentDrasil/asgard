@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -72,9 +73,8 @@ func SplitModelVariant(model string) (string, string) {
 	return model, ""
 }
 
-// Prompt sends a prompt to opencode and parses its JSONL output in real-time.
-// If opts.ReportCallback is set, it is called for each meaningful output line.
-func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
+// buildPromptArgv constructs the CLI arguments for running an opencode prompt.
+func buildPromptArgv(prompt string, opts types.PromptOptions) []string {
 	argv := []string{"run", "--format", "json", "--auto"}
 	if opts.SessionID != "" {
 		argv = append(argv, "--session", opts.SessionID)
@@ -86,12 +86,22 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			argv = append(argv, "--variant", variant)
 		}
 	}
-	argv = append(argv, prompt)
+	argv = append(argv, "--", prompt)
+	return argv
+}
+
+// Prompt sends a prompt to opencode and parses its JSONL output in real-time.
+// If opts.ReportCallback is set, it is called for each meaningful output line.
+func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
+	argv := buildPromptArgv(prompt, opts)
 
 	cmd := exec.CommandContext(ctx, "opencode", argv...)
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -212,6 +222,9 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if stderrMsg := strings.TrimSpace(stderrBuf.String()); stderrMsg != "" {
+			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, stderrMsg)
 		}
 		return nil, fmt.Errorf("running opencode prompt: %w", err)
 	}

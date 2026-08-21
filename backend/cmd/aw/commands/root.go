@@ -18,9 +18,10 @@ var debug bool
 var GlobalConfig *config.Config
 
 var rootCmd = &cobra.Command{
-	Use:   "aw",
-	Short: "Agent Wrapper CLI",
-	Long:  `aw is the command-line interface for Agent Wrapper.`,
+	Use:          "aw",
+	Short:        "Agent Wrapper CLI",
+	Long:         `aw is the command-line interface for Agent Wrapper.`,
+	SilenceUsage: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		zerolog.TimeFieldFormat = time.RFC3339
 		consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}
