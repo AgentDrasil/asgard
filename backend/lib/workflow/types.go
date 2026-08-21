@@ -18,7 +18,23 @@ const (
 	NodeTypeHuman   NodeType = "human"
 	// NodeTypeFunction invokes a natively registered Go function.
 	NodeTypeFunction NodeType = "function"
+	// NodeTypeWorkflow runs an inline sub-workflow definition, optionally
+	// fanning out over items from a file (see FanoutSpec).
+	NodeTypeWorkflow NodeType = "workflow"
 )
+
+// FanoutSpec configures fan-out execution for workflow nodes: the node runs
+// one sub-workflow instance per line of ItemsFile, up to MaxParallel
+// concurrently. MaxParallel is a pointer so definitions can distinguish
+// "not provided" (nil -> runtime default) from an explicit value.
+type FanoutSpec struct {
+	// ItemsFile lists one item per line; each line spawns a sub-workflow run.
+	ItemsFile string `yaml:"items_file"`
+	// MaxParallel caps concurrent sub-workflow executions (nil -> default 3).
+	MaxParallel *int `yaml:"max_parallel,omitempty"`
+	// OutputFile aggregates per-item results when non-empty.
+	OutputFile string `yaml:"output_file,omitempty"`
+}
 
 // NodeStatus is the lifecycle status of a single workflow node.
 type NodeStatus string
@@ -95,6 +111,9 @@ type NodeContext struct {
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.
 	WorkflowMountDirs MountDirsConfig
+	// Headless marks no-interaction execution; node runners use it to
+	// suppress interactive behavior (e.g. human nodes).
+	Headless bool
 }
 
 // Interpolate expands ${...} placeholders in text using run-scoped variables
@@ -156,7 +175,7 @@ func (r *NodeRunnerRegistry) Register(runner NodeRunner) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman, NodeTypeFunction} {
+	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman, NodeTypeFunction, NodeTypeWorkflow} {
 		if runner.Supports(t) {
 			r.runners[t] = runner
 		}

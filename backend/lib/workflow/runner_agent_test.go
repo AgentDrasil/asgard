@@ -445,3 +445,107 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		nctx       *NodeContext
+		node       *NodeSpec
+		resuming   bool
+		wantPrompt string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "resuming session uses follow-up prompt",
+			nctx:       &NodeContext{Input: "some input", Headless: false},
+			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			resuming:   true,
+			wantPrompt: agentFollowUpPrompt,
+		},
+		{
+			name:       "entry node with non-empty input",
+			nctx:       &NodeContext{Input: "hello world", Headless: false},
+			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			resuming:   false,
+			wantPrompt: "hello world",
+		},
+		{
+			name:       "entry node with empty input in non-headless mode returns error",
+			nctx:       &NodeContext{Input: "   ", Headless: false},
+			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			resuming:   false,
+			wantErr:    true,
+			errContain: "the workflow input is empty",
+		},
+		{
+			name:       "entry node with empty input in headless mode falls back to agentStartPrompt",
+			nctx:       &NodeContext{Input: "", Headless: true},
+			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			resuming:   false,
+			wantPrompt: agentStartPrompt,
+		},
+		{
+			name:       "non-entry fresh node uses agentStartPrompt",
+			nctx:       &NodeContext{Input: "", Headless: false},
+			node:       &NodeSpec{ID: "agent-2", Entry: false},
+			resuming:   false,
+			wantPrompt: agentStartPrompt,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotPrompt, err := resolveAgentPrompt(tt.nctx, tt.node, tt.resuming)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantPrompt, gotPrompt)
+			}
+		})
+	}
+
+	// Also verify full runner.Run error on non-headless entry with empty input
+	runner := NewAgentRunnerWithListener(nil, nil, nil)
+	agentRunnerInstance, ok := runner.(*agentRunner)
+	require.True(t, ok)
+
+	agentRunnerInstance.SetAgents([]*agents.Agent{
+		{
+			Config: agents.AgentConfig{
+				ID:   "test-agent",
+				Name: "Test Agent",
+				CLI: []agents.CLITarget{
+					{CLI: "echo", Model: "dummy"},
+				},
+			},
+		},
+	})
+
+	node := &NodeSpec{
+		ID:      "agent-1",
+		Type:    NodeTypeAgent,
+		AgentID: "test-agent",
+		Entry:   true,
+	}
+
+	nctxNonHeadless := &NodeContext{
+		SessionID: "sess-1",
+		RunDir:    t.TempDir(),
+		TmpDir:    t.TempDir(),
+		Input:     "",
+		Node:      node,
+		Headless:  false,
+		Values:    &RunValues{},
+	}
+
+	_, err := runner.Run(t.Context(), nctxNonHeadless)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the workflow input is empty")
+}

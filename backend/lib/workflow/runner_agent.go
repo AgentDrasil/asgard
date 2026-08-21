@@ -161,17 +161,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 	}
 
 	if prompt == "" {
-		switch {
-		case resuming:
-			prompt = agentFollowUpPrompt
-		case node.Entry:
-			input := strings.TrimSpace(nctx.Input)
-			if input == "" {
-				return nil, fmt.Errorf("agent node %q has no prompt: the workflow input is empty", node.ID)
-			}
-			prompt = input
-		default:
-			prompt = agentStartPrompt
+		var promptErr error
+		prompt, promptErr = resolveAgentPrompt(nctx, node, resuming)
+		if promptErr != nil {
+			return nil, promptErr
 		}
 	}
 
@@ -246,7 +239,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		outCh := make(chan runOutcome, 1)
 
 		go func(currentPrompt string, currentSession optional.Option[string]) {
-			runOut, runErr := run.Run(ctx, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken}, r.conf)
+			runOut, runErr := run.Run(ctx, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, r.conf)
 			outCh <- runOutcome{out: runOut, err: runErr}
 		}(prompt, session)
 
@@ -518,4 +511,22 @@ func toArtifactMap(paths []string) map[string]string {
 		m[p] = p
 	}
 	return m
+}
+
+func resolveAgentPrompt(nctx *NodeContext, node *NodeSpec, resuming bool) (string, error) {
+	switch {
+	case resuming:
+		return agentFollowUpPrompt, nil
+	case node.Entry:
+		input := strings.TrimSpace(nctx.Input)
+		if input == "" {
+			if nctx.Headless {
+				return agentStartPrompt, nil
+			}
+			return "", fmt.Errorf("agent node %q has no prompt: the workflow input is empty", node.ID)
+		}
+		return input, nil
+	default:
+		return agentStartPrompt, nil
+	}
 }

@@ -76,6 +76,7 @@ type RunResult struct {
 type StatusScope struct {
 	NodeID   string
 	RunToken string
+	Headless bool
 }
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
@@ -115,6 +116,10 @@ func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget
 	if statusScope.RunToken != "" {
 		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
 		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
+	}
+	if statusScope.Headless {
+		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_HEADLESS=1")
+		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_HEADLESS=1")
 	}
 	if agent != nil {
 		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)

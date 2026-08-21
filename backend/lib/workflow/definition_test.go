@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1031,7 +1032,7 @@ nodes:
   - id: weird
     type: quantum
 `,
-			wantErr: `node weird: invalid type "quantum" (must be agent, llm, command, human or function)`,
+			wantErr: `node weird: invalid type "quantum" (must be agent, llm, command, human, function or workflow)`,
 		},
 		{
 			name: "allowed_exit_codes still rejected on function nodes",
@@ -1183,4 +1184,250 @@ nodes:
 			require.NoError(t, err)
 		})
 	}
+}
+
+// workflowNodeSpec is a minimal valid workflow node body used by the
+// NodeTypeWorkflow validation tests.
+func workflowNodeSpec(extra string) string {
+	return `
+name: wf-node-test
+nodes:
+  - id: sub
+    type: command
+    command: "true"
+  - id: fan
+    type: workflow
+    workflow: sub-wf
+` + extra + `
+  - id: done
+    type: command
+    command: "true"
+    depends:
+      - node: fan
+`
+}
+
+func TestValidate_WorkflowNodeType_Valid(t *testing.T) {
+	t.Parallel()
+
+	specs := []string{
+		workflowNodeSpec(""),
+		workflowNodeSpec("    fanout:\n      items_file: ${tmp_dir}/items.txt\n"),
+		workflowNodeSpec("    fanout:\n      items_file: ${tmp_dir}/items.txt\n      max_parallel: 5\n      output_file: ${tmp_dir}/results.txt\n"),
+	}
+	for _, spec := range specs {
+		defn, err := ParseDefinition([]byte(spec))
+		require.NoError(t, err)
+		node := defn.Nodes[1]
+		assert.Equal(t, NodeTypeWorkflow, node.Type)
+		if node.Fanout != nil && node.Fanout.MaxParallel != nil {
+			assert.Equal(t, 5, *node.Fanout.MaxParallel)
+		}
+	}
+}
+
+func TestValidate_WorkflowNodeType_MissingWorkflow(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: wf-missing
+nodes:
+  - id: fan
+    type: workflow
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow is required for workflow nodes")
+}
+
+func TestValidate_WorkflowNodeType_PromptForbidden(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: wf-prompt
+nodes:
+  - id: fan
+    type: workflow
+    workflow: sub-wf
+    prompt: "do things"
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prompt is not allowed on workflow nodes")
+}
+
+func TestValidate_WorkflowNodeType_NodeOutputFileForbidden(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: wf-outputfile
+nodes:
+  - id: fan
+    type: workflow
+    workflow: sub-wf
+    output_file: ${tmp_dir}/out.txt
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output_file is not allowed on workflow nodes")
+}
+
+func TestValidate_WorkflowNodeType_InvalidFanout(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		extra   string
+		wantErr string
+	}{
+		{
+			name:    "missing items_file",
+			extra:   "    fanout:\n      max_parallel: 2\n",
+			wantErr: "fanout.items_file is required",
+		},
+		{
+			name:    "max_parallel zero",
+			extra:   "    fanout:\n      items_file: items.txt\n      max_parallel: 0\n",
+			wantErr: "fanout.max_parallel must be positive",
+		},
+		{
+			name:    "max_parallel negative",
+			extra:   "    fanout:\n      items_file: items.txt\n      max_parallel: -1\n",
+			wantErr: "fanout.max_parallel must be positive",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseDefinition([]byte(workflowNodeSpec(tt.extra)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestValidate_WorkflowNodeType_InvalidFieldsOnOtherTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr string
+	}{
+		{
+			name: "workflow field on command node",
+			spec: `
+name: wf-on-cmd
+nodes:
+  - id: cmd1
+    type: command
+    command: "true"
+    workflow: sub-wf
+`,
+			wantErr: "workflow is only allowed on workflow nodes",
+		},
+		{
+			name: "fanout on agent node",
+			spec: `
+name: fanout-on-agent
+agents:
+  - id: a1
+nodes:
+  - id: ag1
+    type: agent
+    agent_id: a1
+    entry: true
+    fanout:
+      items_file: items.txt
+`,
+			wantErr: "fanout is only allowed on workflow nodes",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseDefinition([]byte(tt.spec))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestValidate_NoHuman_RejectsHumanNode(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: nohuman-wf
+no_human: true
+nodes:
+  - id: cmd1
+    type: command
+    command: "true"
+  - id: ask1
+    type: human
+    prompt: "Proceed?"
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow declared no_human: true cannot contain human nodes")
+}
+
+func TestValidate_Schedule_RequiresNoHuman(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: sched-wf
+schedule: "0 2 * * *"
+nodes:
+  - id: cmd1
+    type: command
+    command: "true"
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow with schedule must declare no_human: true")
+}
+
+func TestValidate_Schedule_Format(t *testing.T) {
+	t.Parallel()
+
+	base := func(schedule string) string {
+		return fmt.Sprintf(`
+name: sched-wf
+no_human: true
+schedule: %q
+nodes:
+  - id: cmd1
+    type: command
+    command: "true"
+`, schedule)
+	}
+
+	for _, valid := range []string{"0 2 * * *", "*/5 * * * *"} {
+		_, err := ParseDefinition([]byte(base(valid)))
+		require.NoError(t, err, "schedule %q should be valid", valid)
+	}
+
+	for _, invalid := range []string{"invalid-cron", "* * *"} {
+		_, err := ParseDefinition([]byte(base(invalid)))
+		require.Error(t, err, "schedule %q should be rejected", invalid)
+		assert.Contains(t, err.Error(), "invalid schedule expression")
+	}
+}
+
+func TestValidate_Schedule_NeverFires(t *testing.T) {
+	t.Parallel()
+
+	spec := `
+name: never-wf
+no_human: true
+schedule: "0 0 31 2 *"
+nodes:
+  - id: cmd1
+    type: command
+    command: "true"
+`
+	_, err := ParseDefinition([]byte(spec))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "schedule expression will never fire")
 }

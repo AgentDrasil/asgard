@@ -65,6 +65,14 @@ type RunContext struct {
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.
 	WorkflowMountDirs MountDirsConfig
+	// Inline marks an in-process sub-workflow execution: StartRun/SettleRun
+	// persistence at the top level is skipped (the parent run owns it).
+	Inline bool
+	// Headless marks no-interaction execution; human nodes cannot suspend.
+	Headless bool
+	// TmpDir explicitly inherits the parent run's temp directory when
+	// non-empty (skips derivation and MkdirAll).
+	TmpDir string
 	// EmitEvent receives engine lifecycle events; may be nil.
 	EmitEvent func(event WorkflowEvent)
 }
@@ -220,26 +228,31 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		dagSpec = defn.RawSpec()
 	}
 
-	tmpDir := Interpolate(defn.TmpDir, func(key string) (string, bool) {
-		switch key {
-		case "session_id":
-			return rc.SessionID, true
-		case "run_dir":
-			return rc.RunDir, true
+	var tmpDir string
+	if rc.TmpDir != "" {
+		tmpDir = rc.TmpDir
+	} else {
+		tmpDir = Interpolate(defn.TmpDir, func(key string) (string, bool) {
+			switch key {
+			case "session_id":
+				return rc.SessionID, true
+			case "run_dir":
+				return rc.RunDir, true
+			}
+			return "", false
+		})
+		if tmpDir == "" {
+			tmpDir = DefaultTmpDir(rc.SessionID)
 		}
-		return "", false
-	})
-	if tmpDir == "" {
-		tmpDir = DefaultTmpDir(rc.SessionID)
-	}
-	if !filepath.IsAbs(tmpDir) {
-		tmpDir = filepath.Join(rc.RunDir, tmpDir)
-	}
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating tmp dir: %w", err)
+		if !filepath.IsAbs(tmpDir) {
+			tmpDir = filepath.Join(rc.RunDir, tmpDir)
+		}
+		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating tmp dir: %w", err)
+		}
 	}
 
-	if store != nil {
+	if store != nil && !rc.Inline {
 		if err := store.StartRun(&RunSnapshot{
 			RunID:      rc.RunID,
 			SessionID:  rc.SessionID,
@@ -267,7 +280,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 		rc.EmitEvent(ev)
 	}
-	emit(WorkflowEvent{Type: EventWorkflowStarted, Message: fmt.Sprintf("workflow %s started", defn.Name)})
+	if !rc.Inline {
+		emit(WorkflowEvent{Type: EventWorkflowStarted, Message: fmt.Sprintf("workflow %s started", defn.Name)})
+	}
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -789,6 +804,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					LoopIterations:    loopSnapshot,
 					WorkflowRunDirs:   wfRunDirs,
 					WorkflowMountDirs: wfMountDirs,
+					Headless:          rc.Headless || defn.NoHuman,
 				}
 
 				var result *NodeResult
@@ -976,7 +992,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 	mu.Unlock()
 
-	if store != nil {
+	if store != nil && !rc.Inline {
 		if err := store.SettleRun(rc.RunID, persistStatus(run.Status), toPersistedStates(results)); err != nil {
 			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run settlement failed")
 		}
@@ -984,11 +1000,13 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 	// The final event carries the workflow summary so hosts persisting events
 	// render an identical transcript on reload.
-	emit(WorkflowEvent{
-		Type:    EventWorkflowFinished,
-		Status:  NodeStatus(run.Status),
-		Message: SummarizeRun(run),
-	})
+	if !rc.Inline {
+		emit(WorkflowEvent{
+			Type:    EventWorkflowFinished,
+			Status:  NodeStatus(run.Status),
+			Message: SummarizeRun(run),
+		})
+	}
 	return run, nil
 }
 

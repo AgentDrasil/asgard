@@ -53,6 +53,11 @@ Notes:
 `
 
 func main() {
+	if os.Getenv("ASGARD_HEADLESS") == "1" {
+		fmt.Fprintln(os.Stderr, "ask-user is disabled in headless execution mode")
+		os.Exit(1)
+	}
+
 	logger.SetupLogger("ask-user")
 	log.Info().Interface("args", os.Args).Msg("ask-user: command started")
 

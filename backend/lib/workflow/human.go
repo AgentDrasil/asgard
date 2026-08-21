@@ -19,6 +19,10 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	node := nctx.Node
 	emit := nctx.EventEmitter
 
+	if rc.Headless || nctx.Headless || (nctx.Defn != nil && nctx.Defn.NoHuman) {
+		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: headless execution: human nodes not supported", node.ID)}
+	}
+
 	if reply := rc.HumanReplies[node.ID]; reply != "" {
 		return humanReplyResult(nctx, reply)
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/robfig/cron/v3"
 )
 
 // MountDirsConfig defines read-only and read-write mounts for the workflow.
@@ -25,6 +26,13 @@ type WorkflowDefinition struct {
 	MaxNodeExecutions int         `yaml:"max_node_executions"`
 	Loops             []*LoopSpec `yaml:"loops"`
 	Nodes             []*NodeSpec `yaml:"nodes"`
+	// NoHuman declares the workflow runs without any human interaction
+	// (required for scheduled workflows). Definitions containing human
+	// nodes are rejected when set.
+	NoHuman bool `yaml:"no_human"`
+	// Schedule is an optional standard 5-field cron expression (gocron /
+	// robfig ParseStandard syntax) triggering headless runs.
+	Schedule string `yaml:"schedule"`
 
 	// raw is the YAML source this definition was parsed from; it is persisted
 	// as the DAG snapshot for pause/resume and crash recovery.
@@ -115,6 +123,11 @@ type NodeSpec struct {
 	// Function node fields. Function is the name of the Go function
 	// registered in a workflow FunctionRegistry.
 	Function string `yaml:"function"`
+
+	// Workflow node fields. Workflow names the sub-workflow definition to
+	// execute inline; Fanout optionally fans out one sub-run per item line.
+	Workflow string      `yaml:"workflow"`
+	Fanout   *FanoutSpec `yaml:"fanout"`
 
 	// Output quality gate & retry fields.
 	// RequiredOutputs lists file paths (supporting ${tmp_dir}, ${run_dir}, ${session_id})
@@ -236,8 +249,33 @@ func (d *WorkflowDefinition) Validate() error {
 			if node.Function == "" {
 				return fmt.Errorf("node %s: function is required for function nodes", node.ID)
 			}
+		case NodeTypeWorkflow:
+			if node.Workflow == "" {
+				return fmt.Errorf("node %s: workflow is required for workflow nodes", node.ID)
+			}
+			if node.Prompt != "" {
+				return fmt.Errorf("node %s: prompt is not allowed on workflow nodes (sub-workflow input comes from ${input} / fan-out items)", node.ID)
+			}
+			if node.OutputFile != "" {
+				return fmt.Errorf("node %s: output_file is not allowed on workflow nodes (use fanout.output_file instead)", node.ID)
+			}
+			if node.Fanout != nil {
+				if node.Fanout.ItemsFile == "" {
+					return fmt.Errorf("node %s: fanout.items_file is required when fanout is configured", node.ID)
+				}
+				if node.Fanout.MaxParallel != nil && *node.Fanout.MaxParallel <= 0 {
+					return fmt.Errorf("node %s: fanout.max_parallel must be positive (got %d)", node.ID, *node.Fanout.MaxParallel)
+				}
+			}
 		default:
-			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command, human or function)", node.ID, node.Type)
+			return fmt.Errorf("node %s: invalid type %q (must be agent, llm, command, human, function or workflow)", node.ID, node.Type)
+		}
+
+		if node.Workflow != "" && node.Type != NodeTypeWorkflow {
+			return fmt.Errorf("node %s: workflow is only allowed on workflow nodes", node.ID)
+		}
+		if node.Fanout != nil && node.Type != NodeTypeWorkflow {
+			return fmt.Errorf("node %s: fanout is only allowed on workflow nodes", node.ID)
 		}
 
 		if node.Function != "" && node.Type != NodeTypeFunction {
@@ -330,6 +368,9 @@ func (d *WorkflowDefinition) Validate() error {
 	if err := validateHumanNodes(d); err != nil {
 		return err
 	}
+	if err := d.validateNoHumanAndSchedule(); err != nil {
+		return err
+	}
 
 	// Workflows with agent nodes must declare where the raw user input lands;
 	// every other agent node is kicked off with a directive instead.
@@ -344,6 +385,33 @@ func (d *WorkflowDefinition) Validate() error {
 	}
 	if agentCount > 0 && entryCount == 0 {
 		return fmt.Errorf("workflow must mark at least one agent node with entry: true to receive the user input")
+	}
+	return nil
+}
+
+// validateNoHumanAndSchedule enforces the no_human declaration and the
+// schedule constraints: scheduled workflows must be fully headless, use a
+// standard 5-field cron expression, and the expression must actually fire.
+func (d *WorkflowDefinition) validateNoHumanAndSchedule() error {
+	if d.NoHuman {
+		for _, node := range d.Nodes {
+			if node.Type == NodeTypeHuman {
+				return fmt.Errorf("workflow declared no_human: true cannot contain human nodes (node %s)", node.ID)
+			}
+		}
+	}
+	if d.Schedule == "" {
+		return nil
+	}
+	if !d.NoHuman {
+		return fmt.Errorf("workflow with schedule must declare no_human: true")
+	}
+	sched, err := cron.ParseStandard(d.Schedule)
+	if err != nil {
+		return fmt.Errorf("invalid schedule expression %q: %w", d.Schedule, err)
+	}
+	if sched.Next(time.Now()).IsZero() {
+		return fmt.Errorf("schedule expression will never fire: %q", d.Schedule)
 	}
 	return nil
 }
