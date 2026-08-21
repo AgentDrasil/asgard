@@ -142,5 +142,19 @@ describe("workflowPanelState", () => {
       expect(state.stage).toBe("completed");
       expect(state.statusText).toBe("Workflow completed");
     });
+
+    it("determines stage as idle when only user messages exist and running is false", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "user", content: "Run task" },
+        { id: "2", role: "activity", content: "Preparing workspace" },
+      ];
+      const state = computeWorkflowPanelState({
+        running: false,
+        messages,
+        activeAgentName: "Test Workflow",
+      });
+      expect(state.stage).toBe("idle");
+      expect(state.statusText).toBe("Test Workflow is ready");
+    });
   });
 });

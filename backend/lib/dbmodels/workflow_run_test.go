@@ -378,3 +378,40 @@ func TestSuspendedNodes_EncodeDecode(t *testing.T) {
 	_, err = DecodeSuspendedNodes("{invalid")
 	assert.Error(t, err)
 }
+
+func TestWorkflowRunRepository_HasRunningRunBySession(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&WorkflowRun{}))
+
+	repo := NewWorkflowRunRepository(testDB)
+
+	hasRunning, err := repo.HasRunningRunBySession("chat-1")
+	require.NoError(t, err)
+	assert.False(t, hasRunning)
+
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-1",
+		SessionID: "chat-1",
+		Status:    WorkflowStatusRunning,
+	}))
+
+	hasRunning, err = repo.HasRunningRunBySession("chat-1")
+	require.NoError(t, err)
+	assert.True(t, hasRunning)
+
+	hasRunning, err = repo.HasRunningRunBySession("chat-2")
+	require.NoError(t, err)
+	assert.False(t, hasRunning)
+
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-1",
+		SessionID: "chat-1",
+		Status:    WorkflowStatusCompleted,
+	}))
+
+	hasRunning, err = repo.HasRunningRunBySession("chat-1")
+	require.NoError(t, err)
+	assert.False(t, hasRunning)
+}

@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 )
 
@@ -71,6 +73,14 @@ func TestServer_WebUIHostingAndFallback(t *testing.T) {
 }
 
 func TestServer_WorkflowCronIntegration(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
 	tempDir := t.TempDir()
 	agentsDir := filepath.Join(tempDir, "agents")
 	require.NoError(t, os.MkdirAll(filepath.Join(agentsDir, "agent_father"), 0755))

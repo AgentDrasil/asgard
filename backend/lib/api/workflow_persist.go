@@ -593,31 +593,38 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 	}
 
 	go func() {
+		s.activeExecutions.Store(chatID, struct{}{})
+		defer s.activeExecutions.Delete(chatID)
+
+		agentName := ""
 		if s.repo != nil {
-			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil && sess.CurrentAgent != "" {
-				if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusRunning); err != nil {
-					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to update agent status to running on workflow resume")
+			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil {
+				agentName = sess.CurrentAgent
+			}
+		}
+		if agentName != "" && s.repo != nil {
+			if err := s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusRunning); err != nil {
+				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentName).Msg("failed to update agent status to running on workflow resume")
+			} else {
+				s.PublishSessionEvent(chatID, SessionEvent{
+					Type:    "status",
+					Payload: map[string]any{"agent": agentName, "isRunning": true},
+				})
+			}
+			defer func() {
+				if err := s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusCompleted); err != nil {
+					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentName).Msg("failed to mark agent status completed on workflow resume finish")
 				} else {
 					s.PublishSessionEvent(chatID, SessionEvent{
 						Type:    "status",
-						Payload: map[string]any{"agent": sess.CurrentAgent, "isRunning": true},
+						Payload: map[string]any{"agent": agentName, "isRunning": false},
+					})
+					s.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "done",
+						Payload: map[string]any{"agent": agentName},
 					})
 				}
-				defer func() {
-					if err := s.repo.UpdateAgentStatus(chatID, sess.CurrentAgent, dbmodels.AgentStatusCompleted); err != nil {
-						log.Warn().Err(err).Str("chat_id", chatID).Str("agent", sess.CurrentAgent).Msg("failed to mark agent status completed on workflow resume finish")
-					} else {
-						s.PublishSessionEvent(chatID, SessionEvent{
-							Type:    "status",
-							Payload: map[string]any{"agent": sess.CurrentAgent, "isRunning": false},
-						})
-						s.PublishSessionEvent(chatID, SessionEvent{
-							Type:    "done",
-							Payload: map[string]any{"agent": sess.CurrentAgent},
-						})
-					}
-				}()
-			}
+			}()
 		}
 		// Re-driven runs route their events into the persistence handler
 		// and EventHub so node outputs, errors, summary and any follow-up human

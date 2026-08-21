@@ -90,15 +90,17 @@ export function computeWorkflowPanelState(
         artifactFiles: getMessageArtifactFiles(lastBusinessMsg),
       };
     }
-    return {
-      stage: "completed",
-      pendingMessage: null,
-      pendingMessages: [],
-      options: [],
-      statusText: "Workflow completed",
-      targetFiles: [],
-      artifactFiles: [],
-    };
+    if (lastBusinessMsg.role === "assistant") {
+      return {
+        stage: "completed",
+        pendingMessage: null,
+        pendingMessages: [],
+        options: [],
+        statusText: "Workflow completed",
+        targetFiles: [],
+        artifactFiles: [],
+      };
+    }
   }
 
   // 4. idle: No business messages and not running

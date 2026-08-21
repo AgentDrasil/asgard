@@ -198,8 +198,6 @@ func applyOpts(t *testing.T, s *Server, opts ...ServerOption) {
 }
 
 func TestServer_ShutdownIdempotentWithoutStart(t *testing.T) {
-	t.Parallel()
-
 	mockClients := map[string]types.CLIClient{
 		"agy": &mockClient{models: []string{"Gemini 3.5 Flash (Low)"}},
 	}
@@ -246,7 +244,6 @@ cli:
 }
 
 func TestServer_ShutdownBeforeStart(t *testing.T) {
-	t.Parallel()
 
 	mockClients := map[string]types.CLIClient{
 		"agy": &mockClient{models: []string{"Gemini 3.5 Flash (Low)"}},

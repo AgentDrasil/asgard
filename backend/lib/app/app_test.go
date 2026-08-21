@@ -13,10 +13,43 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 )
+
+type mockClient struct {
+	models []string
+}
+
+func (m *mockClient) Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+	var usages []types.ModelUsage
+	for _, model := range m.models {
+		usages = append(usages, types.ModelUsage{Model: model, Remaining: 1.0})
+	}
+	return usages, nil
+}
+
+func (m *mockClient) Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
+	return m.models, nil
+}
+
+func (m *mockClient) Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
+	return &types.PromptResult{}, nil
+}
+
+func TestMain(m *testing.M) {
+	mockClients := map[string]types.CLIClient{
+		"agy":      &mockClient{models: []string{"gemini-3.7-flash", "Gemini 3.5 Flash (Low)"}},
+		"opencode": &mockClient{models: []string{"deepseek-chat"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	code := m.Run()
+	agentwrapper.SetClients(nil)
+	os.Exit(code)
+}
 
 func getFreePort(t *testing.T) int {
 	t.Helper()
@@ -43,7 +76,7 @@ team: "my-team"
 run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
-    model: "Gemini 3.5 Flash (Low)"
+    model: "gemini-3.7-flash"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(fatherDir, "config.yaml"), []byte(fatherYAML), 0644))
 

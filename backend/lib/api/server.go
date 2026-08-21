@@ -33,6 +33,7 @@ type Server struct {
 	agents           []*agents.Agent
 	mux              *http.ServeMux
 	repo             *dbmodels.SessionRepository
+	workflowRunRepo  *dbmodels.WorkflowRunRepository
 	statusListeners  map[string][]*statusListener
 	ttydManager      *ttyd.Manager
 	workflowEngine   *workflow.Engine
@@ -135,6 +136,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 			log.Warn().Err(err).Msg("failed to reset stale running agents on startup")
 		}
 		wfRepo := dbmodels.NewWorkflowRunRepository(dbConn)
+		s.workflowRunRepo = wfRepo
 		if err := wfRepo.ResetAllRunningWorkflows(); err != nil {
 			log.Warn().Err(err).Msg("failed to reset stale running workflows on startup")
 		}
@@ -391,4 +393,26 @@ func (s *Server) PublishSessionEvent(chatID string, ev SessionEvent) {
 		return
 	}
 	s.eventHub.Publish(chatID, ev)
+}
+
+// isSessionRunning determines if a session is currently executing an agent or workflow.
+// It checks in-memory active executions, session agent status, and active workflow runs in DB.
+func (s *Server) isSessionRunning(sess *dbmodels.Session) bool {
+	if sess == nil {
+		return false
+	}
+	if sess.ChatID != "" {
+		if _, running := s.activeExecutions.Load(sess.ChatID); running {
+			return true
+		}
+	}
+	if sess.IsRunning() {
+		return true
+	}
+	if s.workflowRunRepo != nil && sess.ChatID != "" {
+		if running, err := s.workflowRunRepo.HasRunningRunBySession(sess.ChatID); err == nil && running {
+			return true
+		}
+	}
+	return false
 }

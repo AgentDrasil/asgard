@@ -110,6 +110,51 @@ func TestSessionHandler(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, runningSession.IsRunning)
 
+	// Set agent status back to completed, but store in activeExecutions
+	err = repo.UpdateAgentStatus("chat-1", "agent-alpha", dbmodels.AgentStatusCompleted)
+	require.NoError(t, err)
+
+	server.activeExecutions.Store("chat-1", struct{}{})
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/chat-1", nil)
+	rr = httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	err = json.Unmarshal(rr.Body.Bytes(), &runningSession)
+	require.NoError(t, err)
+	assert.True(t, runningSession.IsRunning)
+	server.activeExecutions.Delete("chat-1")
+
+	// Test workflowRunRepo status RUNNING detection
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	server.workflowRunRepo = wfRepo
+	require.NoError(t, wfRepo.SaveRun(&dbmodels.WorkflowRun{
+		RunID:     "run-wf-1",
+		SessionID: "chat-1",
+		Status:    dbmodels.WorkflowStatusRunning,
+	}))
+
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/chat-1", nil)
+	rr = httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	err = json.Unmarshal(rr.Body.Bytes(), &runningSession)
+	require.NoError(t, err)
+	assert.True(t, runningSession.IsRunning)
+
+	require.NoError(t, wfRepo.SaveRun(&dbmodels.WorkflowRun{
+		RunID:     "run-wf-1",
+		SessionID: "chat-1",
+		Status:    dbmodels.WorkflowStatusCompleted,
+	}))
+
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/chat-1", nil)
+	rr = httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	err = json.Unmarshal(rr.Body.Bytes(), &runningSession)
+	require.NoError(t, err)
+	assert.False(t, runningSession.IsRunning)
+
 	// 4. Test limit 20 and ordering by update time
 	// Delete chat-1 first so we start clean
 	req = httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id=chat-1", nil)

@@ -208,6 +208,18 @@ func (r *WorkflowRunRepository) FindWaitingHumansBySession(sessionID string) ([]
 	return runs, nil
 }
 
+// HasRunningRunBySession returns true if there is any workflow run with status RUNNING for the session.
+func (r *WorkflowRunRepository) HasRunningRunBySession(sessionID string) (bool, error) {
+	var count int64
+	err := r.db.Model(&WorkflowRun{}).
+		Where("session_id = ? AND status = ?", sessionID, WorkflowStatusRunning).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // escapeLike escapes SQL LIKE wildcards so the caller-provided value is
 // matched literally under the '\' escape character.
 func escapeLike(value string) string {

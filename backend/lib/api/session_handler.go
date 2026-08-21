@@ -121,7 +121,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		CurrentAgent: sess.CurrentAgent,
 		RunDir:       sess.RunDir,
 		GitRoot:      findGitRoot(sess.RunDir),
-		IsRunning:    sess.IsRunning(),
+		IsRunning:    s.isSessionRunning(sess),
 		Messages:     sess.Messages,
 		Artifacts:    sess.Artifacts,
 	}
@@ -142,13 +142,14 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, _ *http.Request) {
 
 	sessions := make([]ChatSession, 0, len(dbSessions))
 	for _, sess := range dbSessions {
+		sessCopy := sess
 		sessions = append(sessions, ChatSession{
 			ChatID:       sess.ChatID,
 			Title:        sess.Title,
 			CurrentAgent: sess.CurrentAgent,
 			RunDir:       sess.RunDir,
 			GitRoot:      findGitRoot(sess.RunDir),
-			IsRunning:    sess.IsRunning(),
+			IsRunning:    s.isSessionRunning(&sessCopy),
 			Artifacts:    sess.Artifacts,
 		})
 	}
