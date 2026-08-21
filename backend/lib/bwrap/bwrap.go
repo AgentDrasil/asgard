@@ -391,7 +391,15 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 
 	if runDir != "" {
 		if _, err := os.Stat(runDir); err == nil {
-			args = append(args, "--bind", runDir, runDir)
+			// Skip the extra bind when runDir is inside HOME: HOME is already
+			// bind-mounted as a single mount, and a nested separate bind would
+			// give runDir a different st_dev, breaking hard links (pnpm would
+			// then relocate its store onto the project's "filesystem"). This
+			// requires runDir to be part of the HOME mount (not a separate
+			// container volume mounted under HOME).
+			if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
+				args = append(args, "--bind", runDir, runDir)
+			}
 			args = append(args, "--chdir", runDir)
 		} else {
 			args = append(args, "--chdir", home)

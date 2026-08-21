@@ -373,8 +373,10 @@ func TestCommandForCommandExec(t *testing.T) {
 	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
 		t.Errorf("expected ssh dir masking, got: %s", argStr)
 	}
-	if !strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
-		t.Errorf("expected runDir bind mount, got: %s", argStr)
+	// runDir is inside home, so it must NOT be bind-mounted separately (a
+	// nested bind would give it a different st_dev and break hard links).
+	if strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
+		t.Errorf("expected no separate runDir bind mount (inside home), got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--chdir "+runDir) {
 		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)

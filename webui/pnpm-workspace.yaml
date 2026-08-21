@@ -4,3 +4,5 @@ packages:
 allowBuilds:
   "@firebase/util": true
   protobufjs: true
+
+confirmModulesPurge: false
