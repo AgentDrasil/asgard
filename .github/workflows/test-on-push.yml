@@ -9,6 +9,7 @@ env:
   GOIMPORTS_VERSION: latest
   GOLANGCI_LINT_VERSION: latest
   NODE_VERSION: 26
+  PNPM_VERSION: 11.3.0
 
 jobs:
   backend:
@@ -52,6 +53,7 @@ jobs:
     - name: Set up pnpm
       uses: pnpm/setup@v2
       with:
+        version: ${{ env.PNPM_VERSION }}
         runtime: node@${{ env.NODE_VERSION }}
 
     - name: Install dependencies
