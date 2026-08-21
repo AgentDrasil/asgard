@@ -524,7 +524,7 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			}
 			targetMessageID = messageID
 		} else {
-			// If snapshot not found, check memory runs in chat
+			// If snapshot not found by messageID, query session's WAITING_HUMAN snapshots to check for matching node
 			runs, err := engine.FindWaitingRuns(chatID)
 			if err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Msg("looking up waiting workflow runs failed")

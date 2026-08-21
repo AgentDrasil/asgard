@@ -430,12 +430,8 @@ func validateHumanNodes(d *WorkflowDefinition) error {
 	}
 
 	for _, node := range d.Nodes {
-		if node.Type == NodeTypeHuman {
-			if exempt[node.ID] {
-				if len(node.Depends) > 0 {
-					return fmt.Errorf("node %s: on_exhausted human node must have no incoming dependency edges (must be an orphan)", node.ID)
-				}
-			}
+		if node.Type == NodeTypeHuman && exempt[node.ID] && len(node.Depends) > 0 {
+			return fmt.Errorf("node %s: on_exhausted human node must have no incoming dependency edges (must be an orphan)", node.ID)
 		}
 	}
 	return nil

@@ -519,6 +519,11 @@ func TestAskUserReply_CrossChatSessionHijackDefense(t *testing.T) {
 	// Check that chatB received no resume events or artifact modifications
 	_, err = os.Stat(filepath.Join(runDir, "tmp", chatA, "user_feedback.md"))
 	assert.True(t, os.IsNotExist(err))
+
+	sessB, err := s.repo.GetSession(chatB)
+	require.NoError(t, err)
+	require.NotNil(t, sessB)
+	assert.Empty(t, sessB.Messages)
 }
 
 func TestAskUserReply_EmptyMessageID_SingleRunFallback(t *testing.T) {

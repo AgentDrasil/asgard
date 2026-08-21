@@ -93,7 +93,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 			}
 		}
 		captured := snapshotStates() // waitMu -> mu lock ordering compliant
-		_ = store.MarkWaitingHuman(&RunSnapshot{
+		if err := store.MarkWaitingHuman(&RunSnapshot{
 			RunID:              rc.RunID,
 			SessionID:          rc.SessionID,
 			ParentRunID:        rc.ParentRunID,
@@ -107,7 +107,9 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 			SuspendedNodeID:    node.ID,
 			SuspendedMessageID: messageID,
 			SuspendedNodes:     suspendedNodesMap,
-		})
+		}); err != nil {
+			log.Warn().Err(err).Str("run_id", rc.RunID).Str("node_id", node.ID).Msg("marking workflow waiting for human failed")
+		}
 	}
 	if e.replayPending[rc.RunID] {
 		delete(e.replayPending, rc.RunID)

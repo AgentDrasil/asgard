@@ -111,6 +111,8 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 		prompt = nctx.Input
 	}
 
+	// Note: Store and SuspendHuman are intentionally omitted here to inherit
+	// the engine-level defaults (e.store / e.suspendHuman) in Execute and runHumanNode.
 	childRC := RunContext{
 		SessionID:         nctx.SessionID,
 		RunDir:            nctx.RunDir,

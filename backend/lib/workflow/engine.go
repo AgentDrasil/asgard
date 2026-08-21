@@ -919,7 +919,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 							}
 						}
 						captured := snapshotStates()
-						_ = store.RefreshSuspension(rc.RunID, captured.nodeStates, captured.loopIterations, captured.executionCounts, suspendedNodesMap)
+						if err := store.RefreshSuspension(rc.RunID, captured.nodeStates, captured.loopIterations, captured.executionCounts, suspendedNodesMap); err != nil {
+							log.Warn().Err(err).Str("run_id", rc.RunID).Msg("refreshing suspension state failed")
+						}
 					}
 					e.waitMu.Unlock()
 				}
