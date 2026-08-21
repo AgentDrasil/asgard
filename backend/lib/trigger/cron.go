@@ -57,6 +57,8 @@ func NewWorkflowCronManager(repo *dbmodels.SessionRepository, trigger TriggerFun
 // CleanCronSessionID derives a deterministic synthetic session ID from the
 // workflow name. Invalid characters are replaced with '-' and the result is
 // truncated to 64 characters so it always satisfies IsValidChatID.
+// Note: Different workflow names that map to the same string after sanitization
+// or truncation will deterministically share the same synthetic session.
 func CleanCronSessionID(workflowName string) string {
 	id := cronSessionIDPrefix + cronSessionIDInvalidChars.ReplaceAllString(workflowName, "-")
 	if len(id) > maxChatIDLength {

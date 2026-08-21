@@ -212,7 +212,6 @@ func (r *SessionRepository) UpsertSession(session *Session) error {
 			"title":         session.Title,
 			"current_agent": session.CurrentAgent,
 			"run_dir":       session.RunDir,
-			"updated_at":    time.Now(),
 		}).Error
 	})
 }

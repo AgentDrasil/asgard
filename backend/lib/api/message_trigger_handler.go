@@ -20,7 +20,7 @@ type TriggerMessageRequest struct {
 	RunDir   string `json:"runDir,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Wait     bool   `json:"wait,omitempty"`
-	Headless bool   `json:"headless,omitempty"`
+	Headless bool   `json:"-"`
 
 	Metadata map[string]any `json:"metadata,omitempty"`
 }

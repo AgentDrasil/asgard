@@ -147,7 +147,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	s.cronManager = cronMgr
 
 	if err := s.reload(); err != nil {
-
+		_ = cronMgr.Shutdown()
 		return nil, fmt.Errorf("failed to load agents: %w", err)
 	}
 
