@@ -98,9 +98,7 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	workspaceDir, err := os.MkdirTemp("", "asgard-agent-test-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(workspaceDir) })
+	workspaceDir := t.TempDir()
 
 	// Create git repo in workspaceDir with .gitignore
 	cmd := exec.Command("git", "init", workspaceDir)

@@ -14,7 +14,7 @@ lint:
 
 # Build backend and webui
 build:
-    cd backend && go build -o build ./...
+    cd backend && go build -o build/ ./...
     cd webui && pnpm run build
 
 # Test backend and webui

@@ -110,12 +110,12 @@ func TestWorkspaceFileHandler(t *testing.T) {
 	})
 
 	t.Run("Read Tmp File", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
 		sessionTmpDir := filepath.Join(home, "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.RemoveAll(sessionTmpDir) })
 
 		tmpFile, err := os.CreateTemp(sessionTmpDir, "asgard_test_*.md")
 		require.NoError(t, err)
@@ -146,12 +146,12 @@ func TestWorkspaceFileHandler(t *testing.T) {
 	})
 
 	t.Run("Read Tmp File - Unauthorized Denied", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
 		sessionTmpDir := filepath.Join(home, "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.RemoveAll(sessionTmpDir) })
 
 		tmpFile, err := os.CreateTemp(sessionTmpDir, "asgard_test_unauth_*.md")
 		require.NoError(t, err)
