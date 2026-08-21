@@ -1,0 +1,13 @@
+{
+  "languages": {
+    "Go": {
+      "tab_size": 2,
+      "formatter": {
+        "external": {
+          "command": "goimports",
+          "arguments": ["-w", "-local", "github.com/AgentDrasil/asgard", "."],
+        },
+      },
+    },
+  },
+}
