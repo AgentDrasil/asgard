@@ -87,6 +87,7 @@ type NodeResult struct {
 // respective runners via their constructors, never here.
 type NodeContext struct {
 	SessionID string
+	RunID     string
 	RunDir    string
 	TmpDir    string
 	// Input is the initial user prompt that triggered the workflow run.

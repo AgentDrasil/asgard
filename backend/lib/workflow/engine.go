@@ -75,6 +75,20 @@ type RunContext struct {
 	TmpDir string
 	// EmitEvent receives engine lifecycle events; may be nil.
 	EmitEvent func(event WorkflowEvent)
+	// Resume marks a re-driven run from a persisted snapshot.
+	Resume bool
+	// ParentRunID links a sub-workflow (inline) run to its parent run.
+	ParentRunID string
+	// ReuseMessageIDs maps node IDs to original MessageIDs to reuse on first re-suspension.
+	ReuseMessageIDs map[string]string
+}
+
+type humanWaiter struct {
+	replyCh   chan string
+	nodeID    string
+	messageID string
+	iteration int
+	runID     string
 }
 
 // Engine schedules workflow DAGs with fork-join parallelism.
@@ -86,16 +100,22 @@ type Engine struct {
 	store        RunStore
 	suspendHuman SuspendHumanFunc
 
-	// waiting tracks live suspended runs for in-process resume delivery.
-	waitMu  sync.Mutex
-	waiting map[string]chan string
+	// waitMu guards waitingByMsg, waitingByRun, executing, and replayPending.
+	waitMu        sync.Mutex
+	waitingByMsg  map[string]*humanWaiter            // key: messageID -> waiter
+	waitingByRun  map[string]map[string]*humanWaiter // key: runID -> nodeID -> waiter
+	executing     map[string]bool                    // key: runID -> true (active execution)
+	replayPending map[string]bool                    // key: runID -> true (replay initializing)
 }
 
 // NewEngine creates an engine backed by the given runner registry.
 func NewEngine(registry *NodeRunnerRegistry) *Engine {
 	return &Engine{
-		registry: registry,
-		waiting:  make(map[string]chan string),
+		registry:      registry,
+		waitingByMsg:  make(map[string]*humanWaiter),
+		waitingByRun:  make(map[string]map[string]*humanWaiter),
+		executing:     make(map[string]bool),
+		replayPending: make(map[string]bool),
 	}
 }
 
@@ -252,7 +272,16 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 	}
 
-	if store != nil && !rc.Inline {
+	e.waitMu.Lock()
+	e.executing[rc.RunID] = true
+	e.waitMu.Unlock()
+	defer func() {
+		e.waitMu.Lock()
+		delete(e.executing, rc.RunID)
+		e.waitMu.Unlock()
+	}()
+
+	if store != nil && !rc.Inline && !rc.Resume {
 		if err := store.StartRun(&RunSnapshot{
 			RunID:      rc.RunID,
 			SessionID:  rc.SessionID,
@@ -287,6 +316,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	g, gctx := errgroup.WithContext(ctx)
 
 	var mu sync.Mutex
+	hasSuspended := false
 	results := make(map[string]*NodeResult, len(defn.Nodes))
 	for id, res := range rc.SeedNodes {
 		results[id] = res
@@ -792,6 +822,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 				nctx := &NodeContext{
 					SessionID:         rc.SessionID,
+					RunID:             rc.RunID,
 					RunDir:            rc.RunDir,
 					TmpDir:            tmpDir,
 					Input:             rc.Input,
@@ -810,6 +841,11 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				var result *NodeResult
 				var err error
 				if node.Type == NodeTypeHuman {
+					if rc.HumanReplies[node.ID] == "" {
+						mu.Lock()
+						hasSuspended = true
+						mu.Unlock()
+					}
 					result = e.runHumanNode(gctx, rc, nctx, store, dagSpec, snapshotStates)
 				} else {
 					runner, ok := e.registry.Get(node.Type)
@@ -870,6 +906,23 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				})
 				evaluateDownstream(node.ID)
 				mu.Unlock()
+
+				// Post-Settle RefreshSuspension hook (B2, B5, B7, N2)
+				if store != nil {
+					e.waitMu.Lock()
+					if activeWaiters := e.waitingByRun[rc.RunID]; len(activeWaiters) > 0 {
+						suspendedNodesMap := make(map[string]SuspendedNodeInfo, len(activeWaiters))
+						for nid, w := range activeWaiters {
+							suspendedNodesMap[nid] = SuspendedNodeInfo{
+								MessageID: w.messageID,
+								Iteration: w.iteration,
+							}
+						}
+						captured := snapshotStates()
+						_ = store.RefreshSuspension(rc.RunID, captured.nodeStates, captured.loopIterations, captured.executionCounts, suspendedNodesMap)
+					}
+					e.waitMu.Unlock()
+				}
 
 				select {
 				case eventCh <- struct{}{}:
@@ -992,7 +1045,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	}
 	mu.Unlock()
 
-	if store != nil && !rc.Inline {
+	if store != nil && (!rc.Inline || hasSuspended) {
 		if err := store.SettleRun(rc.RunID, persistStatus(run.Status), toPersistedStates(results)); err != nil {
 			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run settlement failed")
 		}

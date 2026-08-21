@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -39,7 +40,6 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	if len(node.Options) > 0 {
 		prompt = prompt + "\n\nOptions: " + strings.Join(node.Options, " / ")
 	}
-	messageID := HumanMessageID(rc.RunID, node.ID, nctx.Iteration)
 
 	// Collect artifact files referenced by the prompt so the host app can
 	// register them for the session and surface them to the frontend.
@@ -49,16 +49,80 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPath(p, nctx.TmpDir))
 	}
 
-	// Register the waiter before delivering the suspension so a racing
-	// Resume can never fall through to the snapshot re-drive path while a
-	// live worker is about to block.
 	replyCh := make(chan string, 1)
+
+	// Atomic registration, non-blocking peek, and snapshot persistence under waitMu (B7, N4)
 	e.waitMu.Lock()
-	e.waiting[rc.RunID] = replyCh
+	// First re-suspension reuse original MessageID if available (N1)
+	var messageID string
+	if originalMsgID, ok := rc.ReuseMessageIDs[node.ID]; ok && originalMsgID != "" {
+		messageID = originalMsgID
+		delete(rc.ReuseMessageIDs, node.ID)
+	} else {
+		messageID = HumanMessageID(rc.RunID, node.ID, nctx.Iteration)
+	}
+
+	waiter := &humanWaiter{
+		replyCh:   replyCh,
+		nodeID:    node.ID,
+		messageID: messageID,
+		iteration: nctx.Iteration,
+		runID:     rc.RunID,
+	}
+
+	if e.waitingByRun[rc.RunID] == nil {
+		e.waitingByRun[rc.RunID] = make(map[string]*humanWaiter)
+	}
+	e.waitingByRun[rc.RunID][node.ID] = waiter
+	e.waitingByMsg[messageID] = waiter
+
+	hasImmediateReply := false
+	select {
+	case reply := <-replyCh:
+		replyCh <- reply // put back to buffer
+		hasImmediateReply = true
+	default:
+	}
+
+	if !hasImmediateReply && store != nil {
+		suspendedNodesMap := make(map[string]SuspendedNodeInfo)
+		for nid, w := range e.waitingByRun[rc.RunID] {
+			suspendedNodesMap[nid] = SuspendedNodeInfo{
+				MessageID: w.messageID,
+				Iteration: w.iteration,
+			}
+		}
+		captured := snapshotStates() // waitMu -> mu lock ordering compliant
+		_ = store.MarkWaitingHuman(&RunSnapshot{
+			RunID:              rc.RunID,
+			SessionID:          rc.SessionID,
+			ParentRunID:        rc.ParentRunID,
+			Status:             PersistStatusWaitingHuman,
+			DAGSpec:            dagSpec,
+			RunDir:             rc.RunDir,
+			Input:              rc.Input,
+			NodeStates:         captured.nodeStates,
+			LoopIterations:     captured.loopIterations,
+			ExecutionCounts:    captured.executionCounts,
+			SuspendedNodeID:    node.ID,
+			SuspendedMessageID: messageID,
+			SuspendedNodes:     suspendedNodesMap,
+		})
+	}
+	if e.replayPending[rc.RunID] {
+		delete(e.replayPending, rc.RunID)
+	}
 	e.waitMu.Unlock()
+
 	defer func() {
 		e.waitMu.Lock()
-		delete(e.waiting, rc.RunID)
+		delete(e.waitingByMsg, messageID)
+		if nodeMap := e.waitingByRun[rc.RunID]; nodeMap != nil {
+			delete(nodeMap, node.ID)
+			if len(nodeMap) == 0 {
+				delete(e.waitingByRun, rc.RunID)
+			}
+		}
 		e.waitMu.Unlock()
 	}()
 
@@ -73,25 +137,6 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		Artifacts: artifactViewerPaths,
 	}); err != nil {
 		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: delivering human suspension: %w", node.ID, err)}
-	}
-
-	if store != nil {
-		captured := snapshotStates()
-		if err := store.MarkWaitingHuman(&RunSnapshot{
-			RunID:              rc.RunID,
-			SessionID:          rc.SessionID,
-			Status:             PersistStatusWaitingHuman,
-			DAGSpec:            dagSpec,
-			RunDir:             rc.RunDir,
-			Input:              rc.Input,
-			NodeStates:         captured.nodeStates,
-			LoopIterations:     captured.loopIterations,
-			ExecutionCounts:    captured.executionCounts,
-			SuspendedNodeID:    node.ID,
-			SuspendedMessageID: messageID,
-		}); err != nil {
-			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting WAITING_HUMAN snapshot failed")
-		}
 	}
 
 	emit(WorkflowEvent{
@@ -164,6 +209,7 @@ func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit fu
 	rc := RunContext{
 		RunID:               snap.RunID,
 		SessionID:           snap.SessionID,
+		ParentRunID:         snap.ParentRunID,
 		RunDir:              snap.RunDir,
 		Input:               snap.Input,
 		DAGSpec:             snap.DAGSpec,
@@ -172,6 +218,9 @@ func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit fu
 		SeedNodes:           fromPersistedStates(snap.NodeStates),
 		SeedLoopIterations:  copyIntMap(snap.LoopIterations),
 		SeedExecutionCounts: copyIntMap(snap.ExecutionCounts),
+		Resume:              true,
+		ReuseMessageIDs:     make(map[string]string),
+		HumanReplies:        make(map[string]string),
 		EmitEvent: func(ev WorkflowEvent) {
 			if emit != nil {
 				emit(ev)
@@ -180,13 +229,128 @@ func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit fu
 			log.Info().Str("run_id", snap.RunID).Str("node", ev.NodeID).Str("type", string(ev.Type)).Msg("resumed workflow event")
 		},
 	}
-	if snap.SuspendedNodeID != "" {
+
+	for nid, sinfo := range snap.SuspendedNodes {
+		if sinfo.MessageID != "" {
+			rc.ReuseMessageIDs[nid] = sinfo.MessageID
+		}
+	}
+
+	if len(snap.SuspendedNodes) > 0 {
+		rc.ActivateNodes = make([]string, 0, len(snap.SuspendedNodes))
+		for nid := range snap.SuspendedNodes {
+			rc.ActivateNodes = append(rc.ActivateNodes, nid)
+		}
+		if snap.SuspendedNodeID != "" && replyText != "" {
+			rc.HumanReplies[snap.SuspendedNodeID] = replyText
+		}
+	} else if snap.SuspendedNodeID != "" {
 		rc.ActivateNodes = []string{snap.SuspendedNodeID}
+		if snap.SuspendedMessageID != "" {
+			rc.ReuseMessageIDs[snap.SuspendedNodeID] = snap.SuspendedMessageID
+		}
 		if replyText != "" {
-			rc.HumanReplies = map[string]string{snap.SuspendedNodeID: replyText}
+			rc.HumanReplies[snap.SuspendedNodeID] = replyText
 		}
 	}
 	return rc
+}
+
+// ResumeByMessageID delivers a reply to the human node matching messageID.
+// If the node has an active in-memory waiter, it delivers the reply directly.
+// Otherwise, it restores the run from snapshot with guards against concurrent replay and active execution.
+func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyText string, emit func(WorkflowEvent)) (*WorkflowRunResult, error) {
+	if messageID == "" || replyText == "" {
+		return nil, fmt.Errorf("message_id and reply_text are required")
+	}
+
+	if e.DeliverResumeByMessageID(messageID, replyText) {
+		return nil, nil
+	}
+
+	store := e.store
+	if store == nil {
+		return nil, fmt.Errorf("workflow run store is not configured")
+	}
+
+	snap, err := store.FindWaitingHumanByMessageID(messageID)
+	if err != nil {
+		return nil, fmt.Errorf("loading waiting workflow run for message %s: %w", messageID, err)
+	}
+	if snap == nil {
+		return nil, fmt.Errorf("no waiting workflow run found for message %s", messageID)
+	}
+	if snap.Status != PersistStatusWaitingHuman {
+		return nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", snap.RunID, snap.Status)
+	}
+
+	// Locate target node for this messageID
+	targetNodeID := snap.SuspendedNodeID
+	if len(snap.SuspendedNodes) > 0 {
+		found := false
+		for nid, sinfo := range snap.SuspendedNodes {
+			if sinfo.MessageID == messageID {
+				targetNodeID = nid
+				found = true
+				break
+			}
+		}
+		if !found && snap.SuspendedMessageID != messageID {
+			// In case SQLite LIKE matched case-insensitively, perform exact match check
+			return nil, fmt.Errorf("message %s does not match any suspended node in run %s", messageID, snap.RunID)
+		}
+	}
+
+	e.waitMu.Lock()
+	// Guard 1: replayPending wait loop (B8)
+	if e.replayPending[snap.RunID] {
+		e.waitMu.Unlock()
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+			if e.DeliverResumeByMessageID(messageID, replyText) {
+				return nil, nil
+			}
+			e.waitMu.Lock()
+			stillPending := e.replayPending[snap.RunID]
+			e.waitMu.Unlock()
+			if !stillPending {
+				break
+			}
+		}
+		if e.DeliverResumeByMessageID(messageID, replyText) {
+			return nil, nil
+		}
+		log.Warn().Str("run_id", snap.RunID).Str("message_id", messageID).Msg("replay pending timeout; resume discarded safely")
+		return nil, nil
+	}
+
+	// Guard 2: executing or registered waiters guard (B6, N3)
+	if e.executing[snap.RunID] || len(e.waitingByRun[snap.RunID]) > 0 {
+		e.waitMu.Unlock()
+		log.Warn().Str("run_id", snap.RunID).Str("message_id", messageID).Msg("workflow run is actively executing or has registered waiters; late or duplicate reply safely ignored")
+		return nil, nil
+	}
+
+	// Guard 3: set replayPending flag with defer cleanup (N5/R4)
+	e.replayPending[snap.RunID] = true
+	defer func() {
+		e.waitMu.Lock()
+		delete(e.replayPending, snap.RunID)
+		e.waitMu.Unlock()
+	}()
+	e.waitMu.Unlock()
+
+	defn, err := ParseDefinition([]byte(snap.DAGSpec))
+	if err != nil {
+		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", snap.RunID, err)
+	}
+
+	rc := e.buildResumeContext(snap, "", emit)
+	if targetNodeID != "" {
+		rc.HumanReplies[targetNodeID] = replyText
+	}
+	return e.Execute(ctx, defn, rc)
 }
 
 // ResumeWithEmitter is like Resume but forwards every event of a re-driven run
@@ -198,6 +362,14 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 	if e.deliverResume(runID, replyText) {
 		return nil, nil
 	}
+
+	e.waitMu.Lock()
+	if e.executing[runID] || len(e.waitingByRun[runID]) > 0 {
+		e.waitMu.Unlock()
+		log.Warn().Str("run_id", runID).Msg("workflow run is active or has pending human nodes; message_id required")
+		return nil, fmt.Errorf("workflow run %s is active or has multiple pending human nodes, message_id required", runID)
+	}
+	e.waitMu.Unlock()
 
 	store := e.store
 	if store == nil {
@@ -213,9 +385,25 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 	if snap.Status != PersistStatusWaitingHuman {
 		return nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", runID, snap.Status)
 	}
-	if snap.SuspendedNodeID == "" {
+	if len(snap.SuspendedNodes) > 1 {
+		return nil, fmt.Errorf("workflow run %s has multiple suspended nodes; message_id required", runID)
+	}
+	if snap.SuspendedNodeID == "" && len(snap.SuspendedNodes) == 0 {
 		return nil, fmt.Errorf("workflow run %s has no suspended node recorded", runID)
 	}
+
+	e.waitMu.Lock()
+	if e.replayPending[snap.RunID] {
+		e.waitMu.Unlock()
+		return nil, fmt.Errorf("workflow run %s is already replaying", runID)
+	}
+	e.replayPending[snap.RunID] = true
+	defer func() {
+		e.waitMu.Lock()
+		delete(e.replayPending, snap.RunID)
+		e.waitMu.Unlock()
+	}()
+	e.waitMu.Unlock()
 
 	defn, err := ParseDefinition([]byte(snap.DAGSpec))
 	if err != nil {
@@ -227,6 +415,7 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 }
 
 // FindWaitingRun returns the WAITING_HUMAN run snapshot for a session, if any.
+// Deprecated (pending step-4 API migration): use FindWaitingRuns instead, which returns every concurrently suspended run of a session.
 func (e *Engine) FindWaitingRun(sessionID string) (*RunSnapshot, error) {
 	if e.store == nil {
 		return nil, nil
@@ -234,13 +423,53 @@ func (e *Engine) FindWaitingRun(sessionID string) (*RunSnapshot, error) {
 	return e.store.FindWaitingHuman(sessionID)
 }
 
+// FindWaitingRuns returns all WAITING_HUMAN run snapshots for a session, most recently updated first.
+func (e *Engine) FindWaitingRuns(sessionID string) ([]*RunSnapshot, error) {
+	if e.store == nil {
+		return nil, nil
+	}
+	return e.store.FindWaitingHumans(sessionID)
+}
+
+// FindWaitingRunByMessageID returns the WAITING_HUMAN run snapshot owning the given ask_user MessageID.
+func (e *Engine) FindWaitingRunByMessageID(messageID string) (*RunSnapshot, error) {
+	if e.store == nil {
+		return nil, nil
+	}
+	return e.store.FindWaitingHumanByMessageID(messageID)
+}
+
+// DeliverResumeByMessageID routes a reply to a live suspended worker matching messageID.
+func (e *Engine) DeliverResumeByMessageID(messageID string, reply string) bool {
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+	if w, ok := e.waitingByMsg[messageID]; ok {
+		select {
+		case w.replyCh <- reply:
+			return true
+		default:
+		}
+	}
+	return false
+}
+
 // deliverResume routes a reply to a live suspended worker.
+// When there is exactly 1 waiter for runID, it delivers the reply.
+// When there are >1 waiters, it logs a warning and returns false.
 func (e *Engine) deliverResume(runID string, reply string) bool {
 	e.waitMu.Lock()
 	defer e.waitMu.Unlock()
-	if ch, ok := e.waiting[runID]; ok {
+	nodeWaiters := e.waitingByRun[runID]
+	if len(nodeWaiters) == 0 {
+		return false
+	}
+	if len(nodeWaiters) > 1 {
+		log.Warn().Str("run_id", runID).Int("waiters", len(nodeWaiters)).Msg("deliverResume: workflow has multiple waiting human nodes; message_id required")
+		return false
+	}
+	for _, w := range nodeWaiters {
 		select {
-		case ch <- reply:
+		case w.replyCh <- reply:
 			return true
 		default:
 		}

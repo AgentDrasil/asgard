@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,7 +139,7 @@ func TestFunctionRegistry_ConcurrentAccess(t *testing.T) {
 // cross-test pollution of the process-wide default registry.
 
 func TestGlobalFunctionHelpers(t *testing.T) {
-	const name = "test_global_helper_unique_name_xyz"
+	name := fmt.Sprintf("test_global_helper_unique_name_%d", time.Now().UnixNano())
 
 	_, ok := GetFunction(name)
 	assert.False(t, ok)

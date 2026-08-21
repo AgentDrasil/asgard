@@ -562,8 +562,9 @@ func TestResumeRestoresCountersAndStableMessageIDs(t *testing.T) {
 
 	waitFor(t, func() bool {
 		snap := store.get("runfb2")
-		return snap != nil && snap.Status == PersistStatusWaitingHuman && snap.SuspendedMessageID == "wf-runfb2-fix_fallback-2"
-	}, "re-driven run should re-suspend with an iteration-2 message id")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && snap.SuspendedMessageID == "wf-runfb2-fix_fallback" &&
+			snap.ExecutionCounts["fix_fallback"] == 2
+	}, "re-driven run should re-suspend with the reused original message id")
 
 	resumedSnap := store.get("runfb2")
 	assert.Equal(t, "fix_fallback", resumedSnap.SuspendedNodeID)
@@ -693,4 +694,838 @@ func TestMemStore_RefreshSuspension(t *testing.T) {
 	// Unknown runs are rejected.
 	err = store.RefreshSuspension("missing", nil, nil, nil, nil)
 	assert.Error(t, err)
+}
+
+// parallelDualLoopYAML defines a DAG with two parallel loops, each exhausting to an on_exhausted orphan human node.
+// This is structurally valid under the current validator and allows concurrent human suspensions.
+const parallelDualLoopYAML = `
+name: parallel-dual-loop
+loops:
+  - id: loop_a
+    nodes: [review_a, verdict_a, fixer_a]
+    max_iterations: 1
+    on_exhausted: human_a
+  - id: loop_b
+    nodes: [review_b, verdict_b, fixer_b]
+    max_iterations: 1
+    on_exhausted: human_b
+nodes:
+  - id: root
+    type: command
+    command: "echo root"
+  - id: review_a
+    type: command
+    command: "echo review_a"
+    depends:
+      - node: root
+      - node: fixer_a
+      - node: human_a
+        when: "nodes.human_a.output == 'retry'"
+        resets_loop: loop_a
+    join: always
+  - id: verdict_a
+    type: command
+    command: "echo verdict_a"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_a
+  - id: fixer_a
+    type: command
+    command: "echo fixer_a"
+    depends:
+      - node: verdict_a
+        when: "nodes.verdict_a.exit_code == 0"
+        counts_loop: loop_a
+  - id: review_b
+    type: command
+    command: "echo review_b"
+    depends:
+      - node: root
+      - node: fixer_b
+      - node: human_b
+        when: "nodes.human_b.output == 'retry'"
+        resets_loop: loop_b
+    join: always
+  - id: verdict_b
+    type: command
+    command: "echo verdict_b"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_b
+  - id: fixer_b
+    type: command
+    command: "echo fixer_b"
+    depends:
+      - node: verdict_b
+        when: "nodes.verdict_b.exit_code == 0"
+        counts_loop: loop_b
+  - id: human_a
+    type: human
+    prompt: "Human A prompt"
+    options: ["ok", "retry"]
+  - id: human_b
+    type: human
+    prompt: "Human B prompt"
+    options: ["ok", "retry"]
+  - id: final
+    type: command
+    command: "echo final"
+    depends:
+      - node: human_a
+      - node: human_b
+`
+
+// parallelDualLoopWithBrotherCommandYAML defines two parallel human nodes and a slow command node.
+const parallelDualLoopWithBrotherCommandYAML = `
+name: parallel-dual-loop-brother
+loops:
+  - id: loop_a
+    nodes: [review_a, verdict_a, fixer_a]
+    max_iterations: 1
+    on_exhausted: human_a
+  - id: loop_b
+    nodes: [review_b, verdict_b, fixer_b]
+    max_iterations: 1
+    on_exhausted: human_b
+nodes:
+  - id: root
+    type: command
+    command: "echo root"
+  - id: review_a
+    type: command
+    command: "echo review_a"
+    depends:
+      - node: root
+      - node: fixer_a
+    join: always
+  - id: verdict_a
+    type: command
+    command: "echo verdict_a"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_a
+  - id: fixer_a
+    type: command
+    command: "echo fixer_a"
+    depends:
+      - node: verdict_a
+        when: "nodes.verdict_a.exit_code == 0"
+        counts_loop: loop_a
+  - id: review_b
+    type: command
+    command: "echo review_b"
+    depends:
+      - node: root
+      - node: fixer_b
+    join: always
+  - id: verdict_b
+    type: command
+    command: "echo verdict_b"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_b
+  - id: fixer_b
+    type: command
+    command: "echo fixer_b"
+    depends:
+      - node: verdict_b
+        when: "nodes.verdict_b.exit_code == 0"
+        counts_loop: loop_b
+  - id: brother_cmd
+    type: command
+    command: "echo brother"
+    depends:
+      - node: root
+  - id: human_a
+    type: human
+    prompt: "Human A prompt"
+    options: ["ok"]
+  - id: human_b
+    type: human
+    prompt: "Human B prompt"
+    options: ["ok"]
+  - id: final
+    type: command
+    command: "echo final"
+    depends:
+      - node: human_a
+      - node: human_b
+      - node: brother_cmd
+`
+
+// singleLoopWithSlowDownstreamYAML defines a human node followed by a slow command node.
+const singleLoopWithSlowDownstreamYAML = `
+name: single-loop-slow-downstream
+loops:
+  - id: loop_a
+    nodes: [review_a, verdict_a, fixer_a]
+    max_iterations: 1
+    on_exhausted: human_a
+nodes:
+  - id: root
+    type: command
+    command: "echo root"
+  - id: review_a
+    type: command
+    command: "echo review_a"
+    depends:
+      - node: root
+      - node: fixer_a
+    join: always
+  - id: verdict_a
+    type: command
+    command: "echo verdict_a"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_a
+  - id: fixer_a
+    type: command
+    command: "echo fixer_a"
+    depends:
+      - node: verdict_a
+        when: "nodes.verdict_a.exit_code == 0"
+        counts_loop: loop_a
+  - id: human_a
+    type: human
+    prompt: "Human A prompt"
+    options: ["ok"]
+  - id: slow_downstream
+    type: command
+    command: "echo slow"
+    depends:
+      - node: human_a
+`
+
+func TestEngine_ParallelHumanNodes_ConcurrentSuspensionAndResume_InMemory(t *testing.T) {
+	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine, rec := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	runDir := t.TempDir()
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		res, err := engine.Execute(context.Background(), defn, RunContext{
+			SessionID: "chat-dual",
+			RunID:     "run-dual",
+			RunDir:    runDir,
+			Input:     "test",
+		})
+		outCh <- outcome{result: res, err: err}
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-dual")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && len(snap.SuspendedNodes) == 2
+	}, "both human nodes should be concurrently suspended")
+
+	snap := store.get("run-dual")
+	require.Len(t, snap.SuspendedNodes, 2)
+	assert.Contains(t, snap.SuspendedNodes, "human_a")
+	assert.Contains(t, snap.SuspendedNodes, "human_b")
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+	assert.NotEmpty(t, msgA)
+	assert.NotEmpty(t, msgB)
+
+	// Resume human_a via DeliverResumeByMessageID in memory
+	resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resA)
+
+	// Resume human_b via DeliverResumeByMessageID in memory
+	resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resB)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	assert.Equal(t, PersistStatusCompleted, store.get("run-dual").Status)
+	assert.Len(t, rec.all(), 2)
+}
+
+func TestEngine_ParallelHumanNodes_RestartReplay(t *testing.T) {
+	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "chat-dual-restart",
+			RunID:     "run-dual-restart",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-dual-restart")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && len(snap.SuspendedNodes) == 2
+	}, "dual human nodes suspend")
+
+	snap := store.get("run-dual-restart")
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+
+	// Cancel engine1 and restore waiting snapshot (simulate server shutdown)
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get("run-dual-restart").Status == PersistStatusCancelled
+	}, "cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	// Recreate fresh engine2 (server restarted)
+	engine2, rec2 := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	// Resume human_a by message ID -> re-drives run; human_b should re-suspend reusing original MessageID
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		outCh <- outcome{result: res, err: err}
+	}()
+
+	// Wait for engine2 to re-suspend at human_b
+	waitFor(t, func() bool {
+		s := store.get("run-dual-restart")
+		return s != nil && s.Status == PersistStatusWaitingHuman && len(s.SuspendedNodes) == 1 && s.SuspendedNodes["human_b"].MessageID == msgB
+	}, "human_b re-suspends with original message ID")
+
+	// Resume human_b in memory on engine2
+	resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resB)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	assert.Equal(t, PersistStatusCompleted, store.get("run-dual-restart").Status)
+	assert.NotEmpty(t, rec2.all())
+}
+
+func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
+	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	go func() {
+		_, _ = engine.Execute(context.Background(), defn, RunContext{
+			SessionID: "chat-prune",
+			RunID:     "run-prune",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-prune")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && len(snap.SuspendedNodes) == 2
+	}, "both suspended")
+
+	snap := store.get("run-prune")
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+
+	// Resume human_a in memory
+	resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resA)
+
+	// Post-Settle should have refreshed store and pruned SuspendedNodes down to human_b
+	waitFor(t, func() bool {
+		s := store.get("run-prune")
+		return s != nil && len(s.SuspendedNodes) == 1 && s.SuspendedNodes["human_b"].MessageID == msgB && s.NodeStates["human_a"].Status == string(StatusSucceeded)
+	}, "snap pruned to human_b with human_a succeeded")
+
+	// Resume human_b to complete run
+	resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resB)
+
+	waitFor(t, func() bool {
+		return store.get("run-prune").Status == PersistStatusCompleted
+	}, "completed")
+}
+
+func TestEngine_Resume_DuplicateReply_NoDoubleExecute(t *testing.T) {
+	t.Run("dual human node duplicate reply ignored", func(t *testing.T) {
+		defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+		require.NoError(t, err)
+
+		store := newMemStore()
+		engine, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+		go func() {
+			_, _ = engine.Execute(context.Background(), defn, RunContext{
+				SessionID: "chat-dup-dual",
+				RunID:     "run-dup-dual",
+				RunDir:    t.TempDir(),
+			})
+		}()
+
+		waitFor(t, func() bool {
+			snap := store.get("run-dup-dual")
+			return snap != nil && len(snap.SuspendedNodes) == 2
+		}, "both suspended")
+
+		snap := store.get("run-dup-dual")
+		msgA := snap.SuspendedNodes["human_a"].MessageID
+		msgB := snap.SuspendedNodes["human_b"].MessageID
+
+		// Resume human_a
+		_, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		require.NoError(t, err)
+
+		// Send duplicate reply for human_a while human_b is still waiting
+		resDup, errDup := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
+		require.NoError(t, errDup)
+		assert.Nil(t, resDup, "duplicate reply should be safely ignored and not trigger re-execution")
+
+		// Resume human_b
+		_, err = engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+		require.NoError(t, err)
+
+		waitFor(t, func() bool {
+			snap := store.get("run-dup-dual")
+			return snap != nil && snap.Status == PersistStatusCompleted
+		}, "settles completed")
+	})
+
+	t.Run("single human node executing guard ignores late resume", func(t *testing.T) {
+		slowRunner := &slowNodeRunner{delay: 100 * time.Millisecond}
+		defn, err := ParseDefinition([]byte(singleLoopWithSlowDownstreamYAML))
+		require.NoError(t, err)
+
+		store := newMemStore()
+		registry := NewNodeRunnerRegistry()
+		registry.Register(slowRunner)
+		rec := &suspendRecorder{}
+		engine := NewEngine(registry)
+		engine.SetRunStore(store)
+		engine.SetHumanSuspender(func(req SuspendRequest) error {
+			rec.record(req)
+			return nil
+		})
+
+		go func() {
+			_, _ = engine.Execute(context.Background(), defn, RunContext{
+				SessionID: "chat-dup-slow",
+				RunID:     "run-dup-slow",
+				RunDir:    t.TempDir(),
+			})
+		}()
+
+		waitFor(t, func() bool {
+			snap := store.get("run-dup-slow")
+			return snap != nil && snap.Status == PersistStatusWaitingHuman
+		}, "suspended")
+
+		snap := store.get("run-dup-slow")
+		msgA := snap.SuspendedMessageID
+
+		// Resume human_a: wakes worker and starts executing slow_downstream
+		_, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		require.NoError(t, err)
+
+		// While slow_downstream is actively running, attempt duplicate ResumeByMessageID and ResumeWithEmitter
+		resDup1, errDup1 := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
+		require.NoError(t, errDup1)
+		assert.Nil(t, resDup1)
+
+		resDup2, errDup2 := engine.ResumeWithEmitter(context.Background(), "run-dup-slow", "duplicate", nil)
+		assert.Error(t, errDup2)
+		assert.Nil(t, resDup2)
+		assert.Contains(t, errDup2.Error(), "active or has multiple pending human nodes")
+
+		waitFor(t, func() bool {
+			return store.get("run-dup-slow").Status == PersistStatusCompleted
+		}, "settles completed")
+	})
+}
+
+type slowNodeRunner struct {
+	delay time.Duration
+}
+
+func (s *slowNodeRunner) Supports(t NodeType) bool {
+	return t == NodeTypeCommand
+}
+
+func (s *slowNodeRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	time.Sleep(s.delay)
+	return &NodeResult{Status: StatusSucceeded, Output: "slow done"}, nil
+}
+
+func TestEngine_HumanNode_FastReplyRace(t *testing.T) {
+	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine, _ := newLoopPersistenceEngine(t, newLoopCountingRunner(passAfterVerdictRuns()), store)
+
+	// Pre-fill a fast reply or deliver synchronously inside suspend callback
+	var once sync.Once
+	engine.SetHumanSuspender(func(req SuspendRequest) error {
+		once.Do(func() {
+			go func() {
+				// Fast reply racing right as waiter registered
+				_ = engine.DeliverResumeByMessageID(req.MessageID, "Retry (reset counter)")
+			}()
+		})
+		return nil
+	})
+
+	runDir := t.TempDir()
+	res, err := engine.Execute(context.Background(), defn, RunContext{
+		SessionID: "chat-fast-race",
+		RunID:     "run-fast-race",
+		RunDir:    runDir,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, RunStatusCompleted, res.Status)
+	assert.Equal(t, PersistStatusCompleted, store.get("run-fast-race").Status)
+}
+
+func TestEngine_Resume_ConcurrentReplyDuringReplay(t *testing.T) {
+	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "chat-concurrent-replay",
+			RunID:     "run-concurrent-replay",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-concurrent-replay")
+		return snap != nil && len(snap.SuspendedNodes) == 2
+	}, "dual suspended")
+
+	snap := store.get("run-concurrent-replay")
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get("run-concurrent-replay").Status == PersistStatusCancelled
+	}, "cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	// Recreate engine2
+	engine2, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	// Concurrently start replay for msgA and deliver reply for msgB during replayPending phase
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		_, _ = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	}()
+
+	resA, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	require.NoError(t, err)
+	require.NotNil(t, resA)
+	assert.Equal(t, RunStatusCompleted, resA.Status)
+	assert.Equal(t, PersistStatusCompleted, store.get("run-concurrent-replay").Status)
+}
+
+func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {
+	brotherExecCount := 0
+	brotherRunner := &brotherCountingRunner{count: &brotherExecCount}
+
+	defn, err := ParseDefinition([]byte(parallelDualLoopWithBrotherCommandYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	registry := NewNodeRunnerRegistry()
+	registry.Register(brotherRunner)
+	engine1 := NewEngine(registry)
+	engine1.SetRunStore(store)
+	engine1.SetHumanSuspender(func(req SuspendRequest) error {
+		return nil
+	})
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "chat-brother",
+			RunID:     "run-brother",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-brother")
+		return snap != nil && len(snap.SuspendedNodes) == 2 && snap.NodeStates["brother_cmd"].Status == string(StatusSucceeded)
+	}, "both suspended and brother_cmd settled in snapshot")
+
+	snap := store.get("run-brother")
+	require.Equal(t, string(StatusSucceeded), snap.NodeStates["brother_cmd"].Status)
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get("run-brother").Status == PersistStatusCancelled
+	}, "cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	assert.Equal(t, 1, brotherExecCount)
+
+	// Recreate engine2 and resume
+	engine2 := NewEngine(registry)
+	engine2.SetRunStore(store)
+	engine2.SetHumanSuspender(func(req SuspendRequest) error {
+		return nil
+	})
+
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		outCh <- outcome{result: res, err: err}
+	}()
+
+	waitFor(t, func() bool {
+		s := store.get("run-brother")
+		return s != nil && s.Status == PersistStatusWaitingHuman && len(s.SuspendedNodes) == 1
+	}, "human_b waiting on engine2")
+
+	_, err = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	assert.Equal(t, 1, brotherExecCount, "brother_cmd should not have been re-executed during replay")
+}
+
+type brotherCountingRunner struct {
+	count *int
+}
+
+func (b *brotherCountingRunner) Supports(t NodeType) bool {
+	return t == NodeTypeCommand
+}
+
+func (b *brotherCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	if nctx.Node.ID == "brother_cmd" {
+		*b.count++
+	}
+	return &NodeResult{Status: StatusSucceeded, Output: "done"}, nil
+}
+
+// parallelTripleLoopYAML defines a DAG with three parallel loops, each exhausting to an on_exhausted orphan human node.
+const parallelTripleLoopYAML = `
+name: parallel-triple-loop
+loops:
+  - id: loop_a
+    nodes: [review_a, verdict_a, fixer_a]
+    max_iterations: 1
+    on_exhausted: human_a
+  - id: loop_b
+    nodes: [review_b, verdict_b, fixer_b]
+    max_iterations: 1
+    on_exhausted: human_b
+  - id: loop_c
+    nodes: [review_c, verdict_c, fixer_c]
+    max_iterations: 1
+    on_exhausted: human_c
+nodes:
+  - id: root
+    type: command
+    command: "echo root"
+  - id: review_a
+    type: command
+    command: "echo review_a"
+    depends:
+      - node: root
+      - node: fixer_a
+      - node: human_a
+        when: "nodes.human_a.output == 'retry'"
+        resets_loop: loop_a
+    join: always
+  - id: verdict_a
+    type: command
+    command: "echo verdict_a"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_a
+  - id: fixer_a
+    type: command
+    command: "echo fixer_a"
+    depends:
+      - node: verdict_a
+        when: "nodes.verdict_a.exit_code == 0"
+        counts_loop: loop_a
+  - id: review_b
+    type: command
+    command: "echo review_b"
+    depends:
+      - node: root
+      - node: fixer_b
+      - node: human_b
+        when: "nodes.human_b.output == 'retry'"
+        resets_loop: loop_b
+    join: always
+  - id: verdict_b
+    type: command
+    command: "echo verdict_b"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_b
+  - id: fixer_b
+    type: command
+    command: "echo fixer_b"
+    depends:
+      - node: verdict_b
+        when: "nodes.verdict_b.exit_code == 0"
+        counts_loop: loop_b
+  - id: review_c
+    type: command
+    command: "echo review_c"
+    depends:
+      - node: root
+      - node: fixer_c
+      - node: human_c
+        when: "nodes.human_c.output == 'retry'"
+        resets_loop: loop_c
+    join: always
+  - id: verdict_c
+    type: command
+    command: "echo verdict_c"
+    allowed_exit_codes: [0, 1]
+    depends:
+      - node: review_c
+  - id: fixer_c
+    type: command
+    command: "echo fixer_c"
+    depends:
+      - node: verdict_c
+        when: "nodes.verdict_c.exit_code == 0"
+        counts_loop: loop_c
+  - id: human_a
+    type: human
+    prompt: "Human A prompt"
+    options: ["ok", "retry"]
+  - id: human_b
+    type: human
+    prompt: "Human B prompt"
+    options: ["ok", "retry"]
+  - id: human_c
+    type: human
+    prompt: "Human C prompt"
+    options: ["ok", "retry"]
+  - id: final
+    type: command
+    command: "echo final"
+    depends:
+      - node: human_a
+      - node: human_b
+      - node: human_c
+`
+
+func TestResumeConcurrentReSuspensionThreeWaiters(t *testing.T) {
+	defn, err := ParseDefinition([]byte(parallelTripleLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "chat-triple",
+			RunID:     "run-triple",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-triple")
+		return snap != nil && snap.Status == PersistStatusWaitingHuman && len(snap.SuspendedNodes) == 3
+	}, "all three human nodes suspended")
+
+	snap := store.get("run-triple")
+	require.Len(t, snap.SuspendedNodes, 3)
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+	msgC := snap.SuspendedNodes["human_c"].MessageID
+	require.NotEmpty(t, msgA)
+	require.NotEmpty(t, msgB)
+	require.NotEmpty(t, msgC)
+
+	// Simulate server shutdown / cancellation
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get("run-triple").Status == PersistStatusCancelled
+	}, "cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	// Recreate engine2 (server restarted)
+	engine2, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	type outcome struct {
+		result *WorkflowRunResult
+		err    error
+	}
+	outCh := make(chan outcome, 1)
+	go func() {
+		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		outCh <- outcome{result: res, err: err}
+	}()
+
+	// Wait for engine2 to re-suspend at human_b and human_c concurrently
+	waitFor(t, func() bool {
+		s := store.get("run-triple")
+		return s != nil && s.Status == PersistStatusWaitingHuman && len(s.SuspendedNodes) == 2 &&
+			s.SuspendedNodes["human_b"].MessageID == msgB &&
+			s.SuspendedNodes["human_c"].MessageID == msgC
+	}, "human_b and human_c re-suspend concurrently with preserved message IDs")
+
+	// Resume human_b in memory on engine2
+	resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resB)
+
+	// Wait for store to update to only human_c suspended
+	waitFor(t, func() bool {
+		s := store.get("run-triple")
+		return s != nil && s.Status == PersistStatusWaitingHuman && len(s.SuspendedNodes) == 1 &&
+			s.SuspendedNodes["human_c"].MessageID == msgC
+	}, "human_c remaining suspended")
+
+	// Resume human_c in memory on engine2
+	resC, err := engine2.ResumeByMessageID(context.Background(), msgC, "ok", nil)
+	require.NoError(t, err)
+	assert.Nil(t, resC)
+
+	out := <-outCh
+	require.NoError(t, out.err)
+	require.NotNil(t, out.result)
+	assert.Equal(t, RunStatusCompleted, out.result.Status)
+	assert.Equal(t, PersistStatusCompleted, store.get("run-triple").Status)
 }
