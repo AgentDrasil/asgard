@@ -414,3 +414,17 @@ nodes:
 	assert.Equal(t, 1, msgIDs["wf-step-fanout_node-1-step_child-1"], "no collision/overwriting for item 1")
 	assert.Equal(t, 1, msgIDs["wf-step-fanout_node-2-step_child-1"], "no collision/overwriting for item 2")
 }
+
+func TestSuspendedNodeInfoTagsMatchAcrossPackages(t *testing.T) {
+	dbRaw, err := json.Marshal(map[string]dbmodels.SuspendedNodeInfo{
+		"node_a": {MessageID: "wf-r1-node_a", Iteration: 2},
+	})
+	require.NoError(t, err)
+
+	wfRaw, err := json.Marshal(map[string]workflow.SuspendedNodeInfo{
+		"node_a": {MessageID: "wf-r1-node_a", Iteration: 2},
+	})
+	require.NoError(t, err)
+
+	assert.JSONEq(t, string(dbRaw), string(wfRaw))
+}

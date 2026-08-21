@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -36,6 +37,13 @@ type PersistedNodeState struct {
 	LoopIterations map[string]int `json:"loop_iterations,omitempty"`
 }
 
+// SuspendedNodeInfo describes one concurrently suspended human node. The JSON
+// tags must stay byte-for-byte identical to dbmodels.SuspendedNodeInfo.
+type SuspendedNodeInfo struct {
+	MessageID string `json:"message_id"`
+	Iteration int    `json:"iteration"`
+}
+
 // RunSnapshot is the persisted state of one workflow run.
 type RunSnapshot struct {
 	RunID     string `json:"run_id"`
@@ -52,12 +60,18 @@ type RunSnapshot struct {
 	// ExecutionCounts persists the per-node execution counts so quota caps
 	// and deterministic human MessageIDs stay stable across restarts.
 	ExecutionCounts map[string]int `json:"execution_counts,omitempty"`
-	// SuspendedNodeID / SuspendedMessageID identify the active human node
-	// while Status is WAITING_HUMAN.
+	// SuspendedNodeID / SuspendedMessageID identify the most recently
+	// suspended human node while Status is WAITING_HUMAN (compatibility with
+	// single-suspension snapshots; the full set lives in SuspendedNodes).
 	SuspendedNodeID    string `json:"suspended_node_id,omitempty"`
 	SuspendedMessageID string `json:"suspended_message_id,omitempty"`
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// SuspendedNodes holds every concurrently suspended human node of the
+	// run, keyed by node ID.
+	SuspendedNodes map[string]SuspendedNodeInfo `json:"suspended_nodes,omitempty"`
+	// ParentRunID links a sub-workflow (inline) run to its parent run.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // snapshotCapture bundles the state MarkWaitingHuman persists: settled node
@@ -82,7 +96,19 @@ type RunStore interface {
 	GetRun(runID string) (*RunSnapshot, error)
 	// FindWaitingHuman returns the WAITING_HUMAN run for a session (nil, nil
 	// when none is suspended).
+	//
+	// Deprecated: use FindWaitingHumans instead, which returns every
+	// concurrently suspended run of a session.
 	FindWaitingHuman(sessionID string) (*RunSnapshot, error)
+	// FindWaitingHumans returns all WAITING_HUMAN runs of a session, most
+	// recently updated first.
+	FindWaitingHumans(sessionID string) ([]*RunSnapshot, error)
+	// FindWaitingHumanByMessageID returns the WAITING_HUMAN run owning the
+	// given ask_user MessageID (nil, nil when not found).
+	FindWaitingHumanByMessageID(messageID string) (*RunSnapshot, error)
+	// RefreshSuspension atomically overwrites a suspended run's settled node
+	// states, counters and (possibly pruned) suspended node set.
+	RefreshSuspension(runID string, states map[string]PersistedNodeState, loopIterations, executionCounts map[string]int, suspendedNodes map[string]SuspendedNodeInfo) error
 }
 
 // SuspendRequest describes a human-node suspension delivered to the host
@@ -162,6 +188,26 @@ func copyIntMap(m map[string]int) map[string]int {
 		out[k] = v
 	}
 	return out
+}
+
+// compatSuspendedColumns picks the legacy single-suspension compatibility
+// values for a suspended node set: the previous node when still present,
+// otherwise the lexicographically first node of the set.
+func compatSuspendedColumns(previousNodeID string, suspendedNodes map[string]SuspendedNodeInfo) (string, string) {
+	if previousNodeID != "" {
+		if info, ok := suspendedNodes[previousNodeID]; ok {
+			return previousNodeID, info.MessageID
+		}
+	}
+	keys := make([]string, 0, len(suspendedNodes))
+	for id := range suspendedNodes {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	for _, id := range keys {
+		return id, suspendedNodes[id].MessageID
+	}
+	return "", ""
 }
 
 // persistStatus maps an engine run status to its persisted spelling.

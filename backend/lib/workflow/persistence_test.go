@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +79,61 @@ func (m *memStore) FindWaitingHuman(sessionID string) (*RunSnapshot, error) {
 		}
 	}
 	return nil, nil
+}
+
+func (m *memStore) FindWaitingHumans(sessionID string) ([]*RunSnapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*RunSnapshot
+	for _, run := range m.runs {
+		if run.SessionID == sessionID && run.Status == PersistStatusWaitingHuman {
+			copy := *run
+			out = append(out, &copy)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (m *memStore) FindWaitingHumanByMessageID(messageID string) (*RunSnapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, run := range m.runs {
+		if run.Status != PersistStatusWaitingHuman {
+			continue
+		}
+		if run.SuspendedMessageID == messageID {
+			copy := *run
+			return &copy, nil
+		}
+		for _, info := range run.SuspendedNodes {
+			if info.MessageID == messageID {
+				copy := *run
+				return &copy, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (m *memStore) RefreshSuspension(runID string, states map[string]PersistedNodeState, loopIterations, executionCounts map[string]int, suspendedNodes map[string]SuspendedNodeInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	run := m.runs[runID]
+	if run == nil {
+		return fmt.Errorf("run %s not found", runID)
+	}
+	run.NodeStates = states
+	run.LoopIterations = loopIterations
+	run.ExecutionCounts = executionCounts
+	run.SuspendedNodes = suspendedNodes
+	suspendedNodeID, suspendedMessageID := compatSuspendedColumns(run.SuspendedNodeID, suspendedNodes)
+	run.SuspendedNodeID = suspendedNodeID
+	run.SuspendedMessageID = suspendedMessageID
+	m.order = append(m.order, "refresh:"+run.RunID)
+	return nil
 }
 
 func (m *memStore) get(runID string) *RunSnapshot {
@@ -533,4 +589,108 @@ func TestResumeRestoresCountersAndStableMessageIDs(t *testing.T) {
 	assert.Equal(t, 3, runner.count("fixer"))
 	assert.Equal(t, 4, runner.count("verdict"))
 	assert.Equal(t, PersistStatusCompleted, store.get("runfb2").Status)
+}
+
+func TestMemStore_FindWaitingHumans(t *testing.T) {
+	store := newMemStore()
+	require.NoError(t, store.StartRun(&RunSnapshot{RunID: "run-a", SessionID: "chat-1", Status: PersistStatusRunning}))
+	require.NoError(t, store.MarkWaitingHuman(&RunSnapshot{
+		RunID:     "run-a",
+		SessionID: "chat-1",
+		Status:    PersistStatusWaitingHuman,
+		SuspendedNodes: map[string]SuspendedNodeInfo{
+			"review": {MessageID: "wf-run-a-review", Iteration: 1},
+		},
+	}))
+	require.NoError(t, store.MarkWaitingHuman(&RunSnapshot{
+		RunID:     "run-b",
+		SessionID: "chat-1",
+		Status:    PersistStatusWaitingHuman,
+		SuspendedNodes: map[string]SuspendedNodeInfo{
+			"approve": {MessageID: "wf-run-b-approve", Iteration: 1},
+		},
+	}))
+	require.NoError(t, store.SettleRun("run-b", PersistStatusCompleted, nil))
+
+	runs, err := store.FindWaitingHumans("chat-1")
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "run-a", runs[0].RunID)
+
+	runs, err = store.FindWaitingHumans("chat-other")
+	require.NoError(t, err)
+	assert.Empty(t, runs)
+}
+
+func TestMemStore_FindWaitingHumanByMessageID(t *testing.T) {
+	store := newMemStore()
+	require.NoError(t, store.MarkWaitingHuman(&RunSnapshot{
+		RunID:              "run-1",
+		SessionID:          "chat-1",
+		Status:             PersistStatusWaitingHuman,
+		SuspendedNodeID:    "approval",
+		SuspendedMessageID: "wf-run-1-approval",
+		SuspendedNodes: map[string]SuspendedNodeInfo{
+			"approval": {MessageID: "wf-run-1-approval", Iteration: 1},
+			"review":   {MessageID: "wf-run-1-review", Iteration: 1},
+		},
+	}))
+
+	run, err := store.FindWaitingHumanByMessageID("wf-run-1-approval")
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, "run-1", run.RunID)
+
+	run, err = store.FindWaitingHumanByMessageID("wf-run-1-review")
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, "run-1", run.RunID)
+
+	run, err = store.FindWaitingHumanByMessageID("wf-missing")
+	require.NoError(t, err)
+	assert.Nil(t, run)
+}
+
+func TestMemStore_RefreshSuspension(t *testing.T) {
+	store := newMemStore()
+	require.NoError(t, store.MarkWaitingHuman(&RunSnapshot{
+		RunID:              "run-1",
+		SessionID:          "chat-1",
+		Status:             PersistStatusWaitingHuman,
+		SuspendedNodeID:    "plan_approval",
+		SuspendedMessageID: "wf-run-1-plan_approval",
+		SuspendedNodes: map[string]SuspendedNodeInfo{
+			"plan_approval": {MessageID: "wf-run-1-plan_approval", Iteration: 1},
+			"code_review":   {MessageID: "wf-run-1-code_review", Iteration: 1},
+		},
+	}))
+
+	err := store.RefreshSuspension(
+		"run-1",
+		map[string]PersistedNodeState{
+			"prep":          {Status: string(StatusSucceeded)},
+			"plan_approval": {Status: string(StatusSucceeded)},
+		},
+		map[string]int{"fix_loop": 2},
+		map[string]int{"fixer": 2},
+		map[string]SuspendedNodeInfo{
+			"code_review": {MessageID: "wf-run-1-code_review", Iteration: 1},
+		},
+	)
+	require.NoError(t, err)
+
+	snap := store.get("run-1")
+	require.NotNil(t, snap)
+	assert.Equal(t, PersistStatusWaitingHuman, snap.Status)
+	assert.Len(t, snap.NodeStates, 2)
+	assert.Equal(t, 2, snap.LoopIterations["fix_loop"])
+	assert.Equal(t, 2, snap.ExecutionCounts["fixer"])
+	require.Len(t, snap.SuspendedNodes, 1)
+	assert.Equal(t, "wf-run-1-code_review", snap.SuspendedNodes["code_review"].MessageID)
+	assert.Equal(t, "code_review", snap.SuspendedNodeID)
+	assert.Equal(t, "wf-run-1-code_review", snap.SuspendedMessageID)
+
+	// Unknown runs are rejected.
+	err = store.RefreshSuspension("missing", nil, nil, nil, nil)
+	assert.Error(t, err)
 }

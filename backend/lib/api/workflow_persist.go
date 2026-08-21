@@ -26,13 +26,14 @@ func newWorkflowRunStore(repo *dbmodels.WorkflowRunRepository) *workflowRunStore
 
 func (s *workflowRunStore) StartRun(run *workflow.RunSnapshot) error {
 	return s.repo.SaveRun(&dbmodels.WorkflowRun{
-		RunID:      run.RunID,
-		SessionID:  run.SessionID,
-		Status:     dbmodels.WorkflowStatusRunning,
-		DAGSpec:    run.DAGSpec,
-		NodeStates: "{}",
-		RunDir:     run.RunDir,
-		Input:      run.Input,
+		RunID:       run.RunID,
+		SessionID:   run.SessionID,
+		Status:      dbmodels.WorkflowStatusRunning,
+		DAGSpec:     run.DAGSpec,
+		NodeStates:  "{}",
+		RunDir:      run.RunDir,
+		Input:       run.Input,
+		ParentRunID: run.ParentRunID,
 	})
 }
 
@@ -49,6 +50,10 @@ func (s *workflowRunStore) MarkWaitingHuman(run *workflow.RunSnapshot) error {
 	if err != nil {
 		return err
 	}
+	suspendedNodes, err := dbmodels.EncodeSuspendedNodes(toDBSuspendedNodes(run.SuspendedNodes))
+	if err != nil {
+		return err
+	}
 	return s.repo.SaveRun(&dbmodels.WorkflowRun{
 		RunID:              run.RunID,
 		SessionID:          run.SessionID,
@@ -59,6 +64,8 @@ func (s *workflowRunStore) MarkWaitingHuman(run *workflow.RunSnapshot) error {
 		ExecutionCounts:    executionCounts,
 		SuspendedNodeID:    run.SuspendedNodeID,
 		SuspendedMessageID: run.SuspendedMessageID,
+		SuspendedNodes:     suspendedNodes,
+		ParentRunID:        run.ParentRunID,
 		RunDir:             run.RunDir,
 		Input:              run.Input,
 	})
@@ -106,6 +113,40 @@ func (s *workflowRunStore) FindWaitingHuman(sessionID string) (*workflow.RunSnap
 	return dbRunToSnapshot(run)
 }
 
+func (s *workflowRunStore) FindWaitingHumans(sessionID string) ([]*workflow.RunSnapshot, error) {
+	runs, err := s.repo.FindWaitingHumansBySession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	snaps := make([]*workflow.RunSnapshot, 0, len(runs))
+	for _, run := range runs {
+		snap, err := dbRunToSnapshot(run)
+		if err != nil {
+			return nil, err
+		}
+		snaps = append(snaps, snap)
+	}
+	return snaps, nil
+}
+
+func (s *workflowRunStore) FindWaitingHumanByMessageID(messageID string) (*workflow.RunSnapshot, error) {
+	run, err := s.repo.FindWaitingHumanByMessageID(messageID)
+	if err != nil || run == nil {
+		return nil, err
+	}
+	return dbRunToSnapshot(run)
+}
+
+func (s *workflowRunStore) RefreshSuspension(runID string, states map[string]workflow.PersistedNodeState, loopIterations, executionCounts map[string]int, suspendedNodes map[string]workflow.SuspendedNodeInfo) error {
+	return s.repo.RefreshSuspension(
+		runID,
+		toDBNodeStates(states),
+		loopIterations,
+		executionCounts,
+		toDBSuspendedNodes(suspendedNodes),
+	)
+}
+
 func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 	states, err := dbmodels.DecodeNodeStates(run.NodeStates)
 	if err != nil {
@@ -116,6 +157,10 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 		return nil, err
 	}
 	executionCounts, err := dbmodels.DecodeIntMap(run.ExecutionCounts)
+	if err != nil {
+		return nil, err
+	}
+	suspendedNodes, err := dbmodels.DecodeSuspendedNodes(run.SuspendedNodes)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +175,8 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 		ExecutionCounts:    executionCounts,
 		SuspendedNodeID:    run.SuspendedNodeID,
 		SuspendedMessageID: run.SuspendedMessageID,
+		SuspendedNodes:     fromDBSuspendedNodes(suspendedNodes),
+		ParentRunID:        run.ParentRunID,
 		CreatedAt:          run.CreatedAt,
 		UpdatedAt:          run.UpdatedAt,
 	}
@@ -157,6 +204,34 @@ func toDBNodeStates(states map[string]workflow.PersistedNodeState) map[string]db
 			OutputPath: state.OutputPath,
 			SkipReason: state.SkipReason,
 			Error:      state.Error,
+		}
+	}
+	return out
+}
+
+func toDBSuspendedNodes(nodes map[string]workflow.SuspendedNodeInfo) map[string]dbmodels.SuspendedNodeInfo {
+	if nodes == nil {
+		return nil
+	}
+	out := make(map[string]dbmodels.SuspendedNodeInfo, len(nodes))
+	for id, info := range nodes {
+		out[id] = dbmodels.SuspendedNodeInfo{
+			MessageID: info.MessageID,
+			Iteration: info.Iteration,
+		}
+	}
+	return out
+}
+
+func fromDBSuspendedNodes(nodes map[string]dbmodels.SuspendedNodeInfo) map[string]workflow.SuspendedNodeInfo {
+	if nodes == nil {
+		return nil
+	}
+	out := make(map[string]workflow.SuspendedNodeInfo, len(nodes))
+	for id, info := range nodes {
+		out[id] = workflow.SuspendedNodeInfo{
+			MessageID: info.MessageID,
+			Iteration: info.Iteration,
 		}
 	}
 	return out
