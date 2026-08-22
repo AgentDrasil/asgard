@@ -8,6 +8,9 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/app"
+
+	// Register notebook workflow functions in the default registry.
+	_ "github.com/AgentDrasil/asgard/backend/plugins/notebook"
 )
 
 func defaultConfigPath() string {

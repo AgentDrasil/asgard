@@ -210,7 +210,7 @@ func TestCollectCandidatesAndFindPending(t *testing.T) {
 	})
 
 	state := StateMap{}
-	RecordSuccess(journal, state, "absorbed", nil)
+	require.NoError(t, RecordSuccess(journal, state, "absorbed", nil))
 
 	pending, err := FindPending(candidates, state)
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestRecordSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	state := StateMap{"entry.md": {Path: "old/path.md", Status: "failed", FailCount: 2}}
-	RecordSuccess(path, state, "absorbed", map[string]interface{}{"model": "gemini"})
+	require.NoError(t, RecordSuccess(path, state, "absorbed", map[string]interface{}{"model": "gemini"}))
 
 	item, ok := state["entry.md"]
 	require.True(t, ok)
@@ -247,6 +247,11 @@ func TestRecordSuccess(t *testing.T) {
 	assert.Equal(t, 0, item.FailCount)
 	assert.NotEmpty(t, item.Date)
 	assert.Equal(t, "gemini", item.Extra["model"])
+
+	t.Run("returns error when target file does not exist", func(t *testing.T) {
+		err := RecordSuccess(filepath.Join(tmpDir, "non-existent.md"), state, "absorbed", nil)
+		require.Error(t, err)
+	})
 
 	needed, err := NeedsProcessing(path, state)
 	require.NoError(t, err)

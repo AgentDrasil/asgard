@@ -188,9 +188,6 @@ func countAgentNodes(defn *workflow.WorkflowDefinition) int {
 
 func findAgentsDir(baseDir string) string {
 	if *agentsDirFlag != "" {
-		if fileExists(filepath.Join(*agentsDirFlag, "agents")) {
-			return *agentsDirFlag
-		}
 		return *agentsDirFlag
 	}
 
