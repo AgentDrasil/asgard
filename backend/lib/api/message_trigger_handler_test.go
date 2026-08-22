@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,14 +48,14 @@ func TestMessageTriggerHandler(t *testing.T) {
 
 	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
-	require.NoError(t, os.WriteFile(wfFile, []byte(`
+	require.NoError(t, os.WriteFile(wfFile, []byte(fmt.Sprintf(`
 name: test-sync-wf
-tmp_dir: "tmp/${session_id}"
+tmp_dir: "%s/tmp/${session_id}"
 nodes:
   - id: step1
     type: command
     command: "echo test-sync-done"
-`), 0644))
+`, tempDir)), 0644))
 
 	wfAgent := &agentspec.Agent{
 		Config: agentspec.AgentConfig{

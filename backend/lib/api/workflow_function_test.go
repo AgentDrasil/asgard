@@ -290,9 +290,10 @@ cli:
 	assert.Contains(t, err.Error(), "server shut down before start completed")
 }
 
-const functionNodeWorkflowYAML = `
+func functionNodeWorkflowYAML(tempDir string) string {
+	return fmt.Sprintf(`
 name: function-e2e
-tmp_dir: "tmp/${session_id}"
+tmp_dir: "%s/tmp/${session_id}"
 nodes:
   - id: greet
     type: function
@@ -302,18 +303,21 @@ nodes:
     function: wrap_upstream
     depends:
       - node: greet
-`
+`, tempDir)
+}
 
-const failingFunctionNodeWorkflowYAML = `
+func failingFunctionNodeWorkflowYAML(tempDir string) string {
+	return fmt.Sprintf(`
 name: function-fail-e2e
-tmp_dir: "tmp/${session_id}"
+tmp_dir: "%s/tmp/${session_id}"
 nodes:
   - id: boom
     type: function
     function: explode
-`
+`, tempDir)
+}
 
-func newFunctionTestServer(t *testing.T, workflowYAML string, register func(reg *workflow.FunctionRegistry)) (*Server, *dbmodels.SessionRepository, *gorm.DB) {
+func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, register func(reg *workflow.FunctionRegistry)) (*Server, *dbmodels.SessionRepository, *gorm.DB) {
 	t.Helper()
 
 	testDB := db.NewDBForTest(t)
@@ -329,7 +333,7 @@ func newFunctionTestServer(t *testing.T, workflowYAML string, register func(reg 
 
 	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
-	require.NoError(t, os.WriteFile(wfFile, []byte(workflowYAML), 0644))
+	require.NoError(t, os.WriteFile(wfFile, []byte(makeWorkflowYAML(tempDir)), 0644))
 
 	conf := &config.Config{AgentDir: tempDir}
 	engine, err := newWorkflowEngine(conf, nil, funcRegistry, nil)

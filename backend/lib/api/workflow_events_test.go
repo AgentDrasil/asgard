@@ -24,9 +24,10 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
-const humanNodeWorkflowYAML = `
+func humanNodeWorkflowYAML(tempDir string) string {
+	return fmt.Sprintf(`
 name: human-stream
-tmp_dir: "tmp/${session_id}"
+tmp_dir: "%s/tmp/${session_id}"
 nodes:
   - id: entry_question
     type: human
@@ -36,7 +37,8 @@ nodes:
     depends:
       - node: entry_question
     command: "echo done > ${tmp_dir}/final.txt"
-`
+`, tempDir)
+}
 
 func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 	t.Parallel()
@@ -59,7 +61,7 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 
 	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
-	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML), 0644))
+	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML(tempDir)), 0644))
 
 	agent := &agentspec.Agent{
 		Config: agentspec.AgentConfig{
@@ -159,7 +161,7 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 
 	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
-	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML), 0644))
+	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML(tempDir)), 0644))
 
 	agent := &agentspec.Agent{
 		Config: agentspec.AgentConfig{
