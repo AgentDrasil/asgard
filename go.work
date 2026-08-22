@@ -1,8 +1,15 @@
 go 1.26.5
 
 use (
+	./agentwrapper
+	./agystatusline
 	./backend
-	./backend/agentwrapper
-	./backend/agystatusline
-	./backend/fakebash
+	./cmd/agent-validate
+	./cmd/asgard
+	./cmd/ask-user
+	./cmd/call-peer
+	./cmd/find-peer
+	./cmd/tester
+	./fakebash
+	./pkg/logger
 )

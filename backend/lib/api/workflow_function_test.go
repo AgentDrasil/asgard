@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/AgentDrasil/asgard/backend/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"

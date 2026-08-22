@@ -4,15 +4,9 @@ go 1.26.5
 
 require github.com/goccy/go-yaml v1.19.2
 
-require github.com/AgentDrasil/asgard/backend/agentwrapper v0.0.0
-
-replace github.com/AgentDrasil/asgard/backend/agentwrapper => ./agentwrapper
-
-require github.com/AgentDrasil/asgard/backend/fakebash v0.0.0
-
-replace github.com/AgentDrasil/asgard/backend/fakebash => ./fakebash
-
 require (
+	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
+	github.com/AgentDrasil/asgard/fakebash v0.0.0
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
@@ -28,6 +22,12 @@ require (
 	google.golang.org/grpc v1.83.1
 	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
+)
+
+replace (
+	github.com/AgentDrasil/asgard/agentwrapper => ../agentwrapper
+	github.com/AgentDrasil/asgard/fakebash => ../fakebash
+	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
 )
 
 require (

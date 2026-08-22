@@ -17,8 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/AgentDrasil/asgard/backend/fakebash/pb"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/fakebash/pb"
 )
 
 // commandRunner executes command nodes, optionally sandboxed via bubblewrap +

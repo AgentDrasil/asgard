@@ -22,28 +22,29 @@ jobs:
       with:
         go-version: ${{ env.GO_VERSION }}
         cache-dependency-path: |
-          backend/go.sum
-          backend/agentwrapper/go.sum
-          backend/fakebash/go.sum
-          backend/agystatusline/go.sum
+          go.work.sum
+          **/go.sum
 
     - name: Install goimports
       run: go install golang.org/x/tools/cmd/goimports@${{ env.GOIMPORTS_VERSION }}
 
+    - name: Install golangci-lint
+      run: curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin ${{ env.GOLANGCI_LINT_VERSION }}
+
     - name: Format check
       run: |
-        test -z "$($(go env GOPATH)/bin/goimports -local github.com/AgentDrasil/asgard -l .)"
+        MODULE_DIRS=$(go list -f '{{.Dir}}' -m)
+        test -z "$($(go env GOPATH)/bin/goimports -local github.com/AgentDrasil/asgard -l $MODULE_DIRS)"
 
     - name: Lint check
-      uses: golangci/golangci-lint-action@v9
-      with:
-        version: ${{ env.GOLANGCI_LINT_VERSION }}
-        working-directory: .
-        args: ./backend/... ./backend/agentwrapper/... ./backend/fakebash/... ./backend/agystatusline/...
+      run: |
+        MODULES=$(go list -f '{{.Dir}}/...' -m)
+        $(go env GOPATH)/bin/golangci-lint run $MODULES
 
     - name: Run tests
       run: |
-        go test -v ./backend/... ./backend/agentwrapper/... ./backend/fakebash/... ./backend/agystatusline/...
+        MODULES=$(go list -f '{{.Dir}}/...' -m)
+        go test -v $MODULES
 
   frontend:
     runs-on: ubuntu-latest

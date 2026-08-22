@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/AgentDrasil/asgard/backend/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper"
 )
 
 var idRegex = regexp.MustCompile("^[a-z0-9-_]+$")

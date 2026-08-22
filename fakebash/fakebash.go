@@ -1,0 +1,489 @@
+package fakebash
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/AgentDrasil/asgard/fakebash/pb"
+)
+
+var allowlist = map[string]struct{}{
+	"agystatusline": {},
+	"find-peer":     {},
+	"call-peer":     {},
+	"ask-user":      {},
+	"ask_user":      {},
+}
+
+func RunClient(args []string) error {
+	if len(args) > 1 {
+		var cmdArgs []string
+		var ok bool
+		if strings.HasPrefix(args[1], "-") {
+			cmdArgs, ok = unpackCommand(append([]string{"bash"}, args[1:]...))
+		} else {
+			cmdArgs, ok = unpackCommand(args[1:])
+		}
+
+		if ok {
+			if len(cmdArgs) == 0 {
+				os.Exit(0)
+			}
+
+			cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Env = os.Environ()
+			err := cmd.Run()
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					os.Exit(exitErr.ExitCode())
+				}
+				log.Error().Err(err).Msg("fakebash run allowlisted command error")
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
+	grpcConn, err := grpc.NewClient("unix:///fakebash/fakebash.sock",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("grpc dial error: %w", err)
+	}
+	defer func() { _ = grpcConn.Close() }()
+
+	client := pb.NewFakebashServiceClient(grpcConn)
+
+	cwd, _ := os.Getwd()
+	env := os.Environ()
+
+	log.Info().Interface("args", args).Str("cwd", cwd).Msg("fakebash: forwarding command to fakebashd via gRPC")
+	startTime := time.Now()
+
+	stream, err := client.RunCommand(context.Background(), &pb.CommandRequest{
+		Args: args[1:],
+		Cwd:  cwd,
+		Env:  env,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("fakebash: RunCommand RPC failed")
+		return fmt.Errorf("run command stream error: %w", err)
+	}
+
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				log.Info().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream received EOF from fakebashd")
+				break
+			}
+			log.Error().Err(err).Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream recv error from fakebashd")
+			return fmt.Errorf("stream recv error: %w", err)
+		}
+
+		switch resp.Type {
+		case pb.CommandResponse_STDOUT:
+			_, _ = os.Stdout.Write(resp.Payload)
+		case pb.CommandResponse_STDERR:
+			_, _ = os.Stderr.Write(resp.Payload)
+		case pb.CommandResponse_EXIT:
+			code := 0
+			if len(resp.Payload) > 0 {
+				code, _ = strconv.Atoi(string(resp.Payload))
+			}
+			log.Info().Int("exitCode", code).Dur("elapsed", time.Since(startTime)).Msg("fakebash: received EXIT frame from fakebashd, exiting")
+			os.Exit(code)
+		}
+	}
+	log.Warn().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream ended without EXIT frame, exiting 0")
+	return nil
+}
+
+type fakebashServer struct {
+	pb.UnimplementedFakebashServiceServer
+}
+
+func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashService_RunCommandServer) error {
+	var cmd *exec.Cmd
+	var cmdStr string
+	if len(req.Args) > 0 {
+		if req.Args[0] == "-c" {
+			if len(req.Args) > 1 {
+				cmdStr = req.Args[1]
+				cmd = exec.CommandContext(stream.Context(), "bash", append([]string{"-c"}, req.Args[1:]...)...)
+			}
+		} else {
+			cmdStr = strings.Join(req.Args, " ")
+			cmd = exec.CommandContext(stream.Context(), req.Args[0], req.Args[1:]...)
+		}
+	}
+
+	log.Info().Str("command", cmdStr).Interface("args", req.Args).Str("cwd", req.Cwd).Msg("fakebashd: command requested")
+
+	if cmdStr == "" {
+		if err := stream.Send(&pb.CommandResponse{
+			Type:    pb.CommandResponse_EXIT,
+			Payload: []byte("0"),
+		}); err != nil {
+			log.Error().Err(err).Msg("fakebashd write exit frame error")
+		}
+		return nil
+	}
+	if req.Cwd != "" {
+		cmd.Dir = req.Cwd
+	}
+	if len(req.Env) > 0 {
+		cmd.Env = req.Env
+	} else {
+		cmd.Env = os.Environ()
+	}
+
+	cmd.WaitDelay = 200 * time.Millisecond
+
+	// Use pipes we own instead of StdoutPipe/StderrPipe: exec.Cmd.Wait closes
+	// those pipes as soon as the process exits, discarding any output the
+	// reader goroutines have not consumed yet (WaitDelay does not help because
+	// StdoutPipe registers no copy goroutines for awaitGoroutines to wait on).
+	stdoutPipe, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderrPipe, stderrWrite, err := os.Pipe()
+	if err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWrite.Close()
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = stderrWrite
+
+	startTime := time.Now()
+	if err := cmd.Start(); err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWrite.Close()
+		_ = stderrPipe.Close()
+		_ = stderrWrite.Close()
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+	// The child holds its own duplicates of the write ends; close the parent
+	// copies so EOF is delivered once the child (and any processes holding the
+	// inherited fds) exit.
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	log.Info().Str("command", cmdStr).Int("pid", cmd.Process.Pid).Msg("fakebashd: process started")
+
+	var streamMu sync.Mutex
+	sendResponse := func(resp *pb.CommandResponse) error {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		return stream.Send(resp)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Stream stdout
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stdoutPipe.Read(buf)
+			if n > 0 {
+				if sendErr := sendResponse(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDOUT,
+					Payload: buf[:n],
+				}); sendErr != nil {
+					log.Error().Err(sendErr).Msg("fakebashd write stdout frame error")
+					return
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Stream stderr
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stderrPipe.Read(buf)
+			if n > 0 {
+				if sendErr := sendResponse(&pb.CommandResponse{
+					Type:    pb.CommandResponse_STDERR,
+					Payload: buf[:n],
+				}); sendErr != nil {
+					log.Error().Err(sendErr).Msg("fakebashd write stderr frame error")
+					return
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	var waitErr error
+	pipesDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(pipesDone)
+	}()
+
+	waitErrCh := make(chan error, 1)
+	go func() {
+		waitErrCh <- cmd.Wait()
+	}()
+
+	select {
+	case <-pipesDone:
+		// Normal case: pipes closed (EOF reached), now collect process exit status
+		waitErr = <-waitErrCh
+		log.Info().Str("command", cmdStr).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: pipes drained normally before/at process exit")
+	case waitErr = <-waitErrCh:
+		// Process exited, but pipes may still be held open by lingering child processes.
+		// Wait for pipes to finish draining or force close them after a short delay.
+		log.Info().Str("command", cmdStr).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: process exited, waiting up to 100ms for pipes to drain")
+		select {
+		case <-pipesDone:
+		case <-time.After(100 * time.Millisecond):
+			_ = stdoutPipe.Close()
+			_ = stderrPipe.Close()
+			<-pipesDone
+			log.Warn().Str("command", cmdStr).Msg("fakebashd: pipes forcibly closed after 100ms grace period")
+		}
+	}
+
+	// Readers have returned by this point, so closing cannot race with reads.
+	_ = stdoutPipe.Close()
+	_ = stderrPipe.Close()
+
+	exitCode := 0
+	if waitErr != nil {
+		if errors.Is(waitErr, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+			exitCode = 0
+		} else if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	log.Info().Str("command", cmdStr).Int("exitCode", exitCode).Dur("elapsed", time.Since(startTime)).Msg("fakebashd: command finished")
+
+	if err := sendResponse(&pb.CommandResponse{
+		Type:    pb.CommandResponse_EXIT,
+		Payload: []byte(strconv.Itoa(exitCode)),
+	}); err != nil {
+		log.Error().Err(err).Msg("fakebashd write exit frame error")
+	}
+
+	return nil
+}
+
+func RunDaemon() error {
+	socketPath := "/fakebash/fakebash.sock"
+	_ = os.Remove(socketPath)
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("fakebashd failed to listen on unix socket: %w", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	grpcServer := grpc.NewServer()
+	srv := &fakebashServer{}
+	pb.RegisterFakebashServiceServer(grpcServer, srv)
+
+	if err := grpcServer.Serve(listener); err != nil {
+		return fmt.Errorf("grpc server error: %w", err)
+	}
+	return nil
+}
+
+func splitCommandString(cmdStr string) [][]string {
+	var commands [][]string
+	var currentCmd []string
+	var currentWord strings.Builder
+
+	inSingleQuote := false
+	inDoubleQuote := false
+	escaped := false
+	wordStarted := false
+
+	emitWord := func() {
+		if wordStarted || currentWord.Len() > 0 {
+			currentCmd = append(currentCmd, currentWord.String())
+			currentWord.Reset()
+			wordStarted = false
+		}
+	}
+
+	emitCommand := func() {
+		emitWord()
+		if len(currentCmd) > 0 {
+			commands = append(commands, currentCmd)
+			currentCmd = nil
+		}
+	}
+
+	for i := 0; i < len(cmdStr); i++ {
+		c := cmdStr[i]
+
+		if escaped {
+			currentWord.WriteByte(c)
+			escaped = false
+			wordStarted = true
+			continue
+		}
+
+		if c == '\\' && !inSingleQuote {
+			escaped = true
+			wordStarted = true
+			continue
+		}
+
+		if c == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			wordStarted = true
+			continue
+		}
+
+		if c == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			wordStarted = true
+			continue
+		}
+
+		if !inSingleQuote && !inDoubleQuote {
+			if c == ';' || c == '\n' {
+				emitCommand()
+				continue
+			}
+			if c == '&' || c == '|' {
+				// Handle && or || operators
+				if i+1 < len(cmdStr) && cmdStr[i+1] == c {
+					i++
+				}
+				emitCommand()
+				continue
+			}
+			if unicode.IsSpace(rune(c)) {
+				emitWord()
+				continue
+			}
+		}
+
+		currentWord.WriteByte(c)
+		wordStarted = true
+	}
+
+	emitCommand()
+
+	return commands
+}
+
+func isNoOpCommand(name string) bool {
+	base := filepath.Base(name)
+	switch base {
+	case "shopt", "true", "false", "colon", ":":
+		return true
+	}
+	return false
+}
+
+func unpackCommand(cmd []string) ([]string, bool) {
+	if len(cmd) == 0 {
+		return nil, true
+	}
+
+	first := cmd[0]
+	base := filepath.Base(first)
+
+	if base == "exec" {
+		return unpackCommand(cmd[1:])
+	}
+
+	if isNoOpCommand(first) {
+		return nil, true
+	}
+
+	if base == "bash" || base == "sh" {
+		cIdx := -1
+		for i := 1; i < len(cmd); i++ {
+			arg := cmd[i]
+			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+				if strings.Contains(arg, "c") {
+					cIdx = i
+					break
+				}
+			}
+		}
+
+		if cIdx != -1 {
+			var innerCmdStr string
+			for i := cIdx + 1; i < len(cmd); i++ {
+				arg := cmd[i]
+				if strings.HasPrefix(arg, "-") {
+					continue
+				}
+				innerCmdStr = arg
+				break
+			}
+
+			if innerCmdStr != "" {
+				innerCmds := splitCommandString(innerCmdStr)
+
+				var finalCmd []string
+				for _, innerCmd := range innerCmds {
+					unpacked, ok := unpackCommand(innerCmd)
+					if !ok {
+						return nil, false
+					}
+					if len(unpacked) > 0 {
+						if len(finalCmd) > 0 {
+							return nil, false
+						}
+						finalCmd = unpacked
+					}
+				}
+				if len(finalCmd) > 0 {
+					return finalCmd, true
+				}
+				return nil, true
+			}
+		}
+
+		return nil, false
+	}
+
+	if _, ok := allowlist[first]; ok {
+		return cmd, true
+	}
+	if _, ok := allowlist[base]; ok {
+		return cmd, true
+	}
+
+	return nil, false
+}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/moznion/go-optional"
 
-	"github.com/AgentDrasil/asgard/backend/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 )
 

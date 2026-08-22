@@ -93,30 +93,49 @@ FROM golang:${GO_VERSION}-alpine AS go-builder
 WORKDIR /app
 
 COPY go.work go.work.sum* ./
-COPY backend/go.mod backend/go.sum ./backend/
-COPY backend/agentwrapper/go.mod backend/agentwrapper/go.sum ./backend/agentwrapper/
-COPY backend/fakebash/go.mod backend/fakebash/go.sum ./backend/fakebash/
-COPY backend/agystatusline/go.mod backend/agystatusline/go.sum ./backend/agystatusline/
+COPY backend/go.mod backend/go.sum* ./backend/
+COPY agentwrapper/go.mod agentwrapper/go.sum* ./agentwrapper/
+COPY agystatusline/go.mod agystatusline/go.sum* ./agystatusline/
+COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
+COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
+COPY cmd/agent-validate/go.mod cmd/agent-validate/go.sum* ./cmd/agent-validate/
+COPY cmd/asgard/go.mod cmd/asgard/go.sum* ./cmd/asgard/
+COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
+COPY cmd/call-peer/go.mod cmd/call-peer/go.sum* ./cmd/call-peer/
+COPY cmd/find-peer/go.mod cmd/find-peer/go.sum* ./cmd/find-peer/
+COPY cmd/tester/go.mod cmd/tester/go.sum* ./cmd/tester/
 
 RUN (cd backend && go mod download) && \
-    (cd backend/agentwrapper && go mod download) && \
-    (cd backend/fakebash && go mod download) && \
-    (cd backend/agystatusline && go mod download)
+    (cd agentwrapper && go mod download) && \
+    (cd agystatusline && go mod download) && \
+    (cd fakebash && go mod download) && \
+    (cd pkg/logger && go mod download) && \
+    (cd cmd/agent-validate && go mod download) && \
+    (cd cmd/asgard && go mod download) && \
+    (cd cmd/ask-user && go mod download) && \
+    (cd cmd/call-peer && go mod download) && \
+    (cd cmd/find-peer && go mod download) && \
+    (cd cmd/tester && go mod download)
 
 COPY backend/ ./backend/
+COPY agentwrapper/ ./agentwrapper/
+COPY agystatusline/ ./agystatusline/
+COPY fakebash/ ./fakebash/
+COPY pkg/ ./pkg/
+COPY cmd/ ./cmd/
 
 RUN mkdir -p /app/bin && \
-    for d in backend/cmd/*; do \
+    for d in cmd/*; do \
     if [ -d "$d" ]; then \
     name=$(basename "$d"); \
     echo "Building $name..."; \
     go build -v -o "/app/bin/$name" "./$d"; \
     fi; \
     done && \
-    go build -v -o /app/bin/aw ./backend/agentwrapper/cmd/aw && \
-    go build -v -o /app/bin/fakebash ./backend/fakebash/cmd/fakebash && \
-    go build -v -o /app/bin/fakebashd ./backend/fakebash/cmd/fakebashd && \
-    go build -v -o /app/bin/agystatusline ./backend/agystatusline/cmd/agystatusline
+    go build -v -o /app/bin/aw ./agentwrapper/cmd/aw && \
+    go build -v -o /app/bin/fakebash ./fakebash/cmd/fakebash && \
+    go build -v -o /app/bin/fakebashd ./fakebash/cmd/fakebashd && \
+    go build -v -o /app/bin/agystatusline ./agystatusline/cmd/agystatusline
 
 # Stage 5: runner
 FROM base_devtool AS runner
