@@ -213,8 +213,34 @@ func (e *SingleAgentExecutor) goGenerateTitle(ctx context.Context, chatID string
 
 // goGenerateSessionTitle spawns a background goroutine that generates a session
 // title for the given prompt via the Gemini API and persists it to the session
-// repository. It is shared by the single-agent and workflow code paths.
+// repository. If LLM generation is unconfigured, fails, or produces an empty title,
+// it falls back to a timestamped title ("2006-01-02 15:04:05").
 func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Client, repo *dbmodels.SessionRepository, chatID string, prompt string, agentID string, agentDesc string) {
+	if repo == nil || chatID == "" {
+		return
+	}
+
+	applyTitle := func(title string) {
+		if title == "" {
+			return
+		}
+		if err := repo.UpdateSessionTitle(chatID, title); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update session title in repo")
+		} else if server != nil {
+			server.PublishSessionEvent(chatID, SessionEvent{
+				Type:    "title",
+				Payload: map[string]any{"title": title},
+			})
+		}
+	}
+
+	fallbackTitle := time.Now().Format("2006-01-02 15:04:05")
+
+	if strings.TrimSpace(prompt) == "" {
+		applyTitle(fallbackTitle)
+		return
+	}
+
 	apiKey := ""
 	model := ""
 	if server != nil && server.conf != nil {
@@ -231,32 +257,32 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 				apiKey = os.Getenv("GEMINI_API_KEY")
 			}
 			if apiKey == "" {
-				log.Warn().Msg("failed to generate session title via gemini: gemini api key not configured")
+				log.Warn().Msg("gemini api key not configured; falling back to timestamp session title")
+				applyTitle(fallbackTitle)
 				return
 			}
 			var err error
 			client, err = llm.NewClient(titleCtx, apiKey)
 			if err != nil {
-				log.Warn().Err(err).Msg("failed to generate session title via gemini")
+				log.Warn().Err(err).Msg("failed to create gemini client for session title; falling back to timestamp session title")
+				applyTitle(fallbackTitle)
 				return
 			}
 		}
 
 		title, err := generateSessionTitle(titleCtx, client, model, prompt, agentID, agentDesc)
 		if err != nil {
-			log.Warn().Err(err).Msg("failed to generate session title via gemini")
+			log.Warn().Err(err).Msg("failed to generate session title via gemini; falling back to timestamp session title")
+			applyTitle(fallbackTitle)
 			return
 		}
-		if title != "" {
-			if err := repo.UpdateSessionTitle(chatID, title); err != nil {
-				log.Warn().Err(err).Msg("failed to update session title in repo")
-			} else if server != nil {
-				server.PublishSessionEvent(chatID, SessionEvent{
-					Type:    "title",
-					Payload: map[string]any{"title": title},
-				})
-			}
+		if strings.TrimSpace(title) == "" {
+			log.Warn().Msg("gemini returned empty session title; falling back to timestamp session title")
+			applyTitle(fallbackTitle)
+			return
 		}
+
+		applyTitle(title)
 	}()
 }
 

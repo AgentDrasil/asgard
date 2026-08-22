@@ -86,3 +86,20 @@ func TestWorkflowTitleSkipsInvalidChatID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, sess, "no session should be created or updated for invalid chat ID")
 }
+
+func TestWorkflowTitleFallbackTimestampWhenUnconfigured(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-wf-title-fallback"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	agent := &agents.Agent{Config: agents.AgentConfig{
+		ID:          "wf-agent",
+		Name:        "Workflow Agent",
+		Description: "runs a deploy workflow",
+	}}
+
+	s.maybeGenerateWorkflowTitle(context.Background(), agent, chatID, "")
+
+	session := waitForTitle(t, s, chatID)
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`, session.Title)
+}

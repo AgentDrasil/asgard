@@ -237,7 +237,7 @@ func (s *Server) persistIncomingWorkflowMessage(agent *agents.Agent, chatID stri
 
 // maybeGenerateWorkflowTitle spawns title-generation if session has no title yet.
 func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agents.Agent, chatID string, prompt string) {
-	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) || prompt == "" {
+	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) {
 		return
 	}
 	session, err := s.repo.GetSession(chatID)
