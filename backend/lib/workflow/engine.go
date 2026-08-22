@@ -13,7 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // NodeAction tells the scheduler whether a ready node should run or be skipped.
@@ -136,12 +136,12 @@ func (e *Engine) Registry() *NodeRunnerRegistry {
 }
 
 // SetAgents preloads agents into the registered agent runner if supported.
-func (e *Engine) SetAgents(agentList []*agents.Agent) {
+func (e *Engine) SetAgents(agentList []*agentspec.Agent) {
 	if e == nil || e.registry == nil {
 		return
 	}
 	if runner, ok := e.registry.Get(NodeTypeAgent); ok {
-		if preloader, ok := runner.(interface{ SetAgents([]*agents.Agent) }); ok {
+		if preloader, ok := runner.(interface{ SetAgents([]*agentspec.Agent) }); ok {
 			preloader.SetAgents(agentList)
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestBuildSystemPrompt(t *testing.T) {
@@ -205,13 +205,13 @@ func TestBuildArgs(t *testing.T) {
 	rwDir := filepath.Join(tmpDir, "rwdir")
 	require.NoError(t, os.MkdirAll(rwDir, 0755))
 
-	cfg := &agents.AgentConfig{
+	cfg := &agentspec.AgentConfig{
 		ID:          "test-agent",
 		Name:        "Test Agent",
 		Description: "A test agent",
 		Team:        "test-team",
 		RunDirs:     []string{runDir},
-		MountDirs: agents.MountConfig{
+		MountDirs: agentspec.MountConfig{
 			ReadOnly:  []string{roDir},
 			ReadWrite: []string{rwDir},
 		},
@@ -231,7 +231,7 @@ func TestBuildArgs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentPath, "AGENTS.md"), []byte("agents instructions"), 0644))
 
 	// Test case 1: agy CLITarget with session, team and langRules
-	targetAgy := agents.CLITarget{
+	targetAgy := agentspec.CLITarget{
 		CLI:   "agy",
 		Model: "some-model",
 	}
@@ -278,14 +278,14 @@ func TestBuildArgs(t *testing.T) {
 	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
 	// Test case 2: opencode CLITarget without team
-	cfgNoTeam := &agents.AgentConfig{
+	cfgNoTeam := &agentspec.AgentConfig{
 		ID:          "test-agent-no-team",
 		Name:        "Test Agent No Team",
 		Description: "A test agent without team",
 		RunDirs:     []string{runDir},
 	}
 
-	targetOpencode := agents.CLITarget{
+	targetOpencode := agentspec.CLITarget{
 		CLI:   "opencode",
 		Model: "another-model",
 	}

@@ -17,24 +17,25 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // stubRunner is a minimal NodeRunner fake used to verify custom runner injection.
 type stubRunner struct {
-	supports workflow.NodeType
+	supports workflowspec.NodeType
 	calls    atomic.Int64
 }
 
-func (r *stubRunner) Supports(t workflow.NodeType) bool { return t == r.supports }
+func (r *stubRunner) Supports(t workflowspec.NodeType) bool { return t == r.supports }
 
-func (r *stubRunner) Run(ctx context.Context, nctx *workflow.NodeContext) (*workflow.NodeResult, error) {
+func (r *stubRunner) Run(ctx context.Context, nctx *workflow.NodeContext) (*workflowspec.NodeResult, error) {
 	r.calls.Add(1)
-	return &workflow.NodeResult{Status: workflow.StatusSucceeded, ExitCode: 0, Output: "stub"}, nil
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: "stub"}, nil
 }
 
 func TestNewWorkflowEngine_InjectsRegistryAndRunners(t *testing.T) {
@@ -45,8 +46,8 @@ func TestNewWorkflowEngine_InjectsRegistryAndRunners(t *testing.T) {
 		return "ok", nil
 	})
 
-	llmStub := &stubRunner{supports: workflow.NodeTypeLLM}
-	cmdStub := &stubRunner{supports: workflow.NodeTypeCommand}
+	llmStub := &stubRunner{supports: workflowspec.NodeTypeLLM}
+	cmdStub := &stubRunner{supports: workflowspec.NodeTypeCommand}
 
 	conf := &config.Config{AgentDir: t.TempDir()}
 	engine, err := newWorkflowEngine(conf, nil, funcRegistry, nil, llmStub, cmdStub)
@@ -56,21 +57,21 @@ func TestNewWorkflowEngine_InjectsRegistryAndRunners(t *testing.T) {
 	registry := engine.Registry()
 	require.NotNil(t, registry)
 
-	fnRunner, ok := registry.Get(workflow.NodeTypeFunction)
+	fnRunner, ok := registry.Get(workflowspec.NodeTypeFunction)
 	require.True(t, ok, "function runner must be registered")
 	res, err := fnRunner.Run(context.Background(), &workflow.NodeContext{
-		Node:      &workflow.NodeSpec{ID: "n1", Type: workflow.NodeTypeFunction, Function: "di_fn"},
-		Upstreams: map[string]*workflow.NodeResult{},
+		Node:      &workflowspec.NodeSpec{ID: "n1", Type: workflowspec.NodeTypeFunction, Function: "di_fn"},
+		Upstreams: map[string]*workflowspec.NodeResult{},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, workflow.StatusSucceeded, res.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Status)
 	assert.Equal(t, "ok", res.Output)
 
-	gotLLM, ok := registry.Get(workflow.NodeTypeLLM)
+	gotLLM, ok := registry.Get(workflowspec.NodeTypeLLM)
 	require.True(t, ok, "custom LLM-type runner must be registered")
 	assert.Same(t, llmStub, gotLLM)
 
-	gotCmd, ok := registry.Get(workflow.NodeTypeCommand)
+	gotCmd, ok := registry.Get(workflowspec.NodeTypeCommand)
 	require.True(t, ok, "custom command-type runner must replace the default")
 	assert.Same(t, cmdStub, gotCmd)
 }
@@ -81,7 +82,7 @@ func TestNewWorkflowEngine_NilRegistryFallsBackToDefault(t *testing.T) {
 	engine, err := newWorkflowEngine(nil, nil, nil, nil)
 	require.NoError(t, err)
 
-	fnRunner, ok := engine.Registry().Get(workflow.NodeTypeFunction)
+	fnRunner, ok := engine.Registry().Get(workflowspec.NodeTypeFunction)
 	require.True(t, ok, "function runner must be registered even with nil registry")
 
 	name := fmt.Sprintf("default-fallback-%d", time.Now().UnixNano())
@@ -90,11 +91,11 @@ func TestNewWorkflowEngine_NilRegistryFallsBackToDefault(t *testing.T) {
 	})
 
 	res, err := fnRunner.Run(context.Background(), &workflow.NodeContext{
-		Node:      &workflow.NodeSpec{ID: "n1", Type: workflow.NodeTypeFunction, Function: name},
-		Upstreams: map[string]*workflow.NodeResult{},
+		Node:      &workflowspec.NodeSpec{ID: "n1", Type: workflowspec.NodeTypeFunction, Function: name},
+		Upstreams: map[string]*workflowspec.NodeResult{},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, workflow.StatusSucceeded, res.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Status)
 	assert.Equal(t, "from-default", res.Output)
 }
 
@@ -174,9 +175,9 @@ func TestServerOptions_FunctionRegistryFallbackAndReplacement(t *testing.T) {
 	t.Run("runner options accumulate", func(t *testing.T) {
 		t.Parallel()
 
-		r1 := &stubRunner{supports: workflow.NodeTypeLLM}
-		r2 := &stubRunner{supports: workflow.NodeTypeHuman}
-		r3 := &stubRunner{supports: workflow.NodeTypeAgent}
+		r1 := &stubRunner{supports: workflowspec.NodeTypeLLM}
+		r2 := &stubRunner{supports: workflowspec.NodeTypeHuman}
+		r3 := &stubRunner{supports: workflowspec.NodeTypeAgent}
 
 		var s Server
 		applyOpts(t, &s, WithNodeRunner(r1), WithCustomRunners(r2, nil, r3))
@@ -212,7 +213,7 @@ func TestServer_ShutdownIdempotentWithoutStart(t *testing.T) {
 	fatherYAML := `
 id: "agent_father"
 name: "Agent Father"
-description: "The agent creates other agents."
+description: "The agent creates other agentspec."
 team: "my-team"
 run_dirs: ["/tmp"]
 cli:
@@ -259,7 +260,7 @@ func TestServer_ShutdownBeforeStart(t *testing.T) {
 	fatherYAML := `
 id: "agent_father"
 name: "Agent Father"
-description: "The agent creates other agents."
+description: "The agent creates other agentspec."
 team: "my-team"
 run_dirs: ["/tmp"]
 cli:
@@ -338,8 +339,8 @@ func newFunctionTestServer(t *testing.T, workflowYAML string, register func(reg 
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:   "fn-agent",
 			Name: "Function Agent",
 			Type: "workflow",
@@ -352,7 +353,7 @@ func newFunctionTestServer(t *testing.T, workflowYAML string, register func(reg 
 		repo:           repo,
 		eventHub:       hub,
 		workflowEngine: engine,
-		agents:         []*agents.Agent{agent},
+		agents:         []*agentspec.Agent{agent},
 		ctx:            context.Background(),
 	}
 

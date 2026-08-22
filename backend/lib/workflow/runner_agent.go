@@ -16,6 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func withNodeTimeout(ctx context.Context, node *NodeSpec) (context.Context, context.CancelFunc) {
@@ -66,24 +67,24 @@ type AgentStatusUpdate struct {
 
 // agentRunner executes agent nodes by invoking CLI agents inside sandboxes.
 type agentRunner struct {
-	loader         *agents.Loader
+	loader         *agentspec.Loader
 	conf           *config.Config
 	statusListener AgentStatusListener
 
 	mu     sync.Mutex
-	agents map[string]*agents.Agent
+	agents map[string]*agentspec.Agent
 	loaded bool
 }
 
 // NewAgentRunner creates the runner for `agent` nodes. The loader resolves
 // agent_id references lazily (and re-resolves after agent reloads on cache miss).
-func NewAgentRunner(loader *agents.Loader, conf *config.Config) NodeRunner {
+func NewAgentRunner(loader *agentspec.Loader, conf *config.Config) NodeRunner {
 	return NewAgentRunnerWithListener(loader, conf, nil)
 }
 
 // NewAgentRunnerWithListener creates the runner for `agent` nodes with an optional status listener.
-func NewAgentRunnerWithListener(loader *agents.Loader, conf *config.Config, listener AgentStatusListener) NodeRunner {
-	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agents.Agent)}
+func NewAgentRunnerWithListener(loader *agentspec.Loader, conf *config.Config, listener AgentStatusListener) NodeRunner {
+	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agentspec.Agent)}
 }
 
 func (r *agentRunner) Supports(t NodeType) bool {
@@ -91,10 +92,10 @@ func (r *agentRunner) Supports(t NodeType) bool {
 }
 
 // SetAgents preloads or refreshes the agent cache in the runner.
-func (r *agentRunner) SetAgents(agentList []*agents.Agent) {
+func (r *agentRunner) SetAgents(agentList []*agentspec.Agent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.agents = make(map[string]*agents.Agent, len(agentList))
+	r.agents = make(map[string]*agentspec.Agent, len(agentList))
 	for _, a := range agentList {
 		if a != nil && a.Config.ID != "" {
 			r.agents[a.Config.ID] = a
@@ -104,7 +105,7 @@ func (r *agentRunner) SetAgents(agentList []*agents.Agent) {
 }
 
 // lookup finds an agent by ID, loading the agent directory on first use.
-func (r *agentRunner) lookup(agentID string) (*agents.Agent, error) {
+func (r *agentRunner) lookup(agentID string) (*agentspec.Agent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -482,7 +483,7 @@ func parseAgentOutput(out []byte) (lastContent string, sessionID string) {
 // resolveEffectiveAgent returns a clone of the agent with missing RunDirs and MountDirs
 // inherited from the enclosing workflow context.
 // ReadOnly and ReadWrite mounts are inherited independently to avoid dropping explicit configs.
-func resolveEffectiveAgent(agent *agents.Agent, nctx *NodeContext) *agents.Agent {
+func resolveEffectiveAgent(agent *agentspec.Agent, nctx *NodeContext) *agentspec.Agent {
 	if agent == nil {
 		return nil
 	}

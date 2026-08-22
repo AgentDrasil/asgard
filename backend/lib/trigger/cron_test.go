@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestCleanCronSessionID(t *testing.T) {
@@ -70,7 +70,7 @@ func isValidChatIDFormat(chatID string) bool {
 
 // newTestWorkflowAgent writes a minimal scheduled workflow definition and wraps
 // it in a workflow agent.
-func newTestWorkflowAgent(t *testing.T, id string, schedule string) *agents.Agent {
+func newTestWorkflowAgent(t *testing.T, id string, schedule string) *agentspec.Agent {
 	t.Helper()
 	spec := fmt.Sprintf(`
 name: %s
@@ -84,8 +84,8 @@ nodes:
 	dir := t.TempDir()
 	path := filepath.Join(dir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(spec), 0o644))
-	return &agents.Agent{
-		Config:       agents.AgentConfig{ID: id, Name: id, Type: "workflow"},
+	return &agentspec.Agent{
+		Config:       agentspec.AgentConfig{ID: id, Name: id, Type: "workflow"},
 		Path:         dir,
 		WorkflowPath: path,
 	}
@@ -108,16 +108,16 @@ func TestWorkflowCronManager_ScheduleTrigger(t *testing.T) {
 
 	var mu sync.Mutex
 	var calls []struct {
-		agent    *agents.Agent
+		agent    *agentspec.Agent
 		chatID   string
 		prompt   string
 		headless bool
 	}
-	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error {
+	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {
 		mu.Lock()
 		defer mu.Unlock()
 		calls = append(calls, struct {
-			agent    *agents.Agent
+			agent    *agentspec.Agent
 			chatID   string
 			prompt   string
 			headless bool
@@ -165,7 +165,7 @@ func TestWorkflowCronManager_SingletonExecution(t *testing.T) {
 	var maxConcurrent int32
 	var mu sync.Mutex
 
-	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error {
+	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {
 		mu.Lock()
 		concurrent++
 		if concurrent > maxConcurrent {
@@ -204,7 +204,7 @@ func TestWorkflowCronManager_SyntheticSession_UpsertPreservesMessages(t *testing
 	repo := dbmodels.NewSessionRepository(dbConn)
 
 	triggered := make(chan string, 4)
-	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error {
+	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {
 		select {
 		case triggered <- chatID:
 		default:
@@ -246,7 +246,7 @@ func TestWorkflowCronManager_SyntheticSession_UpsertPreservesMessages(t *testing
 
 func TestWorkflowCronManager_NilRepo_Tolerance(t *testing.T) {
 	triggered := make(chan string, 4)
-	m := newTestCronManager(t, nil, func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error {
+	m := newTestCronManager(t, nil, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {
 		select {
 		case triggered <- chatID:
 		default:
@@ -268,7 +268,7 @@ func TestWorkflowCronManager_NilRepo_Tolerance(t *testing.T) {
 }
 
 func TestWorkflowCronManager_DynamicReload(t *testing.T) {
-	m := newTestCronManager(t, nil, func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error {
+	m := newTestCronManager(t, nil, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {
 		return nil
 	})
 
@@ -277,19 +277,19 @@ func TestWorkflowCronManager_DynamicReload(t *testing.T) {
 	noSchedule := newTestWorkflowAgent(t, "reload-nosched", "")
 
 	// Initial registration.
-	m.Reload([]*agents.Agent{wfA, wfB})
+	m.Reload([]*agentspec.Agent{wfA, wfB})
 	assert.Eventually(t, func() bool {
 		return len(m.scheduler.Jobs()) == 2
 	}, time.Second, 10*time.Millisecond)
 
 	// Remove one, drop schedule from another.
-	m.Reload([]*agents.Agent{wfA, noSchedule})
+	m.Reload([]*agentspec.Agent{wfA, noSchedule})
 	assert.Eventually(t, func() bool {
 		return len(m.scheduler.Jobs()) == 1
 	}, time.Second, 10*time.Millisecond)
 
 	// Add a new one back.
-	m.Reload([]*agents.Agent{wfA, wfB})
+	m.Reload([]*agentspec.Agent{wfA, wfB})
 	assert.Eventually(t, func() bool {
 		return len(m.scheduler.Jobs()) == 2
 	}, time.Second, 10*time.Millisecond)

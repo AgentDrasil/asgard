@@ -121,4 +121,3 @@ func TestInterpolate(t *testing.T) {
 	// Unterminated placeholder passes through.
 	assert.Equal(t, "broken ${session_id", Interpolate("broken ${session_id", resolve))
 }
-

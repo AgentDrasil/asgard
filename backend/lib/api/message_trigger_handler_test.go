@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestMessageTriggerHandler(t *testing.T) {
@@ -31,13 +31,13 @@ func TestMessageTriggerHandler(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 
-	agentConfig := agents.AgentConfig{
+	agentConfig := agentspec.AgentConfig{
 		ID:          "test-agent",
 		Name:        "Test Agent",
 		Description: "A test agent",
 		Type:        "agent",
 	}
-	agent := &agents.Agent{
+	agent := &agentspec.Agent{
 		Config: agentConfig,
 	}
 
@@ -56,8 +56,8 @@ nodes:
     command: "echo test-sync-done"
 `), 0644))
 
-	wfAgent := &agents.Agent{
-		Config: agents.AgentConfig{
+	wfAgent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:   "test-wf-agent",
 			Name: "Test Workflow Agent",
 			Type: "workflow",
@@ -70,7 +70,7 @@ nodes:
 		repo:           repo,
 		eventHub:       hub,
 		workflowEngine: engine,
-		agents:         []*agents.Agent{agent, wfAgent},
+		agents:         []*agentspec.Agent{agent, wfAgent},
 	}
 	server.mux = server.buildMuxLocked()
 

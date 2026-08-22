@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // handleTeam handles requests to get other team agents for a given chat ID.
@@ -48,7 +48,7 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var currentAgent *agents.Agent
+	var currentAgent *agentspec.Agent
 	for _, a := range s.agents {
 		if a.Config.Name == session.CurrentAgent || a.Config.ID == session.CurrentAgent {
 			currentAgent = a

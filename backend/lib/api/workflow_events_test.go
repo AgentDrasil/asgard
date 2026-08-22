@@ -16,11 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 const humanNodeWorkflowYAML = `
@@ -60,8 +61,8 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML), 0644))
 
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:   "wf-stream-agent",
 			Name: "Workflow Stream Agent",
 			Type: "workflow",
@@ -74,7 +75,7 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 		repo:           repo,
 		eventHub:       hub,
 		workflowEngine: engine,
-		agents:         []*agents.Agent{agent},
+		agents:         []*agentspec.Agent{agent},
 	}
 	s.mux = s.buildMuxLocked()
 	engine.SetHumanSuspender(s.suspendWorkflowHuman)
@@ -160,8 +161,8 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML), 0644))
 
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:   "wf-stream-agent",
 			Name: "Workflow Stream Agent",
 			Type: "workflow",
@@ -174,7 +175,7 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 		repo:           repo,
 		eventHub:       hub,
 		workflowEngine: engine,
-		agents:         []*agents.Agent{agent},
+		agents:         []*agentspec.Agent{agent},
 	}
 	s.mux = s.buildMuxLocked()
 	engine.SetHumanSuspender(s.suspendWorkflowHuman)
@@ -269,12 +270,12 @@ nodes:
     sandbox: false
     command: "echo child-${input}"
 `
-	childDefn, err := workflow.ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(false))
-	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflow.WorkflowDefinition, error) {
+	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "child-event-wf" {
 			return childDefn, nil
 		}
@@ -308,8 +309,8 @@ nodes:
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(parentYAML), 0644))
 
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:   "wf-fanout-event-agent",
 			Name: "Workflow Fanout Event Agent",
 			Type: "workflow",
@@ -322,7 +323,7 @@ nodes:
 		repo:           repo,
 		eventHub:       hub,
 		workflowEngine: engine,
-		agents:         []*agents.Agent{agent},
+		agents:         []*agentspec.Agent{agent},
 	}
 	s.mux = s.buildMuxLocked()
 

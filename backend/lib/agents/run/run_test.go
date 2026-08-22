@@ -11,8 +11,8 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestRun(t *testing.T) {
@@ -79,12 +79,12 @@ func TestRun(t *testing.T) {
 	t.Cleanup(func() { agentwrapper.SetClients(nil) })
 
 	// 1. Test case: successful run choosing the first target with > 10% quota
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:          "test-agent",
 			Name:        "Test Agent",
 			Description: "A test agent for testing run pkg",
-			CLI: []agents.CLITarget{
+			CLI: []agentspec.CLITarget{
 				{CLI: "agy", Model: "agy-model-low"},            // 15% quota (>10%, chosen)
 				{CLI: "agy", Model: "agy-model-high"},           // 50% quota
 				{CLI: "opencode", Model: "opencode-model-high"}, // 80% quota
@@ -111,12 +111,12 @@ func TestRun(t *testing.T) {
 	}
 
 	// 2. Test case: no targets have more than 10% quota
-	insufficientQuotaAgent := &agents.Agent{
-		Config: agents.AgentConfig{
+	insufficientQuotaAgent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:          "insufficient-quota-agent",
 			Name:        "Insufficient Quota Agent",
 			Description: "An agent with target below 10% quota",
-			CLI: []agents.CLITarget{
+			CLI: []agentspec.CLITarget{
 				{CLI: "agy", Model: "agy-model-zero"}, // 0% quota
 			},
 			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
@@ -149,12 +149,12 @@ func TestRun(t *testing.T) {
 	}
 
 	// 5. Test case: fallback to creating $HOME/tmp/$uuid
-	agentWithoutRunDirs := &agents.Agent{
-		Config: agents.AgentConfig{
+	agentWithoutRunDirs := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:          "no-rundirs-agent",
 			Name:        "No RunDirs Agent",
 			Description: "An agent with no run dirs config",
-			CLI: []agents.CLITarget{
+			CLI: []agentspec.CLITarget{
 				{CLI: "agy", Model: "agy-model-high"},
 			},
 		},
@@ -192,12 +192,12 @@ func TestRun(t *testing.T) {
 	}
 
 	// 7. Test case: explicitly selecting model with no quota (0% or <= 0) should error without fallback
-	agentWithZeroQuota := &agents.Agent{
-		Config: agents.AgentConfig{
+	agentWithZeroQuota := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:          "zero-quota-agent",
 			Name:        "Zero Quota Agent",
 			Description: "An agent with zero quota target",
-			CLI: []agents.CLITarget{
+			CLI: []agentspec.CLITarget{
 				{CLI: "agy", Model: "agy-model-zero"},
 			},
 			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},

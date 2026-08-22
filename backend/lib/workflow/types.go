@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-
 // NodeContext carries the pure runtime data for one node execution. External
-// dependencies (llm.Client, agents.Loader, ...) are injected into the
+// dependencies (llm.Client, agentspec.Loader, ...) are injected into the
 // respective runners via their constructors, never here.
 type NodeContext struct {
 	SessionID string

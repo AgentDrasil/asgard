@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/llm"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // SingleAgentRunParams carries the parameters for a single agent execution.
@@ -31,7 +32,7 @@ type SingleAgentRunParams struct {
 
 // SingleAgentExecutor handles responding to and processing single-agent tasks.
 type SingleAgentExecutor struct {
-	agent     *agents.Agent
+	agent     *agentspec.Agent
 	conf      *config.Config
 	repo      *dbmodels.SessionRepository
 	server    *Server
@@ -41,7 +42,7 @@ type SingleAgentExecutor struct {
 // NewSingleAgentExecutor creates a SingleAgentExecutor for the given agent.
 // llmClient may be nil; in that case a genai-backed client is created lazily
 // for session title generation using the configured (or env) API key.
-func NewSingleAgentExecutor(agent *agents.Agent, conf *config.Config, repo *dbmodels.SessionRepository, server *Server, llmClient llm.Client) *SingleAgentExecutor {
+func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *dbmodels.SessionRepository, server *Server, llmClient llm.Client) *SingleAgentExecutor {
 	return &SingleAgentExecutor{
 		agent:     agent,
 		conf:      conf,
@@ -309,7 +310,7 @@ func (e *SingleAgentExecutor) markAgentCompleted(chatID string) {
 
 // recordStatusUpdate processes an incremental status update from an agent run,
 // saving artifacts and messages to the session database, and logging warnings on error.
-func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agents.AgentConfig, workspaceDir string) {
+func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agentspec.AgentConfig, workspaceDir string) {
 	if repo == nil || update.Content == "" || update.EntryType == "agent_response" {
 		return
 	}

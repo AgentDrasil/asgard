@@ -17,6 +17,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 const askUserReplyTestYAML = `
@@ -189,9 +190,9 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventNodeStatusUpdate,
 		NodeID:    "intend_agent",
-		NodeType:  workflow.NodeTypeAgent,
+		NodeType:  workflowspec.NodeTypeAgent,
 		AgentName: "Intent Analyst",
-		Status:    workflow.StatusRunning,
+		Status:    workflowspec.StatusRunning,
 		Message:   "Writing requirements to /tmp/intend.md",
 		EntryType: "tool_call",
 		Metadata: map[string]any{
@@ -218,9 +219,9 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventNodeStatusUpdate,
 		NodeID:    "intend_agent",
-		NodeType:  workflow.NodeTypeAgent,
+		NodeType:  workflowspec.NodeTypeAgent,
 		AgentName: "Intent Analyst",
-		Status:    workflow.StatusRunning,
+		Status:    workflowspec.StatusRunning,
 		Message:   "Requirements written successfully",
 		EntryType: "tool_result",
 		Metadata: map[string]any{
@@ -246,9 +247,9 @@ func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventWorkflowSuspended,
 		NodeID:    "plan_approval",
-		NodeType:  workflow.NodeTypeHuman,
+		NodeType:  workflowspec.NodeTypeHuman,
 		AgentName: "Dev Workflow",
-		Status:    workflow.NodeStatus(workflow.RunStatusWaitingHuman),
+		Status:    workflowspec.NodeStatus(workflow.RunStatusWaitingHuman),
 		Message:   "Please review Plan (/tmp/plan/plan.md)",
 		MessageID: "wf-run-plan_approval",
 		Artifacts: []string{"/tmp/plan/plan.md", "/tmp/plan/todo.yaml"},
@@ -290,12 +291,12 @@ nodes:
     sandbox: false
     command: "echo result-${input}"
 `
-	childDefn, err := workflow.ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(false))
-	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflow.WorkflowDefinition, error) {
+	wfRunner := workflow.NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "fanout-child-persist" {
 			return childDefn, nil
 		}
@@ -332,7 +333,7 @@ nodes:
       output_file: output.jsonl
 `, tmpDir, itemsFile)
 
-	parentDefn, err := workflow.ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	runID := "run-fanout-persist-top"
@@ -361,8 +362,8 @@ nodes:
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventNodeStatusUpdate,
 		NodeID:    "fanout_node",
-		NodeType:  workflow.NodeTypeWorkflow,
-		Status:    workflow.StatusRunning,
+		NodeType:  workflowspec.NodeTypeWorkflow,
+		Status:    workflowspec.StatusRunning,
 		Message:   "Item 1 child started",
 		EntryType: "tool_call",
 		Metadata: map[string]any{
@@ -374,8 +375,8 @@ nodes:
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventNodeStatusUpdate,
 		NodeID:    "fanout_node",
-		NodeType:  workflow.NodeTypeWorkflow,
-		Status:    workflow.StatusRunning,
+		NodeType:  workflowspec.NodeTypeWorkflow,
+		Status:    workflowspec.StatusRunning,
 		Message:   "Item 2 child started",
 		EntryType: "tool_call",
 		Metadata: map[string]any{
@@ -388,8 +389,8 @@ nodes:
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
 		Type:      workflow.EventNodeStatusUpdate,
 		NodeID:    "fanout_node",
-		NodeType:  workflow.NodeTypeWorkflow,
-		Status:    workflow.StatusRunning,
+		NodeType:  workflowspec.NodeTypeWorkflow,
+		Status:    workflowspec.StatusRunning,
 		Message:   "Item 1 child progress ticker",
 		EntryType: "fanout_progress",
 		Metadata: map[string]any{

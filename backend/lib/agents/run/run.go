@@ -13,9 +13,9 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func IsAllowedDir(path string, allowedDirs []string) bool {
@@ -34,7 +34,7 @@ func IsAllowedDir(path string, allowedDirs []string) bool {
 }
 
 // resolveRunDir resolves the run directory for an agent invocation.
-func resolveRunDir(agent *agents.Agent, runDirOpt optional.Option[string]) (string, error) {
+func resolveRunDir(agent *agentspec.Agent, runDirOpt optional.Option[string]) (string, error) {
 	if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
 		rd := runDirOpt.Unwrap()
 		if !IsAllowedDir(rd, agent.Config.RunDirs) {
@@ -80,7 +80,7 @@ type StatusScope struct {
 }
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
-func runTarget(ctx context.Context, agent *agents.Agent, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
+func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -229,12 +229,12 @@ const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic 
 // It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
 // If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
 // If selected model has <= 0 quota, it returns an error immediately with NO fallback.
-func Run(ctx context.Context, agent *agents.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
+func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
 
-	var selectedTarget *agents.CLITarget
+	var selectedTarget *agentspec.CLITarget
 	if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
 		reqModel := modelOpt.Unwrap()
 		for _, target := range agent.Config.CLI {

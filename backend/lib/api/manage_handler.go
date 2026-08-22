@@ -8,15 +8,15 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 const agentFatherID = "agent_father"
 
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
-	loader := agents.NewLoader(s.conf.AgentDir)
+	loader := agentspec.NewLoader(s.conf.AgentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return err

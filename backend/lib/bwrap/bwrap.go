@@ -10,7 +10,7 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // buildSystemPrompt constructs the full system prompt for the given CLI.
@@ -187,7 +187,7 @@ func appendSSHSandboxArgs(args []string, home string) []string {
 
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) ([]string, error) {
+func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -351,7 +351,7 @@ func buildArgsForAgent(cfg *agents.AgentConfig, agentPath string, target agents.
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agents.AgentConfig, agentPath string, target agents.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) (*exec.Cmd, error) {
+func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) (*exec.Cmd, error) {
 	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules)
 	if err != nil {
 		return nil, err

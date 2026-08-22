@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,8 +33,8 @@ func TestIsArtifact(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(customRW) })
 
-	config := &AgentConfig{
-		MountDirs: MountConfig{
+	config := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
 			ReadWrite: []string{customRW},
 		},
 		RunDirs: []string{"/tmp/run_dir"},
@@ -85,7 +87,7 @@ func TestIsArtifactWorkspaceIsRunDir(t *testing.T) {
 	require.NoError(t, exec.Command("git", "init", workspaceDir).Run())
 	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n"), 0644))
 
-	config := &AgentConfig{
+	config := &agentspec.AgentConfig{
 		RunDirs: []string{workspaceDir},
 	}
 
@@ -116,7 +118,7 @@ func TestIsArtifactRunDirAncestorOfWorkspace(t *testing.T) {
 	require.NoError(t, exec.Command("git", "init", workspaceDir).Run())
 	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n"), 0644))
 
-	config := &AgentConfig{
+	config := &agentspec.AgentConfig{
 		RunDirs: []string{root}, // ancestor of the workspace
 	}
 

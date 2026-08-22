@@ -10,6 +10,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // workflowRunStore adapts the dbmodels WorkflowRun repository to the engine's
@@ -432,7 +433,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	// Persist a successful node's final response as an assistant message so
 	// node agents' conclusions survive reloads (streamed agent_response
 	// updates are intentionally not persisted to avoid step-level churn).
-	if ev.Type == workflow.EventNodeFinished && ev.Status == workflow.StatusSucceeded && ev.Output != "" {
+	if ev.Type == workflow.EventNodeFinished && ev.Status == workflowspec.StatusSucceeded && ev.Output != "" {
 		msg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("wf-node-%s-%d", ev.NodeID, time.Now().UnixMilli()),
 			Role:      "assistant",
@@ -450,7 +451,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		}
 		return
 	}
-	if ev.Type == workflow.EventWorkflowFinished && ev.Status == workflow.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
+	if ev.Type == workflow.EventWorkflowFinished && ev.Status == workflowspec.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
 		msg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("wf-summary-%d", time.Now().UnixMilli()),
 			Role:      "assistant",
@@ -468,7 +469,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		}
 		return
 	}
-	if ev.Status != workflow.StatusFailed {
+	if ev.Status != workflowspec.StatusFailed {
 		return
 	}
 	nodeRef := ev.NodeID

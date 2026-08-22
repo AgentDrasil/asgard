@@ -8,11 +8,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/llm"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // newWorkflowEngine builds the shared workflow engine with all node runners
@@ -25,7 +26,7 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 	registry.Register(workflow.NewCommandRunner(true))
 	registry.Register(workflow.NewFunctionRunner(funcRegistry))
 	if conf != nil {
-		registry.Register(workflow.NewAgentRunnerWithListener(agents.NewLoader(conf.AgentDir), conf, statusListener))
+		registry.Register(workflow.NewAgentRunnerWithListener(agentspec.NewLoader(conf.AgentDir), conf, statusListener))
 		if conf.GeminiAPIKey != "" {
 			client, err := llm.NewClient(context.Background(), conf.GeminiAPIKey)
 			if err != nil {
@@ -45,24 +46,24 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 }
 
 // resolveWorkflowDefinition resolves a sub-workflow definition by name against
-// the server's registered agents. Agents are matched first by config ID or
+// the server's registered agentspec. Agents are matched first by config ID or
 // display name; if none matches, all workflow agents' definitions are loaded
 // and compared by definition name.
-func (s *Server) resolveWorkflowDefinition(name string) (*workflow.WorkflowDefinition, error) {
+func (s *Server) resolveWorkflowDefinition(name string) (*workflowspec.WorkflowDefinition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var fallbacks []*agents.Agent
+	var fallbacks []*agentspec.Agent
 	for _, agent := range s.agents {
 		if agent.Config.Type != "workflow" || agent.WorkflowPath == "" {
 			continue
 		}
 		if agent.Config.ID == name || agent.Config.Name == name {
-			return workflow.LoadDefinition(agent.WorkflowPath)
+			return workflowspec.LoadDefinition(agent.WorkflowPath)
 		}
 		fallbacks = append(fallbacks, agent)
 	}
 	for _, agent := range fallbacks {
-		defn, err := workflow.LoadDefinition(agent.WorkflowPath)
+		defn, err := workflowspec.LoadDefinition(agent.WorkflowPath)
 		if err != nil {
 			log.Warn().Err(err).Str("agent", agent.Config.ID).Msg("failed to load candidate sub-workflow definition")
 			continue
@@ -75,7 +76,7 @@ func (s *Server) resolveWorkflowDefinition(name string) (*workflow.WorkflowDefin
 }
 
 // runWorkflow executes a workflow agent synchronously, returning its settled status and summary output.
-func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
+func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
 	s.persistIncomingWorkflowMessage(agent, chatID, req)
 	s.maybeGenerateWorkflowTitle(ctx, agent, chatID, req.Prompt)
 
@@ -105,7 +106,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 		}()
 	}
 
-	defn, err := workflow.LoadDefinition(agent.WorkflowPath)
+	defn, err := workflowspec.LoadDefinition(agent.WorkflowPath)
 	if err != nil {
 		log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to load workflow definition")
 		return "failed", "", fmt.Errorf("failed to load workflow definition: %w", err)
@@ -121,7 +122,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 		}
 		s.mu.RLock()
 		if len(s.agents) > 0 {
-			agentsSnapshot := make([]*agents.Agent, len(s.agents))
+			agentsSnapshot := make([]*agentspec.Agent, len(s.agents))
 			copy(agentsSnapshot, s.agents)
 			engine.SetAgents(agentsSnapshot)
 		}
@@ -131,7 +132,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 	executor := workflow.NewWorkflowExecutor(engine, defn)
 	executor.AgentName = agent.Config.Name
 	executor.WorkflowRunDirs = agent.Config.RunDirs
-	executor.WorkflowMountDirs = workflow.MountDirsConfig{
+	executor.WorkflowMountDirs = workflowspec.MountDirsConfig{
 		ReadOnly:  agent.Config.MountDirs.ReadOnly,
 		ReadWrite: agent.Config.MountDirs.ReadWrite,
 	}
@@ -184,7 +185,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agents.Agent, chatID st
 }
 
 // persistIncomingWorkflowMessage appends the user's prompt to the chat session.
-func (s *Server) persistIncomingWorkflowMessage(agent *agents.Agent, chatID string, req TriggerMessageRequest) {
+func (s *Server) persistIncomingWorkflowMessage(agent *agentspec.Agent, chatID string, req TriggerMessageRequest) {
 	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) || req.Prompt == "" {
 		return
 	}
@@ -236,7 +237,7 @@ func (s *Server) persistIncomingWorkflowMessage(agent *agents.Agent, chatID stri
 }
 
 // maybeGenerateWorkflowTitle spawns title-generation if session has no title yet.
-func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agents.Agent, chatID string, prompt string) {
+func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string) {
 	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) {
 		return
 	}

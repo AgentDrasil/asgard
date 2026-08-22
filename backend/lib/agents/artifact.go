@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // IsArtifact determines whether a given target file path should be treated as an artifact.
@@ -22,7 +24,7 @@ import (
 //  2. Otherwise (target is outside the workspace): if it falls under any ReadWrite mount
 //     or RunDir from config, treat it as an auxiliary artifact output area -> Returns true.
 //  3. Fallback: Returns false.
-func IsArtifact(targetPath string, config *AgentConfig, workspaceDir string) bool {
+func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir string) bool {
 	if targetPath == "" {
 		return false
 	}

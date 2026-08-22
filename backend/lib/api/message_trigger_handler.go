@@ -10,7 +10,7 @@ import (
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.
@@ -34,7 +34,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var targetAgent *agents.Agent
+	var targetAgent *agentspec.Agent
 	s.mu.RLock()
 	for _, a := range s.agents {
 		if a.Config.ID == agentID || a.Config.Name == agentID {
@@ -140,7 +140,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // runSingleAgent executes a single CLI agent synchronously, returning its final assistant text.
-func (s *Server) runSingleAgent(ctx context.Context, agent *agents.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
+func (s *Server) runSingleAgent(ctx context.Context, agent *agentspec.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
 	exec := NewSingleAgentExecutor(agent, s.conf, s.repo, s, nil)
 	out, err := exec.Execute(ctx, SingleAgentRunParams{
 		ChatID:   chatID,

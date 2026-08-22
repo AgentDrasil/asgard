@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
@@ -120,88 +120,88 @@ func TestResolveEffectiveAgent_TableDriven(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		inputAgent    *agents.Agent
+		inputAgent    *agentspec.Agent
 		wantRunDirs   []string
-		wantMountDirs agents.MountConfig
+		wantMountDirs agentspec.MountConfig
 	}{
 		{
 			name: "agent with empty RunDirs and MountDirs inherits all from workflow",
-			inputAgent: &agents.Agent{
-				Config: agents.AgentConfig{
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
 					ID:   "child-empty",
 					Name: "Child Empty",
 				},
 			},
 			wantRunDirs: []string{"/wf/rundir"},
-			wantMountDirs: agents.MountConfig{
+			wantMountDirs: agentspec.MountConfig{
 				ReadOnly:  []string{"/wf/ro"},
 				ReadWrite: []string{"/wf/rw"},
 			},
 		},
 		{
 			name: "agent with explicit RunDirs retains own RunDirs but inherits MountDirs",
-			inputAgent: &agents.Agent{
-				Config: agents.AgentConfig{
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
 					ID:      "child-with-rundir",
 					Name:    "Child with RunDir",
 					RunDirs: []string{"/agent/own/run"},
 				},
 			},
 			wantRunDirs: []string{"/agent/own/run"},
-			wantMountDirs: agents.MountConfig{
+			wantMountDirs: agentspec.MountConfig{
 				ReadOnly:  []string{"/wf/ro"},
 				ReadWrite: []string{"/wf/rw"},
 			},
 		},
 		{
 			name: "agent with explicit ReadOnly retains own RO but inherits RW",
-			inputAgent: &agents.Agent{
-				Config: agents.AgentConfig{
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
 					ID:   "child-custom-ro",
 					Name: "Child Custom RO",
-					MountDirs: agents.MountConfig{
+					MountDirs: agentspec.MountConfig{
 						ReadOnly: []string{"/agent/own/ro"},
 					},
 				},
 			},
 			wantRunDirs: []string{"/wf/rundir"},
-			wantMountDirs: agents.MountConfig{
+			wantMountDirs: agentspec.MountConfig{
 				ReadOnly:  []string{"/agent/own/ro"},
 				ReadWrite: []string{"/wf/rw"},
 			},
 		},
 		{
 			name: "agent with explicit ReadWrite retains own RW but inherits RO",
-			inputAgent: &agents.Agent{
-				Config: agents.AgentConfig{
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
 					ID:   "child-custom-rw",
 					Name: "Child Custom RW",
-					MountDirs: agents.MountConfig{
+					MountDirs: agentspec.MountConfig{
 						ReadWrite: []string{"/agent/own/rw"},
 					},
 				},
 			},
 			wantRunDirs: []string{"/wf/rundir"},
-			wantMountDirs: agents.MountConfig{
+			wantMountDirs: agentspec.MountConfig{
 				ReadOnly:  []string{"/wf/ro"},
 				ReadWrite: []string{"/agent/own/rw"},
 			},
 		},
 		{
 			name: "agent with full custom config retains all custom settings",
-			inputAgent: &agents.Agent{
-				Config: agents.AgentConfig{
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
 					ID:      "child-full-custom",
 					Name:    "Child Full Custom",
 					RunDirs: []string{"/custom/run"},
-					MountDirs: agents.MountConfig{
+					MountDirs: agentspec.MountConfig{
 						ReadOnly:  []string{"/custom/ro"},
 						ReadWrite: []string{"/custom/rw"},
 					},
 				},
 			},
 			wantRunDirs: []string{"/custom/run"},
-			wantMountDirs: agents.MountConfig{
+			wantMountDirs: agentspec.MountConfig{
 				ReadOnly:  []string{"/custom/ro"},
 				ReadWrite: []string{"/custom/rw"},
 			},
@@ -336,15 +336,15 @@ func TestAgentRunner_SetAgents(t *testing.T) {
 	agentRunnerInstance, ok := runner.(*agentRunner)
 	require.True(t, ok)
 
-	testAgents := []*agents.Agent{
+	testAgents := []*agentspec.Agent{
 		{
-			Config: agents.AgentConfig{
+			Config: agentspec.AgentConfig{
 				ID:   "test-agent-1",
 				Name: "Test Agent 1",
 			},
 		},
 		{
-			Config: agents.AgentConfig{
+			Config: agentspec.AgentConfig{
 				ID:   "test-agent-2",
 				Name: "Test Agent 2",
 			},
@@ -368,9 +368,9 @@ func TestAgentRunner_SetAgents(t *testing.T) {
 	reg := NewNodeRunnerRegistry()
 	reg.Register(runner)
 	eng := NewEngine(reg)
-	eng.SetAgents([]*agents.Agent{
+	eng.SetAgents([]*agentspec.Agent{
 		{
-			Config: agents.AgentConfig{
+			Config: agentspec.AgentConfig{
 				ID:   "updated-agent",
 				Name: "Updated",
 			},
@@ -516,12 +516,12 @@ func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
 	agentRunnerInstance, ok := runner.(*agentRunner)
 	require.True(t, ok)
 
-	agentRunnerInstance.SetAgents([]*agents.Agent{
+	agentRunnerInstance.SetAgents([]*agentspec.Agent{
 		{
-			Config: agents.AgentConfig{
+			Config: agentspec.AgentConfig{
 				ID:   "test-agent",
 				Name: "Test Agent",
-				CLI: []agents.CLITarget{
+				CLI: []agentspec.CLITarget{
 					{CLI: "echo", Model: "dummy"},
 				},
 			},

@@ -12,29 +12,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestHandleAgents(t *testing.T) {
 	srv := &Server{
-		agents: []*agents.Agent{
+		agents: []*agentspec.Agent{
 			{
-				Config: agents.AgentConfig{
+				Config: agentspec.AgentConfig{
 					ID:   "agent-alpha",
 					Name: "Agent Alpha",
 				},
 			},
 			{
-				Config: agents.AgentConfig{
+				Config: agentspec.AgentConfig{
 					ID:   "agent-beta",
 					Type: "agent",
 					Name: "Agent Beta",
 				},
 			},
 			{
-				Config: agents.AgentConfig{
+				Config: agentspec.AgentConfig{
 					ID:   "workflow-gamma",
 					Type: "workflow",
 					Name: "Workflow Gamma",
@@ -67,8 +67,8 @@ func TestHandleAgents(t *testing.T) {
 }
 
 func TestExecuteValidation(t *testing.T) {
-	agent := &agents.Agent{
-		Config: agents.AgentConfig{
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
 			ID:      "test-agent",
 			Name:    "Test Agent",
 			RunDirs: []string{"/tmp"},
@@ -106,9 +106,9 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	err = os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("scratch/\n*.tmp\n"), 0644)
 	require.NoError(t, err)
 
-	agentConfig := &agents.AgentConfig{
+	agentConfig := &agentspec.AgentConfig{
 		Name: "TestAgent",
-		MountDirs: agents.MountConfig{
+		MountDirs: agentspec.MountConfig{
 			ReadWrite: []string{"/tmp/custom_rw_dir"},
 		},
 	}

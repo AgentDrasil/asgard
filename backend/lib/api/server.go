@@ -15,12 +15,12 @@ import (
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // ErrServerShutdownBeforeStart is returned by Start when Shutdown was called before or during Start.
@@ -30,7 +30,7 @@ var ErrServerShutdownBeforeStart = errors.New("server shut down before start com
 type Server struct {
 	conf             *config.Config
 	mu               sync.RWMutex
-	agents           []*agents.Agent
+	agents           []*agentspec.Agent
 	mux              *http.ServeMux
 	repo             *dbmodels.SessionRepository
 	workflowRunRepo  *dbmodels.WorkflowRunRepository
@@ -364,7 +364,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // runWorkflowCronTrigger executes a scheduled workflow on behalf of WorkflowCronManager,
 // participating in the activeExecutions mutual-exclusion guard.
-func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agents.Agent, chatID, prompt string, headless bool) error {
+func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agentspec.Agent, chatID, prompt string, headless bool) error {
 	if _, running := s.activeExecutions.LoadOrStore(chatID, struct{}{}); running {
 		log.Warn().Str("chatId", chatID).Msg("skip cron cycle: execution already in flight")
 		return nil

@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/llm"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 type fakeTitleClient struct {
@@ -57,7 +57,7 @@ func TestWorkflowTitleSkipsExistingTitle(t *testing.T) {
 	chatID := "chat-wf-title-exists"
 	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent", Title: "Existing Title"}))
 
-	agent := &agents.Agent{Config: agents.AgentConfig{
+	agent := &agentspec.Agent{Config: agentspec.AgentConfig{
 		ID:          "wf-agent",
 		Name:        "Workflow Agent",
 		Description: "runs a deploy workflow",
@@ -73,7 +73,7 @@ func TestWorkflowTitleSkipsExistingTitle(t *testing.T) {
 
 func TestWorkflowTitleSkipsInvalidChatID(t *testing.T) {
 	s, _, _ := newAskReplyTestServer(t)
-	agent := &agents.Agent{Config: agents.AgentConfig{
+	agent := &agentspec.Agent{Config: agentspec.AgentConfig{
 		ID:          "wf-agent",
 		Name:        "Workflow Agent",
 		Description: "runs a deploy workflow",
@@ -92,7 +92,7 @@ func TestWorkflowTitleFallbackTimestampWhenUnconfigured(t *testing.T) {
 	chatID := "chat-wf-title-fallback"
 	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
 
-	agent := &agents.Agent{Config: agents.AgentConfig{
+	agent := &agentspec.Agent{Config: agentspec.AgentConfig{
 		ID:          "wf-agent",
 		Name:        "Workflow Agent",
 		Description: "runs a deploy workflow",

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // Names under which the notebook functions are registered in the workflow
@@ -139,7 +140,7 @@ func RecordIngestSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 			return "", err
 		}
 		switch result.Status {
-		case string(workflow.StatusSucceeded):
+		case string(workflowspec.StatusSucceeded):
 			if _, err := os.Stat(path); err != nil {
 				// The source file vanished: keep it retryable instead of
 				// recording a success without a SHA-1.
@@ -151,7 +152,7 @@ func RecordIngestSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 				return "", fmt.Errorf("notebook: recording ingest success for %s: %w", path, err)
 			}
 			succeeded++
-		case string(workflow.StatusFailed):
+		case string(workflowspec.StatusFailed):
 			RecordFailure(path, state)
 			failed++
 		}
@@ -263,7 +264,7 @@ func RecordAbsorbSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 		}
 		groupOK := true
 		switch result.Status {
-		case string(workflow.StatusSucceeded):
+		case string(workflowspec.StatusSucceeded):
 			for _, rel := range files {
 				path, err := vaultItemPath(vaultDir, rel)
 				if err != nil {
@@ -281,7 +282,7 @@ func RecordAbsorbSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 				}
 				filesSucceeded++
 			}
-		case string(workflow.StatusFailed):
+		case string(workflowspec.StatusFailed):
 			for _, rel := range files {
 				path, err := vaultItemPath(vaultDir, rel)
 				if err != nil {

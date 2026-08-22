@@ -1,4 +1,4 @@
-// Package trigger hosts scheduled (cron) triggers for workflow agents.
+// Package trigger hosts scheduled (cron) triggers for workflow agentspec.
 package trigger
 
 import (
@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
-	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 var cronSessionIDInvalidChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 // TriggerFunc delegates a workflow trigger to the host layer (Server.runWorkflow).
-type TriggerFunc func(ctx context.Context, agent *agents.Agent, chatID string, prompt string, headless bool) error
+type TriggerFunc func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error
 
 // WorkflowCronManager schedules workflow agents that declare a `schedule` in
 // their workflow definition, triggering them headlessly on a synthetic session.
@@ -70,13 +70,13 @@ func CleanCronSessionID(workflowName string) string {
 // Reload synchronizes scheduled jobs with the latest workflow agents:
 // jobs of removed agents or agents whose schedule was dropped are removed,
 // while new or updated scheduled workflows are (re-)registered.
-func (m *WorkflowCronManager) Reload(agentsList []*agents.Agent) {
+func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 	if m == nil || m.scheduler == nil {
 		return
 	}
 
 	type scheduled struct {
-		agent    *agents.Agent
+		agent    *agentspec.Agent
 		schedule string
 	}
 	desired := make(map[string]scheduled)
@@ -84,7 +84,7 @@ func (m *WorkflowCronManager) Reload(agentsList []*agents.Agent) {
 		if a == nil || a.Config.Type != "workflow" || a.WorkflowPath == "" {
 			continue
 		}
-		defn, err := workflow.LoadDefinition(a.WorkflowPath)
+		defn, err := workflowspec.LoadDefinition(a.WorkflowPath)
 		if err != nil {
 			log.Warn().Err(err).Str("agent", a.Config.ID).Msg("failed to load workflow definition for cron scheduling")
 			continue
@@ -126,7 +126,7 @@ func (m *WorkflowCronManager) Reload(agentsList []*agents.Agent) {
 
 // addJobLocked registers a job with singleton mode so overlapping cycles are
 // skipped while a previous run is still in flight. Callers must hold m.mu.
-func (m *WorkflowCronManager) addJobLocked(agent *agents.Agent, defn gocron.JobDefinition) (uuid.UUID, error) {
+func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, defn gocron.JobDefinition) (uuid.UUID, error) {
 	job, err := m.scheduler.NewJob(
 		defn,
 		gocron.NewTask(m.runScheduledWorkflow, agent),
@@ -139,7 +139,7 @@ func (m *WorkflowCronManager) addJobLocked(agent *agents.Agent, defn gocron.JobD
 }
 
 // runScheduledWorkflow is the task body executed on every schedule cycle.
-func (m *WorkflowCronManager) runScheduledWorkflow(agent *agents.Agent) {
+func (m *WorkflowCronManager) runScheduledWorkflow(agent *agentspec.Agent) {
 	ctx := context.Background()
 	sessionID := CleanCronSessionID(agent.Config.Name)
 
