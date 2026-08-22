@@ -14,9 +14,6 @@ env:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
     - uses: actions/checkout@v7
 
@@ -30,17 +27,18 @@ jobs:
 
     - name: Format check
       run: |
-        $(go env GOPATH)/bin/goimports -l .
+        test -z "$($(go env GOPATH)/bin/goimports -l .)"
 
     - name: Lint check
       uses: golangci/golangci-lint-action@v9
       with:
         version: ${{ env.GOLANGCI_LINT_VERSION }}
-        working-directory: backend
+        working-directory: .
+        args: ./backend/... ./backend/agentwrapper/... ./backend/fakebash/... ./backend/agystatusline/...
 
     - name: Run tests
       run: |
-        go test -v ./...
+        go test -v ./backend/... ./backend/agentwrapper/... ./backend/fakebash/... ./backend/agystatusline/...
 
   frontend:
     runs-on: ubuntu-latest

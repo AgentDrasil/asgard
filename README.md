@@ -54,8 +54,8 @@ When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
     *   System directories (`/bin`, `/usr/bin`, etc.) are mounted read-only.
-    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](backend/cmd/fakebash/main.go) to intercept any shell command executions by the agent.
-*   **Command Execution Sandbox**: Runs the [fakebashd](backend/cmd/fakebashd/main.go) daemon.
+    *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](backend/fakebash/cmd/fakebash/main.go) to intercept any shell command executions by the agent.
+*   **Command Execution Sandbox**: Runs the [fakebashd](backend/fakebash/cmd/fakebashd/main.go) daemon.
     *   This is where actual shell commands requested by the agent are executed.
     *   It mounts the active `runDir` read-write, allowing commands to read/write workspace files.
     *   **Credential Masking**: To prevent credential theft, sensitive directories such as `~/.gemini` and `~/.local/share/opencode` are masked with empty `tmpfs` mounts, ensuring that commands executed by the agent cannot read authentication keys.

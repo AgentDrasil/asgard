@@ -92,19 +92,31 @@ FROM golang:${GO_VERSION}-alpine AS go-builder
 
 WORKDIR /app
 
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+COPY go.work go.work.sum* ./
+COPY backend/go.mod backend/go.sum ./backend/
+COPY backend/agentwrapper/go.mod backend/agentwrapper/go.sum ./backend/agentwrapper/
+COPY backend/fakebash/go.mod backend/fakebash/go.sum ./backend/fakebash/
+COPY backend/agystatusline/go.mod backend/agystatusline/go.sum ./backend/agystatusline/
 
-COPY backend/ .
+RUN (cd backend && go mod download) && \
+    (cd backend/agentwrapper && go mod download) && \
+    (cd backend/fakebash && go mod download) && \
+    (cd backend/agystatusline && go mod download)
+
+COPY backend/ ./backend/
 
 RUN mkdir -p /app/bin && \
-    for d in cmd/*; do \
+    for d in backend/cmd/*; do \
     if [ -d "$d" ]; then \
     name=$(basename "$d"); \
     echo "Building $name..."; \
     go build -v -o "/app/bin/$name" "./$d"; \
     fi; \
-    done
+    done && \
+    go build -v -o /app/bin/aw ./backend/agentwrapper/cmd/aw && \
+    go build -v -o /app/bin/fakebash ./backend/fakebash/cmd/fakebash && \
+    go build -v -o /app/bin/fakebashd ./backend/fakebash/cmd/fakebashd && \
+    go build -v -o /app/bin/agystatusline ./backend/agystatusline/cmd/agystatusline
 
 # Stage 5: runner
 FROM base_devtool AS runner

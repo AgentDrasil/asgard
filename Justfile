@@ -4,40 +4,45 @@ default:
 
 # Format code with goimports
 fmt:
-    cd backend && goimports -w -local "github.com/AgentDrasil/asgard/backend" .
+    goimports -w -local "github.com/AgentDrasil/asgard" backend
     cd webui && pnpm run fmt
+
+modules := "./backend/... ./backend/agentwrapper/... ./backend/fakebash/... ./backend/agystatusline/..."
 
 # Run golangci-lint
 lint:
-    cd backend && golangci-lint run
+    golangci-lint run {{modules}}
     cd webui && pnpm run lint
 
 # Build backend and webui
 build:
-    cd backend && go build -o build/ ./...
+    mkdir -p build && go build -o build/ {{modules}}
     cd webui && pnpm run build
 
 # Test backend and webui
 test:
-    cd backend && go test -v ./...
+    go test -v {{modules}}
     cd webui && pnpm run test
 
 # Run e2e tests
 e2e-test:
-    cd backend && E2E_TEST=true go test -v ./...
+    E2E_TEST=true go test -v {{modules}}
 
-# Install aw and agystatusline binaries
+# Install aw binary
 install-aw:
-    cd backend && go install ./cmd/aw
-    cd backend && go install ./cmd/agystatusline
+    go install ./backend/agentwrapper/cmd/aw
+
+# Install agystatusline binary
+install-agystatusline:
+    go install ./backend/agystatusline/cmd/agystatusline
 
 # Install agent-validate binary
 install-agent-validate:
-    cd backend && go install ./cmd/agent-validate
+    go install ./backend/cmd/agent-validate
 
 # Compile protobuf and gRPC definitions for fakebash
 compile-proto:
-    cd backend && PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative lib/fakebash/pb/fakebash.proto
+    PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative backend/fakebash/pb/fakebash.proto
 
 # Build Docker Image
 build-image:
