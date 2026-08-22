@@ -35,7 +35,7 @@ test:
 
 # Run e2e tests
 e2e-test:
-    E2E_TEST=true go test -v {{module_patterns}}
+    E2E_TEST=true go test -v ./agentwrapper/...
 
 # Install aw binary
 install-aw:
