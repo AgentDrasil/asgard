@@ -269,9 +269,12 @@ const handleSubmit = () => {
               {{ agentDisplayName(agent) }}
             </option>
           </select>
-          <label class="label text-xs text-base-content/60" v-if="currentAgent">
-            <span>{{ currentAgent.description }}</span>
-          </label>
+          <p
+            class="text-xs text-base-content/60 mt-1.5 leading-relaxed break-words"
+            v-if="currentAgent?.description"
+          >
+            {{ currentAgent.description }}
+          </p>
         </div>
 
         <!-- Model Selection (Optional) -->
@@ -295,9 +298,9 @@ const handleSubmit = () => {
               {{ m }}
             </option>
           </select>
-          <label class="label text-xs text-base-content/60">
-            <span> If selected, no quota fallback will be performed if quota is depleted. </span>
-          </label>
+          <p class="text-xs text-base-content/60 mt-1.5 leading-relaxed break-words">
+            If selected, no quota fallback will be performed if quota is depleted.
+          </p>
         </div>
 
         <!-- Run Directory Selection -->
@@ -320,9 +323,9 @@ const handleSubmit = () => {
               {{ dir }}
             </option>
           </select>
-          <label class="label text-xs text-warning" v-if="runDirs.length === 0">
-            <span>No directories available for this agent</span>
-          </label>
+          <p class="text-xs text-warning mt-1.5 break-words" v-if="runDirs.length === 0">
+            No directories available for this agent
+          </p>
         </div>
 
         <!-- Subdirectory Selection (Theme-Aware Unified Cascader Row) -->
