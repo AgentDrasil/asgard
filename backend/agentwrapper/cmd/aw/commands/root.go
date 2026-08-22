@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/AgentDrasil/asgard/backend/cmd/aw/config"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/config"
 )
 
 var debug bool

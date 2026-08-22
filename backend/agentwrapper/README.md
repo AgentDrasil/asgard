@@ -12,9 +12,9 @@
 
 Here is the breakdown of responsibilities across Asgard:
 
-1. **Core Package (`lib/agentwrapper/`)**:
+1. **Core Package (`backend/agentwrapper/`)**:
    - Defines standard interfaces (`CLIClient`, `SandboxSpec`, `ReportFunc`) in `types/types.go`.
-   - Implements agent sub-packages (`lib/agentwrapper/agy`, `lib/agentwrapper/opencode`, etc.).
+   - Implements agent sub-packages (`backend/agentwrapper/agy`, `backend/agentwrapper/opencode`, etc.).
    - Registers available CLI agents (`defaultClients` in `supported.go`).
    - Provides global functions for querying models (`GetSupportedCLIsAndModels`), checking quota (`GetQuota`, `CheckQuota`), and retrieving sandbox specifications (`GetSandboxSpec`).
    - Validates user setup/authentication files (`validate.go`).
@@ -22,7 +22,7 @@ Here is the breakdown of responsibilities across Asgard:
 2. **Outside `agentwrapper` (Where else logic resides)**:
    - **`lib/bwrap/`**: Consumes `types.SandboxSpec` via `agentwrapper.GetSandboxSpec(cliName)` to configure Bubblewrap sandbox bind-mounts, authentication directories, and system prompt generation (`SystemPromptConfigPath`, `SystemPromptHeader`).
    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
-   - **`cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `cmd/aw/commands/agy.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods.
+   - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods.
    - **`lib/agents/run/`**: Handles runtime agent execution within Bubblewrap sandboxes and performs quota checks using `agentwrapper.CheckQuota(cli, model)`.
    - **`lib/api/`**: Serves HTTP endpoints (e.g., `/api/quota`) by delegating quota queries to `agentwrapper.GetQuota(ctx)`.
 
@@ -60,16 +60,16 @@ type SandboxSpec interface {
 
 Follow these steps to add support for a new CLI agent (e.g., `myagent`).
 
-### Step 1: Create a Sub-package under `lib/agentwrapper/`
-Create a new directory `lib/agentwrapper/myagent/` and implement the `CLIClient` (and optionally `SandboxSpec`) interface.
+### Step 1: Create a Sub-package under `backend/agentwrapper/`
+Create a new directory `backend/agentwrapper/myagent/` and implement the `CLIClient` (and optionally `SandboxSpec`) interface.
 
-Example (`lib/agentwrapper/myagent/client.go`):
+Example (`backend/agentwrapper/myagent/client.go`):
 ```go
 package myagent
 
 import (
     "context"
-    "github.com/AgentDrasil/asgard/lib/agentwrapper/types"
+    "github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 type Client struct{}
@@ -123,12 +123,12 @@ func (c *Client) ExtraArgs() []string {
 }
 ```
 
-### Step 2: Register the New Client in `lib/agentwrapper/supported.go`
+### Step 2: Register the New Client in `backend/agentwrapper/supported.go`
 Register your new client instance in the `defaultClients` map:
 
 ```go
 import (
-    "github.com/AgentDrasil/asgard/lib/agentwrapper/myagent"
+    "github.com/AgentDrasil/asgard/backend/agentwrapper/myagent"
 )
 
 var defaultClients = map[string]types.CLIClient{
@@ -139,7 +139,7 @@ var defaultClients = map[string]types.CLIClient{
 ```
 
 ### Step 3: Add Setup Validation (Optional)
-If your agent requires specific local credentials/configs, add a validation function in `lib/agentwrapper/validate.go`:
+If your agent requires specific local credentials/configs, add a validation function in `backend/agentwrapper/validate.go`:
 
 ```go
 func ValidateMyAgentSetup() error {
@@ -163,14 +163,14 @@ if err := agentwrapper.ValidateMyAgentSetup(); err != nil {
 ```
 
 ### Step 4: Add CLI Command to `aw` Tool
-Create `cmd/aw/commands/myagent.go` to expose the Cobra command for `aw myagent`:
+Create `backend/agentwrapper/cmd/aw/commands/myagent.go` to expose the Cobra command for `aw myagent`:
 
 ```go
 package commands
 
 import (
     "github.com/spf13/cobra"
-    "github.com/AgentDrasil/asgard/lib/agentwrapper/myagent"
+    "github.com/AgentDrasil/asgard/backend/agentwrapper/myagent"
 )
 
 var myagentCmd = &cobra.Command{
@@ -187,7 +187,7 @@ func init() {
 }
 ```
 
-Register `myagentCmd` in `cmd/aw/commands/root.go`:
+Register `myagentCmd` in `backend/agentwrapper/cmd/aw/commands/root.go`:
 ```go
 rootCmd.AddCommand(myagentCmd)
 ```
@@ -199,5 +199,5 @@ rootCmd.AddCommand(myagentCmd)
 Run all unit tests across `agentwrapper` to ensure compatibility:
 
 ```bash
-go test ./lib/agentwrapper/...
+go test ./backend/agentwrapper/...
 ```

@@ -3,7 +3,7 @@ package agentwrapper
 import (
 	"context"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 // FakeClient implements types.CLIClient and types.SandboxSpec for testing purposes.

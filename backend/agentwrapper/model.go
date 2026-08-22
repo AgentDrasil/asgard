@@ -1,8 +1,8 @@
 package agentwrapper
 
 import (
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/agy"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/opencode"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/opencode"
 )
 
 // MatchesModel reports whether the requested model matches a known model

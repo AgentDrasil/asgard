@@ -14,7 +14,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 type zaiQuotaResponse struct {

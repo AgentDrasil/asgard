@@ -7,10 +7,10 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/cmd/aw/config"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/agy"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/opencode"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/config"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/opencode"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 var defaultClients = map[string]types.CLIClient{

@@ -7,7 +7,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
 )
 
 type Loader struct {

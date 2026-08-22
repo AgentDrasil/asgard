@@ -9,8 +9,8 @@ import (
 
 	"github.com/moznion/go-optional"
 
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
 )
 
 // buildSystemPrompt constructs the full system prompt for the given CLI.

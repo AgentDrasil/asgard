@@ -11,8 +11,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 )
 

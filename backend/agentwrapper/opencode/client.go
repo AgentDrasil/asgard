@@ -1,11 +1,11 @@
-package agy
+package opencode
 
 import (
 	"context"
 	_ "embed"
 	"strings"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 //go:embed system_prompt_header.md
@@ -41,21 +41,26 @@ func (c *Client) SystemPromptPeerHeader() string {
 }
 
 func (c *Client) SystemPromptConfigPath(home string) string {
-	return home + "/.gemini/GEMINI.md"
+	return home + "/.config/opencode/AGENTS.md"
 }
 
 func (c *Client) SkillsMountPath(home string) string {
-	return home + "/.gemini/antigravity-cli/skills"
+	return home + "/.config/opencode/skills"
 }
 
 func (c *Client) MountDirectories(home string) []string {
-	return []string{home + "/.gemini"}
+	return []string{
+		home + "/.cache",
+		home + "/.config",
+		home + "/.local",
+		home + "/.npm",
+	}
 }
 
 func (c *Client) AuthDirectory(home string) string {
-	return home + "/.gemini"
+	return home + "/.local/share/opencode"
 }
 
 func (c *Client) ExtraArgs() []string {
-	return []string{"--add-tmp-to-dir"}
+	return nil
 }

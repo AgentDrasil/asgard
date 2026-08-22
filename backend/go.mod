@@ -4,6 +4,10 @@ go 1.26.5
 
 require github.com/goccy/go-yaml v1.19.2
 
+require github.com/AgentDrasil/asgard/backend/agentwrapper v0.0.0
+
+replace github.com/AgentDrasil/asgard/backend/agentwrapper => ./agentwrapper
+
 require github.com/AgentDrasil/asgard/backend/fakebash v0.0.0
 
 replace github.com/AgentDrasil/asgard/backend/fakebash => ./fakebash
@@ -17,7 +21,6 @@ require (
 	github.com/rcarmo/go-te v0.1.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
-	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
@@ -42,7 +45,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.21 // indirect
 	github.com/googleapis/gax-go/v2 v2.23.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
@@ -56,7 +58,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect

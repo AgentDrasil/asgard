@@ -14,9 +14,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/agy"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 var (

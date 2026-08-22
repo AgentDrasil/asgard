@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
-	opencode "github.com/AgentDrasil/asgard/backend/lib/agentwrapper/opencode"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
+	opencode "github.com/AgentDrasil/asgard/backend/agentwrapper/opencode"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 var (

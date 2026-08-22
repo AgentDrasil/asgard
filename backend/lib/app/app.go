@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/api"
 	"github.com/AgentDrasil/asgard/backend/lib/cleanup"
 	"github.com/AgentDrasil/asgard/backend/lib/config"

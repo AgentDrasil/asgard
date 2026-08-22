@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 
+	"github.com/AgentDrasil/asgard/backend/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 )

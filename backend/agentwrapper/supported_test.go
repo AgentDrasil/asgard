@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/agentwrapper/types"
 )
 
 func TestGetQuota_DetailedOptions(t *testing.T) {
