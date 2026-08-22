@@ -4,6 +4,10 @@ go 1.26.5
 
 require github.com/goccy/go-yaml v1.19.2
 
+require github.com/AgentDrasil/asgard/backend/fakebash v0.0.0
+
+replace github.com/AgentDrasil/asgard/backend/fakebash => ./fakebash
+
 require (
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
@@ -19,7 +23,6 @@ require (
 	golang.org/x/sync v0.22.0
 	google.golang.org/genai v1.69.0
 	google.golang.org/grpc v1.83.1
-	google.golang.org/protobuf v1.36.12
 	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
 )
@@ -66,6 +69,7 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/api v0.293.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.75.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.0 // indirect

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package fakebash;
 
-option go_package = "github.com/AgentDrasil/asgard/backend/lib/fakebash/pb";
+option go_package = "github.com/AgentDrasil/asgard/backend/fakebash/pb";
 
 service FakebashService {
   rpc RunCommand(CommandRequest) returns (stream CommandResponse);

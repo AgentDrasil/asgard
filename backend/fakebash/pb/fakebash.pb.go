@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.35.1
-// source: lib/fakebash/pb/fakebash.proto
+// source: pb/fakebash.proto
 
 package pb
 
@@ -55,11 +55,11 @@ func (x CommandResponse_Type) String() string {
 }
 
 func (CommandResponse_Type) Descriptor() protoreflect.EnumDescriptor {
-	return file_lib_fakebash_pb_fakebash_proto_enumTypes[0].Descriptor()
+	return file_pb_fakebash_proto_enumTypes[0].Descriptor()
 }
 
 func (CommandResponse_Type) Type() protoreflect.EnumType {
-	return &file_lib_fakebash_pb_fakebash_proto_enumTypes[0]
+	return &file_pb_fakebash_proto_enumTypes[0]
 }
 
 func (x CommandResponse_Type) Number() protoreflect.EnumNumber {
@@ -68,7 +68,7 @@ func (x CommandResponse_Type) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CommandResponse_Type.Descriptor instead.
 func (CommandResponse_Type) EnumDescriptor() ([]byte, []int) {
-	return file_lib_fakebash_pb_fakebash_proto_rawDescGZIP(), []int{1, 0}
+	return file_pb_fakebash_proto_rawDescGZIP(), []int{1, 0}
 }
 
 type CommandRequest struct {
@@ -82,7 +82,7 @@ type CommandRequest struct {
 
 func (x *CommandRequest) Reset() {
 	*x = CommandRequest{}
-	mi := &file_lib_fakebash_pb_fakebash_proto_msgTypes[0]
+	mi := &file_pb_fakebash_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -94,7 +94,7 @@ func (x *CommandRequest) String() string {
 func (*CommandRequest) ProtoMessage() {}
 
 func (x *CommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lib_fakebash_pb_fakebash_proto_msgTypes[0]
+	mi := &file_pb_fakebash_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -107,7 +107,7 @@ func (x *CommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRequest.ProtoReflect.Descriptor instead.
 func (*CommandRequest) Descriptor() ([]byte, []int) {
-	return file_lib_fakebash_pb_fakebash_proto_rawDescGZIP(), []int{0}
+	return file_pb_fakebash_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CommandRequest) GetArgs() []string {
@@ -141,7 +141,7 @@ type CommandResponse struct {
 
 func (x *CommandResponse) Reset() {
 	*x = CommandResponse{}
-	mi := &file_lib_fakebash_pb_fakebash_proto_msgTypes[1]
+	mi := &file_pb_fakebash_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -153,7 +153,7 @@ func (x *CommandResponse) String() string {
 func (*CommandResponse) ProtoMessage() {}
 
 func (x *CommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lib_fakebash_pb_fakebash_proto_msgTypes[1]
+	mi := &file_pb_fakebash_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -166,7 +166,7 @@ func (x *CommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResponse.ProtoReflect.Descriptor instead.
 func (*CommandResponse) Descriptor() ([]byte, []int) {
-	return file_lib_fakebash_pb_fakebash_proto_rawDescGZIP(), []int{1}
+	return file_pb_fakebash_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CommandResponse) GetType() CommandResponse_Type {
@@ -183,11 +183,11 @@ func (x *CommandResponse) GetPayload() []byte {
 	return nil
 }
 
-var File_lib_fakebash_pb_fakebash_proto protoreflect.FileDescriptor
+var File_pb_fakebash_proto protoreflect.FileDescriptor
 
-const file_lib_fakebash_pb_fakebash_proto_rawDesc = "" +
+const file_pb_fakebash_proto_rawDesc = "" +
 	"\n" +
-	"\x1elib/fakebash/pb/fakebash.proto\x12\bfakebash\"H\n" +
+	"\x11pb/fakebash.proto\x12\bfakebash\"H\n" +
 	"\x0eCommandRequest\x12\x12\n" +
 	"\x04args\x18\x01 \x03(\tR\x04args\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x10\n" +
@@ -203,28 +203,28 @@ const file_lib_fakebash_pb_fakebash_proto_rawDesc = "" +
 	"\x04EXIT\x10\x022V\n" +
 	"\x0fFakebashService\x12C\n" +
 	"\n" +
-	"RunCommand\x12\x18.fakebash.CommandRequest\x1a\x19.fakebash.CommandResponse0\x01B7Z5github.com/AgentDrasil/asgard/backend/lib/fakebash/pbb\x06proto3"
+	"RunCommand\x12\x18.fakebash.CommandRequest\x1a\x19.fakebash.CommandResponse0\x01B3Z1github.com/AgentDrasil/asgard/backend/fakebash/pbb\x06proto3"
 
 var (
-	file_lib_fakebash_pb_fakebash_proto_rawDescOnce sync.Once
-	file_lib_fakebash_pb_fakebash_proto_rawDescData []byte
+	file_pb_fakebash_proto_rawDescOnce sync.Once
+	file_pb_fakebash_proto_rawDescData []byte
 )
 
-func file_lib_fakebash_pb_fakebash_proto_rawDescGZIP() []byte {
-	file_lib_fakebash_pb_fakebash_proto_rawDescOnce.Do(func() {
-		file_lib_fakebash_pb_fakebash_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_lib_fakebash_pb_fakebash_proto_rawDesc), len(file_lib_fakebash_pb_fakebash_proto_rawDesc)))
+func file_pb_fakebash_proto_rawDescGZIP() []byte {
+	file_pb_fakebash_proto_rawDescOnce.Do(func() {
+		file_pb_fakebash_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pb_fakebash_proto_rawDesc), len(file_pb_fakebash_proto_rawDesc)))
 	})
-	return file_lib_fakebash_pb_fakebash_proto_rawDescData
+	return file_pb_fakebash_proto_rawDescData
 }
 
-var file_lib_fakebash_pb_fakebash_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_lib_fakebash_pb_fakebash_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_lib_fakebash_pb_fakebash_proto_goTypes = []any{
+var file_pb_fakebash_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_pb_fakebash_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_pb_fakebash_proto_goTypes = []any{
 	(CommandResponse_Type)(0), // 0: fakebash.CommandResponse.Type
 	(*CommandRequest)(nil),    // 1: fakebash.CommandRequest
 	(*CommandResponse)(nil),   // 2: fakebash.CommandResponse
 }
-var file_lib_fakebash_pb_fakebash_proto_depIdxs = []int32{
+var file_pb_fakebash_proto_depIdxs = []int32{
 	0, // 0: fakebash.CommandResponse.type:type_name -> fakebash.CommandResponse.Type
 	1, // 1: fakebash.FakebashService.RunCommand:input_type -> fakebash.CommandRequest
 	2, // 2: fakebash.FakebashService.RunCommand:output_type -> fakebash.CommandResponse
@@ -235,27 +235,27 @@ var file_lib_fakebash_pb_fakebash_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_lib_fakebash_pb_fakebash_proto_init() }
-func file_lib_fakebash_pb_fakebash_proto_init() {
-	if File_lib_fakebash_pb_fakebash_proto != nil {
+func init() { file_pb_fakebash_proto_init() }
+func file_pb_fakebash_proto_init() {
+	if File_pb_fakebash_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lib_fakebash_pb_fakebash_proto_rawDesc), len(file_lib_fakebash_pb_fakebash_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_fakebash_proto_rawDesc), len(file_pb_fakebash_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_lib_fakebash_pb_fakebash_proto_goTypes,
-		DependencyIndexes: file_lib_fakebash_pb_fakebash_proto_depIdxs,
-		EnumInfos:         file_lib_fakebash_pb_fakebash_proto_enumTypes,
-		MessageInfos:      file_lib_fakebash_pb_fakebash_proto_msgTypes,
+		GoTypes:           file_pb_fakebash_proto_goTypes,
+		DependencyIndexes: file_pb_fakebash_proto_depIdxs,
+		EnumInfos:         file_pb_fakebash_proto_enumTypes,
+		MessageInfos:      file_pb_fakebash_proto_msgTypes,
 	}.Build()
-	File_lib_fakebash_pb_fakebash_proto = out.File
-	file_lib_fakebash_pb_fakebash_proto_goTypes = nil
-	file_lib_fakebash_pb_fakebash_proto_depIdxs = nil
+	File_pb_fakebash_proto = out.File
+	file_pb_fakebash_proto_goTypes = nil
+	file_pb_fakebash_proto_depIdxs = nil
 }

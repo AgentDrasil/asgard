@@ -20,7 +20,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agystatusline"
+	"github.com/AgentDrasil/asgard/backend/agystatusline"
 )
 
 func main() {

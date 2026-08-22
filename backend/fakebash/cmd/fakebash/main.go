@@ -5,8 +5,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/fakebash"
-	"github.com/AgentDrasil/asgard/backend/lib/logger"
+	"github.com/AgentDrasil/asgard/backend/fakebash"
+	"github.com/AgentDrasil/asgard/backend/fakebash/internal/logger"
 )
 
 func main() {

@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/AgentDrasil/asgard/backend/lib/fakebash/pb"
+	"github.com/AgentDrasil/asgard/backend/fakebash/pb"
 )
 
 var allowlist = map[string]struct{}{
