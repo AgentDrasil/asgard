@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/AgentDrasil/asgard/pkg/pluginsdk"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // NodeContext is re-exported from pluginsdk.NodeContext.
@@ -45,19 +46,19 @@ type WorkflowRunResult = pluginsdk.WorkflowRunResult
 
 // NodeRunner executes one kind of node.
 type NodeRunner interface {
-	Supports(t NodeType) bool
-	Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error)
+	Supports(t workflowspec.NodeType) bool
+	Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error)
 }
 
 // NodeRunnerRegistry is the IoC container mapping node types to runners.
 type NodeRunnerRegistry struct {
 	mu      sync.RWMutex
-	runners map[NodeType]NodeRunner
+	runners map[workflowspec.NodeType]NodeRunner
 }
 
 // NewNodeRunnerRegistry creates an empty registry.
 func NewNodeRunnerRegistry() *NodeRunnerRegistry {
-	return &NodeRunnerRegistry{runners: make(map[NodeType]NodeRunner)}
+	return &NodeRunnerRegistry{runners: make(map[workflowspec.NodeType]NodeRunner)}
 }
 
 // Register maps every node type supported by runner to that runner,
@@ -68,7 +69,14 @@ func (r *NodeRunnerRegistry) Register(runner NodeRunner) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, t := range []NodeType{NodeTypeAgent, NodeTypeLLM, NodeTypeCommand, NodeTypeHuman, NodeTypeFunction, NodeTypeWorkflow} {
+	for _, t := range []workflowspec.NodeType{
+		workflowspec.NodeTypeAgent,
+		workflowspec.NodeTypeLLM,
+		workflowspec.NodeTypeCommand,
+		workflowspec.NodeTypeHuman,
+		workflowspec.NodeTypeFunction,
+		workflowspec.NodeTypeWorkflow,
+	} {
 		if runner.Supports(t) {
 			r.runners[t] = runner
 		}
@@ -76,7 +84,7 @@ func (r *NodeRunnerRegistry) Register(runner NodeRunner) {
 }
 
 // Get returns the runner registered for a node type.
-func (r *NodeRunnerRegistry) Get(t NodeType) (NodeRunner, bool) {
+func (r *NodeRunnerRegistry) Get(t workflowspec.NodeType) (NodeRunner, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	runner, ok := r.runners[t]

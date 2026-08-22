@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func TestExtractArtifactPaths(t *testing.T) {
@@ -68,7 +70,7 @@ func TestArtifactViewerPathsSorted(t *testing.T) {
 
 func TestHumanSuspensionCarriesArtifacts(t *testing.T) {
 	engine, store, rec := newTestEngine(t)
-	defn, err := ParseDefinition([]byte(humanLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(humanLoopYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()

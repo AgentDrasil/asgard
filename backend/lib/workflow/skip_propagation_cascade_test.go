@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // NewEngineWithRunner builds an engine whose command nodes are served by the
@@ -35,9 +37,9 @@ func newStubRunner(outcomes map[string]stubOutcome) *stubRunner {
 	return &stubRunner{outcomes: outcomes}
 }
 
-func (s *stubRunner) Supports(t NodeType) bool { return t == NodeTypeCommand }
+func (s *stubRunner) Supports(t workflowspec.NodeType) bool { return t == workflowspec.NodeTypeCommand }
 
-func (s *stubRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (s *stubRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	s.mu.Lock()
 	s.runned = append(s.runned, nctx.Node.ID)
 	out, ok := s.outcomes[nctx.Node.ID]
@@ -48,11 +50,11 @@ func (s *stubRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, e
 	if out.err != nil {
 		return nil, out.err
 	}
-	status := StatusSucceeded
+	status := workflowspec.StatusSucceeded
 	if out.exitCode != 0 {
-		status = StatusFailed
+		status = workflowspec.StatusFailed
 	}
-	return &NodeResult{Status: status, ExitCode: out.exitCode, Output: out.output}, nil
+	return &workflowspec.NodeResult{Status: status, ExitCode: out.exitCode, Output: out.output}, nil
 }
 
 func (s *stubRunner) hasRun(nodeID string) bool {
@@ -88,7 +90,7 @@ nodes:
 
 func runEngine(t *testing.T, yamlDef string, outcomes map[string]stubOutcome) (*WorkflowRunResult, *stubRunner) {
 	t.Helper()
-	defn, err := ParseDefinition([]byte(yamlDef))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlDef))
 	require.NoError(t, err)
 
 	stub := newStubRunner(outcomes)
@@ -107,12 +109,12 @@ func TestSkipPropagationMatrix(t *testing.T) {
 		})
 
 		assert.Equal(t, RunStatusCompleted, res.Status)
-		assert.Equal(t, StatusSucceeded, res.Nodes["build_cmd"].Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["build_cmd"].Status)
 		require.NotNil(t, res.Nodes["fix_build_agent"])
-		assert.Equal(t, StatusSkipped, res.Nodes["fix_build_agent"].Status)
-		assert.Equal(t, SkipReasonConditionFalse, res.Nodes["fix_build_agent"].SkipReason)
-		assert.Equal(t, StatusSkipped, res.Nodes["post_test"].Status)
-		assert.Equal(t, SkipReasonConditionFalse, res.Nodes["post_test"].SkipReason)
+		assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["fix_build_agent"].Status)
+		assert.Equal(t, workflowspec.SkipReasonConditionFalse, res.Nodes["fix_build_agent"].SkipReason)
+		assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["post_test"].Status)
+		assert.Equal(t, workflowspec.SkipReasonConditionFalse, res.Nodes["post_test"].SkipReason)
 		assert.False(t, stub.hasRun("fix_build_agent"))
 		assert.False(t, stub.hasRun("post_test"))
 	})
@@ -125,9 +127,9 @@ func TestSkipPropagationMatrix(t *testing.T) {
 		})
 
 		assert.Equal(t, RunStatusCompleted, res.Status)
-		assert.Equal(t, StatusFailed, res.Nodes["build_cmd"].Status)
-		assert.Equal(t, StatusSucceeded, res.Nodes["fix_build_agent"].Status)
-		assert.Equal(t, StatusSucceeded, res.Nodes["post_test"].Status)
+		assert.Equal(t, workflowspec.StatusFailed, res.Nodes["build_cmd"].Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["fix_build_agent"].Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["post_test"].Status)
 		assert.True(t, stub.hasRun("fix_build_agent"))
 		assert.True(t, stub.hasRun("post_test"))
 	})
@@ -155,11 +157,11 @@ nodes:
 		})
 
 		assert.Equal(t, RunStatusFailed, res.Status)
-		assert.Equal(t, StatusFailed, res.Nodes["build_cmd"].Status)
-		assert.Equal(t, StatusSkipped, res.Nodes["verify"].Status)
-		assert.Equal(t, SkipReasonCascadedFailure, res.Nodes["verify"].SkipReason)
-		assert.Equal(t, StatusSkipped, res.Nodes["post_test"].Status)
-		assert.Equal(t, SkipReasonCascadedFailure, res.Nodes["post_test"].SkipReason)
+		assert.Equal(t, workflowspec.StatusFailed, res.Nodes["build_cmd"].Status)
+		assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["verify"].Status)
+		assert.Equal(t, workflowspec.SkipReasonCascadedFailure, res.Nodes["verify"].SkipReason)
+		assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["post_test"].Status)
+		assert.Equal(t, workflowspec.SkipReasonCascadedFailure, res.Nodes["post_test"].SkipReason)
 		assert.False(t, stub.hasRun("verify"))
 		assert.False(t, stub.hasRun("post_test"))
 	})
@@ -194,67 +196,67 @@ nodes:
 	})
 
 	assert.Equal(t, RunStatusCompleted, res.Status)
-	assert.Equal(t, StatusSkipped, res.Nodes["fix_build_agent"].Status)
-	assert.Equal(t, SkipReasonConditionFalse, res.Nodes["fix_build_agent"].SkipReason)
-	assert.Equal(t, StatusSucceeded, res.Nodes["build_summary"].Status)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["fix_build_agent"].Status)
+	assert.Equal(t, workflowspec.SkipReasonConditionFalse, res.Nodes["fix_build_agent"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["build_summary"].Status)
 	assert.True(t, stub.hasRun("build_summary"))
 }
 
 // TestEvaluateNodeReadinessMultiEdge exercises the multi-dependency edge
 // arbitration algorithm directly.
 func TestEvaluateNodeReadinessMultiEdge(t *testing.T) {
-	node := &NodeSpec{
+	node := &workflowspec.NodeSpec{
 		ID:   "joiner",
-		Type: NodeTypeCommand,
-		Depends: []NodeDependency{
+		Type: workflowspec.NodeTypeCommand,
+		Depends: []workflowspec.NodeDependency{
 			{NodeID: "guarded", When: "nodes.guarded.exit_code != 0"},
 			{NodeID: "plain"},
 		},
 	}
 
 	t.Run("when false on guarded edge skips with ConditionFalse", func(t *testing.T) {
-		action, reason := EvaluateNodeReadiness(node, map[string]*NodeResult{
-			"guarded": {Status: StatusSucceeded, ExitCode: 0},
-			"plain":   {Status: StatusSucceeded},
+		action, reason := EvaluateNodeReadiness(node, map[string]*workflowspec.NodeResult{
+			"guarded": {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"plain":   {Status: workflowspec.StatusSucceeded},
 		})
 		assert.Equal(t, ActionSkip, action)
-		assert.Equal(t, SkipReasonConditionFalse, reason)
+		assert.Equal(t, workflowspec.SkipReasonConditionFalse, reason)
 	})
 
 	t.Run("when true bypasses parent failure", func(t *testing.T) {
-		action, reason := EvaluateNodeReadiness(node, map[string]*NodeResult{
-			"guarded": {Status: StatusFailed, ExitCode: 1},
-			"plain":   {Status: StatusSucceeded},
+		action, reason := EvaluateNodeReadiness(node, map[string]*workflowspec.NodeResult{
+			"guarded": {Status: workflowspec.StatusFailed, ExitCode: 1},
+			"plain":   {Status: workflowspec.StatusSucceeded},
 		})
 		assert.Equal(t, ActionRun, action)
 		assert.Empty(t, reason)
 	})
 
 	t.Run("plain failed edge cascades", func(t *testing.T) {
-		action, reason := EvaluateNodeReadiness(node, map[string]*NodeResult{
-			"guarded": {Status: StatusSucceeded, ExitCode: 0},
-			"plain":   {Status: StatusFailed},
+		action, reason := EvaluateNodeReadiness(node, map[string]*workflowspec.NodeResult{
+			"guarded": {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"plain":   {Status: workflowspec.StatusFailed},
 		})
 		assert.Equal(t, ActionSkip, action)
-		assert.Equal(t, SkipReasonCascadedFailure, reason)
+		assert.Equal(t, workflowspec.SkipReasonCascadedFailure, reason)
 	})
 
 	t.Run("upstream condition-false skip propagates as ConditionFalse", func(t *testing.T) {
-		action, reason := EvaluateNodeReadiness(node, map[string]*NodeResult{
-			"guarded": {Status: StatusSucceeded, ExitCode: 0},
-			"plain":   {Status: StatusSkipped, SkipReason: SkipReasonConditionFalse},
+		action, reason := EvaluateNodeReadiness(node, map[string]*workflowspec.NodeResult{
+			"guarded": {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"plain":   {Status: workflowspec.StatusSkipped, SkipReason: workflowspec.SkipReasonConditionFalse},
 		})
 		assert.Equal(t, ActionSkip, action)
-		assert.Equal(t, SkipReasonConditionFalse, reason)
+		assert.Equal(t, workflowspec.SkipReasonConditionFalse, reason)
 	})
 
 	t.Run("upstream cascaded skip propagates as CascadedFailure", func(t *testing.T) {
-		action, reason := EvaluateNodeReadiness(node, map[string]*NodeResult{
-			"guarded": {Status: StatusSucceeded, ExitCode: 0},
-			"plain":   {Status: StatusSkipped, SkipReason: SkipReasonCascadedFailure},
+		action, reason := EvaluateNodeReadiness(node, map[string]*workflowspec.NodeResult{
+			"guarded": {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"plain":   {Status: workflowspec.StatusSkipped, SkipReason: workflowspec.SkipReasonCascadedFailure},
 		})
 		assert.Equal(t, ActionSkip, action)
-		assert.Equal(t, SkipReasonCascadedFailure, reason)
+		assert.Equal(t, workflowspec.SkipReasonCascadedFailure, reason)
 	})
 }
 
@@ -277,7 +279,7 @@ nodes:
       - node: a
       - node: b
 `
-	defn, err := ParseDefinition([]byte(yamlDef))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlDef))
 	require.NoError(t, err)
 
 	var mu sync.Mutex
@@ -286,9 +288,9 @@ nodes:
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	parallelRunner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	parallelRunner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		if nctx.Node.ID == "c" {
-			return &NodeResult{Status: StatusSucceeded}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded}, nil
 		}
 		mu.Lock()
 		running++
@@ -298,7 +300,7 @@ nodes:
 		mu.Unlock()
 		wg.Done()
 		wg.Wait()
-		return &NodeResult{Status: StatusSucceeded}, nil
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded}, nil
 	}}
 
 	engine := NewEngineWithRunner(parallelRunner)
@@ -310,11 +312,11 @@ nodes:
 
 // funcRunner adapts a function into a NodeRunner for tests.
 type funcRunner struct {
-	fn func(ctx context.Context, nctx *NodeContext) (*NodeResult, error)
+	fn func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error)
 }
 
-func (f *funcRunner) Supports(t NodeType) bool { return t == NodeTypeCommand }
+func (f *funcRunner) Supports(t workflowspec.NodeType) bool { return t == workflowspec.NodeTypeCommand }
 
-func (f *funcRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (f *funcRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	return f.fn(ctx, nctx)
 }

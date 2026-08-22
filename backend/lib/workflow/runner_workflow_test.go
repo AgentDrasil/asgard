@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func setupTestEngineWithWorkflowRunner(resolve ResolveDefnFunc) (*Engine, *SubWorkflowRunner) {
@@ -40,10 +42,10 @@ nodes:
     type: command
     command: "echo 'hello from child'"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "child-wf" {
 			return childDefn, nil
 		}
@@ -57,7 +59,7 @@ nodes:
     type: workflow
     workflow: child-wf`
 
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
@@ -72,7 +74,7 @@ nodes:
 
 	subRes := res.Nodes["sub"]
 	require.NotNil(t, subRes)
-	assert.Equal(t, StatusSucceeded, subRes.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, subRes.Status)
 	assert.Contains(t, subRes.Output, "hello from child")
 }
 
@@ -86,10 +88,10 @@ nodes:
     type: command
     command: "echo 'process: ${input}'"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "child-wf" {
 			return childDefn, nil
 		}
@@ -111,7 +113,7 @@ nodes:
       items_file: %s/missing.txt
       output_file: %s`, tmpDir, outputFilePath)
 
-		parentDefn, err := ParseDefinition([]byte(parentYAML))
+		parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 		require.NoError(t, err)
 
 		var events []WorkflowEvent
@@ -127,7 +129,7 @@ nodes:
 
 		subRes := res.Nodes["fanout-node"]
 		require.NotNil(t, subRes)
-		assert.Equal(t, StatusSucceeded, subRes.Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, subRes.Status)
 		assert.Equal(t, "", subRes.Output)
 
 		// Check output file created and has 0 bytes
@@ -165,7 +167,7 @@ nodes:
       items_file: %s
       output_file: %s`, emptyItemsFile, outputFilePath)
 
-		parentDefn, err := ParseDefinition([]byte(parentYAML))
+		parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 		require.NoError(t, err)
 
 		res, err := engine.Execute(t.Context(), parentDefn, RunContext{
@@ -189,12 +191,12 @@ func TestSubWorkflowRunner_Fanout_ConcurrencyAndIsolation(t *testing.T) {
 	var capturedValues []*RunValues
 	var valuesMu sync.Mutex
 
-	childDefn := &WorkflowDefinition{
+	childDefn := &workflowspec.WorkflowDefinition{
 		Name: "child-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "cnode",
-				Type:     NodeTypeFunction,
+				Type:     workflowspec.NodeTypeFunction,
 				Function: "cfunc",
 			},
 		},
@@ -229,7 +231,7 @@ func TestSubWorkflowRunner_Fanout_ConcurrencyAndIsolation(t *testing.T) {
 	})
 
 	registry := NewNodeRunnerRegistry()
-	wfRunner := NewSubWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	wfRunner := NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 	registry.Register(wfRunner)
@@ -246,14 +248,14 @@ func TestSubWorkflowRunner_Fanout_ConcurrencyAndIsolation(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(itemsFile, []byte(strings.Join(items, "\n")), 0644))
 
-	parentDefn := &WorkflowDefinition{
+	parentDefn := &workflowspec.WorkflowDefinition{
 		Name: "parent-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "fanout",
-				Type:     NodeTypeWorkflow,
+				Type:     workflowspec.NodeTypeWorkflow,
 				Workflow: "child-wf",
-				Fanout: &FanoutSpec{
+				Fanout: &workflowspec.FanoutSpec{
 					ItemsFile:   itemsFile,
 					MaxParallel: func(i int) *int { return &i }(2),
 				},
@@ -290,10 +292,10 @@ nodes:
     type: command
     command: "echo tmp=${tmp_dir}"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 
@@ -301,14 +303,14 @@ nodes:
 	itemsFile := filepath.Join(tmpDir, "items.txt")
 	require.NoError(t, os.WriteFile(itemsFile, []byte("item1"), 0644))
 
-	parentDefn := &WorkflowDefinition{
+	parentDefn := &workflowspec.WorkflowDefinition{
 		Name: "parent-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "fanout",
-				Type:     NodeTypeWorkflow,
+				Type:     workflowspec.NodeTypeWorkflow,
 				Workflow: "child-wf",
-				Fanout: &FanoutSpec{
+				Fanout: &workflowspec.FanoutSpec{
 					ItemsFile: itemsFile,
 				},
 			},
@@ -329,19 +331,19 @@ nodes:
 func TestSubWorkflowRunner_Fanout_MountDirsInheritance(t *testing.T) {
 	t.Parallel()
 
-	childDefn := &WorkflowDefinition{
+	childDefn := &workflowspec.WorkflowDefinition{
 		Name: "child-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "check-mounts",
-				Type:     NodeTypeFunction,
+				Type:     workflowspec.NodeTypeFunction,
 				Function: "check-mounts-fn",
 			},
 		},
 	}
 
 	var capturedRunDirs []string
-	var capturedMountDirs MountDirsConfig
+	var capturedMountDirs workflowspec.MountDirsConfig
 
 	fnReg := NewFunctionRegistry()
 	fnReg.Register("check-mounts-fn", func(ctx context.Context, nctx *NodeContext) (string, error) {
@@ -351,7 +353,7 @@ func TestSubWorkflowRunner_Fanout_MountDirsInheritance(t *testing.T) {
 	})
 
 	registry := NewNodeRunnerRegistry()
-	wfRunner := NewSubWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	wfRunner := NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 	registry.Register(wfRunner)
@@ -364,14 +366,14 @@ func TestSubWorkflowRunner_Fanout_MountDirsInheritance(t *testing.T) {
 	itemsFile := filepath.Join(tmpDir, "items.txt")
 	require.NoError(t, os.WriteFile(itemsFile, []byte("item1"), 0644))
 
-	parentDefn := &WorkflowDefinition{
+	parentDefn := &workflowspec.WorkflowDefinition{
 		Name: "parent-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "fanout",
-				Type:     NodeTypeWorkflow,
+				Type:     workflowspec.NodeTypeWorkflow,
 				Workflow: "child-wf",
-				Fanout: &FanoutSpec{
+				Fanout: &workflowspec.FanoutSpec{
 					ItemsFile: itemsFile,
 				},
 			},
@@ -382,7 +384,7 @@ func TestSubWorkflowRunner_Fanout_MountDirsInheritance(t *testing.T) {
 		RunDir:          tmpDir,
 		TmpDir:          tmpDir,
 		WorkflowRunDirs: []string{"/custom/rundir"},
-		WorkflowMountDirs: MountDirsConfig{
+		WorkflowMountDirs: workflowspec.MountDirsConfig{
 			ReadOnly:  []string{"/custom/ro"},
 			ReadWrite: []string{"/custom/rw"},
 		},
@@ -407,10 +409,10 @@ nodes:
     type: command
     command: "if [ \"${input}\" = \"fail\" ]; then exit 1; else echo \"ok: ${input}\"; fi"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 
@@ -418,14 +420,14 @@ nodes:
 	itemsFile := filepath.Join(tmpDir, "items.txt")
 	require.NoError(t, os.WriteFile(itemsFile, []byte("item1\nfail\nitem2"), 0644))
 
-	parentDefn := &WorkflowDefinition{
+	parentDefn := &workflowspec.WorkflowDefinition{
 		Name: "parent-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "fanout",
-				Type:     NodeTypeWorkflow,
+				Type:     workflowspec.NodeTypeWorkflow,
 				Workflow: "child-wf",
-				Fanout: &FanoutSpec{
+				Fanout: &workflowspec.FanoutSpec{
 					ItemsFile: itemsFile,
 				},
 			},
@@ -441,7 +443,7 @@ nodes:
 
 	subRes := res.Nodes["fanout"]
 	require.NotNil(t, subRes)
-	assert.Equal(t, StatusFailed, subRes.Status)
+	assert.Equal(t, workflowspec.StatusFailed, subRes.Status)
 	assert.Contains(t, subRes.Output, "ok: item1")
 	assert.Contains(t, subRes.Output, "ok: item2")
 	assert.Contains(t, subRes.Output, `"status":"FAILED"`)
@@ -450,12 +452,12 @@ nodes:
 func TestSubWorkflowRunner_Fanout_OrderedOutput(t *testing.T) {
 	t.Parallel()
 
-	childDefn := &WorkflowDefinition{
+	childDefn := &workflowspec.WorkflowDefinition{
 		Name: "child-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "sleeper",
-				Type:     NodeTypeFunction,
+				Type:     workflowspec.NodeTypeFunction,
 				Function: "sleep-fn",
 			},
 		},
@@ -476,7 +478,7 @@ func TestSubWorkflowRunner_Fanout_OrderedOutput(t *testing.T) {
 	})
 
 	registry := NewNodeRunnerRegistry()
-	wfRunner := NewSubWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	wfRunner := NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 	registry.Register(wfRunner)
@@ -490,14 +492,14 @@ func TestSubWorkflowRunner_Fanout_OrderedOutput(t *testing.T) {
 	outputFile := filepath.Join(tmpDir, "output.jsonl")
 	require.NoError(t, os.WriteFile(itemsFile, []byte("item1\nitem2\nitem3"), 0644))
 
-	parentDefn := &WorkflowDefinition{
+	parentDefn := &workflowspec.WorkflowDefinition{
 		Name: "parent-wf",
-		Nodes: []*NodeSpec{
+		Nodes: []*workflowspec.NodeSpec{
 			{
 				ID:       "fanout",
-				Type:     NodeTypeWorkflow,
+				Type:     workflowspec.NodeTypeWorkflow,
 				Workflow: "child-wf",
-				Fanout: &FanoutSpec{
+				Fanout: &workflowspec.FanoutSpec{
 					ItemsFile:  itemsFile,
 					OutputFile: outputFile,
 				},
@@ -514,7 +516,7 @@ func TestSubWorkflowRunner_Fanout_OrderedOutput(t *testing.T) {
 
 	subRes := res.Nodes["fanout"]
 	require.NotNil(t, subRes)
-	assert.Equal(t, StatusSucceeded, subRes.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, subRes.Status)
 
 	lines := strings.Split(strings.TrimSpace(subRes.Output), "\n")
 	require.Len(t, lines, 3)
@@ -543,58 +545,58 @@ func TestSubWorkflowRunner_Fanout_OrderedOutput(t *testing.T) {
 func TestSubWorkflowRunner_RecursionDepthAndCycleDetection(t *testing.T) {
 	t.Parallel()
 
-	defns := map[string]*WorkflowDefinition{
+	defns := map[string]*workflowspec.WorkflowDefinition{
 		"A": {
 			Name: "A",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "A"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "A"},
 			},
 		},
 		"B": {
 			Name: "B",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "C"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "C"},
 			},
 		},
 		"C": {
 			Name: "C",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "B"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "B"},
 			},
 		},
 		"D1": {
 			Name: "D1",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "D2"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "D2"},
 			},
 		},
 		"D2": {
 			Name: "D2",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "D3"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "D3"},
 			},
 		},
 		"D3": {
 			Name: "D3",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "D4"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "D4"},
 			},
 		},
 		"D4": {
 			Name: "D4",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeWorkflow, Workflow: "D5"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeWorkflow, Workflow: "D5"},
 			},
 		},
 		"D5": {
 			Name: "D5",
-			Nodes: []*NodeSpec{
-				{ID: "n", Type: NodeTypeCommand, Command: "echo done"},
+			Nodes: []*workflowspec.NodeSpec{
+				{ID: "n", Type: workflowspec.NodeTypeCommand, Command: "echo done"},
 			},
 		},
 	}
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if d, ok := defns[name]; ok {
 			return d, nil
 		}
@@ -625,7 +627,7 @@ func TestSubWorkflowRunner_RecursionDepthAndCycleDetection(t *testing.T) {
 		require.NoError(t, errSuccess)
 		assert.Equal(t, RunStatusCompleted, resSuccess.Status)
 		require.NotNil(t, resSuccess.Nodes["n"])
-		assert.Equal(t, StatusSucceeded, resSuccess.Nodes["n"].Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, resSuccess.Nodes["n"].Status)
 
 		// Depth 5 rejected: root chain has ["root"] -> D1 -> D2 -> D3 -> D4 (length 4) -> calling D5 exceeds max depth 4.
 		ctxReject := context.WithValue(t.Context(), wfCallChainKey{}, []string{"root"})
@@ -646,11 +648,11 @@ nodes:
     type: human
     prompt: "Are you there?"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 	require.NoError(t, childDefn.Validate())
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 
@@ -661,7 +663,7 @@ nodes:
     type: workflow
     workflow: child-human`
 
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	res, err := engine.Execute(t.Context(), parentDefn, RunContext{
@@ -690,10 +692,10 @@ nodes:
     prompt: "Approve?"
     options: ["Approve", "Reject"]`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "child-human" {
 			return childDefn, nil
 		}
@@ -722,7 +724,7 @@ nodes:
     type: workflow
     workflow: child-human`
 
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	type outcome struct {
@@ -770,7 +772,7 @@ nodes:
 	assert.Equal(t, RunStatusCompleted, out.result.Status)
 	subRes := out.result.Nodes["sub"]
 	require.NotNil(t, subRes)
-	assert.Equal(t, StatusSucceeded, subRes.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, subRes.Status)
 
 	// The settled child snapshot must not linger in WAITING_HUMAN (no stale
 	// residue for later resume attempts).
@@ -789,7 +791,7 @@ nodes:
     type: human
     prompt: "Prompt"`
 
-	defn, err := ParseDefinition([]byte(humanYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(humanYAML))
 	require.NoError(t, err)
 
 	engine, _ := setupTestEngineWithWorkflowRunner(nil)
@@ -814,10 +816,10 @@ nodes:
     type: command
     command: "sleep 2"`
 
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
-	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	engine, _ := setupTestEngineWithWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		return childDefn, nil
 	})
 
@@ -829,7 +831,7 @@ nodes:
     workflow: child-slow
     timeout: 50ms`
 
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	res, err := engine.Execute(t.Context(), parentDefn, RunContext{
@@ -838,5 +840,5 @@ nodes:
 	})
 	require.NoError(t, err)
 	assert.Equal(t, RunStatusFailed, res.Status)
-	assert.Equal(t, StatusFailed, res.Nodes["sub"].Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Nodes["sub"].Status)
 }

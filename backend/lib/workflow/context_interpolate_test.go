@@ -4,13 +4,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func TestNodeContextInterpolateLoopIteration(t *testing.T) {
 	nctx := &NodeContext{
 		SessionID: "sess-1",
-		Node:      &NodeSpec{ID: "fixer"},
-		Defn:      &WorkflowDefinition{Name: "t"},
+		Node:      &workflowspec.NodeSpec{ID: "fixer"},
+		Defn:      &workflowspec.WorkflowDefinition{Name: "t"},
 		LoopIterations: map[string]int{
 			"fix_loop":  2,
 			"step_loop": 4,

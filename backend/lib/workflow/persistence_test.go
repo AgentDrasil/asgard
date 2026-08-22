@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // memStore is an in-memory workflow.RunStore fake.
@@ -219,7 +221,7 @@ func TestHumanMessageIDDeterministic(t *testing.T) {
 
 func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 	engine, store, rec := newTestEngine(t)
-	defn, err := ParseDefinition([]byte(humanLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(humanLoopYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()
@@ -248,7 +250,7 @@ func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 	assert.Equal(t, "wf-run789-plan_approval", snap.SuspendedMessageID)
 	assert.Equal(t, PersistStatusWaitingHuman, snap.Status)
 	// The prep node settled before the snapshot.
-	assert.Equal(t, string(StatusSucceeded), snap.NodeStates["prep"].Status)
+	assert.Equal(t, string(workflowspec.StatusSucceeded), snap.NodeStates["prep"].Status)
 
 	require.Len(t, rec.all(), 1)
 	req := rec.all()[0]
@@ -281,7 +283,7 @@ func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 
 func TestHumanNodeResumeAfterRestart(t *testing.T) {
 	engine1, store, _ := newTestEngine(t)
-	defn, err := ParseDefinition([]byte(humanLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(humanLoopYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()
@@ -318,7 +320,7 @@ func TestHumanNodeResumeAfterRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, RunStatusCompleted, result.Status)
-	assert.Equal(t, StatusSucceeded, result.Nodes["plan_approval"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, result.Nodes["plan_approval"].Status)
 	assert.Equal(t, "looks good, ship it", result.Nodes["plan_approval"].Output)
 
 	artifactsDir := filepath.Join(runDir, "tmp", "chat-1")
@@ -366,7 +368,7 @@ nodes:
       - node: review_b
     command: "echo done"
 `
-	_, err := ParseDefinition([]byte(yaml))
+	_, err := workflowspec.ParseDefinition([]byte(yaml))
 	require.NoError(t, err)
 }
 
@@ -383,7 +385,7 @@ nodes:
       - node: approval_1
     prompt: "second approval"
 `
-	_, err := ParseDefinition([]byte(yaml))
+	_, err := workflowspec.ParseDefinition([]byte(yaml))
 	require.NoError(t, err)
 }
 
@@ -394,7 +396,7 @@ nodes:
   - id: approval
     type: human
 `
-	_, err := ParseDefinition([]byte(yaml))
+	_, err := workflowspec.ParseDefinition([]byte(yaml))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "prompt is required for human nodes")
 }
@@ -462,7 +464,7 @@ func newLoopPersistenceEngine(t *testing.T, runner NodeRunner, store RunStore) (
 // runUntilFallbackSuspended executes the fallback-resume workflow on engine
 // until fix_fallback suspends, then simulates a process crash (cancel + settle
 // CANCELLED) and restores the WAITING_HUMAN snapshot, mimicking crash recovery.
-func runUntilFallbackSuspended(t *testing.T, engine *Engine, store *memStore, defn *WorkflowDefinition, runID, sessionID, runDir string) *RunSnapshot {
+func runUntilFallbackSuspended(t *testing.T, engine *Engine, store *memStore, defn *workflowspec.WorkflowDefinition, runID, sessionID, runDir string) *RunSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -499,7 +501,7 @@ func passAfterVerdictRuns() func(nodeID string, n int) int {
 }
 
 func TestFixFallbackResumeAfterRestart(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fallbackResumeYAML))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(passAfterVerdictRuns())
@@ -535,7 +537,7 @@ func TestFixFallbackResumeAfterRestart(t *testing.T) {
 }
 
 func TestResumeRestoresCountersAndStableMessageIDs(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fallbackResumeYAML))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(passAfterVerdictRuns())
@@ -668,8 +670,8 @@ func TestMemStore_RefreshSuspension(t *testing.T) {
 	err := store.RefreshSuspension(
 		"run-1",
 		map[string]PersistedNodeState{
-			"prep":          {Status: string(StatusSucceeded)},
-			"plan_approval": {Status: string(StatusSucceeded)},
+			"prep":          {Status: string(workflowspec.StatusSucceeded)},
+			"plan_approval": {Status: string(workflowspec.StatusSucceeded)},
 		},
 		map[string]int{"fix_loop": 2},
 		map[string]int{"fixer": 2},
@@ -896,7 +898,7 @@ nodes:
 `
 
 func TestEngine_ParallelHumanNodes_ConcurrentSuspensionAndResume_InMemory(t *testing.T) {
-	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -951,7 +953,7 @@ func TestEngine_ParallelHumanNodes_ConcurrentSuspensionAndResume_InMemory(t *tes
 }
 
 func TestEngine_ParallelHumanNodes_RestartReplay(t *testing.T) {
-	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -1016,7 +1018,7 @@ func TestEngine_ParallelHumanNodes_RestartReplay(t *testing.T) {
 }
 
 func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
-	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -1047,7 +1049,7 @@ func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
 	// Post-Settle should have refreshed store and pruned SuspendedNodes down to human_b
 	waitFor(t, func() bool {
 		s := store.get("run-prune")
-		return s != nil && len(s.SuspendedNodes) == 1 && s.SuspendedNodes["human_b"].MessageID == msgB && s.NodeStates["human_a"].Status == string(StatusSucceeded)
+		return s != nil && len(s.SuspendedNodes) == 1 && s.SuspendedNodes["human_b"].MessageID == msgB && s.NodeStates["human_a"].Status == string(workflowspec.StatusSucceeded)
 	}, "snap pruned to human_b with human_a succeeded")
 
 	// Resume human_b to complete run
@@ -1062,7 +1064,7 @@ func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
 
 func TestEngine_Resume_DuplicateReply_NoDoubleExecute(t *testing.T) {
 	t.Run("dual human node duplicate reply ignored", func(t *testing.T) {
-		defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+		defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
 		require.NoError(t, err)
 
 		store := newMemStore()
@@ -1106,7 +1108,7 @@ func TestEngine_Resume_DuplicateReply_NoDoubleExecute(t *testing.T) {
 
 	t.Run("single human node executing guard ignores late resume", func(t *testing.T) {
 		slowRunner := &slowNodeRunner{delay: 100 * time.Millisecond}
-		defn, err := ParseDefinition([]byte(singleLoopWithSlowDownstreamYAML))
+		defn, err := workflowspec.ParseDefinition([]byte(singleLoopWithSlowDownstreamYAML))
 		require.NoError(t, err)
 
 		store := newMemStore()
@@ -1160,17 +1162,17 @@ type slowNodeRunner struct {
 	delay time.Duration
 }
 
-func (s *slowNodeRunner) Supports(t NodeType) bool {
-	return t == NodeTypeCommand
+func (s *slowNodeRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeCommand
 }
 
-func (s *slowNodeRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (s *slowNodeRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	time.Sleep(s.delay)
-	return &NodeResult{Status: StatusSucceeded, Output: "slow done"}, nil
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: "slow done"}, nil
 }
 
 func TestEngine_HumanNode_FastReplyRace(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fallbackResumeYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fallbackResumeYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -1201,7 +1203,7 @@ func TestEngine_HumanNode_FastReplyRace(t *testing.T) {
 }
 
 func TestEngine_Resume_ConcurrentReplyDuringReplay(t *testing.T) {
-	defn, err := ParseDefinition([]byte(parallelDualLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -1251,7 +1253,7 @@ func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {
 	brotherExecCount := 0
 	brotherRunner := &brotherCountingRunner{count: &brotherExecCount}
 
-	defn, err := ParseDefinition([]byte(parallelDualLoopWithBrotherCommandYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopWithBrotherCommandYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()
@@ -1274,11 +1276,11 @@ func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {
 
 	waitFor(t, func() bool {
 		snap := store.get("run-brother")
-		return snap != nil && len(snap.SuspendedNodes) == 2 && snap.NodeStates["brother_cmd"].Status == string(StatusSucceeded)
+		return snap != nil && len(snap.SuspendedNodes) == 2 && snap.NodeStates["brother_cmd"].Status == string(workflowspec.StatusSucceeded)
 	}, "both suspended and brother_cmd settled in snapshot")
 
 	snap := store.get("run-brother")
-	require.Equal(t, string(StatusSucceeded), snap.NodeStates["brother_cmd"].Status)
+	require.Equal(t, string(workflowspec.StatusSucceeded), snap.NodeStates["brother_cmd"].Status)
 	msgA := snap.SuspendedNodes["human_a"].MessageID
 	msgB := snap.SuspendedNodes["human_b"].MessageID
 
@@ -1326,15 +1328,15 @@ type brotherCountingRunner struct {
 	count *int
 }
 
-func (b *brotherCountingRunner) Supports(t NodeType) bool {
-	return t == NodeTypeCommand
+func (b *brotherCountingRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeCommand
 }
 
-func (b *brotherCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (b *brotherCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	if nctx.Node.ID == "brother_cmd" {
 		*b.count++
 	}
-	return &NodeResult{Status: StatusSucceeded, Output: "done"}, nil
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: "done"}, nil
 }
 
 // parallelTripleLoopYAML defines a DAG with three parallel loops, each exhausting to an on_exhausted orphan human node.
@@ -1448,7 +1450,7 @@ nodes:
 `
 
 func TestResumeConcurrentReSuspensionThreeWaiters(t *testing.T) {
-	defn, err := ParseDefinition([]byte(parallelTripleLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(parallelTripleLoopYAML))
 	require.NoError(t, err)
 
 	store := newMemStore()

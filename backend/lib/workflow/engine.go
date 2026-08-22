@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // NodeAction tells the scheduler whether a ready node should run or be skipped.
@@ -49,7 +50,7 @@ type RunContext struct {
 	SuspendHuman SuspendHumanFunc
 	// SeedNodes are pre-settled node results restored from a snapshot; their
 	// workers complete immediately without re-execution.
-	SeedNodes map[string]*NodeResult
+	SeedNodes map[string]*workflowspec.NodeResult
 	// SeedLoopIterations / SeedExecutionCounts restore the loop iteration
 	// counters and per-node execution counts from a persisted snapshot so
 	// circuit-breaker quotas and human MessageIDs survive restarts.
@@ -64,7 +65,7 @@ type RunContext struct {
 	// WorkflowRunDirs carries workflow/parent configured run directories.
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.
-	WorkflowMountDirs MountDirsConfig
+	WorkflowMountDirs workflowspec.MountDirsConfig
 	// Inline marks an in-process sub-workflow execution: StartRun/SettleRun
 	// persistence at the top level is skipped (the parent run owns it).
 	Inline bool
@@ -140,7 +141,7 @@ func (e *Engine) SetAgents(agentList []*agentspec.Agent) {
 	if e == nil || e.registry == nil {
 		return
 	}
-	if runner, ok := e.registry.Get(NodeTypeAgent); ok {
+	if runner, ok := e.registry.Get(workflowspec.NodeTypeAgent); ok {
 		if preloader, ok := runner.(interface{ SetAgents([]*agentspec.Agent) }); ok {
 			preloader.SetAgents(agentList)
 		}
@@ -155,7 +156,7 @@ func (e *Engine) SetAgents(agentList []*agentspec.Agent) {
 //     upstream was intentionally skipped (condition-false).
 //   - SkipReasonCascadedFailure: an upstream FAILED or was itself skipped by
 //     cascaded failure, and the node does not opt in via on_fail/on_skip/join.
-func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (NodeAction, SkipReason) {
+func EvaluateNodeReadiness(node *workflowspec.NodeSpec, upstreams map[string]*workflowspec.NodeResult) (NodeAction, workflowspec.SkipReason) {
 	hasConditionFalseEdge := false
 	hasCascadedFailureEdge := false
 	hasFailedEdge := false
@@ -171,15 +172,15 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 			// satisfy an exit_code condition (e.g. `exit_code == 0`).
 			// However, if the condition explicitly queries `status` or `skip_reason` on
 			// the target node, allow evaluation against the settled skipped result.
-			if parentResult != nil && parentResult.Status == StatusSkipped {
-				_, field, ok := ParseExprTarget(dep.When)
+			if parentResult != nil && parentResult.Status == workflowspec.StatusSkipped {
+				_, field, ok := workflowspec.ParseExprTarget(dep.When)
 				isStatusQuery := ok && (field == "status" || field == "skip_reason")
 				if !isStatusQuery {
 					hasConditionFalseEdge = true
 					continue
 				}
 			}
-			match, err := EvaluateSimpleExpr(dep.When, upstreams, nil)
+			match, err := workflowspec.EvaluateSimpleExpr(dep.When, upstreams, nil)
 			if err != nil {
 				log.Warn().Err(err).Str("node", node.ID).Msgf("when expression %q evaluation failed; treating as false", dep.When)
 				match = false
@@ -195,10 +196,10 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 			continue
 		}
 		switch parentResult.Status {
-		case StatusFailed:
+		case workflowspec.StatusFailed:
 			hasFailedEdge = true
-		case StatusSkipped:
-			if parentResult.SkipReason == SkipReasonCascadedFailure {
+		case workflowspec.StatusSkipped:
+			if parentResult.SkipReason == workflowspec.SkipReasonCascadedFailure {
 				hasCascadedFailureEdge = true
 			} else {
 				hasConditionFalseEdge = true
@@ -208,10 +209,10 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 
 	// 3. Settlement (priority: Failed / CascadedFailure > ConditionFalse).
 	if (hasFailedEdge || hasCascadedFailureEdge) && !node.AllowsFail() {
-		return ActionSkip, SkipReasonCascadedFailure
+		return ActionSkip, workflowspec.SkipReasonCascadedFailure
 	}
 	if hasConditionFalseEdge && !node.AllowsSkip() {
-		return ActionSkip, SkipReasonConditionFalse
+		return ActionSkip, workflowspec.SkipReasonConditionFalse
 	}
 
 	return ActionRun, ""
@@ -220,7 +221,7 @@ func EvaluateNodeReadiness(node *NodeSpec, upstreams map[string]*NodeResult) (No
 // Execute runs the whole DAG and returns the settled run result. Node worker
 // failures never cancel sibling workers (errgroup receives nil); only
 // cancellation of ctx (user cancel) broadcasts to all workers.
-func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunContext) (*WorkflowRunResult, error) {
+func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinition, rc RunContext) (*WorkflowRunResult, error) {
 	if err := defn.Validate(); err != nil {
 		return nil, err
 	}
@@ -252,7 +253,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	if rc.TmpDir != "" {
 		tmpDir = rc.TmpDir
 	} else {
-		tmpDir = Interpolate(defn.TmpDir, func(key string) (string, bool) {
+		tmpDir = workflowspec.Interpolate(defn.TmpDir, func(key string) (string, bool) {
 			switch key {
 			case "session_id":
 				return rc.SessionID, true
@@ -317,7 +318,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 	var mu sync.Mutex
 	hasSuspended := false
-	results := make(map[string]*NodeResult, len(defn.Nodes))
+	results := make(map[string]*workflowspec.NodeResult, len(defn.Nodes))
 	for id, res := range rc.SeedNodes {
 		results[id] = res
 	}
@@ -335,7 +336,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	// Loop bookkeeping: per-loop iteration counters, the child-loop index and
 	// the set of on_exhausted orphan nodes (excluded from roots, swept as
 	// SKIPPED (never_activated) when they never fire).
-	loopsByID := make(map[string]*LoopSpec, len(defn.Loops))
+	loopsByID := make(map[string]*workflowspec.LoopSpec, len(defn.Loops))
 	childLoops := make(map[string][]string, len(defn.Loops))
 	onExhaustedTargets := make(map[string]bool, len(defn.Loops))
 	for _, loop := range defn.Loops {
@@ -385,15 +386,15 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		return m
 	}
 
-	nodeByID := make(map[string]*NodeSpec, len(defn.Nodes))
+	nodeByID := make(map[string]*workflowspec.NodeSpec, len(defn.Nodes))
 	for _, n := range defn.Nodes {
 		nodeByID[n.ID] = n
 	}
 
 	// Classify dependencies
-	unconditionalDeps := make(map[string][]NodeDependency, len(defn.Nodes))
-	conditionalDeps := make(map[string][]NodeDependency, len(defn.Nodes))
-	dependents := make(map[string][]*NodeSpec, len(defn.Nodes))
+	unconditionalDeps := make(map[string][]workflowspec.NodeDependency, len(defn.Nodes))
+	conditionalDeps := make(map[string][]workflowspec.NodeDependency, len(defn.Nodes))
+	dependents := make(map[string][]*workflowspec.NodeSpec, len(defn.Nodes))
 
 	for _, node := range defn.Nodes {
 		for _, dep := range node.Depends {
@@ -471,7 +472,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	// check the loop quota: an exhausted loop suppresses the re-entry and
 	// routes to the loop's on_exhausted orphan (or fails the target when no
 	// fallback is declared).
-	admitViaEdge := func(dep NodeDependency, targetID string) {
+	admitViaEdge := func(dep workflowspec.NodeDependency, targetID string) {
 		// Seed-replay settled guard: already-settled nodes are neither
 		// re-enqueued nor counted.
 		if replaying {
@@ -519,8 +520,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			// the target's earlier iterations succeeded.
 			exhaustedNoFallback = true
 			_, wasSettled := results[targetID]
-			res := &NodeResult{
-				Status: StatusFailed,
+			res := &workflowspec.NodeResult{
+				Status: workflowspec.StatusFailed,
 				Error:  fmt.Errorf("loop %q exhausted after %d iterations; node %s not re-entered", loop.ID, loop.MaxIterations, targetID),
 			}
 			results[targetID] = res
@@ -536,7 +537,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				NodeID:   targetID,
 				NodeType: nodeByID[targetID].Type,
 				AgentID:  nodeByID[targetID].AgentID,
-				Status:   StatusFailed,
+				Status:   workflowspec.StatusFailed,
 				Message:  fmt.Sprintf("node %s FAILED: %v", targetID, res.Error),
 			})
 			// Only cascade into downstream evaluation for a target that
@@ -579,7 +580,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		// not be re-triggered — otherwise conditional loops would re-execute
 		// forever. Dependents that never ran are still evaluated normally.
 		skipIsDeadBranch := false
-		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped && res.SkipReason == SkipReasonConditionFalse {
+		if res := results[settledNodeID]; res != nil && res.Status == workflowspec.StatusSkipped && res.SkipReason == workflowspec.SkipReasonConditionFalse {
 			skipIsDeadBranch = true
 		}
 		// Fail-closed skip guard: a skipped node (any skip reason — cascaded
@@ -587,7 +588,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		// its own; its zero-valued exit code must never satisfy a
 		// downstream `when` expression.
 		parentSkipped := false
-		if res := results[settledNodeID]; res != nil && res.Status == StatusSkipped {
+		if res := results[settledNodeID]; res != nil && res.Status == workflowspec.StatusSkipped {
 			parentSkipped = true
 		}
 		for _, depNode := range dependents[settledNodeID] {
@@ -597,17 +598,17 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				}
 			}
 			// 1. Check if any conditional edge from settledNodeID triggered
-			var matchingEdge *NodeDependency
+			var matchingEdge *workflowspec.NodeDependency
 			for i, cond := range conditionalDeps[depNode.ID] {
 				if cond.NodeID != settledNodeID {
 					continue
 				}
 				match := false
-				_, field, ok := ParseExprTarget(cond.When)
+				_, field, ok := workflowspec.ParseExprTarget(cond.When)
 				isStatusQuery := ok && (field == "status" || field == "skip_reason")
 				if !parentSkipped || isStatusQuery {
 					var err error
-					match, err = EvaluateSimpleExpr(cond.When, results, nil)
+					match, err = workflowspec.EvaluateSimpleExpr(cond.When, results, nil)
 					if err != nil {
 						log.Warn().Err(err).Str("node", depNode.ID).Msgf("when expression %q evaluation failed", cond.When)
 						match = false
@@ -625,7 +626,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			}
 
 			// 2. Check if settledNodeID is an unconditional parent of depNode
-			var unconditionalEdge *NodeDependency
+			var unconditionalEdge *workflowspec.NodeDependency
 			for i, dep := range unconditionalDeps[depNode.ID] {
 				if dep.NodeID == settledNodeID {
 					unconditionalEdge = &unconditionalDeps[depNode.ID][i]
@@ -643,13 +644,13 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				}
 
 				settledRes := results[settledNodeID]
-				settledRan := settledRes != nil && settledRes.Status == StatusSucceeded
+				settledRan := settledRes != nil && settledRes.Status == workflowspec.StatusSucceeded
 
 				if allUnconditionalSettled || (depNode.Join == "always" && settledRan) {
 					action, reason := EvaluateNodeReadiness(depNode, results)
 					if action == ActionSkip {
-						if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != StatusSkipped {
-							res := &NodeResult{Status: StatusSkipped, SkipReason: reason}
+						if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != workflowspec.StatusSkipped {
+							res := &workflowspec.NodeResult{Status: workflowspec.StatusSkipped, SkipReason: reason}
 							results[depNode.ID] = res
 							log.Info().
 								Str("workflow", defn.Name).
@@ -664,7 +665,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 								NodeID:     depNode.ID,
 								NodeType:   depNode.Type,
 								AgentID:    depNode.AgentID,
-								Status:     StatusSkipped,
+								Status:     workflowspec.StatusSkipped,
 								SkipReason: reason,
 								Message:    fmt.Sprintf("node %s skipped (%s)", depNode.ID, reason),
 							})
@@ -684,8 +685,8 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					}
 				}
 				if allConditionalSettled {
-					if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != StatusSkipped {
-						res := &NodeResult{Status: StatusSkipped, SkipReason: SkipReasonConditionFalse}
+					if _, already := results[depNode.ID]; !already || results[depNode.ID].Status != workflowspec.StatusSkipped {
+						res := &workflowspec.NodeResult{Status: workflowspec.StatusSkipped, SkipReason: workflowspec.SkipReasonConditionFalse}
 						results[depNode.ID] = res
 						log.Info().
 							Str("workflow", defn.Name).
@@ -693,16 +694,16 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 							Str("node_id", depNode.ID).
 							Str("node_type", string(depNode.Type)).
 							Str("agent_id", depNode.AgentID).
-							Str("skip_reason", string(SkipReasonConditionFalse)).
-							Msgf("[Workflow %s] Node %q (type=%s, agent=%s) SKIPPED: %s", defn.Name, depNode.ID, depNode.Type, depNode.AgentID, SkipReasonConditionFalse)
+							Str("skip_reason", string(workflowspec.SkipReasonConditionFalse)).
+							Msgf("[Workflow %s] Node %q (type=%s, agent=%s) SKIPPED: %s", defn.Name, depNode.ID, depNode.Type, depNode.AgentID, workflowspec.SkipReasonConditionFalse)
 						emit(WorkflowEvent{
 							Type:       EventNodeSkipped,
 							NodeID:     depNode.ID,
 							NodeType:   depNode.Type,
 							AgentID:    depNode.AgentID,
-							Status:     StatusSkipped,
-							SkipReason: SkipReasonConditionFalse,
-							Message:    fmt.Sprintf("node %s skipped (%s)", depNode.ID, SkipReasonConditionFalse),
+							Status:     workflowspec.StatusSkipped,
+							SkipReason: workflowspec.SkipReasonConditionFalse,
+							Message:    fmt.Sprintf("node %s skipped (%s)", depNode.ID, workflowspec.SkipReasonConditionFalse),
 						})
 						evaluateDownstream(depNode.ID)
 					}
@@ -761,7 +762,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 
 			g.Go(func() error {
 				mu.Lock()
-				upstreams := make(map[string]*NodeResult, len(results))
+				upstreams := make(map[string]*workflowspec.NodeResult, len(results))
 				for k, v := range results {
 					upstreams[k] = v
 				}
@@ -771,7 +772,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				action, reason := EvaluateNodeReadiness(node, upstreams)
 				if action == ActionSkip {
 					mu.Lock()
-					res := &NodeResult{Status: StatusSkipped, SkipReason: reason}
+					res := &workflowspec.NodeResult{Status: workflowspec.StatusSkipped, SkipReason: reason}
 					results[node.ID] = res
 					delete(running, node.ID)
 					log.Info().
@@ -787,7 +788,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 						NodeID:     node.ID,
 						NodeType:   node.Type,
 						AgentID:    node.AgentID,
-						Status:     StatusSkipped,
+						Status:     workflowspec.StatusSkipped,
 						SkipReason: reason,
 						Message:    fmt.Sprintf("node %s skipped (%s)", node.ID, reason),
 					})
@@ -814,7 +815,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					NodeID:   node.ID,
 					NodeType: node.Type,
 					AgentID:  node.AgentID,
-					Status:   StatusRunning,
+					Status:   workflowspec.StatusRunning,
 					Message:  fmt.Sprintf("node %s started", node.ID),
 				})
 
@@ -838,9 +839,9 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 					Headless:          rc.Headless || defn.NoHuman,
 				}
 
-				var result *NodeResult
+				var result *workflowspec.NodeResult
 				var err error
-				if node.Type == NodeTypeHuman {
+				if node.Type == workflowspec.NodeTypeHuman {
 					if rc.HumanReplies[node.ID] == "" {
 						mu.Lock()
 						hasSuspended = true
@@ -870,7 +871,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				}
 
 				evLog := log.Info()
-				if result.Status == StatusFailed {
+				if result.Status == workflowspec.StatusFailed {
 					evLog = log.Error().Err(result.Error)
 				}
 				evLog.
@@ -889,7 +890,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				// (raw stdout) is intentionally excluded — it stays in artifacts
 				// and the tool log.
 				nodeOutput := result.Output
-				if node.Type == NodeTypeCommand || node.Type == NodeTypeHuman {
+				if node.Type == workflowspec.NodeTypeCommand || node.Type == workflowspec.NodeTypeHuman {
 					nodeOutput = ""
 				}
 
@@ -966,21 +967,21 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 			if _, activated := results[nodeID]; activated {
 				return
 			}
-			results[nodeID] = &NodeResult{Status: StatusSkipped, SkipReason: SkipReasonNeverActivated}
+			results[nodeID] = &workflowspec.NodeResult{Status: workflowspec.StatusSkipped, SkipReason: workflowspec.SkipReasonNeverActivated}
 			log.Info().
 				Str("workflow", defn.Name).
 				Str("session_id", rc.SessionID).
 				Str("node_id", nodeID).
-				Str("skip_reason", string(SkipReasonNeverActivated)).
+				Str("skip_reason", string(workflowspec.SkipReasonNeverActivated)).
 				Msgf("[Workflow %s] Node %q SKIPPED (never activated on_exhausted branch)", defn.Name, nodeID)
 			emit(WorkflowEvent{
 				Type:       EventNodeSkipped,
 				NodeID:     nodeID,
 				NodeType:   nodeByID[nodeID].Type,
 				AgentID:    nodeByID[nodeID].AgentID,
-				Status:     StatusSkipped,
-				SkipReason: SkipReasonNeverActivated,
-				Message:    fmt.Sprintf("node %s skipped (%s)", nodeID, SkipReasonNeverActivated),
+				Status:     workflowspec.StatusSkipped,
+				SkipReason: workflowspec.SkipReasonNeverActivated,
+				Message:    fmt.Sprintf("node %s skipped (%s)", nodeID, workflowspec.SkipReasonNeverActivated),
 			})
 			for _, next := range downstreamDependents[nodeID] {
 				mark(next)
@@ -1014,7 +1015,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 		}
 		if run.Status == RunStatusFailed && run.Error == nil {
 			for _, node := range defn.Nodes {
-				if res := results[node.ID]; res != nil && res.Status == StatusFailed && res.Error != nil {
+				if res := results[node.ID]; res != nil && res.Status == workflowspec.StatusFailed && res.Error != nil {
 					run.Error = fmt.Errorf("workflow failed: node %s failed: %w", node.ID, res.Error)
 					break
 				}
@@ -1035,7 +1036,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 				continue
 			}
 			node := nodeByID[loop.OnExhausted]
-			if node == nil || node.Type != NodeTypeHuman {
+			if node == nil || node.Type != workflowspec.NodeTypeHuman {
 				continue
 			}
 			if res := results[loop.OnExhausted]; res != nil && isHumanAbortReply(res.Output, node.Options) {
@@ -1058,7 +1059,7 @@ func (e *Engine) Execute(ctx context.Context, defn *WorkflowDefinition, rc RunCo
 	if !rc.Inline {
 		emit(WorkflowEvent{
 			Type:    EventWorkflowFinished,
-			Status:  NodeStatus(run.Status),
+			Status:  workflowspec.NodeStatus(run.Status),
 			Message: SummarizeRun(run),
 		})
 	}
@@ -1087,19 +1088,19 @@ func isHumanAbortReply(output string, options []string) bool {
 }
 
 // normalizeResult coerces runner output into a well-formed NodeResult.
-func normalizeResult(result *NodeResult, err error) *NodeResult {
+func normalizeResult(result *workflowspec.NodeResult, err error) *workflowspec.NodeResult {
 	if result == nil {
-		result = &NodeResult{}
+		result = &workflowspec.NodeResult{}
 	}
 	if err != nil {
-		result.Status = StatusFailed
+		result.Status = workflowspec.StatusFailed
 		result.Error = err
 		return result
 	}
 	if result.Status == "" {
-		result.Status = StatusSucceeded
+		result.Status = workflowspec.StatusSucceeded
 	}
-	if result.Status == StatusFailed && result.Error == nil {
+	if result.Status == workflowspec.StatusFailed && result.Error == nil {
 		result.Error = fmt.Errorf("node failed with exit code %d", result.ExitCode)
 	}
 	return result
@@ -1110,7 +1111,7 @@ func normalizeResult(result *NodeResult, err error) *NodeResult {
 //   - FAILED if any node was skipped by cascaded failure, or if any FAILED
 //     node was not absorbed by a downstream when-branch that succeeded.
 //   - COMPLETED otherwise (condition-false skips are considered success).
-func settleGlobalStatus(defn *WorkflowDefinition, results map[string]*NodeResult) WorkflowRunStatus {
+func settleGlobalStatus(defn *workflowspec.WorkflowDefinition, results map[string]*workflowspec.NodeResult) WorkflowRunStatus {
 	dependentsWithWhen := make(map[string][]string)
 	for _, node := range defn.Nodes {
 		for _, dep := range node.Depends {
@@ -1122,7 +1123,7 @@ func settleGlobalStatus(defn *WorkflowDefinition, results map[string]*NodeResult
 
 	failureHandled := func(nodeID string) bool {
 		for _, dep := range dependentsWithWhen[nodeID] {
-			if res := results[dep]; res != nil && res.Status == StatusSucceeded {
+			if res := results[dep]; res != nil && res.Status == workflowspec.StatusSucceeded {
 				return true
 			}
 		}
@@ -1134,10 +1135,10 @@ func settleGlobalStatus(defn *WorkflowDefinition, results map[string]*NodeResult
 		if res == nil {
 			return RunStatusFailed
 		}
-		if res.Status == StatusSkipped && res.SkipReason == SkipReasonCascadedFailure {
+		if res.Status == workflowspec.StatusSkipped && res.SkipReason == workflowspec.SkipReasonCascadedFailure {
 			return RunStatusFailed
 		}
-		if res.Status == StatusFailed && !failureHandled(node.ID) {
+		if res.Status == workflowspec.StatusFailed && !failureHandled(node.ID) {
 			return RunStatusFailed
 		}
 	}
@@ -1147,7 +1148,7 @@ func settleGlobalStatus(defn *WorkflowDefinition, results map[string]*NodeResult
 // resolveWorkflowDirs computes the effective RunDirs and MountDirs for a workflow run
 // by combining runtime context overrides (rc) with definition-level defaults (defn).
 // ReadOnly and ReadWrite mounts are resolved independently to preserve granular configuration.
-func resolveWorkflowDirs(rc RunContext, defn *WorkflowDefinition) ([]string, MountDirsConfig) {
+func resolveWorkflowDirs(rc RunContext, defn *workflowspec.WorkflowDefinition) ([]string, workflowspec.MountDirsConfig) {
 	var runDirs []string
 	if len(rc.WorkflowRunDirs) > 0 {
 		runDirs = append([]string(nil), rc.WorkflowRunDirs...)
@@ -1157,7 +1158,7 @@ func resolveWorkflowDirs(rc RunContext, defn *WorkflowDefinition) ([]string, Mou
 		runDirs = []string{rc.RunDir}
 	}
 
-	var mountDirs MountDirsConfig
+	var mountDirs workflowspec.MountDirsConfig
 	// ReadOnly mount fallback: runtime rc overrides defn if provided; otherwise fallback to defn
 	if len(rc.WorkflowMountDirs.ReadOnly) > 0 {
 		mountDirs.ReadOnly = append([]string(nil), rc.WorkflowMountDirs.ReadOnly...)

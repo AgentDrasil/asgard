@@ -19,6 +19,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/fakebash/pb"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // commandRunner executes command nodes, optionally sandboxed via bubblewrap +
@@ -34,11 +35,11 @@ func NewCommandRunner(sandboxEnabled bool) NodeRunner {
 	return &commandRunner{sandboxEnabled: sandboxEnabled}
 }
 
-func (r *commandRunner) Supports(t NodeType) bool {
-	return t == NodeTypeCommand
+func (r *commandRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeCommand
 }
 
-func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 	command := nctx.Interpolate(node.Command)
 
@@ -69,27 +70,27 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult
 		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
 	}
 
-	result := &NodeResult{ExitCode: exitCode, Output: stdout.String()}
+	result := &workflowspec.NodeResult{ExitCode: exitCode, Output: stdout.String()}
 	collectArtifact(nctx, node, result)
 	if err != nil {
-		result.Status = StatusFailed
+		result.Status = workflowspec.StatusFailed
 		result.Error = err
 		return result, nil
 	}
 	// ExitCode always keeps the real process exit code (even on success) so
 	// downstream `when: "nodes.<id>.exit_code == N"` edges match precisely.
 	if !exitCodeAllowed(node, exitCode) {
-		result.Status = StatusFailed
+		result.Status = workflowspec.StatusFailed
 		result.Error = fmt.Errorf("command exited with code %d: %s", exitCode, truncate(stderr.String(), 2000))
 		return result, nil
 	}
-	result.Status = StatusSucceeded
+	result.Status = workflowspec.StatusSucceeded
 	return result, nil
 }
 
 // exitCodeAllowed reports whether the exit code counts as success: zero or a
 // member of the node's allowed_exit_codes whitelist.
-func exitCodeAllowed(node *NodeSpec, exitCode int) bool {
+func exitCodeAllowed(node *workflowspec.NodeSpec, exitCode int) bool {
 	if exitCode == 0 {
 		return true
 	}
@@ -103,7 +104,7 @@ func exitCodeAllowed(node *NodeSpec, exitCode int) bool {
 
 // collectArtifact registers the node's declared output_file (relative to the
 // artifacts dir) in the result if it was produced.
-func collectArtifact(nctx *NodeContext, node *NodeSpec, result *NodeResult) {
+func collectArtifact(nctx *NodeContext, node *workflowspec.NodeSpec, result *workflowspec.NodeResult) {
 	if node.OutputFile == "" {
 		return
 	}

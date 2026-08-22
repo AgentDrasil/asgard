@@ -12,10 +12,12 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // ResolveDefnFunc resolves a sub-workflow definition by name.
-type ResolveDefnFunc func(name string) (*WorkflowDefinition, error)
+type ResolveDefnFunc func(name string) (*workflowspec.WorkflowDefinition, error)
 
 // SubWorkflowRunner executes sub-workflow nodes (single run or fan-out).
 type SubWorkflowRunner struct {
@@ -41,12 +43,12 @@ func (r *SubWorkflowRunner) SetEngine(engine *Engine) {
 type wfCallChainKey struct{}
 
 // Supports reports whether the runner supports the given node type.
-func (r *SubWorkflowRunner) Supports(t NodeType) bool {
-	return t == NodeTypeWorkflow
+func (r *SubWorkflowRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeWorkflow
 }
 
 // Run executes a sub-workflow node, supporting single execution or fan-out over items_file.
-func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 	if node.Workflow == "" {
 		return nil, fmt.Errorf("node %s: workflow name is required", node.ID)
@@ -105,7 +107,7 @@ func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeRe
 	return r.runSingle(childCtx, nctx, node, subDefn)
 }
 
-func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, node *NodeSpec, subDefn *WorkflowDefinition) (*NodeResult, error) {
+func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, subDefn *workflowspec.WorkflowDefinition) (*workflowspec.NodeResult, error) {
 	prompt := nctx.Interpolate(node.Prompt)
 	if prompt == "" {
 		prompt = nctx.Input
@@ -139,8 +141,8 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 			nctx.EventEmitter(WorkflowEvent{
 				Type:      EventNodeStatusUpdate,
 				NodeID:    node.ID,
-				NodeType:  NodeTypeWorkflow,
-				Status:    StatusRunning,
+				NodeType:  workflowspec.NodeTypeWorkflow,
+				Status:    workflowspec.StatusRunning,
 				Message:   ev.Message,
 				EntryType: "fanout_progress",
 				Metadata:  meta,
@@ -150,8 +152,8 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 
 	runRes, err := r.engine.Execute(ctx, subDefn, childRC)
 	if err != nil {
-		return &NodeResult{
-			Status: StatusFailed,
+		return &workflowspec.NodeResult{
+			Status: workflowspec.StatusFailed,
 			Error:  err,
 		}, nil
 	}
@@ -164,16 +166,16 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 				lastOutput = res.Output
 			}
 		}
-		res := &NodeResult{
-			Status: StatusSucceeded,
+		res := &workflowspec.NodeResult{
+			Status: workflowspec.StatusSucceeded,
 			Output: lastOutput,
 		}
 		collectArtifact(nctx, node, res)
 		return res, nil
 	}
 
-	return &NodeResult{
-		Status: StatusFailed,
+	return &workflowspec.NodeResult{
+		Status: workflowspec.StatusFailed,
 		Error:  runRes.Error,
 	}, nil
 }
@@ -186,7 +188,7 @@ type fanoutItemResult struct {
 	err       error
 }
 
-func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, node *NodeSpec, subDefn *WorkflowDefinition) (*NodeResult, error) {
+func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, subDefn *workflowspec.WorkflowDefinition) (*workflowspec.NodeResult, error) {
 	fanout := node.Fanout
 	itemsFilePath := nctx.Interpolate(fanout.ItemsFile)
 	if !filepath.IsAbs(itemsFilePath) {
@@ -232,8 +234,8 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 			nctx.EventEmitter(WorkflowEvent{
 				Type:      EventNodeStatusUpdate,
 				NodeID:    node.ID,
-				NodeType:  NodeTypeWorkflow,
-				Status:    StatusRunning,
+				NodeType:  workflowspec.NodeTypeWorkflow,
+				Status:    workflowspec.StatusRunning,
 				EntryType: "activity",
 				Metadata: map[string]any{
 					"item_count":         0,
@@ -242,8 +244,8 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				Message: "fanout: items list is empty",
 			})
 		}
-		res := &NodeResult{
-			Status: StatusSucceeded,
+		res := &workflowspec.NodeResult{
+			Status: workflowspec.StatusSucceeded,
 			Output: "",
 		}
 		collectArtifact(nctx, node, res)
@@ -275,7 +277,7 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				itemResults = append(itemResults, fanoutItemResult{
 					itemIndex: idx,
 					item:      itm,
-					status:    string(StatusFailed),
+					status:    string(workflowspec.StatusFailed),
 					err:       ctx.Err(),
 				})
 				mu.Unlock()
@@ -288,7 +290,7 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				itemResults = append(itemResults, fanoutItemResult{
 					itemIndex: idx,
 					item:      itm,
-					status:    string(StatusFailed),
+					status:    string(workflowspec.StatusFailed),
 					err:       ctx.Err(),
 				})
 				mu.Unlock()
@@ -322,8 +324,8 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 					nctx.EventEmitter(WorkflowEvent{
 						Type:      EventNodeStatusUpdate,
 						NodeID:    node.ID,
-						NodeType:  NodeTypeWorkflow,
-						Status:    StatusRunning,
+						NodeType:  workflowspec.NodeTypeWorkflow,
+						Status:    workflowspec.StatusRunning,
 						Message:   ev.Message,
 						EntryType: "fanout_progress",
 						Metadata:  meta,
@@ -333,15 +335,15 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 
 			runRes, runErr := r.engine.Execute(ctx, subDefn, childRC)
 			var subOutput string
-			subStatus := string(StatusSucceeded)
+			subStatus := string(workflowspec.StatusSucceeded)
 			var finalErr error
 
 			if runErr != nil {
-				subStatus = string(StatusFailed)
+				subStatus = string(workflowspec.StatusFailed)
 				finalErr = runErr
 			} else if runRes != nil {
 				if runRes.Status != RunStatusCompleted {
-					subStatus = string(StatusFailed)
+					subStatus = string(workflowspec.StatusFailed)
 					finalErr = runRes.Error
 					if finalErr == nil {
 						finalErr = fmt.Errorf("sub-workflow item %d settled with status %s", idx, runRes.Status)
@@ -386,7 +388,7 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 	}
 
 	for _, ir := range itemResults {
-		if ir.status != string(StatusSucceeded) {
+		if ir.status != string(workflowspec.StatusSucceeded) {
 			hasFailure = true
 			failedCount++
 		} else {
@@ -420,8 +422,8 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 		nctx.EventEmitter(WorkflowEvent{
 			Type:      EventNodeStatusUpdate,
 			NodeID:    node.ID,
-			NodeType:  NodeTypeWorkflow,
-			Status:    StatusRunning,
+			NodeType:  workflowspec.NodeTypeWorkflow,
+			Status:    workflowspec.StatusRunning,
 			EntryType: "activity",
 			Metadata: map[string]any{
 				"total_items":     len(lines),
@@ -432,23 +434,23 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 		})
 	}
 
-	res := &NodeResult{
+	res := &workflowspec.NodeResult{
 		Output: aggregatedJSONL,
 	}
 	collectArtifact(nctx, node, res)
 
 	if ctx.Err() != nil {
-		res.Status = StatusFailed
+		res.Status = workflowspec.StatusFailed
 		res.Error = ctx.Err()
 		return res, nil
 	}
 
 	if hasFailure {
-		res.Status = StatusFailed
+		res.Status = workflowspec.StatusFailed
 		res.Error = fmt.Errorf("fanout sub-workflow had %d failed item(s)", failedCount)
 		return res, nil
 	}
 
-	res.Status = StatusSucceeded
+	res.Status = workflowspec.StatusSucceeded
 	return res, nil
 }

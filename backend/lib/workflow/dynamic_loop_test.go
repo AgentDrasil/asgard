@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func TestPlanReviewLoopExecution(t *testing.T) {
@@ -48,7 +50,7 @@ nodes:
         when: "nodes.plan_approval.output == 'Approve'"
     command: "echo coding"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	engine, _, suspender := newTestEngine(t)
@@ -57,7 +59,7 @@ nodes:
 	planRuns := 0
 	codingRuns := 0
 
-	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		runsMu.Lock()
 		defer runsMu.Unlock()
 		if nctx.Node.ID == "plan_agent" {
@@ -66,7 +68,7 @@ nodes:
 		if nctx.Node.ID == "coding_agent" {
 			codingRuns++
 		}
-		return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: "ok"}, nil
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: "ok"}, nil
 	}}
 	engine.registry.Register(runner)
 
@@ -158,7 +160,7 @@ nodes:
         when: "nodes.review_approval.output == 'Pass & Push'"
     command: "echo push"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	engine, _, suspender := newTestEngine(t)
@@ -166,11 +168,11 @@ nodes:
 	var countsMu sync.Mutex
 	executionCounts := make(map[string]int)
 
-	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		countsMu.Lock()
 		executionCounts[nctx.Node.ID]++
 		countsMu.Unlock()
-		return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: fmt.Sprintf("%s ok", nctx.Node.ID)}, nil
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: fmt.Sprintf("%s ok", nctx.Node.ID)}, nil
 	}}
 	engine.registry.Register(runner)
 
@@ -242,9 +244,11 @@ func newLoopCountingRunner(exitFor func(nodeID string, n int) int) *loopCounting
 	return &loopCountingRunner{counts: make(map[string]int), exitFor: exitFor}
 }
 
-func (r *loopCountingRunner) Supports(t NodeType) bool { return t == NodeTypeCommand }
+func (r *loopCountingRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeCommand
+}
 
-func (r *loopCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *loopCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	r.mu.Lock()
 	r.counts[nctx.Node.ID]++
 	n := r.counts[nctx.Node.ID]
@@ -253,7 +257,7 @@ func (r *loopCountingRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeR
 	if r.exitFor != nil {
 		code = r.exitFor(nctx.Node.ID, n)
 	}
-	return &NodeResult{Status: StatusSucceeded, ExitCode: code, Output: nctx.Node.ID}, nil
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: code, Output: nctx.Node.ID}, nil
 }
 
 func (r *loopCountingRunner) count(nodeID string) int {
@@ -301,7 +305,7 @@ nodes:
 `
 
 func TestLoopCountingCircuitBreakActivatesOnExhausted(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fixLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fixLoopYAML))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
@@ -316,11 +320,11 @@ func TestLoopCountingCircuitBreakActivatesOnExhausted(t *testing.T) {
 	assert.Equal(t, 3, runner.count("verdict"))
 	assert.Equal(t, 2, runner.count("fixer"), "fixer admitted exactly max_iterations times")
 	assert.Equal(t, 1, runner.count("fallback"), "on_exhausted orphan activated once")
-	assert.Equal(t, StatusSucceeded, res.Nodes["fallback"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["fallback"].Status)
 }
 
 func TestHappyPathSweepsDormantOrphanAsCompleted(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fixLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fixLoopYAML))
 	require.NoError(t, err)
 
 	// verdict exits 1 (PASS): no fix needed, loop branch never fires.
@@ -339,10 +343,10 @@ func TestHappyPathSweepsDormantOrphanAsCompleted(t *testing.T) {
 	assert.Equal(t, 0, runner.count("fixer"))
 	assert.Equal(t, 0, runner.count("fallback"), "on_exhausted orphan must not run as a root node")
 	require.NotNil(t, res.Nodes["fallback"])
-	assert.Equal(t, StatusSkipped, res.Nodes["fallback"].Status)
-	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["fallback"].SkipReason)
-	assert.Equal(t, StatusSkipped, res.Nodes["fixer"].Status)
-	assert.Equal(t, SkipReasonConditionFalse, res.Nodes["fixer"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["fallback"].Status)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, res.Nodes["fallback"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["fixer"].Status)
+	assert.Equal(t, workflowspec.SkipReasonConditionFalse, res.Nodes["fixer"].SkipReason)
 }
 
 func TestExhaustedHumanAbortSettlesCanceled(t *testing.T) {
@@ -381,7 +385,7 @@ nodes:
     prompt: "Auto-fix exhausted. Retry, skip or abort?"
     options: ["Retry (reset counter)", "Skip This Step", "Abort Workflow"]
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(nil)
@@ -423,7 +427,7 @@ nodes:
 	assert.Contains(t, res.Error.Error(), "aborted by user")
 	assert.Equal(t, 1, runner.count("fixer"))
 	require.NotNil(t, res.Nodes["fix_fallback"])
-	assert.Equal(t, StatusSucceeded, res.Nodes["fix_fallback"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["fix_fallback"].Status)
 	assert.Equal(t, "Abort Workflow", res.Nodes["fix_fallback"].Output)
 }
 
@@ -467,7 +471,7 @@ nodes:
     type: command
     command: "echo retry"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	// verdict demands a fix three times, then passes.
@@ -539,7 +543,7 @@ nodes:
     type: command
     command: "echo inner fallback"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	// check always demands an inner fix; inner exhausts after 2 attempts and
@@ -555,7 +559,7 @@ nodes:
 
 	assert.Equal(t, RunStatusFailed, res.Status, "outer loop exhaustion without on_exhausted must settle FAILED")
 	require.NotNil(t, res.Nodes["step"])
-	assert.Equal(t, StatusFailed, res.Nodes["step"].Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Nodes["step"].Status)
 	require.NotNil(t, res.Nodes["step"].Error)
 	assert.Contains(t, res.Nodes["step"].Error.Error(), "loop \"outer\" exhausted")
 	assert.Equal(t, 6, runner.count("fixer"), "inner loop must run 2 fixes per outer iteration (3 outer steps)")
@@ -591,12 +595,12 @@ nodes:
 
 	assert.Equal(t, RunStatusFailed, res.Status)
 	require.NotNil(t, res.Nodes["verdict"])
-	assert.Equal(t, StatusSkipped, res.Nodes["verdict"].Status)
-	assert.Equal(t, SkipReasonCascadedFailure, res.Nodes["verdict"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["verdict"].Status)
+	assert.Equal(t, workflowspec.SkipReasonCascadedFailure, res.Nodes["verdict"].SkipReason)
 	assert.False(t, stub.hasRun("verdict"))
 	assert.False(t, stub.hasRun("fixer"), "cascade-skipped parent must never trigger a conditional edge")
 	require.NotNil(t, res.Nodes["fixer"])
-	assert.Equal(t, StatusSkipped, res.Nodes["fixer"].Status)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["fixer"].Status)
 }
 
 func TestConditionFalseSkipGuardBlocksConditionalEdge(t *testing.T) {
@@ -629,8 +633,8 @@ nodes:
 	assert.False(t, stub.hasRun("branch"))
 	assert.False(t, stub.hasRun("trap"), "condition-false skipped parent must never trigger a conditional edge")
 	require.NotNil(t, res.Nodes["trap"])
-	assert.Equal(t, StatusSkipped, res.Nodes["trap"].Status)
-	assert.Equal(t, SkipReasonConditionFalse, res.Nodes["trap"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["trap"].Status)
+	assert.Equal(t, workflowspec.SkipReasonConditionFalse, res.Nodes["trap"].SkipReason)
 }
 
 func TestLoopExhaustionStaleSuccessorDoesNotAbsorbFailure(t *testing.T) {
@@ -670,7 +674,7 @@ nodes:
       - node: fixer
         when: "nodes.fixer.exit_code == 0"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	// verdict demands fixes forever; consumer succeeds in every iteration.
@@ -686,13 +690,13 @@ nodes:
 	assert.Equal(t, 2, runner.count("fixer"))
 	assert.GreaterOrEqual(t, runner.count("consumer"), 1, "consumer runs at least once per admitted fixer round (rapid re-admissions may be deduped)")
 	require.NotNil(t, res.Nodes["fixer"])
-	assert.Equal(t, StatusFailed, res.Nodes["fixer"].Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Nodes["fixer"].Status)
 	require.NotNil(t, res.Error)
 	assert.Contains(t, res.Error.Error(), "loop quota exhausted")
 }
 
 func TestSeedReplaySuppressesReenqueueAndCounting(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fixLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fixLoopYAML))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
@@ -702,11 +706,11 @@ func TestSeedReplaySuppressesReenqueueAndCounting(t *testing.T) {
 	// and everything settled except the on_exhausted orphan.
 	res, err := engine.Execute(context.Background(), defn, RunContext{
 		SessionID: "replay-session",
-		SeedNodes: map[string]*NodeResult{
-			"coding":  {Status: StatusSucceeded, ExitCode: 0},
-			"review":  {Status: StatusSucceeded, ExitCode: 0},
-			"verdict": {Status: StatusSucceeded, ExitCode: 0},
-			"fixer":   {Status: StatusSucceeded, ExitCode: 0},
+		SeedNodes: map[string]*workflowspec.NodeResult{
+			"coding":  {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"review":  {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"verdict": {Status: workflowspec.StatusSucceeded, ExitCode: 0},
+			"fixer":   {Status: workflowspec.StatusSucceeded, ExitCode: 0},
 		},
 	})
 	require.NoError(t, err)
@@ -718,25 +722,25 @@ func TestSeedReplaySuppressesReenqueueAndCounting(t *testing.T) {
 	assert.Equal(t, 0, runner.count("fixer"))
 	assert.Equal(t, 0, runner.count("fallback"))
 	require.NotNil(t, res.Nodes["fallback"])
-	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["fallback"].SkipReason)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, res.Nodes["fallback"].SkipReason)
 }
 
 func TestLoopIterationSnapshotInNodeResult(t *testing.T) {
-	defn, err := ParseDefinition([]byte(fixLoopYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(fixLoopYAML))
 	require.NoError(t, err)
 
 	var mu sync.Mutex
 	var ctxSnapshots []map[string]int
 	var interpolated []string
 
-	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		if nctx.Node.ID == "fixer" {
 			mu.Lock()
 			ctxSnapshots = append(ctxSnapshots, copyIntMap(nctx.LoopIterations))
 			interpolated = append(interpolated, nctx.Interpolate("attempt ${loops.fix_loop.iteration}"))
 			mu.Unlock()
 		}
-		return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: nctx.Node.ID}, nil
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: nctx.Node.ID}, nil
 	}}
 	engine := NewEngineWithRunner(runner)
 
@@ -798,7 +802,7 @@ nodes:
     type: command
     command: "echo fallback"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(func(nodeID string, n int) int { return 0 })
@@ -811,7 +815,7 @@ nodes:
 	assert.Equal(t, 2, runner.count("fixer"))
 	assert.Equal(t, 1, runner.count("second_attempt"), "loop_iteration expression fires only on the 2nd fixer attempt")
 	require.NotNil(t, res.Nodes["second_attempt"])
-	assert.Equal(t, StatusSucceeded, res.Nodes["second_attempt"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["second_attempt"].Status)
 }
 
 func TestMaxNodeExecutionsDefinitionCap(t *testing.T) {
@@ -831,7 +835,7 @@ nodes:
         when: "nodes.spin.exit_code == 0"
     join: always
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(nil)
@@ -883,7 +887,7 @@ nodes:
     depends:
       - node: child1
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(nil)
@@ -893,12 +897,12 @@ nodes:
 	require.NoError(t, err)
 
 	assert.Equal(t, RunStatusCompleted, res.Status)
-	assert.Equal(t, StatusSkipped, res.Nodes["orphan_fallback"].Status)
-	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["orphan_fallback"].SkipReason)
-	assert.Equal(t, StatusSkipped, res.Nodes["child1"].Status)
-	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["child1"].SkipReason)
-	assert.Equal(t, StatusSkipped, res.Nodes["child2"].Status)
-	assert.Equal(t, SkipReasonNeverActivated, res.Nodes["child2"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["orphan_fallback"].Status)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, res.Nodes["orphan_fallback"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["child1"].Status)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, res.Nodes["child1"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["child2"].Status)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, res.Nodes["child2"].SkipReason)
 }
 
 func TestAbortCheck_OnlyHumanNodes(t *testing.T) {
@@ -930,14 +934,14 @@ nodes:
     type: command
     command: "echo 'aborting obsolete branch'"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
-	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		if nctx.Node.ID == "fallback_cmd" {
-			return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: "aborting obsolete branch"}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: "aborting obsolete branch"}, nil
 		}
-		return &NodeResult{Status: StatusSucceeded, ExitCode: 0}, nil
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0}, nil
 	}}
 	engine := NewEngineWithRunner(runner)
 
@@ -970,7 +974,7 @@ nodes:
       - node: branch_a
         when: "nodes.branch_a.status == 'SKIPPED'"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(nil)
@@ -980,24 +984,24 @@ nodes:
 	require.NoError(t, err)
 
 	assert.Equal(t, RunStatusCompleted, res.Status)
-	assert.Equal(t, StatusSkipped, res.Nodes["branch_a"].Status)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["branch_a"].Status)
 	assert.Equal(t, 1, runner.count("handle_skip"), "handle_skip must run when branch_a is SKIPPED")
-	assert.Equal(t, StatusSucceeded, res.Nodes["handle_skip"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["handle_skip"].Status)
 }
 
 func TestPersistedNodeState_LoopIterationsRoundtrip(t *testing.T) {
 	t.Parallel()
 
-	results := map[string]*NodeResult{
+	results := map[string]*workflowspec.NodeResult{
 		"fixer": {
-			Status:         StatusSucceeded,
+			Status:         workflowspec.StatusSucceeded,
 			ExitCode:       0,
 			Output:         "fixed",
 			LoopIterations: map[string]int{"fix_loop": 2},
 		},
 		"skipped_node": {
-			Status:         StatusSkipped,
-			SkipReason:     SkipReasonConditionFalse,
+			Status:         workflowspec.StatusSkipped,
+			SkipReason:     workflowspec.SkipReasonConditionFalse,
 			LoopIterations: nil,
 		},
 	}
@@ -1037,7 +1041,7 @@ nodes:
       - node: status
         when: "nodes.status.exit_code == 0"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	runner := newLoopCountingRunner(nil)
@@ -1046,9 +1050,9 @@ nodes:
 	res, err := engine.Execute(context.Background(), defn, RunContext{SessionID: "status-id-sess"})
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusSkipped, res.Nodes["status"].Status)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["status"].Status)
 	assert.Equal(t, 0, runner.count("trap"), "trap must NOT run because nodes.status.exit_code queries exit_code on a skipped node")
-	assert.Equal(t, StatusSkipped, res.Nodes["trap"].Status)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["trap"].Status)
 }
 
 func TestAbortCheck_HumanPhrasing(t *testing.T) {
@@ -1079,7 +1083,7 @@ nodes:
     prompt: "Exhausted"
     options: ["Retry", "Abort Workflow"]
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	engine, _, suspender := newTestEngine(t)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // Persisted run statuses used by RunStore implementations. Note CANCELLED (two
@@ -134,7 +136,7 @@ type SuspendRequest struct {
 type SuspendHumanFunc func(req SuspendRequest) error
 
 // toPersistedStates converts settled engine results into persistable states.
-func toPersistedStates(results map[string]*NodeResult) map[string]PersistedNodeState {
+func toPersistedStates(results map[string]*workflowspec.NodeResult) map[string]PersistedNodeState {
 	states := make(map[string]PersistedNodeState, len(results))
 	for id, res := range results {
 		if res == nil {
@@ -160,12 +162,12 @@ func toPersistedStates(results map[string]*NodeResult) map[string]PersistedNodeS
 }
 
 // fromPersistedStates rebuilds seeded node results from persisted states.
-func fromPersistedStates(states map[string]PersistedNodeState) map[string]*NodeResult {
-	results := make(map[string]*NodeResult, len(states))
+func fromPersistedStates(states map[string]PersistedNodeState) map[string]*workflowspec.NodeResult {
+	results := make(map[string]*workflowspec.NodeResult, len(states))
 	for id, state := range states {
-		res := &NodeResult{
-			Status:         NodeStatus(state.Status),
-			SkipReason:     SkipReason(state.SkipReason),
+		res := &workflowspec.NodeResult{
+			Status:         workflowspec.NodeStatus(state.Status),
+			SkipReason:     workflowspec.SkipReason(state.SkipReason),
 			ExitCode:       state.ExitCode,
 			Output:         state.Output,
 			LoopIterations: copyIntMap(state.LoopIterations),

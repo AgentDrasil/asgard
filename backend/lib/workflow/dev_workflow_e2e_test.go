@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // devWorkflowE2EYAML mirrors the production tmp/agents/dev-workflow/workflow.yaml
@@ -152,9 +154,11 @@ type e2eAgentRunner struct {
 	verdictFor func(reviewN int) string
 }
 
-func (r *e2eAgentRunner) Supports(t NodeType) bool { return t == NodeTypeAgent }
+func (r *e2eAgentRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeAgent
+}
 
-func (r *e2eAgentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *e2eAgentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	r.mu.Lock()
 	if r.counts == nil {
 		r.counts = map[string]int{}
@@ -199,7 +203,7 @@ func (r *e2eAgentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResul
 			return nil, err
 		}
 	}
-	return &NodeResult{Status: StatusSucceeded, ExitCode: 0, Output: nctx.Node.ID}, nil
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: nctx.Node.ID}, nil
 }
 
 func (r *e2eAgentRunner) count(nodeID string) int {
@@ -225,7 +229,7 @@ type e2eOutcome struct {
 // verdict schedule and human reply script, returning the settled outcome.
 func runDevWorkflowE2E(t *testing.T, totalSteps int, verdictFor func(reviewN int) string, script replyScript) *e2eOutcome {
 	t.Helper()
-	defn, err := ParseDefinition([]byte(devWorkflowE2EYAML))
+	defn, err := workflowspec.ParseDefinition([]byte(devWorkflowE2EYAML))
 	require.NoError(t, err)
 
 	runner := &e2eAgentRunner{totalSteps: totalSteps, verdictFor: verdictFor}
@@ -368,7 +372,7 @@ func TestDevWorkflowE2EScenarioC_ExhaustionWakesFallback(t *testing.T) {
 	assert.Equal(t, 5, out.runner.count("fix_agent"), "fixer admitted exactly max_iterations times")
 	assert.Equal(t, 6, out.runner.count("code_review_agent"))
 	require.NotNil(t, out.result.Nodes["mark_step_skipped"])
-	assert.Equal(t, StatusSucceeded, out.result.Nodes["mark_step_skipped"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, out.result.Nodes["mark_step_skipped"].Status)
 
 	todo, err := os.ReadFile(filepath.Join(out.tmpDir, "plan", "todo.yaml"))
 	require.NoError(t, err)
@@ -444,10 +448,10 @@ func TestDevWorkflowE2EScenarioG_Phase5HappyPathSweepsOrphans(t *testing.T) {
 	assert.Equal(t, 1, out.runner.count("final_cleaner"))
 	assert.Equal(t, 1, out.runner.count("final_commit"))
 	require.NotNil(t, out.result.Nodes["fix_fallback"])
-	assert.Equal(t, StatusSkipped, out.result.Nodes["fix_fallback"].Status)
-	assert.Equal(t, SkipReasonNeverActivated, out.result.Nodes["fix_fallback"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, out.result.Nodes["fix_fallback"].Status)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, out.result.Nodes["fix_fallback"].SkipReason)
 	require.NotNil(t, out.result.Nodes["mark_step_skipped"])
-	assert.Equal(t, SkipReasonNeverActivated, out.result.Nodes["mark_step_skipped"].SkipReason)
+	assert.Equal(t, workflowspec.SkipReasonNeverActivated, out.result.Nodes["mark_step_skipped"].SkipReason)
 }
 
 // Scenario H: a Request Changes rejection loops back to final_cleaner, which
@@ -507,12 +511,12 @@ func (c *countingRunStore) counts() (start, settle, waiting int) {
 	return c.startRunCount, c.settleRunCount, c.markWaitingCount
 }
 
-func setupNotebookE2EEngine(t *testing.T, childDefn *WorkflowDefinition, store RunStore) *Engine {
+func setupNotebookE2EEngine(t *testing.T, childDefn *workflowspec.WorkflowDefinition, store RunStore) *Engine {
 	t.Helper()
 	registry := NewNodeRunnerRegistry()
 	registry.Register(NewCommandRunner(false))
 
-	wfRunner := NewSubWorkflowRunner(func(name string) (*WorkflowDefinition, error) {
+	wfRunner := NewSubWorkflowRunner(func(name string) (*workflowspec.WorkflowDefinition, error) {
 		if name == "notes-child-wf" {
 			return childDefn, nil
 		}
@@ -542,7 +546,7 @@ nodes:
     sandbox: false
     command: "echo processed-${input}"
 `
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
 	engine := setupNotebookE2EEngine(t, childDefn, nil)
@@ -585,7 +589,7 @@ nodes:
     command: |
       cat ${tmp_dir}/notes_results.jsonl | grep '"status":"SUCCEEDED"' | wc -l > ${tmp_dir}/committed_hashes.txt
 `
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()
@@ -613,10 +617,10 @@ nodes:
 	assert.Equal(t, "3", strings.TrimSpace(string(committedHashes)))
 
 	// Check final node statuses
-	assert.Equal(t, StatusSucceeded, res.Nodes["scan"].Status)
-	assert.Equal(t, StatusSucceeded, res.Nodes["group"].Status)
-	assert.Equal(t, StatusSucceeded, res.Nodes["notes"].Status)
-	assert.Equal(t, StatusSucceeded, res.Nodes["commit_hashes"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["scan"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["group"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["notes"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["commit_hashes"].Status)
 }
 
 // TestDevWorkflow_FanoutNotebook_PartialFailureIdempotent verifies partial failure:
@@ -638,7 +642,7 @@ nodes:
         echo "ok-${input}"
       fi
 `
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
 	engine := setupNotebookE2EEngine(t, childDefn, nil)
@@ -680,7 +684,7 @@ nodes:
       grep '"status":"SUCCEEDED"' ${tmp_dir}/notes_results.jsonl | wc -l > ${tmp_dir}/committed_hashes.txt
       grep '"status":"FAILED"' ${tmp_dir}/notes_results.jsonl | wc -l > ${tmp_dir}/failed_hashes.txt
 `
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()
@@ -694,8 +698,8 @@ nodes:
 	// Global run status should be FAILED because notes failed
 	require.Equal(t, RunStatusFailed, res.Status)
 
-	assert.Equal(t, StatusFailed, res.Nodes["notes"].Status)
-	assert.Equal(t, StatusSucceeded, res.Nodes["commit_hashes"].Status, "commit_hashes should run due to join: always")
+	assert.Equal(t, workflowspec.StatusFailed, res.Nodes["notes"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["commit_hashes"].Status, "commit_hashes should run due to join: always")
 
 	tmpDir := filepath.Join(runDir, "tmp", sessionID)
 	committed, err := os.ReadFile(filepath.Join(tmpDir, "committed_hashes.txt"))
@@ -721,7 +725,7 @@ nodes:
     sandbox: false
     command: "echo processed-${input}"
 `
-	childDefn, err := ParseDefinition([]byte(childYAML))
+	childDefn, err := workflowspec.ParseDefinition([]byte(childYAML))
 	require.NoError(t, err)
 
 	cStore := newCountingRunStore()
@@ -748,7 +752,7 @@ nodes:
       items_file: "items.txt"
       output_file: "output.jsonl"
 `
-	parentDefn, err := ParseDefinition([]byte(parentYAML))
+	parentDefn, err := workflowspec.ParseDefinition([]byte(parentYAML))
 	require.NoError(t, err)
 
 	runDir := t.TempDir()

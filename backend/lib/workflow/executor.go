@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // WorkflowRunParams contains parameters for executing a workflow.
@@ -26,7 +28,7 @@ type WorkflowRunParams struct {
 // WorkflowExecutor adapts the workflow engine to handle execution and persistence.
 type WorkflowExecutor struct {
 	engine *Engine
-	defn   *WorkflowDefinition
+	defn   *workflowspec.WorkflowDefinition
 	// runDir pins the workflow to a working directory (usually a session's
 	// RunDir); empty means "resolve from request metadata / engine default".
 	runDir string
@@ -35,7 +37,7 @@ type WorkflowExecutor struct {
 	// WorkflowRunDirs carries workflow/parent configured run directories.
 	WorkflowRunDirs []string
 	// WorkflowMountDirs carries workflow/parent configured mount directories.
-	WorkflowMountDirs MountDirsConfig
+	WorkflowMountDirs workflowspec.MountDirsConfig
 	// OnEvent, when set, receives every consumed workflow event keyed by the
 	// session (chat) ID. The host application uses it for side effects such
 	// as persisting node artifacts into the session.
@@ -52,12 +54,12 @@ func (e *WorkflowExecutor) PersistDropped() uint64 {
 }
 
 // NewWorkflowExecutor creates an executor for the given engine and definition.
-func NewWorkflowExecutor(engine *Engine, defn *WorkflowDefinition) *WorkflowExecutor {
+func NewWorkflowExecutor(engine *Engine, defn *workflowspec.WorkflowDefinition) *WorkflowExecutor {
 	return &WorkflowExecutor{engine: engine, defn: defn}
 }
 
 // NewWorkflowExecutorWithRunDir is like NewWorkflowExecutor but pins RunDir.
-func NewWorkflowExecutorWithRunDir(engine *Engine, defn *WorkflowDefinition, runDir string) *WorkflowExecutor {
+func NewWorkflowExecutorWithRunDir(engine *Engine, defn *workflowspec.WorkflowDefinition, runDir string) *WorkflowExecutor {
 	return &WorkflowExecutor{engine: engine, defn: defn, runDir: runDir}
 }
 
@@ -157,7 +159,7 @@ func SummarizeRun(result *WorkflowRunResult) string {
 	for _, id := range ids {
 		res := result.Nodes[id]
 		line := fmt.Sprintf("- %s: %s", id, res.Status)
-		if res.Status == StatusSkipped {
+		if res.Status == workflowspec.StatusSkipped {
 			line += fmt.Sprintf(" (%s)", res.SkipReason)
 		}
 		if res.Error != nil {

@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func TestWorkflowExecutor_PersistCh_TimeoutAndDrop(t *testing.T) {
@@ -19,7 +21,7 @@ nodes:
     type: command
     command: "echo hello"
 `
-	defn, err := ParseDefinition([]byte(yamlSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
 	require.NoError(t, err)
 
 	registry := &NodeRunnerRegistry{}
@@ -79,10 +81,10 @@ func TestWorkflowExecutor_PersistCh_DropCounterDirect(t *testing.T) {
 func TestWorkflowExecutor_Execute_RunDir(t *testing.T) {
 	t.Parallel()
 
-	defn := &WorkflowDefinition{
+	defn := &workflowspec.WorkflowDefinition{
 		Name: "test-rundir",
-		Nodes: []*NodeSpec{
-			{ID: "step1", Type: NodeTypeCommand, Command: "echo hello"},
+		Nodes: []*workflowspec.NodeSpec{
+			{ID: "step1", Type: workflowspec.NodeTypeCommand, Command: "echo hello"},
 		},
 	}
 

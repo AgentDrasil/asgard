@@ -17,9 +17,10 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
-func withNodeTimeout(ctx context.Context, node *NodeSpec) (context.Context, context.CancelFunc) {
+func withNodeTimeout(ctx context.Context, node *workflowspec.NodeSpec) (context.Context, context.CancelFunc) {
 	if d := node.TimeoutDuration(); d > 0 {
 		return context.WithTimeout(ctx, d)
 	}
@@ -87,8 +88,8 @@ func NewAgentRunnerWithListener(loader *agentspec.Loader, conf *config.Config, l
 	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agentspec.Agent)}
 }
 
-func (r *agentRunner) Supports(t NodeType) bool {
-	return t == NodeTypeAgent
+func (r *agentRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeAgent
 }
 
 // SetAgents preloads or refreshes the agent cache in the runner.
@@ -134,7 +135,7 @@ func (r *agentRunner) lookup(agentID string) (*agentspec.Agent, error) {
 	return agent, nil
 }
 
-func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 
 	agent, err := r.lookup(node.AgentID)
@@ -306,10 +307,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 					nctx.EventEmitter(WorkflowEvent{
 						Type:      EventNodeStatusUpdate,
 						NodeID:    node.ID,
-						NodeType:  NodeTypeAgent,
+						NodeType:  workflowspec.NodeTypeAgent,
 						AgentID:   node.AgentID,
 						AgentName: effectiveAgent.Config.Name,
-						Status:    StatusRunning,
+						Status:    workflowspec.StatusRunning,
 						Message:   update.Content,
 						EntryType: update.EntryType,
 						Metadata:  SanitizeMetadata(update.Metadata),
@@ -360,7 +361,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 				Str("agent_id", node.AgentID).
 				Int("attempt", attempt).
 				Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully (required outputs satisfied)", node.AgentID, node.ID)
-			return &NodeResult{Status: StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
 		}
 
 		log.Warn().
@@ -388,10 +389,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 				nctx.EventEmitter(WorkflowEvent{
 					Type:      EventNodeStatusUpdate,
 					NodeID:    node.ID,
-					NodeType:  NodeTypeAgent,
+					NodeType:  workflowspec.NodeTypeAgent,
 					AgentID:   node.AgentID,
 					AgentName: effectiveAgent.Config.Name,
-					Status:    StatusRunning,
+					Status:    workflowspec.StatusRunning,
 					Message:   fmt.Sprintf("Required outputs missing (%s). Retrying (attempt %d/%d)...", strings.Join(missing, ", "), attempt+1, totalAttempts),
 					EntryType: "activity",
 				})
@@ -408,8 +409,8 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 			Str("node_id", node.ID).
 			Str("agent_id", node.AgentID).
 			Msgf("[AgentRunner] Agent %q for node %q execution FAILED: %v", node.AgentID, node.ID, executionErr)
-		return &NodeResult{
-			Status:    StatusFailed,
+		return &workflowspec.NodeResult{
+			Status:    workflowspec.StatusFailed,
 			Output:    lastContent,
 			Artifacts: toArtifactMap(nodeArtifacts),
 			Error:     fmt.Errorf("agent %s run execution failed: %w", node.AgentID, executionErr),
@@ -423,8 +424,8 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, 
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
 		Msgf("[AgentRunner] Agent %q for node %q quality gate FAILED: %v", node.AgentID, node.ID, qualityGateErr)
-	return &NodeResult{
-		Status:    StatusFailed,
+	return &workflowspec.NodeResult{
+		Status:    workflowspec.StatusFailed,
 		Output:    lastContent,
 		Artifacts: toArtifactMap(nodeArtifacts),
 		Error:     fmt.Errorf("agent %s quality gate failed: %w", node.AgentID, qualityGateErr),
@@ -514,7 +515,7 @@ func toArtifactMap(paths []string) map[string]string {
 	return m
 }
 
-func resolveAgentPrompt(nctx *NodeContext, node *NodeSpec, resuming bool) (string, error) {
+func resolveAgentPrompt(nctx *NodeContext, node *workflowspec.NodeSpec, resuming bool) (string, error) {
 	switch {
 	case resuming:
 		return agentFollowUpPrompt, nil

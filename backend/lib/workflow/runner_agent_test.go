@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
@@ -17,29 +18,29 @@ func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
 	tests := []struct {
 		name          string
 		rc            RunContext
-		defn          *WorkflowDefinition
+		defn          *workflowspec.WorkflowDefinition
 		wantRunDirs   []string
-		wantMountDirs MountDirsConfig
+		wantMountDirs workflowspec.MountDirsConfig
 	}{
 		{
 			name: "rc overrides definition completely",
 			rc: RunContext{
 				RunDir:          "/rc/run",
 				WorkflowRunDirs: []string{"/rc/allowed"},
-				WorkflowMountDirs: MountDirsConfig{
+				WorkflowMountDirs: workflowspec.MountDirsConfig{
 					ReadOnly:  []string{"/rc/ro"},
 					ReadWrite: []string{"/rc/rw"},
 				},
 			},
-			defn: &WorkflowDefinition{
+			defn: &workflowspec.WorkflowDefinition{
 				RunDirs: []string{"/defn/allowed"},
-				MountDirs: MountDirsConfig{
+				MountDirs: workflowspec.MountDirsConfig{
 					ReadOnly:  []string{"/defn/ro"},
 					ReadWrite: []string{"/defn/rw"},
 				},
 			},
 			wantRunDirs: []string{"/rc/allowed"},
-			wantMountDirs: MountDirsConfig{
+			wantMountDirs: workflowspec.MountDirsConfig{
 				ReadOnly:  []string{"/rc/ro"},
 				ReadWrite: []string{"/rc/rw"},
 			},
@@ -49,15 +50,15 @@ func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
 			rc: RunContext{
 				RunDir: "/fallback/dir",
 			},
-			defn: &WorkflowDefinition{
+			defn: &workflowspec.WorkflowDefinition{
 				RunDirs: []string{"/defn/allowed"},
-				MountDirs: MountDirsConfig{
+				MountDirs: workflowspec.MountDirsConfig{
 					ReadOnly:  []string{"/defn/ro"},
 					ReadWrite: []string{"/defn/rw"},
 				},
 			},
 			wantRunDirs: []string{"/defn/allowed"},
-			wantMountDirs: MountDirsConfig{
+			wantMountDirs: workflowspec.MountDirsConfig{
 				ReadOnly:  []string{"/defn/ro"},
 				ReadWrite: []string{"/defn/rw"},
 			},
@@ -67,9 +68,9 @@ func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
 			rc: RunContext{
 				RunDir: "/rc/rundir/only",
 			},
-			defn:        &WorkflowDefinition{},
+			defn:        &workflowspec.WorkflowDefinition{},
 			wantRunDirs: []string{"/rc/rundir/only"},
-			wantMountDirs: MountDirsConfig{
+			wantMountDirs: workflowspec.MountDirsConfig{
 				ReadOnly:  nil,
 				ReadWrite: nil,
 			},
@@ -77,19 +78,19 @@ func TestResolveWorkflowDirs_TableDriven(t *testing.T) {
 		{
 			name: "independent fallback for ReadOnly and ReadWrite mounts",
 			rc: RunContext{
-				WorkflowMountDirs: MountDirsConfig{
+				WorkflowMountDirs: workflowspec.MountDirsConfig{
 					ReadOnly: []string{"/rc/ro/only"},
 					// ReadWrite is empty in rc -> should fallback to defn.ReadWrite
 				},
 			},
-			defn: &WorkflowDefinition{
-				MountDirs: MountDirsConfig{
+			defn: &workflowspec.WorkflowDefinition{
+				MountDirs: workflowspec.MountDirsConfig{
 					ReadOnly:  []string{"/defn/ro"},
 					ReadWrite: []string{"/defn/rw/fallback"},
 				},
 			},
 			wantRunDirs: nil,
-			wantMountDirs: MountDirsConfig{
+			wantMountDirs: workflowspec.MountDirsConfig{
 				ReadOnly:  []string{"/rc/ro/only"},
 				ReadWrite: []string{"/defn/rw/fallback"},
 			},
@@ -112,7 +113,7 @@ func TestResolveEffectiveAgent_TableDriven(t *testing.T) {
 
 	nctx := &NodeContext{
 		WorkflowRunDirs: []string{"/wf/rundir"},
-		WorkflowMountDirs: MountDirsConfig{
+		WorkflowMountDirs: workflowspec.MountDirsConfig{
 			ReadOnly:  []string{"/wf/ro"},
 			ReadWrite: []string{"/wf/rw"},
 		},
@@ -319,7 +320,7 @@ nodes:
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := ParseDefinition([]byte(tt.yaml))
+			_, err := workflowspec.ParseDefinition([]byte(tt.yaml))
 			if tt.wantErr == "" {
 				assert.NoError(t, err)
 			} else {
@@ -452,7 +453,7 @@ func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
 	tests := []struct {
 		name       string
 		nctx       *NodeContext
-		node       *NodeSpec
+		node       *workflowspec.NodeSpec
 		resuming   bool
 		wantPrompt string
 		wantErr    bool
@@ -461,21 +462,21 @@ func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
 		{
 			name:       "resuming session uses follow-up prompt",
 			nctx:       &NodeContext{Input: "some input", Headless: false},
-			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			node:       &workflowspec.NodeSpec{ID: "agent-1", Entry: true},
 			resuming:   true,
 			wantPrompt: agentFollowUpPrompt,
 		},
 		{
 			name:       "entry node with non-empty input",
 			nctx:       &NodeContext{Input: "hello world", Headless: false},
-			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			node:       &workflowspec.NodeSpec{ID: "agent-1", Entry: true},
 			resuming:   false,
 			wantPrompt: "hello world",
 		},
 		{
 			name:       "entry node with empty input in non-headless mode returns error",
 			nctx:       &NodeContext{Input: "   ", Headless: false},
-			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			node:       &workflowspec.NodeSpec{ID: "agent-1", Entry: true},
 			resuming:   false,
 			wantErr:    true,
 			errContain: "the workflow input is empty",
@@ -483,14 +484,14 @@ func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
 		{
 			name:       "entry node with empty input in headless mode falls back to agentStartPrompt",
 			nctx:       &NodeContext{Input: "", Headless: true},
-			node:       &NodeSpec{ID: "agent-1", Entry: true},
+			node:       &workflowspec.NodeSpec{ID: "agent-1", Entry: true},
 			resuming:   false,
 			wantPrompt: agentStartPrompt,
 		},
 		{
 			name:       "non-entry fresh node uses agentStartPrompt",
 			nctx:       &NodeContext{Input: "", Headless: false},
-			node:       &NodeSpec{ID: "agent-2", Entry: false},
+			node:       &workflowspec.NodeSpec{ID: "agent-2", Entry: false},
 			resuming:   false,
 			wantPrompt: agentStartPrompt,
 		},
@@ -528,9 +529,9 @@ func TestAgentRunner_Headless_EntryEmptyInputFallback(t *testing.T) {
 		},
 	})
 
-	node := &NodeSpec{
+	node := &workflowspec.NodeSpec{
 		ID:      "agent-1",
-		Type:    NodeTypeAgent,
+		Type:    workflowspec.NodeTypeAgent,
 		AgentID: "test-agent",
 		Entry:   true,
 	}

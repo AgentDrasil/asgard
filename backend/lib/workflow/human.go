@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // runHumanNode executes a `type: human` node. When a reply was pre-supplied
@@ -16,12 +18,12 @@ import (
 // WAITING_HUMAN snapshot is persisted, the suspension is delivered to the host
 // application and the worker blocks until Resume delivers the user reply or
 // the run is cancelled.
-func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeContext, store RunStore, dagSpec string, snapshotStates func() snapshotCapture) *NodeResult {
+func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeContext, store RunStore, dagSpec string, snapshotStates func() snapshotCapture) *workflowspec.NodeResult {
 	node := nctx.Node
 	emit := nctx.EventEmitter
 
 	if rc.Headless || nctx.Headless || (nctx.Defn != nil && nctx.Defn.NoHuman) {
-		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: headless execution: human nodes not supported", node.ID)}
+		return &workflowspec.NodeResult{Status: workflowspec.StatusFailed, Error: fmt.Errorf("node %s: headless execution: human nodes not supported", node.ID)}
 	}
 
 	if reply := rc.HumanReplies[node.ID]; reply != "" {
@@ -33,7 +35,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		suspend = e.suspendHuman
 	}
 	if suspend == nil {
-		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: no human suspension gateway configured", node.ID)}
+		return &workflowspec.NodeResult{Status: workflowspec.StatusFailed, Error: fmt.Errorf("node %s: no human suspension gateway configured", node.ID)}
 	}
 
 	prompt := nctx.Interpolate(node.Prompt)
@@ -138,14 +140,14 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		AgentName: rc.AgentName,
 		Artifacts: artifactViewerPaths,
 	}); err != nil {
-		return &NodeResult{Status: StatusFailed, Error: fmt.Errorf("node %s: delivering human suspension: %w", node.ID, err)}
+		return &workflowspec.NodeResult{Status: workflowspec.StatusFailed, Error: fmt.Errorf("node %s: delivering human suspension: %w", node.ID, err)}
 	}
 
 	emit(WorkflowEvent{
 		Type:      EventWorkflowSuspended,
 		NodeID:    node.ID,
-		NodeType:  NodeTypeHuman,
-		Status:    NodeStatus(RunStatusWaitingHuman),
+		NodeType:  workflowspec.NodeTypeHuman,
+		Status:    workflowspec.NodeStatus(RunStatusWaitingHuman),
 		Message:   prompt,
 		MessageID: messageID,
 		Artifacts: artifactViewerPaths,
@@ -157,14 +159,14 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		emit(WorkflowEvent{
 			Type:     EventWorkflowResumed,
 			NodeID:   node.ID,
-			NodeType: NodeTypeHuman,
-			Status:   StatusRunning,
+			NodeType: workflowspec.NodeTypeHuman,
+			Status:   workflowspec.StatusRunning,
 			Message:  fmt.Sprintf("node %s resumed with user reply", node.ID),
 		})
 		return humanReplyResult(nctx, reply)
 	case <-ctx.Done():
-		return &NodeResult{
-			Status: StatusFailed,
+		return &workflowspec.NodeResult{
+			Status: workflowspec.StatusFailed,
 			Error:  fmt.Errorf("node %s: run cancelled while waiting for human input", node.ID),
 		}
 	}
@@ -172,8 +174,8 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 
 // humanReplyResult settles a human node from a user reply, persisting the
 // reply into the node's declared output_file artifact when configured.
-func humanReplyResult(nctx *NodeContext, reply string) *NodeResult {
-	result := &NodeResult{Status: StatusSucceeded, Output: reply}
+func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult {
+	result := &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: reply}
 	if nctx.Node.OutputFile == "" {
 		return result
 	}
@@ -343,7 +345,7 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 	}()
 	e.waitMu.Unlock()
 
-	defn, err := ParseDefinition([]byte(snap.DAGSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(snap.DAGSpec))
 	if err != nil {
 		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", snap.RunID, err)
 	}
@@ -407,7 +409,7 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 	}()
 	e.waitMu.Unlock()
 
-	defn, err := ParseDefinition([]byte(snap.DAGSpec))
+	defn, err := workflowspec.ParseDefinition([]byte(snap.DAGSpec))
 	if err != nil {
 		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", runID, err)
 	}

@@ -9,12 +9,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // TestExternalContextCancel verifies that canceling the parent context makes
 // every worker exit and settles the run as CANCELED.
 func TestExternalContextCancel(t *testing.T) {
-	defn, err := ParseDefinition([]byte(`
+	defn, err := workflowspec.ParseDefinition([]byte(`
 name: cancel-me
 nodes:
   - id: a
@@ -35,7 +37,7 @@ nodes:
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var started atomic.Int32
-	blockingRunner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	blockingRunner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		started.Add(1)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -73,7 +75,7 @@ nodes:
 // policy: a failing worker returns nil to the errgroup so sibling nodes keep
 // running; only an external ctx cancel broadcasts cancellation.
 func TestNodeFailureDoesNotCancelSiblings(t *testing.T) {
-	defn, err := ParseDefinition([]byte(`
+	defn, err := workflowspec.ParseDefinition([]byte(`
 name: isolated-failure
 nodes:
   - id: failer
@@ -90,19 +92,19 @@ nodes:
 `))
 	require.NoError(t, err)
 
-	engine := NewEngineWithRunner(&funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+	engine := NewEngineWithRunner(&funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 		switch nctx.Node.ID {
 		case "failer":
-			return &NodeResult{Status: StatusFailed, ExitCode: 1, Error: errors.New("exit status 1")}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusFailed, ExitCode: 1, Error: errors.New("exit status 1")}, nil
 		case "slow_sibling":
 			select {
 			case <-time.After(200 * time.Millisecond):
-				return &NodeResult{Status: StatusSucceeded}, nil
+				return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded}, nil
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
 		default:
-			return &NodeResult{Status: StatusSucceeded}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded}, nil
 		}
 	}})
 
@@ -112,16 +114,16 @@ nodes:
 	// Global status is FAILED because `failer` was not absorbed by a when
 	// branch, but the slow sibling must have been allowed to finish.
 	assert.Equal(t, RunStatusFailed, res.Status)
-	assert.Equal(t, StatusFailed, res.Nodes["failer"].Status)
-	assert.Equal(t, StatusSucceeded, res.Nodes["slow_sibling"].Status,
+	assert.Equal(t, workflowspec.StatusFailed, res.Nodes["failer"].Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Nodes["slow_sibling"].Status,
 		"sibling node must not be canceled by a failing worker")
-	assert.Equal(t, StatusSkipped, res.Nodes["downstream"].Status)
-	assert.Equal(t, SkipReasonCascadedFailure, res.Nodes["downstream"].SkipReason)
+	assert.Equal(t, workflowspec.StatusSkipped, res.Nodes["downstream"].Status)
+	assert.Equal(t, workflowspec.SkipReasonCascadedFailure, res.Nodes["downstream"].SkipReason)
 }
 
 // TestWorkflowEvents verifies the engine emits the full lifecycle event stream.
 func TestWorkflowEvents(t *testing.T) {
-	defn, err := ParseDefinition([]byte(`
+	defn, err := workflowspec.ParseDefinition([]byte(`
 name: events
 nodes:
   - id: a
@@ -137,8 +139,8 @@ nodes:
 	require.NoError(t, err)
 
 	var events []WorkflowEvent
-	res, err := NewEngineWithRunner(&funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
-		return &NodeResult{Status: StatusSucceeded, ExitCode: 0}, nil
+	res, err := NewEngineWithRunner(&funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0}, nil
 	}}).Execute(context.Background(), defn, RunContext{
 		SessionID: "evts",
 		EmitEvent: func(ev WorkflowEvent) { events = append(events, ev) },

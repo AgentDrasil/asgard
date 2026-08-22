@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 // functionRunner executes `type: function` nodes by invoking a Go function
@@ -18,11 +20,11 @@ func NewFunctionRunner(registry *FunctionRegistry) NodeRunner {
 	return &functionRunner{registry: registry}
 }
 
-func (r *functionRunner) Supports(t NodeType) bool {
-	return t == NodeTypeFunction
+func (r *functionRunner) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeFunction
 }
 
-func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResult, error) {
+func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 
 	ctx, cancel := withNodeTimeout(ctx, node)
@@ -34,8 +36,8 @@ func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResul
 	}
 	fn, ok := registry.Get(node.Function)
 	if !ok {
-		return &NodeResult{
-			Status:   StatusFailed,
+		return &workflowspec.NodeResult{
+			Status:   workflowspec.StatusFailed,
 			ExitCode: 1,
 			Error:    fmt.Errorf("node %s: function %q is not registered", node.ID, node.Function),
 		}, nil
@@ -48,14 +50,14 @@ func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResul
 		} else {
 			err = fmt.Errorf("node %s: function %q failed: %w", node.ID, node.Function, err)
 		}
-		return &NodeResult{
-			Status:   StatusFailed,
+		return &workflowspec.NodeResult{
+			Status:   workflowspec.StatusFailed,
 			ExitCode: 1,
 			Error:    err,
 		}, nil
 	}
-	return &NodeResult{
-		Status:   StatusSucceeded,
+	return &workflowspec.NodeResult{
+		Status:   workflowspec.StatusSucceeded,
 		ExitCode: 0,
 		Output:   output,
 	}, nil

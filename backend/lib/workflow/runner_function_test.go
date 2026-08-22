@@ -9,13 +9,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
-func newTestFunctionNodeContext(node *NodeSpec) *NodeContext {
+func newTestFunctionNodeContext(node *workflowspec.NodeSpec) *NodeContext {
 	return &NodeContext{
 		SessionID: "sess-fn",
 		Node:      node,
-		Upstreams: map[string]*NodeResult{},
+		Upstreams: map[string]*workflowspec.NodeResult{},
 	}
 }
 
@@ -23,11 +25,11 @@ func TestFunctionRunner_Supports(t *testing.T) {
 	t.Parallel()
 
 	r := NewFunctionRunner(nil)
-	assert.True(t, r.Supports(NodeTypeFunction))
-	assert.False(t, r.Supports(NodeTypeAgent))
-	assert.False(t, r.Supports(NodeTypeLLM))
-	assert.False(t, r.Supports(NodeTypeCommand))
-	assert.False(t, r.Supports(NodeTypeHuman))
+	assert.True(t, r.Supports(workflowspec.NodeTypeFunction))
+	assert.False(t, r.Supports(workflowspec.NodeTypeAgent))
+	assert.False(t, r.Supports(workflowspec.NodeTypeLLM))
+	assert.False(t, r.Supports(workflowspec.NodeTypeCommand))
+	assert.False(t, r.Supports(workflowspec.NodeTypeHuman))
 }
 
 func TestFunctionRunner_Run_Success(t *testing.T) {
@@ -38,14 +40,14 @@ func TestFunctionRunner_Run_Success(t *testing.T) {
 		return strings.ToUpper(nctx.Interpolate("${nodes.src.output}")), nil
 	})
 
-	node := &NodeSpec{ID: "fn_node", Type: NodeTypeFunction, Function: "echo_upper"}
+	node := &workflowspec.NodeSpec{ID: "fn_node", Type: workflowspec.NodeTypeFunction, Function: "echo_upper"}
 	nctx := newTestFunctionNodeContext(node)
-	nctx.Upstreams["src"] = &NodeResult{Status: StatusSucceeded, Output: "payload"}
+	nctx.Upstreams["src"] = &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: "payload"}
 
 	res, err := NewFunctionRunner(registry).Run(t.Context(), nctx)
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, StatusSucceeded, res.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, res.Status)
 	assert.Equal(t, 0, res.ExitCode)
 	assert.Equal(t, "PAYLOAD", res.Output)
 }
@@ -54,12 +56,12 @@ func TestFunctionRunner_Run_UnregisteredFunction(t *testing.T) {
 	t.Parallel()
 
 	registry := NewFunctionRegistry()
-	node := &NodeSpec{ID: "fn_node", Type: NodeTypeFunction, Function: "ghost_fn"}
+	node := &workflowspec.NodeSpec{ID: "fn_node", Type: workflowspec.NodeTypeFunction, Function: "ghost_fn"}
 
 	res, err := NewFunctionRunner(registry).Run(t.Context(), newTestFunctionNodeContext(node))
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, StatusFailed, res.Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Status)
 	assert.Equal(t, 1, res.ExitCode)
 	require.Error(t, res.Error)
 	assert.Contains(t, res.Error.Error(), `function "ghost_fn" is not registered`)
@@ -73,11 +75,11 @@ func TestFunctionRunner_Run_FunctionError(t *testing.T) {
 		return "", errors.New("kaboom")
 	})
 
-	node := &NodeSpec{ID: "fn_node", Type: NodeTypeFunction, Function: "boom"}
+	node := &workflowspec.NodeSpec{ID: "fn_node", Type: workflowspec.NodeTypeFunction, Function: "boom"}
 	res, err := NewFunctionRunner(registry).Run(t.Context(), newTestFunctionNodeContext(node))
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, StatusFailed, res.Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Status)
 	assert.Equal(t, 1, res.ExitCode)
 	require.Error(t, res.Error)
 	assert.Contains(t, res.Error.Error(), "kaboom")
@@ -91,11 +93,11 @@ func TestFunctionRunner_Run_PanicRecovered(t *testing.T) {
 		panic("unexpected error")
 	})
 
-	node := &NodeSpec{ID: "fn_node", Type: NodeTypeFunction, Function: "panic_fn"}
+	node := &workflowspec.NodeSpec{ID: "fn_node", Type: workflowspec.NodeTypeFunction, Function: "panic_fn"}
 	res, err := NewFunctionRunner(registry).Run(t.Context(), newTestFunctionNodeContext(node))
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, StatusFailed, res.Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Status)
 	assert.Equal(t, 1, res.ExitCode)
 	require.Error(t, res.Error)
 	assert.Contains(t, res.Error.Error(), "unexpected error")
@@ -114,10 +116,10 @@ func TestFunctionRunner_Run_ContextTimeout(t *testing.T) {
 		}
 	})
 
-	node := &NodeSpec{ID: "fn_node", Type: NodeTypeFunction, Function: "slow_fn", Timeout: "200ms"}
+	node := &workflowspec.NodeSpec{ID: "fn_node", Type: workflowspec.NodeTypeFunction, Function: "slow_fn", Timeout: "200ms"}
 
 	done := make(chan struct{})
-	var res *NodeResult
+	var res *workflowspec.NodeResult
 	var err error
 	go func() {
 		defer close(done)
@@ -132,7 +134,7 @@ func TestFunctionRunner_Run_ContextTimeout(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, StatusFailed, res.Status)
+	assert.Equal(t, workflowspec.StatusFailed, res.Status)
 	assert.Equal(t, 1, res.ExitCode)
 	require.Error(t, res.Error)
 	assert.True(t,
@@ -160,7 +162,7 @@ nodes:
     depends:
       - node: fn_node
 `
-	defn, err := ParseDefinition([]byte(spec))
+	defn, err := workflowspec.ParseDefinition([]byte(spec))
 	require.NoError(t, err)
 
 	registry := NewFunctionRegistry()
@@ -182,6 +184,6 @@ nodes:
 
 	fnResult := res.Nodes["fn_node"]
 	require.NotNil(t, fnResult)
-	assert.Equal(t, StatusSucceeded, fnResult.Status)
+	assert.Equal(t, workflowspec.StatusSucceeded, fnResult.Status)
 	assert.Equal(t, "SOURCE-PAYLOAD", strings.TrimSpace(fnResult.Output))
 }

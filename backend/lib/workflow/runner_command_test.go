@@ -5,9 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
-func runCommandNode(t *testing.T, node *NodeSpec) *NodeResult {
+func runCommandNode(t *testing.T, node *workflowspec.NodeSpec) *workflowspec.NodeResult {
 	t.Helper()
 	runner := NewCommandRunner(false)
 	nctx := &NodeContext{
@@ -15,7 +17,7 @@ func runCommandNode(t *testing.T, node *NodeSpec) *NodeResult {
 		RunDir:    t.TempDir(),
 		TmpDir:    t.TempDir(),
 		Node:      node,
-		Defn:      &WorkflowDefinition{Name: "cmd-test", Nodes: []*NodeSpec{node}},
+		Defn:      &workflowspec.WorkflowDefinition{Name: "cmd-test", Nodes: []*workflowspec.NodeSpec{node}},
 	}
 	result, err := runner.Run(t.Context(), nctx)
 	require.NoError(t, err)
@@ -27,15 +29,15 @@ func TestCommandRunner_DefaultExitCodeSemantics(t *testing.T) {
 	t.Parallel()
 
 	t.Run("exit 0 succeeds", func(t *testing.T) {
-		result := runCommandNode(t, &NodeSpec{ID: "ok", Type: NodeTypeCommand, Command: "true"})
-		assert.Equal(t, StatusSucceeded, result.Status)
+		result := runCommandNode(t, &workflowspec.NodeSpec{ID: "ok", Type: workflowspec.NodeTypeCommand, Command: "true"})
+		assert.Equal(t, workflowspec.StatusSucceeded, result.Status)
 		assert.Equal(t, 0, result.ExitCode)
 		assert.NoError(t, result.Error)
 	})
 
 	t.Run("exit 1 fails by default", func(t *testing.T) {
-		result := runCommandNode(t, &NodeSpec{ID: "fail", Type: NodeTypeCommand, Command: "false"})
-		assert.Equal(t, StatusFailed, result.Status)
+		result := runCommandNode(t, &workflowspec.NodeSpec{ID: "fail", Type: workflowspec.NodeTypeCommand, Command: "false"})
+		assert.Equal(t, workflowspec.StatusFailed, result.Status)
 		assert.Equal(t, 1, result.ExitCode)
 		assert.Error(t, result.Error)
 	})
@@ -45,25 +47,25 @@ func TestCommandRunner_AllowedExitCodes(t *testing.T) {
 	t.Parallel()
 
 	t.Run("whitelisted exit 1 succeeds and keeps real exit code", func(t *testing.T) {
-		result := runCommandNode(t, &NodeSpec{
+		result := runCommandNode(t, &workflowspec.NodeSpec{
 			ID:               "grepish",
-			Type:             NodeTypeCommand,
+			Type:             workflowspec.NodeTypeCommand,
 			Command:          "false",
 			AllowedExitCodes: []int{0, 1},
 		})
-		assert.Equal(t, StatusSucceeded, result.Status)
+		assert.Equal(t, workflowspec.StatusSucceeded, result.Status)
 		assert.Equal(t, 1, result.ExitCode, "success must preserve the real exit code for when-edges")
 		assert.NoError(t, result.Error)
 	})
 
 	t.Run("non-whitelisted exit 2 fails and keeps real exit code", func(t *testing.T) {
-		result := runCommandNode(t, &NodeSpec{
+		result := runCommandNode(t, &workflowspec.NodeSpec{
 			ID:               "bad",
-			Type:             NodeTypeCommand,
+			Type:             workflowspec.NodeTypeCommand,
 			Command:          "exit 2",
 			AllowedExitCodes: []int{0, 1},
 		})
-		assert.Equal(t, StatusFailed, result.Status)
+		assert.Equal(t, workflowspec.StatusFailed, result.Status)
 		assert.Equal(t, 2, result.ExitCode, "failure must preserve the real exit code")
 		assert.Error(t, result.Error)
 	})
@@ -72,35 +74,35 @@ func TestCommandRunner_AllowedExitCodes(t *testing.T) {
 func TestCommandRunner_AllowedExitCodes_DownstreamEdgeSemantics(t *testing.T) {
 	t.Parallel()
 
-	defn := &WorkflowDefinition{Name: "edges", Nodes: []*NodeSpec{
-		{ID: "check", Type: NodeTypeCommand, Command: "exit 2", AllowedExitCodes: []int{0, 1}},
+	defn := &workflowspec.WorkflowDefinition{Name: "edges", Nodes: []*workflowspec.NodeSpec{
+		{ID: "check", Type: workflowspec.NodeTypeCommand, Command: "exit 2", AllowedExitCodes: []int{0, 1}},
 	}}
-	upstreams := map[string]*NodeResult{
+	upstreams := map[string]*workflowspec.NodeResult{
 		"check": runCommandNode(t, defn.Nodes[0]),
 	}
 
 	// A FAILED node with exit code 2 must not satisfy a `== 0` (nor `== 1`)
 	// condition edge, so no false branch is activated downstream.
-	ok, err := EvaluateSimpleExpr("nodes.check.exit_code == 0", upstreams, defn)
+	ok, err := workflowspec.EvaluateSimpleExpr("nodes.check.exit_code == 0", upstreams, defn)
 	require.NoError(t, err)
 	assert.False(t, ok, "failed exit 2 must not match exit_code == 0 edge")
 
-	ok, err = EvaluateSimpleExpr("nodes.check.exit_code == 1", upstreams, defn)
+	ok, err = workflowspec.EvaluateSimpleExpr("nodes.check.exit_code == 1", upstreams, defn)
 	require.NoError(t, err)
 	assert.False(t, ok, "failed exit 2 must not match exit_code == 1 edge")
 
-	ok, err = EvaluateSimpleExpr("nodes.check.exit_code != 0", upstreams, defn)
+	ok, err = workflowspec.EvaluateSimpleExpr("nodes.check.exit_code != 0", upstreams, defn)
 	require.NoError(t, err)
 	assert.True(t, ok, "failure branch edge must still match")
 
 	// A SUCCEEDED whitelisted node with exit code 1 must match `== 1` edges.
-	defnOK := &WorkflowDefinition{Name: "edges-ok", Nodes: []*NodeSpec{
-		{ID: "check", Type: NodeTypeCommand, Command: "false", AllowedExitCodes: []int{0, 1}},
+	defnOK := &workflowspec.WorkflowDefinition{Name: "edges-ok", Nodes: []*workflowspec.NodeSpec{
+		{ID: "check", Type: workflowspec.NodeTypeCommand, Command: "false", AllowedExitCodes: []int{0, 1}},
 	}}
-	upstreamsOK := map[string]*NodeResult{
+	upstreamsOK := map[string]*workflowspec.NodeResult{
 		"check": runCommandNode(t, defnOK.Nodes[0]),
 	}
-	ok, err = EvaluateSimpleExpr("nodes.check.exit_code == 1", upstreamsOK, defnOK)
+	ok, err = workflowspec.EvaluateSimpleExpr("nodes.check.exit_code == 1", upstreamsOK, defnOK)
 	require.NoError(t, err)
 	assert.True(t, ok, "whitelisted exit 1 must match exit_code == 1 edge")
 }
@@ -109,7 +111,7 @@ func TestValidate_AllowedExitCodesOnlyOnCommandNodes(t *testing.T) {
 	t.Parallel()
 
 	t.Run("command node with whitelist is valid", func(t *testing.T) {
-		_, err := ParseDefinition([]byte(`
+		_, err := workflowspec.ParseDefinition([]byte(`
 name: ok-wf
 nodes:
   - id: check
@@ -126,7 +128,7 @@ nodes:
 	})
 
 	t.Run("agent node with whitelist is rejected", func(t *testing.T) {
-		_, err := ParseDefinition([]byte(`
+		_, err := workflowspec.ParseDefinition([]byte(`
 name: bad-wf
 nodes:
   - id: entry_agent
