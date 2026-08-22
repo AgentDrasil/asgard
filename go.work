@@ -11,5 +11,8 @@ use (
 	./cmd/find-peer
 	./cmd/tester
 	./fakebash
+	./pkg/agentspec
 	./pkg/logger
+	./pkg/workflowspec
+	./plugins/notebook
 )

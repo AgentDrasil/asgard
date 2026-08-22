@@ -7,13 +7,14 @@ require github.com/goccy/go-yaml v1.19.2
 require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/fakebash v0.0.0
+	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
+	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
 	github.com/libtnb/sqlite v1.2.2
 	github.com/moznion/go-optional v0.13.0
 	github.com/rcarmo/go-te v0.1.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.36.0
@@ -27,7 +28,9 @@ require (
 replace (
 	github.com/AgentDrasil/asgard/agentwrapper => ../agentwrapper
 	github.com/AgentDrasil/asgard/fakebash => ../fakebash
+	github.com/AgentDrasil/asgard/pkg/agentspec => ../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
+	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
 )
 
 require (
@@ -58,6 +61,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect

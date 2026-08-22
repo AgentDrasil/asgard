@@ -8,8 +8,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 var agentsDirFlag = flag.String("agents-dir", "", "Path to the agents root directory containing agents/ subdirectories and teams.yaml")
@@ -69,7 +69,7 @@ func validateFile(filePath string) {
 	isWorkflow := filepath.Base(filePath) == "workflow.yaml" || containsNodesKey(data)
 
 	if isWorkflow {
-		defn, err := workflow.ParseDefinition(data)
+		defn, err := workflowspec.ParseDefinition(data)
 		if err == nil {
 			fmt.Printf("Workflow definition is valid (Name: %q, Nodes: %d)\n", defn.Name, len(defn.Nodes))
 			checkAgentIDReferences(defn, filepath.Dir(filePath))
@@ -83,7 +83,7 @@ func validateFile(filePath string) {
 	}
 
 	// Try validating as AgentConfig
-	var cfg agents.AgentConfig
+	var cfg agentspec.AgentConfig
 	if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.ID != "" {
 		if err := cfg.Validate(); err != nil {
 			fmt.Fprintf(os.Stderr, "Agent config validation failed: %v\n", err)
@@ -103,7 +103,7 @@ func validateFile(filePath string) {
 	}
 
 	// If neither passed, try workflow parse explicitly to output error
-	defn, err := workflow.ParseDefinition(data)
+	defn, err := workflowspec.ParseDefinition(data)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Validation failed: file %q is neither a valid agent config nor a valid workflow definition: %v\n", filePath, err)
 		os.Exit(1)
@@ -120,7 +120,7 @@ func validateAgentConfigFile(configPath string) {
 		os.Exit(1)
 	}
 
-	var cfg agents.AgentConfig
+	var cfg agentspec.AgentConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing agent config YAML in %q: %v\n", configPath, err)
 		os.Exit(1)
@@ -134,7 +134,7 @@ func validateAgentConfigFile(configPath string) {
 }
 
 func validateWorkflowFile(workflowPath string) {
-	defn, err := workflow.LoadDefinition(workflowPath)
+	defn, err := workflowspec.LoadDefinition(workflowPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Workflow definition validation failed for %q: %v\n", workflowPath, err)
 		os.Exit(1)
@@ -143,13 +143,13 @@ func validateWorkflowFile(workflowPath string) {
 	checkAgentIDReferences(defn, filepath.Dir(workflowPath))
 }
 
-func checkAgentIDReferences(defn *workflow.WorkflowDefinition, baseDir string) {
+func checkAgentIDReferences(defn *workflowspec.WorkflowDefinition, baseDir string) {
 	agentsDir := findAgentsDir(baseDir)
 	if agentsDir == "" {
 		return
 	}
 
-	loader := agents.NewLoader(agentsDir)
+	loader := agentspec.NewLoader(agentsDir)
 	loadedAgents, err := loader.LoadAll()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  Notice: could not load agents from %q to verify agent_id references: %v\n", agentsDir, err)
@@ -163,7 +163,7 @@ func checkAgentIDReferences(defn *workflow.WorkflowDefinition, baseDir string) {
 
 	missing := false
 	for _, node := range defn.Nodes {
-		if node.Type == workflow.NodeTypeAgent && node.AgentID != "" {
+		if node.Type == workflowspec.NodeTypeAgent && node.AgentID != "" {
 			if !knownAgents[node.AgentID] {
 				fmt.Fprintf(os.Stderr, "  Warning: node %q references agent_id %q which is not registered in agents pool (%s)\n", node.ID, node.AgentID, agentsDir)
 				missing = true
@@ -176,10 +176,10 @@ func checkAgentIDReferences(defn *workflow.WorkflowDefinition, baseDir string) {
 	}
 }
 
-func countAgentNodes(defn *workflow.WorkflowDefinition) int {
+func countAgentNodes(defn *workflowspec.WorkflowDefinition) int {
 	cnt := 0
 	for _, n := range defn.Nodes {
-		if n.Type == workflow.NodeTypeAgent {
+		if n.Type == workflowspec.NodeTypeAgent {
 			cnt++
 		}
 	}

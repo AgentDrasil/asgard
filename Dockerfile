@@ -97,7 +97,10 @@ COPY backend/go.mod backend/go.sum* ./backend/
 COPY agentwrapper/go.mod agentwrapper/go.sum* ./agentwrapper/
 COPY agystatusline/go.mod agystatusline/go.sum* ./agystatusline/
 COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
+COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
+COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
+COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
 COPY cmd/agent-validate/go.mod cmd/agent-validate/go.sum* ./cmd/agent-validate/
 COPY cmd/asgard/go.mod cmd/asgard/go.sum* ./cmd/asgard/
 COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
@@ -109,7 +112,10 @@ RUN (cd backend && go mod download) && \
     (cd agentwrapper && go mod download) && \
     (cd agystatusline && go mod download) && \
     (cd fakebash && go mod download) && \
+    (cd pkg/agentspec && go mod download) && \
     (cd pkg/logger && go mod download) && \
+    (cd pkg/workflowspec && go mod download) && \
+    (cd plugins/notebook && go mod download) && \
     (cd cmd/agent-validate && go mod download) && \
     (cd cmd/asgard && go mod download) && \
     (cd cmd/ask-user && go mod download) && \
@@ -122,6 +128,7 @@ COPY agentwrapper/ ./agentwrapper/
 COPY agystatusline/ ./agystatusline/
 COPY fakebash/ ./fakebash/
 COPY pkg/ ./pkg/
+COPY plugins/ ./plugins/
 COPY cmd/ ./cmd/
 
 RUN mkdir -p /app/bin && \

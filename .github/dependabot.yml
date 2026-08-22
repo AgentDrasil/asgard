@@ -81,7 +81,31 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: gomod
+    directory: /pkg/agentspec
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
     directory: /pkg/logger
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /pkg/workflowspec
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /plugins/notebook
     schedule:
       interval: weekly
     groups:

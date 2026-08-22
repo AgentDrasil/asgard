@@ -1,4 +1,4 @@
-package agents
+package agentspec
 
 type Agent struct {
 	Config AgentConfig

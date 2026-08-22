@@ -1,4 +1,4 @@
-package workflow
+package workflowspec
 
 import (
 	"fmt"
@@ -73,7 +73,7 @@ func EvaluateSimpleExpr(expr string, upstreams map[string]*NodeResult, defn *Wor
 		return true, nil
 	}
 
-	left, err := resolveNodeValue(leftPath, upstreams, defn)
+	left, err := ResolveNodeValue(leftPath, upstreams, defn)
 	if err != nil {
 		return false, err
 	}
@@ -130,11 +130,11 @@ func parseLiteral(raw string) (string, error) {
 	return raw, nil
 }
 
-// resolveNodeValue resolves a dot-notation path against node results.
+// ResolveNodeValue resolves a dot-notation path against node results.
 // Supported paths: nodes.<id>.status | exit_code | output | error | skip_reason
 // | loop_iteration.<loop_id> plus spec fields such as nodes.<id>.output_file
 // (resolved via defn).
-func resolveNodeValue(path string, upstreams map[string]*NodeResult, defn *WorkflowDefinition) (string, error) {
+func ResolveNodeValue(path string, upstreams map[string]*NodeResult, defn *WorkflowDefinition) (string, error) {
 	parts := strings.Split(path, ".")
 	if len(parts) < 3 || parts[0] != "nodes" {
 		return "", fmt.Errorf("path %q must start with nodes.<id>.<field>", path)

@@ -1,4 +1,4 @@
-package workflow
+package workflowspec
 
 import (
 	"testing"
@@ -122,24 +122,3 @@ func TestInterpolate(t *testing.T) {
 	assert.Equal(t, "broken ${session_id", Interpolate("broken ${session_id", resolve))
 }
 
-func TestNodeContextInterpolateLoopIteration(t *testing.T) {
-	nctx := &NodeContext{
-		SessionID: "sess-1",
-		Node:      &NodeSpec{ID: "fixer"},
-		Defn:      &WorkflowDefinition{Name: "t"},
-		LoopIterations: map[string]int{
-			"fix_loop":  2,
-			"step_loop": 4,
-		},
-	}
-
-	assert.Equal(t,
-		"attempt 2 of fix loop, step 4",
-		nctx.Interpolate("attempt ${loops.fix_loop.iteration} of fix loop, step ${loops.step_loop.iteration}"),
-	)
-	// Unknown loop ids pass through verbatim (mirroring ${HOME} semantics).
-	assert.Equal(t,
-		"keep ${loops.unknown.iteration} intact",
-		nctx.Interpolate("keep ${loops.unknown.iteration} intact"),
-	)
-}
