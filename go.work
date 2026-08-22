@@ -13,6 +13,7 @@ use (
 	./fakebash
 	./pkg/agentspec
 	./pkg/logger
+	./pkg/pluginsdk
 	./pkg/workflowspec
 	./plugins/notebook
 )

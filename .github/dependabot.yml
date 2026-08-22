@@ -97,6 +97,14 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: gomod
+    directory: /pkg/pluginsdk
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
     directory: /pkg/workflowspec
     schedule:
       interval: weekly

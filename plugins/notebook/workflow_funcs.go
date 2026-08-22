@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/pluginsdk"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -50,10 +50,10 @@ var supportedIngestExts = []string{".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".
 // init registers the notebook workflow functions in the process-wide default
 // registry so `type: function` nodes can resolve them by name.
 func init() {
-	workflow.RegisterFunction(FunctionScanIngestPending, ScanIngestPending)
-	workflow.RegisterFunction(FunctionRecordIngestSuccess, RecordIngestSuccess)
-	workflow.RegisterFunction(FunctionScanAbsorbPending, ScanAbsorbPending)
-	workflow.RegisterFunction(FunctionRecordAbsorbSuccess, RecordAbsorbSuccess)
+	pluginsdk.RegisterFunction(FunctionScanIngestPending, ScanIngestPending)
+	pluginsdk.RegisterFunction(FunctionRecordIngestSuccess, RecordIngestSuccess)
+	pluginsdk.RegisterFunction(FunctionScanAbsorbPending, ScanAbsorbPending)
+	pluginsdk.RegisterFunction(FunctionRecordAbsorbSuccess, RecordAbsorbSuccess)
 }
 
 // ScanIngestPending implements `notebook.scan_ingest_pending`: under the
@@ -62,7 +62,7 @@ func init() {
 // the failure ceiling), and atomically writes the pending vault-relative paths
 // (one per line) to `${tmp_dir}/ingest_items.jsonl` for fan-out consumption.
 // It returns a one-line scan summary.
-func ScanIngestPending(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
+func ScanIngestPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
@@ -111,7 +111,7 @@ func ScanIngestPending(ctx context.Context, nctx *workflow.NodeContext) (string,
 // Note on concurrency: state settlement relies on the workflow engine's
 // single-instance execution constraint per workflow to avoid concurrent
 // read-modify-write races on `.state/ingest_state.yaml`.
-func RecordIngestSuccess(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
+func RecordIngestSuccess(ctx context.Context, nctx *pluginsdk.NodeContext) (string, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
@@ -176,7 +176,7 @@ func RecordIngestSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 // atomically writes the groups (one JSON array per line) to
 // `${tmp_dir}/absorb_items.jsonl` for fan-out consumption. It returns a
 // grouping summary.
-func ScanAbsorbPending(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
+func ScanAbsorbPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
@@ -234,7 +234,7 @@ func ScanAbsorbPending(ctx context.Context, nctx *workflow.NodeContext) (string,
 // Note on concurrency: state settlement relies on the workflow engine's
 // single-instance execution constraint per workflow to avoid concurrent
 // read-modify-write races on `.state/absorb_state.yaml`.
-func RecordAbsorbSuccess(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
+func RecordAbsorbSuccess(ctx context.Context, nctx *pluginsdk.NodeContext) (string, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
@@ -316,7 +316,7 @@ func RecordAbsorbSuccess(ctx context.Context, nctx *workflow.NodeContext) (strin
 // NOTEBOOK_VAULT_DIR environment variable wins when non-empty, then the first
 // configured workflow run dir when absolute. Anything else is an explicit
 // error to prevent silently scanning a wrong (e.g. empty RunDir) location.
-func resolveVaultDir(nctx *workflow.NodeContext) (string, error) {
+func resolveVaultDir(nctx *pluginsdk.NodeContext) (string, error) {
 	if dir := os.Getenv(envVaultDir); dir != "" {
 		return filepath.Clean(dir), nil
 	}
@@ -331,7 +331,7 @@ func resolveVaultDir(nctx *workflow.NodeContext) (string, error) {
 
 // resolveTmpFilePath joins name with the node's tmp dir, falling back to a
 // run-scoped temp path (or process temp dir) when the context carries none.
-func resolveTmpFilePath(nctx *workflow.NodeContext, name string) string {
+func resolveTmpFilePath(nctx *pluginsdk.NodeContext, name string) string {
 	if nctx != nil && nctx.TmpDir != "" {
 		return filepath.Join(nctx.TmpDir, name)
 	}

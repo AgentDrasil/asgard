@@ -30,7 +30,7 @@ func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*NodeResul
 
 	registry := r.registry
 	if registry == nil {
-		registry = defaultFunctionRegistry
+		registry = DefaultFunctionRegistry()
 	}
 	fn, ok := registry.Get(node.Function)
 	if !ok {

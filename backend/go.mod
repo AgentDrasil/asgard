@@ -8,6 +8,7 @@ require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/fakebash v0.0.0
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
+	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
@@ -30,6 +31,7 @@ replace (
 	github.com/AgentDrasil/asgard/fakebash => ../fakebash
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
+	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
 )
 

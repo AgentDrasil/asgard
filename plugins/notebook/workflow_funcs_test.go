@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/pluginsdk"
 )
 
 // newTestVault creates an isolated vault skeleton (Data/, 01_Raw/, .state/).
@@ -45,8 +45,8 @@ func writeVaultFile(t *testing.T, vault, rel, content string) string {
 }
 
 // newTestNodeContext builds a minimal node context rooted at tmpDir.
-func newTestNodeContext(tmpDir string) *workflow.NodeContext {
-	return &workflow.NodeContext{SessionID: "sess-test", RunID: "run-test", TmpDir: tmpDir}
+func newTestNodeContext(tmpDir string) *pluginsdk.NodeContext {
+	return &pluginsdk.NodeContext{SessionID: "sess-test", RunID: "run-test", TmpDir: tmpDir}
 }
 
 // readNonEmptyLines returns the trimmed, non-empty lines of a file.
@@ -96,11 +96,11 @@ func TestNotebookFunctionsRegistered(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			fn, ok := workflow.DefaultFunctionRegistry().Get(name)
+			fn, ok := pluginsdk.DefaultFunctionRegistry().Get(name)
 			require.True(t, ok, "function %s should be registered in the default registry", name)
 			require.NotNil(t, fn)
 
-			child := workflow.NewFunctionRegistryWithParent(workflow.DefaultFunctionRegistry())
+			child := pluginsdk.NewFunctionRegistryWithParent(pluginsdk.DefaultFunctionRegistry())
 			inherited, ok := child.Get(name)
 			require.True(t, ok, "child registries should inherit %s", name)
 			require.NotNil(t, inherited)
@@ -135,7 +135,7 @@ func TestResolveVaultDirPriority(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(envVaultDir, tt.env)
 
-			got, err := resolveVaultDir(&workflow.NodeContext{WorkflowRunDirs: tt.runDirs})
+			got, err := resolveVaultDir(&pluginsdk.NodeContext{WorkflowRunDirs: tt.runDirs})
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorContains(t, err, tt.errSubst)
@@ -472,11 +472,11 @@ func TestContextCancellation(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	nctx := &workflow.NodeContext{TmpDir: t.TempDir()}
+	nctx := &pluginsdk.NodeContext{TmpDir: t.TempDir()}
 
 	tests := []struct {
 		name string
-		fn   workflow.WorkflowFunction
+		fn   pluginsdk.WorkflowFunction
 	}{
 		{"ScanIngestPending", ScanIngestPending},
 		{"RecordIngestSuccess", RecordIngestSuccess},
@@ -498,11 +498,11 @@ func TestContextCancellation(t *testing.T) {
 
 func TestVaultResolutionError(t *testing.T) {
 	t.Setenv(envVaultDir, "")
-	nctx := &workflow.NodeContext{} // no run dirs and no tmp dir
+	nctx := &pluginsdk.NodeContext{} // no run dirs and no tmp dir
 
 	tests := []struct {
 		name string
-		fn   workflow.WorkflowFunction
+		fn   pluginsdk.WorkflowFunction
 	}{
 		{"ScanIngestPending", ScanIngestPending},
 		{"RecordIngestSuccess", RecordIngestSuccess},

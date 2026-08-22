@@ -99,6 +99,7 @@ COPY agystatusline/go.mod agystatusline/go.sum* ./agystatusline/
 COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
 COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
+COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
 COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
 COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
 COPY cmd/agent-validate/go.mod cmd/agent-validate/go.sum* ./cmd/agent-validate/
@@ -114,6 +115,7 @@ RUN (cd backend && go mod download) && \
     (cd fakebash && go mod download) && \
     (cd pkg/agentspec && go mod download) && \
     (cd pkg/logger && go mod download) && \
+    (cd pkg/pluginsdk && go mod download) && \
     (cd pkg/workflowspec && go mod download) && \
     (cd plugins/notebook && go mod download) && \
     (cd cmd/agent-validate && go mod download) && \
