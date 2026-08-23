@@ -7,10 +7,41 @@ package simplest
 
 import (
 	"github.com/AgentDrasil/asgard/simplest/internal/agent"
+	"github.com/AgentDrasil/asgard/simplest/internal/config"
+	"github.com/AgentDrasil/asgard/simplest/internal/prompt"
 	"github.com/AgentDrasil/asgard/simplest/internal/provider"
 	"github.com/AgentDrasil/asgard/simplest/internal/session"
 	"github.com/AgentDrasil/asgard/simplest/internal/tools"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
+)
+
+// ---- config ----
+
+type (
+	Config         = config.Config
+	ProviderConfig = config.ProviderConfig
+	ModelConfig    = config.ModelConfig
+)
+
+var (
+	LoadConfig              = config.Load
+	LoadConfigFrom          = config.LoadFrom
+	GetAvailableModels      = config.GetAvailableModels
+	ResolveModelAndProvider = config.ResolveModelAndProvider
+	IsModelWhitelisted      = config.IsModelWhitelisted
+	DefaultConfigPath       = config.DefaultConfigPath
+)
+
+// ---- prompt ----
+
+type (
+	PromptBuildOptions = prompt.Options
+	ContextFile        = prompt.ContextFile
+)
+
+var (
+	BuildSystemPrompt       = prompt.BuildSystemPrompt
+	LoadProjectContextFiles = prompt.LoadProjectContextFiles
 )
 
 // ---- agent ----
