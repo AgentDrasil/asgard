@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // Request configures one Run invocation. Everything is programmatic.

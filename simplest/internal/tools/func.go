@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // Func adapts a plain Go function into an AgentTool so plugins can register

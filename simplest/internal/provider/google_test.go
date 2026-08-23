@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // --- model family classification ---

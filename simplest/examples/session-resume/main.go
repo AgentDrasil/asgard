@@ -8,11 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/AgentDrasil/asgard/simplest/agent"
+	s "github.com/AgentDrasil/asgard/simplest"
 	"github.com/AgentDrasil/asgard/simplest/examples/internal/exampleutil"
-	"github.com/AgentDrasil/asgard/simplest/provider"
-	"github.com/AgentDrasil/asgard/simplest/session"
-	"github.com/AgentDrasil/asgard/simplest/types"
 )
 
 func main() {
@@ -22,10 +19,10 @@ func main() {
 	}
 
 	model := exampleutil.GeminiModel()
-	p := provider.NewGemini(os.Getenv("GEMINI_API_KEY"))
+	p := s.NewGemini(os.Getenv("GEMINI_API_KEY"))
 	sys := "You are a helpful coding agent."
 
-	mgr := session.New(session.DefaultBaseDir()) // ~/.simplest
+	mgr := s.New(s.DefaultBaseDir()) // ~/.simplest
 	sf, err := mgr.Create(cwd, nil)
 	if err != nil {
 		panic(err)
@@ -35,9 +32,9 @@ func main() {
 	base := exampleutil.NewRequest(model, p, sys, "Remember the number 42.", nil)
 
 	// Round 1
-	var final []types.Message
-	for ev := range agent.Run(context.Background(), base) {
-		if ev.Kind == types.AgentEnd {
+	var final []s.Message
+	for ev := range s.Run(context.Background(), base) {
+		if ev.Kind == s.AgentEnd {
 			final = ev.Messages
 		}
 	}
@@ -48,8 +45,8 @@ func main() {
 	}
 
 	// Round 2: same session, new instruction
-	if _, err := sf.AppendMessage(&types.UserMessage{
-		Content:   types.TextOnly("What number did I ask you to remember?"),
+	if _, err := sf.AppendMessage(&s.UserMessage{
+		Content:   s.TextOnly("What number did I ask you to remember?"),
 		Timestamp: time.Now().UnixMilli(),
 	}); err != nil {
 		panic(err)

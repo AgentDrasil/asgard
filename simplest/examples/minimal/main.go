@@ -5,9 +5,8 @@ package main
 import (
 	"os"
 
+	s "github.com/AgentDrasil/asgard/simplest"
 	"github.com/AgentDrasil/asgard/simplest/examples/internal/exampleutil"
-	"github.com/AgentDrasil/asgard/simplest/provider"
-	"github.com/AgentDrasil/asgard/simplest/tools"
 )
 
 func main() {
@@ -16,11 +15,11 @@ func main() {
 		panic(err)
 	}
 
-	reg := tools.DefaultRegistry(cwd) // read bash edit write find grep ls
+	reg := s.DefaultRegistry(cwd) // read bash edit write find grep ls
 
 	exampleutil.RunAndPrint(exampleutil.NewRequest(
 		exampleutil.GeminiModel(),
-		provider.NewGemini(os.Getenv("GEMINI_API_KEY")),
+		s.NewGemini(os.Getenv("GEMINI_API_KEY")),
 		"You are a helpful coding agent.",
 		"List the Go files in this repo (do not modify anything).",
 		reg.Tools(),

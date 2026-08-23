@@ -45,51 +45,48 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/AgentDrasil/simplest/agent"
-	"github.com/AgentDrasil/simplest/provider"
-	"github.com/AgentDrasil/simplest/tools"
-	"github.com/AgentDrasil/simplest/types"
+	s "github.com/AgentDrasil/asgard/simplest"
 )
 
 func main() {
-	model := &types.Model{
+	model := &s.Model{
 		ID:            "gemini-3.7-flash",
 		Name:          "Gemini 3.7 Flash",
-		API:           types.APIGoogleGenerativeAI, // or types.APIOpenAICompat
+		API:           s.APIGoogleGenerativeAI, // or s.APIOpenAICompat
 		Provider:      "google",
 		BaseURL:       "", // "" = official endpoint; must include version path if custom
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,
 		Input:         []string{"text", "image"},
-		Cost:          types.ModelCostRates{Input: 0.3, Output: 2.5},
+		Cost:          s.ModelCostRates{Input: 0.3, Output: 2.5},
 	}
 
-	reg := tools.DefaultRegistry("/path/to/project") // read/bash/edit/write/find/grep/ls
+	reg := s.DefaultRegistry("/path/to/project") // read/bash/edit/write/find/grep/ls
 
-	events := agent.Run(context.Background(), agent.Request{
+	events := s.Run(context.Background(), s.Request{
 		SystemPrompt: "You are a helpful coding agent.",
-		Messages: []types.Message{
-			&types.UserMessage{Content: types.TextOnly("List the Go files in this repo"), Timestamp: now()},
+		Messages: []s.Message{
+			&s.UserMessage{Content: s.TextOnly("List the Go files in this repo"), Timestamp: now()},
 		},
 		Model:    model,
-		Provider: provider.NewGemini(os.Getenv("GEMINI_API_KEY")),
+		Provider: s.NewGemini(os.Getenv("GEMINI_API_KEY")),
 		Tools:    reg.Tools(),
 	})
 
 	for ev := range events {
-		if e, ok := ev.(types.AgentEvent); ok {
+		if e, ok := ev.(s.AgentEvent); ok {
 			switch e.Kind {
-			case types.MessageUpdate:
+			case s.MessageUpdate:
 				if e.Message != nil {
 					fmt.Print(lastText(e.Message)) // stream tokens as they arrive
 				}
-			case types.MessageEnd:
+			case s.MessageEnd:
 				// Errors surface as StopReason==error on the assistant message,
 				// not as provider-level StreamErrorEvents.
-				if e.Message != nil && e.Message.StopReason == types.StopError {
+				if e.Message != nil && e.Message.StopReason == s.StopError {
 					fmt.Printf("\n[error] %s\n", e.Message.ErrorMessage)
 				}
-			case types.AgentEnd:
+			case s.AgentEnd:
 				fmt.Println("\n--- done ---")
 			}
 		}

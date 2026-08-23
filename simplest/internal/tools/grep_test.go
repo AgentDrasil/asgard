@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 func grepSetup(t *testing.T) string {

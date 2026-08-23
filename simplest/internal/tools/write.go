@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 const writeSchemaJSON = `{

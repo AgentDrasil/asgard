@@ -3,7 +3,7 @@ package agent
 import (
 	"sync"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // Queue is a mutex-guarded FIFO for steering and follow-up messages.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // Entry type discriminators for the session entry union.

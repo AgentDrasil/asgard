@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AgentDrasil/asgard/simplest/types"
+	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
 // OpenAICompat streams over the OpenAI chat-completions protocol

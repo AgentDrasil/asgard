@@ -8,15 +8,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AgentDrasil/asgard/simplest/agent"
-	"github.com/AgentDrasil/asgard/simplest/types"
+	s "github.com/AgentDrasil/asgard/simplest"
 )
 
 // LastText returns the concatenated text blocks of an assistant message.
-func LastText(m *types.AssistantMessage) string {
+func LastText(m *s.AssistantMessage) string {
 	out := ""
 	for _, c := range m.Content {
-		if t, ok := c.(types.TextContent); ok {
+		if t, ok := c.(s.TextContent); ok {
 			out += t.Text
 		}
 	}
@@ -25,44 +24,44 @@ func LastText(m *types.AssistantMessage) string {
 
 func now() int64 { return time.Now().UnixMilli() }
 
-func userMsg(text string) *types.UserMessage {
-	return &types.UserMessage{Content: types.TextOnly(text), Timestamp: now()}
+func userMsg(text string) *s.UserMessage {
+	return &s.UserMessage{Content: s.TextOnly(text), Timestamp: now()}
 }
 
 // GeminiModel returns a ready-to-use gemini-2.5-flash model descriptor.
-func GeminiModel() *types.Model {
-	return &types.Model{
+func GeminiModel() *s.Model {
+	return &s.Model{
 		ID:            "gemini-3.7-flash",
 		Name:          "Gemini 3.7 Flash",
-		API:           types.APIGoogleGenerativeAI,
+		API:           s.APIGoogleGenerativeAI,
 		Provider:      "google",
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,
 		Input:         []string{"text", "image"},
-		Cost:          types.ModelCostRates{Input: 0.3, Output: 2.5},
+		Cost:          s.ModelCostRates{Input: 0.3, Output: 2.5},
 	}
 }
 
-// NewRequest builds a basic agent.Request with a single user message.
-func NewRequest(model *types.Model, p types.Provider, systemPrompt, userText string, toolList []types.AgentTool) agent.Request {
-	return agent.Request{
+// NewRequest builds a basic s.Request with a single user message.
+func NewRequest(model *s.Model, p s.Provider, systemPrompt, userText string, toolList []s.AgentTool) s.Request {
+	return s.Request{
 		SystemPrompt: systemPrompt,
-		Messages:     []types.Message{userMsg(userText)},
+		Messages:     []s.Message{userMsg(userText)},
 		Model:        model,
 		Provider:     p,
 		Tools:        toolList,
 	}
 }
 
-// RunAndPrint drives one agent.Run and prints events to stdout.
-func RunAndPrint(req agent.Request) {
-	events := agent.Run(context.Background(), req)
+// RunAndPrint drives one s.Run and prints events to stdout.
+func RunAndPrint(req s.Request) {
+	events := s.Run(context.Background(), req)
 	printed := 0 // MessageUpdate carries the full accumulated text; print only the new suffix
 	for ev := range events {
 		switch ev.Kind {
-		case types.MessageStart:
+		case s.MessageStart:
 			printed = 0
-		case types.MessageUpdate:
+		case s.MessageUpdate:
 			if ev.Message != nil {
 				text := LastText(ev.Message)
 				if len(text) > printed {
@@ -70,18 +69,18 @@ func RunAndPrint(req agent.Request) {
 					printed = len(text)
 				}
 			}
-		case types.MessageEnd:
+		case s.MessageEnd:
 			printed = 0
-			if ev.Message != nil && ev.Message.StopReason == types.StopError {
+			if ev.Message != nil && ev.Message.StopReason == s.StopError {
 				fmt.Printf("\n[error] %s\n", ev.Message.ErrorMessage)
 			}
-		case types.ToolExecutionStart:
+		case s.ToolExecutionStart:
 			fmt.Printf("\n[tool] %s %s\n", ev.ToolName, mustJSON(ev.Args))
-		case types.ToolExecutionEnd:
+		case s.ToolExecutionEnd:
 			if ev.IsError {
 				fmt.Printf("[tool error] %s\n", mustJSON(ev.Result))
 			}
-		case types.AgentEnd:
+		case s.AgentEnd:
 			fmt.Println("\n--- done ---")
 		}
 	}

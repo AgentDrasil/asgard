@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"os"
 
+	s "github.com/AgentDrasil/asgard/simplest"
 	"github.com/AgentDrasil/asgard/simplest/examples/internal/exampleutil"
-	"github.com/AgentDrasil/asgard/simplest/provider"
-	"github.com/AgentDrasil/asgard/simplest/tools"
-	"github.com/AgentDrasil/asgard/simplest/types"
 )
 
 func main() {
@@ -18,8 +16,8 @@ func main() {
 		panic(err)
 	}
 
-	reg := tools.DefaultRegistry(cwd)
-	err = reg.Register(&tools.Func{
+	reg := s.DefaultRegistry(cwd)
+	err = reg.Register(&s.Func{
 		ToolName:        "weather",
 		ToolDescription: "Get current weather for a city",
 		Snippet:         "query live weather", // shown in the system prompt
@@ -30,16 +28,16 @@ func main() {
 			},
 			"required": ["city"]
 		}`),
-		Fn: func(ctx context.Context, callID string, args json.RawMessage, onUpdate types.UpdateFunc) (*types.ToolResult, error) {
+		Fn: func(ctx context.Context, callID string, args json.RawMessage, onUpdate s.UpdateFunc) (*s.ToolResult, error) {
 			var in struct {
 				City string `json:"city"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			return &types.ToolResult{
-				Content: []types.AssistantContent{
-					types.TextContent{Type: "text", Text: "sunny, 22C in " + in.City},
+			return &s.ToolResult{
+				Content: []s.AssistantContent{
+					s.TextContent{Type: "text", Text: "sunny, 22C in " + in.City},
 				},
 				Details: map[string]any{"source": "example"},
 			}, nil
@@ -51,7 +49,7 @@ func main() {
 
 	exampleutil.RunAndPrint(exampleutil.NewRequest(
 		exampleutil.GeminiModel(),
-		provider.NewGemini(os.Getenv("GEMINI_API_KEY")),
+		s.NewGemini(os.Getenv("GEMINI_API_KEY")),
 		"You are a helpful coding agent.",
 		"What's the weather in Tokyo?",
 		reg.Tools(),
