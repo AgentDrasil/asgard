@@ -30,6 +30,8 @@ var (
 	ResolveModelAndProvider = config.ResolveModelAndProvider
 	IsModelWhitelisted      = config.IsModelWhitelisted
 	DefaultConfigPath       = config.DefaultConfigPath
+	SetGlobalConfig         = config.SetGlobalConfig
+	ResetGlobalConfig       = config.ResetGlobalConfig
 )
 
 // ---- prompt ----
@@ -108,6 +110,9 @@ type (
 	AssistantMessage = types.AssistantMessage
 	AssistantContent = types.AssistantContent
 	TextContent      = types.TextContent
+	ThinkingContent  = types.ThinkingContent
+	ImageContent     = types.ImageContent
+	ToolCall         = types.ToolCall
 	ToolResult       = types.ToolResult
 	UpdateFunc       = types.UpdateFunc
 	Usage            = types.Usage
@@ -141,6 +146,7 @@ type (
 	Model          = types.Model
 	ModelCostRates = types.ModelCostRates
 	Provider       = types.Provider
+	Context        = types.Context
 )
 
 const (
@@ -165,10 +171,28 @@ const (
 // ---- types: events ----
 
 type (
-	AgentEvent = types.AgentEvent
+	AgentEvent            = types.AgentEvent
+	AssistantMessageEvent = types.AssistantMessageEvent
+	Partial               = types.Partial
+	DoneEvent             = types.DoneEvent
+	StreamErrorEvent      = types.StreamErrorEvent
+	StreamOptions         = types.StreamOptions
 )
 
 const (
+	EvStart         = types.EvStart
+	EvTextStart     = types.EvTextStart
+	EvTextDelta     = types.EvTextDelta
+	EvTextEnd       = types.EvTextEnd
+	EvThinkingStart = types.EvThinkingStart
+	EvThinkingDelta = types.EvThinkingDelta
+	EvThinkingEnd   = types.EvThinkingEnd
+	EvToolcallStart = types.EvToolcallStart
+	EvToolcallDelta = types.EvToolcallDelta
+	EvToolcallEnd   = types.EvToolcallEnd
+	EvDone          = types.EvDone
+	EvStreamError   = types.EvStreamError
+
 	AgentStart          = types.AgentStart
 	MessageStart        = types.MessageStart
 	MessageUpdate       = types.MessageUpdate
