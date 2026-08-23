@@ -7,7 +7,7 @@ import (
 	"github.com/AgentDrasil/asgard/simplest"
 )
 
-// Models returns the list of available whitelisted models from simplest.
+// Models returns the list of available models from simplest.
 func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	models, err := simplest.GetAvailableModels()
 	if err != nil {
@@ -20,7 +20,7 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	return result, nil
 }
 
-// Usage returns the ModelUsage list for all available whitelisted models with Remaining = 1.0.
+// Usage returns the ModelUsage list for all available models with Remaining = 1.0.
 func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
 	models, err := Models(ctx, opts)
 	if err != nil {

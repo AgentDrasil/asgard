@@ -7,8 +7,8 @@ import (
 
 // API wire protocols supported by this library.
 const (
-	APIOpenAICompat       = "openai-completions"
-	APIGoogleGenerativeAI = "google-generative-ai"
+	APIOpenAICompat = "openai-compat"
+	APIGoogleGemini = "google-gemini"
 )
 
 // ModelCostRates is pricing in $/million tokens.
@@ -23,7 +23,7 @@ type ModelCostRates struct {
 type Model struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
-	API           string            `json:"api"` // APIOpenAICompat or APIGoogleGenerativeAI
+	API           string            `json:"api"` // APIOpenAICompat or APIGoogleGemini
 	Provider      string            `json:"provider"`
 	BaseURL       string            `json:"baseUrl"`
 	Reasoning     bool              `json:"reasoning"`

@@ -126,7 +126,7 @@ func TestSupportedCLIs_SimplestModelsAndQuota(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	validYAML := `providers:
   google:
-    api: google-generative-ai
+    api: google-gemini
     apiKey: test-key
 models:
   - id: gemini-3.7-flash
@@ -151,7 +151,7 @@ models:
 	models := GetSupportedCLIsAndModels()
 	got := models["simplest"]
 	if len(got) != 2 {
-		t.Fatalf("expected 2 whitelisted models for simplest, got %v", got)
+		t.Fatalf("expected 2 models for simplest, got %v", got)
 	}
 	expectedModels := map[string]bool{
 		"gemini-3.7-flash": true,

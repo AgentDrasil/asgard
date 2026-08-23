@@ -65,7 +65,7 @@ func oaModel(url string) *types.Model {
 
 func gModel(url string) *types.Model {
 	return &types.Model{
-		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGoogleGenerativeAI, Provider: "google",
+		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGoogleGemini, Provider: "google",
 		BaseURL: url, Reasoning: true, ContextWindow: 1e6, MaxTokens: 8192,
 		Cost:  types.ModelCostRates{Input: 0.3, Output: 2.5},
 		Input: []string{"text", "image"},

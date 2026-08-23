@@ -1,6 +1,5 @@
 // Package config provides configuration loading, Fail-Closed validation,
-// environment variable expansion, model cataloging, and deterministic whitelist
-// filtering for the simplest module.
+// environment variable expansion, and model cataloging for the simplest module.
 package config
 
 import (
@@ -8,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -45,9 +43,6 @@ type ModelConfig struct {
 type Config struct {
 	Providers map[string]ProviderConfig `yaml:"providers" json:"providers"`
 	Models    []ModelConfig             `yaml:"models" json:"models"`
-	Whitelist []string                  `yaml:"whitelist" json:"whitelist"`
-
-	compiledWhitelist []*regexp.Regexp
 }
 
 // DefaultConfigPath resolves the configuration file path by precedence:
@@ -115,7 +110,7 @@ func Load() (*Config, error) {
 }
 
 // LoadFrom loads and parses a YAML configuration file from the specified path.
-// It expands environment variables, validates structure, and pre-compiles whitelist regexes.
+// It expands environment variables and validates structure.
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -130,20 +125,6 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse yaml config %s: %w", path, err)
 	}
 
-	// Pre-compile whitelist regular expressions.
-	for idx, pattern := range cfg.Whitelist {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			cfg.compiledWhitelist = append(cfg.compiledWhitelist, nil)
-			continue
-		}
-		rx, err := regexp.Compile("(?i)^(?:" + pattern + ")$")
-		if err != nil {
-			return nil, fmt.Errorf("invalid whitelist pattern at index %d (%q): %w", idx, pattern, err)
-		}
-		cfg.compiledWhitelist = append(cfg.compiledWhitelist, rx)
-	}
-
 	return &cfg, nil
 }
 
@@ -151,19 +132,18 @@ func defaultFallbackConfig() *Config {
 	cfg := &Config{
 		Providers: make(map[string]ProviderConfig),
 		Models:    make([]ModelConfig, 0),
-		Whitelist: make([]string, 0),
 	}
 
 	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" {
 		cfg.Providers["google"] = ProviderConfig{
-			API:    types.APIGoogleGenerativeAI,
+			API:    types.APIGoogleGemini,
 			APIKey: geminiKey,
 		}
 		cfg.Models = append(cfg.Models, ModelConfig{
 			ID:            "gemini-3.7-flash",
 			Name:          "Gemini 3.7 Flash",
 			Provider:      "google",
-			API:           types.APIGoogleGenerativeAI,
+			API:           types.APIGoogleGemini,
 			ContextWindow: 1_048_576,
 			MaxTokens:     8192,
 			Reasoning:     true,
@@ -197,48 +177,7 @@ func defaultFallbackConfig() *Config {
 	return cfg
 }
 
-// IsModelAllowed evaluates whether modelID is permitted according to Whitelist.
-// If Whitelist is empty, all models are allowed.
-// Matching first tries case-insensitive exact equality strings.EqualFold.
-// If that misses, it tries anchored regex (?i)^(?:\Qpattern\E)$ (or precompiled regex).
-func (c *Config) IsModelAllowed(modelID string) bool {
-	if c == nil || len(c.Whitelist) == 0 {
-		return true
-	}
-
-	trimmedID := strings.TrimSpace(modelID)
-
-	// 1. Case-insensitive exact comparison
-	for _, p := range c.Whitelist {
-		if strings.EqualFold(strings.TrimSpace(p), trimmedID) {
-			return true
-		}
-	}
-
-	// 2. Anchored regex matching
-	if len(c.compiledWhitelist) == len(c.Whitelist) {
-		for _, rx := range c.compiledWhitelist {
-			if rx != nil && rx.MatchString(trimmedID) {
-				return true
-			}
-		}
-	} else {
-		for _, p := range c.Whitelist {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
-			rx, err := regexp.Compile("(?i)^(?:" + p + ")$")
-			if err == nil && rx.MatchString(trimmedID) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// GetAvailableModels returns all configured models that satisfy Whitelist filtering.
+// GetAvailableModels returns all configured models.
 func (c *Config) GetAvailableModels() []*types.Model {
 	if c == nil {
 		return nil
@@ -246,9 +185,6 @@ func (c *Config) GetAvailableModels() []*types.Model {
 
 	var res []*types.Model
 	for _, mc := range c.Models {
-		if !c.IsModelAllowed(mc.ID) {
-			continue
-		}
 
 		provCfg, hasProv := c.Providers[mc.Provider]
 		api := mc.API
@@ -306,7 +242,7 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 
 	available := c.GetAvailableModels()
 	if len(available) == 0 {
-		return nil, nil, fmt.Errorf("no available models configured or allowed by whitelist")
+		return nil, nil, fmt.Errorf("no models configured")
 	}
 
 	var matched *types.Model
@@ -322,7 +258,7 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 	}
 
 	if matched == nil {
-		return nil, nil, fmt.Errorf("model %q not found or not allowed by whitelist", modelID)
+		return nil, nil, fmt.Errorf("model %q not found in configuration", modelID)
 	}
 
 	provCfg, hasProv := c.Providers[matched.Provider]
@@ -333,7 +269,7 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 
 	var p types.Provider
 	switch matched.API {
-	case types.APIGoogleGenerativeAI:
+	case types.APIGoogleGemini:
 		p = provider.NewGemini(apiKey)
 	case types.APIOpenAICompat:
 		oa := provider.NewOpenAICompat(apiKey)
@@ -372,15 +308,6 @@ func ResolveModelAndProvider(modelID string) (*types.Model, types.Provider, erro
 		return nil, nil, err
 	}
 	return cfg.ResolveModelAndProvider(modelID)
-}
-
-// IsModelWhitelisted checks whether modelID is whitelisted in the global configuration.
-func IsModelWhitelisted(modelID string) bool {
-	cfg, err := getOrLoadGlobalConfig()
-	if err != nil {
-		return false
-	}
-	return cfg.IsModelAllowed(modelID)
 }
 
 // SetGlobalConfig overrides the global configuration (useful for testing or programmatic init).

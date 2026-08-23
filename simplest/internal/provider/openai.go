@@ -415,7 +415,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 		em := newEmitter(ch)
 		key := p.apiKey(opts)
 		if key == "" {
-			em.fail(ctx, fmt.Errorf("openai-completions: no API key configured"))
+			em.fail(ctx, fmt.Errorf("openai-compat: no API key configured"))
 			return
 		}
 		body, err := p.buildRequest(model, cx, opts)

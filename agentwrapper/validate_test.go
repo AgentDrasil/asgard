@@ -127,7 +127,7 @@ func TestValidateSimplestSetup(t *testing.T) {
 	validYAML := `
 providers:
   google:
-    api: google-generative-ai
+    api: google-gemini
     apiKey: valid-key
 models:
   - id: gemini-3.7-flash

@@ -19,7 +19,7 @@ func TestModelsAndUsage(t *testing.T) {
 
 	simplest.SetGlobalConfig(&simplest.Config{
 		Providers: map[string]simplest.ProviderConfig{
-			"google": {API: simplest.APIGoogleGenerativeAI, APIKey: "fake-key"},
+			"google": {API: simplest.APIGoogleGemini, APIKey: "fake-key"},
 		},
 		Models: []simplest.ModelConfig{
 			{
@@ -28,14 +28,7 @@ func TestModelsAndUsage(t *testing.T) {
 				Provider:      "google",
 				ContextWindow: 1048576,
 			},
-			{
-				ID:            "unwhitelisted-model",
-				Name:          "Unwhitelisted Model",
-				Provider:      "google",
-				ContextWindow: 100000,
-			},
 		},
-		Whitelist: []string{"gemini-3.7-flash"},
 	})
 
 	ctx := context.Background()

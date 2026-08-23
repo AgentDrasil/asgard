@@ -33,7 +33,7 @@ func GeminiModel() *s.Model {
 	return &s.Model{
 		ID:            "gemini-3.7-flash",
 		Name:          "Gemini 3.7 Flash",
-		API:           s.APIGoogleGenerativeAI,
+		API:           s.APIGoogleGemini,
 		Provider:      "google",
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,

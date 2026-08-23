@@ -28,7 +28,6 @@ var (
 	LoadConfigFrom          = config.LoadFrom
 	GetAvailableModels      = config.GetAvailableModels
 	ResolveModelAndProvider = config.ResolveModelAndProvider
-	IsModelWhitelisted      = config.IsModelWhitelisted
 	DefaultConfigPath       = config.DefaultConfigPath
 	SetGlobalConfig         = config.SetGlobalConfig
 	ResetGlobalConfig       = config.ResetGlobalConfig
@@ -150,8 +149,8 @@ type (
 )
 
 const (
-	APIGoogleGenerativeAI = types.APIGoogleGenerativeAI
-	APIOpenAICompat       = types.APIOpenAICompat
+	APIGoogleGemini = types.APIGoogleGemini
+	APIOpenAICompat = types.APIOpenAICompat
 )
 
 // ---- types: tool authoring ----

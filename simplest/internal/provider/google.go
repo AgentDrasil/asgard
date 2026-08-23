@@ -287,11 +287,11 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 		em := newEmitter(ch)
 		key := p.apiKey(opts)
 		if key == "" {
-			em.fail(ctx, fmt.Errorf("google-generative-ai: no API key configured"))
+			em.fail(ctx, fmt.Errorf("google-gemini: no API key configured"))
 			return
 		}
 		if !supportedModel(model.ID) {
-			em.fail(ctx, fmt.Errorf("google-generative-ai: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.ID))
+			em.fail(ctx, fmt.Errorf("google-gemini: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.ID))
 			return
 		}
 		contents, config, err := p.buildRequest(model, cx, opts)
