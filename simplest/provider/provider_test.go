@@ -65,7 +65,7 @@ func oaModel(url string) *types.Model {
 
 func gModel(url string) *types.Model {
 	return &types.Model{
-		ID: "gemini-2.5-flash", Name: "Gemini", API: types.APIGoogleGenerativeAI, Provider: "google",
+		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGoogleGenerativeAI, Provider: "google",
 		BaseURL: url, Reasoning: true, ContextWindow: 1e6, MaxTokens: 8192,
 		Cost:  types.ModelCostRates{Input: 0.3, Output: 2.5},
 		Input: []string{"text", "image"},
@@ -452,11 +452,11 @@ func TestGeminiConvertMessagesMergesToolResults(t *testing.T) {
 	if r0.Name != "read" || r1.Name != "grep" {
 		t.Fatalf("responses named wrongly: %+v %+v", r0, r1)
 	}
-	if m0 := r0.Response.(map[string]any); m0["output"] != "file data" {
-		t.Fatalf("output framing: %v", m0)
+	if r0.Response["output"] != "file data" {
+		t.Fatalf("output framing: %v", r0.Response)
 	}
-	if m1 := r1.Response.(map[string]any); m1["error"] != "boom" {
-		t.Fatalf("error framing: %v", m1)
+	if r1.Response["error"] != "boom" {
+		t.Fatalf("error framing: %v", r1.Response)
 	}
 }
 

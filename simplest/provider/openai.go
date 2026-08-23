@@ -108,7 +108,7 @@ func (u *oaUsage) toUsage(m *types.Model) types.Usage {
 	// servers without cache details don't bill all prompt tokens as cache reads.
 	cacheRead := int64(0)
 	cacheWrite := int64(0)
-	if u.PromptTokensDetails != nil {
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
 		cacheRead = u.PromptTokensDetails.CachedTokens
 		cacheWrite = u.PromptTokensDetails.CacheWriteToken
 	} else if u.PromptCacheHitTokens > 0 {

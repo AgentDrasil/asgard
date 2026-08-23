@@ -6,18 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/genai"
 
 	"github.com/AgentDrasil/asgard/simplest/types"
 )
 
-const defaultGeminiBase = "https://generativelanguage.googleapis.com/v1beta"
-
-// Gemini streams over the Google Generative AI protocol
-// (POST {base}/models/{id}:streamGenerateContent?alt=sse, x-goog-api-key).
-// When Model.BaseURL is set it must already include the API version path.
+// Gemini streams over the Google Generative AI protocol via the official
+// google.golang.org/genai SDK. Only Gemini 3 series and Gemma 4 models are
+// supported; any other model ID fails the stream.
 type Gemini struct {
 	Client *http.Client
 	APIKey string
@@ -36,83 +35,23 @@ func (p *Gemini) apiKey(opts *types.StreamOptions) string {
 	return p.APIKey
 }
 
-// wire shapes.
-
-type gInline struct {
-	MimeType string `json:"mimeType"`
-	Data     string `json:"data"`
-}
-
-type gFunctionCall struct {
-	Name string          `json:"name"`
-	ID   string          `json:"id,omitempty"`
-	Args json.RawMessage `json:"args,omitempty"`
-}
-
-type gFunctionResponse struct {
-	Name     string `json:"name"`
-	Response any    `json:"response"`
-	ID       string `json:"id,omitempty"`
-}
-
-type gPart struct {
-	Text             string             `json:"text,omitempty"`
-	Thought          bool               `json:"thought,omitempty"`
-	ThoughtSignature string             `json:"thoughtSignature,omitempty"`
-	InlineData       *gInline           `json:"inlineData,omitempty"`
-	FunctionCall     *gFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *gFunctionResponse `json:"functionResponse,omitempty"`
-}
-
-type gContent struct {
-	Role  string  `json:"role,omitempty"` // "user" | "model"
-	Parts []gPart `json:"parts"`
-}
-
-type gFuncDecl struct {
-	Name                 string          `json:"name"`
-	Description          string          `json:"description"`
-	ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema,omitempty"`
-}
-
-type gTools struct {
-	FunctionDeclarations []gFuncDecl `json:"functionDeclarations"`
-}
-
-type gThinkingConfig struct {
-	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
-	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
-	ThinkingBudget  *int64 `json:"thinkingBudget,omitempty"`
-}
-
-type gGenerationConfig struct {
-	Temperature     *float64         `json:"temperature,omitempty"`
-	MaxOutputTokens *int64           `json:"maxOutputTokens,omitempty"`
-	ThinkingConfig  *gThinkingConfig `json:"thinkingConfig,omitempty"`
-}
-
-type gRequest struct {
-	Contents          []gContent         `json:"contents"`
-	Tools             []gTools           `json:"tools,omitempty"`
-	SystemInstruction *gContent          `json:"systemInstruction,omitempty"`
-	GenerationConfig  *gGenerationConfig `json:"generationConfig,omitempty"`
-}
-
-// model-family helpers (thinking-level resolution and tool-call-id
-// requirement tables per model family).
+// model-family helpers.
 
 var (
-	gemini3ProRe    = regexp.MustCompile(`gemini-3(\.\d+)?-pro`)
-	gemini3FlashRe  = regexp.MustCompile(`gemini-3(\.\d+)?-flash|gemini-flash-latest|gemini-flash-lite-latest`)
-	geminiMajorRe   = regexp.MustCompile(`^gemini(?:-live)?-(\d+)`)
-	gemma4Re        = regexp.MustCompile(`gemma-?4`)
-	base64PayloadRe = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+	gemini3ProRe   = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?pro(-(preview|latest))?$`)
+	gemini3LiteRe  = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?flash-lite(-(preview|latest))?$|^gemini-flash-lite-latest$`)
+	gemini3FlashRe = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?flash(-(preview|latest))?$|^gemini-flash-latest$`)
+	gemma4Re       = regexp.MustCompile(`^gemma-4-(\d+b(-a\d+b)?)-it$`)
 )
 
-// gemini3Family returns "pro", "flash" or "" for gemini-3 style models.
+// gemini3Family returns "pro", "lite", "flash" or "" for gemini-3 style
+// models. flash-lite must be tested before flash.
 func gemini3Family(modelID string) string {
 	if gemini3ProRe.MatchString(modelID) {
 		return "pro"
+	}
+	if gemini3LiteRe.MatchString(modelID) {
+		return "lite"
 	}
 	if gemini3FlashRe.MatchString(modelID) {
 		return "flash"
@@ -120,35 +59,80 @@ func gemini3Family(modelID string) string {
 	return ""
 }
 
+func isGemma4Model(modelID string) bool { return gemma4Re.MatchString(modelID) }
+
+// supportedModel reports whether the model ID belongs to a supported family
+// (Gemini 3 series or Gemma 4).
+func supportedModel(modelID string) bool {
+	return gemini3Family(modelID) != "" || isGemma4Model(modelID)
+}
+
 // requiresToolCallID reports whether the model echoes tool call ids in
 // functionCall/functionResponse parts.
 func requiresToolCallID(modelID string) bool {
-	if strings.HasPrefix(modelID, "claude-") || strings.HasPrefix(modelID, "gpt-oss-") {
-		return true
-	}
-	if m := geminiMajorRe.FindStringSubmatch(modelID); m != nil {
-		major, err := strconv.Atoi(m[1])
-		return err == nil && major >= 3
-	}
-	return false
-}
-
-func validB64(s string) bool {
-	return s != "" && len(s)%4 == 0 && base64PayloadRe.MatchString(s)
+	return strings.HasPrefix(modelID, "claude-") || strings.HasPrefix(modelID, "gpt-oss-") ||
+		gemini3Family(modelID) != ""
 }
 
 func sameModel(am *types.AssistantMessage, model *types.Model) bool {
 	return am.Provider == model.Provider && am.API == model.API && am.Model == model.ID
 }
 
+// thinking configuration.
+
+// googleThinkingConfig resolves the thinking config for a request based on
+// the requested level and model family. Gemma 4 supports no thinking config;
+// unknown families are rejected by the caller.
+func googleThinkingConfig(level types.ThinkingLevel, modelID string) *genai.ThinkingConfig {
+	family := gemini3Family(modelID)
+	switch family {
+	case "":
+		return nil // gemma: no thinking control
+	case "pro":
+		// gemini-3 pro supports LOW/HIGH only and cannot disable thinking.
+		lvl := genai.ThinkingLevelHigh
+		switch level {
+		case types.ThinkingMinimal, types.ThinkingLow, types.ThinkingOff:
+			lvl = genai.ThinkingLevelLow
+		}
+		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: lvl}
+	case "flash":
+		// flash supports LOW/MEDIUM/HIGH; MINIMAL is not accepted.
+		var lvl genai.ThinkingLevel
+		switch level {
+		case types.ThinkingMinimal, types.ThinkingLow, types.ThinkingOff:
+			lvl = genai.ThinkingLevelLow
+		case types.ThinkingMedium:
+			lvl = genai.ThinkingLevelMedium
+		default:
+			lvl = genai.ThinkingLevelHigh
+		}
+		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: lvl}
+	default:
+		// flash-lite supports MINIMAL/LOW/MEDIUM/HIGH.
+		var lvl genai.ThinkingLevel
+		switch level {
+		case types.ThinkingMinimal, types.ThinkingOff:
+			lvl = genai.ThinkingLevelMinimal
+		case types.ThinkingLow:
+			lvl = genai.ThinkingLevelLow
+		case types.ThinkingMedium:
+			lvl = genai.ThinkingLevelMedium
+		default:
+			lvl = genai.ThinkingLevelHigh
+		}
+		return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: lvl}
+	}
+}
+
 // message conversion.
 
-func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gContent, error) {
-	var contents []gContent
+func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*genai.Content, error) {
+	var contents []*genai.Content
 	withToolCallID := requiresToolCallID(model.ID)
 
-	addParts := func(role string, parts ...gPart) {
-		contents = append(contents, gContent{Role: role, Parts: parts})
+	addParts := func(role string, parts ...*genai.Part) {
+		contents = append(contents, &genai.Content{Role: role, Parts: parts})
 	}
 
 	for _, m := range cx.Messages {
@@ -158,13 +142,13 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gCont
 			if err != nil {
 				return nil, fmt.Errorf("user content: %w", err)
 			}
-			parts := make([]gPart, 0, len(blocks))
+			parts := make([]*genai.Part, 0, len(blocks))
 			for _, blk := range blocks {
 				switch b := blk.(type) {
 				case types.TextContent:
-					parts = append(parts, gPart{Text: b.Text})
+					parts = append(parts, &genai.Part{Text: b.Text})
 				case types.ImageContent:
-					parts = append(parts, gPart{InlineData: &gInline{MimeType: b.MimeType, Data: b.Data}})
+					parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: b.MimeType, Data: []byte(b.Data)}})
 				}
 			}
 			if len(parts) > 0 {
@@ -172,7 +156,7 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gCont
 			}
 		case *types.AssistantMessage:
 			same := sameModel(msg, model)
-			parts := make([]gPart, 0, len(msg.Content))
+			parts := make([]*genai.Part, 0, len(msg.Content))
 			for _, blk := range msg.Content {
 				switch b := blk.(type) {
 				case types.ThinkingContent:
@@ -182,28 +166,36 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gCont
 					if strings.TrimSpace(b.Thinking) == "" && b.Signature == "" {
 						continue
 					}
-					sig := ""
-					if validB64(b.Signature) {
-						sig = b.Signature
+					sig := []byte(nil)
+					if b.Signature != "" {
+						sig = []byte(b.Signature)
 					} else if b.Redacted {
 						continue // redacted payloads without a reusable signature are unusable
 					}
-					parts = append(parts, gPart{Text: b.Thinking, Thought: true, ThoughtSignature: sig})
+					parts = append(parts, &genai.Part{Text: b.Thinking, Thought: true, ThoughtSignature: sig})
 				case types.TextContent:
 					if b.Text == "" {
 						continue
 					}
-					parts = append(parts, gPart{Text: b.Text})
+					parts = append(parts, &genai.Part{Text: b.Text})
 				case types.ToolCall:
-					args := b.Arguments
-					if len(args) == 0 || string(args) == "null" {
-						args = json.RawMessage(`{}`)
+					args := map[string]any{}
+					if len(b.Arguments) > 0 && string(b.Arguments) != "null" {
+						if err := json.Unmarshal(b.Arguments, &args); err != nil {
+							return nil, fmt.Errorf("tool call %s arguments: %w", b.Name, err)
+						}
 					}
-					call := &gFunctionCall{Name: b.Name, Args: args}
+					call := &genai.FunctionCall{Name: b.Name, Args: args}
 					if withToolCallID && b.ID != "" {
 						call.ID = b.ID
 					}
-					parts = append(parts, gPart{FunctionCall: call})
+					part := &genai.Part{FunctionCall: call}
+					if b.Signature != "" {
+						// Gemini 3 requires thought signatures to be echoed
+						// back on functionCall parts.
+						part.ThoughtSignature = []byte(b.Signature)
+					}
+					parts = append(parts, part)
 				}
 			}
 			if len(parts) > 0 {
@@ -215,25 +207,25 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gCont
 				return nil, fmt.Errorf("tool result content: %w", err)
 			}
 			text, images := geminiToolResultBlocks(blocks)
-			resp := any(map[string]any{"output": text})
+			resp := map[string]any{"output": text}
 			if msg.IsError {
 				resp = map[string]any{"error": text}
 			}
-			fr := &gFunctionResponse{Name: msg.ToolName, Response: resp}
+			fr := &genai.FunctionResponse{Name: msg.ToolName, Response: resp}
 			if withToolCallID && msg.ToolCallID != "" {
 				fr.ID = msg.ToolCallID
 			}
 			// Merge consecutive function responses into one user entry.
 			n := len(contents)
 			if n > 0 && contents[n-1].Role == "user" && hasFunctionResponse(contents[n-1]) {
-				contents[n-1].Parts = append(contents[n-1].Parts, gPart{FunctionResponse: fr})
+				contents[n-1].Parts = append(contents[n-1].Parts, &genai.Part{FunctionResponse: fr})
 			} else {
-				addParts("user", gPart{FunctionResponse: fr})
+				addParts("user", &genai.Part{FunctionResponse: fr})
 			}
 			if len(images) > 0 && imageSupported(model) {
-				imgParts := []gPart{{Text: "Tool result image:"}}
+				imgParts := []*genai.Part{{Text: "Tool result image:"}}
 				for _, im := range images {
-					imgParts = append(imgParts, gPart{InlineData: &gInline{MimeType: im.MimeType, Data: im.Data}})
+					imgParts = append(imgParts, &genai.Part{InlineData: &genai.Blob{MIMEType: im.MimeType, Data: []byte(im.Data)}})
 				}
 				if gemini3Family(model.ID) != "" {
 					last := len(contents) - 1
@@ -247,7 +239,7 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]gCont
 	return contents, nil
 }
 
-func hasFunctionResponse(c gContent) bool {
+func hasFunctionResponse(c *genai.Content) bool {
 	for _, p := range c.Parts {
 		if p.FunctionResponse != nil {
 			return true
@@ -274,39 +266,13 @@ func geminiToolResultBlocks(blocks []types.AssistantContent) (string, []types.Im
 	return text, images
 }
 
-// response parsing.
+// response parsing helpers.
 
-type gChunk struct {
-	ResponseID string `json:"responseId"`
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text             *string `json:"text"`
-				Thought          bool    `json:"thought"`
-				ThoughtSignature string  `json:"thoughtSignature"`
-				FunctionCall     *struct {
-					Name string          `json:"name"`
-					ID   string          `json:"id"`
-					Args json.RawMessage `json:"args"`
-				} `json:"functionCall"`
-			} `json:"parts"`
-		} `json:"content"`
-		FinishReason string `json:"finishReason"`
-	} `json:"candidates"`
-	UsageMetadata *struct {
-		PromptTokenCount        int64 `json:"promptTokenCount"`
-		CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
-		ThoughtsTokenCount      int64 `json:"thoughtsTokenCount"`
-		CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
-		TotalTokenCount         int64 `json:"totalTokenCount"`
-	} `json:"usageMetadata"`
-}
-
-func mapFinishReasonGoogle(reason string) types.StopReason {
+func mapFinishReasonGoogle(reason genai.FinishReason) types.StopReason {
 	switch reason {
-	case "STOP":
+	case genai.FinishReasonStop:
 		return types.StopStop
-	case "MAX_TOKENS":
+	case genai.FinishReasonMaxTokens:
 		return types.StopLength
 	default:
 		return types.StopError
@@ -324,21 +290,24 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			em.fail(ctx, fmt.Errorf("google-generative-ai: no API key configured"))
 			return
 		}
-		body, err := p.buildRequest(model, cx, opts)
+		if !supportedModel(model.ID) {
+			em.fail(ctx, fmt.Errorf("google-generative-ai: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.ID))
+			return
+		}
+		contents, config, err := p.buildRequest(model, cx, opts)
 		if err != nil {
 			em.fail(ctx, err)
 			return
 		}
-		base := defaultGeminiBase
+		cc := &genai.ClientConfig{
+			APIKey:     key,
+			Backend:    genai.BackendGeminiAPI,
+			HTTPClient: p.client(),
+		}
 		if model.BaseURL != "" {
-			base = strings.TrimRight(model.BaseURL, "/")
+			cc.HTTPOptions.BaseURL = model.BaseURL
 		}
-		url := base + "/models/" + model.ID + ":streamGenerateContent?alt=sse"
-		headers := map[string]string{"x-goog-api-key": key}
-		for k, v := range model.Headers {
-			headers[k] = v
-		}
-		resp, err := postSSE(ctx, p.client(), url, headers, body)
+		client, err := genai.NewClient(ctx, cc)
 		if err != nil {
 			em.fail(ctx, err)
 			return
@@ -346,42 +315,48 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 
 		em.start(model.API, model.Provider, model.ID)
 		toolCallCounter := 0
-		finishReason := ""
+		finishReason := genai.FinishReasonUnspecified
 
-		scanErr := scanSSE(resp, func(payload string) error {
-			var chunk gChunk
-			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-				return nil // skip malformed chunks
+		for resp, err := range client.Models.GenerateContentStream(ctx, model.ID, contents, config) {
+			if err != nil {
+				em.fail(ctx, err)
+				return
 			}
-			if em.out.ResponseID == "" {
-				em.out.ResponseID = chunk.ResponseID
+			if em.out.ResponseID == "" && resp.ResponseID != "" {
+				em.out.ResponseID = resp.ResponseID
 			}
-			if um := chunk.UsageMetadata; um != nil {
-				input := um.PromptTokenCount - um.CachedContentTokenCount
+			if um := resp.UsageMetadata; um != nil {
+				input := int64(um.PromptTokenCount) - int64(um.CachedContentTokenCount)
 				if input < 0 {
 					input = 0
 				}
-				thoughts := um.ThoughtsTokenCount
+				thoughts := int64(um.ThoughtsTokenCount)
 				usage := types.Usage{
 					Input:       input,
-					Output:      um.CandidatesTokenCount + um.ThoughtsTokenCount,
-					CacheRead:   um.CachedContentTokenCount,
+					Output:      int64(um.CandidatesTokenCount) + thoughts,
+					CacheRead:   int64(um.CachedContentTokenCount),
 					Reasoning:   &thoughts,
-					TotalTokens: um.TotalTokenCount,
+					TotalTokens: int64(um.TotalTokenCount),
 				}
 				CalculateCost(model, &usage)
 				em.out.Usage = usage
 			}
-			if len(chunk.Candidates) == 0 {
-				return nil
+			if len(resp.Candidates) == 0 {
+				continue
 			}
-			cand := chunk.Candidates[0]
+			cand := resp.Candidates[0]
+			if cand.FinishReason != "" && cand.FinishReason != genai.FinishReasonUnspecified {
+				finishReason = cand.FinishReason
+			}
+			if cand.Content == nil {
+				continue
+			}
 			for _, part := range cand.Content.Parts {
-				if part.Text != nil {
+				if part.Text != "" {
 					if part.Thought {
-						em.thinkingDelta(*part.Text, part.ThoughtSignature)
+						em.thinkingDelta(part.Text, string(part.ThoughtSignature))
 					} else {
-						em.textDelta(*part.Text)
+						em.textDelta(part.Text)
 					}
 					continue
 				}
@@ -399,32 +374,27 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 						toolCallCounter++
 						id = fmt.Sprintf("%s_%d_%d", fc.Name, time.Now().UnixMilli(), toolCallCounter)
 					}
-					args := fc.Args
-					if len(args) == 0 || string(args) == "null" {
-						args = json.RawMessage(`{}`)
+					args := json.RawMessage("{}")
+					if len(fc.Args) > 0 {
+						if raw, merr := json.Marshal(fc.Args); merr == nil {
+							args = raw
+						}
 					}
 					idx := em.appendToolCall(types.ToolCall{
 						Type: types.TypeToolCall, ID: id, Name: fc.Name, Arguments: args,
+						Signature: string(part.ThoughtSignature),
 					})
 					em.toolCallDelta(idx, string(args), args)
 					em.toolCallEnd(idx)
 				}
 			}
-			if cand.FinishReason != "" {
-				finishReason = cand.FinishReason
-			}
-			return nil
-		})
-
-		if scanErr != nil {
-			em.fail(ctx, scanErr)
-			return
 		}
+
 		if streamAborted(ctx) {
 			em.fail(ctx, context.Canceled)
 			return
 		}
-		if finishReason == "" {
+		if finishReason == genai.FinishReasonUnspecified {
 			em.fail(ctx, fmt.Errorf("google stream ended without a finish reason"))
 			return
 		}
@@ -441,7 +411,7 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 				}
 			}
 		}
-		em.out.RawStopReason = finishReason
+		em.out.RawStopReason = string(finishReason)
 		em.out.Timestamp = time.Now().UnixMilli()
 		em.done(stop)
 	}()
@@ -455,103 +425,48 @@ func (p *Gemini) client() *http.Client {
 	return http.DefaultClient
 }
 
-func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types.StreamOptions) ([]byte, error) {
+func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types.StreamOptions) ([]*genai.Content, *genai.GenerateContentConfig, error) {
 	contents, err := p.ConvertMessages(model, cx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	req := gRequest{Contents: contents}
+	config := &genai.GenerateContentConfig{}
 	if cx.SystemPrompt != "" {
-		req.SystemInstruction = &gContent{Parts: []gPart{{Text: cx.SystemPrompt}}}
+		config.SystemInstruction = &genai.Content{Role: "user", Parts: []*genai.Part{{Text: cx.SystemPrompt}}}
 	}
-	cfg := &gGenerationConfig{}
-	hasCfg := false
 	if opts != nil {
 		if opts.Temperature != nil {
-			t := *opts.Temperature
-			cfg.Temperature = &t
-			hasCfg = true
+			t := float32(*opts.Temperature)
+			config.Temperature = &t
 		}
 		if opts.MaxTokens != nil {
-			mx := *opts.MaxTokens
-			cfg.MaxOutputTokens = &mx
-			hasCfg = true
+			config.MaxOutputTokens = int32(*opts.MaxTokens)
 		}
 		level := opts.ThinkingLevel
 		if model.Reasoning && level != "" {
-			cfg.ThinkingConfig = googleThinkingConfig(level, model.ID)
-			hasCfg = true
+			config.ThinkingConfig = googleThinkingConfig(level, model.ID)
 		}
 	} else if model.Reasoning {
-		cfg.ThinkingConfig = &gThinkingConfig{IncludeThoughts: true}
-		hasCfg = true
-	}
-	if hasCfg {
-		req.GenerationConfig = cfg
+		config.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}
 	}
 	if len(cx.Tools) > 0 {
-		decls := make([]gFuncDecl, 0, len(cx.Tools))
+		decls := make([]*genai.FunctionDeclaration, 0, len(cx.Tools))
 		for _, td := range cx.Tools {
 			params := td.Parameters
 			if len(params) == 0 {
 				params = json.RawMessage(`{"type":"object","properties":{}}`)
 			}
-			decls = append(decls, gFuncDecl{Name: td.Name, Description: td.Description, ParametersJSONSchema: params})
-		}
-		req.Tools = []gTools{{FunctionDeclarations: decls}}
-	}
-	return json.Marshal(req)
-}
-
-func isGemma4Model(modelID string) bool { return gemma4Re.MatchString(modelID) }
-
-// googleThinkingConfig resolves the thinking config for a request
-// based on the requested thinking level and model ID.
-func googleThinkingConfig(level types.ThinkingLevel, modelID string) *gThinkingConfig {
-	if level == types.ThinkingOff {
-		return disabledThinkingConfig(modelID)
-	}
-	return &gThinkingConfig{IncludeThoughts: true, ThinkingLevel: apiThinkingLevel(level, modelID)}
-}
-
-func disabledThinkingConfig(modelID string) *gThinkingConfig {
-	switch {
-	case gemini3Family(modelID) == "pro":
-		return &gThinkingConfig{ThinkingLevel: "LOW"}
-	case gemini3Family(modelID) == "flash", isGemma4Model(modelID):
-		return &gThinkingConfig{ThinkingLevel: "MINIMAL"}
-	default:
-		budget := int64(0)
-		return &gThinkingConfig{ThinkingBudget: &budget}
-	}
-}
-
-func apiThinkingLevel(level types.ThinkingLevel, modelID string) string {
-	family := gemini3Family(modelID)
-	gemma := isGemma4Model(modelID)
-	switch level {
-	case types.ThinkingMinimal:
-		if family == "pro" || gemma {
-			if family == "pro" {
-				return "LOW"
+			var schema map[string]any
+			if err := json.Unmarshal(params, &schema); err != nil {
+				return nil, nil, fmt.Errorf("tool %s parameters: %w", td.Name, err)
 			}
-			return "MINIMAL"
+			decls = append(decls, &genai.FunctionDeclaration{
+				Name:                 td.Name,
+				Description:          td.Description,
+				ParametersJsonSchema: schema,
+			})
 		}
-		return "MINIMAL"
-	case types.ThinkingLow:
-		if family == "pro" || gemma {
-			if gemma {
-				return "MINIMAL"
-			}
-			return "LOW"
-		}
-		return "LOW"
-	case types.ThinkingMedium:
-		if family == "pro" || gemma {
-			return "HIGH"
-		}
-		return "MEDIUM"
-	default:
-		return "HIGH"
+		config.Tools = []*genai.Tool{{FunctionDeclarations: decls}}
 	}
+	return contents, config, nil
 }

@@ -209,13 +209,6 @@ Guidelines:
 	return b.String()
 }
 
-func orDefault(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
-}
-
 func projectContextSection(files []ContextFile) string {
 	if len(files) == 0 {
 		return ""

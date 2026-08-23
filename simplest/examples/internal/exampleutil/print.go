@@ -32,8 +32,8 @@ func userMsg(text string) *types.UserMessage {
 // GeminiModel returns a ready-to-use gemini-2.5-flash model descriptor.
 func GeminiModel() *types.Model {
 	return &types.Model{
-		ID:            "gemini-2.5-flash",
-		Name:          "Gemini 2.5 Flash",
+		ID:            "gemini-3.7-flash",
+		Name:          "Gemini 3.7 Flash",
 		API:           types.APIGoogleGenerativeAI,
 		Provider:      "google",
 		ContextWindow: 1_000_000,

@@ -90,6 +90,9 @@ type ToolCall struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+	// Signature carries the provider's opaque thought signature (Gemini 3
+	// thoughtSignature) that must be echoed back with the tool call.
+	Signature string `json:"signature,omitempty"`
 }
 
 const (
