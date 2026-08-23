@@ -61,7 +61,7 @@ type lsArgs struct {
 	Limit *float64 `json:"limit"`
 }
 
-// Execute lists one directory level like pi's ls tool.
+// Execute lists one directory level.
 func (t *LsTool) Execute(ctx context.Context, toolCallID string, args json.RawMessage, onUpdate types.UpdateFunc) (*types.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("operation aborted")

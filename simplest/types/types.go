@@ -1,8 +1,7 @@
-// Package types defines the shared data model for the pi-compatible Go agent:
+// Package types defines the shared data model for the Go agent:
 // messages, content blocks, streaming events, tools, models, and contexts.
 //
-// The JSON shape of messages mirrors pi's TypeScript agent so session files can
-// stay compatible.
+// The JSON shape of messages is stable so session files can stay compatible.
 package types
 
 import "encoding/json"
@@ -181,7 +180,7 @@ func MarshalBlocks(blocks []AssistantContent) (json.RawMessage, error) {
 }
 
 // TextOnly builds a user message content value that is a bare JSON string,
-// matching pi's compact representation for plain-text prompts.
+// the compact representation for plain-text prompts.
 func TextOnly(s string) json.RawMessage {
 	b, _ := json.Marshal(s)
 	return json.RawMessage(b)

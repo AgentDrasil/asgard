@@ -15,7 +15,7 @@ go run ./examples/session-resume
   the built-in tool registry, streamed to stdout.
 - **custom-tool** — registers an extra Go-func tool (`weather`) alongside the
   built-ins via `tools.Func`.
-- **session-resume** — persists a run into a pi-compatible JSONL session and
+- **session-resume** — persists a run into a JSONL session and
   resumes it for a second round.
 
 All three share a tiny event-printing loop; see `print.go` in each directory.

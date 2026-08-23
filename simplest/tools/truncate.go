@@ -1,4 +1,4 @@
-// Package tools is a Go port of pi's seven built-in coding-agent tools
+// Package tools implements seven built-in coding-agent tools
 // (read, bash, edit, write, grep, find, ls) plus a tool registry with a
 // JSON-Schema-subset argument validator.
 package tools

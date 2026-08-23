@@ -11,7 +11,7 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/types"
 )
 
-// Entry type discriminators, matching pi's session entry union.
+// Entry type discriminators for the session entry union.
 const (
 	TypeSession             = "session"
 	TypeMessage             = "message"
@@ -26,7 +26,7 @@ const (
 )
 
 // Compaction/branch summary framing used when projecting entries into
-// user messages for the LLM context (copied from pi's messages.ts).
+// user messages for the LLM context.
 const (
 	CompactionSummaryPrefix = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 	CompactionSummarySuffix = "\n</summary>"
@@ -48,7 +48,7 @@ type Header struct {
 // a flat struct with all per-type fields optional. Unknown fields of foreign
 // entries are dropped when a file is rewritten.
 //
-// Message, Content and Data keep their raw JSON so pi-authored files round-trip.
+// Message, Content and Data keep their raw JSON so foreign files round-trip.
 type Entry struct {
 	Type      string  `json:"type"`
 	ID        string  `json:"id"`
@@ -108,7 +108,7 @@ type Context struct {
 
 // LoadFile parses a session file. Blank and malformed lines are skipped. If
 // the first parseable line is not a valid session header, the file is treated
-// as empty (matching pi). A missing file yields an empty result.
+// as empty. A missing file yields an empty result.
 func LoadFile(path string) (*Header, []*Entry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -157,7 +157,7 @@ func LoadFile(path string) (*Header, []*Entry, error) {
 	return header, entries, nil
 }
 
-// EncodeCwd encodes a working directory into pi's safe directory name:
+// EncodeCwd encodes a working directory into a safe directory name:
 // --<path with separators and colons replaced by dashes>--.
 func EncodeCwd(cwd string) string {
 	resolved, err := filepath.Abs(cwd)

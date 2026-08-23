@@ -17,8 +17,7 @@ const defaultGeminiBase = "https://generativelanguage.googleapis.com/v1beta"
 
 // Gemini streams over the Google Generative AI protocol
 // (POST {base}/models/{id}:streamGenerateContent?alt=sse, x-goog-api-key).
-// When Model.BaseURL is set it must already include the API version path,
-// mirroring pi's httpOptions.baseUrl behavior.
+// When Model.BaseURL is set it must already include the API version path.
 type Gemini struct {
 	Client *http.Client
 	APIKey string
@@ -99,8 +98,8 @@ type gRequest struct {
 	GenerationConfig  *gGenerationConfig `json:"generationConfig,omitempty"`
 }
 
-// model-family helpers (subsets of pi's resolveGoogleThinkingLevel /
-// getThinkingLevel / requiresToolCallId tables).
+// model-family helpers (thinking-level resolution and tool-call-id
+// requirement tables per model family).
 
 var (
 	gemini3ProRe    = regexp.MustCompile(`gemini-3(\.\d+)?-pro`)
@@ -506,8 +505,8 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 
 func isGemma4Model(modelID string) bool { return gemma4Re.MatchString(modelID) }
 
-// googleThinkingConfig mirrors pi's getThinkingLevel / getDisabledThinkingConfig
-// (google-generative-ai.ts:432-484).
+// googleThinkingConfig resolves the thinking config for a request
+// based on the requested thinking level and model ID.
 func googleThinkingConfig(level types.ThinkingLevel, modelID string) *gThinkingConfig {
 	if level == types.ThinkingOff {
 		return disabledThinkingConfig(modelID)

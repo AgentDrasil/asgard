@@ -1,4 +1,4 @@
-// session-resume: run round 1, persist it into a pi-compatible JSONL
+// session-resume: run round 1, persist it into a JSONL
 // session, then resume with a second instruction.
 package main
 

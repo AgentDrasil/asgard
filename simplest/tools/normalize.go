@@ -42,7 +42,7 @@ func SplitBom(s string) (bom, text string) {
 	return "", s
 }
 
-// normalizeForFuzzyMatch applies pi's progressive normalization: NFKC,
+// normalizeForFuzzyMatch progressively normalizes text: NFKC,
 // per-line trailing-whitespace strip, smart quotes to ASCII, Unicode dashes to
 // '-', and special spaces to plain space.
 func normalizeForFuzzyMatch(text string) string {

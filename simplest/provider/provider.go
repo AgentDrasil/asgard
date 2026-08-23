@@ -32,8 +32,8 @@ func CalculateCost(m *types.Model, u *types.Usage) {
 }
 
 // postSSE issues a POST expecting an SSE response. Non-2xx responses are
-// converted to errors carrying up to 4000 chars of the body, mirroring pi's
-// normalizeProviderError formatting ("<status>: <body>").
+// converted to errors carrying up to 4000 chars of the body, formatted as
+// "<status>: <body>".
 func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -91,7 +91,7 @@ func streamAborted(ctx context.Context) bool {
 
 // emitter builds the streaming AssistantMessage and emits protocol events.
 // It tracks the currently open text/thinking block so block switches emit
-// matching *_end events, mirroring pi's stream assembly.
+// matching *_end events as the stream progresses.
 type emitter struct {
 	ch     chan types.AssistantMessageEvent
 	out    *types.AssistantMessage

@@ -14,7 +14,7 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/types"
 )
 
-// Manager creates and discovers session files under a pi agent directory.
+// Manager creates and discovers session files under an agent directory.
 type Manager struct {
 	BaseDir string
 }
@@ -122,8 +122,8 @@ func newCore(cwd, id, parentSession string) *SessionFile {
 }
 
 // Create starts a new persisted session for cwd under the manager's sessions
-// directory. The file is created lazily on the first assistant message,
-// matching pi's deferred flush.
+// directory. The file is created lazily on the first assistant message
+// (deferred flush).
 func (m *Manager) Create(cwd string, opts *CreateOptions) (*SessionFile, error) {
 	id := ""
 	var parent string

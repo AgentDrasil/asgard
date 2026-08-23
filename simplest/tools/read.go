@@ -40,7 +40,7 @@ var imageExts = map[string]string{
 }
 
 // ReadTool reads file contents, with head truncation and image support.
-// It ports pi's read tool; images are returned as base64 ImageContent blocks
+// Images are returned as base64 ImageContent blocks
 // without resizing.
 type ReadTool struct {
 	cwd string

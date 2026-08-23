@@ -103,8 +103,8 @@ type oaUsage struct {
 }
 
 func (u *oaUsage) toUsage(m *types.Model) types.Usage {
-	// pi: prompt_tokens_details?.cached_tokens ?? prompt_cache_hit_tokens ??
-	// cached_tokens ?? 0 (openai-completions.ts:1472-1473). Default 0 so that
+	// Cache read tokens: prompt_tokens_details?.cached_tokens ??
+	// prompt_cache_hit_tokens ?? cached_tokens ?? 0. Default 0 so that
 	// servers without cache details don't bill all prompt tokens as cache reads.
 	cacheRead := int64(0)
 	cacheWrite := int64(0)
@@ -314,8 +314,8 @@ type oaDelta struct {
 	} `json:"tool_calls"`
 }
 
-// firstReasoning returns the first non-empty reasoning field value, matching
-// pi's dedup order ["reasoning_content", "reasoning", "reasoning_text"].
+// firstReasoning returns the first non-empty reasoning field value, trying
+// ["reasoning_content", "reasoning", "reasoning_text"] in that order.
 func firstReasoning(d oaDelta) string {
 	switch {
 	case d.ReasoningContent != "":
@@ -364,7 +364,8 @@ type toolAccum struct {
 }
 
 // parseStreamingJSON best-effort parses a possibly-truncated JSON object by
-// appending missing closers, mirroring pi's incremental argument display.
+// appending missing closers so partial arguments can still be displayed
+// incrementally.
 func parseStreamingJSON(s string) json.RawMessage {
 	if s == "" {
 		return nil
@@ -447,7 +448,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			}
 			var chunk oaChunk
 			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-				return nil // skip malformed chunks like pi skips bad lines
+				return nil // skip malformed chunks
 			}
 			if em.out.ResponseID == "" {
 				em.out.ResponseID = chunk.ID

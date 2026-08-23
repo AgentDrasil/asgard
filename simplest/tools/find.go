@@ -30,7 +30,8 @@ type FindToolDetails struct {
 }
 
 // FindTool searches for files by glob pattern, gitignore-aware. Like grep, it
-// uses a built-in walker instead of the fd/ripgrep binaries pi shells out to.
+// uses a built-in gitignore-aware walker instead of shelling out to the
+// fd binary.
 type FindTool struct {
 	cwd string
 }

@@ -34,7 +34,7 @@ type BashToolDetails struct {
 }
 
 // BashTool executes commands via bash -c in a configured working directory,
-// tail-truncating combined stdout/stderr like pi's bash tool.
+// tail-truncating combined stdout/stderr to configured limits.
 type BashTool struct {
 	cwd string
 }
@@ -55,7 +55,6 @@ func (t *BashTool) PromptGuidelines() []string {
 }
 func (t *BashTool) ExecutionMode() types.ToolExecutionMode { return "" }
 
-// Description mirrors pi's bash tool description.
 func (t *BashTool) Description() string {
 	return fmt.Sprintf("Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.", DefaultMaxLines, DefaultMaxBytes/1024)
 }
@@ -197,7 +196,7 @@ func appendTruncationFooter(text string, tr *TruncationResult, fullPath string) 
 }
 
 func saveFullOutput(content string) (string, error) {
-	f, err := os.CreateTemp("", "pi-bash-*.txt")
+	f, err := os.CreateTemp("", "simplest-bash-*.txt")
 	if err != nil {
 		return "", err
 	}

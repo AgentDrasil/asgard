@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// MarshalMessage encodes a Message as its pi-compatible role envelope,
+// MarshalMessage encodes a Message as its role envelope,
 // i.e. a JSON object whose "role" field discriminates the concrete type.
 func MarshalMessage(m Message) (json.RawMessage, error) {
 	switch t := m.(type) {
@@ -20,7 +20,7 @@ func MarshalMessage(m Message) (json.RawMessage, error) {
 	}
 }
 
-// marshalEnveloped marshals the role field first (matching pi's field order),
+// marshalEnveloped marshals the role field first,
 // then splices in the body object's remaining fields.
 func marshalEnveloped(role Role, body any) (json.RawMessage, error) {
 	bb, err := json.Marshal(body)
@@ -55,8 +55,8 @@ type MessageHead struct {
 }
 
 // UnmarshalMessage decodes a role-enveloped message produced by MarshalMessage
-// or pi's TypeScript agent. Unknown roles yield an error; null content is
-// normalized to an empty block list, mirroring pi's lenient session parsing.
+// or other writers of the same format. Unknown roles yield an error; null content is
+// normalized to an empty block list.
 func UnmarshalMessage(raw json.RawMessage) (Message, error) {
 	var head MessageHead
 	if err := json.Unmarshal(raw, &head); err != nil {

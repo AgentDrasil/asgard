@@ -7,7 +7,7 @@ import (
 )
 
 // resolveToCwd resolves a possibly-relative path against cwd, expanding a
-// leading "~" to the user's home directory. Unlike pi's path-utils it does not
+// leading "~" to the user's home directory. It does not
 // retry macOS-specific filename variants (NFD forms, narrow spaces, curly
 // quotes).
 func resolveToCwd(filePath, cwd string) string {

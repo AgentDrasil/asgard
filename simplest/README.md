@@ -1,7 +1,7 @@
 # simplest
 
-A Go library that reimplements the core of [pi](https://pi.dev/) (the coding agent): one
-function to run an agent request, pi-compatible sessions with resume, the
+A Go library that implements the core of a coding agent: one
+function to run an agent request, JSONL sessions with resume, the
 seven built-in tools, OpenAI-compatible and Gemini providers, prompt assembly,
 and in-process Go plugins.
 
@@ -20,7 +20,7 @@ go get github.com/AgentDrasil/simplest
 |------------|---------|
 | `types`    | Shared data model: messages, content blocks, events, `Provider`, `Model`, `Context` |
 | `tools`    | 7 built-ins (`read`, `bash`, `edit`, `write`, `find`, `grep`, `ls`), registry, JSON-schema validation, Go-func tool adapter |
-| `session`  | pi-compatible JSONL v3 session store (tree entries, resume, compaction) |
+| `session`  | JSONL v3 session store (tree entries, resume, compaction) |
 | `provider` | `openai-completions` and `google-generative-ai` SSE streaming clients |
 | `prompt`   | System-prompt assembly + AGENTS.md / CLAUDE.md context-file loading |
 | `agent`    | The run loop: `Run(ctx, Request) <-chan AgentEvent` |
@@ -142,7 +142,7 @@ reg := tools.DefaultRegistry(cwd)      // read bash edit write find grep ls
 names := reg.Names()                   // ["read","bash","edit","write","find","grep","ls"]
 ```
 
-Faithful ports of pi's tools: fuzzy edit matching, 2000-line/50KB truncation,
+Fuzzy edit matching, 2000-line/50KB truncation,
 gitignore-aware find/grep, unified diff rendering.
 
 ### Registering your own tool (Go func)
@@ -185,9 +185,8 @@ req.Validate = func(args, parameters json.RawMessage) error {
 
 ## 4. Sessions
 
-Sessions are append-only trees stored as pi-compatible JSONL v3 under
-`<baseDir>/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. Files written
-here load in pi and vice versa.
+Sessions are append-only trees stored as JSONL v3 under
+`<baseDir>/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.
 
 ```go
 mgr := session.New(session.DefaultBaseDir()) // ~/.simplest
@@ -226,7 +225,7 @@ cx, _ := sf.BuildContext("")          // Context{Messages, ThinkingLevel, Model}
 _ = cx.Messages                        // []types.Message ready for providers
 ```
 
-Files are flushed lazily on the first assistant message (matching pi); call
+Files are flushed lazily on the first assistant message; call
 `sf.Flush()` to write early. `session.FindMostRecent(dir, cwd)` and
 `session.List(dir)` support discovery.
 
@@ -364,19 +363,6 @@ for ev := range agent.Run(ctx, req2) { ... }
 `Request.Messages` is an immutable starting point, so "continue working" is
 always: persist prior output → append a new user message → call `Run` again
 with the full context.
-
-## Deviations from pi
-
-Documented, intentional:
-
-- `grep`/`find` use a built-in gitignore-aware walker instead of shelling out to `rg`/`fd`
-- Session files are written as v3 only (no v1/v2 migration); worktree shadowing for context files not ported
-- Provider compat matrix reduced to the vanilla protocols (no provider-specific thinking formats)
-- Skills formatting omitted; docs paths in the base prompt default to repo-relative names
-- `before_provider_request` hook (pi extensions API) not ported; only Before/AfterToolCall hooks exist
-- read tool returns images at original resolution (no 2000x2000 downscale like pi's `processImage`)
-- Base prompt drops pi's `examples/extensions/` docs reference; pi self-referential passages kept verbatim
-- Session files have no cross-process file lock: concurrent appends to one file can interleave/corrupt
 
 Run tests with:
 

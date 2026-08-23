@@ -178,7 +178,7 @@ type diffStringResult struct {
 }
 
 // GenerateDiffString renders a display-oriented diff with line numbers and
-// limited context, mirroring pi's generateDiffString.
+// limited context with line numbers.
 func GenerateDiffString(oldContent, newContent string, contextLines int) diffStringResult {
 	if contextLines <= 0 {
 		contextLines = 4

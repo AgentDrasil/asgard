@@ -1,5 +1,5 @@
-// Package prompt builds the system prompt (pi-compatible base text plus
-// assembly API) and loads project context files (AGENTS.md / CLAUDE.md
+// Package prompt builds the system prompt (base text plus assembly API)
+// and loads project context files (AGENTS.md / CLAUDE.md
 // hierarchy walking from cwd to filesystem root).
 package prompt
 
@@ -16,7 +16,7 @@ type ContextFile struct {
 	Content string
 }
 
-// contextFileCandidates is pi's per-directory precedence order: the first
+// contextFileCandidates is the per-directory precedence order: the first
 // existing file wins.
 var contextFileCandidates = []string{
 	"AGENTS.override.md",
@@ -49,8 +49,8 @@ func loadContextFileFromDir(dir string) *ContextFile {
 // LoadProjectContextFiles collects instruction files: the global one from
 // agentDir first, then one per directory walking from cwd up to the root,
 // ordered root-most first (nearest directory last). Missing files are skipped;
-// read errors are ignored like pi's best-effort loader. The git-worktree
-// shadowing rule from pi is not ported (linked-worktree setups only).
+// read errors are ignored on a best-effort basis. The git-worktree
+// shadowing rule is not implemented (linked-worktree setups only).
 func LoadProjectContextFiles(cwd, agentDir string) []ContextFile {
 	resolvedCwd, err := filepath.Abs(cwd)
 	if err != nil {
@@ -110,9 +110,8 @@ type Options struct {
 	// ContextFiles overrides loading; when nil, callers usually pass
 	// LoadProjectContextFiles output explicitly.
 	ContextFiles []ContextFile
-	// Docs paths shown in the pi-documentation section. Deviation from pi:
-	// these cannot be resolved from an installed package, so they default to
-	// repo-relative names.
+	// Documentation paths shown in the prompt. These cannot be resolved
+	// from an installed package, so they default to repo-relative names.
 	ReadmePath   string
 	DocsPath     string
 	ExamplesPath string
@@ -127,10 +126,10 @@ func hasTool(tools []string, name string) bool {
 	return false
 }
 
-const baseIdentity = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.`
+const baseIdentity = `You are an expert coding assistant operating inside an agent harness. You help users by reading files, executing commands, editing code, and writing new files.`
 
 // BuildSystemPrompt assembles the system prompt: identity, available tools,
-// guidelines, pi docs section, append text, project context files, and cwd.
+// guidelines, append text, project context files, and cwd.
 func BuildSystemPrompt(opts Options) string {
 	promptCwd := strings.ReplaceAll(opts.CWD, "\\", "/")
 	appendSection := ""
@@ -152,10 +151,6 @@ func BuildSystemPrompt(opts Options) string {
 		b.WriteString("\nCurrent working directory: " + promptCwd + "\n")
 		return b.String()
 	}
-
-	readmePath := orDefault(opts.ReadmePath, "README.md")
-	docsPath := orDefault(opts.DocsPath, "docs")
-	examplesPath := orDefault(opts.ExamplesPath, "examples")
 
 	visibleTools := make([]string, 0, len(tools))
 	for _, name := range tools {
@@ -205,16 +200,7 @@ Available tools:
 In addition to the tools above, you may have access to other custom tools depending on the project.
 
 Guidelines:
-` + strings.Join(guidelines, "\n") + `
-
-Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: ` + readmePath + `
-- Additional docs: ` + docsPath + `
-- Examples: ` + examplesPath + ` (extensions, custom tools, SDK)
-- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
-- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md)
-- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
-- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)`)
+` + strings.Join(guidelines, "\n") + ``)
 
 	b.WriteString(appendSection)
 	b.WriteString(projectContextSection(contextFiles))

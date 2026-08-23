@@ -85,7 +85,7 @@ type editArgs struct {
 	Edits []Edit
 }
 
-// NormalizeEditArgs applies pi's prepareArguments shim: some models send edits
+// NormalizeEditArgs normalizes edit arguments: some models send edits
 // as a JSON string instead of an array, a single edit object instead of a
 // one-element array, or legacy top-level oldText/newText fields.
 func NormalizeEditArgs(args json.RawMessage) (json.RawMessage, error) {

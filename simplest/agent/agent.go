@@ -1,5 +1,5 @@
-// Package agent implements the Run event-channel loop ported from pi's
-// agent-loop.ts: streaming assistant turns, tool dispatch with hooks,
+// Package agent implements the Run event-channel loop: streaming assistant
+// turns, tool dispatch with hooks,
 // steering/follow-up queues, and opt-in auto-compaction.
 package agent
 

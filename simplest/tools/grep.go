@@ -37,8 +37,8 @@ type GrepToolDetails struct {
 
 const grepDefaultLimit = 100
 
-// GrepTool searches file contents with regex or literal patterns. Unlike pi,
-// which shells out to ripgrep, it uses a built-in gitignore-aware walker.
+// GrepTool searches file contents with regex or literal patterns using a
+// built-in gitignore-aware walker.
 type GrepTool struct {
 	cwd string
 }
