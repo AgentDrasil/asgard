@@ -10,12 +10,14 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
+	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
 var defaultClients = map[string]types.CLIClient{
 	"agy":      &agy.Client{},
 	"opencode": &opencode.Client{},
+	"simplest": &simplest.Client{},
 }
 
 var clients = defaultClients
