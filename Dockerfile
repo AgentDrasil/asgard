@@ -108,6 +108,7 @@ COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
 COPY cmd/call-peer/go.mod cmd/call-peer/go.sum* ./cmd/call-peer/
 COPY cmd/find-peer/go.mod cmd/find-peer/go.sum* ./cmd/find-peer/
 COPY cmd/tester/go.mod cmd/tester/go.sum* ./cmd/tester/
+COPY simplest/go.mod simplest/go.sum* ./simplest/
 
 RUN (cd backend && go mod download) && \
     (cd agentwrapper && go mod download) && \
@@ -123,7 +124,8 @@ RUN (cd backend && go mod download) && \
     (cd cmd/ask-user && go mod download) && \
     (cd cmd/call-peer && go mod download) && \
     (cd cmd/find-peer && go mod download) && \
-    (cd cmd/tester && go mod download)
+    (cd cmd/tester && go mod download) && \
+    (cd simplest && go mod download)
 
 COPY backend/ ./backend/
 COPY agentwrapper/ ./agentwrapper/
@@ -132,6 +134,7 @@ COPY fakebash/ ./fakebash/
 COPY pkg/ ./pkg/
 COPY plugins/ ./plugins/
 COPY cmd/ ./cmd/
+COPY simplest/ ./simplest/
 
 RUN mkdir -p /app/bin && \
     for d in cmd/*; do \
