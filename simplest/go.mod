@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/goccy/go-yaml v1.19.2
+	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/text v0.41.0
 	google.golang.org/genai v1.69.0

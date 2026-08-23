@@ -11,10 +11,11 @@ package session
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // CurrentVersion is the JSONL session format version written by this package.
@@ -32,27 +33,11 @@ func fileTimestamp(ts string) string {
 
 // uuidv7 generates a time-ordered RFC 9562 version-7 UUID.
 func uuidv7() string {
-	var b [16]byte
-	binary.BigEndian.PutUint64(b[:8], ((uint64(time.Now().UnixMilli()))&((1<<48)-1))<<16)
-	if _, err := rand.Read(b[6:]); err != nil {
-		panic("session: crypto/rand unavailable: " + err.Error())
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic("session: failed to generate uuid: " + err.Error())
 	}
-	b[6] = (b[6] & 0x0f) | 0x70 // version 7
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
-	return formatUUID(b)
-}
-
-func formatUUID(b [16]byte) string {
-	var sb strings.Builder
-	sb.Grow(36)
-	h := hex.EncodeToString(b[:])
-	for i, c := range h {
-		if i == 8 || i == 12 || i == 16 || i == 20 {
-			sb.WriteByte('-')
-		}
-		sb.WriteRune(c)
-	}
-	return sb.String()
+	return id.String()
 }
 
 // generateEntryID returns a unique short id (8 hex chars). Falls back to a full uuid after repeated collisions.
