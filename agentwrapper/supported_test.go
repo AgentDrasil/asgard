@@ -93,7 +93,8 @@ func TestCheckQuota_ModelVariant(t *testing.T) {
 }
 
 func TestSupportedCLIs_SimplestRegistration(t *testing.T) {
-	// Restore default clients
+	origClients := clients
+	t.Cleanup(func() { clients = origClients })
 	SetClients(nil)
 
 	registered := GetRegisteredCLIs()

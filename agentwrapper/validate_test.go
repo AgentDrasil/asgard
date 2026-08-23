@@ -87,8 +87,9 @@ func TestValidateSimplestSetup(t *testing.T) {
 	})
 
 	t.Setenv("SIMPLEST_CONFIG_PATH", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("OPENAI_API_KEY", "")
+	_ = os.Unsetenv("SIMPLEST_CONFIG_PATH")
+	_ = os.Unsetenv("GEMINI_API_KEY")
+	_ = os.Unsetenv("OPENAI_API_KEY")
 
 	// 1. Completely missing configuration and API keys -> Error
 	err := ValidateSimplestSetup()
@@ -101,14 +102,14 @@ func TestValidateSimplestSetup(t *testing.T) {
 	if err := ValidateSimplestSetup(); err != nil {
 		t.Fatalf("expected success with GEMINI_API_KEY, got: %v", err)
 	}
-	t.Setenv("GEMINI_API_KEY", "")
+	_ = os.Unsetenv("GEMINI_API_KEY")
 
 	// 3. No config file, but OPENAI_API_KEY set -> Success
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 	if err := ValidateSimplestSetup(); err != nil {
 		t.Fatalf("expected success with OPENAI_API_KEY, got: %v", err)
 	}
-	t.Setenv("OPENAI_API_KEY", "")
+	_ = os.Unsetenv("OPENAI_API_KEY")
 
 	// 4. Config file exists at ~/.config/simplest/config.yaml but is corrupt YAML -> Error
 	cfgDir := filepath.Join(tempDir, ".config", "simplest")
