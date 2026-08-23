@@ -86,7 +86,6 @@ func TestValidateSimplestSetup(t *testing.T) {
 		homeDirFn = origHomeDirFn
 	})
 
-	t.Setenv("SIMPLEST_CONFIG_PATH", "")
 	_ = os.Unsetenv("SIMPLEST_CONFIG_PATH")
 	_ = os.Unsetenv("GEMINI_API_KEY")
 	_ = os.Unsetenv("OPENAI_API_KEY")

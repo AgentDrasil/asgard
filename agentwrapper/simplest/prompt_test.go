@@ -408,3 +408,115 @@ func TestPrompt_ThinkingAndToolcallDeltasNotStreamedAsAgentResponse(t *testing.T
 	assert.Equal(t, "User-facing message.", res.LastContent)
 	assert.Equal(t, []string{"User-facing message."}, reportedAgentResponses)
 }
+
+// capturingMockProvider captures the simplest.Context passed to Stream.
+type capturingMockProvider struct {
+	mu           sync.Mutex
+	capturedCtxs []*simplest.Context
+	responses    []*simplest.AssistantMessage
+}
+
+func (m *capturingMockProvider) Stream(ctx context.Context, model *simplest.Model, cx *simplest.Context, opts *simplest.StreamOptions) <-chan simplest.AssistantMessageEvent {
+	m.mu.Lock()
+	if cx != nil {
+		m.capturedCtxs = append(m.capturedCtxs, cx)
+	}
+	m.mu.Unlock()
+
+	ch := make(chan simplest.AssistantMessageEvent, 10)
+	go func() {
+		defer close(ch)
+		for _, resp := range m.responses {
+			partial := &simplest.AssistantMessage{
+				Content:   []simplest.AssistantContent{},
+				API:       model.API,
+				Provider:  model.Provider,
+				Model:     model.ID,
+				Timestamp: time.Now().UnixMilli(),
+			}
+			ch <- simplest.Partial{
+				Kind:    simplest.EvStart,
+				Partial: partial,
+			}
+			for _, blk := range resp.Content {
+				if tc, ok := blk.(simplest.TextContent); ok {
+					ch <- simplest.Partial{
+						Kind:    simplest.EvTextDelta,
+						Delta:   tc.Text,
+						Partial: partial,
+					}
+				}
+			}
+			ch <- simplest.DoneEvent{
+				Kind:    simplest.EvDone,
+				Reason:  simplest.StopStop,
+				Message: resp,
+			}
+		}
+	}()
+	return ch
+}
+
+func TestPrompt_SandboxSystemPromptAssembly(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	// 1. Create sandbox mount target: ~/.config/simplest/AGENTS.md with specific token
+	configSimplestDir := filepath.Join(tempHome, ".config", "simplest")
+	require.NoError(t, os.MkdirAll(configSimplestDir, 0755))
+	configAgentsContent := "# CRITICAL PROTOCOL: Use /bin/ask-user and /bin/call-peer only."
+	require.NoError(t, os.WriteFile(filepath.Join(configSimplestDir, "AGENTS.md"), []byte(configAgentsContent), 0644))
+
+	// 2. Create ~/.simplest/AGENTS.md with stale content to assert it is NOT loaded as agentDir
+	legacySimplestDir := filepath.Join(tempHome, ".simplest")
+	require.NoError(t, os.MkdirAll(legacySimplestDir, 0755))
+	legacyAgentsContent := "STALE_LEGACY_PROMPT_SHOULD_NOT_BE_LOADED"
+	require.NoError(t, os.WriteFile(filepath.Join(legacySimplestDir, "AGENTS.md"), []byte(legacyAgentsContent), 0644))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Prompt received."},
+		},
+		Usage: simplest.Usage{
+			Input:       20,
+			Output:      5,
+			TotalTokens: 25,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	res, err := Prompt(context.Background(), "Run command", types.PromptOptions{
+		Dir: testDir,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Prompt received.", res.LastContent)
+
+	require.NotEmpty(t, capturingP.capturedCtxs)
+	capturedSystemPrompt := capturingP.capturedCtxs[0].SystemPrompt
+
+	// Assert ~/.config/simplest/AGENTS.md content is assembled into the system prompt
+	assert.Contains(t, capturedSystemPrompt, configAgentsContent)
+	// Assert ~/.simplest/AGENTS.md was not loaded
+	assert.NotContains(t, capturedSystemPrompt, legacyAgentsContent)
+}

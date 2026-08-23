@@ -130,7 +130,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 
 	// Build system prompt
-	contextFiles := simplest.LoadProjectContextFiles(runDir, baseDir)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting home directory: %w", err)
+	}
+	agentCfgDir := (&Client{}).AuthDirectory(home)
+	contextFiles := simplest.LoadProjectContextFiles(runDir, agentCfgDir)
 	sysPrompt := simplest.BuildSystemPrompt(simplest.PromptBuildOptions{
 		SelectedTools: toolNames,
 		CWD:           runDir,

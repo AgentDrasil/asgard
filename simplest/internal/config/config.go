@@ -134,6 +134,7 @@ func LoadFrom(path string) (*Config, error) {
 	for idx, pattern := range cfg.Whitelist {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
+			cfg.compiledWhitelist = append(cfg.compiledWhitelist, nil)
 			continue
 		}
 		rx, err := regexp.Compile("(?i)^(?:" + pattern + ")$")
