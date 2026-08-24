@@ -116,6 +116,8 @@ var agyCmd = &cobra.Command{
 	},
 }
 
+var agyModelsCmd = newAgentModelsCmd("agy", "agy", &agyDir, agy.Models)
+
 // resolvePrompt returns the effective prompt. It prefers the -p flag value;
 // if that is empty it reads from stdin (only when stdin is not a terminal).
 // Returns an error when neither source provides a value.
@@ -148,12 +150,14 @@ func resolvePrompt(flagValue string) (string, error) {
 }
 
 func init() {
-	agyCmd.Flags().StringVar(&agyDir, "dir", "", "Working directory for the agent (defaults to current directory)")
+	agyCmd.PersistentFlags().StringVar(&agyDir, "dir", "", "Working directory for the agent (defaults to current directory)")
 	agyCmd.Flags().StringVarP(&agyPrompt, "prompt", "p", "", "Prompt to send to the agent (or pipe via stdin)")
 	agyCmd.Flags().StringVarP(&agySession, "session", "s", "", "Session ID to resume")
 	agyCmd.Flags().BoolVar(&agyUsage, "usage", false, "Print token usage information")
 	agyCmd.Flags().StringVarP(&agyModel, "model", "m", "", "Model to select for the session")
 	agyCmd.Flags().BoolVar(&agyAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent")
+
+	agyCmd.AddCommand(agyModelsCmd)
 }
 
 // agentStatusPayload matches the AgentStatusUpdate struct in lib/workflow/runner_agent.go.

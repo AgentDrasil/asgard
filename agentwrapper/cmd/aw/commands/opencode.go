@@ -102,10 +102,14 @@ var opencodeCmd = &cobra.Command{
 	},
 }
 
+var opencodeModelsCmd = newAgentModelsCmd("opencode", "opencode", &opencodeDir, opencode.Models)
+
 func init() {
-	opencodeCmd.Flags().StringVar(&opencodeDir, "dir", "", "Working directory for the agent (defaults to current directory)")
+	opencodeCmd.PersistentFlags().StringVar(&opencodeDir, "dir", "", "Working directory for the agent (defaults to current directory)")
 	opencodeCmd.Flags().StringVarP(&opencodePrompt, "prompt", "p", "", "Prompt to send to the agent (or pipe via stdin)")
 	opencodeCmd.Flags().StringVarP(&opencodeSession, "session", "s", "", "Session ID to resume")
 	opencodeCmd.Flags().BoolVar(&opencodeUsage, "usage", false, "Print token usage information")
 	opencodeCmd.Flags().StringVarP(&opencodeModel, "model", "m", "", "Model to select for the session")
+
+	opencodeCmd.AddCommand(opencodeModelsCmd)
 }

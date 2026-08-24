@@ -54,4 +54,5 @@ func init() {
 	rootCmd.AddCommand(agyCmd)
 	rootCmd.AddCommand(opencodeCmd)
 	rootCmd.AddCommand(simplestCmd)
+	rootCmd.AddCommand(modelsCmd)
 }

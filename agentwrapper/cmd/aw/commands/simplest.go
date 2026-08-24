@@ -99,11 +99,15 @@ var simplestCmd = &cobra.Command{
 	},
 }
 
+var simplestModelsCmd = newAgentModelsCmd("simplest", "", &simplestDir, simplest.Models)
+
 func init() {
-	simplestCmd.Flags().StringVar(&simplestDir, "dir", "", "Working directory for the agent (defaults to current directory)")
+	simplestCmd.PersistentFlags().StringVar(&simplestDir, "dir", "", "Working directory for the agent (defaults to current directory)")
 	simplestCmd.Flags().StringVarP(&simplestPrompt, "prompt", "p", "", "Prompt to send to the agent (or pipe via stdin)")
 	simplestCmd.Flags().StringVarP(&simplestSession, "session", "s", "", "Session ID to resume")
 	simplestCmd.Flags().BoolVar(&simplestUsage, "usage", false, "Print token usage information")
 	simplestCmd.Flags().StringVarP(&simplestModel, "model", "m", "", "Model to select for the session")
 	simplestCmd.Flags().BoolVar(&simplestAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent (no-op for simplest)")
+
+	simplestCmd.AddCommand(simplestModelsCmd)
 }
