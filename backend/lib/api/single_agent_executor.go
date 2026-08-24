@@ -75,19 +75,25 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 
 	prompt := params.Prompt
 
-	runDirOpt := optional.None[string]()
+	rawRunDir := ""
 	// Always lock to established session.RunDir if session already exists
 	if session != nil && session.RunDir != "" {
-		runDirOpt = optional.Some(session.RunDir)
+		rawRunDir = session.RunDir
 	} else if params.RunDir != "" {
-		runDirOpt = optional.Some(params.RunDir)
+		rawRunDir = params.RunDir
 	} else if params.Metadata != nil {
 		if rd, ok := params.Metadata["run_dir"].(string); ok && rd != "" {
-			runDirOpt = optional.Some(rd)
+			rawRunDir = rd
 		}
 	}
-	if runDirOpt.IsNone() && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
-		runDirOpt = optional.Some(e.agent.Config.RunDirs[0])
+	if rawRunDir == "" && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
+		rawRunDir = e.agent.Config.RunDirs[0]
+	}
+
+	normalizedRunDir := NormalizeSessionRunDir(rawRunDir, chatID)
+	runDirOpt := optional.None[string]()
+	if normalizedRunDir != "" {
+		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
 	modelOpt := optional.None[string]()

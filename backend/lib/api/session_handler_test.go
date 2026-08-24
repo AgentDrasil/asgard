@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -53,9 +55,13 @@ func TestSessionHandler(t *testing.T) {
 	var createdSession ChatSession
 	err = json.Unmarshal(rrPost.Body.Bytes(), &createdSession)
 	require.NoError(t, err)
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	expectedSessionTmp := filepath.Join(home, "tmp", createdSession.ChatID)
+
 	assert.NotEmpty(t, createdSession.ChatID)
 	assert.Equal(t, "agent-alpha", createdSession.CurrentAgent)
-	assert.Equal(t, "/tmp", createdSession.RunDir)
+	assert.Equal(t, expectedSessionTmp, createdSession.RunDir)
 
 	// 2. Insert session via repo
 	err = repo.SaveSession(&dbmodels.Session{

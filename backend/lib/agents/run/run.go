@@ -20,6 +20,7 @@ import (
 
 func IsAllowedDir(path string, allowedDirs []string) bool {
 	path = filepath.Clean(path)
+	home, _ := os.UserHomeDir()
 	for _, dir := range allowedDirs {
 		dir = filepath.Clean(dir)
 		if path == dir {
@@ -28,6 +29,13 @@ func IsAllowedDir(path string, allowedDirs []string) bool {
 		// Check if it is a subdirectory
 		if strings.HasPrefix(path, dir+string(filepath.Separator)) {
 			return true
+		}
+		// If allowedDirs contains "/tmp", also allow subdirectories under $HOME/tmp (sandbox session dirs)
+		if dir == "/tmp" && home != "" {
+			userTmp := filepath.Join(home, "tmp")
+			if path == userTmp || strings.HasPrefix(path, userTmp+string(filepath.Separator)) {
+				return true
+			}
 		}
 	}
 	return false

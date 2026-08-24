@@ -72,7 +72,7 @@ func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) 
 		return "", http.StatusBadRequest, errors.New("session has no associated workspace directory")
 	}
 
-	return sess.RunDir, http.StatusOK, nil
+	return NormalizeSessionRunDir(sess.RunDir, sessionID), http.StatusOK, nil
 }
 
 func (s *Server) validateAndResolvePath(runDir, reqPath string) (string, string, int, error) {

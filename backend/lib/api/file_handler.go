@@ -55,7 +55,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if sess != nil {
 			if sess.RunDir != "" {
-				runDir = sess.RunDir
+				runDir = NormalizeSessionRunDir(sess.RunDir, sessionID)
 			}
 			sessionModifiedFiles = sess.Artifacts
 		}

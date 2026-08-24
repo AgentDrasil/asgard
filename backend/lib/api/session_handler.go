@@ -56,9 +56,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	chatID := uuid.Must(uuid.NewV7()).String()
 
+	normalizedRunDir := NormalizeSessionRunDir(req.RunDir, chatID)
 	runDirOpt := optional.None[string]()
-	if req.RunDir != "" {
-		runDirOpt = optional.Some(req.RunDir)
+	if normalizedRunDir != "" {
+		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
 	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt); err != nil {
@@ -73,8 +74,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ChatSession{
 		ChatID:       chatID,
 		CurrentAgent: req.CurrentAgent,
-		RunDir:       req.RunDir,
-		GitRoot:      findGitRoot(req.RunDir),
+		RunDir:       normalizedRunDir,
+		GitRoot:      findGitRoot(normalizedRunDir),
 	})
 }
 

@@ -465,3 +465,48 @@ func TestFilesSearchHandler_TableDriven(t *testing.T) {
 		})
 	}
 }
+
+func TestFilesHandler_TmpResolution(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	server := &Server{
+		conf: &config.Config{Host: "http://localhost:8080"},
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	chatID := uuid.Must(uuid.NewV7()).String()
+	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	sess.RunDir = "/tmp"
+	require.NoError(t, repo.SaveSession(sess))
+
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	sessionTmp := filepath.Join(home, "tmp", chatID)
+	require.NoError(t, os.MkdirAll(sessionTmp, 0755))
+	defer func() { _ = os.RemoveAll(sessionTmp) }()
+
+	testFile := filepath.Join(sessionTmp, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("hello from session tmp"), 0644))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID, nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp FileTreeResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	found := false
+	for _, entry := range resp.Entries {
+		if entry.Name == "test.txt" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected test.txt in session tmp tree")
+}

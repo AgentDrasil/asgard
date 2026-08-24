@@ -1,9 +1,12 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsValidChatID(t *testing.T) {
@@ -30,4 +33,24 @@ func TestIsValidChatID(t *testing.T) {
 	for _, id := range invalidIDs {
 		assert.False(t, IsValidChatID(id), "expected invalid: %s", id)
 	}
+}
+
+func TestNormalizeSessionRunDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	chatID := "session-123"
+	expectedSessionTmp := filepath.Join(home, "tmp", chatID)
+
+	// /tmp -> ~/tmp/<chatID>
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp/", chatID))
+
+	// Empty string -> ~/tmp/<chatID>
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir(".", chatID))
+
+	// Explicit custom path -> untouched clean path
+	customPath := filepath.Join(home, "src", "my-project")
+	assert.Equal(t, customPath, NormalizeSessionRunDir(customPath, chatID))
 }

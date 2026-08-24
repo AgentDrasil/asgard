@@ -12,9 +12,17 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/simplest"
 )
 
 func TestSimplestModelsRunE(t *testing.T) {
+	simplest.SetGlobalConfig(&simplest.Config{
+		Models: []simplest.ModelConfig{
+			{ID: "test-model", Provider: "test-provider"},
+		},
+	})
+	defer simplest.ResetGlobalConfig()
+
 	GlobalConfig = nil
 	defer func() { GlobalConfig = nil }()
 
