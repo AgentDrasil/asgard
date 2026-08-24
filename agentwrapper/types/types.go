@@ -154,3 +154,32 @@ func (o *PromptOptions) ResponseDelayOrDefault() time.Duration {
 func RemapSandboxPath(targetPath string) string {
 	return strings.TrimSpace(targetPath)
 }
+
+// KnownVariants is the canonical set of model effort variants that may be appended
+// to a model string as a suffix segment (e.g. "provider/model/low", "model/high").
+var KnownVariants = map[string]bool{
+	"minimal": true,
+	"low":     true,
+	"medium":  true,
+	"high":    true,
+	"xhigh":   true,
+	"max":     true,
+}
+
+// SplitModelVariant parses a model string that may contain a variant suffix
+// (e.g. "zai-coding-plan/glm-5.3/low", "claude-sonnet-4-6/high") and separates
+// the base model name from the variant suffix. If no recognized variant suffix is
+// present, the variant return value is empty string.
+func SplitModelVariant(modelWithVariant string) (string, string) {
+	if modelWithVariant == "" {
+		return "", ""
+	}
+	parts := strings.Split(modelWithVariant, "/")
+	if len(parts) > 1 {
+		last := strings.ToLower(parts[len(parts)-1])
+		if KnownVariants[last] {
+			return strings.Join(parts[:len(parts)-1], "/"), last
+		}
+	}
+	return modelWithVariant, ""
+}

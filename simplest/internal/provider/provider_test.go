@@ -301,6 +301,43 @@ func TestOpenAIReasoningDelta(t *testing.T) {
 	}
 }
 
+func TestOpenAIReasoningEffortValidation(t *testing.T) {
+	srv := sseServer(t, []string{
+		`{"choices":[{"delta":{"content":"ok"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"[DONE]",
+	}, nil, nil, "")
+	defer srv.Close()
+
+	model := oaModel(srv.URL)
+	model.Reasoning = true
+	model.ReasoningEffort = []string{"low", "high"}
+
+	p := NewOpenAICompat("k")
+
+	// Valid effort
+	_, done, errEv := drain(p.Stream(context.Background(), model, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingLow,
+	}))
+	if errEv != nil {
+		t.Fatalf("expected success for allowed thinking level, got error: %+v", errEv)
+	}
+	if done == nil {
+		t.Fatal("expected done event")
+	}
+
+	// Disallowed effort
+	_, _, errEv = drain(p.Stream(context.Background(), model, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingMax,
+	}))
+	if errEv == nil {
+		t.Fatal("expected error event for disallowed thinking level")
+	}
+	if !strings.Contains(errEv.Message.ErrorMessage, "unsupported reasoning effort \"max\"") {
+		t.Fatalf("unexpected error message: %q", errEv.Message.ErrorMessage)
+	}
+}
+
 // --- Google Generative AI ---
 
 func gChunks(events ...string) []string { return events }

@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // API wire protocols supported by this library.
@@ -21,17 +22,32 @@ type ModelCostRates struct {
 
 // Model describes one callable model endpoint. Configured programmatically.
 type Model struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	API           string            `json:"api"` // APIOpenAICompat or APIGoogleGemini
-	Provider      string            `json:"provider"`
-	BaseURL       string            `json:"baseUrl"`
-	Reasoning     bool              `json:"reasoning"`
-	Input         []string          `json:"input"` // "text", "image"
-	Cost          ModelCostRates    `json:"cost"`
-	ContextWindow int64             `json:"contextWindow"`
-	MaxTokens     int64             `json:"maxTokens"`
-	Headers       map[string]string `json:"headers,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	API             string            `json:"api"` // APIOpenAICompat or APIGoogleGemini
+	Provider        string            `json:"provider"`
+	BaseURL         string            `json:"baseUrl"`
+	Reasoning       bool              `json:"reasoning"`
+	ReasoningEffort []string          `json:"reasoningEffort,omitempty"`
+	Input           []string          `json:"input"` // "text", "image"
+	Cost            ModelCostRates    `json:"cost"`
+	ContextWindow   int64             `json:"contextWindow"`
+	MaxTokens       int64             `json:"maxTokens"`
+	Headers         map[string]string `json:"headers,omitempty"`
+}
+
+// SupportsReasoningEffort reports whether the given effort is allowed for this model.
+// If ReasoningEffort is empty, all valid thinking levels are considered supported.
+func (m *Model) SupportsReasoningEffort(effort string) bool {
+	if m == nil || len(m.ReasoningEffort) == 0 {
+		return true
+	}
+	for _, allowed := range m.ReasoningEffort {
+		if strings.EqualFold(allowed, effort) {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolDef is the provider-facing description of a tool sent to the LLM API.

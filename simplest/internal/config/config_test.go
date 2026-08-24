@@ -110,6 +110,16 @@ func TestResolveModelAndProvider(t *testing.T) {
 				APIKey:  "openai-secret-key",
 				BaseURL: "https://custom.openai.api/v1",
 			},
+			"zai-coding-plan": {
+				API:     types.APIOpenAICompat,
+				APIKey:  "zai-secret-key",
+				BaseURL: "https://api.z.ai/v1",
+			},
+			"openrouter": {
+				API:     types.APIOpenAICompat,
+				APIKey:  "openrouter-secret-key",
+				BaseURL: "https://openrouter.ai/api/v1",
+			},
 		},
 		Models: []ModelConfig{
 			{
@@ -123,6 +133,18 @@ func TestResolveModelAndProvider(t *testing.T) {
 				Name:          "GPT 4o",
 				Provider:      "openai",
 				ContextWindow: 128000,
+			},
+			{
+				ID:            "glm-5.3",
+				Name:          "GLM 5.3",
+				Provider:      "zai-coding-plan",
+				ContextWindow: 1048576,
+			},
+			{
+				ID:            "stealth/ox-alpha",
+				Name:          "Stealth OX Alpha",
+				Provider:      "openrouter",
+				ContextWindow: 131072,
 			},
 		},
 	}
@@ -142,9 +164,83 @@ func TestResolveModelAndProvider(t *testing.T) {
 	assert.Equal(t, "gpt-4o", mOpenAI.ID)
 	assert.Equal(t, types.APIOpenAICompat, mOpenAI.API)
 
-	// 3. Resolve missing model
+	// 3. Resolve by provider prefix (zai-coding-plan/glm-5.3)
+	mZai, pZai, err := cfg.ResolveModelAndProvider("zai-coding-plan/glm-5.3")
+	require.NoError(t, err)
+	require.NotNil(t, mZai)
+	require.NotNil(t, pZai)
+	assert.Equal(t, "glm-5.3", mZai.ID)
+	assert.Equal(t, "zai-coding-plan", mZai.Provider)
+
+	// 4. Resolve OpenRouter model with slash in ID (stealth/ox-alpha and openrouter/stealth/ox-alpha)
+	mOR, _, err := cfg.ResolveModelAndProvider("stealth/ox-alpha")
+	require.NoError(t, err)
+	assert.Equal(t, "stealth/ox-alpha", mOR.ID)
+
+	mORFull, _, err := cfg.ResolveModelAndProvider("openrouter/stealth/ox-alpha")
+	require.NoError(t, err)
+	assert.Equal(t, "stealth/ox-alpha", mORFull.ID)
+
+	// 5. Resolve missing model
 	mErr, pErr, err := cfg.ResolveModelAndProvider("claude-3-opus")
 	require.Error(t, err)
 	assert.Nil(t, mErr)
 	assert.Nil(t, pErr)
+}
+
+func TestLoad_ReasoningEffort(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "config_reasoning.yaml")
+
+	yamlContent := `
+providers:
+  deepseek:
+    api: openai-compat
+    apiKey: "dummy-key"
+    baseUrl: "https://api.deepseek.com"
+  zai-coding-plan:
+    api: openai-compat
+    apiKey: "dummy-key"
+models:
+  - id: deepseek-v4-flash
+    name: "DeepSeek V4 Flash"
+    provider: deepseek
+    reasoning: true
+    reasoning_effort:
+      - low
+      - high
+      - max
+  - id: glm-5.3
+    name: "GLM 5.3"
+    provider: zai-coding-plan
+    reasoning: true
+    reasoningEffort:
+      - low
+      - high
+`
+	require.NoError(t, os.WriteFile(configFile, []byte(yamlContent), 0644))
+
+	cfg, err := LoadFrom(configFile)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	models := cfg.GetAvailableModels()
+	require.Len(t, models, 2)
+
+	// Check reasoning_effort snake_case mapping
+	assert.Equal(t, "deepseek-v4-flash", models[0].ID)
+	assert.Equal(t, []string{"low", "high", "max"}, models[0].ReasoningEffort)
+	assert.True(t, models[0].SupportsReasoningEffort("low"))
+	assert.True(t, models[0].SupportsReasoningEffort("high"))
+	assert.True(t, models[0].SupportsReasoningEffort("max"))
+	assert.True(t, models[0].SupportsReasoningEffort("LOW"))
+	assert.False(t, models[0].SupportsReasoningEffort("minimal"))
+	assert.False(t, models[0].SupportsReasoningEffort("medium"))
+
+	// Check reasoningEffort camelCase mapping
+	assert.Equal(t, "glm-5.3", models[1].ID)
+	assert.Equal(t, []string{"low", "high"}, models[1].ReasoningEffort)
+	assert.True(t, models[1].SupportsReasoningEffort("low"))
+	assert.True(t, models[1].SupportsReasoningEffort("high"))
+	assert.False(t, models[1].SupportsReasoningEffort("max"))
 }

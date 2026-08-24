@@ -413,6 +413,7 @@ func TestPrompt_ThinkingAndToolcallDeltasNotStreamedAsAgentResponse(t *testing.T
 type capturingMockProvider struct {
 	mu           sync.Mutex
 	capturedCtxs []*simplest.Context
+	capturedOpts []*simplest.StreamOptions
 	responses    []*simplest.AssistantMessage
 }
 
@@ -420,6 +421,9 @@ func (m *capturingMockProvider) Stream(ctx context.Context, model *simplest.Mode
 	m.mu.Lock()
 	if cx != nil {
 		m.capturedCtxs = append(m.capturedCtxs, cx)
+	}
+	if opts != nil {
+		m.capturedOpts = append(m.capturedOpts, opts)
 	}
 	m.mu.Unlock()
 
@@ -455,6 +459,92 @@ func (m *capturingMockProvider) Stream(ctx context.Context, model *simplest.Mode
 		}
 	}()
 	return ch
+}
+
+func TestPrompt_ThinkingVariantPassThrough(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Done."},
+		},
+		Usage: simplest.Usage{
+			Input:       20,
+			Output:      5,
+			TotalTokens: 25,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	var resolvedModel string
+	testModel := &simplest.Model{
+		ID:            "glm-5.3",
+		Name:          "GLM 5.3",
+		Provider:      "zai-coding-plan",
+		API:           simplest.APIOpenAICompat,
+		ContextWindow: 1048576,
+		Reasoning:     true,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		resolvedModel = modelID
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	_, err := Prompt(context.Background(), "Coding task", types.PromptOptions{
+		Dir:   testDir,
+		Model: "zai-coding-plan/glm-5.3/low",
+	})
+	require.NoError(t, err)
+
+	// Target model passed to resolver should have variant stripped
+	assert.Equal(t, "zai-coding-plan/glm-5.3", resolvedModel)
+
+	// StreamOptions should receive ThinkingLevel "low"
+	require.NotEmpty(t, capturingP.capturedOpts)
+	assert.Equal(t, simplest.ThinkingLow, capturingP.capturedOpts[0].ThinkingLevel)
+}
+
+func TestPrompt_ReasoningEffortDisallowedError(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	testModel := &simplest.Model{
+		ID:              "deepseek-v4-flash",
+		Name:            "DeepSeek V4 Flash",
+		Provider:        "deepseek",
+		API:             simplest.APIOpenAICompat,
+		ContextWindow:   1048576,
+		Reasoning:       true,
+		ReasoningEffort: []string{"low", "high"},
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, nil, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	// Max is not in [low, high], should fail early
+	_, err := Prompt(context.Background(), "Coding task", types.PromptOptions{
+		Dir:   testDir,
+		Model: "deepseek/deepseek-v4-flash/max",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported reasoning effort \"max\"")
+	assert.Contains(t, err.Error(), "deepseek-v4-flash")
 }
 
 func TestPrompt_SandboxSystemPromptAssembly(t *testing.T) {

@@ -444,6 +444,9 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 		}
 		level := opts.ThinkingLevel
 		if model.Reasoning && level != "" {
+			if len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(string(level)) {
+				return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+			}
 			config.ThinkingConfig = googleThinkingConfig(level, model.ID)
 		}
 	} else if model.Reasoning {

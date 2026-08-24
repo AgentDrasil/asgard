@@ -118,6 +118,7 @@ type (
 	Cost             = types.Cost
 	Role             = types.Role
 	StopReason       = types.StopReason
+	ThinkingLevel    = types.ThinkingLevel
 )
 
 var (
@@ -137,6 +138,14 @@ const (
 	StopLength  = types.StopLength
 	StopError   = types.StopError
 	StopAborted = types.StopAborted
+
+	ThinkingOff     = types.ThinkingOff
+	ThinkingMinimal = types.ThinkingMinimal
+	ThinkingLow     = types.ThinkingLow
+	ThinkingMedium  = types.ThinkingMedium
+	ThinkingHigh    = types.ThinkingHigh
+	ThinkingXHigh   = types.ThinkingXHigh
+	ThinkingMax     = types.ThinkingMax
 )
 
 // ---- types: models & providers ----

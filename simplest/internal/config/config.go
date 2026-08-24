@@ -26,17 +26,37 @@ type ProviderConfig struct {
 
 // ModelConfig defines configuration for a specific model endpoint.
 type ModelConfig struct {
-	ID            string               `yaml:"id" json:"id"`
-	Name          string               `yaml:"name" json:"name"`
-	Provider      string               `yaml:"provider" json:"provider"`
-	API           string               `yaml:"api" json:"api"`
-	BaseURL       string               `yaml:"baseUrl" json:"baseUrl"`
-	ContextWindow int64                `yaml:"contextWindow" json:"contextWindow"`
-	MaxTokens     int64                `yaml:"maxTokens" json:"maxTokens"`
-	Reasoning     bool                 `yaml:"reasoning" json:"reasoning"`
-	Cost          types.ModelCostRates `yaml:"cost" json:"cost"`
-	Input         []string             `yaml:"input" json:"input"`
-	Headers       map[string]string    `yaml:"headers" json:"headers"`
+	ID              string               `yaml:"id" json:"id"`
+	Name            string               `yaml:"name" json:"name"`
+	Provider        string               `yaml:"provider" json:"provider"`
+	API             string               `yaml:"api" json:"api"`
+	BaseURL         string               `yaml:"baseUrl" json:"baseUrl"`
+	ContextWindow   int64                `yaml:"contextWindow" json:"contextWindow"`
+	MaxTokens       int64                `yaml:"maxTokens" json:"maxTokens"`
+	Reasoning       bool                 `yaml:"reasoning" json:"reasoning"`
+	ReasoningEffort []string             `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
+	Cost            types.ModelCostRates `yaml:"cost" json:"cost"`
+	Input           []string             `yaml:"input" json:"input"`
+	Headers         map[string]string    `yaml:"headers" json:"headers"`
+}
+
+// RawModelConfig is a type alias to ModelConfig used to prevent infinite recursion during UnmarshalYAML.
+type RawModelConfig ModelConfig
+
+// UnmarshalYAML implements custom unmarshaling to support both reasoningEffort and reasoning_effort keys.
+func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		RawModelConfig       `yaml:",inline"`
+		ReasoningEffortSnake []string `yaml:"reasoning_effort,omitempty"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	*m = ModelConfig(raw.RawModelConfig)
+	if len(raw.ReasoningEffortSnake) > 0 && len(m.ReasoningEffort) == 0 {
+		m.ReasoningEffort = raw.ReasoningEffortSnake
+	}
+	return nil
 }
 
 // Config represents the top-level configuration structure.
@@ -214,17 +234,18 @@ func (c *Config) GetAvailableModels() []*types.Model {
 		}
 
 		m := &types.Model{
-			ID:            mc.ID,
-			Name:          mc.Name,
-			API:           api,
-			Provider:      mc.Provider,
-			BaseURL:       baseURL,
-			Reasoning:     mc.Reasoning,
-			Input:         mc.Input,
-			Cost:          mc.Cost,
-			ContextWindow: mc.ContextWindow,
-			MaxTokens:     mc.MaxTokens,
-			Headers:       mergedHeaders,
+			ID:              mc.ID,
+			Name:            mc.Name,
+			API:             api,
+			Provider:        mc.Provider,
+			BaseURL:         baseURL,
+			Reasoning:       mc.Reasoning,
+			ReasoningEffort: mc.ReasoningEffort,
+			Input:           mc.Input,
+			Cost:            mc.Cost,
+			ContextWindow:   mc.ContextWindow,
+			MaxTokens:       mc.MaxTokens,
+			Headers:         mergedHeaders,
 		}
 		res = append(res, m)
 	}
@@ -234,7 +255,10 @@ func (c *Config) GetAvailableModels() []*types.Model {
 
 // ResolveModelAndProvider resolves a model and constructs its corresponding Provider instance.
 // If modelID is empty, the first allowed model in the configuration is selected.
-// If modelID is specified, it matches against allowed models by exact or case-insensitive ID.
+// If modelID is specified, it matches against allowed models by:
+// 1. Exact or case-insensitive match on Model ID (e.g. "glm-5.3")
+// 2. Exact or case-insensitive match on "Provider/ModelID" (e.g. "zai-coding-plan/glm-5.3")
+// 3. If modelID contains a provider prefix (e.g. "zai-coding-plan/glm-5.3"), match provider and ID parts
 func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Provider, error) {
 	if c == nil {
 		return nil, nil, errors.New("nil configuration")
@@ -253,6 +277,19 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 			if strings.EqualFold(m.ID, modelID) {
 				matched = m
 				break
+			}
+			if m.Provider != "" && strings.EqualFold(m.Provider+"/"+m.ID, modelID) {
+				matched = m
+				break
+			}
+		}
+		if matched == nil && strings.Contains(modelID, "/") {
+			parts := strings.SplitN(modelID, "/", 2)
+			for _, m := range available {
+				if strings.EqualFold(m.Provider, parts[0]) && strings.EqualFold(m.ID, parts[1]) {
+					matched = m
+					break
+				}
 			}
 		}
 	}

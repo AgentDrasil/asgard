@@ -592,6 +592,9 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 		}
 		level := opts.ThinkingLevel
 		if model.Reasoning && level != "" && level != types.ThinkingOff {
+			if len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(string(level)) {
+				return nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+			}
 			req.ReasoningEffort = string(level)
 		}
 	}

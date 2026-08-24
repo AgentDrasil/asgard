@@ -51,14 +51,6 @@ func classifyLine(opl *opencodeLine) string {
 	}
 }
 
-// knownVariants is the set of opencode effort variants that may be appended
-// to a model string as a suffix segment (e.g. "provider/model/low").
-var knownVariants = map[string]bool{
-	"low":    true,
-	"medium": true,
-	"high":   true,
-}
-
 // SplitModelVariant parses a model string that may contain a variant suffix
 // (e.g. "zai-coding-plan/glm-5.3/low" -> "zai-coding-plan/glm-5.3", "low") or
 // ("openai/gpt-5/high" -> "openai/gpt-5", "high").
@@ -67,10 +59,7 @@ var knownVariants = map[string]bool{
 // "openrouter/deepseek/deepseek-chat") are left intact.
 // If no variant suffix is present, it returns (model, "").
 func SplitModelVariant(model string) (string, string) {
-	if idx := strings.LastIndex(model, "/"); idx > 0 && knownVariants[model[idx+1:]] {
-		return model[:idx], model[idx+1:]
-	}
-	return model, ""
+	return types.SplitModelVariant(model)
 }
 
 // buildPromptArgv constructs the CLI arguments for running an opencode prompt.

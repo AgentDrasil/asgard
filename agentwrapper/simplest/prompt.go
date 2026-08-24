@@ -45,6 +45,15 @@ func getProviderResolver() ProviderResolver {
 	return simplest.ResolveModelAndProvider
 }
 
+// SplitModelVariant parses a model string that may contain a variant/thinking suffix
+// (e.g. "zai-coding-plan/glm-5.3/low" -> "zai-coding-plan/glm-5.3", "low" or
+// "gemini-3.7-flash/high" -> "gemini-3.7-flash", "high").
+// Only a trailing segment matching a known variant is treated as a variant.
+// If no variant suffix is present, it returns (model, "").
+func SplitModelVariant(model string) (string, string) {
+	return types.SplitModelVariant(model)
+}
+
 // Prompt runs simplest agent loop in-process and returns structured PromptResult.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
 	runDir := opts.Dir
@@ -57,9 +66,22 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 
 	resolver := getProviderResolver()
-	model, prov, err := resolver(opts.Model)
+	targetModel := opts.Model
+	var thinkingLevel simplest.ThinkingLevel
+	var rawVariant string
+	if baseModel, variant := SplitModelVariant(targetModel); variant != "" {
+		targetModel = baseModel
+		rawVariant = variant
+		thinkingLevel = simplest.ThinkingLevel(variant)
+	}
+
+	model, prov, err := resolver(targetModel)
 	if err != nil {
 		return nil, fmt.Errorf("resolving model and provider: %w", err)
+	}
+
+	if rawVariant != "" && len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(rawVariant) {
+		return nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", rawVariant, model.ID, model.ReasoningEffort)
 	}
 
 	baseDir := simplest.DefaultBaseDir()
@@ -106,6 +128,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		}
 	}
 
+	if thinkingLevel != "" {
+		if _, err := sf.AppendThinkingLevelChange(thinkingLevel); err != nil {
+			return nil, fmt.Errorf("appending thinking level change to session: %w", err)
+		}
+	}
+
 	// Append user prompt message to session
 	userMsg := &simplest.UserMessage{
 		Content:   simplest.TextOnly(prompt),
@@ -143,11 +171,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	})
 
 	req := simplest.Request{
-		SystemPrompt: sysPrompt,
-		Messages:     sessionCtx.Messages,
-		Model:        model,
-		Provider:     prov,
-		Tools:        toolList,
+		SystemPrompt:  sysPrompt,
+		Messages:      sessionCtx.Messages,
+		Model:         model,
+		Provider:      prov,
+		Tools:         toolList,
+		ThinkingLevel: thinkingLevel,
 	}
 
 	maxTokens := int(model.ContextWindow)

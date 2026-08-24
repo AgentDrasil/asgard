@@ -14,22 +14,17 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
-// knownVariants is the set of agy reasoning effort variants that may be appended
-// to a model string as a suffix segment (e.g. "gemini-3.7-flash/low" or "gemini-3.7-flash-low").
-var knownVariants = map[string]bool{
-	"low":    true,
-	"medium": true,
-	"high":   true,
-}
-
 // SplitModelVariant parses a model string that may contain a variant/effort suffix
 // (e.g. "gemini-3.7-flash-low" -> "gemini-3.7-flash", "low" or "gemini-3.7-flash/low" -> "gemini-3.7-flash", "low").
 func SplitModelVariant(model string) (string, string) {
-	if idx := strings.LastIndex(model, "/"); idx > 0 && knownVariants[model[idx+1:]] {
-		return model[:idx], model[idx+1:]
+	if base, variant := types.SplitModelVariant(model); variant != "" {
+		return base, variant
 	}
-	if idx := strings.LastIndex(model, "-"); idx > 0 && knownVariants[model[idx+1:]] {
-		return model[:idx], model[idx+1:]
+	if idx := strings.LastIndex(model, "-"); idx > 0 {
+		suffix := strings.ToLower(model[idx+1:])
+		if types.KnownVariants[suffix] {
+			return model[:idx], suffix
+		}
 	}
 	return model, ""
 }
@@ -113,7 +108,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}, nil
 }
 
-// ── workspace trust ────────────────────────────────────────────────────────
+// ── workspace trust ──────────────────────────────────────────────────────────
 
 func ensureWorkspaceTrusted(dir string) error {
 	absDir, err := filepath.Abs(dir)
