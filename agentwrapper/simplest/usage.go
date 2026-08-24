@@ -2,12 +2,23 @@ package simplest
 
 import (
 	"context"
+	"strings"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/simplest"
 )
 
-// Models returns the list of available models from simplest.
+func fullModelName(provider, id string) string {
+	if provider == "" {
+		return id
+	}
+	if strings.HasPrefix(strings.ToLower(id), strings.ToLower(provider)+"/") {
+		return id
+	}
+	return provider + "/" + id
+}
+
+// Models returns the list of available models from simplest formatted as provider/model.
 func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	models, err := simplest.GetAvailableModels()
 	if err != nil {
@@ -15,7 +26,7 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	}
 	result := make([]string, 0, len(models))
 	for _, m := range models {
-		result = append(result, m.ID)
+		result = append(result, fullModelName(m.Provider, m.ID))
 	}
 	return result, nil
 }

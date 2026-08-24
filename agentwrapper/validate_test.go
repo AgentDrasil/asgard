@@ -126,12 +126,12 @@ func TestValidateSimplestSetup(t *testing.T) {
 	// 5. Config file exists and is valid -> Success
 	validYAML := `
 providers:
-  google:
-    api: google-gemini
+  gemini:
+    api: gemini
     apiKey: valid-key
 models:
   - id: gemini-3.7-flash
-    provider: google
+    provider: gemini
 `
 	if err := os.WriteFile(cfgFile, []byte(validYAML), 0600); err != nil {
 		t.Fatalf("failed to write valid config: %v", err)

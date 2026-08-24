@@ -197,7 +197,7 @@ func TestGeminiToolCallIDEchoedInRequest(t *testing.T) {
 				Content: []types.AssistantContent{
 					types.ToolCall{Type: "toolCall", ID: "tc1", Name: "read", Arguments: json.RawMessage(`{}`)},
 				},
-				Provider: "google", API: types.APIGoogleGemini, Model: "gemini-3.7-flash",
+				Provider: "gemini", API: types.APIGemini, Model: "gemini-3.7-flash",
 			},
 			&types.ToolResultMessage{ToolCallID: "tc1", ToolName: "read",
 				Content: json.RawMessage(`[{"type":"text","text":"data"}]`)},

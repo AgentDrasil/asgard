@@ -11,6 +11,15 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
+func TestFullModelName(t *testing.T) {
+	assert.Equal(t, "gemini/gemini-3.7-flash", FullModelName("gemini", "gemini-3.7-flash"))
+	assert.Equal(t, "deepseek/deepseek-v4-flash", FullModelName("deepseek", "deepseek-v4-flash"))
+	assert.Equal(t, "stealth/ox-alpha", FullModelName("stealth", "stealth/ox-alpha"))
+	assert.Equal(t, "stealth/ox-alpha", FullModelName("stealth", "ox-alpha"))
+	assert.Equal(t, "openrouter/stealth/ox-alpha", FullModelName("openrouter", "stealth/ox-alpha"))
+	assert.Equal(t, "glm-5.3", FullModelName("", "glm-5.3"))
+}
+
 func TestLoad_FromPath(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "sk-secret-12345")
 	t.Setenv("TEST_BASE_URL", "https://api.openai.com/v1")
@@ -24,6 +33,9 @@ providers:
     baseUrl: ${TEST_BASE_URL}
     headers:
       X-Custom-Header: "provider-val"
+  gemini:
+    api: gemini
+    apiKey: "gemini-key"
 models:
   - id: custom-model-1
     name: "Custom Model 1"
@@ -32,6 +44,9 @@ models:
     maxTokens: 4096
     headers:
       X-Model-Header: "model-val"
+  - id: gemini-3.7-flash
+    name: "Gemini 3.7 Flash"
+    provider: gemini
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	err := os.WriteFile(configPath, []byte(configContent), 0o600)
@@ -49,20 +64,27 @@ models:
 	assert.Equal(t, "https://api.openai.com/v1", prov.BaseURL)
 	assert.Equal(t, "provider-val", prov.Headers["X-Custom-Header"])
 
+	geminiProv, ok := cfg.Providers["gemini"]
+	require.True(t, ok)
+	assert.Equal(t, "gemini", geminiProv.API)
+
 	// Verify model
-	require.Len(t, cfg.Models, 1)
+	require.Len(t, cfg.Models, 2)
 	m := cfg.Models[0]
 	assert.Equal(t, "custom-model-1", m.ID)
 	assert.Equal(t, int64(65536), m.ContextWindow)
 
 	// Verify GetAvailableModels
 	available := cfg.GetAvailableModels()
-	require.Len(t, available, 1)
+	require.Len(t, available, 2)
 	assert.Equal(t, "custom-model-1", available[0].ID)
 	assert.Equal(t, "openai-compat", available[0].API)
 	assert.Equal(t, "https://api.openai.com/v1", available[0].BaseURL)
 	assert.Equal(t, "provider-val", available[0].Headers["X-Custom-Header"])
 	assert.Equal(t, "model-val", available[0].Headers["X-Model-Header"])
+
+	assert.Equal(t, "gemini-3.7-flash", available[1].ID)
+	assert.Equal(t, "gemini", available[1].API)
 }
 
 func TestLoad_FailClosed_CorruptedYAML(t *testing.T) {
@@ -90,8 +112,8 @@ func TestDefaultFallback_MissingConfig(t *testing.T) {
 	require.Len(t, available, 2)
 
 	assert.Equal(t, "gemini-3.7-flash", available[0].ID)
-	assert.Equal(t, types.APIGoogleGemini, available[0].API)
-	assert.Equal(t, "google", available[0].Provider)
+	assert.Equal(t, types.APIGemini, available[0].API)
+	assert.Equal(t, "gemini", available[0].Provider)
 
 	assert.Equal(t, "gpt-4o", available[1].ID)
 	assert.Equal(t, types.APIOpenAICompat, available[1].API)
@@ -101,8 +123,8 @@ func TestDefaultFallback_MissingConfig(t *testing.T) {
 func TestResolveModelAndProvider(t *testing.T) {
 	cfg := &Config{
 		Providers: map[string]ProviderConfig{
-			"google": {
-				API:    types.APIGoogleGemini,
+			"gemini": {
+				API:    types.APIGemini,
 				APIKey: "gemini-secret-key",
 			},
 			"openai": {
@@ -125,7 +147,7 @@ func TestResolveModelAndProvider(t *testing.T) {
 			{
 				ID:            "gemini-3.7-flash",
 				Name:          "Gemini Flash",
-				Provider:      "google",
+				Provider:      "gemini",
 				ContextWindow: 1048576,
 			},
 			{
@@ -156,7 +178,20 @@ func TestResolveModelAndProvider(t *testing.T) {
 	require.NotNil(t, pDefault)
 	assert.Equal(t, "gemini-3.7-flash", mDefault.ID)
 
-	// 2. Resolve OpenAI model
+	// 2. Resolve Gemini model by provider/model (gemini/gemini-3.7-flash)
+	mGemini, pGemini, err := cfg.ResolveModelAndProvider("gemini/gemini-3.7-flash")
+	require.NoError(t, err)
+	require.NotNil(t, mGemini)
+	require.NotNil(t, pGemini)
+	assert.Equal(t, "gemini-3.7-flash", mGemini.ID)
+	assert.Equal(t, types.APIGemini, mGemini.API)
+
+	// 3. Resolve Gemini model by bare ID
+	mGeminiBare, _, err := cfg.ResolveModelAndProvider("gemini-3.7-flash")
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-3.7-flash", mGeminiBare.ID)
+
+	// 4. Resolve OpenAI model
 	mOpenAI, pOpenAI, err := cfg.ResolveModelAndProvider("gpt-4o")
 	require.NoError(t, err)
 	require.NotNil(t, mOpenAI)
@@ -164,7 +199,7 @@ func TestResolveModelAndProvider(t *testing.T) {
 	assert.Equal(t, "gpt-4o", mOpenAI.ID)
 	assert.Equal(t, types.APIOpenAICompat, mOpenAI.API)
 
-	// 3. Resolve by provider prefix (zai-coding-plan/glm-5.3)
+	// 5. Resolve by provider prefix (zai-coding-plan/glm-5.3)
 	mZai, pZai, err := cfg.ResolveModelAndProvider("zai-coding-plan/glm-5.3")
 	require.NoError(t, err)
 	require.NotNil(t, mZai)
@@ -172,7 +207,7 @@ func TestResolveModelAndProvider(t *testing.T) {
 	assert.Equal(t, "glm-5.3", mZai.ID)
 	assert.Equal(t, "zai-coding-plan", mZai.Provider)
 
-	// 4. Resolve OpenRouter model with slash in ID (stealth/ox-alpha and openrouter/stealth/ox-alpha)
+	// 6. Resolve OpenRouter model with slash in ID (stealth/ox-alpha and openrouter/stealth/ox-alpha)
 	mOR, _, err := cfg.ResolveModelAndProvider("stealth/ox-alpha")
 	require.NoError(t, err)
 	assert.Equal(t, "stealth/ox-alpha", mOR.ID)
@@ -181,7 +216,7 @@ func TestResolveModelAndProvider(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "stealth/ox-alpha", mORFull.ID)
 
-	// 5. Resolve missing model
+	// 7. Resolve missing model
 	mErr, pErr, err := cfg.ResolveModelAndProvider("claude-3-opus")
 	require.Error(t, err)
 	assert.Nil(t, mErr)

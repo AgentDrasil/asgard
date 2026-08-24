@@ -28,13 +28,13 @@ func userMsg(text string) *s.UserMessage {
 	return &s.UserMessage{Content: s.TextOnly(text), Timestamp: now()}
 }
 
-// GeminiModel returns a ready-to-use gemini-2.5-flash model descriptor.
+// GeminiModel returns a ready-to-use gemini-3.7-flash model descriptor.
 func GeminiModel() *s.Model {
 	return &s.Model{
 		ID:            "gemini-3.7-flash",
 		Name:          "Gemini 3.7 Flash",
-		API:           s.APIGoogleGemini,
-		Provider:      "google",
+		API:           s.APIGemini,
+		Provider:      "gemini",
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,
 		Input:         []string{"text", "image"},

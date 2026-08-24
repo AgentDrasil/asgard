@@ -342,7 +342,7 @@ func TestLengthStopFailsAllToolCalls(t *testing.T) {
 
 func TestErrorStopEndsRunImmediately(t *testing.T) {
 	fp := &fakeProvider{responses: []*types.AssistantMessage{
-		&types.AssistantMessage{Content: []types.AssistantContent{}, StopReason: types.StopError, ErrorMessage: "boom"},
+		{Content: []types.AssistantContent{}, StopReason: types.StopError, ErrorMessage: "boom"},
 		textMsg("never"),
 	}}
 	evs, end := collect(t, Run(context.Background(), baseRequest(fp)))

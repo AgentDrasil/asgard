@@ -21,7 +21,7 @@ go get github.com/AgentDrasil/simplest
 | `types`    | Shared data model: messages, content blocks, events, `Provider`, `Model`, `Context` |
 | `tools`    | 7 built-ins (`read`, `bash`, `edit`, `write`, `find`, `grep`, `ls`), registry, JSON-schema validation, Go-func tool adapter |
 | `session`  | JSONL v3 session store (tree entries, resume, compaction) |
-| `provider` | `openai-compat` and `google-gemini` SSE streaming clients |
+| `provider` | `openai-compat` and `gemini` SSE streaming clients |
 | `prompt`   | System-prompt assembly + AGENTS.md / CLAUDE.md context-file loading |
 | `agent`    | The run loop: `Run(ctx, Request) <-chan AgentEvent` |
 
@@ -52,8 +52,8 @@ func main() {
 	model := &s.Model{
 		ID:            "gemini-3.7-flash",
 		Name:          "Gemini 3.7 Flash",
-		API:           s.APIGoogleGemini, // or s.APIOpenAICompat
-		Provider:      "google",
+		API:           s.APIGemini, // or s.APIOpenAICompat
+		Provider:      "gemini",
 		BaseURL:       "", // "" = official endpoint; must include version path if custom
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,

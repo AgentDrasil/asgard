@@ -19,13 +19,13 @@ func TestModelsAndUsage(t *testing.T) {
 
 	simplest.SetGlobalConfig(&simplest.Config{
 		Providers: map[string]simplest.ProviderConfig{
-			"google": {API: simplest.APIGoogleGemini, APIKey: "fake-key"},
+			"gemini": {API: simplest.APIGemini, APIKey: "fake-key"},
 		},
 		Models: []simplest.ModelConfig{
 			{
 				ID:            "gemini-3.7-flash",
 				Name:          "Gemini 3.7 Flash",
-				Provider:      "google",
+				Provider:      "gemini",
 				ContextWindow: 1048576,
 			},
 		},
@@ -36,12 +36,12 @@ func TestModelsAndUsage(t *testing.T) {
 
 	models, err := Models(ctx, opts)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"gemini-3.7-flash"}, models)
+	assert.Equal(t, []string{"gemini/gemini-3.7-flash"}, models)
 
 	usages, err := Usage(ctx, opts)
 	require.NoError(t, err)
 	require.Len(t, usages, 1)
-	assert.Equal(t, "gemini-3.7-flash", usages[0].Model)
+	assert.Equal(t, "gemini/gemini-3.7-flash", usages[0].Model)
 	assert.Equal(t, 1.0, usages[0].Remaining)
 	assert.Equal(t, int64(0), usages[0].RefreshDate)
 }

@@ -16,28 +16,40 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
+// FullModelName returns the model identifier prefixed with provider if not already present.
+func FullModelName(provider, id string) string {
+	if provider == "" {
+		return id
+	}
+	if strings.HasPrefix(strings.ToLower(id), strings.ToLower(provider)+"/") {
+		return id
+	}
+	return provider + "/" + id
+}
+
 // ProviderConfig defines configuration for an LLM provider.
 type ProviderConfig struct {
 	API     string            `yaml:"api" json:"api"`
-	APIKey  string            `yaml:"apiKey" json:"apiKey"`
-	BaseURL string            `yaml:"baseUrl" json:"baseUrl"`
-	Headers map[string]string `yaml:"headers" json:"headers"`
+	APIKey  string            `yaml:"apiKey,omitempty" json:"apiKey,omitempty"`
+	BaseURL string            `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
 // ModelConfig defines configuration for a specific model endpoint.
+// The API protocol is inherited from the corresponding ProviderConfig if omitted.
 type ModelConfig struct {
 	ID              string               `yaml:"id" json:"id"`
-	Name            string               `yaml:"name" json:"name"`
+	Name            string               `yaml:"name,omitempty" json:"name,omitempty"`
 	Provider        string               `yaml:"provider" json:"provider"`
-	API             string               `yaml:"api" json:"api"`
-	BaseURL         string               `yaml:"baseUrl" json:"baseUrl"`
-	ContextWindow   int64                `yaml:"contextWindow" json:"contextWindow"`
-	MaxTokens       int64                `yaml:"maxTokens" json:"maxTokens"`
-	Reasoning       bool                 `yaml:"reasoning" json:"reasoning"`
+	API             string               `yaml:"api,omitempty" json:"api,omitempty"`
+	BaseURL         string               `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
+	ContextWindow   int64                `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
+	MaxTokens       int64                `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
+	Reasoning       bool                 `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 	ReasoningEffort []string             `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
-	Cost            types.ModelCostRates `yaml:"cost" json:"cost"`
-	Input           []string             `yaml:"input" json:"input"`
-	Headers         map[string]string    `yaml:"headers" json:"headers"`
+	Cost            types.ModelCostRates `yaml:"cost,omitempty" json:"cost,omitempty"`
+	Input           []string             `yaml:"input,omitempty" json:"input,omitempty"`
+	Headers         map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
 // RawModelConfig is a type alias to ModelConfig used to prevent infinite recursion during UnmarshalYAML.
@@ -155,15 +167,14 @@ func defaultFallbackConfig() *Config {
 	}
 
 	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" {
-		cfg.Providers["google"] = ProviderConfig{
-			API:    types.APIGoogleGemini,
+		cfg.Providers["gemini"] = ProviderConfig{
+			API:    types.APIGemini,
 			APIKey: geminiKey,
 		}
 		cfg.Models = append(cfg.Models, ModelConfig{
 			ID:            "gemini-3.7-flash",
 			Name:          "Gemini 3.7 Flash",
-			Provider:      "google",
-			API:           types.APIGoogleGemini,
+			Provider:      "gemini",
 			ContextWindow: 1_048_576,
 			MaxTokens:     8192,
 			Reasoning:     true,
@@ -185,7 +196,6 @@ func defaultFallbackConfig() *Config {
 			ID:            "gpt-4o",
 			Name:          "GPT-4o",
 			Provider:      "openai",
-			API:           types.APIOpenAICompat,
 			BaseURL:       baseURL,
 			ContextWindow: 128_000,
 			MaxTokens:     4096,
@@ -256,9 +266,10 @@ func (c *Config) GetAvailableModels() []*types.Model {
 // ResolveModelAndProvider resolves a model and constructs its corresponding Provider instance.
 // If modelID is empty, the first allowed model in the configuration is selected.
 // If modelID is specified, it matches against allowed models by:
-// 1. Exact or case-insensitive match on Model ID (e.g. "glm-5.3")
-// 2. Exact or case-insensitive match on "Provider/ModelID" (e.g. "zai-coding-plan/glm-5.3")
-// 3. If modelID contains a provider prefix (e.g. "zai-coding-plan/glm-5.3"), match provider and ID parts
+// 1. Exact or case-insensitive match on FullModelName (e.g. "gemini/gemini-3.5-flash-lite", "zai-coding-plan/glm-5.3")
+// 2. Exact or case-insensitive match on "Provider/ModelID"
+// 3. Match by splitting modelID at first '/' into provider and model ID
+// 4. Exact or case-insensitive match on Model ID (e.g. "gemini-3.5-flash-lite", "glm-5.3")
 func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Provider, error) {
 	if c == nil {
 		return nil, nil, errors.New("nil configuration")
@@ -273,8 +284,10 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 	if modelID == "" {
 		matched = available[0]
 	} else {
+		// 1. Try full model name or provider/id match
 		for _, m := range available {
-			if strings.EqualFold(m.ID, modelID) {
+			fullName := FullModelName(m.Provider, m.ID)
+			if strings.EqualFold(fullName, modelID) {
 				matched = m
 				break
 			}
@@ -283,10 +296,20 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 				break
 			}
 		}
+		// 2. Try matching provider and ID parts if modelID contains '/'
 		if matched == nil && strings.Contains(modelID, "/") {
 			parts := strings.SplitN(modelID, "/", 2)
 			for _, m := range available {
 				if strings.EqualFold(m.Provider, parts[0]) && strings.EqualFold(m.ID, parts[1]) {
+					matched = m
+					break
+				}
+			}
+		}
+		// 3. Fallback: match by bare model ID
+		if matched == nil {
+			for _, m := range available {
+				if strings.EqualFold(m.ID, modelID) {
 					matched = m
 					break
 				}
@@ -305,8 +328,8 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 	}
 
 	var p types.Provider
-	switch matched.API {
-	case types.APIGoogleGemini:
+	switch strings.ToLower(matched.API) {
+	case types.APIGemini, "google-gemini":
 		p = provider.NewGemini(apiKey)
 	case types.APIOpenAICompat:
 		oa := provider.NewOpenAICompat(apiKey)

@@ -158,7 +158,7 @@ type (
 )
 
 const (
-	APIGoogleGemini = types.APIGoogleGemini
+	APIGemini       = types.APIGemini
 	APIOpenAICompat = types.APIOpenAICompat
 )
 

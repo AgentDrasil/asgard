@@ -515,6 +515,60 @@ func TestPrompt_ThinkingVariantPassThrough(t *testing.T) {
 	assert.Equal(t, simplest.ThinkingLow, capturingP.capturedOpts[0].ThinkingLevel)
 }
 
+func TestPrompt_GeminiProviderModelVariantPassThrough(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Done."},
+		},
+		Usage: simplest.Usage{
+			Input:       20,
+			Output:      5,
+			TotalTokens: 25,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	var resolvedModel string
+	testModel := &simplest.Model{
+		ID:            "gemini-3.5-flash-lite",
+		Name:          "Gemini 3.5 Flash Lite",
+		Provider:      "gemini",
+		API:           simplest.APIGemini,
+		ContextWindow: 1048576,
+		Reasoning:     true,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		resolvedModel = modelID
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	_, err := Prompt(context.Background(), "Coding task", types.PromptOptions{
+		Dir:   testDir,
+		Model: "gemini/gemini-3.5-flash-lite/low",
+	})
+	require.NoError(t, err)
+
+	// Target model passed to resolver should have variant stripped
+	assert.Equal(t, "gemini/gemini-3.5-flash-lite", resolvedModel)
+
+	// StreamOptions should receive ThinkingLevel "low"
+	require.NotEmpty(t, capturingP.capturedOpts)
+	assert.Equal(t, simplest.ThinkingLow, capturingP.capturedOpts[0].ThinkingLevel)
+}
+
 func TestPrompt_ReasoningEffortDisallowedError(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)

@@ -125,14 +125,14 @@ func TestSupportedCLIs_SimplestModelsAndQuota(t *testing.T) {
 	// Fixture: simplest whitelist config
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	validYAML := `providers:
-  google:
-    api: google-gemini
+  gemini:
+    api: gemini
     apiKey: test-key
 models:
   - id: gemini-3.7-flash
-    provider: google
+    provider: gemini
   - id: gemini-3.7-pro
-    provider: google
+    provider: gemini
 `
 	if err := os.WriteFile(cfgPath, []byte(validYAML), 0600); err != nil {
 		t.Fatalf("writing fixture config: %v", err)
@@ -154,8 +154,8 @@ models:
 		t.Fatalf("expected 2 models for simplest, got %v", got)
 	}
 	expectedModels := map[string]bool{
-		"gemini-3.7-flash": true,
-		"gemini-3.7-pro":   true,
+		"gemini/gemini-3.7-flash": true,
+		"gemini/gemini-3.7-pro":   true,
 	}
 	for _, m := range got {
 		if !expectedModels[m] {

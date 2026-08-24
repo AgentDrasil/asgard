@@ -22,6 +22,8 @@ func TestMatchesModel(t *testing.T) {
 		{cli: "agy", model: "gemini-3.7-flash", known: "gemini-3.7-flash", want: true},
 		{cli: "simplest", model: "zai-coding-plan/glm-5.3/low", known: "zai-coding-plan/glm-5.3", want: true},
 		{cli: "simplest", model: "zai-coding-plan/glm-5.3/max", known: "zai-coding-plan/glm-5.3", want: true},
+		{cli: "simplest", model: "gemini/gemini-3.5-flash-lite/low", known: "gemini/gemini-3.5-flash-lite", want: true},
+		{cli: "simplest", model: "gemini/gemini-3.7-flash/high", known: "gemini/gemini-3.7-flash", want: true},
 		{cli: "simplest", model: "gemini-3.7-flash/high", known: "gemini-3.7-flash", want: true},
 		{cli: "simplest", model: "gemini-3.7-flash", known: "gemini-3.7-flash", want: true},
 	}
@@ -46,6 +48,9 @@ func TestModelCandidates(t *testing.T) {
 		t.Errorf("unexpected candidates: %v", got)
 	}
 	if got := ModelCandidates("agy", "gemini-3.7-flash/low"); !reflect.DeepEqual(got, []string{"gemini-3.7-flash/low", "gemini-3.7-flash"}) {
+		t.Errorf("unexpected candidates: %v", got)
+	}
+	if got := ModelCandidates("simplest", "gemini/gemini-3.5-flash-lite/low"); !reflect.DeepEqual(got, []string{"gemini/gemini-3.5-flash-lite/low", "gemini/gemini-3.5-flash-lite"}) {
 		t.Errorf("unexpected candidates: %v", got)
 	}
 	if got := ModelCandidates("simplest", "zai-coding-plan/glm-5.3/max"); !reflect.DeepEqual(got, []string{"zai-coding-plan/glm-5.3/max", "zai-coding-plan/glm-5.3"}) {

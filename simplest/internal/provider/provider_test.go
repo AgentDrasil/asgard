@@ -65,7 +65,7 @@ func oaModel(url string) *types.Model {
 
 func gModel(url string) *types.Model {
 	return &types.Model{
-		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGoogleGemini, Provider: "google",
+		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGemini, Provider: "gemini",
 		BaseURL: url, Reasoning: true, ContextWindow: 1e6, MaxTokens: 8192,
 		Cost:  types.ModelCostRates{Input: 0.3, Output: 2.5},
 		Input: []string{"text", "image"},
@@ -165,7 +165,8 @@ func TestOpenAIStreamHappyPath(t *testing.T) {
 }
 
 func TestOpenAIRequestOptionsAndTools(t *testing.T) {
-	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &capturedBody, nil, "")
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
 	defer srv.Close()
 	temp := 0.5
 	mt := int64(1234)
@@ -178,7 +179,7 @@ func TestOpenAIRequestOptionsAndTools(t *testing.T) {
 	p := NewOpenAICompat("k")
 	_, _, _ = drain(p.Stream(context.Background(), oaModel(srv.URL), cx, opts))
 
-	b := capturedBody
+	b := captured
 	if b["temperature"] != 0.5 || b["max_completion_tokens"] != float64(1234) {
 		t.Fatalf("options not sent: %v", b)
 	}
@@ -192,10 +193,9 @@ func TestOpenAIRequestOptionsAndTools(t *testing.T) {
 	}
 }
 
-var capturedBody map[string]any
-
 func TestOpenAISystemPromptAndRoles(t *testing.T) {
-	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &capturedBody2, nil, "")
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
 	defer srv.Close()
 	cx := &types.Context{
 		SystemPrompt: "sys prompt",
@@ -217,7 +217,7 @@ func TestOpenAISystemPromptAndRoles(t *testing.T) {
 	}
 	p := NewOpenAICompat("k")
 	_, _, _ = drain(p.Stream(context.Background(), oaModel(srv.URL), cx, nil))
-	msgs := capturedBody2["messages"].([]any)
+	msgs := captured["messages"].([]any)
 	if len(msgs) != 5 {
 		t.Fatalf("want 5 wire messages, got %d: %v", len(msgs), msgs)
 	}
@@ -242,8 +242,6 @@ func TestOpenAISystemPromptAndRoles(t *testing.T) {
 		t.Fatalf("trailing user lost: %v", msgs[4])
 	}
 }
-
-var capturedBody2 map[string]any
 
 func TestOpenAIHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
