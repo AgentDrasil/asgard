@@ -85,7 +85,7 @@ func setupTmpDir(home string, chatID string) (string, error) {
 	return tmpDir, nil
 }
 
-// appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH).
+// appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH, TZ).
 func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string, error) {
 	// Basic safety isolation flags
 	args = append(args, "--die-with-parent")
@@ -120,13 +120,22 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 		}
 	}
 
-	// Mount library/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility
-	extraROPaths := []string{"/lib", "/lib64", "/usr/lib", "/etc"}
+	// Mount library/timezone/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility and timezone inheritance
+	extraROPaths := []string{"/lib", "/lib64", "/usr/lib", "/usr/share/zoneinfo", "/usr/share/zoneinfo-icu", "/etc"}
 	for _, p := range extraROPaths {
 		if !mountedPaths[p] {
 			if _, err := os.Stat(p); err == nil {
 				args = append(args, "--ro-bind", p, p)
 				mountedPaths[p] = true
+			}
+		}
+	}
+	// If /etc/localtime is a symlink resolving to a target outside the mounted paths, mount it as well
+	if realLocaltime, err := filepath.EvalSymlinks("/etc/localtime"); err == nil && realLocaltime != "/etc/localtime" {
+		if !mountedPaths[realLocaltime] {
+			if _, err := os.Stat(realLocaltime); err == nil {
+				args = append(args, "--ro-bind", realLocaltime, realLocaltime)
+				mountedPaths[realLocaltime] = true
 			}
 		}
 	}
@@ -137,10 +146,13 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 		args = append(args, "--dev", "/dev")
 	}
 
-	// Set HOME and PATH env
+	// Set HOME, PATH, and TZ env
 	args = append(args, "--setenv", "HOME", home)
 	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
 		args = append(args, "--setenv", "PATH", pathEnv)
+	}
+	if tzEnv := os.Getenv("TZ"); tzEnv != "" {
+		args = append(args, "--setenv", "TZ", tzEnv)
 	}
 
 	return args, nil

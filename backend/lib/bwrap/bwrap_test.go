@@ -324,6 +324,22 @@ func TestBuildArgs(t *testing.T) {
 	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 }
 
+func TestTimezoneInheritance(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("TZ", "Asia/Tokyo")
+
+	args, err := appendBaseSandboxArgs([]string{}, tmpDir, "test-tz")
+	require.NoError(t, err)
+
+	argStr := strings.Join(args, " ")
+	assert.Contains(t, argStr, "--setenv TZ Asia/Tokyo")
+
+	if _, err := os.Stat("/usr/share/zoneinfo"); err == nil {
+		assert.Contains(t, argStr, "--ro-bind /usr/share/zoneinfo /usr/share/zoneinfo")
+	}
+}
+
 func TestCommandForCommandExec(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -342,12 +358,12 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create ssh dir: %v", err)
 	}
 
-	runDir := filepath.Join(tmpDir, "rundir")
-	if err := os.MkdirAll(runDir, 0755); err != nil {
+	runcfgRunDir := filepath.Join(tmpDir, "rundir")
+	if err := os.MkdirAll(runcfgRunDir, 0755); err != nil {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runDir, "test-sock-dir", "test-chat")
+	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat")
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
@@ -375,11 +391,11 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	// runDir is inside home, so it must NOT be bind-mounted separately (a
 	// nested bind would give it a different st_dev and break hard links).
-	if strings.Contains(argStr, "--bind "+runDir+" "+runDir) {
+	if strings.Contains(argStr, "--bind "+runcfgRunDir+" "+runcfgRunDir) {
 		t.Errorf("expected no separate runDir bind mount (inside home), got: %s", argStr)
 	}
-	if !strings.Contains(argStr, "--chdir "+runDir) {
-		t.Errorf("expected '--chdir %s' in args, got: %s", runDir, argStr)
+	if !strings.Contains(argStr, "--chdir "+runcfgRunDir) {
+		t.Errorf("expected '--chdir %s' in args, got: %s", runcfgRunDir, argStr)
 	}
 
 	expectedEnd := "-- /bin/fakebashd"
