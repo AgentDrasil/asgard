@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/agent-validate
 
-go 1.26.5
+go 1.27.0
 
 require (
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
