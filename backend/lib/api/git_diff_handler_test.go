@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -91,17 +91,17 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
 	srvWithRepo := &Server{repo: sessionRepo}
 
-	validSessionID := uuid.Must(uuid.NewV7()).String()
+	validSessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(validSessionID, "test-agent", "", "", nil))
 	sess, err := sessionRepo.GetSession(validSessionID)
 	require.NoError(t, err)
 	sess.RunDir = repoDir
 	require.NoError(t, sessionRepo.SaveSession(sess))
 
-	nonExistentSessionID := uuid.Must(uuid.NewV7()).String()
+	nonExistentSessionID := uuid.NewV7().String()
 
 	// Session whose RunDir is not inside a git repository
-	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	nonGitSessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
 	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
 	require.NoError(t, err)
@@ -267,7 +267,7 @@ func TestHandleGitDiff_DeletedFiles(t *testing.T) {
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
 	srv := &Server{repo: sessionRepo}
 
-	sessionID := uuid.Must(uuid.NewV7()).String()
+	sessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(sessionID, "test-agent", "", "", nil))
 	sess, err := sessionRepo.GetSession(sessionID)
 	require.NoError(t, err)
@@ -360,7 +360,7 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
 	srvWithRepo := &Server{repo: sessionRepo}
 
-	validSessionID := uuid.Must(uuid.NewV7()).String()
+	validSessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(validSessionID, "test-agent", "", "", nil))
 	sess, err := sessionRepo.GetSession(validSessionID)
 	require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 	require.NoError(t, sessionRepo.SaveSession(sess))
 
 	// Session whose RunDir is not inside a git repository
-	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	nonGitSessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
 	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
 	require.NoError(t, err)
@@ -502,7 +502,7 @@ func TestHandleGitPushPull_Validation(t *testing.T) {
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
 	srvWithRepo := &Server{repo: sessionRepo}
 
-	nonGitSessionID := uuid.Must(uuid.NewV7()).String()
+	nonGitSessionID := uuid.NewV7().String()
 	require.NoError(t, sessionRepo.UpdateAgentSession(nonGitSessionID, "test-agent", "", "", nil))
 	nonGitSess, err := sessionRepo.GetSession(nonGitSessionID)
 	require.NoError(t, err)

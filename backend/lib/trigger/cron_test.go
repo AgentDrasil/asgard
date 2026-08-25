@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -127,10 +126,10 @@ func TestWorkflowCronManager_ScheduleTrigger(t *testing.T) {
 
 	agent := newTestWorkflowAgent(t, "sched-trigger-wf", "")
 	m.mu.Lock()
-	jobID, err := m.addJobLocked(agent, gocron.DurationJob(50*time.Millisecond))
+	job, err := m.addJobLocked(agent, gocron.DurationJob(50*time.Millisecond))
 	m.mu.Unlock()
 	require.NoError(t, err)
-	assert.NotEqual(t, uuid.Nil, jobID)
+	assert.NotNil(t, job)
 
 	assert.Eventually(t, func() bool {
 		mu.Lock()

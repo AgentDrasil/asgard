@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -225,7 +225,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		// agent nodes share a session, each runner only consumes the status updates
 		// its own sandbox reported. It is injected into the sandbox via env and
 		// echoed back by aw in every update payload.
-		runToken := uuid.Must(uuid.NewV7()).String()
+		runToken := uuid.NewV7().String()
 		var statusCh <-chan AgentStatusUpdate
 		var cancelListener func()
 		if r.statusListener != nil && nctx.SessionID != "" {

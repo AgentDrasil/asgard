@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -48,7 +48,7 @@ func (e *SingleAgentExecutor) executeSequential(
 	}
 
 	// ── Run the agent in a goroutine, collect result on resultCh ──────────
-	runToken := uuid.Must(uuid.NewV7()).String()
+	runToken := uuid.NewV7().String()
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
 		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken}, e.conf)
@@ -132,7 +132,7 @@ func (e *SingleAgentExecutor) handleFinalResult(
 		// Save final assistant response to DB session
 		if respText != "" {
 			finalMsg := dbmodels.ChatMessage{
-				ID:          fmt.Sprintf("assistant-%s-%s", chatID, uuid.Must(uuid.NewV7()).String()),
+				ID:          fmt.Sprintf("assistant-%s-%s", chatID, uuid.NewV7().String()),
 				Role:        "assistant",
 				Content:     respText,
 				AgentName:   e.agent.Config.Name,

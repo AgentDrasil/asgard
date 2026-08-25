@@ -14,8 +14,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // CurrentVersion is the JSONL session format version written by this package.
@@ -33,11 +32,7 @@ func fileTimestamp(ts string) string {
 
 // uuidv7 generates a time-ordered RFC 9562 version-7 UUID.
 func uuidv7() string {
-	id, err := uuid.NewV7()
-	if err != nil {
-		panic("session: failed to generate uuid: " + err.Error())
-	}
-	return id.String()
+	return uuid.NewV7().String()
 }
 
 // generateEntryID returns a unique short id (8 hex chars). Falls back to a full uuid after repeated collisions.

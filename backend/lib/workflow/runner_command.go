@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -153,7 +153,7 @@ func runSandboxedCommand(ctx context.Context, command, runDir, chatID string, st
 	if err != nil {
 		return -1, fmt.Errorf("getting user home directory: %w", err)
 	}
-	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.Must(uuid.NewV7()).String())
+	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0o755); err != nil {
 		return -1, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}

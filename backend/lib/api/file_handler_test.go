@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,7 +38,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create session with runDir
-	chatID := uuid.Must(uuid.NewV7()).String()
+	chatID := uuid.NewV7().String()
 	err = repo.UpdateAgentSession(chatID, "test-agent", "", "", nil)
 	require.NoError(t, err)
 

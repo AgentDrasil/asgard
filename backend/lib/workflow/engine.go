@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 
@@ -227,10 +227,10 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 	}
 
 	if rc.SessionID == "" {
-		rc.SessionID = uuid.Must(uuid.NewV7()).String()
+		rc.SessionID = uuid.NewV7().String()
 	}
 	if rc.RunID == "" {
-		rc.RunID = uuid.Must(uuid.NewV7()).String()
+		rc.RunID = uuid.NewV7().String()
 	}
 	if rc.RunDir == "" {
 		wd, err := os.Getwd()

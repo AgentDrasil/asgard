@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
@@ -204,7 +204,7 @@ func (s *Server) persistIncomingWorkflowMessage(agent *agentspec.Agent, chatID s
 		}
 	}
 	if userMsgID == "" {
-		userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
+		userMsgID = fmt.Sprintf("msg-%s", uuid.NewV7().String())
 	}
 	role := "user"
 	activityType := ""

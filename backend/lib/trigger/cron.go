@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/go-co-op/gocron/v2"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -35,7 +34,7 @@ type WorkflowCronManager struct {
 	repo      *dbmodels.SessionRepository
 	trigger   TriggerFunc
 	mu        sync.Mutex
-	jobs      map[string]uuid.UUID // agent.Config.ID -> gocron Job ID
+	jobs      map[string]gocron.Job // agent.Config.ID -> gocron Job
 }
 
 // NewWorkflowCronManager creates and starts a gocron scheduler.
@@ -48,7 +47,7 @@ func NewWorkflowCronManager(repo *dbmodels.SessionRepository, trigger TriggerFun
 		scheduler: scheduler,
 		repo:      repo,
 		trigger:   trigger,
-		jobs:      make(map[string]uuid.UUID),
+		jobs:      make(map[string]gocron.Job),
 	}
 	scheduler.Start()
 	return m, nil
@@ -97,9 +96,9 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for id, jobID := range m.jobs {
+	for id, job := range m.jobs {
 		if _, ok := desired[id]; !ok {
-			if err := m.scheduler.RemoveJob(jobID); err != nil {
+			if err := m.scheduler.RemoveJob(job.ID()); err != nil {
 				log.Warn().Err(err).Str("agent", id).Msg("failed to remove stale workflow cron job")
 			}
 			delete(m.jobs, id)
@@ -108,34 +107,34 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 
 	for id, item := range desired {
 		// Re-register unconditionally so schedule changes take effect.
-		if jobID, ok := m.jobs[id]; ok {
-			if err := m.scheduler.RemoveJob(jobID); err != nil {
+		if job, ok := m.jobs[id]; ok {
+			if err := m.scheduler.RemoveJob(job.ID()); err != nil {
 				log.Warn().Err(err).Str("agent", id).Msg("failed to remove outdated workflow cron job")
 			}
 			delete(m.jobs, id)
 		}
-		jobID, err := m.addJobLocked(item.agent, gocron.CronJob(item.schedule, false))
+		job, err := m.addJobLocked(item.agent, gocron.CronJob(item.schedule, false))
 		if err != nil {
 			log.Error().Err(err).Str("agent", id).Str("schedule", item.schedule).Msg("failed to register workflow cron job")
 			continue
 		}
-		m.jobs[id] = jobID
+		m.jobs[id] = job
 		log.Info().Str("agent", id).Str("schedule", item.schedule).Msg("Scheduled workflow cron job")
 	}
 }
 
 // addJobLocked registers a job with singleton mode so overlapping cycles are
 // skipped while a previous run is still in flight. Callers must hold m.mu.
-func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, defn gocron.JobDefinition) (uuid.UUID, error) {
+func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, defn gocron.JobDefinition) (gocron.Job, error) {
 	job, err := m.scheduler.NewJob(
 		defn,
 		gocron.NewTask(m.runScheduledWorkflow, agent),
 		gocron.WithSingletonMode(gocron.LimitModeReschedule),
 	)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to schedule workflow cron job: %w", err)
+		return nil, fmt.Errorf("failed to schedule workflow cron job: %w", err)
 	}
-	return job.ID(), nil
+	return job, nil
 }
 
 // runScheduledWorkflow is the task body executed on every schedule cycle.

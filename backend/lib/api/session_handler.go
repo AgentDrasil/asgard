@@ -3,8 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -54,7 +54,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	chatID := uuid.Must(uuid.NewV7()).String()
+	chatID := uuid.NewV7().String()
 
 	normalizedRunDir := NormalizeSessionRunDir(req.RunDir, chatID)
 	runDirOpt := optional.None[string]()

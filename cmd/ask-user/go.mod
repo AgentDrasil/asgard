@@ -4,7 +4,6 @@ go 1.27.0
 
 require (
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
-	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.35.1
 )
 

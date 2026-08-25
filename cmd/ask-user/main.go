@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/logger"
@@ -116,7 +116,7 @@ func main() {
 	askUserURL := internalHost + "/api/ask-user"
 	statusURL := internalHost + "/agent-status"
 
-	msgID := fmt.Sprintf("ask-%s", uuid.Must(uuid.NewV7()).String())
+	msgID := fmt.Sprintf("ask-%s", uuid.NewV7().String())
 	sendAgentStatus(statusURL, chatID, msgID, questionText, agentID, agentName)
 
 	// Send AskUser request and long-poll host until user replies

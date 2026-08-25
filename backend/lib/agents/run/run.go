@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
@@ -61,7 +61,7 @@ func resolveRunDir(agent *agentspec.Agent, runDirOpt optional.Option[string]) (s
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
-	uuidDir := filepath.Join(tmpDir, uuid.Must(uuid.NewV7()).String())
+	uuidDir := filepath.Join(tmpDir, uuid.NewV7().String())
 	if err := os.MkdirAll(uuidDir, 0755); err != nil {
 		return "", fmt.Errorf("creating uuid run directory %q: %w", uuidDir, err)
 	}
@@ -93,7 +93,7 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
 	}
-	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.Must(uuid.NewV7()).String())
+	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}

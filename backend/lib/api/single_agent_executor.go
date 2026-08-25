@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -56,7 +56,7 @@ func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *d
 func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRunParams) (string, error) {
 	chatID := params.ChatID
 	if chatID == "" {
-		chatID = uuid.Must(uuid.NewV7()).String()
+		chatID = uuid.NewV7().String()
 	} else if !IsValidChatID(chatID) {
 		return "", fmt.Errorf("invalid chatID format")
 	}
@@ -143,7 +143,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 				}
 			}
 			if userMsgID == "" {
-				userMsgID = fmt.Sprintf("msg-%s", uuid.Must(uuid.NewV7()).String())
+				userMsgID = fmt.Sprintf("msg-%s", uuid.NewV7().String())
 			}
 
 			role := "user"

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,7 +34,7 @@ func setupTestServer(t *testing.T) (*Server, *dbmodels.SessionRepository, string
 	server.mux = server.buildMuxLocked()
 
 	tempWorkspaceDir := t.TempDir()
-	chatID := uuid.Must(uuid.NewV7()).String()
+	chatID := uuid.NewV7().String()
 
 	err = repo.UpdateAgentSession(chatID, "test-agent", "", "", nil)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestFilesTreeHandler_TableDriven(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, "root.txt"), []byte("root file"), 0644))
 
-	nonExistentChatID := uuid.Must(uuid.NewV7()).String()
+	nonExistentChatID := uuid.NewV7().String()
 
 	tests := []struct {
 		name           string
@@ -477,7 +477,7 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 	}
 	server.mux = server.buildMuxLocked()
 
-	chatID := uuid.Must(uuid.NewV7()).String()
+	chatID := uuid.NewV7().String()
 	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
 
 	sess, err := repo.GetSession(chatID)

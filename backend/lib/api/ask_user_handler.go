@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -55,7 +55,7 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.MessageID == "" {
-		req.MessageID = fmt.Sprintf("ask-%s", uuid.Must(uuid.NewV7()).String())
+		req.MessageID = fmt.Sprintf("ask-%s", uuid.NewV7().String())
 	}
 
 	log.Info().Str("chat_id", req.ChatID).Str("question", req.Question).Str("agent_name", req.AgentName).Msg("handleAskUser: received ask-user request from sandbox")

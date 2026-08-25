@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
@@ -66,7 +66,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 	chatID := req.ChatID
 	if chatID == "" {
-		chatID = uuid.Must(uuid.NewV7()).String()
+		chatID = uuid.NewV7().String()
 	} else if !IsValidChatID(chatID) {
 		http.Error(w, `{"error":"invalid chatId format"}`, http.StatusBadRequest)
 		return

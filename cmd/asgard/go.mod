@@ -17,6 +17,7 @@ require (
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
@@ -79,4 +80,5 @@ replace (
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../../pkg/pluginsdk
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../../pkg/workflowspec
 	github.com/AgentDrasil/asgard/plugins/notebook => ../../plugins/notebook
+	github.com/AgentDrasil/asgard/simplest => ../../simplest
 )
