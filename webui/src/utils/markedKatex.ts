@@ -10,7 +10,7 @@ export interface MarkedKatexOptions {
   throwOnError?: boolean;
 }
 
-interface KatexToken extends Tokens.Generic {
+export interface KatexToken extends Tokens.Generic {
   text: string;
   displayMode: boolean;
 }
@@ -28,6 +28,7 @@ const INLINE_BRACKET_RULE = /^\\\[([\s\S]+?)\\\]/;
 const BLOCK_DOUBLE_DOLLAR_RULE = /^\$\$([\s\S]+?)\$\$(?:\n|$)/;
 const BLOCK_BRACKET_RULE = /^\\\[([\s\S]+?)\\\](?:\n|$)/;
 
+// Defense-in-depth HTML escaper (handles standard entities including quotes)
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -91,8 +92,11 @@ function inlineTokenizer(src: string): KatexToken | undefined {
   }
 
   match = INLINE_PAREN_RULE.exec(src);
-  if (match && match[1].trim().length > 0) {
-    return { type: "inlineKatex", raw: match[0], text: match[1], displayMode: false };
+  if (match) {
+    const content = match[1].trim();
+    if (content.length > 0) {
+      return { type: "inlineKatex", raw: match[0], text: content, displayMode: false };
+    }
   }
 
   match = INLINE_BRACKET_RULE.exec(src);

@@ -148,13 +148,21 @@ const answer = 42;
       expect(segments[2].type).toBe("markdown");
 
       const firstSeg = segments[0] as Extract<RawSegment, { type: "markdown" }>;
-      const rawHtml1 = marked.parser(firstSeg.tokens);
+      const tokens1 = firstSeg.tokens;
+      if (firstSeg.links) {
+        (tokens1 as unknown as { links: typeof firstSeg.links }).links = firstSeg.links;
+      }
+      const rawHtml1 = marked.parser(tokens1);
       const cleanHtml1 = sanitizeMarkdownHtml(rawHtml1);
       expect(cleanHtml1).toContain('<span class="katex">');
       expect(cleanHtml1).toContain("<math");
 
       const thirdSeg = segments[2] as Extract<RawSegment, { type: "markdown" }>;
-      const rawHtml3 = marked.parser(thirdSeg.tokens);
+      const tokens3 = thirdSeg.tokens;
+      if (thirdSeg.links) {
+        (tokens3 as unknown as { links: typeof thirdSeg.links }).links = thirdSeg.links;
+      }
+      const rawHtml3 = marked.parser(tokens3);
       const cleanHtml3 = sanitizeMarkdownHtml(rawHtml3);
       expect(cleanHtml3).toContain("katex-display-wrapper");
       expect(cleanHtml3).toContain('<span class="katex-display">');
@@ -163,7 +171,9 @@ const answer = 42;
     });
 
     it("preserves MathML tags and aria attributes through sanitizeMarkdownHtml", () => {
-      const rawHtml = marked.parse("$$\\int_0^\\infty e^{-x} dx = 1$$") as string;
+      const parsed = marked.parse("$$\\int_0^\\infty e^{-x} dx = 1$$");
+      expect(typeof parsed).toBe("string");
+      const rawHtml = parsed as string;
       const cleanHtml = sanitizeMarkdownHtml(rawHtml);
 
       // Verify KaTeX display wrapper and katex span
@@ -193,7 +203,11 @@ const answer = 42;
       expect(segments).toHaveLength(1);
 
       const seg = segments[0] as Extract<RawSegment, { type: "markdown" }>;
-      const html = sanitizeMarkdownHtml(marked.parser(seg.tokens));
+      const tokens = seg.tokens;
+      if (seg.links) {
+        (tokens as unknown as { links: typeof seg.links }).links = seg.links;
+      }
+      const html = sanitizeMarkdownHtml(marked.parser(tokens));
 
       expect(html).toContain("<table>");
       expect(html).toContain("变量</th>");
@@ -216,7 +230,11 @@ const answer = 42;
       expect(segments).toHaveLength(1);
 
       const seg = segments[0] as Extract<RawSegment, { type: "markdown" }>;
-      const html = sanitizeMarkdownHtml(marked.parser(seg.tokens));
+      const tokens = seg.tokens;
+      if (seg.links) {
+        (tokens as unknown as { links: typeof seg.links }).links = seg.links;
+      }
+      const html = sanitizeMarkdownHtml(marked.parser(tokens));
 
       expect(html).toContain("<ul>");
       expect(html).toContain("<ol>");

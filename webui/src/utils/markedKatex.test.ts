@@ -1,6 +1,6 @@
 import { Marked } from "marked";
 import { describe, it, expect } from "vitest";
-import { markedKatex } from "./markedKatex";
+import { markedKatex, type KatexToken } from "./markedKatex";
 
 function createMarked() {
   const marked = new Marked();
@@ -9,7 +9,7 @@ function createMarked() {
   return marked;
 }
 
-function findTokens(tokens: ReturnType<Marked["lexer"]>, type: string): any[] {
+function findTokens<T = KatexToken>(tokens: ReturnType<Marked["lexer"]>, type: string): T[] {
   const found: any[] = [];
   const walk = (list: typeof tokens) => {
     for (const token of list) {
@@ -199,8 +199,8 @@ describe("markedKatex", () => {
       expect(findTokens(tokens, "inlineKatex")).toHaveLength(0);
       const code = findTokens(tokens, "code");
       expect(code).toHaveLength(1);
-      expect((code[0] as { lang: string }).lang).toBe("math");
-      expect((code[0] as { text: string }).text).toContain("$$x$$");
+      expect((code[0] as unknown as { lang: string }).lang).toBe("math");
+      expect((code[0] as unknown as { text: string }).text).toContain("$$x$$");
     });
   });
 
