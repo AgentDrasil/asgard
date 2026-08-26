@@ -36,6 +36,7 @@
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "daisyui": "^5.7.19",
+    "jsdom": "^26.0.0",
     "oxfmt": "^0.64.0",
     "oxlint": "^1.79.0",
     "tailwindcss": "^4.3.3",

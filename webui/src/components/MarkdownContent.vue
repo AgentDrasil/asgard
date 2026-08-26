@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { marked } from "marked";
-import DOMPurify from "dompurify";
 import MermaidViewer from "./MermaidViewer.vue";
 import { useShiki } from "../composables/useShiki";
 import { splitMarkdownTokens } from "../utils/markdownSegments";
+import { sanitizeMarkdownHtml } from "../utils/markdownSanitize";
 
 const props = withDefaults(
   defineProps<{
@@ -118,6 +118,8 @@ const DEFAULT_PROSE_CLASSES = [
   "[&:not(pre)>code]:rounded",
   "[&_code]:text-warning",
   "[&_code]:break-words",
+  "[&_.katex-display]:my-3",
+  "[&_.katex-display-wrapper]:overflow-x-auto",
 ].join(" ");
 
 type ContentSegment = { type: "markdown"; html: string } | { type: "mermaid"; code: string };
@@ -139,7 +141,7 @@ const segments = computed<ContentSegment[]>(() => {
       (tokensToParse as unknown as { links: typeof segment.links }).links = segment.links;
     }
     const rawHtml = marked.parser(tokensToParse);
-    const sanitized = DOMPurify.sanitize(rawHtml);
+    const sanitized = sanitizeMarkdownHtml(rawHtml);
     const highlighted = highlightHtmlCodeBlocks(sanitized, [...BLOCK_CLASSES]);
     return {
       type: "markdown",
