@@ -1,9 +1,12 @@
 import { marked, type Token, type TokensList } from "marked";
+import { markedKatex } from "./markedKatex";
 
 marked.setOptions({
   gfm: true,
   breaks: true,
 });
+
+marked.use(markedKatex());
 
 export type RawSegment =
   | { type: "markdown"; tokens: Token[]; links?: TokensList["links"] }

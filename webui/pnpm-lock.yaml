@@ -32,6 +32,9 @@ importers:
       fuse.js:
         specifier: ^7.5.0
         version: 7.5.0
+      katex:
+        specifier: ^0.18.4
+        version: 0.18.4
       marked:
         specifier: ^18.0.10
         version: 18.0.10
@@ -1577,6 +1580,10 @@ packages:
 
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
+    hasBin: true
+
+  katex@0.18.4:
+    resolution: {integrity: sha512-IMPntbRLOU+eu88XDiFKqQ8Akhr9Tv7jDMXqPhjG9SI1JMA4DIgXk4x9k4skJz2NZJXBRbC+2pYBLj9olqcZow==}
     hasBin: true
 
   khroma@2.1.0:
@@ -3727,6 +3734,10 @@ snapshots:
   json5@2.2.3: {}
 
   katex@0.16.47:
+    dependencies:
+      commander: 8.3.0
+
+  katex@0.18.4:
     dependencies:
       commander: 8.3.0
 
