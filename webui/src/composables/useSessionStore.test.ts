@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ref } from "vue";
+import { ref, nextTick } from "vue";
 import { useSessionStore } from "./useSessionStore";
 import * as api from "../lib/api";
 import type { ChatSession, AgentInfo, SessionEvent } from "../types";
@@ -465,6 +465,53 @@ describe("useSessionStore", () => {
     expect(store.isRunning.value).toBe(false);
     expect(store.loading.value).toBe(false);
     expect(store.workingAgentLabel.value).toBeNull();
+  });
+
+  it("should restore running state and fallback workingAgentLabel from messages when agents are not yet loaded", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-snapshot-running",
+      title: "Running Snapshot Session",
+      currentAgent: "coder",
+      runDir: "/workspace",
+      isRunning: true,
+      messages: [
+        { id: "msg-1", role: "user", content: "Implement feature", timestamp: 1000 },
+        {
+          id: "msg-2",
+          role: "activity",
+          agentName: "coder",
+          content: "Writing tests",
+          timestamp: 1100,
+        },
+        {
+          id: "msg-3",
+          role: "assistant",
+          agentName: "coder",
+          content: "Working on step 3",
+          timestamp: 1200,
+        },
+      ],
+    };
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+    // Initial state: agents list is empty
+    const agents = ref<AgentInfo[]>([]);
+    const store = useSessionStore({ agents });
+
+    await store.openSession("session-snapshot-running");
+
+    // 1. Assert running and loading state are directly restored from snapshot
+    expect(store.isRunning.value).toBe(true);
+    expect(store.loading.value).toBe(true);
+    // 2. Assert fallback to agentName in historical messages when agents list is empty
+    expect(store.workingAgentLabel.value).toBe("coder");
+
+    // 3. When agents list finishes loading, workingAgentLabel and activeAgent automatically resolve to display name
+    agents.value = [{ id: "coder", name: "Code Developer", description: "", run_dirs: [] }];
+    await nextTick();
+    expect(store.activeAgent.value?.name).toBe("Code Developer");
+    expect(store.workingAgentLabel.value).toBe("Code Developer");
   });
 
   it("should not set isRunning or loading when opening a session with unreplied ask_user", async () => {

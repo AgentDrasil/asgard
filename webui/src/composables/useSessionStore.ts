@@ -399,8 +399,18 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       } else {
         activeAgent.value = null;
       }
+
+      // If workingAgentLabel is set to raw agentId and agents list becomes available, update to display name
+      if (workingAgentLabel.value && agents.value.length > 0) {
+        const matched = agents.value.find(
+          (a) => a.id === workingAgentLabel.value || a.name === workingAgentLabel.value,
+        );
+        if (matched) {
+          workingAgentLabel.value = matched.name;
+        }
+      }
     },
-    { immediate: true },
+    { immediate: true, deep: true },
   );
 
   // Sync document title

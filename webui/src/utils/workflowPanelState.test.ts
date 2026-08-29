@@ -28,6 +28,20 @@ describe("workflowPanelState", () => {
       expect(state.statusText).toBe("Architect is running...");
     });
 
+    it("determines stage as running when running is true even if last message is assistant", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "user", content: "Start task" },
+        { id: "2", role: "assistant", content: "Step 1 finished" },
+      ];
+      const state = computeWorkflowPanelState({
+        running: true,
+        messages,
+        workingAgentLabel: "Coder",
+      });
+      expect(state.stage).toBe("running");
+      expect(state.statusText).toBe("Coder is running...");
+    });
+
     it("prioritizes waiting_human over running when an unreplied ask_user message exists", () => {
       const messages: ChatMessage[] = [
         { id: "1", role: "user", content: "Start review" },
