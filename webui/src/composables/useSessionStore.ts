@@ -399,18 +399,24 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       } else {
         activeAgent.value = null;
       }
+    },
+    { immediate: true },
+  );
 
-      // If workingAgentLabel is set to raw agentId and agents list becomes available, update to display name
+  // If workingAgentLabel is set to raw agentId and agents list becomes available, update to display name
+  watch(
+    [agents, workingAgentLabel],
+    () => {
       if (workingAgentLabel.value && agents.value.length > 0) {
         const matched = agents.value.find(
           (a) => a.id === workingAgentLabel.value || a.name === workingAgentLabel.value,
         );
-        if (matched) {
+        if (matched && workingAgentLabel.value !== matched.name) {
           workingAgentLabel.value = matched.name;
         }
       }
     },
-    { immediate: true, deep: true },
+    { immediate: true },
   );
 
   // Sync document title

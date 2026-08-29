@@ -364,10 +364,8 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 	if targetNodeID != "" {
 		rc.HumanReplies[targetNodeID] = replyText
 	}
-	if store != nil {
-		if err := store.MarkRunning(snap.RunID); err != nil {
-			log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
-		}
+	if err := store.MarkRunning(snap.RunID); err != nil {
+		log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
 	}
 	res, err := e.Execute(ctx, defn, rc)
 	return ResumeReDriven, res, err
@@ -431,10 +429,8 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 	}
 
 	rc := e.buildResumeContext(snap, replyText, emit)
-	if store != nil {
-		if err := store.MarkRunning(snap.RunID); err != nil {
-			log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
-		}
+	if err := store.MarkRunning(snap.RunID); err != nil {
+		log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
 	}
 	res, err := e.Execute(ctx, defn, rc)
 	return ResumeReDriven, res, err
