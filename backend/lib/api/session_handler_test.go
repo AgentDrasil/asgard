@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,6 +18,8 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 func TestSessionHandler(t *testing.T) {
@@ -192,4 +196,144 @@ func TestSessionHandler(t *testing.T) {
 	// The first session in the list should be the last one inserted (chat-22)
 	assert.Equal(t, "chat-22", sessions[0].ChatID)
 	assert.Equal(t, "chat-3", sessions[19].ChatID) // chat-1 and chat-2 are pushed out of the top 20
+}
+
+func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	tempDir := t.TempDir()
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	statusFlowYAML := fmt.Sprintf(`
+name: status-flow
+tmp_dir: "%s/tmp/${session_id}"
+nodes:
+  - id: pre_step
+    type: command
+    command: "sleep 0.2 && echo ready > ${tmp_dir}/pre.txt"
+  - id: entry_question
+    type: human
+    depends:
+      - node: pre_step
+    prompt: "please approve the plan"
+  - id: final
+    type: command
+    depends:
+      - node: entry_question
+    command: "sleep 0.2 && echo done > ${tmp_dir}/final.txt"
+`, tempDir)
+	require.NoError(t, os.WriteFile(wfFile, []byte(statusFlowYAML), 0644))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "wf-status-agent",
+			Name: "Workflow Status Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
+	server := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+		agents:          []*agentspec.Agent{agent},
+	}
+	server.mux = server.buildMuxLocked()
+	engine.SetHumanSuspender(server.suspendWorkflowHuman)
+
+	chatID := "chat-wf-session-status"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-status-agent"}))
+
+	subCh, _, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	// Trigger workflow
+	triggerPayload := map[string]any{
+		"prompt": "start status check flow",
+		"chatId": chatID,
+	}
+	raw, err := json.Marshal(triggerPayload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/wf-status-agent/message", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusAccepted, rec.Code)
+
+	// Stage 1: Initial execution -> GET /api/sessions/:id should have IsRunning == true
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/sessions/"+chatID, nil)
+	recGetInitial := httptest.NewRecorder()
+	server.ServeHTTP(recGetInitial, reqGet)
+	assert.Equal(t, http.StatusOK, recGetInitial.Code)
+
+	var sessRespInitial ChatSession
+	require.NoError(t, json.Unmarshal(recGetInitial.Body.Bytes(), &sessRespInitial))
+	assert.True(t, sessRespInitial.IsRunning, "Session IsRunning must be true during initial execution")
+
+	var askMessageID string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && askMessageID == "" {
+		select {
+		case ev := <-subCh:
+			if ev.Type == "message" && ev.Message != nil && ev.Message.Role == "ask_user" {
+				askMessageID = ev.Message.ID
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	require.NotEmpty(t, askMessageID)
+
+	// Stage 2: Suspended / waiting human stage -> GET /api/sessions/:id should have IsRunning == false
+	recGet := httptest.NewRecorder()
+	server.ServeHTTP(recGet, reqGet)
+	assert.Equal(t, http.StatusOK, recGet.Code)
+
+	var sessResp ChatSession
+	require.NoError(t, json.Unmarshal(recGet.Body.Bytes(), &sessResp))
+	assert.False(t, sessResp.IsRunning, "Session IsRunning must be false while waiting for human input")
+
+	// Resume the workflow
+	replyRec := postAskUserReply(t, server, chatID, askMessageID, "Approved Status")
+	assert.Equal(t, http.StatusOK, replyRec.Code)
+
+	// Stage 3: Resumed / running stage -> GET /api/sessions/:id should have IsRunning == true
+	recGetResumed := httptest.NewRecorder()
+	server.ServeHTTP(recGetResumed, reqGet)
+	assert.Equal(t, http.StatusOK, recGetResumed.Code)
+
+	var sessRespResumed ChatSession
+	require.NoError(t, json.Unmarshal(recGetResumed.Body.Bytes(), &sessRespResumed))
+	assert.True(t, sessRespResumed.IsRunning, "Session IsRunning must be true during resumed execution")
+
+	// Wait for completion
+	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)
+	time.Sleep(50 * time.Millisecond)
+
+	// Stage 4: Execution finished -> GET /api/sessions/:id should have IsRunning == false
+	recGetCompleted := httptest.NewRecorder()
+	server.ServeHTTP(recGetCompleted, reqGet)
+	assert.Equal(t, http.StatusOK, recGetCompleted.Code)
+
+	var sessRespCompleted ChatSession
+	require.NoError(t, json.Unmarshal(recGetCompleted.Body.Bytes(), &sessRespCompleted))
+	assert.False(t, sessRespCompleted.IsRunning, "Session IsRunning must be false once completed")
 }

@@ -14,9 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -664,4 +666,531 @@ func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
 	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approve Live", string(feedback))
+}
+
+func TestWorkflowPersist_LiveWaiterResume_NoPrematureDone(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	tempDir := t.TempDir()
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	slowWorkflowYAML := fmt.Sprintf(`
+name: human-stream
+tmp_dir: "%s/tmp/${session_id}"
+nodes:
+  - id: entry_question
+    type: human
+    prompt: "please approve the plan"
+  - id: final
+    type: command
+    depends:
+      - node: entry_question
+    command: "sleep 0.2 && echo done > ${tmp_dir}/final.txt"
+`, tempDir)
+	require.NoError(t, os.WriteFile(wfFile, []byte(slowWorkflowYAML), 0644))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "wf-live-agent",
+			Name: "Workflow Live Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
+	s := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+		agents:          []*agentspec.Agent{agent},
+	}
+	s.mux = s.buildMuxLocked()
+	engine.SetHumanSuspender(s.suspendWorkflowHuman)
+
+	chatID := "chat-wf-live-waiter-done-test"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-live-agent"}))
+
+	subCh, doneCh, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	triggerPayload := map[string]any{
+		"prompt": "start flow",
+		"chatId": chatID,
+	}
+	raw, err := json.Marshal(triggerPayload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/wf-live-agent/message", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusAccepted, rec.Code)
+
+	var askMessageID string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && askMessageID == "" {
+		select {
+		case ev := <-subCh:
+			if ev.Type == "message" && ev.Message != nil && ev.Message.Role == "ask_user" {
+				askMessageID = ev.Message.ID
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	require.NotEmpty(t, askMessageID)
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, s.isSessionRunning(sess), "Session must not be running while waiting for human")
+
+	// Drain any events from the pre-resume/suspension phase before starting resume collection
+	drain := true
+	for drain {
+		select {
+		case <-subCh:
+		default:
+			drain = false
+		}
+	}
+
+	var statusEvents []SessionEvent
+	var doneEvents []SessionEvent
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		for {
+			select {
+			case ev := <-subCh:
+				switch ev.Type {
+				case "status":
+					statusEvents = append(statusEvents, ev)
+				case "done":
+					doneEvents = append(doneEvents, ev)
+				}
+			case <-doneCh:
+				for {
+					select {
+					case ev := <-subCh:
+						switch ev.Type {
+						case "status":
+							statusEvents = append(statusEvents, ev)
+						case "done":
+							doneEvents = append(doneEvents, ev)
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	replyRec := postAskUserReply(t, s, chatID, askMessageID, "Approved")
+	assert.Equal(t, http.StatusOK, replyRec.Code)
+
+	// Sample running status while workflow is running the final node
+	time.Sleep(50 * time.Millisecond)
+	sessRunning, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.True(t, s.isSessionRunning(sessRunning), "Session must be running during resumed execution")
+
+	// Wait until workflow run completes
+	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)
+
+	// Give a short grace period for all events to drain
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-eventsDone
+
+	// Assert exactly 1 done event was received overall
+	assert.Len(t, doneEvents, 1, "Must receive exactly one done event upon full completion")
+
+	// Verify status event sequence after resume: first isRunning: true, last isRunning: false
+	require.NotEmpty(t, statusEvents)
+	assert.Equal(t, true, statusEvents[0].Payload["isRunning"], "First status event after resume must be running: true")
+	assert.Equal(t, false, statusEvents[len(statusEvents)-1].Payload["isRunning"], "Last status event after resume must be running: false")
+
+	sessAfter, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, s.isSessionRunning(sessAfter))
+}
+
+func TestWorkflowPersist_RedriveResume_StatusSync(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	runDir := t.TempDir()
+
+	s := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+	}
+	s.mux = s.buildMuxLocked()
+	engine.SetHumanSuspender(s.suspendWorkflowHuman)
+
+	chatID := "chat-wf-redrive-sync"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+	require.NoError(t, repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID: "wf-run-redrive-plan_approval", Role: "ask_user", Content: "please approve the plan",
+	}))
+
+	slowRedriveYAML := fmt.Sprintf(`
+name: ask-reply-loop
+tmp_dir: "%s/tmp/${session_id}"
+nodes:
+  - id: plan_approval
+    type: human
+    prompt: "please approve the plan"
+    output_file: "user_feedback.md"
+  - id: final
+    type: command
+    depends:
+      - node: plan_approval
+    command: "sleep 0.2 && cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
+`, runDir)
+
+	require.NoError(t, store.MarkWaitingHuman(&workflow.RunSnapshot{
+		RunID:              "run-redrive",
+		SessionID:          chatID,
+		Status:             workflow.PersistStatusWaitingHuman,
+		DAGSpec:            slowRedriveYAML,
+		RunDir:             runDir,
+		NodeStates:         map[string]workflow.PersistedNodeState{},
+		SuspendedNodeID:    "plan_approval",
+		SuspendedMessageID: "wf-run-redrive-plan_approval",
+	}))
+
+	subCh, doneCh, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	statusEvents := make([]SessionEvent, 0)
+	doneSub := make(chan struct{})
+	go func() {
+		defer close(doneSub)
+		for {
+			select {
+			case ev := <-subCh:
+				if ev.Type == "status" {
+					statusEvents = append(statusEvents, ev)
+				}
+			case <-doneCh:
+				for {
+					select {
+					case ev := <-subCh:
+						if ev.Type == "status" {
+							statusEvents = append(statusEvents, ev)
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	rec := postAskUserReply(t, s, chatID, "wf-run-redrive-plan_approval", "Approved Redrive")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify GET /api/sessions/:id during redrive returns isRunning: true
+	time.Sleep(50 * time.Millisecond)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/sessions/"+chatID, nil)
+	recGetRunning := httptest.NewRecorder()
+	s.ServeHTTP(recGetRunning, reqGet)
+	assert.Equal(t, http.StatusOK, recGetRunning.Code)
+	var sessRespRunning ChatSession
+	require.NoError(t, json.Unmarshal(recGetRunning.Body.Bytes(), &sessRespRunning))
+	assert.True(t, sessRespRunning.IsRunning, "GET /api/sessions/:id must return isRunning: true during redrive")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err := store.GetRun("run-redrive")
+		require.NoError(t, err)
+		if run != nil && run.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run-redrive did not complete; status=%v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-doneSub
+
+	hasRunningStatus := false
+	hasCompletedStatus := false
+	for _, ev := range statusEvents {
+		if isRunning, ok := ev.Payload["isRunning"].(bool); ok {
+			if isRunning {
+				hasRunningStatus = true
+			} else {
+				hasCompletedStatus = true
+			}
+		}
+	}
+	assert.True(t, hasRunningStatus, "Must broadcast isRunning: true status event during redrive")
+	assert.True(t, hasCompletedStatus, "Must broadcast isRunning: false status event after redrive")
+
+	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Approved Redrive", string(feedback))
+
+	// Verify GET /api/sessions/:id after redrive returns isRunning: false
+	recGetCompleted := httptest.NewRecorder()
+	s.ServeHTTP(recGetCompleted, reqGet)
+	assert.Equal(t, http.StatusOK, recGetCompleted.Code)
+	var sessRespCompleted ChatSession
+	require.NoError(t, json.Unmarshal(recGetCompleted.Body.Bytes(), &sessRespCompleted))
+	assert.False(t, sessRespCompleted.IsRunning, "GET /api/sessions/:id must return isRunning: false after redrive completion")
+}
+
+func TestWorkflowPersist_ResumeDuplicateReply_GuardSafety(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	tempDir := t.TempDir()
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	// Command sleeps a bit to stay actively executing
+	sleepYAML := fmt.Sprintf(`
+name: sleep-flow
+tmp_dir: "%s/tmp/${session_id}"
+nodes:
+  - id: entry
+    type: human
+    prompt: "please approve"
+  - id: slow_node
+    type: command
+    depends:
+      - node: entry
+    command: "sleep 0.3 && echo done > ${tmp_dir}/final.txt"
+`, tempDir)
+	require.NoError(t, os.WriteFile(wfFile, []byte(sleepYAML), 0644))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "wf-guard-agent",
+			Name: "Workflow Guard Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
+	s := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+		agents:          []*agentspec.Agent{agent},
+	}
+	s.mux = s.buildMuxLocked()
+	engine.SetHumanSuspender(s.suspendWorkflowHuman)
+
+	chatID := "chat-wf-dup-guard"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-guard-agent"}))
+
+	subCh, _, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	triggerPayload := map[string]any{
+		"prompt": "start flow",
+		"chatId": chatID,
+	}
+	raw, err := json.Marshal(triggerPayload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/wf-guard-agent/message", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusAccepted, rec.Code)
+
+	var askMessageID string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && askMessageID == "" {
+		select {
+		case ev := <-subCh:
+			if ev.Type == "message" && ev.Message != nil && ev.Message.Role == "ask_user" {
+				askMessageID = ev.Message.ID
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	require.NotEmpty(t, askMessageID)
+
+	// Post the first valid reply
+	replyRec1 := postAskUserReply(t, s, chatID, askMessageID, "First Reply")
+	assert.Equal(t, http.StatusOK, replyRec1.Code)
+
+	// Immediately post a duplicate reply while engine is executing slow_node
+	replyRec2 := postAskUserReply(t, s, chatID, askMessageID, "Duplicate Reply")
+	assert.Equal(t, http.StatusOK, replyRec2.Code)
+
+	// Wait for completion
+	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)
+
+	// Ensure engine finishes cleanly
+	time.Sleep(100 * time.Millisecond)
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, s.isSessionRunning(sess))
+}
+
+func TestWorkflowPersist_ResumeError_RollbackSafety(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	runDir := t.TempDir()
+
+	s := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+	}
+	s.mux = s.buildMuxLocked()
+	engine.SetHumanSuspender(s.suspendWorkflowHuman)
+
+	chatID := "chat-rollback-test"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+	require.NoError(t, repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID: "wf-corrupted-msg-id", Role: "ask_user", Content: "please approve",
+	}))
+
+	// Seed a waiting run with invalid/corrupted DAGSpec so ResumeByMessageID will match the snapshot but fail during ParseDefinition
+	require.NoError(t, store.MarkWaitingHuman(&workflow.RunSnapshot{
+		RunID:              "run-corrupted",
+		SessionID:          chatID,
+		Status:             workflow.PersistStatusWaitingHuman,
+		DAGSpec:            "invalid: yaml: : : [",
+		RunDir:             runDir,
+		NodeStates:         map[string]workflow.PersistedNodeState{},
+		SuspendedNodeID:    "plan_approval",
+		SuspendedMessageID: "wf-corrupted-msg-id",
+	}))
+
+	subCh, doneCh, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	statusEvents := make([]SessionEvent, 0)
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		for {
+			select {
+			case ev := <-subCh:
+				if ev.Type == "status" {
+					statusEvents = append(statusEvents, ev)
+				}
+			case <-doneCh:
+				for {
+					select {
+					case ev := <-subCh:
+						if ev.Type == "status" {
+							statusEvents = append(statusEvents, ev)
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	rec := postAskUserReply(t, s, chatID, "wf-corrupted-msg-id", "Some Reply")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+	<-eventsDone
+
+	// activeExecutions should be clean and session should not be stuck running
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, s.isSessionRunning(sess))
+	_, inActive := s.activeExecutions.Load(chatID)
+	assert.False(t, inActive, "activeExecutions must be deleted on error/ignored resume")
+	assert.False(t, sess.IsRunning(), "session must be in completed state after rollback")
+
+	// Verify status transition: status:true followed by status:false on rollback
+	hasStatusTrue := false
+	hasStatusFalse := false
+	for _, ev := range statusEvents {
+		if isRunning, ok := ev.Payload["isRunning"].(bool); ok {
+			if isRunning {
+				hasStatusTrue = true
+			} else {
+				hasStatusFalse = true
+			}
+		}
+	}
+	assert.True(t, hasStatusTrue, "Must broadcast isRunning: true when starting resume")
+	assert.True(t, hasStatusFalse, "Must broadcast isRunning: false when rolling back on resume error")
 }

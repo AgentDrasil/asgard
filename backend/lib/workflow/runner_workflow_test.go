@@ -762,7 +762,7 @@ nodes:
 
 	// Delivering the reply to the live waiter unblocks the in-process
 	// suspension; both the child and the parent run complete afterwards.
-	res, err := engine.ResumeByMessageID(context.Background(), msgID, "Approve", nil)
+	_, res, err := engine.ResumeByMessageID(context.Background(), msgID, "Approve", nil)
 	require.NoError(t, err)
 	require.Nil(t, res)
 

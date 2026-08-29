@@ -148,6 +148,10 @@ func (s *workflowRunStore) RefreshSuspension(runID string, states map[string]wor
 	)
 }
 
+func (s *workflowRunStore) MarkRunning(runID string) error {
+	return s.repo.UpdateRunStatus(runID, dbmodels.WorkflowStatusRunning)
+}
+
 func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 	states, err := dbmodels.DecodeNodeStates(run.NodeStates)
 	if err != nil {
@@ -285,6 +289,27 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 	return nil
 }
 
+// resolveWorkflowAgentKey maps a workflow event's AgentName to the agent key
+// registered on the session (Config.ID), falling back to CurrentAgent.
+func (s *Server) resolveWorkflowAgentKey(sessionID, agentName string) string {
+	if agentName != "" {
+		s.mu.RLock()
+		for _, a := range s.agents {
+			if a.Config.Name == agentName || a.Config.ID == agentName {
+				s.mu.RUnlock()
+				return a.Config.ID
+			}
+		}
+		s.mu.RUnlock()
+	}
+	if s.repo != nil && sessionID != "" {
+		if sess, err := s.repo.GetSession(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
+			return sess.CurrentAgent
+		}
+	}
+	return agentName
+}
+
 // handleWorkflowEvent persists side effects of workflow node events. Node
 // artifacts (e.g. command output_file results) are registered on the session
 // so the frontend artifact viewer can list and open them. Node and workflow
@@ -294,6 +319,25 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 // the same reason.
 func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent) {
 	if s.repo == nil || sessionID == "" {
+		return
+	}
+	if ev.Type == workflow.EventWorkflowStarted || ev.Type == workflow.EventWorkflowResumed {
+		s.activeExecutions.Store(sessionID, struct{}{})
+		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
+		if agentKey != "" {
+			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusRunning)
+		}
+		agentName := ev.AgentName
+		if agentName == "" {
+			agentName = agentKey
+		}
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type: "status",
+			Payload: map[string]any{
+				"agent":     agentName,
+				"isRunning": true,
+			},
+		})
 		return
 	}
 	if ev.Type == workflow.EventNodeStarted {
@@ -313,6 +357,11 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Type == workflow.EventWorkflowSuspended {
+		s.activeExecutions.Delete(sessionID)
+		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
+		if agentKey != "" {
+			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusCompleted)
+		}
 		s.PublishSessionEvent(sessionID, SessionEvent{
 			Type: "status",
 			Payload: map[string]any{
@@ -451,21 +500,36 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		}
 		return
 	}
-	if ev.Type == workflow.EventWorkflowFinished && ev.Status == workflowspec.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
-		msg := dbmodels.ChatMessage{
-			ID:        fmt.Sprintf("wf-summary-%d", time.Now().UnixMilli()),
-			Role:      "assistant",
-			Content:   ev.Message,
-			AgentName: ev.AgentName,
-			Timestamp: time.Now().UnixMilli(),
+	if ev.Type == workflow.EventWorkflowFinished {
+		s.activeExecutions.Delete(sessionID)
+		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
+		if agentKey != "" {
+			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusCompleted)
 		}
-		if err := s.repo.AppendMessage(sessionID, msg); err != nil {
-			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow summary to repo")
-		} else {
-			s.PublishSessionEvent(sessionID, SessionEvent{
-				Type:    "message",
-				Message: &msg,
-			})
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": ev.AgentName, "isRunning": false},
+		})
+		s.PublishSessionEvent(sessionID, SessionEvent{
+			Type:    "done",
+			Payload: map[string]any{"agent": ev.AgentName},
+		})
+		if ev.Status == workflowspec.NodeStatus(workflow.RunStatusCompleted) && ev.Message != "" {
+			msg := dbmodels.ChatMessage{
+				ID:        fmt.Sprintf("wf-summary-%d", time.Now().UnixMilli()),
+				Role:      "assistant",
+				Content:   ev.Message,
+				AgentName: ev.AgentName,
+				Timestamp: time.Now().UnixMilli(),
+			}
+			if err := s.repo.AppendMessage(sessionID, msg); err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to append workflow summary to repo")
+			} else {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "message",
+					Message: &msg,
+				})
+			}
 		}
 		return
 	}
@@ -595,41 +659,16 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 
 	go func() {
 		s.activeExecutions.Store(chatID, struct{}{})
-		defer s.activeExecutions.Delete(chatID)
 
-		agentName := ""
-		if s.repo != nil {
-			if sess, err := s.repo.GetSession(chatID); err == nil && sess != nil {
-				agentName = sess.CurrentAgent
-			}
-		}
+		agentName := s.resolveWorkflowAgentKey(chatID, "")
 		if agentName != "" && s.repo != nil {
-			if err := s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusRunning); err != nil {
-				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentName).Msg("failed to update agent status to running on workflow resume")
-			} else {
-				s.PublishSessionEvent(chatID, SessionEvent{
-					Type:    "status",
-					Payload: map[string]any{"agent": agentName, "isRunning": true},
-				})
-			}
-			defer func() {
-				if err := s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusCompleted); err != nil {
-					log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentName).Msg("failed to mark agent status completed on workflow resume finish")
-				} else {
-					s.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "status",
-						Payload: map[string]any{"agent": agentName, "isRunning": false},
-					})
-					s.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "done",
-						Payload: map[string]any{"agent": agentName},
-					})
-				}
-			}()
+			_ = s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusRunning)
+			s.PublishSessionEvent(chatID, SessionEvent{
+				Type:    "status",
+				Payload: map[string]any{"agent": agentName, "isRunning": true},
+			})
 		}
-		// Re-driven runs route their events into the persistence handler
-		// and EventHub so node outputs, errors, summary and any follow-up human
-		// suspension land in the session transcript and are published in real-time.
+
 		emit := func(ev workflow.WorkflowEvent) {
 			sid := ev.SessionID
 			if sid == "" {
@@ -638,8 +677,25 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			s.handleWorkflowEvent(sid, ev)
 		}
 
-		if _, err := engine.ResumeByMessageID(context.Background(), targetMessageID, replyText, emit); err != nil {
-			log.Warn().Err(err).Str("message_id", targetMessageID).Msg("resuming workflow by message id failed")
+		outcome, _, err := engine.ResumeByMessageID(context.Background(), targetMessageID, replyText, emit)
+		if err != nil || outcome == workflow.ResumeIgnored {
+			if err != nil {
+				log.Warn().Err(err).Str("message_id", targetMessageID).Msg("resuming workflow by message id failed")
+			}
+			// Defense fuse: skip rollback if engine is actively executing session
+			if s.workflowEngine != nil && s.workflowEngine.IsSessionExecuting(chatID) {
+				log.Warn().Str("chat_id", chatID).Msg("resume ignored or errored but engine is still executing session; skipping rollback")
+			} else {
+				s.activeExecutions.Delete(chatID)
+				if agentName != "" && s.repo != nil {
+					_ = s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusCompleted)
+					s.PublishSessionEvent(chatID, SessionEvent{
+						Type:    "status",
+						Payload: map[string]any{"agent": agentName, "isRunning": false},
+					})
+				}
+			}
 		}
+		// When outcome == ResumeDeliveredLive or ResumeReDriven: lifecycle is fully driven by handleWorkflowEvent
 	}()
 }

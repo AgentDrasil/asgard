@@ -138,6 +138,15 @@ func (m *memStore) RefreshSuspension(runID string, states map[string]PersistedNo
 	return nil
 }
 
+func (m *memStore) MarkRunning(runID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if snap, ok := m.runs[runID]; ok {
+		snap.Status = PersistStatusRunning
+	}
+	return nil
+}
+
 func (m *memStore) get(runID string) *RunSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -260,7 +269,7 @@ func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 	assert.Equal(t, []string{"Approve", "Reject"}, req.Options)
 
 	// Resume via the engine (in-process waiter delivery).
-	_, err = engine.Resume(context.Background(), "run789", "Approved")
+	_, _, err = engine.Resume(context.Background(), "run789", "Approved")
 	require.NoError(t, err)
 
 	out := <-outCh
@@ -316,7 +325,7 @@ func TestHumanNodeResumeAfterRestart(t *testing.T) {
 	engine2 := NewEngine(registry)
 	engine2.SetRunStore(store)
 
-	result, err := engine2.Resume(context.Background(), "runrestart", "looks good, ship it")
+	_, result, err := engine2.Resume(context.Background(), "runrestart", "looks good, ship it")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, RunStatusCompleted, result.Status)
@@ -339,7 +348,7 @@ func TestResumeRejectsNonWaitingRun(t *testing.T) {
 		RunID: "run1", SessionID: "s", Status: PersistStatusCompleted,
 		NodeStates: map[string]PersistedNodeState{},
 	}))
-	_, err := engine.Resume(context.Background(), "run1", "reply")
+	_, _, err := engine.Resume(context.Background(), "run1", "reply")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not waiting for human input")
 }
@@ -521,7 +530,7 @@ func TestFixFallbackResumeAfterRestart(t *testing.T) {
 	// A brand-new engine (fresh process) sharing only the store resumes the
 	// orphan human node from the snapshot reply.
 	engine2, _ := newLoopPersistenceEngine(t, runner, store)
-	result, err := engine2.Resume(context.Background(), "runfb", "Retry (reset counter)")
+	_, result, err := engine2.Resume(context.Background(), "runfb", "Retry (reset counter)")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, RunStatusCompleted, result.Status)
@@ -581,7 +590,7 @@ func TestResumeRestoresCountersAndStableMessageIDs(t *testing.T) {
 	assert.Equal(t, 2, runner.count("fixer"))
 
 	// Delivering the reply to the live re-driven run completes it.
-	_, err = engine2.Resume(context.Background(), "runfb2", "Retry (reset counter)")
+	_, _, err = engine2.Resume(context.Background(), "runfb2", "Retry (reset counter)")
 	require.NoError(t, err)
 
 	out := <-outCh
@@ -935,12 +944,12 @@ func TestEngine_ParallelHumanNodes_ConcurrentSuspensionAndResume_InMemory(t *tes
 	assert.NotEmpty(t, msgB)
 
 	// Resume human_a via DeliverResumeByMessageID in memory
-	resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	_, resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resA)
 
 	// Resume human_b via DeliverResumeByMessageID in memory
-	resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	_, resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resB)
 
@@ -994,7 +1003,7 @@ func TestEngine_ParallelHumanNodes_RestartReplay(t *testing.T) {
 	}
 	outCh := make(chan outcome, 1)
 	go func() {
-		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		_, res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 		outCh <- outcome{result: res, err: err}
 	}()
 
@@ -1005,7 +1014,7 @@ func TestEngine_ParallelHumanNodes_RestartReplay(t *testing.T) {
 	}, "human_b re-suspends with original message ID")
 
 	// Resume human_b in memory on engine2
-	resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	_, resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resB)
 
@@ -1042,7 +1051,7 @@ func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
 	msgB := snap.SuspendedNodes["human_b"].MessageID
 
 	// Resume human_a in memory
-	resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	_, resA, err := engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resA)
 
@@ -1053,7 +1062,7 @@ func TestEngine_ParallelHuman_PartialResume_PrunesSuspendedNodes(t *testing.T) {
 	}, "snap pruned to human_b with human_a succeeded")
 
 	// Resume human_b to complete run
-	resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	_, resB, err := engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resB)
 
@@ -1088,16 +1097,16 @@ func TestEngine_Resume_DuplicateReply_NoDoubleExecute(t *testing.T) {
 		msgB := snap.SuspendedNodes["human_b"].MessageID
 
 		// Resume human_a
-		_, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		_, _, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 		require.NoError(t, err)
 
 		// Send duplicate reply for human_a while human_b is still waiting
-		resDup, errDup := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
+		_, resDup, errDup := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
 		require.NoError(t, errDup)
 		assert.Nil(t, resDup, "duplicate reply should be safely ignored and not trigger re-execution")
 
 		// Resume human_b
-		_, err = engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+		_, _, err = engine.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 		require.NoError(t, err)
 
 		waitFor(t, func() bool {
@@ -1139,15 +1148,15 @@ func TestEngine_Resume_DuplicateReply_NoDoubleExecute(t *testing.T) {
 		msgA := snap.SuspendedMessageID
 
 		// Resume human_a: wakes worker and starts executing slow_downstream
-		_, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		_, _, err = engine.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 		require.NoError(t, err)
 
 		// While slow_downstream is actively running, attempt duplicate ResumeByMessageID and ResumeWithEmitter
-		resDup1, errDup1 := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
+		_, resDup1, errDup1 := engine.ResumeByMessageID(context.Background(), msgA, "duplicate", nil)
 		require.NoError(t, errDup1)
 		assert.Nil(t, resDup1)
 
-		resDup2, errDup2 := engine.ResumeWithEmitter(context.Background(), "run-dup-slow", "duplicate", nil)
+		_, resDup2, errDup2 := engine.ResumeWithEmitter(context.Background(), "run-dup-slow", "duplicate", nil)
 		assert.Error(t, errDup2)
 		assert.Nil(t, resDup2)
 		assert.Contains(t, errDup2.Error(), "active or has multiple pending human nodes")
@@ -1239,10 +1248,10 @@ func TestEngine_Resume_ConcurrentReplyDuringReplay(t *testing.T) {
 	// Concurrently start replay for msgA and deliver reply for msgB during replayPending phase
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		_, _ = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+		_, _, _ = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	}()
 
-	resA, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	_, resA, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 	require.NoError(t, err)
 	require.NotNil(t, resA)
 	assert.Equal(t, RunStatusCompleted, resA.Status)
@@ -1305,7 +1314,7 @@ func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {
 	}
 	outCh := make(chan outcome, 1)
 	go func() {
-		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		_, res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 		outCh <- outcome{result: res, err: err}
 	}()
 
@@ -1314,7 +1323,7 @@ func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {
 		return s != nil && s.Status == PersistStatusWaitingHuman && len(s.SuspendedNodes) == 1
 	}, "human_b waiting on engine2")
 
-	_, err = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	_, _, err = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
 
 	out := <-outCh
@@ -1495,7 +1504,7 @@ func TestResumeConcurrentReSuspensionThreeWaiters(t *testing.T) {
 	}
 	outCh := make(chan outcome, 1)
 	go func() {
-		res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		_, res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
 		outCh <- outcome{result: res, err: err}
 	}()
 
@@ -1508,7 +1517,7 @@ func TestResumeConcurrentReSuspensionThreeWaiters(t *testing.T) {
 	}, "human_b and human_c re-suspend concurrently with preserved message IDs")
 
 	// Resume human_b in memory on engine2
-	resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	_, resB, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resB)
 
@@ -1520,7 +1529,7 @@ func TestResumeConcurrentReSuspensionThreeWaiters(t *testing.T) {
 	}, "human_c remaining suspended")
 
 	// Resume human_c in memory on engine2
-	resC, err := engine2.ResumeByMessageID(context.Background(), msgC, "ok", nil)
+	_, resC, err := engine2.ResumeByMessageID(context.Background(), msgC, "ok", nil)
 	require.NoError(t, err)
 	assert.Nil(t, resC)
 

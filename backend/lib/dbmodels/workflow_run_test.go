@@ -415,3 +415,33 @@ func TestWorkflowRunRepository_HasRunningRunBySession(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, hasRunning)
 }
+
+func TestWorkflowRunRepository_UpdateRunStatus(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&WorkflowRun{}))
+
+	repo := NewWorkflowRunRepository(testDB)
+
+	require.NoError(t, repo.SaveRun(&WorkflowRun{
+		RunID:     "run-status-1",
+		SessionID: "chat-status",
+		Status:    WorkflowStatusWaitingHuman,
+	}))
+
+	hasRunning, err := repo.HasRunningRunBySession("chat-status")
+	require.NoError(t, err)
+	assert.False(t, hasRunning)
+
+	require.NoError(t, repo.UpdateRunStatus("run-status-1", WorkflowStatusRunning))
+
+	run, err := repo.GetRun("run-status-1")
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, WorkflowStatusRunning, run.Status)
+
+	hasRunning, err = repo.HasRunningRunBySession("chat-status")
+	require.NoError(t, err)
+	assert.True(t, hasRunning)
+}

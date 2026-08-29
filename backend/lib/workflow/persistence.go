@@ -111,6 +111,8 @@ type RunStore interface {
 	// RefreshSuspension atomically overwrites a suspended run's settled node
 	// states, counters and (possibly pruned) suspended node set.
 	RefreshSuspension(runID string, states map[string]PersistedNodeState, loopIterations, executionCounts map[string]int, suspendedNodes map[string]SuspendedNodeInfo) error
+	// MarkRunning updates the persisted status of a run to RUNNING when it resumes execution.
+	MarkRunning(runID string) error
 }
 
 // SuspendRequest describes a human-node suspension delivered to the host

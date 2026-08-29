@@ -395,14 +395,17 @@ func (s *Server) PublishSessionEvent(chatID string, ev SessionEvent) {
 	s.eventHub.Publish(chatID, ev)
 }
 
-// isSessionRunning determines if a session is currently executing an agent or workflow.
-// It checks in-memory active executions, session agent status, and active workflow runs in DB.
 func (s *Server) isSessionRunning(sess *dbmodels.Session) bool {
 	if sess == nil {
 		return false
 	}
 	if sess.ChatID != "" {
 		if _, running := s.activeExecutions.Load(sess.ChatID); running {
+			return true
+		}
+	}
+	if s.workflowEngine != nil && sess.ChatID != "" {
+		if s.workflowEngine.IsSessionExecuting(sess.ChatID) {
 			return true
 		}
 	}

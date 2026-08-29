@@ -90,25 +90,12 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 				Payload: map[string]any{"agent": agentID, "isRunning": true},
 			})
 		}
-		defer func() {
-			if err := s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted); err != nil {
-				log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to mark workflow agent status completed")
-			} else {
-				s.PublishSessionEvent(chatID, SessionEvent{
-					Type:    "status",
-					Payload: map[string]any{"agent": agentID, "isRunning": false},
-				})
-				s.PublishSessionEvent(chatID, SessionEvent{
-					Type:    "done",
-					Payload: map[string]any{"agent": agentID},
-				})
-			}
-		}()
 	}
 
 	defn, err := workflowspec.LoadDefinition(agent.WorkflowPath)
 	if err != nil {
 		log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to load workflow definition")
+		s.emitWorkflowPreExecutionCleanup(chatID, agentID)
 		return "failed", "", fmt.Errorf("failed to load workflow definition: %w", err)
 	}
 
@@ -118,6 +105,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 		engine, err = newWorkflowEngine(s.conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
+			s.emitWorkflowPreExecutionCleanup(chatID, agentID)
 			return "failed", "", fmt.Errorf("failed to create workflow engine: %w", err)
 		}
 		s.mu.RLock()
@@ -168,6 +156,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 		return "waiting_human", "", nil
 	case res := <-resultCh:
 		if res.err != nil {
+			s.emitWorkflowPreExecutionCleanup(chatID, agentID)
 			return "failed", "", res.err
 		}
 		summary := workflow.SummarizeRun(res.result)
@@ -250,4 +239,18 @@ func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agentspe
 		return
 	}
 	goGenerateSessionTitle(ctx, s, nil, s.repo, chatID, prompt, agent.Config.ID, agent.Config.Description)
+}
+
+func (s *Server) emitWorkflowPreExecutionCleanup(chatID, agentID string) {
+	if s.repo != nil && chatID != "" && agentID != "" {
+		_ = s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusCompleted)
+		s.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": agentID, "isRunning": false},
+		})
+		s.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "done",
+			Payload: map[string]any{"agent": agentID},
+		})
+	}
 }

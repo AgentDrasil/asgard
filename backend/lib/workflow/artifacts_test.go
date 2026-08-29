@@ -118,7 +118,7 @@ func TestHumanSuspensionCarriesArtifacts(t *testing.T) {
 	assert.Equal(t, []string{"/tmp/prep.txt"}, suspended.Artifacts)
 	assert.NotEmpty(t, suspended.MessageID)
 
-	_, err = engine.Resume(context.Background(), "runart", "Approve")
+	_, _, err = engine.Resume(context.Background(), "runart", "Approve")
 	require.NoError(t, err)
 
 	<-done

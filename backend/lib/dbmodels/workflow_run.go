@@ -163,6 +163,13 @@ func (r *WorkflowRunRepository) SaveRun(run *WorkflowRun) error {
 	return r.db.Save(run).Error
 }
 
+// UpdateRunStatus updates the status column of a workflow run by run_id.
+func (r *WorkflowRunRepository) UpdateRunStatus(runID string, status string) error {
+	return r.db.Model(&WorkflowRun{}).
+		Where("run_id = ?", runID).
+		Update("status", status).Error
+}
+
 // GetRun retrieves a workflow run by run ID. Returns (nil, nil) when not found.
 func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {
 	var run WorkflowRun

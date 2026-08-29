@@ -156,6 +156,16 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 
 	select {
 	case reply := <-replyCh:
+		if store != nil {
+			e.waitMu.Lock()
+			shouldMarkRunning := len(e.waitingByRun[rc.RunID]) <= 1
+			e.waitMu.Unlock()
+			if shouldMarkRunning {
+				if err := store.MarkRunning(rc.RunID); err != nil {
+					log.Warn().Err(err).Str("run_id", rc.RunID).Msg("marking workflow run running failed")
+				}
+			}
+		}
 		emit(WorkflowEvent{
 			Type:     EventWorkflowResumed,
 			NodeID:   node.ID,
@@ -196,11 +206,11 @@ func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult 
 }
 
 // Resume delivers a user reply to a suspended run. When the run has a live
-// in-process waiter the reply unblocks it and (nil, nil) is returned.
+// in-process waiter the reply unblocks it and (ResumeDeliveredLive, nil, nil) is returned.
 // Otherwise (e.g. after a server restart) the run is re-driven from its
 // persisted snapshot with the suspended node settled from the reply. Re-driven
 // events are only logged.
-func (e *Engine) Resume(ctx context.Context, runID string, replyText string) (*WorkflowRunResult, error) {
+func (e *Engine) Resume(ctx context.Context, runID string, replyText string) (ResumeOutcome, *WorkflowRunResult, error) {
 	return e.ResumeWithEmitter(ctx, runID, replyText, nil)
 }
 
@@ -263,29 +273,29 @@ func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit fu
 // ResumeByMessageID delivers a reply to the human node matching messageID.
 // If the node has an active in-memory waiter, it delivers the reply directly.
 // Otherwise, it restores the run from snapshot with guards against concurrent replay and active execution.
-func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyText string, emit func(WorkflowEvent)) (*WorkflowRunResult, error) {
+func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyText string, emit func(WorkflowEvent)) (ResumeOutcome, *WorkflowRunResult, error) {
 	if messageID == "" || replyText == "" {
-		return nil, fmt.Errorf("message_id and reply_text are required")
+		return ResumeIgnored, nil, fmt.Errorf("message_id and reply_text are required")
 	}
 
 	if e.DeliverResumeByMessageID(messageID, replyText) {
-		return nil, nil
+		return ResumeDeliveredLive, nil, nil
 	}
 
 	store := e.store
 	if store == nil {
-		return nil, fmt.Errorf("workflow run store is not configured")
+		return ResumeIgnored, nil, fmt.Errorf("workflow run store is not configured")
 	}
 
 	snap, err := store.FindWaitingHumanByMessageID(messageID)
 	if err != nil {
-		return nil, fmt.Errorf("loading waiting workflow run for message %s: %w", messageID, err)
+		return ResumeIgnored, nil, fmt.Errorf("loading waiting workflow run for message %s: %w", messageID, err)
 	}
 	if snap == nil {
-		return nil, fmt.Errorf("no waiting workflow run found for message %s", messageID)
+		return ResumeIgnored, nil, fmt.Errorf("no waiting workflow run found for message %s", messageID)
 	}
 	if snap.Status != PersistStatusWaitingHuman {
-		return nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", snap.RunID, snap.Status)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", snap.RunID, snap.Status)
 	}
 
 	// Locate target node for this messageID
@@ -301,7 +311,7 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 		}
 		if !found && snap.SuspendedMessageID != messageID {
 			// In case SQLite LIKE matched case-insensitively, perform exact match check
-			return nil, fmt.Errorf("message %s does not match any suspended node in run %s", messageID, snap.RunID)
+			return ResumeIgnored, nil, fmt.Errorf("message %s does not match any suspended node in run %s", messageID, snap.RunID)
 		}
 	}
 
@@ -313,7 +323,7 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 		for time.Now().Before(deadline) {
 			time.Sleep(5 * time.Millisecond)
 			if e.DeliverResumeByMessageID(messageID, replyText) {
-				return nil, nil
+				return ResumeDeliveredLive, nil, nil
 			}
 			e.waitMu.Lock()
 			stillPending := e.replayPending[snap.RunID]
@@ -323,17 +333,17 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 			}
 		}
 		if e.DeliverResumeByMessageID(messageID, replyText) {
-			return nil, nil
+			return ResumeDeliveredLive, nil, nil
 		}
 		log.Warn().Str("run_id", snap.RunID).Str("message_id", messageID).Msg("replay pending timeout; resume discarded safely")
-		return nil, nil
+		return ResumeIgnored, nil, nil
 	}
 
 	// Guard 2: executing or registered waiters guard (B6, N3)
 	if e.executing[snap.RunID] || len(e.waitingByRun[snap.RunID]) > 0 {
 		e.waitMu.Unlock()
 		log.Warn().Str("run_id", snap.RunID).Str("message_id", messageID).Msg("workflow run is actively executing or has registered waiters; late or duplicate reply safely ignored")
-		return nil, nil
+		return ResumeIgnored, nil, nil
 	}
 
 	// Guard 3: set replayPending flag with defer cleanup (N5/R4)
@@ -347,59 +357,65 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 
 	defn, err := workflowspec.ParseDefinition([]byte(snap.DAGSpec))
 	if err != nil {
-		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", snap.RunID, err)
+		return ResumeIgnored, nil, fmt.Errorf("restoring workflow definition for run %s: %w", snap.RunID, err)
 	}
 
 	rc := e.buildResumeContext(snap, "", emit)
 	if targetNodeID != "" {
 		rc.HumanReplies[targetNodeID] = replyText
 	}
-	return e.Execute(ctx, defn, rc)
+	if store != nil {
+		if err := store.MarkRunning(snap.RunID); err != nil {
+			log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
+		}
+	}
+	res, err := e.Execute(ctx, defn, rc)
+	return ResumeReDriven, res, err
 }
 
 // ResumeWithEmitter is like Resume but forwards every event of a re-driven run
 // to emit (when non-nil) so hosts can persist and surface resume progress.
-func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText string, emit func(WorkflowEvent)) (*WorkflowRunResult, error) {
+func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText string, emit func(WorkflowEvent)) (ResumeOutcome, *WorkflowRunResult, error) {
 	if runID == "" || replyText == "" {
-		return nil, fmt.Errorf("run_id and reply_text are required")
+		return ResumeIgnored, nil, fmt.Errorf("run_id and reply_text are required")
 	}
 	if e.deliverResume(runID, replyText) {
-		return nil, nil
+		return ResumeDeliveredLive, nil, nil
 	}
 
 	e.waitMu.Lock()
 	if e.executing[runID] || len(e.waitingByRun[runID]) > 0 {
 		e.waitMu.Unlock()
 		log.Warn().Str("run_id", runID).Msg("workflow run is active or has pending human nodes; message_id required")
-		return nil, fmt.Errorf("workflow run %s is active or has multiple pending human nodes, message_id required", runID)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s is active or has multiple pending human nodes, message_id required", runID)
 	}
 	e.waitMu.Unlock()
 
 	store := e.store
 	if store == nil {
-		return nil, fmt.Errorf("workflow run store is not configured")
+		return ResumeIgnored, nil, fmt.Errorf("workflow run store is not configured")
 	}
 	snap, err := store.GetRun(runID)
 	if err != nil {
-		return nil, fmt.Errorf("loading workflow run %s: %w", runID, err)
+		return ResumeIgnored, nil, fmt.Errorf("loading workflow run %s: %w", runID, err)
 	}
 	if snap == nil {
-		return nil, fmt.Errorf("workflow run %s not found", runID)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s not found", runID)
 	}
 	if snap.Status != PersistStatusWaitingHuman {
-		return nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", runID, snap.Status)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", runID, snap.Status)
 	}
 	if len(snap.SuspendedNodes) > 1 {
-		return nil, fmt.Errorf("workflow run %s has multiple suspended nodes; message_id required", runID)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s has multiple suspended nodes; message_id required", runID)
 	}
 	if snap.SuspendedNodeID == "" && len(snap.SuspendedNodes) == 0 {
-		return nil, fmt.Errorf("workflow run %s has no suspended node recorded", runID)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s has no suspended node recorded", runID)
 	}
 
 	e.waitMu.Lock()
 	if e.replayPending[snap.RunID] {
 		e.waitMu.Unlock()
-		return nil, fmt.Errorf("workflow run %s is already replaying", runID)
+		return ResumeIgnored, nil, fmt.Errorf("workflow run %s is already replaying", runID)
 	}
 	e.replayPending[snap.RunID] = true
 	defer func() {
@@ -411,11 +427,17 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 
 	defn, err := workflowspec.ParseDefinition([]byte(snap.DAGSpec))
 	if err != nil {
-		return nil, fmt.Errorf("restoring workflow definition for run %s: %w", runID, err)
+		return ResumeIgnored, nil, fmt.Errorf("restoring workflow definition for run %s: %w", runID, err)
 	}
 
 	rc := e.buildResumeContext(snap, replyText, emit)
-	return e.Execute(ctx, defn, rc)
+	if store != nil {
+		if err := store.MarkRunning(snap.RunID); err != nil {
+			log.Warn().Err(err).Str("run_id", snap.RunID).Msg("marking workflow run running failed")
+		}
+	}
+	res, err := e.Execute(ctx, defn, rc)
+	return ResumeReDriven, res, err
 }
 
 // FindWaitingRun returns the WAITING_HUMAN run snapshot for a session, if any.

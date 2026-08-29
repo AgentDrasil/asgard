@@ -286,7 +286,7 @@ func runDevWorkflowE2E(t *testing.T, totalSteps int, verdictFor func(reviewN int
 					replies := script[req.NodeID]
 					reply := replies[min(n, len(replies)-1)]
 					replied[req.NodeID] = n + 1
-					_, _ = engine.Resume(context.Background(), req.RunID, reply)
+					_, _, _ = engine.Resume(context.Background(), req.RunID, reply)
 				}
 			}
 		}

@@ -96,10 +96,10 @@ nodes:
 					switch repliedCount {
 					case 1:
 						// First round: request changes
-						_, _ = engine.Resume(context.Background(), req.RunID, "Request Changes")
+						_, _, _ = engine.Resume(context.Background(), req.RunID, "Request Changes")
 					case 2:
 						// Second round: approve
-						_, _ = engine.Resume(context.Background(), req.RunID, "Approve")
+						_, _, _ = engine.Resume(context.Background(), req.RunID, "Approve")
 						return
 					}
 				}
@@ -199,10 +199,10 @@ nodes:
 					switch repliedCount {
 					case 1:
 						// Round 1: Fix Required
-						_, _ = engine.Resume(context.Background(), req.RunID, "Fix Required")
+						_, _, _ = engine.Resume(context.Background(), req.RunID, "Fix Required")
 					case 2:
 						// Round 2: Pass & Push
-						_, _ = engine.Resume(context.Background(), req.RunID, "Pass & Push")
+						_, _, _ = engine.Resume(context.Background(), req.RunID, "Pass & Push")
 						return
 					}
 				}
@@ -412,7 +412,7 @@ nodes:
 				if pending > 0 && !replied {
 					replied = true
 					req := rec.all()[0]
-					_, _ = engine.Resume(context.Background(), req.RunID, "Abort Workflow")
+					_, _, _ = engine.Resume(context.Background(), req.RunID, "Abort Workflow")
 					return
 				}
 			}
@@ -1106,7 +1106,7 @@ nodes:
 				suspender.mu.Unlock()
 
 				if req.RunID != "" {
-					_, _ = engine.Resume(context.Background(), req.RunID, "don't abort")
+					_, _, _ = engine.Resume(context.Background(), req.RunID, "don't abort")
 					return
 				}
 			}

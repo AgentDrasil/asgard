@@ -84,6 +84,14 @@ type RunContext struct {
 	ReuseMessageIDs map[string]string
 }
 
+type ResumeOutcome int
+
+const (
+	ResumeDeliveredLive ResumeOutcome = iota // Reply delivered to in-memory waiter
+	ResumeReDriven                           // Run re-driven from snapshot
+	ResumeIgnored                            // Duplicate or late reply dropped
+)
+
 type humanWaiter struct {
 	replyCh   chan string
 	nodeID    string
@@ -101,11 +109,12 @@ type Engine struct {
 	store        RunStore
 	suspendHuman SuspendHumanFunc
 
-	// waitMu guards waitingByMsg, waitingByRun, executing, and replayPending.
+	// waitMu guards waitingByMsg, waitingByRun, executing, sessionRuns, and replayPending.
 	waitMu        sync.Mutex
 	waitingByMsg  map[string]*humanWaiter            // key: messageID -> waiter
 	waitingByRun  map[string]map[string]*humanWaiter // key: runID -> nodeID -> waiter
 	executing     map[string]bool                    // key: runID -> true (active execution)
+	sessionRuns   map[string]map[string]bool         // key: sessionID -> runID -> true
 	replayPending map[string]bool                    // key: runID -> true (replay initializing)
 }
 
@@ -116,6 +125,7 @@ func NewEngine(registry *NodeRunnerRegistry) *Engine {
 		waitingByMsg:  make(map[string]*humanWaiter),
 		waitingByRun:  make(map[string]map[string]*humanWaiter),
 		executing:     make(map[string]bool),
+		sessionRuns:   make(map[string]map[string]bool),
 		replayPending: make(map[string]bool),
 	}
 }
@@ -146,6 +156,23 @@ func (e *Engine) SetAgents(agentList []*agentspec.Agent) {
 			preloader.SetAgents(agentList)
 		}
 	}
+}
+
+// IsSessionExecuting reports whether any workflow run belonging to the given
+// session is currently actively executing (not suspended waiting for human input).
+func (e *Engine) IsSessionExecuting(sessionID string) bool {
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+	runs := e.sessionRuns[sessionID]
+	if len(runs) == 0 {
+		return false
+	}
+	for runID := range runs {
+		if e.executing[runID] && len(e.waitingByRun[runID]) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // EvaluateNodeReadiness decides whether a node whose dependencies have all
@@ -275,10 +302,20 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 
 	e.waitMu.Lock()
 	e.executing[rc.RunID] = true
+	if e.sessionRuns[rc.SessionID] == nil {
+		e.sessionRuns[rc.SessionID] = make(map[string]bool)
+	}
+	e.sessionRuns[rc.SessionID][rc.RunID] = true
 	e.waitMu.Unlock()
 	defer func() {
 		e.waitMu.Lock()
 		delete(e.executing, rc.RunID)
+		if runs := e.sessionRuns[rc.SessionID]; runs != nil {
+			delete(runs, rc.RunID)
+			if len(runs) == 0 {
+				delete(e.sessionRuns, rc.SessionID)
+			}
+		}
 		e.waitMu.Unlock()
 	}()
 
@@ -1053,6 +1090,16 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run settlement failed")
 		}
 	}
+
+	e.waitMu.Lock()
+	delete(e.executing, rc.RunID)
+	if runs := e.sessionRuns[rc.SessionID]; runs != nil {
+		delete(runs, rc.RunID)
+		if len(runs) == 0 {
+			delete(e.sessionRuns, rc.SessionID)
+		}
+	}
+	e.waitMu.Unlock()
 
 	// The final event carries the workflow summary so hosts persisting events
 	// render an identical transcript on reload.
