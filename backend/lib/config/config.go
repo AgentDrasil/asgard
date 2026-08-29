@@ -133,14 +133,10 @@ func (c Config) verifyDirs() error {
 	return nil
 }
 
-func LoadConfig(path string) (*Config, error) {
+// ParseAndValidate unmarshals configuration YAML data, applies defaults, and validates contents and directories.
+func ParseAndValidate(data []byte) (*Config, error) {
 	cfg := &Config{}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	err = yaml.Unmarshal(data, cfg)
+	err := yaml.Unmarshal(data, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -174,4 +170,13 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseAndValidate(data)
 }

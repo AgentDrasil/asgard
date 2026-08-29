@@ -169,20 +169,20 @@ func New(opts ...Option) (*App, error) {
 
 	// 1. Resolve configuration
 	conf := options.Config
-	if conf == nil {
-		path := options.ConfigPath
-		if path == "" {
-			path = os.Getenv("CONFIG_PATH")
-			if path == "" {
-				path = "config.yaml"
-			}
+	resolvedConfigPath := options.ConfigPath
+	if resolvedConfigPath == "" {
+		resolvedConfigPath = os.Getenv("CONFIG_PATH")
+		if resolvedConfigPath == "" {
+			resolvedConfigPath = "config.yaml"
 		}
+	}
+	if conf == nil {
 		var err error
-		conf, err = config.LoadConfig(path)
+		conf, err = config.LoadConfig(resolvedConfigPath)
 		if err != nil {
 			log.Warn().Err(err).Msg("failed to load config, entering degraded salvage mode")
 			diagnostics.AddError("config", err.Error())
-			conf = salvageConfig(path)
+			conf = salvageConfig(resolvedConfigPath)
 		}
 	}
 
@@ -243,6 +243,7 @@ func New(opts ...Option) (*App, error) {
 	// 7. Assemble API Server with options
 	apiOpts := []api.ServerOption{
 		api.WithDiagnostics(diagnostics),
+		api.WithConfigPath(resolvedConfigPath),
 	}
 	if options.FunctionRegistry != nil {
 		apiOpts = append(apiOpts, api.WithFunctionRegistry(options.FunctionRegistry))

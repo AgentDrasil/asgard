@@ -2,8 +2,16 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -13,6 +21,59 @@ import (
 )
 
 const agentFatherID = "agent_father"
+
+var osRename = os.Rename
+
+const defaultConfigTemplate = `# Asgard Configuration Template
+debug: false
+port: 8080
+internal_port: 8081
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "asgard.db"
+agent_dir: "./agents"
+gemini_api_key: "<your-gemini-api-key>"
+gemini_model_for_chat_title: "gemini-2.5-flash"
+chat_lang: "English (US)"
+doc_lang: "English (US)"
+comment_lang: "English (US)"
+`
+
+func checkManageOrigin(r *http.Request) error {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return errors.New("invalid origin header")
+	}
+	if u.Host == r.Host {
+		return nil
+	}
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		firstFwd := strings.TrimSpace(strings.Split(fwdHost, ",")[0])
+		if u.Host == firstFwd {
+			return nil
+		}
+	}
+	originHost := u.Hostname()
+	reqHost, _, _ := net.SplitHostPort(r.Host)
+	if reqHost == "" {
+		reqHost = r.Host
+	}
+	remoteHost, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if remoteHost == "" {
+		remoteHost = r.RemoteAddr
+	}
+	isLoopback := func(h string) bool {
+		return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	}
+	if isLoopback(originHost) && (isLoopback(reqHost) || isLoopback(remoteHost)) {
+		return nil
+	}
+	return errors.New("cross-origin manage request rejected")
+}
 
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
@@ -68,6 +129,13 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleReload handles POST /api/manage/reload.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	if err := checkManageOrigin(r); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
 	if err := s.reload(); err != nil {
 		log.Error().Err(err).Msg("Failed to reload agents")
 		if s.diagnostics != nil {
@@ -86,6 +154,200 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "agents reloaded"})
+}
+
+// ConfigRawResponse represents the raw configuration file response.
+type ConfigRawResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Exists  bool   `json:"exists"`
+}
+
+// SaveConfigRawRequest represents the request body for saving configuration.
+type SaveConfigRawRequest struct {
+	Content string `json:"content"`
+}
+
+// handleGetConfigRaw handles GET /api/manage/config.
+func (s *Server) handleGetConfigRaw(w http.ResponseWriter, r *http.Request) {
+	if err := checkManageOrigin(r); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	cfgPath := s.configPath
+	if cfgPath == "" {
+		cfgPath = "config.yaml"
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ConfigRawResponse{
+				Path:    cfgPath,
+				Content: defaultConfigTemplate,
+				Exists:  false,
+			})
+			return
+		}
+		log.Error().Err(err).Str("path", cfgPath).Msg("failed to read raw config")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(ConfigRawResponse{
+		Path:    cfgPath,
+		Content: string(data),
+		Exists:  true,
+	})
+}
+
+// handleSaveConfigRaw handles PUT /api/manage/config.
+func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
+	if err := checkManageOrigin(r); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	var req SaveConfigRawRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Validate configuration
+	if _, err := config.ParseAndValidate([]byte(req.Content)); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("invalid configuration: %v", err)})
+		return
+	}
+
+	cfgPath := s.configPath
+	if cfgPath == "" {
+		cfgPath = "config.yaml"
+	}
+
+	dir := filepath.Dir(cfgPath)
+	if dir == "" {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Error().Err(err).Str("dir", dir).Msg("failed to create config directory")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 1. Try atomic rename via temp file
+	tmpFile, err := os.CreateTemp(dir, "config-*.tmp")
+	if err == nil {
+		tmpPath := tmpFile.Name()
+		_, writeErr := tmpFile.Write([]byte(req.Content))
+		syncErr := tmpFile.Sync()
+		closeErr := tmpFile.Close()
+
+		if writeErr == nil && syncErr == nil && closeErr == nil {
+			renameErr := osRename(tmpPath, cfgPath)
+			if renameErr == nil {
+				// Atomic write succeeded
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+				return
+			}
+
+			// If rename fails due to Docker bind-mount (EBUSY or EXDEV), fallback to direct truncate write
+			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
+				_ = os.Remove(tmpPath)
+				if writeErr := writeConfigDirect(cfgPath, req.Content); writeErr != nil {
+					log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config via direct truncate fallback")
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+				return
+			}
+
+			_ = os.Remove(tmpPath)
+			log.Error().Err(renameErr).Str("path", cfgPath).Msg("failed to atomic rename config file")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": renameErr.Error()})
+			return
+		}
+
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	// If creating temp file failed, fallback to direct truncate
+	if writeErr := writeConfigDirect(cfgPath, req.Content); writeErr != nil {
+		log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config directly")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+}
+
+func writeConfigDirect(path, content string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.Write([]byte(content)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// handleRestart handles POST /api/manage/restart.
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if err := checkManageOrigin(r); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "server restart initiated"})
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	if s.restartTrigger != nil {
+		time.AfterFunc(300*time.Millisecond, s.restartTrigger)
+	}
 }
 
 // handleQuota handles GET /api/quota.

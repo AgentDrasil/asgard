@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ var ErrServerShutdownBeforeStart = errors.New("server shut down before start com
 // Server manages the HTTP server hosting agents.
 type Server struct {
 	conf             *config.Config
+	configPath       string
+	restartTrigger   func()
 	mu               sync.RWMutex
 	agents           []*agentspec.Agent
 	mux              *http.ServeMux
@@ -55,6 +58,20 @@ type Server struct {
 
 // ServerOption mutates a Server during construction (functional options).
 type ServerOption func(*Server)
+
+// WithConfigPath sets the config file path for the Server.
+func WithConfigPath(path string) ServerOption {
+	return func(s *Server) {
+		s.configPath = path
+	}
+}
+
+// WithRestartTrigger overrides the default restart trigger function for the Server.
+func WithRestartTrigger(fn func()) ServerOption {
+	return func(s *Server) {
+		s.restartTrigger = fn
+	}
+}
 
 // WithFunctionRegistry replaces the Server's workflow function registry.
 func WithFunctionRegistry(reg *workflow.FunctionRegistry) ServerOption {
@@ -154,6 +171,21 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		}
 	}
 
+	if s.configPath == "" {
+		s.configPath = os.Getenv("CONFIG_PATH")
+		if s.configPath == "" {
+			s.configPath = "config.yaml"
+		}
+	}
+
+	if s.restartTrigger == nil {
+		s.restartTrigger = func() {
+			if s.cancel != nil {
+				s.cancel()
+			}
+		}
+	}
+
 	if s.diagnostics == nil {
 		s.diagnostics = NewSystemDiagnostics()
 	}
@@ -199,8 +231,11 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// CORS Headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// CORS Headers (skip wildcard origin for manage endpoints)
+	isManage := strings.HasPrefix(r.URL.Path, "/api/manage/")
+	if !isManage {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With")
 
@@ -225,6 +260,9 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
+	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
+	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)
+	mux.HandleFunc("POST /api/manage/restart", s.handleRestart)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/quota", s.handleQuota)

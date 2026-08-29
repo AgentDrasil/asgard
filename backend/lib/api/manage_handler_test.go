@@ -7,7 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -320,4 +324,419 @@ teams:
 	// Must not accumulate duplicate errors
 	assert.Len(t, snap2.Errors, 1)
 	assert.Equal(t, snap1.Errors, snap2.Errors)
+}
+
+func TestManageConfig_GetContent_SameOrigin(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "custom-config.yaml")
+	sampleContent := "debug: true\nhost: 127.0.0.1\n"
+	require.NoError(t, os.WriteFile(cfgFilePath, []byte(sampleContent), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/config", nil)
+	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "http://localhost:8080")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp ConfigRawResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, cfgFilePath, resp.Path)
+	assert.Equal(t, sampleContent, resp.Content)
+	assert.True(t, resp.Exists)
+}
+
+func TestManageConfig_GetContent_CrossOrigin_Rejected(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/config", nil)
+	req.Host = "192.168.1.100:8080"
+	req.RemoteAddr = "192.168.1.50:12345"
+	req.Header.Set("Origin", "http://attacker.com")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "cross-origin manage request rejected")
+}
+
+func TestManageConfig_Put_LoopbackDevAllowed(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "dev-config.yaml")
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	validContent := `
+debug: true
+db: sqlite
+dsn: dev.db
+agent_dir: "` + tmpDir + `"
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-2.5-flash
+`
+	body, _ := json.Marshal(SaveConfigRawRequest{Content: validContent})
+	req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+	req.Host = "localhost:8080"
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Header.Set("Origin", "http://localhost:8082") // Vite dev server port
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	saved, err := os.ReadFile(cfgFilePath)
+	require.NoError(t, err)
+	assert.Equal(t, validContent, string(saved))
+}
+
+func TestManageConfig_PutValidContent_AtomicAndFallback(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "config.yaml")
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	validContent := `
+debug: true
+db: sqlite
+dsn: live.db
+agent_dir: "` + tmpDir + `"
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-2.5-flash
+`
+	body, _ := json.Marshal(SaveConfigRawRequest{Content: validContent})
+	req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	saved, err := os.ReadFile(cfgFilePath)
+	require.NoError(t, err)
+	assert.Equal(t, validContent, string(saved))
+}
+
+func TestManageConfig_PutInvalidContent_Rejection(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "config.yaml")
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	// Missing required fields
+	invalidContent := `
+debug: true
+db: mysql
+`
+	body, _ := json.Marshal(SaveConfigRawRequest{Content: invalidContent})
+	req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid configuration")
+}
+
+func TestManageConfig_Put_RenameFallbackOnMountErrors(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tests := []struct {
+		name           string
+		renameErr      error
+		expectedStatus int
+		expectSaved    bool
+	}{
+		{
+			name:           "fallback on EXDEV (cross-device/bind-mount)",
+			renameErr:      syscall.EXDEV,
+			expectedStatus: http.StatusOK,
+			expectSaved:    true,
+		},
+		{
+			name:           "fallback on EBUSY (mountpoint busy)",
+			renameErr:      syscall.EBUSY,
+			expectedStatus: http.StatusOK,
+			expectSaved:    true,
+		},
+		{
+			name:           "failure on unexpected rename error",
+			renameErr:      syscall.EPERM,
+			expectedStatus: http.StatusInternalServerError,
+			expectSaved:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+			fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+			require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+			require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+			cfgFilePath := filepath.Join(tmpDir, "config.yaml")
+			conf := &config.Config{
+				AgentDir: tmpDir,
+				Port:     8080,
+			}
+
+			testDB := db.NewDBForTest(t)
+			srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+			require.NoError(t, err)
+
+			t.Cleanup(func() { osRename = os.Rename })
+			osRename = func(_, _ string) error {
+				return tc.renameErr
+			}
+
+			validContent := `
+debug: true
+db: sqlite
+dsn: live.db
+agent_dir: "` + tmpDir + `"
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-2.5-flash
+`
+			body, _ := json.Marshal(SaveConfigRawRequest{Content: validContent})
+			req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.expectedStatus, w.Code)
+			if tc.expectSaved {
+				saved, err := os.ReadFile(cfgFilePath)
+				require.NoError(t, err)
+				assert.Equal(t, validContent, string(saved))
+			}
+
+			// Ensure no config-*.tmp leftover files remain in dir
+			tmpMatches, err := filepath.Glob(filepath.Join(tmpDir, "config-*.tmp"))
+			require.NoError(t, err)
+			assert.Empty(t, tmpMatches, "temporary files should be cleaned up")
+		})
+	}
+}
+
+func TestManageRestart_TriggerCalled(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	var count atomic.Int32
+	mockTrigger := func() {
+		count.Add(1)
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithRestartTrigger(mockTrigger))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/restart", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "server restart initiated")
+
+	require.Eventually(t, func() bool {
+		return count.Load() == 1
+	}, 2*time.Second, 10*time.Millisecond, "restart trigger should fire exactly once")
+}
+
+func TestWriteConfigDirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.yaml")
+	err := writeConfigDirect(path, "key: value\n")
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "key: value\n", string(content))
+
+	// Directory path causes OpenFile error
+	err = writeConfigDirect(tmpDir, "key: value\n")
+	assert.Error(t, err)
 }
