@@ -95,6 +95,10 @@ function cacheSet(key: string, value: string): void {
   highlightCache.set(key, value);
 }
 
+export function getHighlighterSync(): Highlighter | null {
+  return highlighter.value;
+}
+
 export async function getHighlighter(): Promise<Highlighter> {
   if (highlighter.value) return highlighter.value;
   if (!highlighterPromise) {

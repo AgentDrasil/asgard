@@ -1,0 +1,401 @@
+/* ==========================================================================
+   @git-diff-view Theme Integration for DaisyUI and Catppuccin Themes
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   DaisyUI: Dark Theme (Default Dark)
+   -------------------------------------------------------------------------- */
+[data-theme="dark"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: color-mix(in oklab, var(--color-base-content, #fff) 12%, transparent);
+  --diff-plain-content--: var(--color-base-100, #1d232a);
+  --diff-plain-lineNumber--: var(--color-base-200, #191e24);
+  --diff-plain-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #fff) 45%,
+    transparent
+  );
+  --diff-expand-content--: var(--color-base-200, #191e24);
+  --diff-expand-lineNumber--: var(--color-base-200, #191e24);
+  --diff-expand-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #fff) 45%,
+    transparent
+  );
+  --diff-empty-content--: var(--color-base-200, #191e24);
+
+  --diff-add-content--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 15%,
+    var(--color-base-100, #1d232a)
+  );
+  --diff-add-lineNumber--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 25%,
+    var(--color-base-200, #191e24)
+  );
+  --diff-add-content-highlight--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 35%,
+    var(--color-base-100, #1d232a)
+  );
+
+  --diff-del-content--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 15%,
+    var(--color-base-100, #1d232a)
+  );
+  --diff-del-lineNumber--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 25%,
+    var(--color-base-200, #191e24)
+  );
+  --diff-del-content-highlight--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 35%,
+    var(--color-base-100, #1d232a)
+  );
+
+  --diff-hunk-content--: color-mix(
+    in oklab,
+    var(--color-primary, #6419e6) 15%,
+    var(--color-base-100, #1d232a)
+  );
+  --diff-hunk-lineNumber--: color-mix(
+    in oklab,
+    var(--color-primary, #6419e6) 25%,
+    var(--color-base-200, #191e24)
+  );
+  --diff-hunk-lineNumber-hover--: var(--color-primary, #6419e6);
+  --diff-hunk-content-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #fff) 60%,
+    transparent
+  );
+
+  --diff-add-widget--: var(--color-primary, #6419e6);
+  --diff-add-widget-color--: var(--color-primary-content, #ffffff);
+  --diff-multi-select-bg: var(--color-warning, #fbbd23);
+  --diff-multi-select-border: var(--color-primary, #6419e6);
+}
+
+[data-theme="dark"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="dark"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="dark"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: var(--color-base-content, #c9d1d9);
+}
+
+/* --------------------------------------------------------------------------
+   DaisyUI: Light Theme (Default Light)
+   -------------------------------------------------------------------------- */
+[data-theme="light"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: color-mix(in oklab, var(--color-base-content, #000) 12%, transparent);
+  --diff-plain-content--: var(--color-base-100, #ffffff);
+  --diff-plain-lineNumber--: var(--color-base-200, #f2f2f2);
+  --diff-plain-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #000) 50%,
+    transparent
+  );
+  --diff-expand-content--: var(--color-base-200, #f2f2f2);
+  --diff-expand-lineNumber--: var(--color-base-200, #f2f2f2);
+  --diff-expand-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #000) 50%,
+    transparent
+  );
+  --diff-empty-content--: var(--color-base-200, #f2f2f2);
+
+  --diff-add-content--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 15%,
+    var(--color-base-100, #ffffff)
+  );
+  --diff-add-lineNumber--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 25%,
+    var(--color-base-200, #f2f2f2)
+  );
+  --diff-add-content-highlight--: color-mix(
+    in oklab,
+    var(--color-success, #00a96e) 35%,
+    var(--color-base-100, #ffffff)
+  );
+
+  --diff-del-content--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 15%,
+    var(--color-base-100, #ffffff)
+  );
+  --diff-del-lineNumber--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 25%,
+    var(--color-base-200, #f2f2f2)
+  );
+  --diff-del-content-highlight--: color-mix(
+    in oklab,
+    var(--color-error, #ff5861) 35%,
+    var(--color-base-100, #ffffff)
+  );
+
+  --diff-hunk-content--: color-mix(
+    in oklab,
+    var(--color-primary, #570df8) 12%,
+    var(--color-base-100, #ffffff)
+  );
+  --diff-hunk-lineNumber--: color-mix(
+    in oklab,
+    var(--color-primary, #570df8) 22%,
+    var(--color-base-200, #f2f2f2)
+  );
+  --diff-hunk-lineNumber-hover--: var(--color-primary, #570df8);
+  --diff-hunk-content-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #000) 60%,
+    transparent
+  );
+
+  --diff-add-widget--: var(--color-primary, #570df8);
+  --diff-add-widget-color--: var(--color-primary-content, #ffffff);
+  --diff-multi-select-bg: var(--color-warning, #fbbd23);
+  --diff-multi-select-border: var(--color-primary, #570df8);
+}
+
+[data-theme="light"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="light"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="light"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: var(--color-base-content, #1f2937);
+}
+
+/* --------------------------------------------------------------------------
+   DaisyUI: Cupcake Theme
+   -------------------------------------------------------------------------- */
+[data-theme="cupcake"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: color-mix(in oklab, var(--color-base-content, #291334) 12%, transparent);
+  --diff-plain-content--: var(--color-base-100, #faf7f5);
+  --diff-plain-lineNumber--: var(--color-base-200, #efeae6);
+  --diff-plain-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #291334) 50%,
+    transparent
+  );
+  --diff-expand-content--: var(--color-base-200, #efeae6);
+  --diff-expand-lineNumber--: var(--color-base-200, #efeae6);
+  --diff-expand-lineNumber-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #291334) 50%,
+    transparent
+  );
+  --diff-empty-content--: var(--color-base-200, #efeae6);
+
+  --diff-add-content--: color-mix(
+    in oklab,
+    var(--color-success, #2bd4bd) 18%,
+    var(--color-base-100, #faf7f5)
+  );
+  --diff-add-lineNumber--: color-mix(
+    in oklab,
+    var(--color-success, #2bd4bd) 28%,
+    var(--color-base-200, #efeae6)
+  );
+  --diff-add-content-highlight--: color-mix(
+    in oklab,
+    var(--color-success, #2bd4bd) 38%,
+    var(--color-base-100, #faf7f5)
+  );
+
+  --diff-del-content--: color-mix(
+    in oklab,
+    var(--color-error, #f43f5e) 15%,
+    var(--color-base-100, #faf7f5)
+  );
+  --diff-del-lineNumber--: color-mix(
+    in oklab,
+    var(--color-error, #f43f5e) 25%,
+    var(--color-base-200, #efeae6)
+  );
+  --diff-del-content-highlight--: color-mix(
+    in oklab,
+    var(--color-error, #f43f5e) 35%,
+    var(--color-base-100, #faf7f5)
+  );
+
+  --diff-hunk-content--: color-mix(
+    in oklab,
+    var(--color-primary, #65c3c8) 18%,
+    var(--color-base-100, #faf7f5)
+  );
+  --diff-hunk-lineNumber--: color-mix(
+    in oklab,
+    var(--color-primary, #65c3c8) 28%,
+    var(--color-base-200, #efeae6)
+  );
+  --diff-hunk-lineNumber-hover--: var(--color-primary, #65c3c8);
+  --diff-hunk-content-color--: color-mix(
+    in oklab,
+    var(--color-base-content, #291334) 60%,
+    transparent
+  );
+
+  --diff-add-widget--: var(--color-primary, #65c3c8);
+  --diff-add-widget-color--: var(--color-primary-content, #291334);
+  --diff-multi-select-bg: var(--color-warning, #fbbd23);
+  --diff-multi-select-border: var(--color-primary, #65c3c8);
+}
+
+[data-theme="cupcake"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="cupcake"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="cupcake"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: var(--color-base-content, #291334);
+}
+
+/* --------------------------------------------------------------------------
+   Catppuccin: Mocha Theme
+   -------------------------------------------------------------------------- */
+[data-theme="mocha"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: #313244;
+  --diff-plain-content--: #1e1e2e;
+  --diff-plain-lineNumber--: #181825;
+  --diff-plain-lineNumber-color--: #6c7086;
+  --diff-expand-content--: #181825;
+  --diff-expand-lineNumber--: #181825;
+  --diff-expand-lineNumber-color--: #6c7086;
+  --diff-empty-content--: #181825;
+
+  --diff-add-content--: #1e2d2f;
+  --diff-add-lineNumber--: #273e38;
+  --diff-add-content-highlight--: #36584c;
+
+  --diff-del-content--: #2d1f2d;
+  --diff-del-lineNumber--: #442436;
+  --diff-del-content-highlight--: #5c2d44;
+
+  --diff-hunk-content--: #1e2638;
+  --diff-hunk-lineNumber--: #243048;
+  --diff-hunk-lineNumber-hover--: #89b4fa;
+  --diff-hunk-content-color--: #9399b2;
+
+  --diff-add-widget--: #89b4fa;
+  --diff-add-widget-color--: #11111b;
+  --diff-multi-select-bg: #f9e2af;
+  --diff-multi-select-border: #89b4fa;
+}
+
+[data-theme="mocha"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="mocha"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="mocha"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: #cdd6f4;
+}
+
+/* --------------------------------------------------------------------------
+   Catppuccin: Macchiato Theme
+   -------------------------------------------------------------------------- */
+[data-theme="macchiato"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: #363a4f;
+  --diff-plain-content--: #24273a;
+  --diff-plain-lineNumber--: #1e2030;
+  --diff-plain-lineNumber-color--: #6e738d;
+  --diff-expand-content--: #1e2030;
+  --diff-expand-lineNumber--: #1e2030;
+  --diff-expand-lineNumber-color--: #6e738d;
+  --diff-empty-content--: #1e2030;
+
+  --diff-add-content--: #233438;
+  --diff-add-lineNumber--: #2b4545;
+  --diff-add-content-highlight--: #3a5e5c;
+
+  --diff-del-content--: #332435;
+  --diff-del-lineNumber--: #4b2b42;
+  --diff-del-content-highlight--: #643553;
+
+  --diff-hunk-content--: #222d43;
+  --diff-hunk-lineNumber--: #2a3754;
+  --diff-hunk-lineNumber-hover--: #8aadf4;
+  --diff-hunk-content-color--: #939ab7;
+
+  --diff-add-widget--: #8aadf4;
+  --diff-add-widget-color--: #181926;
+  --diff-multi-select-bg: #eed49f;
+  --diff-multi-select-border: #8aadf4;
+}
+
+[data-theme="macchiato"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="macchiato"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="macchiato"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: #cad3f5;
+}
+
+/* --------------------------------------------------------------------------
+   Catppuccin: Frappé Theme
+   -------------------------------------------------------------------------- */
+[data-theme="frappe"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: #414559;
+  --diff-plain-content--: #303446;
+  --diff-plain-lineNumber--: #292c3c;
+  --diff-plain-lineNumber-color--: #737994;
+  --diff-expand-content--: #292c3c;
+  --diff-expand-lineNumber--: #292c3c;
+  --diff-expand-lineNumber-color--: #737994;
+  --diff-empty-content--: #292c3c;
+
+  --diff-add-content--: #2e3e3e;
+  --diff-add-lineNumber--: #384f4a;
+  --diff-add-content-highlight--: #476a61;
+
+  --diff-del-content--: #3d2f3d;
+  --diff-del-lineNumber--: #543649;
+  --diff-del-content-highlight--: #6f425b;
+
+  --diff-hunk-content--: #2c384e;
+  --diff-hunk-lineNumber--: #364460;
+  --diff-hunk-lineNumber-hover--: #8caaee;
+  --diff-hunk-content-color--: #949cbb;
+
+  --diff-add-widget--: #8caaee;
+  --diff-add-widget-color--: #232634;
+  --diff-multi-select-bg: #e5c890;
+  --diff-multi-select-border: #8caaee;
+}
+
+[data-theme="frappe"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="frappe"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="frappe"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: #c6d0f5;
+}
+
+/* --------------------------------------------------------------------------
+   Catppuccin: Latte Theme (Light)
+   -------------------------------------------------------------------------- */
+[data-theme="latte"] .diff-tailwindcss-wrapper .diff-style-root {
+  --diff-border--: #ccd0da;
+  --diff-plain-content--: #eff1f5;
+  --diff-plain-lineNumber--: #e6e9ef;
+  --diff-plain-lineNumber-color--: #8c8fa1;
+  --diff-expand-content--: #e6e9ef;
+  --diff-expand-lineNumber--: #e6e9ef;
+  --diff-expand-lineNumber-color--: #8c8fa1;
+  --diff-empty-content--: #e6e9ef;
+
+  --diff-add-content--: #dcead6;
+  --diff-add-lineNumber--: #c3e2b9;
+  --diff-add-content-highlight--: #a6d498;
+
+  --diff-del-content--: #f8dadf;
+  --diff-del-lineNumber--: #f3bcc5;
+  --diff-del-content-highlight--: #e995a5;
+
+  --diff-hunk-content--: #dce5fa;
+  --diff-hunk-lineNumber--: #c4d4f8;
+  --diff-hunk-lineNumber-hover--: #1e66f5;
+  --diff-hunk-content-color--: #6c6f85;
+
+  --diff-add-widget--: #1e66f5;
+  --diff-add-widget-color--: #ffffff;
+  --diff-multi-select-bg: #df8e1d;
+  --diff-multi-select-border: #1e66f5;
+}
+
+[data-theme="latte"] .diff-tailwindcss-wrapper [data-state="diff"],
+[data-theme="latte"] .diff-tailwindcss-wrapper [data-state="plain"],
+[data-theme="latte"] .diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: #4c4f69;
+}

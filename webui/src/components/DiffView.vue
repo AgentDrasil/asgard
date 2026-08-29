@@ -11,6 +11,7 @@ import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
 import { commentKey, rebuildChatInputFromComments } from "../utils/commentUtils";
 import { buildVcsRoute, resolveViewFromRoute } from "../utils/routeUtils";
+import { useDiffHighlighter, getDiffTheme } from "../composables/useDiffHighlighter";
 
 const route = useRoute();
 const router = useRouter();
@@ -75,6 +76,7 @@ const selectedIndex = ref(0);
 let lastLoadedCommit: string | null | undefined = undefined;
 let diffReqId = 0;
 
+const { diffHighlighter } = useDiffHighlighter();
 const selectedFile = computed(() => files.value[selectedIndex.value] ?? null);
 
 const diffFileObj = computed((): DiffFile | null => {
@@ -86,7 +88,12 @@ const diffFileObj = computed((): DiffFile | null => {
     hunks: f.hunks,
   });
   df.initTheme(theme.value);
-  df.init();
+  df.initRaw();
+  if (diffHighlighter.value) {
+    df.initSyntax({ registerHighlighter: diffHighlighter.value });
+  } else {
+    df.initSyntax({});
+  }
   df.buildSplitDiffLines();
   df.buildUnifiedDiffLines();
   return df;
@@ -292,11 +299,13 @@ const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 const viewMode = ref<DiffModeEnum>(isMobile ? DiffModeEnum.Unified : DiffModeEnum.Split);
 
 // ── Theme ────────────────────────────────────────────────────────────────────
-const theme = ref<"dark" | "light">((localStorage.getItem("theme") as "dark" | "light") ?? "dark");
+const theme = ref<"dark" | "light">(
+  getDiffTheme(typeof localStorage !== "undefined" ? localStorage.getItem("theme") : null),
+);
 
 const syncTheme = () => {
   const docTheme = document.documentElement.getAttribute("data-theme");
-  theme.value = docTheme === "light" ? "light" : "dark";
+  theme.value = getDiffTheme(docTheme);
 };
 
 const observer = new MutationObserver(syncTheme);
@@ -630,6 +639,7 @@ const commentedFileList = computed(() => {
               :diff-view-highlight="true"
               :diff-view-add-widget="true"
               :diff-view-wrap="true"
+              :register-highlighter="diffHighlighter"
               @on-add-widget-click="handleAddWidgetClick"
               class="h-full"
             >

@@ -11,6 +11,8 @@
 @plugin "./themes/catppuccinTheme.macchiato.ts";
 @plugin "./themes/catppuccinTheme.mocha.ts";
 
+@import "./themes/diffTheme.css";
+
 @theme {
   --animate-fade-in: fade-in 0.15s ease-out;
 }
