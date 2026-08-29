@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
@@ -181,4 +183,141 @@ teams:
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"apiKey":"test-key"`)
 	assert.Contains(t, w.Body.String(), `"vapidKey":"test-vapid"`)
+}
+
+func TestSystemStatusHandler_OkAndDegraded(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	err := os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755)
+	require.NoError(t, err)
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644)
+	require.NoError(t, err)
+
+	teamsYaml := `
+teams:
+  - my-team
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+	require.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// 1. Initial status -> "ok"
+	req := httptest.NewRequest(http.MethodGet, "/api/system/status", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var snap DiagnosticsSnapshot
+	err = json.Unmarshal(w.Body.Bytes(), &snap)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", snap.Status)
+	assert.Empty(t, snap.Errors)
+
+	// 2. Add error -> "degraded"
+	srv.Diagnostics().AddError("config", "corrupted syntax")
+	srv.Diagnostics().AddWarning("ssh", "key missing")
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/system/status", nil)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	var snap2 DiagnosticsSnapshot
+	err = json.Unmarshal(w2.Body.Bytes(), &snap2)
+	require.NoError(t, err)
+	assert.Equal(t, "degraded", snap2.Status)
+	assert.Equal(t, []string{"corrupted syntax"}, snap2.Errors)
+	assert.Equal(t, []string{"key missing"}, snap2.Warnings)
+}
+
+func TestHandleReload_DeduplicatesDiagnostics(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	err := os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755)
+	require.NoError(t, err)
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644)
+	require.NoError(t, err)
+
+	teamsYaml := `
+teams:
+  - my-team
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte(teamsYaml), 0644)
+	require.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// Remove agent_father directory so subsequent reloads will fail
+	require.NoError(t, os.RemoveAll(filepath.Join(tmpDir, "agents", "agent_father")))
+
+	// First reload failure
+	req1 := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w1 := httptest.NewRecorder()
+	srv.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusInternalServerError, w1.Code)
+
+	snap1 := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap1.Status)
+	assert.Len(t, snap1.Errors, 1)
+
+	// Second reload failure
+	req2 := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusInternalServerError, w2.Code)
+
+	snap2 := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap2.Status)
+	// Must not accumulate duplicate errors
+	assert.Len(t, snap2.Errors, 1)
+	assert.Equal(t, snap1.Errors, snap2.Errors)
 }

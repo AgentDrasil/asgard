@@ -29,10 +29,7 @@ type CreateSessionRequest struct {
 
 // handleSessions handles GET, POST, and DELETE requests to /api/sessions.
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	if s.repo == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session repository not initialized"})
+	if !s.requireRepo(w) {
 		return
 	}
 
@@ -80,10 +77,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
-	if s.repo == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session repository not initialized"})
+	if !s.requireRepo(w) {
 		return
 	}
 

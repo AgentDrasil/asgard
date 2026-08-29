@@ -235,3 +235,97 @@ func TestApp_Stop_Idempotency(t *testing.T) {
 	var nilApp *App
 	assert.NoError(t, nilApp.Stop(ctx))
 }
+
+func TestApp_New_DegradedModeOnAgentValidationFailure(t *testing.T) {
+	// Not parallel because t.Setenv modifies process environment
+	t.Setenv("HOME", t.TempDir())
+
+	tempDir := t.TempDir()
+	conf := createTestConfig(t, tempDir)
+	testDB := db.NewDBForTest(t)
+
+	appInstance, err := New(
+		WithConfig(conf),
+		WithDB(testDB),
+		WithSkipAgentValidation(false),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap.Status)
+	assert.NotEmpty(t, snap.Errors)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}
+
+func TestApp_New_DegradedModeOnMissingAgentFather(t *testing.T) {
+	tempDir := t.TempDir()
+	emptyAgentDir := filepath.Join(tempDir, "agents")
+	require.NoError(t, os.MkdirAll(emptyAgentDir, 0755))
+
+	conf := &config.Config{
+		Host:                    "127.0.0.1",
+		Port:                    getFreePort(t),
+		InternalPort:            getFreePort(t),
+		DB:                      "sqlite",
+		DSN:                     filepath.Join(tempDir, "test.db"),
+		AgentDir:                tempDir,
+		GeminiAPIKey:            "test-key",
+		GeminiModelForChatTitle: "test-model",
+	}
+	testDB := db.NewDBForTest(t)
+
+	appInstance, err := New(
+		WithConfig(conf),
+		WithDB(testDB),
+		WithSkipAgentValidation(true),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap.Status)
+	assert.NotEmpty(t, snap.Errors)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}
+
+func TestApp_New_DegradedModeOnCorruptedConfig_SalvagePort(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	corruptedYAML := `
+port: 7000
+db: "invalid_db"
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(corruptedYAML), 0644))
+
+	appInstance, err := New(
+		WithConfigPath(configPath),
+		WithSkipAgentValidation(true),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+	assert.Equal(t, 7000, appInstance.Config().Port)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap.Status)
+	assert.NotEmpty(t, snap.Errors)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}

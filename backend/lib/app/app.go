@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
@@ -122,6 +123,31 @@ type App struct {
 	stopErr   error
 }
 
+func salvageConfig(path string) *config.Config {
+	cfg := &config.Config{
+		Port:         8080,
+		InternalPort: 8081,
+	}
+	data, err := os.ReadFile(path)
+	if err == nil {
+		_ = yaml.Unmarshal(data, cfg)
+	}
+	if cfg.Port <= 0 {
+		cfg.Port = 8080
+	}
+	if cfg.InternalPort <= 0 {
+		cfg.InternalPort = 8081
+	}
+	if cfg.WebUIPath == "" {
+		if info, err := os.Stat("/opt/asgard/webui"); err == nil && info.IsDir() {
+			cfg.WebUIPath = "/opt/asgard/webui"
+		} else if info, err := os.Stat("webui/dist"); err == nil && info.IsDir() {
+			cfg.WebUIPath = "webui/dist"
+		}
+	}
+	return cfg
+}
+
 func setupLogger(conf *config.Config) {
 	if conf != nil && conf.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
@@ -139,6 +165,8 @@ func New(opts ...Option) (*App, error) {
 		}
 	}
 
+	diagnostics := api.NewSystemDiagnostics()
+
 	// 1. Resolve configuration
 	conf := options.Config
 	if conf == nil {
@@ -152,17 +180,21 @@ func New(opts ...Option) (*App, error) {
 		var err error
 		conf, err = config.LoadConfig(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load config: %w", err)
+			log.Warn().Err(err).Msg("failed to load config, entering degraded salvage mode")
+			diagnostics.AddError("config", err.Error())
+			conf = salvageConfig(path)
 		}
 	}
 
 	// 2. Validate CLI agent setups (unless skipped)
 	if !options.SkipAgentValidation {
 		if err := agentwrapper.ValidateAgySetup(); err != nil {
-			return nil, fmt.Errorf("agy agent setup validation failed: %w", err)
+			log.Warn().Err(err).Msg("agy agent setup validation failed")
+			diagnostics.AddError("cli_auth", err.Error())
 		}
 		if err := agentwrapper.ValidateOpencodeSetup(); err != nil {
-			return nil, fmt.Errorf("opencode agent setup validation failed: %w", err)
+			log.Warn().Err(err).Msg("opencode agent setup validation failed")
+			diagnostics.AddError("cli_auth", err.Error())
 		}
 	}
 
@@ -172,7 +204,8 @@ func New(opts ...Option) (*App, error) {
 	// 4. Initialize SSH Agent (unless skipped)
 	if !options.SkipSSHSetup {
 		if err := sshagent.SetupSSHAgent(); err != nil {
-			return nil, fmt.Errorf("failed to setup SSH agent: %w", err)
+			log.Warn().Err(err).Msg("failed to setup SSH agent")
+			diagnostics.AddError("ssh", err.Error())
 		}
 	}
 
@@ -182,23 +215,35 @@ func New(opts ...Option) (*App, error) {
 		var err error
 		database, err = db.NewDB(conf)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to database: %w", err)
+			log.Warn().Err(err).Msg("failed to connect to database, entering degraded mode")
+			diagnostics.AddError("db", err.Error())
+			database = nil
 		}
 	}
 
-	if err := dbmodels.AutoMigrate(database); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	if database != nil {
+		if err := dbmodels.AutoMigrate(database); err != nil {
+			log.Warn().Err(err).Msg("failed to migrate database, entering degraded mode")
+			diagnostics.AddError("db", err.Error())
+			database = nil
+		}
 	}
 
 	// 6. Initialize cleanup scheduler
-	repo := dbmodels.NewSessionRepository(database)
-	scheduler, err := cleanup.NewScheduler(repo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize cleanup scheduler: %w", err)
+	var scheduler *cleanup.Scheduler
+	if database != nil {
+		repo := dbmodels.NewSessionRepository(database)
+		var err error
+		scheduler, err = cleanup.NewScheduler(repo)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to initialize cleanup scheduler")
+		}
 	}
 
 	// 7. Assemble API Server with options
-	var apiOpts []api.ServerOption
+	apiOpts := []api.ServerOption{
+		api.WithDiagnostics(diagnostics),
+	}
 	if options.FunctionRegistry != nil {
 		apiOpts = append(apiOpts, api.WithFunctionRegistry(options.FunctionRegistry))
 	}
@@ -211,7 +256,9 @@ func New(opts ...Option) (*App, error) {
 
 	srv, err := api.New(conf, database, apiOpts...)
 	if err != nil {
-		_ = scheduler.Shutdown()
+		if scheduler != nil {
+			_ = scheduler.Shutdown()
+		}
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
 
@@ -237,6 +284,14 @@ func (a *App) DB() *gorm.DB {
 		return nil
 	}
 	return a.db
+}
+
+// Server returns the underlying API server of the App.
+func (a *App) Server() *api.Server {
+	if a == nil {
+		return nil
+	}
+	return a.server
 }
 
 // Start starts the underlying HTTP server and blocks until exit.

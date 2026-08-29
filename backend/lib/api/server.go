@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,6 +40,7 @@ type Server struct {
 	workflowEngine   *workflow.Engine
 	cronManager      *trigger.WorkflowCronManager
 	eventHub         *SessionEventHub
+	diagnostics      *SystemDiagnostics
 	ctx              context.Context
 	cancel           context.CancelFunc
 	activeExecutions sync.Map // chatID -> struct{}
@@ -96,6 +98,33 @@ func WithCustomRunners(runners ...workflow.NodeRunner) ServerOption {
 	}
 }
 
+// WithDiagnostics sets the SystemDiagnostics instance for the Server.
+func WithDiagnostics(d *SystemDiagnostics) ServerOption {
+	return func(s *Server) {
+		s.diagnostics = d
+	}
+}
+
+// Diagnostics returns the Server's SystemDiagnostics instance.
+func (s *Server) Diagnostics() *SystemDiagnostics {
+	if s == nil {
+		return nil
+	}
+	return s.diagnostics
+}
+
+func (s *Server) requireRepo(w http.ResponseWriter) bool {
+	if s.repo == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "database unavailable in degraded mode",
+		})
+		return false
+	}
+	return true
+}
+
 // New creates a new Server instance, loading all agents from the configured directory.
 func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, error) {
 	var repo *dbmodels.SessionRepository
@@ -123,6 +152,10 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		if opt != nil {
 			opt(s)
 		}
+	}
+
+	if s.diagnostics == nil {
+		s.diagnostics = NewSystemDiagnostics()
 	}
 
 	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
@@ -153,8 +186,12 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	s.cronManager = cronMgr
 
 	if err := s.reload(); err != nil {
-		_ = cronMgr.Shutdown()
-		return nil, fmt.Errorf("failed to load agents: %w", err)
+		log.Warn().Err(err).Msg("failed to load initial agents, entering degraded mode")
+		s.diagnostics.AddError("agent_load", err.Error())
+		s.mu.Lock()
+		s.agents = []*agentspec.Agent{}
+		s.mux = s.buildMuxLocked()
+		s.mu.Unlock()
 	}
 
 	return s, nil
@@ -186,6 +223,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	}
 
 	mux.HandleFunc("GET /team", s.handleTeam)
+	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
@@ -210,7 +248,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/files/content", s.handleFilesContent)
 	mux.HandleFunc("GET /api/files/search", s.handleFilesSearch)
 
-	if s.conf.WebUIPath != "" {
+	if s.conf != nil && s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			path := filepath.Join(s.conf.WebUIPath, filepath.Clean(r.URL.Path))

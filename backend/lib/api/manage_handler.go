@@ -49,16 +49,40 @@ func (s *Server) reload() error {
 	return nil
 }
 
+// handleSystemStatus handles GET /api/system/status.
+func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	var snap DiagnosticsSnapshot
+	if s.diagnostics != nil {
+		snap = s.diagnostics.Snapshot()
+	} else {
+		snap = DiagnosticsSnapshot{
+			Status:   "ok",
+			Errors:   []string{},
+			Warnings: []string{},
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(snap)
+}
+
 // handleReload handles POST /api/manage/reload.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if err := s.reload(); err != nil {
 		log.Error().Err(err).Msg("Failed to reload agents")
+		if s.diagnostics != nil {
+			s.diagnostics.ResetSource("agent_load")
+			s.diagnostics.AddError("agent_load", err.Error())
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
+	if s.diagnostics != nil {
+		s.diagnostics.ResetSource("agent_load")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "agents reloaded"})
