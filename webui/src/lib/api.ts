@@ -8,6 +8,7 @@ import type {
   GitActionResult,
   GitDiffFile,
   GitLogResponse,
+  SystemStatusResponse,
   TriggerAgentMessageParams,
   WorkspaceFileContent,
 } from "../types";
@@ -22,6 +23,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     window.location.href = url.toString();
   }
   return response;
+}
+
+// Fetch system diagnostics status (returns null on 404 or non-ok)
+export async function getSystemStatus(): Promise<SystemStatusResponse | null> {
+  try {
+    const res = await apiFetch("/api/system/status");
+    if (res.status === 404) return null;
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.error("getSystemStatus error:", err);
+  }
+  return null;
 }
 
 // Fetch loaded agents from backend

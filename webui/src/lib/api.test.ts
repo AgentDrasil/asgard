@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getAgents, getFileTree, getFileContent, searchFiles } from "./api";
+import { getAgents, getFileTree, getFileContent, searchFiles, getSystemStatus } from "./api";
 
 describe("API Library", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -10,6 +10,34 @@ describe("API Library", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("getSystemStatus", () => {
+    it("returns null on 404 response without throwing", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 404,
+      } as Response);
+
+      const res = await getSystemStatus();
+      expect(res).toBeNull();
+    });
+
+    it("returns diagnostic status on 200 OK", async () => {
+      const mockStatus = {
+        status: "degraded",
+        errors: ["Missing token"],
+        warnings: [],
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockStatus,
+      } as Response);
+
+      const res = await getSystemStatus();
+      expect(res).toEqual(mockStatus);
+    });
   });
 
   it("should return empty array and log error on fetch error for getAgents", async () => {

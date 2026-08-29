@@ -5,7 +5,10 @@ import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
+import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
+import { getSystemStatus } from "./lib/api";
+import { useToast } from "./composables/useToast";
 import type { ActiveView, CommandItem } from "./types";
 import {
   resolveViewFromRoute,
@@ -250,11 +253,39 @@ watch(
   { immediate: true },
 );
 
+const toast = useToast();
+
+const checkSystemStatus = async () => {
+  try {
+    const status = await getSystemStatus();
+    if (!status) return;
+
+    if (status.status === "degraded") {
+      if (status.errors && status.errors.length > 0) {
+        for (const err of status.errors) {
+          toast.error(err, { title: "系统服务降级 (System Degraded)" });
+        }
+      } else {
+        toast.warning("系统处于降级模式运行中", { title: "系统服务降级 (System Degraded)" });
+      }
+    }
+
+    if (status.warnings && status.warnings.length > 0) {
+      for (const warn of status.warnings) {
+        toast.warning(warn, { title: "系统提示 (System Warning)" });
+      }
+    }
+  } catch (e) {
+    console.error("checkSystemStatus error:", e);
+  }
+};
+
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
   await loadAgents();
   await loadSessions();
+  checkSystemStatus();
 });
 
 onUnmounted(() => {
@@ -475,5 +506,8 @@ const commandList = computed<CommandItem[]>(() => [
 
     <!-- Quota Modal -->
     <QuotaModal v-model="isQuotaModalOpen" />
+
+    <!-- Global Toast Container -->
+    <ToastContainer />
   </div>
 </template>

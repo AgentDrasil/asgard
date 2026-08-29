@@ -167,3 +167,17 @@ export interface CommandItem {
   shortcut?: string;
   action: () => void | Promise<void>;
 }
+
+export interface SystemStatusResponse {
+  status: "ok" | "degraded";
+  errors?: string[];
+  warnings?: string[];
+}
+
+export interface ToastItem {
+  id: string;
+  type: "info" | "success" | "warning" | "error";
+  title?: string;
+  message: string;
+  duration?: number;
+}
