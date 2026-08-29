@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getAgents, getFileTree, getFileContent, searchFiles, getSystemStatus } from "./api";
+import {
+  getAgents,
+  reloadAgents,
+  getConfigFile,
+  saveConfigFile,
+  restartServer,
+  getFileTree,
+  getFileContent,
+  searchFiles,
+  getSystemStatus,
+} from "./api";
 
 describe("API Library", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -179,6 +189,138 @@ describe("API Library", () => {
       const res = await searchFiles("sess-123", "aborted-query");
       expect(res).toEqual([]);
       expect(consoleErrorSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reloadAgents", () => {
+    it("returns success: true when /api/manage/reload succeeds", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "success", message: "agents reloaded" }),
+      } as Response);
+
+      const res = await reloadAgents();
+      expect(res).toEqual({ success: true });
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/manage/reload", { method: "POST" });
+    });
+
+    it("returns extracted error message when /api/manage/reload fails with 500 JSON error", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "agent_father is required but missing" }),
+      } as Response);
+
+      const res = await reloadAgents();
+      expect(res).toEqual({
+        success: false,
+        error: "agent_father is required but missing",
+      });
+    });
+
+    it("handles network reject gracefully", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Connection refused"));
+
+      const res = await reloadAgents();
+      expect(res).toEqual({
+        success: false,
+        error: "Connection refused",
+      });
+    });
+  });
+
+  describe("getConfigFile", () => {
+    it("fetches config file successfully", async () => {
+      const mockResp = {
+        path: "/etc/asgard/config.yaml",
+        content: "port: 8080\n",
+        exists: true,
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResp,
+      } as Response);
+
+      const res = await getConfigFile();
+      expect(res).toEqual(mockResp);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/manage/config", undefined);
+    });
+
+    it("returns null on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Failed to fetch"));
+
+      const res = await getConfigFile();
+      expect(res).toBeNull();
+      expect(consoleErrorSpy).toHaveBeenCalledWith("getConfigFile error:", expect.any(Error));
+    });
+  });
+
+  describe("saveConfigFile", () => {
+    it("saves configuration successfully", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "success", message: "config saved" }),
+      } as Response);
+
+      const res = await saveConfigFile("port: 9000\n");
+      expect(res).toEqual({ status: "success", message: "config saved" });
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/manage/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "port: 9000\n" }),
+      });
+    });
+
+    it("returns error from response when validation fails (400)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "invalid configuration: yaml parse error" }),
+      } as Response);
+
+      const res = await saveConfigFile("invalid: yaml: :");
+      expect(res).toEqual({ error: "invalid configuration: yaml parse error" });
+    });
+
+    it("handles network reject gracefully", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network offline"));
+
+      const res = await saveConfigFile("port: 8080");
+      expect(res).toEqual({ error: "Network offline" });
+    });
+  });
+
+  describe("restartServer", () => {
+    it("returns true on 200 response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "success", message: "server restart initiated" }),
+      } as Response);
+
+      const res = await restartServer();
+      expect(res).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/manage/restart", { method: "POST" });
+    });
+
+    it("returns false on non-ok response (e.g. 403 / 500)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 403,
+      } as Response);
+
+      const res = await restartServer();
+      expect(res).toBe(false);
+    });
+
+    it("returns true even if fetch throws network error (due to process exit / reset)", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+
+      const res = await restartServer();
+      expect(res).toBe(true);
     });
   });
 });

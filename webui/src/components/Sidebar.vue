@@ -2,14 +2,16 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
-import { apiFetch } from "../lib/api";
+import { reloadAgents, restartServer, getSystemStatus } from "../lib/api";
 import SessionList from "./sidebar/SessionList.vue";
 import ThemeSelector from "./sidebar/ThemeSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
+import { useToast } from "../composables/useToast";
 
 const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
+const toast = useToast();
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     sessions: ChatSession[];
     agents?: AgentInfo[];
@@ -29,10 +31,16 @@ const emit = defineEmits<{
   (e: "toggle-sidebar"): void;
   (e: "toggle-terminal"): void;
   (e: "open-quota"): void;
+  (e: "open-config"): void;
+  (e: "reload-agents"): void;
 }>();
 
 const isReloading = ref(false);
+const isRestarting = ref(false);
+const isRestartConfirmOpen = ref(false);
 const viewMode = ref<"list" | "agent">("list");
+
+let restartAbortController: AbortController | null = null;
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
@@ -77,13 +85,95 @@ const reloadApp = async () => {
   if (isReloading.value) return;
   isReloading.value = true;
   try {
-    await apiFetch("/api/manage/reload", { method: "POST" });
-  } catch (err) {
-    console.error("Failed to reload via /api/manage/reload:", err);
+    const result = await reloadAgents();
+    if (result.success) {
+      toast.success("Agents reloaded successfully", { title: "Reload Success" });
+      emit("reload-agents");
+    } else {
+      toast.error(result.error || "Failed to reload agents", { title: "Reload Error" });
+    }
+  } catch (err: any) {
+    toast.error(err?.message || "Failed to reload agents", { title: "Reload Error" });
   } finally {
     isReloading.value = false;
   }
 };
+
+const openRestartConfirm = () => {
+  if (isRestarting.value) return;
+  isRestartConfirmOpen.value = true;
+};
+
+const triggerRestartWorkflow = async () => {
+  isRestartConfirmOpen.value = false;
+  if (isRestarting.value) return;
+  isRestarting.value = true;
+
+  // 1. Send restart signal
+  const accepted = await restartServer();
+  if (!accepted) {
+    isRestarting.value = false;
+    toast.error("重启请求被服务器拒绝 (HTTP error)，请检查后端日志。", {
+      title: "Restart Failed",
+    });
+    return;
+  }
+
+  // 2. Poll /api/system/status with backoff and timeout (120s)
+  toast.info("服务正在重启，页面将在服务就绪后自动刷新...", {
+    title: "正在重启 (Restarting)",
+    duration: 10000,
+  });
+
+  restartAbortController = new AbortController();
+  const abortSignal = restartAbortController.signal;
+  const startTime = Date.now();
+  const timeoutMs = 120_000;
+  const initialDelay = 1000;
+  const interval = 1500;
+
+  // Initial delay to give process time to exit
+  await new Promise((resolve) => setTimeout(resolve, initialDelay));
+
+  const pollStatus = async () => {
+    while (Date.now() - startTime < timeoutMs) {
+      if (abortSignal.aborted) return;
+      try {
+        const status = await getSystemStatus();
+        if (status !== null) {
+          if (abortSignal.aborted) return;
+          // Server is back online!
+          toast.success("服务已重新上线，正在刷新页面...", { title: "重启完成" });
+          setTimeout(() => {
+            if (!abortSignal.aborted) {
+              window.location.reload();
+            }
+          }, 500);
+          return;
+        }
+      } catch {
+        // Network transient error during shutdown/reboot, ignore and continue polling
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+
+    if (abortSignal.aborted) return;
+
+    // Timeout reached
+    isRestarting.value = false;
+    toast.error(
+      "服务重启探测超时 (120s)。若容器未配置 restart 策略（如 --restart=always），请手动检查 Docker 容器状态 (docker ps / docker logs)。",
+      { title: "重启超时 (Restart Timeout)", duration: 0 },
+    );
+  };
+
+  pollStatus();
+};
+
+defineExpose({
+  openRestartConfirm,
+  triggerRestartWorkflow,
+});
 
 onMounted(() => {
   const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
@@ -103,6 +193,10 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener("mousemove", handleMouseMove);
   document.removeEventListener("mouseup", stopResize);
+  if (restartAbortController) {
+    restartAbortController.abort();
+    restartAbortController = null;
+  }
 });
 </script>
 
@@ -211,20 +305,41 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- Action Menu (Horizontal with icons, visible when sidebar is open) -->
+    <!-- Action Menu (Adaptive flex-wrap layout, visible when sidebar is open) -->
     <div
       v-if="isOpen"
-      class="px-3 py-1.5 flex items-center justify-around gap-1 w-full border-t border-base-100/50 bg-base-300"
+      class="px-2 py-1.5 flex flex-wrap items-center justify-around gap-1 w-full border-t border-base-100/50 bg-base-300"
     >
       <button
         @click="reloadApp"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
         title="Reload Agents"
-        :disabled="isReloading"
+        :disabled="isReloading || isRestarting"
       >
         <Icon
           icon="mynaui:refresh"
-          :class="['h-5 w-5 fill-current', { 'animate-spin': isReloading }]"
+          :class="['h-4.5 w-4.5 fill-current', { 'animate-spin': isReloading }]"
+        />
+      </button>
+
+      <button
+        @click="emit('open-config')"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Configuration Editor"
+        :disabled="isRestarting"
+      >
+        <Icon icon="mynaui:cog" class="h-4.5 w-4.5 fill-current" />
+      </button>
+
+      <button
+        @click="isRestartConfirmOpen = true"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Restart Server"
+        :disabled="isRestarting"
+      >
+        <Icon
+          icon="mynaui:power"
+          :class="['h-4.5 w-4.5 fill-current text-error/80', { 'animate-spin': isRestarting }]"
         />
       </button>
 
@@ -232,8 +347,9 @@ onUnmounted(() => {
         @click="emit('open-quota')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
         title="Check Quota"
+        :disabled="isRestarting"
       >
-        <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current" />
+        <Icon icon="mynaui:chart-bar-one" class="h-4.5 w-4.5 fill-current" />
       </button>
 
       <!-- Theme Selector Dropdown -->
@@ -243,9 +359,69 @@ onUnmounted(() => {
         @click="emit('toggle-terminal')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
         :title="`Toggle Global Terminal (${toggleTerminalShortcut})`"
+        :disabled="isRestarting"
       >
-        <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current" />
+        <Icon icon="mynaui:terminal" class="h-4.5 w-4.5 fill-current" />
       </button>
     </div>
+
+    <!-- Restart Confirmation Modal -->
+    <Transition name="fade">
+      <div
+        v-if="isRestartConfirmOpen"
+        class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+        @click.self="isRestartConfirmOpen = false"
+      >
+        <div
+          class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4"
+        >
+          <div class="flex items-start gap-3">
+            <div class="p-2.5 rounded-full bg-warning/10 text-warning shrink-0">
+              <Icon icon="mynaui:danger" class="h-6 w-6" />
+            </div>
+            <div class="space-y-1">
+              <h3 class="font-bold text-lg text-base-content">确认重启后端服务？</h3>
+              <p class="text-sm text-base-content/70 leading-relaxed">
+                重启操作将安全终止当前 Asgard 后端进程。
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="bg-base-300/60 rounded-xl p-3.5 border border-base-100/40 text-xs text-base-content/80 space-y-1.5"
+          >
+            <div class="font-semibold text-warning flex items-center gap-1.5">
+              <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
+              <span>重要提示 (Prerequisites)</span>
+            </div>
+            <p>
+              请确保 Docker 容器启动时配置了自动重启策略（如 <code>--restart=always</code> 或
+              <code>--restart=unless-stopped</code>），否则进程退出后容器将不会自动重新启动。
+            </p>
+            <p class="text-base-content/60 text-[11px]">
+              重启过程中页面将自动轮询系统状态，恢复后将自动刷新。
+            </p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              @click="isRestartConfirmOpen = false"
+              class="btn btn-ghost btn-sm"
+              :disabled="isRestarting"
+            >
+              取消
+            </button>
+            <button
+              @click="triggerRestartWorkflow"
+              class="btn btn-error btn-sm gap-1.5"
+              :disabled="isRestarting"
+            >
+              <Icon icon="mynaui:power" class="h-4 w-4" />
+              <span>确认重启</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </aside>
 </template>

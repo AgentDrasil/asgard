@@ -174,6 +174,18 @@ export interface SystemStatusResponse {
   warnings?: string[];
 }
 
+export interface ConfigFileResponse {
+  path: string;
+  content: string;
+  exists: boolean;
+}
+
+export interface ConfigSaveResponse {
+  status?: string;
+  message?: string;
+  error?: string;
+}
+
 export interface ToastItem {
   id: string;
   type: "info" | "success" | "warning" | "error";
