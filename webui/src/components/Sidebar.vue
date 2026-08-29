@@ -314,6 +314,30 @@ onUnmounted(() => {
       v-if="isOpen"
       class="px-2 py-1.5 flex flex-wrap items-center justify-around gap-1 w-full border-t border-base-100/50 bg-base-300"
     >
+      <!-- 1. Quota -->
+      <button
+        @click="emit('open-quota')"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        title="Check Quota"
+        :disabled="isRestarting"
+      >
+        <Icon icon="mynaui:chart-bar-one" class="h-4.5 w-4.5 fill-current" />
+      </button>
+
+      <!-- 2. Theme Selector Dropdown -->
+      <ThemeSelector />
+
+      <!-- 3. Terminal -->
+      <button
+        @click="emit('toggle-terminal')"
+        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
+        :title="`Toggle Global Terminal (${toggleTerminalShortcut})`"
+        :disabled="isRestarting"
+      >
+        <Icon icon="mynaui:terminal" class="h-4.5 w-4.5 fill-current" />
+      </button>
+
+      <!-- 4. Refresh Agent -->
       <button
         @click="reloadApp"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
@@ -326,6 +350,7 @@ onUnmounted(() => {
         />
       </button>
 
+      <!-- 5. Config Editor -->
       <button
         @click="emit('open-config')"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
@@ -335,6 +360,7 @@ onUnmounted(() => {
         <Icon icon="mynaui:cog" class="h-4.5 w-4.5 fill-current" />
       </button>
 
+      <!-- 6. Restart Server -->
       <button
         @click="isRestartConfirmOpen = true"
         class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
@@ -345,27 +371,6 @@ onUnmounted(() => {
           icon="mynaui:power"
           :class="['h-4.5 w-4.5 fill-current text-error/80', { 'animate-spin': isRestarting }]"
         />
-      </button>
-
-      <button
-        @click="emit('open-quota')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Check Quota"
-        :disabled="isRestarting"
-      >
-        <Icon icon="mynaui:chart-bar-one" class="h-4.5 w-4.5 fill-current" />
-      </button>
-
-      <!-- Theme Selector Dropdown -->
-      <ThemeSelector />
-
-      <button
-        @click="emit('toggle-terminal')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        :title="`Toggle Global Terminal (${toggleTerminalShortcut})`"
-        :disabled="isRestarting"
-      >
-        <Icon icon="mynaui:terminal" class="h-4.5 w-4.5 fill-current" />
       </button>
     </div>
 
