@@ -42,7 +42,7 @@ describe("ToastContainer component", () => {
   });
 
   it("supports copying toast message to clipboard", async () => {
-    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    const writeTextMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     Object.assign(navigator, {
       clipboard: {
         writeText: writeTextMock,

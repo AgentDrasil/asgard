@@ -210,6 +210,12 @@ func (s *Server) handleGetConfigRaw(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func writeStatusOK(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": msg})
+}
+
 // handleSaveConfigRaw handles PUT /api/manage/config.
 func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if err := checkManageOrigin(r); err != nil {
@@ -218,6 +224,9 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req SaveConfigRawRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -241,9 +250,6 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dir := filepath.Dir(cfgPath)
-	if dir == "" {
-		dir = "."
-	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Error().Err(err).Str("dir", dir).Msg("failed to create config directory")
 		w.Header().Set("Content-Type", "application/json")
@@ -264,9 +270,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 			renameErr := osRename(tmpPath, cfgPath)
 			if renameErr == nil {
 				// Atomic write succeeded
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+				writeStatusOK(w, "config saved")
 				return
 			}
 
@@ -280,9 +284,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 					_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
 					return
 				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+				writeStatusOK(w, "config saved")
 				return
 			}
 
@@ -307,9 +309,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "config saved"})
+	writeStatusOK(w, "config saved")
 }
 
 func writeConfigDirect(path, content string) error {

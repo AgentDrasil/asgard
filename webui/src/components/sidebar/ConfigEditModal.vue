@@ -65,12 +65,25 @@ const handleSave = async () => {
   }
 };
 
+const isDirty = () => configContent.value !== originalContent.value;
+
 const closeModal = () => {
+  if (isDirty()) {
+    if (!window.confirm("当前配置存在未保存的修改，确定要放弃修改并关闭吗？")) {
+      return;
+    }
+  }
   emit("update:modelValue", false);
 };
 
+const handleModalKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Escape" && props.modelValue && !saving.value) {
+    closeModal();
+  }
+};
+
 const handleRestartClick = () => {
-  closeModal();
+  emit("update:modelValue", false);
   emit("restart");
 };
 
@@ -78,7 +91,10 @@ watch(
   () => props.modelValue,
   (isOpen) => {
     if (isOpen) {
+      window.addEventListener("keydown", handleModalKeydown);
       loadConfig();
+    } else {
+      window.removeEventListener("keydown", handleModalKeydown);
     }
   },
   { immediate: true },

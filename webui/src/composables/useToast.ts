@@ -14,6 +14,9 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 let nextId = 1;
 
 function generateId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
   return `toast-${Date.now()}-${nextId++}`;
 }
 
@@ -34,6 +37,12 @@ export function useToast() {
   };
 
   const addToast = (type: ToastType, message: string, options?: ToastOptions): string => {
+    // Avoid duplicate toast with identical type and message
+    const existing = toasts.value.find((t) => t.type === type && t.message === message);
+    if (existing) {
+      return existing.id;
+    }
+
     const id = generateId();
     const duration =
       options?.duration !== undefined ? options.duration : type === "error" ? 0 : 5000;

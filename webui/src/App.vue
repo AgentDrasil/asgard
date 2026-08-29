@@ -286,9 +286,8 @@ const checkSystemStatus = async () => {
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
-  await loadAgents();
-  await loadSessions();
-  checkSystemStatus();
+  void checkSystemStatus();
+  await Promise.all([loadAgents(), loadSessions()]);
 });
 
 onUnmounted(() => {

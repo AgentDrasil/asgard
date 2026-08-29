@@ -87,13 +87,13 @@ const reloadApp = async () => {
   try {
     const result = await reloadAgents();
     if (result.success) {
-      toast.success("Agents reloaded successfully", { title: "Reload Success" });
+      toast.success("Agent 配置重载成功", { title: "重载成功 (Reload Success)" });
       emit("reload-agents");
     } else {
-      toast.error(result.error || "Failed to reload agents", { title: "Reload Error" });
+      toast.error(result.error || "Agent 配置重载失败", { title: "重载失败 (Reload Error)" });
     }
   } catch (err: any) {
-    toast.error(err?.message || "Failed to reload agents", { title: "Reload Error" });
+    toast.error(err?.message || "Agent 配置重载失败", { title: "重载失败 (Reload Error)" });
   } finally {
     isReloading.value = false;
   }
@@ -102,6 +102,12 @@ const reloadApp = async () => {
 const openRestartConfirm = () => {
   if (isRestarting.value) return;
   isRestartConfirmOpen.value = true;
+};
+
+const handleRestartModalKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Escape" && isRestartConfirmOpen.value && !isRestarting.value) {
+    isRestartConfirmOpen.value = false;
+  }
 };
 
 const triggerRestartWorkflow = async () => {
@@ -138,21 +144,17 @@ const triggerRestartWorkflow = async () => {
   const pollStatus = async () => {
     while (Date.now() - startTime < timeoutMs) {
       if (abortSignal.aborted) return;
-      try {
-        const status = await getSystemStatus();
-        if (status !== null) {
-          if (abortSignal.aborted) return;
-          // Server is back online!
-          toast.success("服务已重新上线，正在刷新页面...", { title: "重启完成" });
-          setTimeout(() => {
-            if (!abortSignal.aborted) {
-              window.location.reload();
-            }
-          }, 500);
-          return;
-        }
-      } catch {
-        // Network transient error during shutdown/reboot, ignore and continue polling
+      const status = await getSystemStatus();
+      if (status !== null) {
+        if (abortSignal.aborted) return;
+        // Server is back online!
+        toast.success("服务已重新上线，正在刷新页面...", { title: "重启完成" });
+        setTimeout(() => {
+          if (!abortSignal.aborted) {
+            window.location.reload();
+          }
+        }, 500);
+        return;
       }
       await new Promise((resolve) => setTimeout(resolve, interval));
     }
@@ -167,7 +169,7 @@ const triggerRestartWorkflow = async () => {
     );
   };
 
-  pollStatus();
+  void pollStatus();
 };
 
 defineExpose({
@@ -176,6 +178,7 @@ defineExpose({
 });
 
 onMounted(() => {
+  window.addEventListener("keydown", handleRestartModalKeydown);
   const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
   if (savedViewMode === "list" || savedViewMode === "agent") {
     viewMode.value = savedViewMode;
@@ -191,6 +194,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener("keydown", handleRestartModalKeydown);
   document.removeEventListener("mousemove", handleMouseMove);
   document.removeEventListener("mouseup", stopResize);
   if (restartAbortController) {
