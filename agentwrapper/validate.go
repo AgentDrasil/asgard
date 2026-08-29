@@ -21,7 +21,8 @@ func ValidateAgySetup() error {
 	tokenPath := filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 	if fi, err := os.Stat(tokenPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("agy setup validation failed: oauth token file does not exist at %s", tokenPath)
+			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
+			return fmt.Errorf("agy setup validation failed: oauth token file does not exist at %s. Please run 'docker exec -it <container_name> agy' to log in (find the container name via 'docker ps').", tokenPath)
 		}
 		return fmt.Errorf("failed to check oauth token: %w", err)
 	} else if fi.IsDir() {
@@ -42,7 +43,8 @@ func ValidateOpencodeSetup() error {
 	authPath := filepath.Join(home, ".local", "share", "opencode", "auth.json")
 	if fi, err := os.Stat(authPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("opencode setup validation failed: auth file does not exist at %s", authPath)
+			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
+			return fmt.Errorf("opencode setup validation failed: auth file does not exist at %s. Please run 'docker exec -it <container_name> opencode auth login' to log in (find the container name via 'docker ps').", authPath)
 		}
 		return fmt.Errorf("failed to check auth file: %w", err)
 	} else if fi.IsDir() {

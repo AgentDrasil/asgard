@@ -3,7 +3,11 @@ package agentwrapper
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateAgySetup(t *testing.T) {
@@ -41,6 +45,22 @@ func TestValidateAgySetup(t *testing.T) {
 	}
 }
 
+func TestValidateAgySetup_MissingToken_ErrorContainsDockerExecHint(t *testing.T) {
+	tempDir := t.TempDir()
+	origHomeDirFn := homeDirFn
+	homeDirFn = func() (string, error) {
+		return tempDir, nil
+	}
+	t.Cleanup(func() {
+		homeDirFn = origHomeDirFn
+	})
+
+	err := ValidateAgySetup()
+	require.Error(t, err)
+	expectedHint := "Please run 'docker exec -it <container_name> agy' to log in (find the container name via 'docker ps')."
+	assert.True(t, strings.Contains(err.Error(), expectedHint), "expected error to contain %q, got %q", expectedHint, err.Error())
+}
+
 func TestValidateOpencodeSetup(t *testing.T) {
 	tempDir := t.TempDir()
 	origHomeDirFn := homeDirFn
@@ -74,6 +94,22 @@ func TestValidateOpencodeSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+}
+
+func TestValidateOpencodeSetup_MissingAuth_ErrorContainsDockerExecHint(t *testing.T) {
+	tempDir := t.TempDir()
+	origHomeDirFn := homeDirFn
+	homeDirFn = func() (string, error) {
+		return tempDir, nil
+	}
+	t.Cleanup(func() {
+		homeDirFn = origHomeDirFn
+	})
+
+	err := ValidateOpencodeSetup()
+	require.Error(t, err)
+	expectedHint := "Please run 'docker exec -it <container_name> opencode auth login' to log in (find the container name via 'docker ps')."
+	assert.True(t, strings.Contains(err.Error(), expectedHint), "expected error to contain %q, got %q", expectedHint, err.Error())
 }
 
 func TestValidateSimplestSetup(t *testing.T) {
