@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
-import { reloadAgents, restartServer, getSystemStatus } from "../lib/api";
 import SessionList from "./sidebar/SessionList.vue";
-import ThemeSelector from "./sidebar/ThemeSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
-import { useToast } from "../composables/useToast";
 
-const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
-const toast = useToast();
+const route = useRoute();
+const router = useRouter();
+const { toggleSidebarShortcut } = useShortcuts();
 
 const props = withDefaults(
   defineProps<{
@@ -29,18 +28,9 @@ const emit = defineEmits<{
   (e: "new-chat", agentId?: string, runDir?: string): void;
   (e: "delete-session", id: string): void;
   (e: "toggle-sidebar"): void;
-  (e: "toggle-terminal"): void;
-  (e: "open-quota"): void;
-  (e: "open-config"): void;
-  (e: "reload-agents"): void;
 }>();
 
-const isReloading = ref(false);
-const isRestarting = ref(false);
-const isRestartConfirmOpen = ref(false);
 const viewMode = ref<"list" | "agent">("list");
-
-let restartAbortController: AbortController | null = null;
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
@@ -81,110 +71,11 @@ const stopResize = () => {
   }
 };
 
-const reloadApp = async () => {
-  if (isReloading.value) return;
-  isReloading.value = true;
-  try {
-    const result = await reloadAgents();
-    if (result.success) {
-      toast.success("Agent configuration reloaded successfully", {
-        title: "Reload Success",
-      });
-      emit("reload-agents");
-    } else {
-      toast.error(result.error || "Failed to reload agent configuration", {
-        title: "Reload Error",
-      });
-    }
-  } catch (err: any) {
-    toast.error(err?.message || "Failed to reload agent configuration", {
-      title: "Reload Error",
-    });
-  } finally {
-    isReloading.value = false;
-  }
+const navigateToSettings = () => {
+  router.push("/settings");
 };
-
-const openRestartConfirm = () => {
-  if (isRestarting.value) return;
-  isRestartConfirmOpen.value = true;
-};
-
-const handleRestartModalKeydown = (e: KeyboardEvent) => {
-  if (e.key === "Escape" && isRestartConfirmOpen.value && !isRestarting.value) {
-    isRestartConfirmOpen.value = false;
-  }
-};
-
-const triggerRestartWorkflow = async () => {
-  isRestartConfirmOpen.value = false;
-  if (isRestarting.value) return;
-  isRestarting.value = true;
-
-  // 1. Send restart signal
-  const accepted = await restartServer();
-  if (!accepted) {
-    isRestarting.value = false;
-    toast.error("Restart request rejected by server (HTTP error). Please check backend logs.", {
-      title: "Restart Failed",
-    });
-    return;
-  }
-
-  // 2. Poll /api/system/status with backoff and timeout (120s)
-  toast.info("Server is restarting, page will refresh automatically once ready...", {
-    title: "Restarting",
-    duration: 10000,
-  });
-
-  restartAbortController = new AbortController();
-  const abortSignal = restartAbortController.signal;
-  const startTime = Date.now();
-  const timeoutMs = 120_000;
-  const initialDelay = 1000;
-  const interval = 1500;
-
-  // Initial delay to give process time to exit
-  await new Promise((resolve) => setTimeout(resolve, initialDelay));
-
-  const pollStatus = async () => {
-    while (Date.now() - startTime < timeoutMs) {
-      if (abortSignal.aborted) return;
-      const status = await getSystemStatus();
-      if (status !== null) {
-        if (abortSignal.aborted) return;
-        // Server is back online!
-        toast.success("Server is back online, refreshing page...", { title: "Restart Complete" });
-        setTimeout(() => {
-          if (!abortSignal.aborted) {
-            window.location.reload();
-          }
-        }, 500);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-
-    if (abortSignal.aborted) return;
-
-    // Timeout reached
-    isRestarting.value = false;
-    toast.error(
-      "Server restart probe timed out (120s). If the container is not configured with a restart policy (e.g. --restart=always), check Docker container status manually (docker ps / docker logs).",
-      { title: "Restart Timeout", duration: 0 },
-    );
-  };
-
-  void pollStatus();
-};
-
-defineExpose({
-  openRestartConfirm,
-  triggerRestartWorkflow,
-});
 
 onMounted(() => {
-  window.addEventListener("keydown", handleRestartModalKeydown);
   const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
   if (savedViewMode === "list" || savedViewMode === "agent") {
     viewMode.value = savedViewMode;
@@ -200,13 +91,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleRestartModalKeydown);
   document.removeEventListener("mousemove", handleMouseMove);
   document.removeEventListener("mouseup", stopResize);
-  if (restartAbortController) {
-    restartAbortController.abort();
-    restartAbortController = null;
-  }
 });
 </script>
 
@@ -236,7 +122,8 @@ onUnmounted(() => {
     >
       <h1
         v-if="isOpen"
-        class="text-lg font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent truncate"
+        class="text-lg font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent truncate cursor-pointer"
+        @click="router.push('/newchat')"
       >
         Asgard
       </h1>
@@ -315,130 +202,22 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- Action Menu (Adaptive flex-wrap layout, visible when sidebar is open) -->
-    <div
-      v-if="isOpen"
-      class="px-2 py-1.5 flex flex-wrap items-center justify-around gap-1 w-full border-t border-base-100/50 bg-base-300"
-    >
-      <!-- 1. Quota -->
+    <!-- Bottom Settings Entry -->
+    <div class="p-2 border-t border-base-100/50 bg-base-300 w-full flex flex-col items-center">
       <button
-        @click="emit('open-quota')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Check Quota"
-        :disabled="isRestarting"
+        @click="navigateToSettings"
+        :class="[
+          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium hover:bg-base-200',
+          route.path.startsWith('/settings')
+            ? 'bg-base-200 text-primary font-semibold'
+            : 'text-base-content/80',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        title="Settings"
       >
-        <Icon icon="mynaui:chart-bar-one" class="h-4.5 w-4.5 fill-current" />
-      </button>
-
-      <!-- 2. Theme Selector Dropdown -->
-      <ThemeSelector />
-
-      <!-- 3. Terminal -->
-      <button
-        @click="emit('toggle-terminal')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        :title="`Toggle Global Terminal (${toggleTerminalShortcut})`"
-        :disabled="isRestarting"
-      >
-        <Icon icon="mynaui:terminal" class="h-4.5 w-4.5 fill-current" />
-      </button>
-
-      <!-- 4. Refresh Agent -->
-      <button
-        @click="reloadApp"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Reload Agents"
-        :disabled="isReloading || isRestarting"
-      >
-        <Icon
-          icon="mynaui:refresh"
-          :class="['h-4.5 w-4.5 fill-current', { 'animate-spin': isReloading }]"
-        />
-      </button>
-
-      <!-- 5. Config Editor -->
-      <button
-        @click="emit('open-config')"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Configuration Editor"
-        :disabled="isRestarting"
-      >
-        <Icon icon="mynaui:cog" class="h-4.5 w-4.5 fill-current" />
-      </button>
-
-      <!-- 6. Restart Server -->
-      <button
-        @click="isRestartConfirmOpen = true"
-        class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-        title="Restart Server"
-        :disabled="isRestarting"
-      >
-        <Icon
-          icon="mynaui:power"
-          :class="['h-4.5 w-4.5 fill-current text-error/80', { 'animate-spin': isRestarting }]"
-        />
+        <Icon icon="mynaui:cog" class="h-5 w-5 fill-current shrink-0" />
+        <span v-if="isOpen">Settings</span>
       </button>
     </div>
-
-    <!-- Restart Confirmation Modal -->
-    <Transition name="fade">
-      <div
-        v-if="isRestartConfirmOpen"
-        class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-        @click.self="isRestartConfirmOpen = false"
-      >
-        <div
-          class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4"
-        >
-          <div class="flex items-start gap-3">
-            <div class="p-2.5 rounded-full bg-warning/10 text-warning shrink-0">
-              <Icon icon="mynaui:danger" class="h-6 w-6" />
-            </div>
-            <div class="space-y-1">
-              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
-              <p class="text-sm text-base-content/70 leading-relaxed">
-                This will gracefully terminate the current Asgard backend process.
-              </p>
-            </div>
-          </div>
-
-          <div
-            class="bg-base-300/60 rounded-xl p-3.5 border border-base-100/40 text-xs text-base-content/80 space-y-1.5"
-          >
-            <div class="font-semibold text-warning flex items-center gap-1.5">
-              <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
-              <span>Prerequisites</span>
-            </div>
-            <p>
-              Please ensure your Docker container is configured with an automatic restart policy
-              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
-              otherwise the container will not restart after the process exits.
-            </p>
-            <p class="text-base-content/60 text-[11px]">
-              The page will poll system status and automatically refresh once the server is back
-              online.
-            </p>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2">
-            <button
-              @click="isRestartConfirmOpen = false"
-              class="btn btn-ghost btn-sm"
-              :disabled="isRestarting"
-            >
-              Cancel
-            </button>
-            <button
-              @click="triggerRestartWorkflow"
-              class="btn btn-error btn-sm gap-1.5"
-              :disabled="isRestarting"
-            >
-              <Icon icon="mynaui:power" class="h-4 w-4" />
-              <span>Confirm Restart</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
   </aside>
 </template>

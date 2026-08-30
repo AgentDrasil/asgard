@@ -1,14 +1,9 @@
-import { h } from "vue";
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import NewChatView from "./views/NewChatView.vue";
 import ChatView from "./views/ChatView.vue";
+import SettingsView from "./views/SettingsView.vue";
+import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
-
-export const SettingsPlaceholder = () =>
-  h("div", { class: "p-6 text-base-content/70" }, "Settings");
-
-export const ConfigEditPlaceholder = () =>
-  h("div", { class: "p-6 text-base-content/70" }, "Config Editor");
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -38,12 +33,12 @@ export const routes: RouteRecordRaw[] = [
   {
     path: "/settings",
     name: "settings",
-    component: SettingsPlaceholder,
+    component: SettingsView,
   },
   {
     path: "/settings/config",
     name: "settings-config",
-    component: ConfigEditPlaceholder,
+    component: ConfigEditView,
   },
   {
     path: "/settings/logs",

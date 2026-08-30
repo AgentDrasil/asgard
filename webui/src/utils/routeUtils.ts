@@ -139,7 +139,12 @@ export function resolveViewFromRoute(
     activeView = "vcs";
   } else if (routeName === "chat-files") {
     activeView = "file";
-  } else if (routeName === "chat") {
+  } else if (
+    routeName === "chat" ||
+    routeName === "settings" ||
+    routeName === "settings-config" ||
+    routeName === "settings-logs"
+  ) {
     activeView = "chat";
   } else {
     // Priority 2: Segment-anchored regex matching (check /vcs before /files)

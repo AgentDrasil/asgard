@@ -231,6 +231,25 @@ describe("routeUtils", () => {
         filePath: "files/sub/files.ts",
         commitId: null,
       });
+
+      // Settings routes
+      expect(resolveViewFromRoute("/settings", {}, "settings")).toEqual({
+        activeView: "chat",
+        filePath: null,
+        commitId: null,
+      });
+
+      expect(resolveViewFromRoute("/settings/config", {}, "settings-config")).toEqual({
+        activeView: "chat",
+        filePath: null,
+        commitId: null,
+      });
+
+      expect(resolveViewFromRoute("/settings/logs", {}, "settings-logs")).toEqual({
+        activeView: "chat",
+        filePath: null,
+        commitId: null,
+      });
     });
   });
 

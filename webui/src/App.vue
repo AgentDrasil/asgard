@@ -5,7 +5,6 @@ import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
-import ConfigEditModal from "./components/sidebar/ConfigEditModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
 import { getSystemStatus } from "./lib/api";
@@ -31,8 +30,6 @@ const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
 const isCommandPaletteOpen = ref(false);
 const isQuotaModalOpen = ref(false);
-const isConfigModalOpen = ref(false);
-const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null);
 const selectedFilePath = ref<string | null>(null);
 const selectedCommit = ref<string | null>(null);
 const isFileTreeOpen = ref(true);
@@ -425,7 +422,6 @@ const commandList = computed<CommandItem[]>(() => [
 
     <!-- Sidebar -->
     <Sidebar
-      ref="sidebarRef"
       :isOpen="isSidebarOpen"
       :sessions="sessions"
       :agents="agents"
@@ -434,10 +430,6 @@ const commandList = computed<CommandItem[]>(() => [
       @new-chat="(agentId, runDir) => handleNewChat(closeSidebarOnMobile, agentId, runDir)"
       @delete-session="handleDeleteSession"
       @toggle-sidebar="toggleSidebar"
-      @toggle-terminal="toggleTerminal('sidebar')"
-      @open-quota="isQuotaModalOpen = true"
-      @open-config="isConfigModalOpen = true"
-      @reload-agents="loadAgents"
     />
 
     <!-- Main Content Area -->
@@ -513,9 +505,6 @@ const commandList = computed<CommandItem[]>(() => [
 
     <!-- Quota Modal -->
     <QuotaModal v-model="isQuotaModalOpen" />
-
-    <!-- Config Editor Modal -->
-    <ConfigEditModal v-model="isConfigModalOpen" @restart="sidebarRef?.openRestartConfirm()" />
 
     <!-- Global Toast Container -->
     <ToastContainer />
