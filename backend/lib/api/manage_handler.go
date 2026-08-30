@@ -103,6 +103,38 @@ func (s *Server) reload() error {
 	s.mux = s.buildMuxLocked()
 	s.mu.Unlock()
 
+	if s.diagnostics != nil {
+		s.diagnostics.ResetSource("model_validation")
+		seenModels := make(map[string]bool)
+		for _, a := range agents {
+			if a == nil {
+				continue
+			}
+			for _, target := range a.Config.CLI {
+				if target.Model == "" {
+					continue
+				}
+				modelKey := target.CLI + ":" + target.Model
+				if seenModels[modelKey] {
+					continue
+				}
+				seenModels[modelKey] = true
+
+				if _, known := agentwrapper.LookupContextWindow(target.Model); !known {
+					log.Error().
+						Str("agent", a.Config.ID).
+						Str("cli", target.CLI).
+						Str("model", target.Model).
+						Msg("Configured model is not in known context window registry, falling back to 1M default context window")
+					s.diagnostics.AddWarning(
+						"model_validation",
+						fmt.Sprintf("Agent %q uses uncataloged model %q; falling back to 1M default context window", a.Config.ID, target.Model),
+					)
+				}
+			}
+		}
+	}
+
 	if s.cronManager != nil {
 		s.cronManager.Reload(agents)
 	}

@@ -191,7 +191,7 @@ teams:
 
 func TestSystemStatusHandler_OkAndDegraded(t *testing.T) {
 	mockClients := map[string]types.CLIClient{
-		"agy": &mockClient{models: []string{"test-model"}},
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
 	}
 	agentwrapper.SetClients(mockClients)
 	t.Cleanup(func() {
@@ -209,7 +209,7 @@ description: "Root agent"
 run_dirs: ["/tmp"]
 cli:
   - cli: "agy"
-    model: "test-model"
+    model: "gemini-3.7-flash-high"
 `
 	err = os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644)
 	require.NoError(t, err)
@@ -739,4 +739,162 @@ func TestWriteConfigDirect(t *testing.T) {
 	// Directory path causes OpenFile error
 	err = writeConfigDirect(tmpDir, "key: value\n")
 	assert.Error(t, err)
+}
+
+func TestServerReload_KnownModels(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy":      &mockClient{models: []string{"gemini-3.7-flash-high"}},
+		"opencode": &mockClient{models: []string{"claude-sonnet-4-6"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_worker"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	workerYaml := `
+id: "agent_worker"
+name: "Agent Worker"
+description: "Worker agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "opencode"
+    model: "claude-sonnet-4-6"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_worker", "config.yaml"), []byte(workerYaml), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	snap := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "ok", snap.Status)
+	assert.Empty(t, snap.Errors)
+	assert.Empty(t, snap.Warnings)
+}
+
+func TestServerReload_UnknownModel_SoftPass(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"unknown-provider/secret-model-v1"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "unknown-provider/secret-model-v1"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// Soft pass allows normal startup and reload
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"status":"success"`)
+
+	snap := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "ok", snap.Status) // Warnings do not degrade status to error
+	assert.Empty(t, snap.Errors)
+	require.Len(t, snap.Warnings, 1)
+	assert.Contains(t, snap.Warnings[0], `Agent "agent_father" uses uncataloged model "unknown-provider/secret-model-v1"; falling back to 1M default context window`)
+}
+
+func TestServerReload_DiagnosticsReset(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"unknown-model-xyz", "gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	unknownYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "unknown-model-xyz"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(unknownYaml), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	snap1 := srv.Diagnostics().Snapshot()
+	require.Len(t, snap1.Warnings, 1)
+	assert.Contains(t, snap1.Warnings[0], "unknown-model-xyz")
+
+	// Update to known model and reload
+	knownYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(knownYaml), 0644))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	snap2 := srv.Diagnostics().Snapshot()
+	assert.Empty(t, snap2.Warnings)
 }
