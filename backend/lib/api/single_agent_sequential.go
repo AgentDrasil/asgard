@@ -9,6 +9,7 @@ import (
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 )
@@ -55,7 +56,7 @@ func (e *SingleAgentExecutor) executeSequential(
 		resultCh <- seqRunResult{out, err}
 	}()
 
-	return e.streamAndFinish(ctx, chatID, runDirOpt, sessionMode, statusCh, resultCh)
+	return e.streamAndFinish(ctx, chatID, runDirOpt, modelOpt, sessionMode, statusCh, resultCh)
 }
 
 // streamAndFinish drains status events from statusCh until resultCh delivers the final output.
@@ -63,6 +64,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 	ctx context.Context,
 	chatID string,
 	runDirOpt optional.Option[string],
+	modelOpt optional.Option[string],
 	sessionMode string,
 	statusCh <-chan AgentStatusUpdate,
 	resultCh <-chan seqRunResult,
@@ -80,7 +82,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 				if result.err != nil {
 					return "", fmt.Errorf("failed to run agent: %w", result.err)
 				}
-				return e.handleFinalResult(result.out, chatID, runDirOpt, sessionMode)
+				return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
 			case <-ctx.Done():
 				return "", ctx.Err()
 			}
@@ -99,7 +101,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 			if result.err != nil {
 				return "", fmt.Errorf("failed to run agent: %w", result.err)
 			}
-			return e.handleFinalResult(result.out, chatID, runDirOpt, sessionMode)
+			return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
 
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -113,9 +115,22 @@ func (e *SingleAgentExecutor) handleFinalResult(
 	out []byte,
 	chatID string,
 	runDirOpt optional.Option[string],
+	modelOpt optional.Option[string],
 	sessionMode string,
 ) (string, error) {
 	respText, sessionID, inputTokens, maxTokens := parseOutput(out)
+
+	if maxTokens <= 0 {
+		modelName := ""
+		if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
+			modelName = modelOpt.Unwrap()
+		} else if len(e.agent.Config.CLI) > 0 && e.agent.Config.CLI[0].Model != "" {
+			modelName = e.agent.Config.CLI[0].Model
+		}
+		if modelName != "" {
+			maxTokens = agentwrapper.GetModelContextWindow("", modelName)
+		}
+	}
 
 	if e.repo != nil {
 		// Always update runDir; only persist sessionID in resume mode.

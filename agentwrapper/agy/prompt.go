@@ -92,7 +92,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("starting agy: %w", err)
 	}
 
-	sessionID, lastContent, inputTokens, maxTokens := parseStream(stdout, opts.ReportCallback)
+	maxTokens := types.GetModelContextWindow(opts.Model)
+	sessionID, lastContent, inputTokens, outMaxTokens := parseStream(stdout, opts.ReportCallback, maxTokens)
 
 	// Wait for the subprocess. A non-zero exit after successful output is
 	// non-fatal — log and continue.
@@ -103,7 +104,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	return &types.PromptResult{
 		SessionID:   sessionID,
 		InputTokens: inputTokens,
-		MaxTokens:   maxTokens,
+		MaxTokens:   outMaxTokens,
 		LastContent: lastContent,
 	}, nil
 }

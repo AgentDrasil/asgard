@@ -46,7 +46,7 @@ func collectCalls(ndjson string) (sessionID, lastContent string, inputTokens int
 	cb := types.ReportFunc(func(si int, src, et, content string, _ map[string]any) {
 		calls = append(calls, streamCall{si, src, et, content})
 	})
-	sessionID, lastContent, inputTokens, _ = parseStream(strings.NewReader(ndjson), cb)
+	sessionID, lastContent, inputTokens, _ = parseStream(strings.NewReader(ndjson), cb, 1048576)
 	return
 }
 
@@ -58,8 +58,9 @@ func TestParseStream_Replay(t *testing.T) {
 	// session ID comes from the "init" event
 	assert.Equal(t, "57659af8-fee7-4694-8913-6ad09e91234a", sessionID)
 
-	// inputTokens comes from result.usage
-	assert.Equal(t, 15198, inputTokens)
+	// inputTokens reflects the single-step prompt context (4555),
+	// NOT the multi-turn cumulative billing sum (10534 + 109 + 4555 = 15198).
+	assert.Equal(t, 4555, inputTokens)
 
 	// lastContent is result.response — NOT any tool output
 	assert.Equal(t, wantResponse, lastContent)
@@ -82,11 +83,63 @@ func TestParseStream_Replay(t *testing.T) {
 // TestParseStream_NilCallback verifies that parseStream still returns the
 // correct sessionID and lastContent when no callback is registered.
 func TestParseStream_NilCallback(t *testing.T) {
-	sessionID, lastContent, inputTokens, maxTokens := parseStream(strings.NewReader(realNDJSON), nil)
+	sessionID, lastContent, inputTokens, maxTokens := parseStream(strings.NewReader(realNDJSON), nil, 1048576)
 	assert.Equal(t, "57659af8-fee7-4694-8913-6ad09e91234a", sessionID)
 	assert.Equal(t, wantResponse, lastContent)
-	assert.Equal(t, 15198, inputTokens)
+	assert.Equal(t, 4555, inputTokens)
 	assert.Equal(t, 1048576, maxTokens)
+}
+
+// TestParseStream_AutoCompact_AntiPollution verifies that step-level context
+// size (including drops from auto-compaction) is preserved and not overwritten
+// by cumulative billing usage reported in result.
+func TestParseStream_AutoCompact_AntiPollution(t *testing.T) {
+	ndjson := `{"event":"init","conversation_id":"compact-session-1"}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":80000}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":150000}}}
+{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"compacted","usage":{"input_tokens":30000}}}
+{"event":"result","result":{"conversation_id":"compact-session-1","status":"SUCCESS","response":"compacted","usage":{"input_tokens":260000}}}`
+
+	var lastMetadata map[string]any
+	cb := types.ReportFunc(func(si int, src, et, content string, meta map[string]any) {
+		lastMetadata = meta
+	})
+
+	sessionID, lastContent, inputTokens, maxTokens := parseStream(strings.NewReader(ndjson), cb, 200000)
+	assert.Equal(t, "compact-session-1", sessionID)
+	assert.Equal(t, "compacted", lastContent)
+	assert.Equal(t, 30000, inputTokens)
+	assert.Equal(t, 200000, maxTokens)
+	require.NotNil(t, lastMetadata)
+	assert.Equal(t, 30000, lastMetadata["input_tokens"])
+	assert.Equal(t, 30000, lastMetadata["total_input_tokens"])
+	assert.Equal(t, 200000, lastMetadata["max_tokens"])
+}
+
+// TestParseStream_DynamicMaxTokens verifies dynamic max tokens injection for various models.
+func TestParseStream_DynamicMaxTokens(t *testing.T) {
+	ndjson := `{"event":"init","conversation_id":"test-dynamic"}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"ok","usage":{"input_tokens":5000}}}
+{"event":"result","result":{"conversation_id":"test-dynamic","status":"SUCCESS","response":"ok","usage":{"input_tokens":5000}}}`
+
+	var lastMetadata map[string]any
+	cb := types.ReportFunc(func(si int, src, et, content string, meta map[string]any) {
+		lastMetadata = meta
+	})
+
+	// Claude (256K)
+	claudeLimit := types.GetModelContextWindow("claude-sonnet-4-6")
+	assert.Equal(t, 256000, claudeLimit)
+	_, _, _, outMax := parseStream(strings.NewReader(ndjson), cb, claudeLimit)
+	assert.Equal(t, 256000, outMax)
+	assert.Equal(t, 256000, lastMetadata["max_tokens"])
+
+	// OpenCode Big Pickle (200K)
+	pickleLimit := types.GetModelContextWindow("opencode/big-pickle")
+	assert.Equal(t, 200000, pickleLimit)
+	_, _, _, outMax = parseStream(strings.NewReader(ndjson), cb, pickleLimit)
+	assert.Equal(t, 200000, outMax)
+	assert.Equal(t, 200000, lastMetadata["max_tokens"])
 }
 
 // TestParseStream_ToolFormatting covers the content string built for every

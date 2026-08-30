@@ -181,7 +181,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 
 	maxTokens := int(model.ContextWindow)
 	if maxTokens <= 0 {
-		maxTokens = 1048576
+		maxTokens = types.GetModelContextWindow(targetModel)
 	}
 
 	var finalMessages []simplest.Message

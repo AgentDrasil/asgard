@@ -226,3 +226,26 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 		})
 	}
 }
+
+func TestPrompt_DynamicMaxTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		model         string
+		wantMaxTokens int
+	}{
+		{"claude-3-7-sonnet", 200000},
+		{"openai/gpt-4o", 128000},
+		{"gemini-2.5-pro", 1048576},
+		{"deepseek-reasoner", 128000},
+		{"custom-unknown-model", 1048576},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			t.Parallel()
+			got := types.GetModelContextWindow(tt.model)
+			assert.Equal(t, tt.wantMaxTokens, got)
+		})
+	}
+}

@@ -664,3 +664,49 @@ func TestPrompt_SandboxSystemPromptAssembly(t *testing.T) {
 	// Assert ~/.simplest/AGENTS.md was not loaded
 	assert.NotContains(t, capturedSystemPrompt, legacyAgentsContent)
 }
+
+func TestPrompt_ContextWindowFallback(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Hello fallback."},
+		},
+		Usage: simplest.Usage{
+			Input: 15,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	mockP := &mockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	// Model with ContextWindow = 0 should trigger fallback to types.GetModelContextWindow
+	testModel := &simplest.Model{
+		ID:            "claude-sonnet-4-6",
+		Name:          "Claude Sonnet 4.6",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 0,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, mockP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	res, err := Prompt(context.Background(), "Hello", types.PromptOptions{
+		Dir:   testDir,
+		Model: "claude-sonnet-4-6",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Hello fallback.", res.LastContent)
+	assert.Equal(t, 15, res.InputTokens)
+	assert.Equal(t, 256000, res.MaxTokens)
+}

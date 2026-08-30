@@ -116,6 +116,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	buf := make([]byte, 4*1024*1024)
 	scanner.Buffer(buf, len(buf))
 
+	maxTokens := types.GetModelContextWindow(opts.Model)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
@@ -184,7 +186,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			if content != "" {
 				if opts.ReportCallback != nil {
 					metadata := map[string]any{
-						"max_tokens": 1048576,
+						"max_tokens": maxTokens,
 					}
 					if entryType == "agent_response" {
 						metadata["is_append"] = true
@@ -237,7 +239,6 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		lastContent = lastToolOutput
 	}
 
-	maxTokens := 1048576
 	remaining := 1.0
 	if maxTokens > 0 {
 		remaining = 1.0 - (float64(totalTokens) / float64(maxTokens))
