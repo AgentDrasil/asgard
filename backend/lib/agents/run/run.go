@@ -100,17 +100,19 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
 	var langRules string
+	var configPath string
 	if conf != nil {
 		langRules = conf.LanguageRules()
+		configPath = conf.GetConfigPath()
 	}
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

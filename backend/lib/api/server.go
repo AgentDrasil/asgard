@@ -66,6 +66,14 @@ func WithConfigPath(path string) ServerOption {
 	}
 }
 
+// ConfigPath returns the server configuration file path.
+func (s *Server) ConfigPath() string {
+	if s == nil {
+		return ""
+	}
+	return s.configPath
+}
+
 // WithRestartTrigger overrides the default restart trigger function for the Server.
 func WithRestartTrigger(fn func()) ServerOption {
 	return func(s *Server) {
@@ -176,6 +184,9 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		if s.configPath == "" {
 			s.configPath = "config.yaml"
 		}
+	}
+	if s.conf != nil && s.conf.ConfigPath == "" {
+		s.conf.ConfigPath = s.configPath
 	}
 
 	if s.restartTrigger == nil {

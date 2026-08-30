@@ -23,7 +23,7 @@ import (
 // extraRunners replace the default runner for the node types they support.
 func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, resolveDefn workflow.ResolveDefnFunc, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
 	registry := workflow.NewNodeRunnerRegistry()
-	registry.Register(workflow.NewCommandRunner(true))
+	registry.Register(workflow.NewCommandRunnerWithConfig(true, conf))
 	registry.Register(workflow.NewFunctionRunner(funcRegistry))
 	if conf != nil {
 		registry.Register(workflow.NewAgentRunnerWithListener(agentspec.NewLoader(conf.AgentDir), conf, statusListener))

@@ -197,9 +197,24 @@ func appendSSHSandboxArgs(args []string, home string) []string {
 	return args
 }
 
+// appendConfigMaskArgs masks the server configuration file if it exists, preventing credential leaks.
+func appendConfigMaskArgs(args []string, configPath string) []string {
+	if strings.TrimSpace(configPath) == "" {
+		return args
+	}
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return args
+	}
+	if fi, err := os.Stat(absPath); err == nil && !fi.IsDir() {
+		args = append(args, "--ro-bind", "/dev/null", absPath)
+	}
+	return args
+}
+
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) ([]string, error) {
+func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -210,6 +225,7 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	if err != nil {
 		return nil, err
 	}
+	args = appendConfigMaskArgs(args, configPath)
 
 	// Mount roles config run_dirs as read-write
 	if cfg != nil {
@@ -363,8 +379,8 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules)
+func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules, configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +389,7 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -384,6 +400,7 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	if err != nil {
 		return nil, err
 	}
+	args = appendConfigMaskArgs(args, configPath)
 
 	// Bind HOME
 	args = append(args, "--bind", home, home)
@@ -400,6 +417,9 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string) (*exec.
 	}
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
+
+	// Append config file masking again in case HOME bind-mount shadowed base masking
+	args = appendConfigMaskArgs(args, configPath)
 
 	if runDir != "" {
 		if _, err := os.Stat(runDir); err == nil {

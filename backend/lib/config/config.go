@@ -35,6 +35,14 @@ type Config struct {
 	ChatLang                string                    `yaml:"chat_lang"`
 	DocLang                 string                    `yaml:"doc_lang"`
 	CommentLang             string                    `yaml:"comment_lang"`
+	ConfigPath              string                    `yaml:"-" json:"-"`
+}
+
+func (c *Config) GetConfigPath() string {
+	if c == nil {
+		return ""
+	}
+	return c.ConfigPath
 }
 
 func (c *Config) GetChatLang() string {
@@ -178,5 +186,10 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	return ParseAndValidate(data)
+	cfg, err := ParseAndValidate(data)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConfigPath = path
+	return cfg, nil
 }

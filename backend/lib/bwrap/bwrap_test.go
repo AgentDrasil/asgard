@@ -237,10 +237,15 @@ func TestBuildArgs(t *testing.T) {
 	}
 
 	langRules := "## Language Preferences\n\n- Responses/Conversations: Chinese (Simplified)"
-	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat", langRules)
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("api_key: secret"), 0644))
+
+	args, err := buildArgsForAgent(cfg, agentPath, targetAgy, "some prompt", optional.Some("my-session-id"), runDir, "test-sock-dir", "test-chat", langRules, configPath)
 	require.NoError(t, err)
 
 	argStr := strings.Join(args, " ")
+
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+configPath)
 
 	sshDir := filepath.Join(home, ".ssh")
 	assert.Contains(t, argStr, "--tmpfs "+sshDir)
@@ -290,7 +295,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "another-model",
 	}
 
-	argsOpencode, err := buildArgsForAgent(cfgNoTeam, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "", "")
+	argsOpencode, err := buildArgsForAgent(cfgNoTeam, agentPath, targetOpencode, "run", optional.None[string](), runDir, "test-sock-dir", "", "", "")
 	require.NoError(t, err)
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
@@ -363,7 +368,12 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat")
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("api_key: secret"), 0644); err != nil {
+		t.Fatalf("failed to create config.yaml: %v", err)
+	}
+
+	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
@@ -379,6 +389,9 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--bind "+tmpDir+" "+tmpDir) {
 		t.Errorf("expected home bind mount, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--ro-bind /dev/null "+configPath) {
+		t.Errorf("expected config masking ro-bind /dev/null, got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--tmpfs "+agyAuthDir) {
 		t.Errorf("expected agy auth dir masking, got: %s", argStr)

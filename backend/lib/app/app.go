@@ -185,6 +185,9 @@ func New(opts ...Option) (*App, error) {
 			conf = salvageConfig(resolvedConfigPath)
 		}
 	}
+	if conf != nil && conf.ConfigPath == "" {
+		conf.ConfigPath = resolvedConfigPath
+	}
 
 	// 2. Validate CLI agent setups (unless skipped)
 	if !options.SkipAgentValidation {

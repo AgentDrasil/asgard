@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/fakebash/pb"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
@@ -28,11 +29,17 @@ type commandRunner struct {
 	// sandboxEnabled is the default sandbox setting; a node-level `sandbox`
 	// flag overrides it.
 	sandboxEnabled bool
+	conf           *config.Config
 }
 
 // NewCommandRunner creates the runner for `command` nodes.
 func NewCommandRunner(sandboxEnabled bool) NodeRunner {
 	return &commandRunner{sandboxEnabled: sandboxEnabled}
+}
+
+// NewCommandRunnerWithConfig creates the runner for `command` nodes with a Config instance.
+func NewCommandRunnerWithConfig(sandboxEnabled bool, conf *config.Config) NodeRunner {
+	return &commandRunner{sandboxEnabled: sandboxEnabled, conf: conf}
 }
 
 func (r *commandRunner) Supports(t workflowspec.NodeType) bool {
@@ -65,7 +72,11 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 	var exitCode int
 	var err error
 	if sandbox {
-		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, &stdout, &stderr)
+		configPath := ""
+		if r.conf != nil {
+			configPath = r.conf.GetConfigPath()
+		}
+		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, &stdout, &stderr)
 	} else {
 		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
 	}
@@ -148,7 +159,7 @@ func asExitError(err error, target **exec.ExitError) bool {
 // runSandboxedCommand runs the command inside a bubblewrap sandbox hosting a
 // fakebashd gRPC daemon, mirroring the dual-sandbox execution model used by
 // agent runs: the host dials the socket directory bind-mounted at /fakebash.
-func runSandboxedCommand(ctx context.Context, command, runDir, chatID string, stdout, stderr *bytes.Buffer) (int, error) {
+func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, stdout, stderr *bytes.Buffer) (int, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return -1, fmt.Errorf("getting user home directory: %w", err)
@@ -159,7 +170,7 @@ func runSandboxedCommand(ctx context.Context, command, runDir, chatID string, st
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID)
+	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath)
 	if err != nil {
 		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
 	}
