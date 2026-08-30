@@ -9,6 +9,7 @@ export interface ToastOptions {
 }
 
 const toasts = ref<ToastItem[]>([]);
+const toastHistory = ref<ToastItem[]>([]);
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 let nextId = 1;
@@ -36,13 +37,11 @@ export function useToast() {
     toasts.value = [];
   };
 
-  const addToast = (type: ToastType, message: string, options?: ToastOptions): string => {
-    // Avoid duplicate toast with identical type and message
-    const existing = toasts.value.find((t) => t.type === type && t.message === message);
-    if (existing) {
-      return existing.id;
-    }
+  const clearToastHistory = () => {
+    toastHistory.value = [];
+  };
 
+  const addToast = (type: ToastType, message: string, options?: ToastOptions): string => {
     const id = generateId();
     const duration =
       options?.duration !== undefined ? options.duration : type === "error" ? 0 : 5000;
@@ -53,7 +52,19 @@ export function useToast() {
       message,
       title: options?.title,
       duration,
+      timestamp: Date.now(),
     };
+
+    toastHistory.value.push(item);
+    if (toastHistory.value.length > 500) {
+      toastHistory.value.shift();
+    }
+
+    // Avoid duplicate toast with identical type and message in active floating toasts
+    const existing = toasts.value.find((t) => t.type === type && t.message === message);
+    if (existing) {
+      return existing.id;
+    }
 
     toasts.value.push(item);
 
@@ -76,6 +87,8 @@ export function useToast() {
 
   return {
     toasts: readonly(toasts),
+    toastHistory: readonly(toastHistory),
+    clearToastHistory,
     addToast,
     removeToast,
     clear,

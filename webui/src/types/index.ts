@@ -186,10 +186,24 @@ export interface ConfigSaveResponse {
   error?: string;
 }
 
+export interface SystemLogEntry {
+  id: number;
+  timestamp: string;
+  level: "warn" | "error" | "info";
+  source: string;
+  message: string;
+  details?: string;
+}
+
+export interface SystemLogsResponse {
+  logs: SystemLogEntry[];
+}
+
 export interface ToastItem {
   id: string;
   type: "info" | "success" | "warning" | "error";
   title?: string;
   message: string;
   duration?: number;
+  timestamp?: number;
 }

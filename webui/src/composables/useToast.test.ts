@@ -4,8 +4,9 @@ import { useToast } from "./useToast";
 describe("useToast composable", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    const { clear } = useToast();
+    const { clear, clearToastHistory } = useToast();
     clear();
+    clearToastHistory();
   });
 
   afterEach(() => {
@@ -83,5 +84,53 @@ describe("useToast composable", () => {
 
     clear();
     expect(toasts.value).toHaveLength(0);
+  });
+
+  it("tracks toast history chronologically with timestamps", () => {
+    const { toastHistory, info, warning, error, clear } = useToast();
+    info("Info event");
+    warning("Warning event", { title: "Degraded" });
+    error("Error event");
+
+    expect(toastHistory.value).toHaveLength(3);
+    expect(toastHistory.value[0].message).toBe("Info event");
+    expect(toastHistory.value[0].timestamp).toBeDefined();
+    expect(toastHistory.value[1].title).toBe("Degraded");
+    expect(toastHistory.value[2].type).toBe("error");
+
+    // Clearing active toasts should not wipe historical logs
+    clear();
+    expect(toastHistory.value).toHaveLength(3);
+  });
+
+  it("records repeated calls into toastHistory even when floating duplicate is filtered", () => {
+    const { toasts, toastHistory, warning } = useToast();
+    warning("Repeat warning");
+    warning("Repeat warning");
+
+    // Floating toasts only show 1 to avoid clutter
+    expect(toasts.value).toHaveLength(1);
+    // History contains both occurrences
+    expect(toastHistory.value).toHaveLength(2);
+  });
+
+  it("clears toast history when clearToastHistory is called", () => {
+    const { toastHistory, info, clearToastHistory } = useToast();
+    info("Msg 1");
+    info("Msg 2");
+    expect(toastHistory.value).toHaveLength(2);
+
+    clearToastHistory();
+    expect(toastHistory.value).toHaveLength(0);
+  });
+
+  it("caps toast history to at most 500 items", () => {
+    const { toastHistory, info } = useToast();
+    for (let i = 0; i < 520; i++) {
+      info(`Msg ${i}`);
+    }
+    expect(toastHistory.value).toHaveLength(500);
+    expect(toastHistory.value[0].message).toBe("Msg 20");
+    expect(toastHistory.value[499].message).toBe("Msg 519");
   });
 });

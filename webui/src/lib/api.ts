@@ -10,6 +10,8 @@ import type {
   GitActionResult,
   GitDiffFile,
   GitLogResponse,
+  SystemLogEntry,
+  SystemLogsResponse,
   SystemStatusResponse,
   TriggerAgentMessageParams,
   WorkspaceFileContent,
@@ -37,6 +39,23 @@ export async function getSystemStatus(): Promise<SystemStatusResponse | null> {
     console.error("getSystemStatus error:", err);
   }
   return null;
+}
+
+// Fetch diagnostic system logs (returns empty array on non-ok or network failure)
+export async function getSystemLogs(level?: string): Promise<SystemLogEntry[]> {
+  try {
+    const url =
+      level && level !== "all"
+        ? `/api/system/logs?level=${encodeURIComponent(level)}`
+        : "/api/system/logs";
+    const res = await apiFetch(url);
+    if (!res.ok) return [];
+    const data: SystemLogsResponse = await res.json();
+    return data.logs || [];
+  } catch (err) {
+    console.error("getSystemLogs error:", err);
+    return [];
+  }
 }
 
 // Fetch loaded agents from backend

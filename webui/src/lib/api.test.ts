@@ -9,6 +9,7 @@ import {
   getFileContent,
   searchFiles,
   getSystemStatus,
+  getSystemLogs,
 } from "./api";
 
 describe("API Library", () => {
@@ -47,6 +48,58 @@ describe("API Library", () => {
 
       const res = await getSystemStatus();
       expect(res).toEqual(mockStatus);
+    });
+  });
+
+  describe("getSystemLogs", () => {
+    it("returns logs on 200 OK without filter", async () => {
+      const mockLogs = [
+        {
+          id: 1,
+          timestamp: "2026-08-30T10:00:00Z",
+          level: "warn" as const,
+          source: "config",
+          message: "config warning",
+        },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ logs: mockLogs }),
+      } as Response);
+
+      const res = await getSystemLogs();
+      expect(res).toEqual(mockLogs);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/system/logs", undefined);
+    });
+
+    it("includes level filter query param when provided", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ logs: [] }),
+      } as Response);
+
+      await getSystemLogs("error");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/system/logs?level=error", undefined);
+    });
+
+    it("returns empty array on non-ok response without throwing", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 500,
+      } as Response);
+
+      const res = await getSystemLogs();
+      expect(res).toEqual([]);
+    });
+
+    it("handles fetch rejection and logs error", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network disconnect"));
+
+      const res = await getSystemLogs();
+      expect(res).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith("getSystemLogs error:", expect.any(Error));
     });
   });
 
