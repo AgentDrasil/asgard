@@ -158,12 +158,13 @@ func RemapSandboxPath(targetPath string) string {
 // KnownVariants is the canonical set of model effort variants that may be appended
 // to a model string as a suffix segment (e.g. "provider/model/low", "model/high").
 var KnownVariants = map[string]bool{
-	"minimal": true,
-	"low":     true,
-	"medium":  true,
-	"high":    true,
-	"xhigh":   true,
-	"max":     true,
+	"minimal":  true,
+	"low":      true,
+	"medium":   true,
+	"high":     true,
+	"xhigh":    true,
+	"max":      true,
+	"thinking": true,
 }
 
 // SplitModelVariant parses a model string that may contain a variant suffix
@@ -182,4 +183,70 @@ func SplitModelVariant(modelWithVariant string) (string, string) {
 		}
 	}
 	return modelWithVariant, ""
+}
+
+// DefaultContextWindow is the standard fallback context window size (1M tokens).
+const DefaultContextWindow = 1048576
+
+// exactModelContextTable maps canonical model names to their context window sizes.
+var exactModelContextTable = map[string]int{
+	// agy (Claude: 256000, Gemini: 1048576)
+	"claude-opus-4-6-thinking": 256000,
+	"claude-sonnet-4-6":        256000,
+	"gemini-3.1-pro-high":     1048576,
+	"gemini-3.1-pro-low":      1048576,
+	"gemini-3.7-flash-high":   1048576,
+	"gemini-3.7-flash-low":    1048576,
+	"gemini-3.7-flash-medium": 1048576,
+
+	// opencode
+	"opencode/big-pickle":                      200000,
+	"opencode/ling-3.0-flash-fin-free":         262144,
+	"opencode/mimo-v2.5-free":                  1048576,
+	"opencode/muse-spark-1.2-contributor-free": 1048576,
+	"opencode/nemotron-3-ultra-free":           262144,
+	"opencode/nemotron-3.5-lightning-free":     262144,
+	"zai-coding-plan/glm-5.3":                  1048576,
+	"zai-coding-plan/glm-5.3-flash":            1048576,
+}
+
+// StripVariant removes effort/thinking variant suffixes (e.g. "/low", "/high")
+// from a model string.
+func StripVariant(model string) string {
+	model = strings.TrimSpace(model)
+	if base, variant := SplitModelVariant(model); variant != "" {
+		model = base
+	}
+	return strings.TrimSpace(model)
+}
+
+// LookupContextWindow determines the context window limit for a model.
+// It returns the limit in tokens and whether the model was recognized as a known model.
+// For unknown models, it falls back to DefaultContextWindow and returns known=false.
+func LookupContextWindow(model string) (limit int, known bool) {
+	raw := strings.ToLower(strings.TrimSpace(model))
+	if raw == "" {
+		return DefaultContextWindow, false
+	}
+
+	// 1. Exact match on raw lowercase model name
+	if val, ok := exactModelContextTable[raw]; ok {
+		return val, true
+	}
+
+	// 2. Exact match on stripped variant name (e.g. "zai-coding-plan/glm-5.3/low" -> "zai-coding-plan/glm-5.3")
+	stripped := StripVariant(raw)
+	if val, ok := exactModelContextTable[stripped]; ok {
+		return val, true
+	}
+
+	// Unknown model fallback
+	return DefaultContextWindow, false
+}
+
+// GetModelContextWindow returns the context window token limit for a model.
+// If unknown, it returns DefaultContextWindow (1M).
+func GetModelContextWindow(model string) int {
+	limit, _ := LookupContextWindow(model)
+	return limit
 }

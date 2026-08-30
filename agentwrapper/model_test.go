@@ -60,3 +60,35 @@ func TestModelCandidates(t *testing.T) {
 		t.Errorf("unexpected candidates: %v", got)
 	}
 }
+
+func TestLookupContextWindow(t *testing.T) {
+	limit, known := LookupContextWindow("claude-opus-4-6-thinking")
+	if !known || limit != 256000 {
+		t.Errorf("LookupContextWindow(claude-opus-4-6-thinking) = (%d, %v), want (256000, true)", limit, known)
+	}
+
+	limit, known = LookupContextWindow("unknown-xyz")
+	if known || limit != 1048576 {
+		t.Errorf("LookupContextWindow(unknown-xyz) = (%d, %v), want (1048576, false)", limit, known)
+	}
+}
+
+func TestGetModelContextWindow(t *testing.T) {
+	tests := []struct {
+		cli   string
+		model string
+		want  int
+	}{
+		{"opencode", "zai-coding-plan/glm-5.3/low", 1048576},
+		{"agy", "claude-opus-4-6-thinking", 256000},
+		{"agy", "gemini-3.7-flash-low", 1048576},
+		{"simplest", "custom/unknown-model", 1048576},
+	}
+
+	for _, tt := range tests {
+		got := GetModelContextWindow(tt.cli, tt.model)
+		if got != tt.want {
+			t.Errorf("GetModelContextWindow(%q, %q) = %d, want %d", tt.cli, tt.model, got, tt.want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
 // MatchesModel reports whether the requested model matches a known model
@@ -44,4 +45,21 @@ func ModelCandidates(cli, model string) []string {
 		}
 	}
 	return names
+}
+
+// LookupContextWindow delegates directly to types.LookupContextWindow.
+func LookupContextWindow(model string) (limit int, known bool) {
+	return types.LookupContextWindow(model)
+}
+
+// GetModelContextWindow resolves the context window for a model given the CLI type.
+// It iterates through ModelCandidates(cli, model) and returns the first known limit.
+// If none are known, it returns types.DefaultContextWindow (1M).
+func GetModelContextWindow(cli, model string) int {
+	for _, candidate := range ModelCandidates(cli, model) {
+		if limit, known := types.LookupContextWindow(candidate); known {
+			return limit
+		}
+	}
+	return types.DefaultContextWindow
 }
