@@ -55,7 +55,9 @@ const handleSave = async () => {
     } else {
       saveSuccess.value = true;
       originalContent.value = configContent.value;
-      toast.success("配置已保存，重启服务后生效", { title: "配置已保存" });
+      toast.success("Configuration saved, restart server to apply changes", {
+        title: "Config Saved",
+      });
     }
   } catch (err: any) {
     errorMessage.value = err?.message || "Failed to save configuration";
@@ -69,7 +71,9 @@ const isDirty = () => configContent.value !== originalContent.value;
 
 const closeModal = () => {
   if (isDirty()) {
-    if (!window.confirm("当前配置存在未保存的修改，确定要放弃修改并关闭吗？")) {
+    if (
+      !window.confirm("You have unsaved changes. Are you sure you want to discard them and close?")
+    ) {
       return;
     }
   }
@@ -156,17 +160,14 @@ watch(
             >
               <div class="flex items-center gap-2">
                 <Icon icon="mynaui:check-circle" class="h-5 w-5 shrink-0" />
-                <span
-                  >配置已保存，重启服务后生效 (Configuration saved, restart server to apply
-                  changes)</span
-                >
+                <span>Configuration saved, restart server to apply changes</span>
               </div>
               <button
                 @click="handleRestartClick"
                 class="btn btn-sm btn-outline border-success-content/30 text-success-content hover:bg-success-content/20 gap-1.5"
               >
                 <Icon icon="mynaui:refresh" class="h-4 w-4" />
-                <span>重启服务</span>
+                <span>Restart Server</span>
               </button>
             </div>
 

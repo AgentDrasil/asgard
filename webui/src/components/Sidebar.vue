@@ -87,13 +87,19 @@ const reloadApp = async () => {
   try {
     const result = await reloadAgents();
     if (result.success) {
-      toast.success("Agent 配置重载成功", { title: "重载成功 (Reload Success)" });
+      toast.success("Agent configuration reloaded successfully", {
+        title: "Reload Success",
+      });
       emit("reload-agents");
     } else {
-      toast.error(result.error || "Agent 配置重载失败", { title: "重载失败 (Reload Error)" });
+      toast.error(result.error || "Failed to reload agent configuration", {
+        title: "Reload Error",
+      });
     }
   } catch (err: any) {
-    toast.error(err?.message || "Agent 配置重载失败", { title: "重载失败 (Reload Error)" });
+    toast.error(err?.message || "Failed to reload agent configuration", {
+      title: "Reload Error",
+    });
   } finally {
     isReloading.value = false;
   }
@@ -119,15 +125,15 @@ const triggerRestartWorkflow = async () => {
   const accepted = await restartServer();
   if (!accepted) {
     isRestarting.value = false;
-    toast.error("重启请求被服务器拒绝 (HTTP error)，请检查后端日志。", {
+    toast.error("Restart request rejected by server (HTTP error). Please check backend logs.", {
       title: "Restart Failed",
     });
     return;
   }
 
   // 2. Poll /api/system/status with backoff and timeout (120s)
-  toast.info("服务正在重启，页面将在服务就绪后自动刷新...", {
-    title: "正在重启 (Restarting)",
+  toast.info("Server is restarting, page will refresh automatically once ready...", {
+    title: "Restarting",
     duration: 10000,
   });
 
@@ -148,7 +154,7 @@ const triggerRestartWorkflow = async () => {
       if (status !== null) {
         if (abortSignal.aborted) return;
         // Server is back online!
-        toast.success("服务已重新上线，正在刷新页面...", { title: "重启完成" });
+        toast.success("Server is back online, refreshing page...", { title: "Restart Complete" });
         setTimeout(() => {
           if (!abortSignal.aborted) {
             window.location.reload();
@@ -164,8 +170,8 @@ const triggerRestartWorkflow = async () => {
     // Timeout reached
     isRestarting.value = false;
     toast.error(
-      "服务重启探测超时 (120s)。若容器未配置 restart 策略（如 --restart=always），请手动检查 Docker 容器状态 (docker ps / docker logs)。",
-      { title: "重启超时 (Restart Timeout)", duration: 0 },
+      "Server restart probe timed out (120s). If the container is not configured with a restart policy (e.g. --restart=always), check Docker container status manually (docker ps / docker logs).",
+      { title: "Restart Timeout", duration: 0 },
     );
   };
 
@@ -389,9 +395,9 @@ onUnmounted(() => {
               <Icon icon="mynaui:danger" class="h-6 w-6" />
             </div>
             <div class="space-y-1">
-              <h3 class="font-bold text-lg text-base-content">确认重启后端服务？</h3>
+              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
               <p class="text-sm text-base-content/70 leading-relaxed">
-                重启操作将安全终止当前 Asgard 后端进程。
+                This will gracefully terminate the current Asgard backend process.
               </p>
             </div>
           </div>
@@ -401,14 +407,16 @@ onUnmounted(() => {
           >
             <div class="font-semibold text-warning flex items-center gap-1.5">
               <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
-              <span>重要提示 (Prerequisites)</span>
+              <span>Prerequisites</span>
             </div>
             <p>
-              请确保 Docker 容器启动时配置了自动重启策略（如 <code>--restart=always</code> 或
-              <code>--restart=unless-stopped</code>），否则进程退出后容器将不会自动重新启动。
+              Please ensure your Docker container is configured with an automatic restart policy
+              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
+              otherwise the container will not restart after the process exits.
             </p>
             <p class="text-base-content/60 text-[11px]">
-              重启过程中页面将自动轮询系统状态，恢复后将自动刷新。
+              The page will poll system status and automatically refresh once the server is back
+              online.
             </p>
           </div>
 
@@ -418,7 +426,7 @@ onUnmounted(() => {
               class="btn btn-ghost btn-sm"
               :disabled="isRestarting"
             >
-              取消
+              Cancel
             </button>
             <button
               @click="triggerRestartWorkflow"
@@ -426,7 +434,7 @@ onUnmounted(() => {
               :disabled="isRestarting"
             >
               <Icon icon="mynaui:power" class="h-4 w-4" />
-              <span>确认重启</span>
+              <span>Confirm Restart</span>
             </button>
           </div>
         </div>

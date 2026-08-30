@@ -266,16 +266,18 @@ const checkSystemStatus = async () => {
     if (status.status === "degraded") {
       if (status.errors && status.errors.length > 0) {
         for (const err of status.errors) {
-          toast.error(err, { title: "系统服务降级 (System Degraded)" });
+          toast.error(err, { title: "System Degraded" });
         }
       } else {
-        toast.warning("系统处于降级模式运行中", { title: "系统服务降级 (System Degraded)" });
+        toast.warning("System is currently running in degraded mode", {
+          title: "System Degraded",
+        });
       }
     }
 
     if (status.warnings && status.warnings.length > 0) {
       for (const warn of status.warnings) {
-        toast.warning(warn, { title: "系统提示 (System Warning)" });
+        toast.warning(warn, { title: "System Warning" });
       }
     }
   } catch (e) {

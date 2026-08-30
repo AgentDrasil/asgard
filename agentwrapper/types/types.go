@@ -193,11 +193,11 @@ var exactModelContextTable = map[string]int{
 	// agy (Claude: 256000, Gemini: 1048576)
 	"claude-opus-4-6-thinking": 256000,
 	"claude-sonnet-4-6":        256000,
-	"gemini-3.1-pro-high":     1048576,
-	"gemini-3.1-pro-low":      1048576,
-	"gemini-3.7-flash-high":   1048576,
-	"gemini-3.7-flash-low":    1048576,
-	"gemini-3.7-flash-medium": 1048576,
+	"gemini-3.1-pro-high":      1048576,
+	"gemini-3.1-pro-low":       1048576,
+	"gemini-3.7-flash-high":    1048576,
+	"gemini-3.7-flash-low":     1048576,
+	"gemini-3.7-flash-medium":  1048576,
 
 	// opencode
 	"opencode/big-pickle":                      200000,

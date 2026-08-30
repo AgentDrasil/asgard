@@ -58,7 +58,7 @@ function inlineStart(src: string): number {
 /**
  * Report the index of the next block-level delimiter ($$ or \[) that starts
  * its own line. Delimiters appearing mid-line are left to the inline
- * tokenizer so sentences like "前缀 $$x^2$$ 后缀" stay within one paragraph.
+ * tokenizer so sentences like "prefix $$x^2$$ suffix" stay within one paragraph.
  */
 function blockStart(src: string): number {
   const pattern = /\$\$|\\\[/g;

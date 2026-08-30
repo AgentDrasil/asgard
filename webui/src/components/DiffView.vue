@@ -186,7 +186,7 @@ async function loadDiffOnly() {
         selectedIndex.value = idx;
         selectedFilePath.value = files.value[idx].newPath;
       } else {
-        // 未命中降级：回落为首个文件并纠正 URL
+        // Fallback on mismatch: default to first file and reconcile route
         selectedIndex.value = 0;
         selectedFilePath.value = files.value[0]?.newPath ?? null;
         if (props.sessionId) {
