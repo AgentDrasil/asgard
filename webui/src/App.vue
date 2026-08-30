@@ -489,6 +489,8 @@ const commandList = computed<CommandItem[]>(() => [
       @new-chat="(agentId, runDir) => handleNewChat(closeSidebarOnMobile, agentId, runDir)"
       @delete-session="handleDeleteSession"
       @toggle-sidebar="toggleSidebar"
+      @toggle-terminal="() => toggleTerminal('sidebar')"
+      @open-quota="isQuotaModalOpen = true"
     />
 
     <!-- Main Content Area -->

@@ -8,7 +8,7 @@ import { useShortcuts } from "../composables/useShortcuts";
 
 const route = useRoute();
 const router = useRouter();
-const { toggleSidebarShortcut } = useShortcuts();
+const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +28,8 @@ const emit = defineEmits<{
   (e: "new-chat", agentId?: string, runDir?: string): void;
   (e: "delete-session", id: string): void;
   (e: "toggle-sidebar"): void;
+  (e: "toggle-terminal"): void;
+  (e: "open-quota"): void;
 }>();
 
 const viewMode = ref<"list" | "agent">("list");
@@ -202,15 +204,41 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- Bottom Settings Entry -->
-    <div class="p-2 border-t border-base-100/50 bg-base-300 w-full flex flex-col items-center">
+    <!-- Bottom Actions & Settings Entry -->
+    <div
+      class="p-2 border-t border-base-100/50 bg-base-300 w-full flex flex-col items-center space-y-0.5"
+    >
+      <button
+        @click="emit('toggle-terminal')"
+        :class="[
+          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:bg-base-200 hover:text-base-content',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        :title="`Terminal (${toggleTerminalShortcut})`"
+      >
+        <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current shrink-0" />
+        <span v-if="isOpen">Terminal</span>
+      </button>
+
+      <button
+        @click="emit('open-quota')"
+        :class="[
+          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:bg-base-200 hover:text-base-content',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        title="Usage & Quota"
+      >
+        <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current shrink-0" />
+        <span v-if="isOpen">Usage & Quota</span>
+      </button>
+
       <button
         @click="navigateToSettings"
         :class="[
           'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium hover:bg-base-200',
           route.path.startsWith('/settings')
             ? 'bg-base-200 text-primary font-semibold'
-            : 'text-base-content/80',
+            : 'text-base-content/80 hover:text-base-content',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
         title="Settings"

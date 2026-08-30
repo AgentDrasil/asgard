@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
-import { Icon } from "@iconify/vue";
 import { APP_THEMES } from "../../themes/terminal";
 
 const currentTheme = ref("dark");
@@ -21,63 +20,33 @@ onMounted(() => {
   document.documentElement.setAttribute("data-theme", currentTheme.value);
 });
 
-const selectTheme = (themeId: string) => {
+const onThemeChange = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const themeId = target.value;
   currentTheme.value = themeId;
   document.documentElement.setAttribute("data-theme", themeId);
   localStorage.setItem("theme", themeId);
-
-  if (document.activeElement instanceof HTMLElement) {
-    document.activeElement.blur();
-  }
 };
 </script>
 
 <template>
-  <div class="dropdown dropdown-top">
-    <button
-      tabindex="0"
-      role="button"
-      class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-      title="Select Theme"
+  <div class="flex items-center">
+    <select
+      :value="currentTheme"
+      @change="onThemeChange"
+      class="select select-bordered select-sm w-48 sm:w-56 bg-base-100 border-base-300 text-base-content focus:outline-hidden focus:ring-2 focus:ring-primary/50 text-xs font-medium cursor-pointer"
+      aria-label="Select Theme"
     >
-      <Icon icon="mdi:paint-outline" class="h-5 w-5 fill-current" />
-    </button>
-    <ul
-      tabindex="0"
-      class="dropdown-content menu menu-sm bg-base-200 border border-base-100 rounded-box z-50 w-52 p-1.5 shadow-xl max-h-60 overflow-y-auto mb-1"
-    >
-      <li class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1">
-        DaisyUI Themes
-      </li>
-      <li v-for="t in daisyUiThemes" :key="t.id">
-        <button
-          @click="selectTheme(t.id)"
-          :class="[
-            'flex items-center justify-between py-1 px-2 text-xs rounded-md',
-            currentTheme === t.id ? 'active font-medium' : '',
-          ]"
-        >
-          <span>{{ t.name }}</span>
-          <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
-        </button>
-      </li>
-      <li
-        class="menu-title text-[10px] uppercase font-semibold text-base-content/50 px-2 py-1 mt-1"
-      >
-        Catppuccin Themes
-      </li>
-      <li v-for="t in catppuccinThemes" :key="t.id">
-        <button
-          @click="selectTheme(t.id)"
-          :class="[
-            'flex items-center justify-between py-1 px-2 text-xs rounded-md',
-            currentTheme === t.id ? 'active font-medium' : '',
-          ]"
-        >
-          <span>{{ t.name }}</span>
-          <Icon v-if="currentTheme === t.id" icon="mynaui:check" class="w-4 h-4 shrink-0" />
-        </button>
-      </li>
-    </ul>
+      <optgroup label="DaisyUI Themes">
+        <option v-for="t in daisyUiThemes" :key="t.id" :value="t.id">
+          {{ t.name }}
+        </option>
+      </optgroup>
+      <optgroup label="Catppuccin Themes">
+        <option v-for="t in catppuccinThemes" :key="t.id" :value="t.id">
+          {{ t.name }}
+        </option>
+      </optgroup>
+    </select>
   </div>
 </template>
