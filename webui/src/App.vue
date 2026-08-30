@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { Icon } from "@iconify/vue";
 import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
-import { getSystemStatus } from "./lib/api";
+import { getSystemStatus, reloadAgents } from "./lib/api";
 import { useToast } from "./composables/useToast";
+import { useRestartFlow } from "./composables/useRestartFlow";
 import type { ActiveView, CommandItem } from "./types";
 import {
   resolveViewFromRoute,
@@ -43,6 +45,14 @@ const isVCSSidebarOpen = ref(true);
 const terminalType = ref<"session" | "sidebar">("session");
 
 const {
+  isRestarting,
+  isRestartConfirmOpen,
+  openRestartConfirm,
+  closeRestartConfirm,
+  triggerRestartWorkflow,
+} = useRestartFlow();
+
+const {
   toggleSidebarShortcut,
   toggleArtifactsShortcut,
   toggleDiffShortcut,
@@ -67,8 +77,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     (e.code === "F1" || e.key === "F1") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
 
   const isCommandPaletteKey =
-    isBareF1 ||
-    (ctrlKey && e.shiftKey && !e.altKey && (e.code === "KeyP" || e.key === "P" || e.key === "p"));
+    isBareF1 || (ctrlKey && !e.altKey && (e.code === "KeyP" || e.key === "P" || e.key === "p"));
 
   if (isCommandPaletteKey) {
     e.preventDefault();
@@ -86,20 +95,6 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     } else {
       toggleTerminal("session");
     }
-    return;
-  }
-
-  // Ctrl+P / Cmd+P (Open file search modal before input guard)
-  if (
-    ctrlKey &&
-    !e.altKey &&
-    !e.shiftKey &&
-    (e.code === "KeyP" || e.key === "p" || e.key === "P")
-  ) {
-    e.preventDefault();
-    e.stopPropagation();
-    isCommandPaletteOpen.value = false;
-    isFileSearchOpen.value = true;
     return;
   }
 
@@ -327,7 +322,71 @@ const closeSidebarOnMobile = () => {
   }
 };
 
+const isReloadingAgents = ref(false);
+
+const reloadApp = async () => {
+  if (isReloadingAgents.value) return;
+  isReloadingAgents.value = true;
+  try {
+    const result = await reloadAgents();
+    if (result.success) {
+      toast.success("Agent configuration reloaded successfully", {
+        title: "Reload Success",
+      });
+      await Promise.all([loadAgents(), loadSessions()]);
+    } else {
+      toast.error(result.error || "Failed to reload agent configuration", {
+        title: "Reload Error",
+      });
+    }
+  } catch (err: any) {
+    toast.error(err?.message || "Failed to reload agent configuration", {
+      title: "Reload Error",
+    });
+  } finally {
+    isReloadingAgents.value = false;
+  }
+};
+
 const commandList = computed<CommandItem[]>(() => [
+  {
+    id: "open-settings",
+    title: "Open Settings",
+    icon: "mynaui:cog",
+    action: () => router.push("/settings"),
+  },
+  {
+    id: "open-logs",
+    title: "Open System Logs & Diagnostics",
+    icon: "mynaui:terminal",
+    action: () => router.push("/settings/logs"),
+  },
+  {
+    id: "edit-config",
+    title: "Open Config Editor",
+    icon: "mynaui:cog-three",
+    action: () => router.push("/settings/config"),
+  },
+  {
+    id: "reload-agents",
+    title: "Reload Agents",
+    icon: "mynaui:refresh",
+    action: () => reloadApp(),
+  },
+  {
+    id: "restart-server",
+    title: "Restart Server",
+    icon: "mynaui:power",
+    action: () => openRestartConfirm(),
+  },
+  {
+    id: "search-files",
+    title: "Search Files in Workspace",
+    icon: "octicon:file-code-24",
+    action: () => {
+      isFileSearchOpen.value = true;
+    },
+  },
   {
     id: "toggle-left-panel",
     title: "Toggle Left Panel",
@@ -505,6 +564,67 @@ const commandList = computed<CommandItem[]>(() => [
 
     <!-- Quota Modal -->
     <QuotaModal v-model="isQuotaModalOpen" />
+
+    <!-- Restart Confirmation Modal -->
+    <Transition name="fade">
+      <div
+        v-if="isRestartConfirmOpen"
+        class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+        @click.self="closeRestartConfirm"
+      >
+        <div
+          class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4"
+        >
+          <div class="flex items-start gap-3">
+            <div class="p-2.5 rounded-full bg-warning/10 text-warning shrink-0">
+              <Icon icon="mynaui:danger" class="h-6 w-6" />
+            </div>
+            <div class="space-y-1">
+              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
+              <p class="text-sm text-base-content/70 leading-relaxed">
+                This will gracefully terminate the current Asgard backend process.
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="bg-base-300/60 rounded-xl p-3.5 border border-base-100/40 text-xs text-base-content/80 space-y-1.5"
+          >
+            <div class="font-semibold text-warning flex items-center gap-1.5">
+              <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
+              <span>Prerequisites</span>
+            </div>
+            <p>
+              Please ensure your Docker container is configured with an automatic restart policy
+              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
+              otherwise the container will not restart after the process exits.
+            </p>
+            <p class="text-base-content/60 text-[11px]">
+              The page will poll system status and automatically refresh once the server is back
+              online.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              @click="closeRestartConfirm"
+              class="btn btn-ghost btn-sm"
+              :disabled="isRestarting"
+            >
+              Cancel
+            </button>
+            <button
+              @click="triggerRestartWorkflow"
+              class="btn btn-error btn-sm gap-1.5"
+              :disabled="isRestarting"
+            >
+              <Icon icon="mynaui:power" class="h-4 w-4" />
+              <span>Confirm Restart</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Global Toast Container -->
     <ToastContainer />

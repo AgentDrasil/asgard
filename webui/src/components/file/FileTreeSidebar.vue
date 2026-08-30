@@ -3,7 +3,6 @@ import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { Icon } from "@iconify/vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { getFileTree } from "../../lib/api";
-import { useShortcuts } from "../../composables/useShortcuts";
 import { formatPath } from "../../utils/agentUtils";
 import type { FileTreeEntry } from "../../types";
 
@@ -20,8 +19,6 @@ const emit = defineEmits<{
   (e: "open-search"): void;
   (e: "refresh"): void;
 }>();
-
-const { fileSearchShortcut } = useShortcuts();
 
 const rootNodes = ref<FileTreeEntry[]>([]);
 const isTreeLoading = ref(false);
@@ -189,11 +186,8 @@ onUnmounted(() => {
         >
           <span class="flex items-center gap-1.5 truncate">
             <Icon icon="material-symbols:search" class="h-3.5 w-3.5 text-base-content/40" />
-            <span class="text-[11px] truncate">Find file...</span>
+            <span class="text-[11px] truncate">Search files...</span>
           </span>
-          <kbd class="kbd kbd-xs bg-base-200 text-[10px] text-base-content/50 font-mono">{{
-            fileSearchShortcut
-          }}</kbd>
         </button>
       </div>
 

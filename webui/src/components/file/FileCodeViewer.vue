@@ -26,7 +26,7 @@ const emit = defineEmits<{
   (e: "file-loaded", data: WorkspaceFileContent | null): void;
 }>();
 
-const { fileSearchShortcut, findShortcut } = useShortcuts();
+const { findShortcut } = useShortcuts();
 const { highlightToHtml } = useShiki();
 
 const fileData = ref<WorkspaceFileContent | null>(null);
@@ -323,7 +323,6 @@ watch([() => fileData.value, markdownMode], () => {
         >
           <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
           <span>Search Files</span>
-          <kbd class="kbd kbd-xs bg-base-200 text-[10px]">{{ fileSearchShortcut }}</kbd>
         </button>
       </div>
 

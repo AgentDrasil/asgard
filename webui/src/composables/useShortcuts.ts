@@ -13,8 +13,8 @@ export function useShortcuts() {
   const toggleDiffShortcut = computed(() => `${modKey.value}+${altKey.value}+D`);
   const toggleTerminalShortcut = computed(() => `${modKey.value}+\``);
   const sendShortcut = computed(() => `${modKey.value}+Enter`);
-  const fileSearchShortcut = computed(() => `${modKey.value}+P`);
-  const commandPaletteShortcut = computed(() => `${modKey.value}+Shift+P`);
+  const commandPaletteShortcut = computed(() => `${modKey.value}+P`);
+  const commandPaletteShiftShortcut = computed(() => `${modKey.value}+Shift+P`);
   const commandPaletteF1Shortcut = computed(() => "F1");
   const toggleFileViewShortcut = computed(() => `${modKey.value}+${altKey.value}+F`);
   const findShortcut = computed(() => `${modKey.value}+F`);
@@ -28,8 +28,8 @@ export function useShortcuts() {
     toggleDiffShortcut,
     toggleTerminalShortcut,
     sendShortcut,
-    fileSearchShortcut,
     commandPaletteShortcut,
+    commandPaletteShiftShortcut,
     commandPaletteF1Shortcut,
     toggleFileViewShortcut,
     findShortcut,

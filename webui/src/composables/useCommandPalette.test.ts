@@ -111,4 +111,68 @@ describe("useCommandPalette", () => {
     expect(query.value).toBe("");
     expect(selectedIndex.value).toBe(0);
   });
+
+  it("filters and executes core commands (Settings, Logs, Config, Reload, Restart, Search Files)", () => {
+    const actions = {
+      openSettings: vi.fn<() => void>(),
+      openLogs: vi.fn<() => void>(),
+      editConfig: vi.fn<() => void>(),
+      reloadAgents: vi.fn<() => void>(),
+      restartServer: vi.fn<() => void>(),
+      searchFiles: vi.fn<() => void>(),
+    };
+
+    const coreCommands: CommandItem[] = [
+      { id: "open-settings", title: "Open Settings", action: actions.openSettings },
+      { id: "open-logs", title: "Open System Logs & Diagnostics", action: actions.openLogs },
+      { id: "edit-config", title: "Open Config Editor", action: actions.editConfig },
+      { id: "reload-agents", title: "Reload Agents", action: actions.reloadAgents },
+      { id: "restart-server", title: "Restart Server", action: actions.restartServer },
+      { id: "search-files", title: "Search Files in Workspace", action: actions.searchFiles },
+    ];
+
+    const { query, filteredCommands, selectCurrent } = useCommandPalette(coreCommands);
+
+    // Test Settings command
+    query.value = "settings";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("open-settings");
+    selectCurrent()?.action();
+    expect(actions.openSettings).toHaveBeenCalledTimes(1);
+
+    // Test Logs command
+    query.value = "logs";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("open-logs");
+    selectCurrent()?.action();
+    expect(actions.openLogs).toHaveBeenCalledTimes(1);
+
+    // Test Config command
+    query.value = "config";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("edit-config");
+    selectCurrent()?.action();
+    expect(actions.editConfig).toHaveBeenCalledTimes(1);
+
+    // Test Reload command
+    query.value = "reload";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("reload-agents");
+    selectCurrent()?.action();
+    expect(actions.reloadAgents).toHaveBeenCalledTimes(1);
+
+    // Test Restart command
+    query.value = "restart";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("restart-server");
+    selectCurrent()?.action();
+    expect(actions.restartServer).toHaveBeenCalledTimes(1);
+
+    // Test Search Files command
+    query.value = "search files";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("search-files");
+    selectCurrent()?.action();
+    expect(actions.searchFiles).toHaveBeenCalledTimes(1);
+  });
 });
