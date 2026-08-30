@@ -1,7 +1,10 @@
 package opencode
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -234,10 +237,11 @@ func TestPrompt_DynamicMaxTokens(t *testing.T) {
 		model         string
 		wantMaxTokens int
 	}{
-		{"claude-3-7-sonnet", 200000},
-		{"openai/gpt-4o", 128000},
-		{"gemini-2.5-pro", 1048576},
-		{"deepseek-reasoner", 128000},
+		{"opencode/big-pickle", 200000},
+		{"opencode/ling-3.0-flash-fin-free", 262144},
+		{"opencode/mimo-v2.5-free", 1048576},
+		{"opencode/nemotron-3-ultra-free", 262144},
+		{"zai-coding-plan/glm-5.3", 1048576},
 		{"custom-unknown-model", 1048576},
 	}
 
@@ -248,4 +252,40 @@ func TestPrompt_DynamicMaxTokens(t *testing.T) {
 			assert.Equal(t, tt.wantMaxTokens, got)
 		})
 	}
+}
+
+func TestPrompt_MetadataInjection_FakeBinary(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeOpencode := filepath.Join(tmpDir, "opencode")
+
+	// Script outputs a jsonl stream with step_finish and text lines
+	script := `#!/bin/sh
+echo '{"type":"step_start","timestamp":1000,"sessionID":"ses_fake123","part":{"id":"prt_1","type":"step-start"}}'
+echo '{"type":"text","timestamp":1001,"sessionID":"ses_fake123","part":{"id":"prt_2","messageID":"msg_1","type":"text","text":"Hello fake world"}}'
+echo '{"type":"step_finish","timestamp":1002,"sessionID":"ses_fake123","part":{"id":"prt_3","reason":"stop","messageID":"msg_1","type":"step-finish","tokens":{"total":1200,"input":450,"output":750}}}'
+`
+	require.NoError(t, os.WriteFile(fakeOpencode, []byte(script), 0755))
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+":"+origPath)
+
+	var recordedMetadata []map[string]any
+	cb := func(stepIndex int, source, entryType, content string, metadata map[string]any) {
+		recordedMetadata = append(recordedMetadata, metadata)
+	}
+
+	opts := types.PromptOptions{
+		Model:          "opencode/big-pickle",
+		ReportCallback: cb,
+	}
+
+	res, err := Prompt(context.Background(), "hello", opts)
+	require.NoError(t, err)
+	assert.Equal(t, "ses_fake123", res.SessionID)
+	assert.Equal(t, "Hello fake world", res.LastContent)
+	assert.Equal(t, 450, res.InputTokens)
+	assert.Equal(t, 200000, res.MaxTokens)
+
+	require.NotEmpty(t, recordedMetadata)
+	assert.Equal(t, 200000, recordedMetadata[0]["max_tokens"])
 }

@@ -122,13 +122,17 @@ func (e *SingleAgentExecutor) handleFinalResult(
 
 	if maxTokens <= 0 {
 		modelName := ""
+		cliName := ""
+		if len(e.agent.Config.CLI) > 0 {
+			cliName = e.agent.Config.CLI[0].CLI
+		}
 		if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
 			modelName = modelOpt.Unwrap()
 		} else if len(e.agent.Config.CLI) > 0 && e.agent.Config.CLI[0].Model != "" {
 			modelName = e.agent.Config.CLI[0].Model
 		}
 		if modelName != "" {
-			maxTokens = agentwrapper.GetModelContextWindow("", modelName)
+			maxTokens = agentwrapper.GetModelContextWindow(cliName, modelName)
 		}
 	}
 

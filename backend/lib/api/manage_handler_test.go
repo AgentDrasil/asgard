@@ -898,3 +898,51 @@ cli:
 	snap2 := srv.Diagnostics().Snapshot()
 	assert.Empty(t, snap2.Warnings)
 }
+
+func TestServerReload_DisplayNameModelWarning(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"Claude 3.7 Sonnet (Thinking)"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "Claude 3.7 Sonnet (Thinking)"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// Display name models soft-pass startup/reload with a warning in diagnostics
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"status":"success"`)
+
+	snap := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "ok", snap.Status)
+	assert.Empty(t, snap.Errors)
+	require.Len(t, snap.Warnings, 1)
+	assert.Contains(t, snap.Warnings[0], `Agent "agent_father" uses uncataloged model "Claude 3.7 Sonnet (Thinking)"; falling back to 1M default context window`)
+}

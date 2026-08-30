@@ -87,7 +87,7 @@ type streamResult struct {
 func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, lastContent string, inputTokens, outMaxTokens int) {
 	outMaxTokens = maxTokens
 	if outMaxTokens <= 0 {
-		outMaxTokens = 1048576
+		outMaxTokens = types.DefaultContextWindow
 	}
 
 	// textByStep accumulates text_delta across ACTIVE→DONE events for the same
@@ -174,7 +174,7 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, la
 					}
 					if inputTokens > 0 {
 						metadata["input_tokens"] = inputTokens
-						metadata["total_input_tokens"] = inputTokens // 兼容旧客户端字段，与 input_tokens 保持同值单步口径
+						metadata["total_input_tokens"] = inputTokens // Legacy client compatibility, matching single-step input_tokens value
 					}
 					cb(su.StepIndex, "MODEL", "agent_response", full, metadata)
 				}
@@ -190,8 +190,8 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, la
 			}
 			lastContent = res.Response
 			if res.Usage != nil && res.Usage.InputTokens > 0 {
-				// 仅在之前未收到任何 step_update 的极端情况下兜底使用 result 中的值，
-				// 避免全链路累计 Billing Token (如 10534+109+4555=15198) 覆盖单步真实上下文占用 (4555)
+				// Only fallback to result usage if no step_update usage was observed,
+				// avoiding cumulative billing tokens (e.g. 10534+109+4555=15198) overriding single-step context usage (4555).
 				if inputTokens <= 0 {
 					inputTokens = res.Usage.InputTokens
 				}

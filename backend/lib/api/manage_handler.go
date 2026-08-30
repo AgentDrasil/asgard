@@ -104,35 +104,7 @@ func (s *Server) reload() error {
 	s.mu.Unlock()
 
 	if s.diagnostics != nil {
-		s.diagnostics.ResetSource("model_validation")
-		seenModels := make(map[string]bool)
-		for _, a := range agents {
-			if a == nil {
-				continue
-			}
-			for _, target := range a.Config.CLI {
-				if target.Model == "" {
-					continue
-				}
-				modelKey := target.CLI + ":" + target.Model
-				if seenModels[modelKey] {
-					continue
-				}
-				seenModels[modelKey] = true
-
-				if _, known := agentwrapper.LookupContextWindow(target.Model); !known {
-					log.Error().
-						Str("agent", a.Config.ID).
-						Str("cli", target.CLI).
-						Str("model", target.Model).
-						Msg("Configured model is not in known context window registry, falling back to 1M default context window")
-					s.diagnostics.AddWarning(
-						"model_validation",
-						fmt.Sprintf("Agent %q uses uncataloged model %q; falling back to 1M default context window", a.Config.ID, target.Model),
-					)
-				}
-			}
-		}
+		s.validateModelContextWindows(agents)
 	}
 
 	if s.cronManager != nil {
@@ -140,6 +112,41 @@ func (s *Server) reload() error {
 	}
 
 	return nil
+}
+
+// validateModelContextWindows checks configured models against the context window registry,
+// recording warnings in diagnostics for any uncataloged models without failing reload.
+func (s *Server) validateModelContextWindows(agents []*agentspec.Agent) {
+	s.diagnostics.ResetSource("model_validation")
+	seenModels := make(map[string]bool)
+	for _, a := range agents {
+		if a == nil {
+			continue
+		}
+		for _, target := range a.Config.CLI {
+			if target.Model == "" {
+				continue
+			}
+			// Deduplicate warnings by CLI and model pair to avoid spamming duplicate warnings across agents.
+			modelKey := target.CLI + ":" + target.Model
+			if seenModels[modelKey] {
+				continue
+			}
+			seenModels[modelKey] = true
+
+			if _, known := agentwrapper.LookupContextWindow(target.Model); !known {
+				log.Error().
+					Str("agent", a.Config.ID).
+					Str("cli", target.CLI).
+					Str("model", target.Model).
+					Msg("Configured model is not in known context window registry, falling back to 1M default context window")
+				s.diagnostics.AddWarning(
+					"model_validation",
+					fmt.Sprintf("Agent %q uses uncataloged model %q; falling back to 1M default context window", a.Config.ID, target.Model),
+				)
+			}
+		}
+	}
 }
 
 // handleSystemStatus handles GET /api/system/status.
