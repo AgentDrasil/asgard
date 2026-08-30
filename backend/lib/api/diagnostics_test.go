@@ -101,7 +101,8 @@ func TestSystemDiagnostics_RingBufferCapAndTruncation(t *testing.T) {
 
 	allLogs := diag.GetLogs("all")
 	assert.Len(t, allLogs, maxLogBufferCapacity)
-	// Oldest entries discarded
+	// Oldest entries discarded, first retained ID is 1 + (1050 + 1 - 1000) = 52
+	assert.Equal(t, int64(52), allLogs[0].ID)
 	assert.Equal(t, int64(1051), allLogs[len(allLogs)-1].ID)
 }
 

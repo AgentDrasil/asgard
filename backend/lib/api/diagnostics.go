@@ -60,10 +60,15 @@ func NewSystemDiagnostics() *SystemDiagnostics {
 	}
 }
 
-// recordLogEntry appends a log entry to the ring buffer, truncating details if necessary.
+// recordLogEntry appends a log entry to the ring buffer, truncating details safely at rune boundary if necessary.
 func (d *SystemDiagnostics) recordLogEntry(level, source, message, details string) {
 	if len(details) > maxLogDetailsLength {
-		details = details[:maxLogDetailsLength] + "... [truncated]"
+		// Truncate at safe rune boundary to prevent slicing multibyte UTF-8 sequences
+		truncated := []rune(details)
+		if len(truncated) > maxLogDetailsLength {
+			truncated = truncated[:maxLogDetailsLength]
+		}
+		details = string(truncated) + "... [truncated]"
 	}
 
 	d.logMu.Lock()
@@ -88,6 +93,8 @@ func (d *SystemDiagnostics) recordLogEntry(level, source, message, details strin
 }
 
 // AddLog records a diagnostic log entry and updates the diagnostic error/warning snapshot.
+// Any level other than "error" or "warn" (e.g. "info", "notice") is normalized to "warn"
+// to ensure it is captured in the degraded snapshot appropriately.
 func (d *SystemDiagnostics) AddLog(level, source, message, details string) {
 	if d == nil {
 		return

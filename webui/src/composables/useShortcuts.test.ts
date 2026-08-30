@@ -4,8 +4,6 @@ import { useShortcuts } from "./useShortcuts";
 describe("useShortcuts", () => {
   it("provides shortcut strings with modifier keys", () => {
     const {
-      modKey,
-      altKey,
       toggleSidebarShortcut,
       toggleArtifactsShortcut,
       toggleDiffShortcut,
@@ -17,14 +15,18 @@ describe("useShortcuts", () => {
       toggleFileViewShortcut,
     } = useShortcuts();
 
-    expect(toggleSidebarShortcut.value).toBe(`${modKey.value}+B`);
-    expect(toggleArtifactsShortcut.value).toBe(`${modKey.value}+${altKey.value}+B`);
-    expect(toggleDiffShortcut.value).toBe(`${modKey.value}+${altKey.value}+D`);
-    expect(toggleTerminalShortcut.value).toBe(`${modKey.value}+\``);
-    expect(sendShortcut.value).toBe(`${modKey.value}+Enter`);
-    expect(commandPaletteShortcut.value).toBe(`${modKey.value}+P`);
-    expect(commandPaletteShiftShortcut.value).toBe(`${modKey.value}+Shift+P`);
+    const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+    const expectedMod = isMac ? "⌘" : "Ctrl";
+    const expectedAlt = isMac ? "⌥" : "Alt";
+
+    expect(toggleSidebarShortcut.value).toBe(`${expectedMod}+B`);
+    expect(toggleArtifactsShortcut.value).toBe(`${expectedMod}+${expectedAlt}+B`);
+    expect(toggleDiffShortcut.value).toBe(`${expectedMod}+${expectedAlt}+D`);
+    expect(toggleTerminalShortcut.value).toBe(`${expectedMod}+\``);
+    expect(sendShortcut.value).toBe(`${expectedMod}+Enter`);
+    expect(commandPaletteShortcut.value).toBe(`${expectedMod}+P`);
+    expect(commandPaletteShiftShortcut.value).toBe(`${expectedMod}+Shift+P`);
     expect(commandPaletteF1Shortcut.value).toBe("F1");
-    expect(toggleFileViewShortcut.value).toBe(`${modKey.value}+${altKey.value}+F`);
+    expect(toggleFileViewShortcut.value).toBe(`${expectedMod}+${expectedAlt}+F`);
   });
 });

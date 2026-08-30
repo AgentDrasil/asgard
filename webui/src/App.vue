@@ -535,7 +535,7 @@ const commandList = computed<CommandItem[]>(() => [
       </router-view>
     </main>
 
-    <!-- File Search Modal (Ctrl+P / Cmd+P) -->
+    <!-- File Search Modal (triggered from Command Palette or action buttons) -->
     <FileSearchModal
       :isOpen="isFileSearchOpen"
       :sessionId="activeSessionId || ''"
@@ -555,7 +555,7 @@ const commandList = computed<CommandItem[]>(() => [
       "
     />
 
-    <!-- Command Palette Modal (F1 / Ctrl+Shift+P / Cmd+Shift+P) -->
+    <!-- Command Palette Modal (Ctrl+P / Cmd+P / F1 / Ctrl+Shift+P / Cmd+Shift+P) -->
     <CommandPaletteModal
       :isOpen="isCommandPaletteOpen"
       :commands="commandList"
@@ -570,7 +570,9 @@ const commandList = computed<CommandItem[]>(() => [
       <div
         v-if="isRestartConfirmOpen"
         class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+        tabindex="-1"
         @click.self="closeRestartConfirm"
+        @keydown.esc="closeRestartConfirm"
       >
         <div
           class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4"

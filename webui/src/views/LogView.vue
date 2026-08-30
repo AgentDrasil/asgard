@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
@@ -25,6 +25,7 @@ const isLoading = ref(false);
 const searchQuery = ref("");
 const selectedLevel = ref<"all" | "error" | "warn">("all");
 const copiedId = ref<string | null>(null);
+let copyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 const fetchLogs = async () => {
   isLoading.value = true;
@@ -38,6 +39,13 @@ const fetchLogs = async () => {
 
 onMounted(() => {
   void fetchLogs();
+});
+
+onUnmounted(() => {
+  if (copyTimeoutId !== null) {
+    clearTimeout(copyTimeoutId);
+    copyTimeoutId = null;
+  }
 });
 
 const formatTime = (ts: number): string => {
@@ -142,8 +150,12 @@ const handleCopyLog = async (item: UnifiedLogItem) => {
   try {
     await navigator.clipboard.writeText(content);
     copiedId.value = item.id;
-    setTimeout(() => {
+    if (copyTimeoutId !== null) {
+      clearTimeout(copyTimeoutId);
+    }
+    copyTimeoutId = setTimeout(() => {
       if (copiedId.value === item.id) copiedId.value = null;
+      copyTimeoutId = null;
     }, 2000);
   } catch (err) {
     console.error("Failed to copy log content:", err);

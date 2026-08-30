@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRouter, onBeforeRouteLeave } from "vue-router";
 import { Icon } from "@iconify/vue";
 import { getConfigFile, saveConfigFile } from "../lib/api";
@@ -24,6 +24,12 @@ const configContent = ref("");
 const originalContent = ref("");
 const errorMessage = ref("");
 const saveSuccess = ref(false);
+
+watch(configContent, (newVal) => {
+  if (saveSuccess.value && newVal !== originalContent.value) {
+    saveSuccess.value = false;
+  }
+});
 
 const loadConfig = async () => {
   loading.value = true;

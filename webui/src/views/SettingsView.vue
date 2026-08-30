@@ -213,8 +213,11 @@ const navigateBack = () => {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <!-- Edit Config Card -->
           <div
+            role="button"
+            tabindex="0"
             @click="navigateToConfig"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs"
+            @keydown.enter.space.prevent="navigateToConfig"
+            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
           >
             <div class="space-y-1">
               <div
@@ -236,8 +239,11 @@ const navigateBack = () => {
 
           <!-- Logs & Diagnostics Card -->
           <div
+            role="button"
+            tabindex="0"
             @click="navigateToLogs"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs"
+            @keydown.enter.space.prevent="navigateToLogs"
+            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
           >
             <div class="space-y-1">
               <div
