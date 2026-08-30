@@ -166,6 +166,20 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(snap)
 }
 
+// handleSystemLogs handles GET /api/system/logs.
+func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
+	level := r.URL.Query().Get("level")
+	var logs []LogEntry
+	if s.diagnostics != nil {
+		logs = s.diagnostics.GetLogs(level)
+	} else {
+		logs = []LogEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(SystemLogsResponse{Logs: logs})
+}
+
 // handleReload handles POST /api/manage/reload.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if err := checkManageOrigin(r); err != nil {

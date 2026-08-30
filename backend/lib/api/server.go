@@ -270,6 +270,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
+	mux.HandleFunc("GET /api/system/logs", s.handleSystemLogs)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
 	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)

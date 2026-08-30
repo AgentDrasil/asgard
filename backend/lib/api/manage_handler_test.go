@@ -946,3 +946,81 @@ cli:
 	require.Len(t, snap.Warnings, 1)
 	assert.Contains(t, snap.Warnings[0], `Agent "agent_father" uses uncataloged model "Claude 3.7 Sonnet (Thinking)"; falling back to 1M default context window`)
 }
+
+func TestSystemLogsHandler(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// Add test entries
+	srv.Diagnostics().AddError("config", "corrupted syntax")
+	srv.Diagnostics().AddWarning("ssh", "key missing")
+
+	// 1. GET /api/system/logs (all)
+	reqAll := httptest.NewRequest(http.MethodGet, "/api/system/logs", nil)
+	wAll := httptest.NewRecorder()
+	srv.ServeHTTP(wAll, reqAll)
+	assert.Equal(t, http.StatusOK, wAll.Code)
+
+	var respAll SystemLogsResponse
+	require.NoError(t, json.Unmarshal(wAll.Body.Bytes(), &respAll))
+	require.Len(t, respAll.Logs, 2)
+	assert.Equal(t, "error", respAll.Logs[0].Level)
+	assert.Equal(t, "config", respAll.Logs[0].Source)
+	assert.Equal(t, "corrupted syntax", respAll.Logs[0].Message)
+	assert.Equal(t, "warn", respAll.Logs[1].Level)
+	assert.Equal(t, "ssh", respAll.Logs[1].Source)
+	assert.Equal(t, "key missing", respAll.Logs[1].Message)
+
+	// 2. GET /api/system/logs?level=warn
+	reqWarn := httptest.NewRequest(http.MethodGet, "/api/system/logs?level=warn", nil)
+	wWarn := httptest.NewRecorder()
+	srv.ServeHTTP(wWarn, reqWarn)
+	assert.Equal(t, http.StatusOK, wWarn.Code)
+
+	var respWarn SystemLogsResponse
+	require.NoError(t, json.Unmarshal(wWarn.Body.Bytes(), &respWarn))
+	require.Len(t, respWarn.Logs, 1)
+	assert.Equal(t, "warn", respWarn.Logs[0].Level)
+	assert.Equal(t, "ssh", respWarn.Logs[0].Source)
+
+	// 3. GET /api/system/logs?level=error
+	reqErr := httptest.NewRequest(http.MethodGet, "/api/system/logs?level=error", nil)
+	wErr := httptest.NewRecorder()
+	srv.ServeHTTP(wErr, reqErr)
+	assert.Equal(t, http.StatusOK, wErr.Code)
+
+	var respErr SystemLogsResponse
+	require.NoError(t, json.Unmarshal(wErr.Body.Bytes(), &respErr))
+	require.Len(t, respErr.Logs, 1)
+	assert.Equal(t, "error", respErr.Logs[0].Level)
+	assert.Equal(t, "config", respErr.Logs[0].Source)
+}
