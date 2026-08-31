@@ -10,7 +10,7 @@ import {
   mapExtToLang,
   escapeHtml,
   extractHighlightedLines,
-  getMediaCategory,
+  resolveViewerCategory,
 } from "../../utils/fileUtils";
 import MarkdownContent from "../MarkdownContent.vue";
 import FindBar from "../FindBar.vue";
@@ -53,22 +53,19 @@ const isMarkdownFile = computed(() => {
   return ext === "md" || ext === "markdown";
 });
 
-const mediaCategory = computed(() => {
-  if (!fileData.value) return "code";
-  const cat = getMediaCategory(fileData.value.ext, fileData.value.path);
-  if (cat === "code" && fileData.value.isBinary) {
-    return "binary";
-  }
-  return cat;
+const viewerCategory = computed<
+  "image" | "video" | "audio" | "pdf" | "binary" | "markdown" | "code"
+>(() => {
+  return resolveViewerCategory(fileData.value);
 });
 
 const isMedia = computed(() => {
-  const cat = mediaCategory.value;
+  const cat = viewerCategory.value;
   return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf";
 });
 
 const isBinaryOnly = computed(() => {
-  return mediaCategory.value === "binary" || (!isMedia.value && !!fileData.value?.isBinary);
+  return viewerCategory.value === "binary" || (!isMedia.value && !!fileData.value?.isBinary);
 });
 
 const rawUrl = computed(() => {
@@ -215,6 +212,8 @@ const codeContainerRef = ref<HTMLElement | null>(null);
 const findState = useInPageFind(codeContainerRef);
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
+  if (isMedia.value || isBinaryOnly.value) return;
+
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
 
@@ -321,11 +320,7 @@ watch([() => fileData.value, markdownMode], () => {
     />
 
     <!-- Main Content Area -->
-    <div
-      ref="codeContainerRef"
-      class="flex-1 overflow-auto min-w-0 relative"
-      :class="isMedia ? 'p-0' : ''"
-    >
+    <div ref="codeContainerRef" class="flex-1 overflow-auto min-w-0 relative">
       <!-- Loading State -->
       <div
         v-if="isLoading"
@@ -364,12 +359,18 @@ watch([() => fileData.value, markdownMode], () => {
 
       <!-- Media Viewer Mode (Image / Video / Audio / PDF) -->
       <MediaViewer
-        v-else-if="isMedia && fileData"
+        v-else-if="
+          (viewerCategory === 'image' ||
+            viewerCategory === 'video' ||
+            viewerCategory === 'audio' ||
+            viewerCategory === 'pdf') &&
+          fileData
+        "
         :src="rawUrl"
         :fileName="fileData.name"
         :fileExt="fileData.ext"
         :fileSize="fileData.size"
-        :mediaCategory="mediaCategory as any"
+        :mediaCategory="viewerCategory"
       />
 
       <!-- Binary File Fallback State -->

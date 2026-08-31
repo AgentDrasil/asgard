@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 var mediaMimeMap = map[string]string{
@@ -24,11 +26,11 @@ var mediaMimeMap = map[string]string{
 	// Videos
 	"mp4":  "video/mp4",
 	"webm": "video/webm",
-	"ogg":  "video/ogg",
-	"ogv":  "video/ogg",
+	"ogv":  "video/ogv",
 	"mov":  "video/quicktime",
 
 	// Audio
+	"ogg":  "audio/ogg",
 	"mp3":  "audio/mpeg",
 	"wav":  "audio/wav",
 	"oga":  "audio/ogg",
@@ -82,7 +84,7 @@ func isBinaryOrMediaFile(filePath string, ext string) (bool, error) {
 
 	buf := make([]byte, 512)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return false, err
 	}
 
@@ -98,4 +100,26 @@ func isBinaryOrMediaFile(filePath string, ext string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// serveRawMedia handles raw media streaming with whitelisting and security headers.
+func serveRawMedia(w http.ResponseWriter, r *http.Request, absPath string, ext string, name string, modTime time.Time) {
+	if !isMediaExt(ext) {
+		writeJSONError(w, http.StatusForbidden, "access denied: streaming is only permitted for media files")
+		return
+	}
+
+	file, err := os.Open(absPath)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to open file")
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	mimeType := detectMimeType(ext, nil)
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+
+	http.ServeContent(w, r, name, modTime, file)
 }

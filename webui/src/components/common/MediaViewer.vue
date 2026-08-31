@@ -135,6 +135,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
             title="Download / Open Raw"
@@ -162,7 +163,13 @@ const formattedSize = computed(() => {
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
           <p class="text-sm font-medium">Failed to load image</p>
-          <a v-if="src" :href="src" target="_blank" class="btn btn-sm btn-outline mt-2">
+          <a
+            v-if="src"
+            :href="src"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-sm btn-outline mt-2"
+          >
             Open Directly
           </a>
         </div>
@@ -199,6 +206,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
             title="Download / Open Raw"
@@ -215,7 +223,13 @@ const formattedSize = computed(() => {
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
           <p class="text-sm font-medium">Failed to load video</p>
-          <a v-if="src" :href="src" target="_blank" class="btn btn-sm btn-outline mt-2">
+          <a
+            v-if="src"
+            :href="src"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-sm btn-outline mt-2"
+          >
             Open Directly
           </a>
         </div>
@@ -256,6 +270,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-sm btn-outline gap-1.5 w-full mt-2"
           >
@@ -281,6 +296,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             class="btn btn-ghost btn-xs gap-1 text-xs"
             title="Open in New Tab"
           >
@@ -291,6 +307,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
             title="Download"
@@ -327,6 +344,7 @@ const formattedSize = computed(() => {
             v-if="src"
             :href="src"
             target="_blank"
+            rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-primary btn-sm gap-1.5 w-full mt-2"
           >
@@ -341,7 +359,7 @@ const formattedSize = computed(() => {
 
 <style scoped>
 .checkerboard-bg {
-  background-color: var(--b2, #f8f9fa);
+  background-color: var(--color-base-200, #f8f9fa);
   background-image:
     linear-gradient(45deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),

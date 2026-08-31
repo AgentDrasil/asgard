@@ -4,7 +4,7 @@ import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import { useShiki } from "../composables/useShiki";
 import { useInPageFind } from "../composables/useInPageFind";
-import { getFileIcon, getMediaCategory } from "../utils/fileUtils";
+import { getFileIcon, resolveViewerCategory } from "../utils/fileUtils";
 import { getRawWorkspaceFileUrl } from "../lib/api";
 import MarkdownContent from "./MarkdownContent.vue";
 import FindBar from "./FindBar.vue";
@@ -44,22 +44,19 @@ const isMarkdown = computed(() => {
   return ext === "md" || ext === "markdown";
 });
 
-const mediaCategory = computed(() => {
-  if (!fileData.value) return "code";
-  const cat = getMediaCategory(fileData.value.ext, fileData.value.path);
-  if (cat === "code" && fileData.value.isBinary) {
-    return "binary";
-  }
-  return cat;
+const viewerCategory = computed<
+  "image" | "video" | "audio" | "pdf" | "binary" | "markdown" | "code"
+>(() => {
+  return resolveViewerCategory(fileData.value);
 });
 
 const isMedia = computed(() => {
-  const cat = mediaCategory.value;
+  const cat = viewerCategory.value;
   return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf";
 });
 
-const isMediaOrPdf = computed(() => {
-  const cat = mediaCategory.value;
+const isMediaPreview = computed(() => {
+  const cat = viewerCategory.value;
   return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf" || cat === "binary";
 });
 
@@ -143,7 +140,7 @@ const findState = useInPageFind(contentContainerRef);
 
 // When file content or markdown view mode changes, re-run active search if find bar is open
 watch([() => fileData.value, markdownViewMode], () => {
-  if (findState.isOpen.value && findState.query.value.trim() && !isMediaOrPdf.value) {
+  if (findState.isOpen.value && findState.query.value.trim() && !isMediaPreview.value) {
     nextTick(() => {
       findState.performSearch();
     });
@@ -233,6 +230,7 @@ watch([() => fileData.value, markdownViewMode], () => {
           v-if="isMedia && rawUrl"
           :href="rawUrl"
           target="_blank"
+          rel="noopener noreferrer"
           :download="fileData?.name"
           class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300 inline-flex items-center"
           title="Open in new window / Download"
@@ -242,7 +240,7 @@ watch([() => fileData.value, markdownViewMode], () => {
 
         <!-- Find Button (only for text/code/markdown) -->
         <button
-          v-if="!isMediaOrPdf"
+          v-if="!isMediaPreview"
           @click="findState.toggle()"
           :class="[
             'p-1.5 text-xs rounded transition-colors border',
@@ -267,7 +265,7 @@ watch([() => fileData.value, markdownViewMode], () => {
 
     <!-- Floating In-Page Find Bar -->
     <FindBar
-      v-if="!isMediaOrPdf"
+      v-if="!isMediaPreview"
       v-model="findState.query.value"
       :isOpen="findState.isOpen.value"
       :currentIndex="findState.currentIndex.value"
@@ -281,7 +279,7 @@ watch([() => fileData.value, markdownViewMode], () => {
     <div
       ref="contentContainerRef"
       class="flex-1 overflow-y-auto relative bg-base-100"
-      :class="isMediaOrPdf ? 'p-0' : 'p-3 sm:p-4'"
+      :class="isMediaPreview ? 'p-0' : 'p-3 sm:p-4'"
     >
       <div
         v-if="loading"
@@ -307,13 +305,22 @@ watch([() => fileData.value, markdownViewMode], () => {
       </div>
 
       <div v-else-if="fileData" class="h-full">
-        <div v-if="isMediaOrPdf" class="w-full h-full min-w-0">
+        <div
+          v-if="
+            viewerCategory === 'image' ||
+            viewerCategory === 'video' ||
+            viewerCategory === 'audio' ||
+            viewerCategory === 'pdf' ||
+            viewerCategory === 'binary'
+          "
+          class="w-full h-full min-w-0"
+        >
           <MediaViewer
-            :src="mediaCategory === 'binary' ? '' : rawUrl"
+            :src="viewerCategory === 'binary' ? '' : rawUrl"
             :fileName="fileData.name"
             :fileExt="fileData.ext"
             :fileSize="fileData.size"
-            :mediaCategory="mediaCategory as any"
+            :mediaCategory="viewerCategory"
           />
         </div>
         <div

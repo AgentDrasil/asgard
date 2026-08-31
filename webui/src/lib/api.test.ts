@@ -10,6 +10,8 @@ import {
   searchFiles,
   getSystemStatus,
   getSystemLogs,
+  getRawFileContentUrl,
+  getRawWorkspaceFileUrl,
 } from "./api";
 
 describe("API Library", () => {
@@ -374,6 +376,22 @@ describe("API Library", () => {
 
       const res = await restartServer();
       expect(res).toBe(true);
+    });
+  });
+
+  describe("raw media URL helpers", () => {
+    it("getRawFileContentUrl constructs encoded URL with raw=1", () => {
+      const url = getRawFileContentUrl("session-123", "/src/assets/logo with spaces.png");
+      expect(url).toBe(
+        "/api/files/content?session_id=session-123&path=%2Fsrc%2Fassets%2Flogo%20with%20spaces.png&raw=1",
+      );
+    });
+
+    it("getRawWorkspaceFileUrl constructs encoded URL with raw=1", () => {
+      const url = getRawWorkspaceFileUrl("session-123", "/workspace/dir/test & special#name.pdf");
+      expect(url).toBe(
+        "/api/v1/workspace/file?session_id=session-123&path=%2Fworkspace%2Fdir%2Ftest%20%26%20special%23name.pdf&raw=1",
+      );
     });
   });
 });

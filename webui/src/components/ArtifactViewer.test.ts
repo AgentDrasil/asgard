@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createApp, nextTick, h } from "vue";
+import { createApp, h } from "vue";
 import ArtifactViewer from "./ArtifactViewer.vue";
 
 // Mock @iconify/vue
@@ -57,12 +57,10 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    // Wait for fetch & nextTick
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    const mediaViewer = root.querySelector(".media-viewer");
-    expect(mediaViewer).not.toBeNull();
     const img = root.querySelector("img");
     expect(img).not.toBeNull();
     expect(img?.getAttribute("src")).toBe(
@@ -101,8 +99,9 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector("video")).not.toBeNull();
+    });
 
     const video = root.querySelector("video");
     expect(video).not.toBeNull();
@@ -138,8 +137,9 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector("audio")).not.toBeNull();
+    });
 
     const audio = root.querySelector("audio");
     expect(audio).not.toBeNull();
@@ -175,10 +175,10 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    expect(root.querySelector(".media-viewer")).not.toBeNull();
     expect(root.querySelector("iframe")).not.toBeNull();
     expect(root.querySelector('a[title="Open in new window / Download"]')).not.toBeNull();
 
@@ -210,11 +210,11 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("Hello World");
+    });
 
     expect(root.querySelector(".media-viewer")).toBeNull();
-    expect(root.textContent).toContain("Hello World");
     expect(root.querySelector('button[title="Rendered Markdown Preview"]')).not.toBeNull();
     expect(root.querySelector('button[title="Find in artifact"]')).not.toBeNull();
 
@@ -246,12 +246,12 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("package main");
+    });
 
     expect(root.querySelector(".media-viewer")).toBeNull();
     expect(root.querySelector("pre.shiki")).not.toBeNull();
-    expect(root.textContent).toContain("package main");
     // Verify file icon uses correct extension icon (not fallback code icon)
     expect(root.querySelector('[data-icon="vscode-icons:file-type-go"]')).not.toBeNull();
 
@@ -283,10 +283,10 @@ describe("ArtifactViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    expect(root.querySelector(".media-viewer")).not.toBeNull();
     expect(root.textContent).toContain("Binary file");
     expect(root.textContent).not.toContain("Download File");
     // Header icon should be rendered

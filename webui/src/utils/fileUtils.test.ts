@@ -10,6 +10,7 @@ import {
   isAudioFile,
   isPdfFile,
   getMediaCategory,
+  resolveViewerCategory,
 } from "./fileUtils";
 
 describe("fileUtils", () => {
@@ -125,6 +126,32 @@ describe("fileUtils", () => {
       expect(getMediaCategory("bin")).toBe("binary");
       expect(getMediaCategory("zip")).toBe("binary");
       expect(getMediaCategory("tar")).toBe("binary");
+    });
+  });
+
+  describe("resolveViewerCategory", () => {
+    it("returns code for null or undefined", () => {
+      expect(resolveViewerCategory(null)).toBe("code");
+      expect(resolveViewerCategory(undefined)).toBe("code");
+    });
+
+    it("returns media category from extension", () => {
+      expect(resolveViewerCategory({ ext: "png", path: "/test.png" })).toBe("image");
+      expect(resolveViewerCategory({ ext: "mp4", path: "/test.mp4" })).toBe("video");
+      expect(resolveViewerCategory({ ext: "mp3", path: "/test.mp3" })).toBe("audio");
+      expect(resolveViewerCategory({ ext: "pdf", path: "/test.pdf" })).toBe("pdf");
+      expect(resolveViewerCategory({ ext: "md", path: "/test.md" })).toBe("markdown");
+      expect(resolveViewerCategory({ ext: "go", path: "/main.go" })).toBe("code");
+    });
+
+    it("returns binary when isBinary is true even for unknown/code extensions", () => {
+      expect(resolveViewerCategory({ ext: "dat", path: "/data.dat", isBinary: true })).toBe(
+        "binary",
+      );
+      expect(resolveViewerCategory({ ext: "unknown", path: "/file", isBinary: true })).toBe(
+        "binary",
+      );
+      expect(resolveViewerCategory({ ext: "go", path: "/main.go", isBinary: false })).toBe("code");
     });
   });
 

@@ -38,6 +38,7 @@ describe("MediaViewer.vue", () => {
     zoomInBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(root.textContent).toContain("125%");
+    expect(img?.getAttribute("style")).toContain("scale(1.25)");
 
     // Click Zoom Out button
     const zoomOutBtn = root.querySelector('button[title="Zoom Out"]') as HTMLButtonElement;
@@ -45,6 +46,7 @@ describe("MediaViewer.vue", () => {
     zoomOutBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(root.textContent).toContain("100%");
+    expect(img?.getAttribute("style")).toContain("scale(1)");
 
     // Click Rotate button
     const rotateBtn = root.querySelector('button[title="Rotate"]') as HTMLButtonElement;

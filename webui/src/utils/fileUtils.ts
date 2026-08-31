@@ -172,6 +172,21 @@ export function getMediaCategory(ext?: string, path?: string): MediaCategory {
   return "code"; // unknown ext → text-safe default for a coding workspace
 }
 
+export function resolveViewerCategory(
+  file?: {
+    ext?: string;
+    path?: string;
+    isBinary?: boolean;
+  } | null,
+): MediaCategory {
+  if (!file) return "code";
+  const cat = getMediaCategory(file.ext, file.path);
+  if (cat === "code" && file.isBinary) {
+    return "binary";
+  }
+  return cat;
+}
+
 export function getFileIcon(ext?: string, path?: string): string {
   const fileExt = extractExt(ext, path);
   if (isImageFile(fileExt)) {

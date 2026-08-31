@@ -33,11 +33,11 @@ func TestDetectMimeType_TableDriven(t *testing.T) {
 		// Videos
 		{"mp4", "mp4", nil, "video/mp4"},
 		{"webm", "webm", nil, "video/webm"},
-		{"ogg", "ogg", nil, "video/ogg"},
-		{"ogv", "ogv", nil, "video/ogg"},
+		{"ogv", "ogv", nil, "video/ogv"},
 		{"mov", "mov", nil, "video/quicktime"},
 
 		// Audio
+		{"ogg", "ogg", nil, "audio/ogg"},
 		{"mp3", "mp3", nil, "audio/mpeg"},
 		{"wav", "wav", nil, "audio/wav"},
 		{"oga", "oga", nil, "audio/ogg"},

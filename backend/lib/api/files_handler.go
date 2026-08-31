@@ -273,25 +273,7 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 	isRaw := rawParam == "1" || strings.EqualFold(rawParam, "true")
 
 	if isRaw {
-		// Whitelist check: only allow media/PDF files
-		if !isMediaExt(ext) {
-			writeJSONError(w, http.StatusForbidden, "access denied: streaming is only permitted for media files")
-			return
-		}
-
-		file, err := os.Open(absTarget)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to open file: "+err.Error())
-			return
-		}
-		defer func() { _ = file.Close() }()
-
-		mimeType := detectMimeType(ext, nil)
-		w.Header().Set("Content-Type", mimeType)
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-
-		http.ServeContent(w, r, name, info.ModTime(), file)
+		serveRawMedia(w, r, absTarget, ext, name, info.ModTime())
 		return
 	}
 

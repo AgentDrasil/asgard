@@ -51,11 +51,10 @@ describe("FileCodeViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    const mediaViewer = root.querySelector(".media-viewer");
-    expect(mediaViewer).not.toBeNull();
     const img = root.querySelector("img");
     expect(img).not.toBeNull();
     expect(img?.getAttribute("src")).toBe(
@@ -90,11 +89,10 @@ describe("FileCodeViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    const mediaViewer = root.querySelector(".media-viewer");
-    expect(mediaViewer).not.toBeNull();
     expect(root.querySelector("table")).toBeNull();
 
     app.unmount();
@@ -122,11 +120,10 @@ describe("FileCodeViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
 
-    const mediaViewer = root.querySelector(".media-viewer");
-    expect(mediaViewer).not.toBeNull();
     expect(root.textContent).toContain("Binary file");
     expect(root.textContent).not.toContain("Download File");
     expect(root.querySelector("a")).toBeNull();
@@ -157,12 +154,12 @@ describe("FileCodeViewer.vue", () => {
     });
     app.mount(root);
 
-    await new Promise((r) => setTimeout(r, 50));
-    await nextTick();
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("console.log('hello');");
+    });
 
     expect(root.querySelector(".media-viewer")).toBeNull();
     expect(root.querySelector("table")).not.toBeNull();
-    expect(root.textContent).toContain("console.log('hello');");
     expect(root.textContent).toContain("const a = 1;");
     expect(root.querySelector('button[title^="Find in file"]')).not.toBeNull();
 
