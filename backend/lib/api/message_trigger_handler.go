@@ -3,13 +3,16 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"uuid"
 
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -23,6 +26,86 @@ type TriggerMessageRequest struct {
 	Headless bool   `json:"-"`
 
 	Metadata map[string]any `json:"metadata,omitempty"`
+
+	Attachments []dbmodels.Attachment `json:"attachments,omitempty"`
+}
+
+// formatPromptWithAttachments formats a user prompt with attached files info for sandboxed agent execution.
+// It enforces zero-trust validation:
+// 1. Limits attachments to at most 20 entries.
+// 2. Ignores any client-supplied Path.
+// 3. Sanitizes Name via filepath.Base, length <= 255, and control character filtering.
+// 4. Generates sandbox path strictly as /tmp/attachments/<safeName>.
+func formatPromptWithAttachments(prompt string, attachments []dbmodels.Attachment) string {
+	if len(attachments) == 0 {
+		return prompt
+	}
+
+	maxAtts := 20
+	if len(attachments) > maxAtts {
+		attachments = attachments[:maxAtts]
+	}
+
+	type validAtt struct {
+		name        string
+		sandboxPath string
+		size        int64
+	}
+
+	valid := make([]validAtt, 0, len(attachments))
+	for _, att := range attachments {
+		rawName := strings.TrimSpace(att.Name)
+		if rawName == "" {
+			continue
+		}
+		// Replace backslashes first for cross-platform safety
+		rawName = strings.ReplaceAll(rawName, "\\", "/")
+		base := filepath.Base(rawName)
+		if base == "." || base == ".." || base == "/" || base != rawName {
+			continue
+		}
+		if len(base) > 255 {
+			continue
+		}
+
+		var sb strings.Builder
+		hasControl := false
+		for _, r := range base {
+			if r < 32 || r == 127 || r == '/' || r == '\\' {
+				hasControl = true
+				break
+			}
+			sb.WriteRune(r)
+		}
+		if hasControl {
+			continue
+		}
+		safeName := strings.TrimSpace(sb.String())
+		if safeName == "" || safeName == "." || safeName == ".." {
+			continue
+		}
+
+		sandboxPath := "/tmp/attachments/" + safeName
+		valid = append(valid, validAtt{
+			name:        safeName,
+			sandboxPath: sandboxPath,
+			size:        att.Size,
+		})
+	}
+
+	if len(valid) == 0 {
+		return prompt
+	}
+
+	var sb strings.Builder
+	sb.WriteString(prompt)
+	sb.WriteString("\n\n[Attached Files]\n")
+	for _, att := range valid {
+		fmt.Fprintf(&sb, "- %s (%s, %d bytes)\n", att.name, att.sandboxPath, att.size)
+	}
+	sb.WriteString("Please inspect and process these attachments directly from the sandbox filesystem.")
+
+	return sb.String()
 }
 
 // handleTriggerMessage handles POST /api/agents/{id}/message, launching agent execution
@@ -143,11 +226,12 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runSingleAgent(ctx context.Context, agent *agentspec.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
 	exec := NewSingleAgentExecutor(agent, s.conf, s.repo, s, nil)
 	out, err := exec.Execute(ctx, SingleAgentRunParams{
-		ChatID:   chatID,
-		Prompt:   req.Prompt,
-		RunDir:   req.RunDir,
-		Model:    req.Model,
-		Metadata: req.Metadata,
+		ChatID:      chatID,
+		Prompt:      req.Prompt,
+		RunDir:      req.RunDir,
+		Model:       req.Model,
+		Metadata:    req.Metadata,
+		Attachments: req.Attachments,
 	})
 	if err != nil {
 		return "failed", "", err

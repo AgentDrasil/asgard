@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,123 @@ nodes:
 		assert.Equal(t, "failed", resp["status"])
 		assert.NotEmpty(t, resp["error"])
 		assert.Equal(t, chatID, resp["chatId"])
+	})
+
+	t.Run("trigger message with attachments parses and accepts", func(t *testing.T) {
+		t.Parallel()
+
+		chatID := "chat-trigger-attachments-1"
+		subCh, _, cancel := hub.Subscribe(chatID, 0)
+		t.Cleanup(cancel)
+
+		payload := TriggerMessageRequest{
+			Prompt: "analyze files",
+			ChatID: chatID,
+			Attachments: []dbmodels.Attachment{
+				{
+					Name:     "data.csv",
+					Path:     "/malicious/client/path/data.csv",
+					Size:     1024,
+					MimeType: "text/csv",
+				},
+			},
+		}
+		data, err := json.Marshal(payload)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/message", bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		server.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusAccepted, rr.Code)
+
+		var resp map[string]any
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "accepted", resp["status"])
+		assert.Equal(t, chatID, resp["chatId"])
+
+		// The executor will persist the message and publish to event hub
+		select {
+		case ev := <-subCh:
+			assert.Equal(t, "message", ev.Type)
+			require.NotNil(t, ev.Message)
+			assert.Equal(t, "analyze files", ev.Message.Content)
+			require.Len(t, ev.Message.Attachments, 1)
+			assert.Equal(t, "data.csv", ev.Message.Attachments[0].Name)
+			assert.Equal(t, int64(1024), ev.Message.Attachments[0].Size)
+		case <-time.After(1 * time.Second):
+			t.Fatal("timed out waiting for triggered user message event with attachments")
+		}
+	})
+}
+
+func TestFormatPromptWithAttachments(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty attachments returns original prompt", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "Hello World", formatPromptWithAttachments("Hello World", nil))
+		assert.Equal(t, "Hello World", formatPromptWithAttachments("Hello World", []dbmodels.Attachment{}))
+	})
+
+	t.Run("single and multiple attachments injects sandbox path", func(t *testing.T) {
+		t.Parallel()
+		atts := []dbmodels.Attachment{
+			{Name: "report.pdf", Size: 2048, Path: "/ignored/path"},
+			{Name: "data.csv", Size: 512},
+		}
+		res := formatPromptWithAttachments("Analyze data", atts)
+		expected := "Analyze data\n\n[Attached Files]\n- report.pdf (/tmp/attachments/report.pdf, 2048 bytes)\n- data.csv (/tmp/attachments/data.csv, 512 bytes)\nPlease inspect and process these attachments directly from the sandbox filesystem."
+		assert.Equal(t, expected, res)
+	})
+
+	t.Run("ignores client fake path and protects against path traversal", func(t *testing.T) {
+		t.Parallel()
+		atts := []dbmodels.Attachment{
+			{Name: "../../../etc/passwd", Size: 100, Path: "/etc/passwd"},
+			{Name: "..\\..\\windows\\system32\\calc.exe", Size: 200, Path: "C:\\calc.exe"},
+			{Name: "normal.txt", Size: 50, Path: "/malicious/path"},
+		}
+		res := formatPromptWithAttachments("Check files", atts)
+		// Directory traversals in Name are filtered out by base != rawName check
+		assert.Contains(t, res, "- normal.txt (/tmp/attachments/normal.txt, 50 bytes)")
+		assert.NotContains(t, res, "passwd")
+		assert.NotContains(t, res, "calc.exe")
+		assert.NotContains(t, res, "/malicious/path")
+	})
+
+	t.Run("enforces max 20 attachments limit", func(t *testing.T) {
+		t.Parallel()
+		atts := make([]dbmodels.Attachment, 25)
+		for i := 0; i < 25; i++ {
+			atts[i] = dbmodels.Attachment{
+				Name: fmt.Sprintf("file_%d.txt", i),
+				Size: int64(i),
+			}
+		}
+		res := formatPromptWithAttachments("Many files", atts)
+		assert.Contains(t, res, "file_0.txt")
+		assert.Contains(t, res, "file_19.txt")
+		assert.NotContains(t, res, "file_20.txt")
+	})
+
+	t.Run("filters out invalid names and names exceeding 255 chars", func(t *testing.T) {
+		t.Parallel()
+		tooLongName := strings.Repeat("a", 256) + ".txt"
+		atts := []dbmodels.Attachment{
+			{Name: tooLongName, Size: 100},
+			{Name: "bad\x00name.txt", Size: 100},
+			{Name: "bad\nname.txt", Size: 100},
+			{Name: ".", Size: 100},
+			{Name: "..", Size: 100},
+			{Name: "/", Size: 100},
+			{Name: "valid.txt", Size: 100},
+		}
+		res := formatPromptWithAttachments("Check invalid", atts)
+		assert.Contains(t, res, "- valid.txt (/tmp/attachments/valid.txt, 100 bytes)")
+		assert.NotContains(t, res, tooLongName)
+		assert.NotContains(t, res, "bad")
 	})
 }

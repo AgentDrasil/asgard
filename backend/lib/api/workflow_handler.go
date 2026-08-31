@@ -140,10 +140,11 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 		err    error
 	}
 	resultCh := make(chan runResult, 1)
+	augmentedPrompt := formatPromptWithAttachments(req.Prompt, req.Attachments)
 	go func() {
 		res, err := executor.Execute(ctx, workflow.WorkflowRunParams{
 			SessionID: chatID,
-			Prompt:    req.Prompt,
+			Prompt:    augmentedPrompt,
 			RunDir:    req.RunDir,
 			Headless:  req.Headless,
 			Metadata:  req.Metadata,
@@ -214,6 +215,7 @@ func (s *Server) persistIncomingWorkflowMessage(agent *agentspec.Agent, chatID s
 		Content:      req.Prompt,
 		AgentName:    agentName,
 		Timestamp:    time.Now().UnixMilli(),
+		Attachments:  req.Attachments,
 	}
 	if err := s.repo.AppendMessage(chatID, msg); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append workflow user message to repo")

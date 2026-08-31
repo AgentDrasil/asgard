@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,4 +130,117 @@ func TestRunWorkflow_PreExecutionError_Cleanup(t *testing.T) {
 	assert.False(t, sess.IsRunning(), "Session agent status must be completed")
 	assert.True(t, receivedStatusFalse, "Must receive status {isRunning: false}")
 	assert.True(t, receivedDone, "Must receive done event")
+}
+
+func TestWorkflowHandler_PersistAttachmentsAndEntryPrompt(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	hub := NewSessionEventHubWithCapacity(50)
+	t.Cleanup(hub.Close)
+
+	tempDir := t.TempDir()
+	wfFile := filepath.Join(tempDir, "workflow.yaml")
+	require.NoError(t, os.WriteFile(wfFile, []byte(fmt.Sprintf(`
+name: test-wf-attachments
+tmp_dir: "%s/tmp/${session_id}"
+nodes:
+  - id: step1
+    type: command
+    command: "echo wf-done"
+`, tempDir)), 0644))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "wf-attachments-agent",
+			Name: "Workflow Attachments Agent",
+			Type: "workflow",
+		},
+		WorkflowPath: wfFile,
+	}
+
+	s := &Server{
+		conf:            &config.Config{},
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+		agents:          []*agentspec.Agent{agent},
+	}
+	s.mux = s.buildMuxLocked()
+
+	chatID := "chat-wf-attachments-test"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-attachments-agent"}))
+
+	subCh, _, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	attachments := []dbmodels.Attachment{
+		{
+			Name:     "input.json",
+			Path:     "/ignored/path/input.json",
+			Size:     256,
+			MimeType: "application/json",
+		},
+	}
+
+	triggerPayload := TriggerMessageRequest{
+		Prompt:      "run workflow with file",
+		ChatID:      chatID,
+		Wait:        true,
+		Attachments: attachments,
+	}
+	raw, err := json.Marshal(triggerPayload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/wf-attachments-agent/message?wait=true", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify DB message persistence
+	session, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotEmpty(t, session.Messages)
+
+	var userMsg *dbmodels.ChatMessage
+	for _, m := range session.Messages {
+		if m.Role == "user" {
+			userMsg = &m
+			break
+		}
+	}
+	require.NotNil(t, userMsg)
+	// Content must remain raw prompt
+	assert.Equal(t, "run workflow with file", userMsg.Content)
+	require.Len(t, userMsg.Attachments, 1)
+	assert.Equal(t, "input.json", userMsg.Attachments[0].Name)
+	assert.Equal(t, int64(256), userMsg.Attachments[0].Size)
+
+	// Verify SSE user message event
+	select {
+	case ev := <-subCh:
+		assert.Equal(t, "message", ev.Type)
+		require.NotNil(t, ev.Message)
+		assert.Equal(t, "run workflow with file", ev.Message.Content)
+		require.Len(t, ev.Message.Attachments, 1)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for SSE message event in workflow")
+	}
 }

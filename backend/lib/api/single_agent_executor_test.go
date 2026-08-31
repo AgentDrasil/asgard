@@ -158,3 +158,99 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 		assert.Equal(t, 200000, lastMsg.MaxTokens)
 	})
 }
+
+func TestSingleAgentExecutor_Attachments(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	err := dbmodels.AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	hub := NewSessionEventHubWithCapacity(10)
+	t.Cleanup(hub.Close)
+
+	server := &Server{
+		conf:     &config.Config{},
+		repo:     repo,
+		eventHub: hub,
+	}
+
+	chatID := "test-chat-executor-attachments"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+	}))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "test-agent",
+			Name: "Test Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "gemini-3.7-flash-high"},
+			},
+		},
+	}
+
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, server, nil)
+
+	subCh, _, cancel := hub.Subscribe(chatID, 0)
+	t.Cleanup(cancel)
+
+	attachments := []dbmodels.Attachment{
+		{
+			Name:     "data.csv",
+			Path:     "/malicious/client/path/data.csv",
+			Size:     1024,
+			MimeType: "text/csv",
+		},
+		{
+			Name:     "photo.png",
+			Path:     "/other/path/photo.png",
+			Size:     2048,
+			MimeType: "image/png",
+		},
+	}
+
+	// When Execute runs, it persists the userMsg with prompt and params.Attachments
+	// Since run.Run will try to run CLI without mock backend, we can test the pre-run persistence and parameters
+	// Or we can invoke Execute and let it finish or fail, then verify the DB state
+	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
+		ChatID:      chatID,
+		Prompt:      "Analyze user files",
+		Attachments: attachments,
+	})
+
+	// Verify DB message persistence
+	session, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotEmpty(t, session.Messages)
+
+	var userMsg *dbmodels.ChatMessage
+	for _, m := range session.Messages {
+		if m.Role == "user" {
+			userMsg = &m
+			break
+		}
+	}
+	require.NotNil(t, userMsg)
+	// Content must remain raw prompt without [Attached Files] injection
+	assert.Equal(t, "Analyze user files", userMsg.Content)
+	// Attachments must be preserved
+	require.Len(t, userMsg.Attachments, 2)
+	assert.Equal(t, "data.csv", userMsg.Attachments[0].Name)
+	assert.Equal(t, int64(1024), userMsg.Attachments[0].Size)
+	assert.Equal(t, "photo.png", userMsg.Attachments[1].Name)
+	assert.Equal(t, int64(2048), userMsg.Attachments[1].Size)
+
+	// Verify SSE broadcast included raw content and attachments
+	select {
+	case ev := <-subCh:
+		assert.Equal(t, "message", ev.Type)
+		require.NotNil(t, ev.Message)
+		assert.Equal(t, "Analyze user files", ev.Message.Content)
+		require.Len(t, ev.Message.Attachments, 2)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for SSE user message event with attachments")
+	}
+}

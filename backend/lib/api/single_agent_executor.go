@@ -23,11 +23,12 @@ import (
 
 // SingleAgentRunParams carries the parameters for a single agent execution.
 type SingleAgentRunParams struct {
-	ChatID   string
-	Prompt   string
-	RunDir   string
-	Model    string
-	Metadata map[string]any
+	ChatID      string
+	Prompt      string
+	RunDir      string
+	Model       string
+	Metadata    map[string]any
+	Attachments []dbmodels.Attachment
 }
 
 // SingleAgentExecutor handles responding to and processing single-agent tasks.
@@ -165,6 +166,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 				Content:      prompt,
 				AgentName:    agentName,
 				Timestamp:    time.Now().UnixMilli(),
+				Attachments:  params.Attachments,
 			}
 			if err := e.repo.AppendMessage(chatID, userMsg); err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
@@ -209,7 +211,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	// context cancellation. This guarantees the session's isRunning
 	// state is cleared after the agent sandbox exits.
 	defer e.markAgentCompleted(chatID)
-	return e.executeSequential(ctx, prompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
+	augmentedPrompt := formatPromptWithAttachments(prompt, params.Attachments)
+	return e.executeSequential(ctx, augmentedPrompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
 }
 
 // goGenerateTitle spawns a background goroutine that generates and persists a
