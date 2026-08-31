@@ -409,3 +409,11 @@ export async function searchFiles(
     return [];
   }
 }
+
+export function getRawFileContentUrl(sessionId: string, path: string): string {
+  return `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`;
+}
+
+export function getRawWorkspaceFileUrl(sessionId: string, path: string): string {
+  return `/api/v1/workspace/file?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`;
+}

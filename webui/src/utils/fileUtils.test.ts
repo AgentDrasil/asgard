@@ -5,6 +5,11 @@ import {
   escapeHtml,
   extractHighlightedLines,
   isAncestorDir,
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  getMediaCategory,
 } from "./fileUtils";
 
 describe("fileUtils", () => {
@@ -43,8 +48,83 @@ describe("fileUtils", () => {
       expect(getFileIcon("go")).toBe("vscode-icons:file-type-go");
       expect(getFileIcon("ts")).toBe("vscode-icons:file-type-typescript");
       expect(getFileIcon("md")).toBe("octicon:markdown-24");
+      expect(getFileIcon("png")).toBe("vscode-icons:file-type-image");
+      expect(getFileIcon("mp4")).toBe("vscode-icons:file-type-video");
+      expect(getFileIcon("mp3")).toBe("vscode-icons:file-type-audio");
+      expect(getFileIcon("pdf")).toBe("vscode-icons:file-type-pdf");
       expect(getFileIcon(undefined, "src/components/App.vue")).toBe("vscode-icons:file-type-vue");
+      expect(getFileIcon(undefined, "some/path/photo.jpg")).toBe("vscode-icons:file-type-image");
+      expect(getFileIcon(undefined, "some/path/movie.webm")).toBe("vscode-icons:file-type-video");
+      expect(getFileIcon(undefined, "some/path/audio.wav")).toBe("vscode-icons:file-type-audio");
+      expect(getFileIcon(undefined, "some/path/doc.pdf")).toBe("vscode-icons:file-type-pdf");
       expect(getFileIcon(undefined, "some/path/file.xyz")).toBe("octicon:file-code-24");
+    });
+  });
+
+  describe("media type checkers", () => {
+    it("detects image files correctly", () => {
+      expect(isImageFile("png")).toBe(true);
+      expect(isImageFile(".jpg")).toBe(true);
+      expect(isImageFile("jpeg")).toBe(true);
+      expect(isImageFile("svg")).toBe(true);
+      expect(isImageFile("webp")).toBe(true);
+      expect(isImageFile("gif")).toBe(true);
+      expect(isImageFile(undefined, "path/to/icon.ico")).toBe(true);
+      expect(isImageFile("go")).toBe(false);
+      expect(isImageFile("ts")).toBe(false);
+      expect(isImageFile(undefined, "app.ts")).toBe(false);
+    });
+
+    it("detects video files correctly", () => {
+      expect(isVideoFile("mp4")).toBe(true);
+      expect(isVideoFile(".webm")).toBe(true);
+      expect(isVideoFile("mov")).toBe(true);
+      expect(isVideoFile(undefined, "test.ogv")).toBe(true);
+      expect(isVideoFile("mp3")).toBe(false);
+      expect(isVideoFile("png")).toBe(false);
+    });
+
+    it("detects audio files correctly", () => {
+      expect(isAudioFile("ogg")).toBe(true);
+      expect(isAudioFile("mp3")).toBe(true);
+      expect(isAudioFile(".wav")).toBe(true);
+      expect(isAudioFile("flac")).toBe(true);
+      expect(isAudioFile("aac")).toBe(true);
+      expect(isAudioFile(undefined, "sound.m4a")).toBe(true);
+      expect(isAudioFile("mp4")).toBe(false);
+      expect(isAudioFile("pdf")).toBe(false);
+    });
+
+    it("detects pdf files correctly", () => {
+      expect(isPdfFile("pdf")).toBe(true);
+      expect(isPdfFile(".pdf")).toBe(true);
+      expect(isPdfFile(undefined, "doc.pdf")).toBe(true);
+      expect(isPdfFile("png")).toBe(false);
+      expect(isPdfFile("txt")).toBe(false);
+    });
+
+    it("detects getMediaCategory properly", () => {
+      expect(getMediaCategory("png")).toBe("image");
+      expect(getMediaCategory("mp4")).toBe("video");
+      expect(getMediaCategory("mp3")).toBe("audio");
+      expect(getMediaCategory("ogg")).toBe("audio");
+      expect(getMediaCategory("pdf")).toBe("pdf");
+      expect(getMediaCategory("md")).toBe("markdown");
+      expect(getMediaCategory("markdown")).toBe("markdown");
+      expect(getMediaCategory("go")).toBe("code");
+      expect(getMediaCategory("ts")).toBe("code");
+      expect(getMediaCategory("txt")).toBe("code");
+      expect(getMediaCategory("java")).toBe("code");
+      expect(getMediaCategory(undefined, "lib.rs")).toBe("code");
+      expect(getMediaCategory(undefined, "dir.d/README")).toBe("code");
+      expect(getMediaCategory(undefined, "dir.d/file")).toBe("code");
+      expect(getMediaCategory(undefined, "config.toml")).toBe("code");
+      expect(getMediaCategory(undefined, "pom.xml")).toBe("code");
+      expect(getMediaCategory("")).toBe("code");
+      expect(getMediaCategory("wasm")).toBe("binary");
+      expect(getMediaCategory("bin")).toBe("binary");
+      expect(getMediaCategory("zip")).toBe("binary");
+      expect(getMediaCategory("tar")).toBe("binary");
     });
   });
 

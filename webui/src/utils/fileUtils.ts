@@ -71,8 +71,122 @@ export function mapExtToLang(ext?: string): string {
   }
 }
 
+export const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "ico",
+  "bmp",
+  "avif",
+]);
+
+export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogv", "mov"]);
+
+export const AUDIO_EXTENSIONS = new Set(["ogg", "mp3", "wav", "oga", "aac", "m4a", "flac"]);
+
+export const PDF_EXTENSIONS = new Set(["pdf"]);
+
+export const BINARY_EXTENSIONS = new Set([
+  "zip",
+  "tar",
+  "gz",
+  "tgz",
+  "bz2",
+  "xz",
+  "7z",
+  "rar",
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "o",
+  "a",
+  "obj",
+  "lib",
+  "bin",
+  "dat",
+  "wasm",
+  "class",
+  "jar",
+  "iso",
+  "img",
+  "db",
+  "sqlite",
+  "sqlite3",
+  "pyc",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+]);
+
+export function extractExt(ext?: string, path?: string): string {
+  if (ext) {
+    return ext.toLowerCase().replace(/^\./, "");
+  }
+  if (path) {
+    const base = path.split("/").pop() ?? path;
+    const parts = base.split(".");
+    if (parts.length > 1) {
+      return (parts.pop() ?? "").toLowerCase();
+    }
+  }
+  return "";
+}
+
+export function isImageFile(ext?: string, path?: string): boolean {
+  const e = extractExt(ext, path);
+  return IMAGE_EXTENSIONS.has(e);
+}
+
+export function isVideoFile(ext?: string, path?: string): boolean {
+  const e = extractExt(ext, path);
+  return VIDEO_EXTENSIONS.has(e);
+}
+
+export function isAudioFile(ext?: string, path?: string): boolean {
+  const e = extractExt(ext, path);
+  return AUDIO_EXTENSIONS.has(e);
+}
+
+export function isPdfFile(ext?: string, path?: string): boolean {
+  const e = extractExt(ext, path);
+  return PDF_EXTENSIONS.has(e);
+}
+
+export type MediaCategory = "image" | "video" | "audio" | "pdf" | "markdown" | "code" | "binary";
+
+export function getMediaCategory(ext?: string, path?: string): MediaCategory {
+  const e = extractExt(ext, path);
+  if (isImageFile(e)) return "image";
+  if (isVideoFile(e)) return "video";
+  if (isAudioFile(e)) return "audio";
+  if (isPdfFile(e)) return "pdf";
+  if (e === "md" || e === "markdown") return "markdown";
+  if (!e) return "code"; // extensionless → treat as text
+  if (BINARY_EXTENSIONS.has(e)) return "binary";
+  return "code"; // unknown ext → text-safe default for a coding workspace
+}
+
 export function getFileIcon(ext?: string, path?: string): string {
-  const fileExt = (ext || path?.split(".").pop() || "").toLowerCase();
+  const fileExt = extractExt(ext, path);
+  if (isImageFile(fileExt)) {
+    return "vscode-icons:file-type-image";
+  }
+  if (isVideoFile(fileExt)) {
+    return "vscode-icons:file-type-video";
+  }
+  if (isAudioFile(fileExt)) {
+    return "vscode-icons:file-type-audio";
+  }
+  if (isPdfFile(fileExt)) {
+    return "vscode-icons:file-type-pdf";
+  }
+
   switch (fileExt) {
     case "md":
     case "markdown":
