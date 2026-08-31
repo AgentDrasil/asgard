@@ -53,7 +53,7 @@ describe("ChatInput.vue", () => {
     app.unmount();
   });
 
-  it("disables attach button when no sessionId is provided", async () => {
+  it("hides attach button when no sessionId is provided", async () => {
     const app = createApp({
       render() {
         return h(ChatInput, {

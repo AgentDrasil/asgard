@@ -20,7 +20,7 @@ export function humanfriendly(num: number): string {
  * e.g., 500 -> "500 B", 12697 -> "12.4 KB", 1048576 -> "1.0 MB".
  */
 export function formatFileSize(bytes?: number): string {
-  if (bytes === undefined || bytes === null || isNaN(bytes) || bytes < 0) return "0 B";
+  if (bytes === undefined || bytes === null || Number.isNaN(bytes) || bytes < 0) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;

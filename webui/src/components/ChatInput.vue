@@ -2,12 +2,13 @@
 import { ref, watch, computed } from "vue";
 import { Icon } from "@iconify/vue";
 import { useShortcuts } from "../composables/useShortcuts";
+import { useToast } from "../composables/useToast";
 import type { Attachment } from "../types";
 import { uploadAttachment } from "../lib/api";
-import { formatFileSize } from "../lib/format";
-import { getFileIcon } from "../utils/fileUtils";
+import AttachmentChips from "./chat/AttachmentChips.vue";
 
 const { modKey, sendShortcut } = useShortcuts();
+const toast = useToast();
 
 const props = defineProps<{
   loading: boolean;
@@ -25,6 +26,7 @@ const isModalOpen = ref(false);
 const attachments = ref<Attachment[]>([]);
 const isUploading = ref(false);
 const isDragging = ref(false);
+let dragEnterCounter = 0;
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const isMultiline = computed(() => {
@@ -101,8 +103,9 @@ const processFiles = async (files: FileList | File[]) => {
             attachments.value.push(att);
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to upload attachment:", err);
+        toast.error(`Failed to upload "${file.name}": ${err?.message || "upload failed"}`);
       }
     }
   } finally {
@@ -133,21 +136,35 @@ const handlePaste = (e: ClipboardEvent) => {
   }
 };
 
-const handleDragOver = (e: DragEvent) => {
+const handleDragEnter = (e: DragEvent) => {
   if (!props.sessionId || props.loading) return;
-  e.preventDefault();
-  isDragging.value = true;
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+    dragEnterCounter++;
+    isDragging.value = true;
+  }
 };
 
-const handleDragLeave = (e: DragEvent) => {
-  e.preventDefault();
-  isDragging.value = false;
+const handleDragOver = (e: DragEvent) => {
+  if (!props.sessionId || props.loading) return;
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+    e.preventDefault();
+  }
+};
+
+const handleDragLeave = (_e: DragEvent) => {
+  if (!props.sessionId || props.loading) return;
+  dragEnterCounter--;
+  if (dragEnterCounter <= 0) {
+    dragEnterCounter = 0;
+    isDragging.value = false;
+  }
 };
 
 const handleDrop = (e: DragEvent) => {
+  dragEnterCounter = 0;
+  isDragging.value = false;
   if (!props.sessionId || props.loading) return;
   e.preventDefault();
-  isDragging.value = false;
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
     void processFiles(e.dataTransfer.files);
   }
@@ -157,6 +174,7 @@ const handleDrop = (e: DragEvent) => {
 <template>
   <div
     class="p-2.5 sm:p-4 bg-base-100 border-t border-base-200/50 md:border-t-0 shrink-0 min-w-0 w-full"
+    @dragenter="handleDragEnter"
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
     @drop="handleDrop"
@@ -167,39 +185,11 @@ const handleDrop = (e: DragEvent) => {
 
     <div class="flex flex-col max-w-4xl w-full mx-auto min-w-0 gap-2">
       <!-- Attachment Previews List (Chips) -->
-      <div
-        v-if="attachments.length > 0 || isUploading"
-        class="flex flex-wrap items-center gap-2 px-1"
-      >
-        <div
-          v-for="(att, idx) in attachments"
-          :key="att.name + idx"
-          class="badge badge-lg gap-1.5 py-3.5 px-3 bg-base-200 border border-base-300 shadow-xs max-w-full text-xs font-mono select-none"
-        >
-          <Icon :icon="getFileIcon(undefined, att.name)" class="h-4 w-4 shrink-0" />
-          <span class="truncate max-w-[160px] sm:max-w-[220px]" :title="att.name">
-            {{ att.name }}
-          </span>
-          <span class="text-base-content/50 text-[11px]"> ({{ formatFileSize(att.size) }}) </span>
-          <button
-            type="button"
-            @click="removeAttachment(idx)"
-            class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-base-300"
-            title="Remove attachment"
-          >
-            <Icon icon="material-symbols:close" class="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <!-- Uploading Indicator Badge -->
-        <div
-          v-if="isUploading"
-          class="badge badge-lg gap-2 py-3.5 px-3 bg-base-200/80 border border-base-300 shadow-xs text-xs font-mono text-base-content/70 select-none"
-        >
-          <span class="loading loading-spinner loading-xs text-primary"></span>
-          <span>Uploading attachment...</span>
-        </div>
-      </div>
+      <AttachmentChips
+        :attachments="attachments"
+        :is-uploading="isUploading"
+        @remove="removeAttachment"
+      />
 
       <div class="relative flex items-center w-full min-w-0">
         <!-- Left Buttons Join/Group (Expand & Attach) -->
@@ -277,37 +267,12 @@ const handleDrop = (e: DragEvent) => {
         </div>
 
         <!-- Attachments Preview inside Modal -->
-        <div
-          v-if="attachments.length > 0 || isUploading"
-          class="flex flex-wrap items-center gap-2 mb-3 px-1"
-        >
-          <div
-            v-for="(att, idx) in attachments"
-            :key="'modal-' + att.name + idx"
-            class="badge badge-lg gap-1.5 py-3.5 px-3 bg-base-200 border border-base-300 shadow-xs max-w-full text-xs font-mono select-none"
-          >
-            <Icon :icon="getFileIcon(undefined, att.name)" class="h-4 w-4 shrink-0" />
-            <span class="truncate max-w-[160px] sm:max-w-[220px]" :title="att.name">
-              {{ att.name }}
-            </span>
-            <span class="text-base-content/50 text-[11px]"> ({{ formatFileSize(att.size) }}) </span>
-            <button
-              type="button"
-              @click="removeAttachment(idx)"
-              class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-base-300"
-              title="Remove attachment"
-            >
-              <Icon icon="material-symbols:close" class="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div
-            v-if="isUploading"
-            class="badge badge-lg gap-2 py-3.5 px-3 bg-base-200/80 border border-base-300 shadow-xs text-xs font-mono text-base-content/70 select-none"
-          >
-            <span class="loading loading-spinner loading-xs text-primary"></span>
-            <span>Uploading attachment...</span>
-          </div>
+        <div class="mb-3">
+          <AttachmentChips
+            :attachments="attachments"
+            :is-uploading="isUploading"
+            @remove="removeAttachment"
+          />
         </div>
 
         <div class="flex-1 min-h-[250px] flex flex-col mb-4">

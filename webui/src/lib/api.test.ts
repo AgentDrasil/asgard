@@ -429,12 +429,12 @@ describe("API Library", () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue({
         ok: false,
         status: 413,
-        json: async () => ({ error: "attachment size exceeds maximum limit (20MB)" }),
+        json: async () => ({ error: "file size exceeds 20MB limit" }),
       } as Response);
 
       const dummyFile = new File(["huge content"], "huge.zip", { type: "application/zip" });
       await expect(uploadAttachment("sess-123", dummyFile)).rejects.toThrow(
-        "attachment size exceeds maximum limit (20MB)",
+        "file size exceeds 20MB limit",
       );
     });
 
