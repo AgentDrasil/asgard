@@ -39,20 +39,28 @@ func (a *Agents) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, a)
 }
 
+type Attachment struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"` // 沙箱内部路径，如 "/tmp/attachments/filename.ext"
+	Size     int64  `json:"size"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
 type ChatMessage struct {
-	ID            string   `json:"id"`
-	Role          string   `json:"role"`
-	Content       string   `json:"content"`
-	AgentName     string   `json:"agentName,omitempty"`
-	Timestamp     int64    `json:"timestamp,omitempty"`
-	ActivityType  string   `json:"activityType,omitempty"`
-	StepIndex     int      `json:"stepIndex,omitempty"`
-	InputTokens   int      `json:"inputTokens,omitempty"`
-	MaxTokens     int      `json:"maxTokens,omitempty"`
-	Replied       bool     `json:"replied,omitempty"`
-	ReplyText     string   `json:"replyText,omitempty"`
-	TargetFiles   []string `json:"targetFiles,omitempty"`
-	ArtifactFiles []string `json:"artifactFiles,omitempty"`
+	ID            string       `json:"id"`
+	Role          string       `json:"role"`
+	Content       string       `json:"content"`
+	AgentName     string       `json:"agentName,omitempty"`
+	Timestamp     int64        `json:"timestamp,omitempty"`
+	ActivityType  string       `json:"activityType,omitempty"`
+	StepIndex     int          `json:"stepIndex,omitempty"`
+	InputTokens   int          `json:"inputTokens,omitempty"`
+	MaxTokens     int          `json:"maxTokens,omitempty"`
+	Replied       bool         `json:"replied,omitempty"`
+	ReplyText     string       `json:"replyText,omitempty"`
+	TargetFiles   []string     `json:"targetFiles,omitempty"`
+	ArtifactFiles []string     `json:"artifactFiles,omitempty"`
+	Attachments   []Attachment `json:"attachments,omitempty"`
 }
 
 type Messages []ChatMessage

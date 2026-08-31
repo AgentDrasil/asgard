@@ -286,6 +286,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
+	mux.HandleFunc("POST /api/sessions/{id}/attachments", s.handleSessionAttachmentsUpload)
+	mux.HandleFunc("GET /api/sessions/{id}/attachments/{filename}", s.handleSessionAttachmentDownload)
 	mux.HandleFunc("POST /api/agents/{id}/message", s.handleTriggerMessage)
 	mux.HandleFunc("POST /api/sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /api/sessions", s.handleSessions)
