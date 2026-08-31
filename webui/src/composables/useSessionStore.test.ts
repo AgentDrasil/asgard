@@ -258,6 +258,62 @@ describe("useSessionStore", () => {
       metadata: expect.objectContaining({
         message_id: expect.stringMatching(/^user-/),
       }),
+      attachments: undefined,
+    });
+  });
+
+  it("should send message with attachments optimistically and pass attachments to triggerAgentMessage", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-attachments",
+      title: "Chat with attachments",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      messages: [],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+    const triggerSpy = vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "accepted",
+      chatId: "session-attachments",
+    });
+
+    const store = useSessionStore({ agents });
+    await store.openSession("session-attachments");
+
+    const attachments = [
+      {
+        name: "test.png",
+        path: ".attachments/test.png",
+        size: 1024,
+        mimeType: "image/png",
+      },
+    ];
+
+    await store.sendMessage("Here is a screenshot", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/workspace",
+      attachments,
+    });
+
+    expect(store.messages.value.length).toBe(1);
+    expect(store.messages.value[0].role).toBe("user");
+    expect(store.messages.value[0].content).toBe("Here is a screenshot");
+    expect(store.messages.value[0].attachments).toEqual(attachments);
+    expect(store.isRunning.value).toBe(true);
+
+    expect(triggerSpy).toHaveBeenCalledWith("agent-1", {
+      prompt: "Here is a screenshot",
+      chatId: "session-attachments",
+      runDir: "/workspace",
+      model: undefined,
+      metadata: expect.objectContaining({
+        message_id: expect.stringMatching(/^user-/),
+      }),
+      attachments,
     });
   });
 

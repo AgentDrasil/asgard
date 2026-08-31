@@ -1,6 +1,6 @@
 import { ref, computed, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
-import type { ChatSession, AgentInfo, ChatMessage, SessionEvent } from "../types";
+import type { ChatSession, AgentInfo, ChatMessage, SessionEvent, Attachment } from "../types";
 import { getSession, getSessions, createSession, triggerAgentMessage } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
@@ -307,6 +307,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       selectedAgentId?: string;
       selectedDir?: string;
       selectedModel?: string;
+      attachments?: Attachment[];
     },
   ) => {
     let currentThreadId = activeSessionId.value;
@@ -328,6 +329,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       role: "user",
       content: text,
       timestamp: Date.now(),
+      attachments: opts?.attachments,
     };
     rawMessages.value = [...rawMessages.value, userMsg];
 
@@ -371,6 +373,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       runDir: currentSession.runDir || opts?.selectedDir,
       model: opts?.selectedModel,
       metadata: { message_id: userMsgId },
+      attachments: opts?.attachments,
     });
 
     if (res?.conflict) {

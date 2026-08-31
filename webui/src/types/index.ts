@@ -14,6 +14,13 @@ export interface MessagePart {
   text: string;
 }
 
+export interface Attachment {
+  name: string;
+  path: string;
+  size: number;
+  mimeType?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role:
@@ -38,6 +45,7 @@ export interface ChatMessage {
   replyText?: string;
   targetFiles?: string[];
   artifactFiles?: string[];
+  attachments?: Attachment[];
 }
 
 export interface ChatSession {
@@ -119,6 +127,7 @@ export interface TriggerAgentMessageParams {
   runDir?: string;
   model?: string;
   metadata?: Record<string, any>;
+  attachments?: Attachment[];
 }
 
 export interface FileTreeEntry {

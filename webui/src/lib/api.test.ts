@@ -12,6 +12,9 @@ import {
   getSystemLogs,
   getRawFileContentUrl,
   getRawWorkspaceFileUrl,
+  uploadAttachment,
+  getAttachmentUrl,
+  triggerAgentMessage,
 } from "./api";
 
 describe("API Library", () => {
@@ -392,6 +395,108 @@ describe("API Library", () => {
       expect(url).toBe(
         "/api/v1/workspace/file?session_id=session-123&path=%2Fworkspace%2Fdir%2Ftest%20%26%20special%23name.pdf&raw=1",
       );
+    });
+  });
+
+  describe("attachments API", () => {
+    it("uploadAttachment uploads file and returns the first Attachment object", async () => {
+      const mockAttachment = {
+        name: "test.png",
+        path: ".attachments/test.png",
+        size: 1024,
+        mimeType: "image/png",
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [mockAttachment],
+      } as Response);
+
+      const dummyFile = new File(["dummy content"], "test.png", { type: "image/png" });
+      const res = await uploadAttachment("sess-123", dummyFile);
+
+      expect(res).toEqual(mockAttachment);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/sessions/sess-123/attachments",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.any(FormData),
+        }),
+      );
+    });
+
+    it("uploadAttachment throws error on non-ok status with backend error message", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 413,
+        json: async () => ({ error: "attachment size exceeds maximum limit (20MB)" }),
+      } as Response);
+
+      const dummyFile = new File(["huge content"], "huge.zip", { type: "application/zip" });
+      await expect(uploadAttachment("sess-123", dummyFile)).rejects.toThrow(
+        "attachment size exceeds maximum limit (20MB)",
+      );
+    });
+
+    it("uploadAttachment throws error if response array is empty", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      } as Response);
+
+      const dummyFile = new File(["data"], "empty.txt", { type: "text/plain" });
+      await expect(uploadAttachment("sess-123", dummyFile)).rejects.toThrow(
+        "Invalid attachment upload response",
+      );
+    });
+
+    it("getAttachmentUrl constructs properly encoded URL", () => {
+      const url = getAttachmentUrl("sess-123", "sub dir/test image.png");
+      expect(url).toBe("/api/sessions/sess-123/attachments/sub%20dir%2Ftest%20image.png");
+    });
+  });
+
+  describe("triggerAgentMessage", () => {
+    it("sends prompt and attachments in request body", async () => {
+      const mockResult = { status: "accepted", chatId: "sess-123" };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResult,
+      } as Response);
+
+      const attachments = [
+        {
+          name: "data.csv",
+          path: ".attachments/data.csv",
+          size: 2048,
+          mimeType: "text/csv",
+        },
+      ];
+
+      const res = await triggerAgentMessage("coder", {
+        prompt: "Analyze this dataset",
+        chatId: "sess-123",
+        runDir: "/workspace",
+        model: "gemini-2.5",
+        metadata: { message_id: "user-123" },
+        attachments,
+      });
+
+      expect(res).toEqual(mockResult);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/agents/coder/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: "Analyze this dataset",
+          chatId: "sess-123",
+          runDir: "/workspace",
+          model: "gemini-2.5",
+          metadata: { message_id: "user-123" },
+          attachments,
+        }),
+      });
     });
   });
 });
