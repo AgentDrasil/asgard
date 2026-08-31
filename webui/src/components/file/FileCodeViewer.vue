@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
-import { getFileContent } from "../../lib/api";
+import { getFileContent, getRawFileContentUrl } from "../../lib/api";
 import { useShiki } from "../../composables/useShiki";
 import { useShortcuts } from "../../composables/useShortcuts";
 import { useInPageFind } from "../../composables/useInPageFind";
-import { humanfriendly } from "../../lib/format";
 import { commentKey } from "../../utils/commentUtils";
-import { mapExtToLang, escapeHtml, extractHighlightedLines } from "../../utils/fileUtils";
+import {
+  mapExtToLang,
+  escapeHtml,
+  extractHighlightedLines,
+  getMediaCategory,
+} from "../../utils/fileUtils";
 import MarkdownContent from "../MarkdownContent.vue";
 import FindBar from "../FindBar.vue";
+import MediaViewer from "../common/MediaViewer.vue";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
@@ -48,13 +53,36 @@ const isMarkdownFile = computed(() => {
   return ext === "md" || ext === "markdown";
 });
 
+const mediaCategory = computed(() => {
+  if (!fileData.value) return "code";
+  const cat = getMediaCategory(fileData.value.ext, fileData.value.path);
+  if (cat === "code" && fileData.value.isBinary) {
+    return "binary";
+  }
+  return cat;
+});
+
+const isMedia = computed(() => {
+  const cat = mediaCategory.value;
+  return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf";
+});
+
+const isBinaryOnly = computed(() => {
+  return mediaCategory.value === "binary" || (!isMedia.value && !!fileData.value?.isBinary);
+});
+
+const rawUrl = computed(() => {
+  if (!props.sessionId || !fileData.value?.path) return "";
+  return getRawFileContentUrl(props.sessionId, fileData.value.path);
+});
+
 const lines = computed<string[]>(() => {
-  if (!fileData.value || fileData.value.isBinary) return [];
+  if (!fileData.value || fileData.value.isBinary || isMedia.value) return [];
   return fileData.value.content.split("\n");
 });
 
 const highlightedLines = computed<string[]>(() => {
-  if (!fileData.value || fileData.value.isBinary) return [];
+  if (!fileData.value || fileData.value.isBinary || isMedia.value) return [];
   const content = fileData.value.content;
   const rawLines = lines.value;
   const lang = mapExtToLang(fileData.value.ext);
@@ -146,7 +174,9 @@ function toggleCommentWidget(lineNum: number) {
     const existing = getExistingComment(lineNum);
     widgetInput.value = existing?.comment ?? "";
     nextTick(() => {
-      textareaRef.value?.focus();
+      if (typeof textareaRef.value?.focus === "function") {
+        textareaRef.value.focus();
+      }
     });
   }
 }
@@ -210,7 +240,12 @@ onUnmounted(() => {
 
 // Watch fileData & markdownMode to re-run or clear find highlights
 watch([() => fileData.value, markdownMode], () => {
-  if (findState.isOpen.value && findState.query.value.trim()) {
+  if (
+    findState.isOpen.value &&
+    findState.query.value.trim() &&
+    !isMedia.value &&
+    !isBinaryOnly.value
+  ) {
     nextTick(() => {
       findState.performSearch();
     });
@@ -224,15 +259,12 @@ watch([() => fileData.value, markdownMode], () => {
   <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0 relative">
     <!-- Subheader / Toolbar for Code Viewer -->
     <div
-      v-if="fileData"
+      v-if="fileData && !isMedia && !isBinaryOnly"
       class="px-3 py-1.5 bg-base-200/60 border-b border-base-300 flex items-center justify-end text-xs font-mono shrink-0 gap-2"
     >
       <div class="flex items-center gap-1.5 shrink-0">
         <!-- Markdown Preview Toggle (if markdown file) -->
-        <div
-          v-if="isMarkdownFile && !fileData.isBinary"
-          class="join bg-base-300/60 p-0.5 rounded-lg shrink-0"
-        >
+        <div v-if="isMarkdownFile" class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
             @click="markdownMode = 'preview'"
             :class="[
@@ -261,7 +293,6 @@ watch([() => fileData.value, markdownMode], () => {
 
         <!-- Find in File Button -->
         <button
-          v-if="!fileData.isBinary"
           @click="findState.toggle()"
           class="btn btn-xs border-none font-medium gap-1 text-[11px]"
           :class="
@@ -279,6 +310,7 @@ watch([() => fileData.value, markdownMode], () => {
 
     <!-- Floating In-Page Find Bar -->
     <FindBar
+      v-if="!isMedia && !isBinaryOnly"
       v-model="findState.query.value"
       :isOpen="findState.isOpen.value"
       :currentIndex="findState.currentIndex.value"
@@ -289,7 +321,11 @@ watch([() => fileData.value, markdownMode], () => {
     />
 
     <!-- Main Content Area -->
-    <div ref="codeContainerRef" class="flex-1 overflow-auto min-w-0 relative">
+    <div
+      ref="codeContainerRef"
+      class="flex-1 overflow-auto min-w-0 relative"
+      :class="isMedia ? 'p-0' : ''"
+    >
       <!-- Loading State -->
       <div
         v-if="isLoading"
@@ -326,19 +362,25 @@ watch([() => fileData.value, markdownMode], () => {
         </button>
       </div>
 
-      <!-- Binary File Banner State -->
-      <div
-        v-else-if="fileData?.isBinary"
-        class="flex flex-col items-center justify-center h-full gap-3 text-base-content/60 p-8 text-center"
-      >
-        <Icon icon="octicon:file-binary-24" class="h-12 w-12 text-warning/80" />
-        <h3 class="text-sm font-bold text-base-content">Binary File Not Previewable</h3>
-        <p class="text-xs max-w-sm text-base-content/60">
-          The file <strong class="text-base-content font-mono">{{ fileData.name }}</strong> cannot
-          be previewed in the editor because it contains binary data.
-        </p>
-        <div class="badge badge-neutral font-mono text-xs">{{ humanfriendly(fileData.size) }}B</div>
-      </div>
+      <!-- Media Viewer Mode (Image / Video / Audio / PDF) -->
+      <MediaViewer
+        v-else-if="isMedia && fileData"
+        :src="rawUrl"
+        :fileName="fileData.name"
+        :fileExt="fileData.ext"
+        :fileSize="fileData.size"
+        :mediaCategory="mediaCategory as any"
+      />
+
+      <!-- Binary File Fallback State -->
+      <MediaViewer
+        v-else-if="isBinaryOnly && fileData"
+        src=""
+        :fileName="fileData.name"
+        :fileExt="fileData.ext"
+        :fileSize="fileData.size"
+        mediaCategory="binary"
+      />
 
       <!-- Markdown Preview Mode -->
       <div

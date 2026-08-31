@@ -4,8 +4,11 @@ import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import { useShiki } from "../composables/useShiki";
 import { useInPageFind } from "../composables/useInPageFind";
+import { getFileIcon, getMediaCategory } from "../utils/fileUtils";
+import { getRawWorkspaceFileUrl } from "../lib/api";
 import MarkdownContent from "./MarkdownContent.vue";
 import FindBar from "./FindBar.vue";
+import MediaViewer from "./common/MediaViewer.vue";
 
 const { highlightBlock } = useShiki();
 
@@ -26,6 +29,7 @@ interface FileData {
   ext: string;
   size: number;
   content: string;
+  isBinary?: boolean;
   updatedAt: string;
 }
 
@@ -38,6 +42,30 @@ const isMarkdown = computed(() => {
   if (!fileData.value) return false;
   const ext = fileData.value.ext.toLowerCase();
   return ext === "md" || ext === "markdown";
+});
+
+const mediaCategory = computed(() => {
+  if (!fileData.value) return "code";
+  const cat = getMediaCategory(fileData.value.ext, fileData.value.path);
+  if (cat === "code" && fileData.value.isBinary) {
+    return "binary";
+  }
+  return cat;
+});
+
+const isMedia = computed(() => {
+  const cat = mediaCategory.value;
+  return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf";
+});
+
+const isMediaOrPdf = computed(() => {
+  const cat = mediaCategory.value;
+  return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf" || cat === "binary";
+});
+
+const rawUrl = computed(() => {
+  if (!props.sessionId || !fileData.value?.path) return "";
+  return getRawWorkspaceFileUrl(props.sessionId, fileData.value.path);
 });
 
 const highlightedArtifactContent = computed(() => {
@@ -66,30 +94,6 @@ const highlightedArtifactContent = computed(() => {
 function formatPath(path: string): string {
   if (!path) return "";
   return path.replace(/^\/home\/[^/]+/, "~");
-}
-
-function getFileIcon(path: string) {
-  const ext = path.split(".").pop()?.toLowerCase() || "";
-  switch (ext) {
-    case "md":
-    case "markdown":
-      return "octicon:markdown-24";
-    case "go":
-      return "vscode-icons:file-type-go";
-    case "ts":
-    case "tsx":
-      return "vscode-icons:file-type-typescript";
-    case "js":
-    case "jsx":
-      return "vscode-icons:file-type-js";
-    case "json":
-      return "vscode-icons:file-type-json";
-    case "css":
-    case "html":
-      return "vscode-icons:file-type-html";
-    default:
-      return "octicon:file-code-24";
-  }
 }
 
 async function fetchFile(path: string) {
@@ -139,7 +143,7 @@ const findState = useInPageFind(contentContainerRef);
 
 // When file content or markdown view mode changes, re-run active search if find bar is open
 watch([() => fileData.value, markdownViewMode], () => {
-  if (findState.isOpen.value && findState.query.value.trim()) {
+  if (findState.isOpen.value && findState.query.value.trim() && !isMediaOrPdf.value) {
     nextTick(() => {
       findState.performSearch();
     });
@@ -177,7 +181,7 @@ watch([() => fileData.value, markdownViewMode], () => {
         <div class="relative flex-1 min-w-0">
           <div class="relative flex items-center w-full">
             <Icon
-              :icon="getFileIcon(activeFilePath || '')"
+              :icon="getFileIcon(undefined, activeFilePath || '')"
               class="absolute left-2.5 h-4 w-4 shrink-0 text-emerald-500 pointer-events-none z-10"
             />
             <select
@@ -224,8 +228,21 @@ watch([() => fileData.value, markdownViewMode], () => {
           </button>
         </div>
 
-        <!-- Find Button -->
+        <!-- Open Raw / Download Button for Media -->
+        <a
+          v-if="isMedia && rawUrl"
+          :href="rawUrl"
+          target="_blank"
+          :download="fileData?.name"
+          class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300 inline-flex items-center"
+          title="Open in new window / Download"
+        >
+          <Icon icon="octicon:link-external-16" class="h-3.5 w-3.5" />
+        </a>
+
+        <!-- Find Button (only for text/code/markdown) -->
         <button
+          v-if="!isMediaOrPdf"
           @click="findState.toggle()"
           :class="[
             'p-1.5 text-xs rounded transition-colors border',
@@ -250,6 +267,7 @@ watch([() => fileData.value, markdownViewMode], () => {
 
     <!-- Floating In-Page Find Bar -->
     <FindBar
+      v-if="!isMediaOrPdf"
       v-model="findState.query.value"
       :isOpen="findState.isOpen.value"
       :currentIndex="findState.currentIndex.value"
@@ -260,7 +278,11 @@ watch([() => fileData.value, markdownViewMode], () => {
     />
 
     <!-- Content Preview Area -->
-    <div ref="contentContainerRef" class="flex-1 overflow-y-auto p-3 sm:p-4 relative bg-base-100">
+    <div
+      ref="contentContainerRef"
+      class="flex-1 overflow-y-auto relative bg-base-100"
+      :class="isMediaOrPdf ? 'p-0' : 'p-3 sm:p-4'"
+    >
       <div
         v-if="loading"
         class="flex items-center justify-center h-full text-base-content/60 text-sm gap-2"
@@ -285,7 +307,19 @@ watch([() => fileData.value, markdownViewMode], () => {
       </div>
 
       <div v-else-if="fileData" class="h-full">
-        <div v-if="isMarkdown && markdownViewMode === 'rendered'" class="w-full h-full min-w-0">
+        <div v-if="isMediaOrPdf" class="w-full h-full min-w-0">
+          <MediaViewer
+            :src="mediaCategory === 'binary' ? '' : rawUrl"
+            :fileName="fileData.name"
+            :fileExt="fileData.ext"
+            :fileSize="fileData.size"
+            :mediaCategory="mediaCategory as any"
+          />
+        </div>
+        <div
+          v-else-if="isMarkdown && markdownViewMode === 'rendered'"
+          class="w-full h-full min-w-0"
+        >
           <MarkdownContent :content="fileData.content" />
         </div>
         <div v-else v-html="highlightedArtifactContent" class="w-full h-full min-w-0"></div>

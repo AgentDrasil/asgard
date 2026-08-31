@@ -132,6 +132,7 @@ const formattedSize = computed(() => {
             <Icon icon="octicon:sync-16" class="w-3.5 h-3.5" />
           </button>
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             :download="fileName"
@@ -161,7 +162,9 @@ const formattedSize = computed(() => {
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
           <p class="text-sm font-medium">Failed to load image</p>
-          <a :href="src" target="_blank" class="btn btn-sm btn-outline mt-2"> Open Directly </a>
+          <a v-if="src" :href="src" target="_blank" class="btn btn-sm btn-outline mt-2">
+            Open Directly
+          </a>
         </div>
         <img
           ref="imgRef"
@@ -193,6 +196,7 @@ const formattedSize = computed(() => {
         </div>
         <div class="flex items-center gap-1">
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             :download="fileName"
@@ -211,7 +215,9 @@ const formattedSize = computed(() => {
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
           <p class="text-sm font-medium">Failed to load video</p>
-          <a :href="src" target="_blank" class="btn btn-sm btn-outline mt-2"> Open Directly </a>
+          <a v-if="src" :href="src" target="_blank" class="btn btn-sm btn-outline mt-2">
+            Open Directly
+          </a>
         </div>
         <video
           v-show="!videoError"
@@ -247,6 +253,7 @@ const formattedSize = computed(() => {
             Your browser does not support the audio element.
           </audio>
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             :download="fileName"
@@ -271,6 +278,7 @@ const formattedSize = computed(() => {
         </div>
         <div class="flex items-center gap-1">
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             class="btn btn-ghost btn-xs gap-1 text-xs"
@@ -280,6 +288,7 @@ const formattedSize = computed(() => {
             <span>Open in Tab</span>
           </a>
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             :download="fileName"
@@ -312,11 +321,10 @@ const formattedSize = computed(() => {
             <p class="text-xs text-base-content/50 mt-1">
               Binary file <span v-if="formattedSize">({{ formattedSize }})</span>
             </p>
-            <p class="text-xs text-base-content/60 mt-2">
-              This file cannot be previewed as text. You can download or open it directly.
-            </p>
+            <p class="text-xs text-base-content/60 mt-2">This file cannot be previewed as text.</p>
           </div>
           <a
+            v-if="src"
             :href="src"
             target="_blank"
             :download="fileName"

@@ -193,4 +193,27 @@ describe("MediaViewer.vue", () => {
 
     app.unmount();
   });
+
+  it("renders binary fallback card without download CTA when src is empty", async () => {
+    const app = createApp({
+      render() {
+        return h(MediaViewer, {
+          src: "",
+          fileName: "data.bin",
+          fileExt: "bin",
+          fileSize: 1024,
+          mediaCategory: "binary",
+        });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    expect(root.textContent).toContain("data.bin");
+    expect(root.textContent).toContain("Binary file");
+    expect(root.textContent).not.toContain("Download File");
+    expect(root.querySelector("a")).toBeNull();
+
+    app.unmount();
+  });
 });
