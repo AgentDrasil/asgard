@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { marked } from "marked";
 import MermaidViewer from "./MermaidViewer.vue";
 import { useShiki } from "../composables/useShiki";
 import { splitMarkdownTokens } from "../utils/markdownSegments";
 import { sanitizeMarkdownHtml } from "../utils/markdownSanitize";
+import { setupSortableTables } from "../utils/tableSort";
 
 const props = withDefaults(
   defineProps<{
@@ -17,6 +18,8 @@ const props = withDefaults(
 );
 
 const { highlightHtmlCodeBlocks } = useShiki();
+const containerRef = ref<HTMLElement | null>(null);
+let cleanupTableSort: (() => void) | null = null;
 
 const BLOCK_CLASSES = [
   "rounded-lg",
@@ -149,10 +152,37 @@ const segments = computed<ContentSegment[]>(() => {
     };
   });
 });
+
+const refreshSortableTables = () => {
+  if (cleanupTableSort) {
+    cleanupTableSort();
+    cleanupTableSort = null;
+  }
+  nextTick(() => {
+    if (containerRef.value) {
+      cleanupTableSort = setupSortableTables(containerRef.value);
+    }
+  });
+};
+
+watch(segments, () => {
+  refreshSortableTables();
+});
+
+onMounted(() => {
+  refreshSortableTables();
+});
+
+onUnmounted(() => {
+  if (cleanupTableSort) {
+    cleanupTableSort();
+    cleanupTableSort = null;
+  }
+});
 </script>
 
 <template>
-  <div class="markdown-content-wrapper min-w-0 w-full">
+  <div ref="containerRef" class="markdown-content-wrapper min-w-0 w-full">
     <template v-for="(segment, idx) in segments" :key="idx">
       <MermaidViewer v-if="segment.type === 'mermaid'" :code="segment.code" />
       <div v-else :class="[DEFAULT_PROSE_CLASSES, customClass]" v-html="segment.html" />

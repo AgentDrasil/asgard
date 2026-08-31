@@ -45,6 +45,9 @@ export function mapExtToLang(ext?: string): string {
     case "md":
     case "markdown":
       return "markdown";
+    case "csv":
+    case "tsv":
+      return "csv";
     case "py":
       return "python";
     case "sh":
@@ -88,6 +91,8 @@ export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogv", "mov"]);
 export const AUDIO_EXTENSIONS = new Set(["ogg", "mp3", "wav", "oga", "aac", "m4a", "flac"]);
 
 export const PDF_EXTENSIONS = new Set(["pdf"]);
+
+export const CSV_EXTENSIONS = new Set(["csv", "tsv"]);
 
 export const BINARY_EXTENSIONS = new Set([
   "zip",
@@ -158,7 +163,20 @@ export function isPdfFile(ext?: string, path?: string): boolean {
   return PDF_EXTENSIONS.has(e);
 }
 
-export type MediaCategory = "image" | "video" | "audio" | "pdf" | "markdown" | "code" | "binary";
+export function isCsvFile(ext?: string, path?: string): boolean {
+  const e = extractExt(ext, path);
+  return CSV_EXTENSIONS.has(e);
+}
+
+export type MediaCategory =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "csv"
+  | "markdown"
+  | "code"
+  | "binary";
 
 export function getMediaCategory(ext?: string, path?: string): MediaCategory {
   const e = extractExt(ext, path);
@@ -166,6 +184,7 @@ export function getMediaCategory(ext?: string, path?: string): MediaCategory {
   if (isVideoFile(e)) return "video";
   if (isAudioFile(e)) return "audio";
   if (isPdfFile(e)) return "pdf";
+  if (isCsvFile(e)) return "csv";
   if (e === "md" || e === "markdown") return "markdown";
   if (!e) return "code"; // extensionless → treat as text
   if (BINARY_EXTENSIONS.has(e)) return "binary";
@@ -200,6 +219,9 @@ export function getFileIcon(ext?: string, path?: string): string {
   }
   if (isPdfFile(fileExt)) {
     return "vscode-icons:file-type-pdf";
+  }
+  if (isCsvFile(fileExt)) {
+    return "vscode-icons:file-type-excel";
   }
 
   switch (fileExt) {

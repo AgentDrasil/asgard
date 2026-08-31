@@ -67,13 +67,19 @@ const MAX_ARTIFACT_WIDTH = 900;
 
 const artifactWidth = ref(DEFAULT_ARTIFACT_WIDTH);
 const isResizingArtifact = ref(false);
+const isArtifactExpanded = ref(false);
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 
 const updateWindowWidth = () => {
   isDesktop.value = window.innerWidth >= 768;
 };
 
+const toggleArtifactExpand = () => {
+  isArtifactExpanded.value = !isArtifactExpanded.value;
+};
+
 const startArtifactResize = (e: MouseEvent) => {
+  if (isArtifactExpanded.value) return;
   e.preventDefault();
   isResizingArtifact.value = true;
   document.addEventListener("mousemove", handleArtifactMouseMove);
@@ -83,7 +89,7 @@ const startArtifactResize = (e: MouseEvent) => {
 };
 
 const handleArtifactMouseMove = (e: MouseEvent) => {
-  if (!isResizingArtifact.value) return;
+  if (!isResizingArtifact.value || isArtifactExpanded.value) return;
   const newWidth = Math.min(
     Math.max(window.innerWidth - e.clientX, MIN_ARTIFACT_WIDTH),
     MAX_ARTIFACT_WIDTH,
@@ -328,7 +334,13 @@ onUnmounted(() => {
       <!-- Left: Chat Messages Area -->
       <div
         class="flex-1 flex flex-col h-full overflow-hidden relative min-w-0"
-        :class="isArtifactDrawerOpen && activeArtifactPath ? 'hidden md:flex' : 'flex'"
+        :class="
+          isArtifactDrawerOpen && activeArtifactPath
+            ? isArtifactExpanded
+              ? 'hidden'
+              : 'hidden md:flex'
+            : 'flex'
+        "
       >
         <!-- Floating In-Page Find Bar -->
         <FindBar
@@ -439,17 +451,21 @@ onUnmounted(() => {
       <!-- Right: Resizable Artifact Panel (Under Header) -->
       <div
         v-if="isArtifactDrawerOpen && activeArtifactPath"
-        class="w-full md:w-auto h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
-        :class="{
-          'transition-none': isResizingArtifact,
-          'transition-[width] duration-200': !isResizingArtifact,
-        }"
+        class="h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
+        :class="[
+          isArtifactExpanded ? 'flex-1 w-full' : isDesktop ? 'w-auto' : 'w-full',
+          {
+            'transition-none': isResizingArtifact,
+            'transition-[width] duration-200': !isResizingArtifact,
+          },
+        ]"
         :style="{
-          width: isDesktop ? `${artifactWidth}px` : '100%',
+          width: isArtifactExpanded ? '100%' : isDesktop ? `${artifactWidth}px` : '100%',
         }"
       >
         <!-- Resizer Handle on Left Edge of Artifact Panel -->
         <div
+          v-if="!isArtifactExpanded"
           @mousedown="startArtifactResize"
           class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
           title="Drag to resize panel"
@@ -459,8 +475,10 @@ onUnmounted(() => {
           :sessionId="sessionId || ''"
           :activeFilePath="activeArtifactPath"
           :modifiedFiles="modifiedFiles"
+          :isExpanded="isArtifactExpanded"
           @close="emit('toggle-artifact-drawer')"
           @select-file="(f) => emit('select-artifact', f)"
+          @toggle-expand="toggleArtifactExpand"
         />
       </div>
     </div>

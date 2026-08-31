@@ -9,6 +9,7 @@ import {
   isVideoFile,
   isAudioFile,
   isPdfFile,
+  isCsvFile,
   getMediaCategory,
   resolveViewerCategory,
 } from "./fileUtils";
@@ -28,6 +29,8 @@ describe("fileUtils", () => {
       expect(mapExtToLang("yaml")).toBe("yaml");
       expect(mapExtToLang("yml")).toBe("yaml");
       expect(mapExtToLang("md")).toBe("markdown");
+      expect(mapExtToLang("csv")).toBe("csv");
+      expect(mapExtToLang("tsv")).toBe("csv");
       expect(mapExtToLang("py")).toBe("python");
       expect(mapExtToLang("sh")).toBe("bash");
       expect(mapExtToLang("sql")).toBe("sql");
@@ -49,6 +52,8 @@ describe("fileUtils", () => {
       expect(getFileIcon("go")).toBe("vscode-icons:file-type-go");
       expect(getFileIcon("ts")).toBe("vscode-icons:file-type-typescript");
       expect(getFileIcon("md")).toBe("octicon:markdown-24");
+      expect(getFileIcon("csv")).toBe("vscode-icons:file-type-excel");
+      expect(getFileIcon("tsv")).toBe("vscode-icons:file-type-excel");
       expect(getFileIcon("png")).toBe("vscode-icons:file-type-image");
       expect(getFileIcon("mp4")).toBe("vscode-icons:file-type-video");
       expect(getFileIcon("mp3")).toBe("vscode-icons:file-type-audio");
@@ -58,6 +63,7 @@ describe("fileUtils", () => {
       expect(getFileIcon(undefined, "some/path/movie.webm")).toBe("vscode-icons:file-type-video");
       expect(getFileIcon(undefined, "some/path/audio.wav")).toBe("vscode-icons:file-type-audio");
       expect(getFileIcon(undefined, "some/path/doc.pdf")).toBe("vscode-icons:file-type-pdf");
+      expect(getFileIcon(undefined, "some/path/data.csv")).toBe("vscode-icons:file-type-excel");
       expect(getFileIcon(undefined, "some/path/file.xyz")).toBe("octicon:file-code-24");
     });
   });
@@ -104,12 +110,21 @@ describe("fileUtils", () => {
       expect(isPdfFile("txt")).toBe(false);
     });
 
+    it("detects csv files correctly", () => {
+      expect(isCsvFile("csv")).toBe(true);
+      expect(isCsvFile(".tsv")).toBe(true);
+      expect(isCsvFile(undefined, "data.csv")).toBe(true);
+      expect(isCsvFile("txt")).toBe(false);
+    });
+
     it("detects getMediaCategory properly", () => {
       expect(getMediaCategory("png")).toBe("image");
       expect(getMediaCategory("mp4")).toBe("video");
       expect(getMediaCategory("mp3")).toBe("audio");
       expect(getMediaCategory("ogg")).toBe("audio");
       expect(getMediaCategory("pdf")).toBe("pdf");
+      expect(getMediaCategory("csv")).toBe("csv");
+      expect(getMediaCategory("tsv")).toBe("csv");
       expect(getMediaCategory("md")).toBe("markdown");
       expect(getMediaCategory("markdown")).toBe("markdown");
       expect(getMediaCategory("go")).toBe("code");
@@ -140,6 +155,7 @@ describe("fileUtils", () => {
       expect(resolveViewerCategory({ ext: "mp4", path: "/test.mp4" })).toBe("video");
       expect(resolveViewerCategory({ ext: "mp3", path: "/test.mp3" })).toBe("audio");
       expect(resolveViewerCategory({ ext: "pdf", path: "/test.pdf" })).toBe("pdf");
+      expect(resolveViewerCategory({ ext: "csv", path: "/test.csv" })).toBe("csv");
       expect(resolveViewerCategory({ ext: "md", path: "/test.md" })).toBe("markdown");
       expect(resolveViewerCategory({ ext: "go", path: "/main.go" })).toBe("code");
     });

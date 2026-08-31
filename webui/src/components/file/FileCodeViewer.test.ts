@@ -67,6 +67,39 @@ describe("FileCodeViewer.vue", () => {
     app.unmount();
   });
 
+  it("renders CsvViewer for CSV files and supports table preview and sorting", async () => {
+    vi.spyOn(api, "getFileContent").mockResolvedValueOnce({
+      path: "/data/users.csv",
+      name: "users.csv",
+      ext: "csv",
+      size: 100,
+      content: "Name,Age\nAlice,30\nBob,25",
+      isBinary: false,
+      updatedAt: "2026-08-31T10:00:00Z",
+    });
+
+    const app = createApp({
+      render() {
+        return h(FileCodeViewer, {
+          sessionId: "sess-abc",
+          filePath: "/data/users.csv",
+          comments: new Map(),
+        });
+      },
+    });
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(root.querySelector(".csv-table-viewer")).not.toBeNull();
+    });
+
+    expect(root.textContent).toContain("2 cols × 2 rows");
+    expect(root.textContent).toContain("Alice");
+    expect(root.textContent).toContain("Bob");
+
+    app.unmount();
+  });
+
   it("renders MediaViewer for SVG files prioritised over code viewer", async () => {
     vi.spyOn(api, "getFileContent").mockResolvedValueOnce({
       path: "/src/assets/icon.svg",

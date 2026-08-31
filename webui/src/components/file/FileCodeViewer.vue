@@ -11,10 +11,12 @@ import {
   escapeHtml,
   extractHighlightedLines,
   resolveViewerCategory,
+  isCsvFile,
 } from "../../utils/fileUtils";
 import MarkdownContent from "../MarkdownContent.vue";
 import FindBar from "../FindBar.vue";
 import MediaViewer from "../common/MediaViewer.vue";
+import CsvViewer from "../common/CsvViewer.vue";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
@@ -38,6 +40,7 @@ const fileData = ref<WorkspaceFileContent | null>(null);
 const isLoading = ref(false);
 const errorMessage = ref("");
 const markdownMode = ref<"preview" | "source">("preview");
+const csvMode = ref<"table" | "source">("table");
 
 // Out-of-order response guard
 let reqSequence = 0;
@@ -53,8 +56,13 @@ const isMarkdownFile = computed(() => {
   return ext === "md" || ext === "markdown";
 });
 
+const isCsv = computed(() => {
+  if (!fileData.value) return false;
+  return isCsvFile(fileData.value.ext, fileData.value.path);
+});
+
 const viewerCategory = computed<
-  "image" | "video" | "audio" | "pdf" | "binary" | "markdown" | "code"
+  "image" | "video" | "audio" | "pdf" | "csv" | "binary" | "markdown" | "code"
 >(() => {
   return resolveViewerCategory(fileData.value);
 });
@@ -125,6 +133,9 @@ async function loadContent() {
       // If markdown, default to preview
       if (data.ext === "md" || data.ext === "markdown") {
         markdownMode.value = "preview";
+      }
+      if (isCsvFile(data.ext, data.path)) {
+        csvMode.value = "table";
       }
       emit("file-loaded", data);
     }
@@ -212,7 +223,7 @@ const codeContainerRef = ref<HTMLElement | null>(null);
 const findState = useInPageFind(codeContainerRef);
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
-  if (isMedia.value || isBinaryOnly.value) return;
+  if (isMedia.value || isBinaryOnly.value || (isCsv.value && csvMode.value === "table")) return;
 
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
@@ -237,13 +248,14 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown);
 });
 
-// Watch fileData & markdownMode to re-run or clear find highlights
-watch([() => fileData.value, markdownMode], () => {
+// Watch fileData, markdownMode, and csvMode to re-run or clear find highlights
+watch([() => fileData.value, markdownMode, csvMode], () => {
   if (
     findState.isOpen.value &&
     findState.query.value.trim() &&
     !isMedia.value &&
-    !isBinaryOnly.value
+    !isBinaryOnly.value &&
+    (!isCsv.value || csvMode.value === "source")
   ) {
     nextTick(() => {
       findState.performSearch();
@@ -290,8 +302,37 @@ watch([() => fileData.value, markdownMode], () => {
           </button>
         </div>
 
-        <!-- Find in File Button -->
+        <!-- CSV Preview Toggle (if CSV file) -->
+        <div v-if="isCsv" class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
+          <button
+            @click="csvMode = 'table'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              csvMode === 'table'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+          >
+            <Icon icon="octicon:table-24" class="h-3 w-3" />
+            <span>Table</span>
+          </button>
+          <button
+            @click="csvMode = 'source'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              csvMode === 'source'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+          >
+            <Icon icon="octicon:code-24" class="h-3 w-3" />
+            <span>Source</span>
+          </button>
+        </div>
+
+        <!-- Find in File Button (hidden when table view is active) -->
         <button
+          v-if="!isCsv || csvMode === 'source'"
           @click="findState.toggle()"
           class="btn btn-xs border-none font-medium gap-1 text-[11px]"
           :class="
@@ -309,7 +350,7 @@ watch([() => fileData.value, markdownMode], () => {
 
     <!-- Floating In-Page Find Bar -->
     <FindBar
-      v-if="!isMedia && !isBinaryOnly"
+      v-if="!isMedia && !isBinaryOnly && (!isCsv || csvMode === 'source')"
       v-model="findState.query.value"
       :isOpen="findState.isOpen.value"
       :currentIndex="findState.currentIndex.value"
@@ -381,6 +422,13 @@ watch([() => fileData.value, markdownMode], () => {
         :fileExt="fileData.ext"
         :fileSize="fileData.size"
         mediaCategory="binary"
+      />
+
+      <!-- CSV Table Preview Mode -->
+      <CsvViewer
+        v-else-if="isCsv && csvMode === 'table' && fileData"
+        :content="fileData.content"
+        :fileName="fileData.name"
       />
 
       <!-- Markdown Preview Mode -->

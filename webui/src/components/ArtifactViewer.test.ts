@@ -74,6 +74,52 @@ describe("ArtifactViewer.vue", () => {
     app.unmount();
   });
 
+  it("renders CsvViewer for CSV artifact file and supports fullscreen toggle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        path: "/workspace/data.csv",
+        name: "data.csv",
+        ext: "csv",
+        size: 100,
+        content: "Name,Score\nAlice,95\nBob,80",
+        isBinary: false,
+        updatedAt: "2026-08-31T10:00:00Z",
+      }),
+    } as Response);
+
+    let expandToggled = false;
+    const app = createApp({
+      render() {
+        return h(ArtifactViewer, {
+          sessionId: "sess-123",
+          activeFilePath: "/workspace/data.csv",
+          modifiedFiles: ["/workspace/data.csv"],
+          isExpanded: false,
+          onToggleExpand: () => {
+            expandToggled = true;
+          },
+        });
+      },
+    });
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(root.querySelector(".csv-table-viewer")).not.toBeNull();
+    });
+
+    expect(root.textContent).toContain("2 cols × 2 rows");
+    expect(root.textContent).toContain("Alice");
+    expect(root.textContent).toContain("95");
+
+    const expandBtn = root.querySelector('button[title^="Full screen"]') as HTMLButtonElement;
+    expect(expandBtn).not.toBeNull();
+    expandBtn.click();
+    expect(expandToggled).toBe(true);
+
+    app.unmount();
+  });
+
   it("renders MediaViewer for video artifact file", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
