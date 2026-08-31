@@ -11,7 +11,7 @@ import { initPushNotifications } from "./lib/push";
 import { getSystemStatus, reloadAgents } from "./lib/api";
 import { useToast } from "./composables/useToast";
 import { useRestartFlow } from "./composables/useRestartFlow";
-import type { ActiveView, CommandItem } from "./types";
+import type { ActiveView, Attachment, CommandItem } from "./types";
 import {
   resolveViewFromRoute,
   buildChatRoute,
@@ -298,11 +298,12 @@ const handleStartWelcomeChat = () => {
   }
 };
 
-const handleSendMessage = (text: string) => {
+const handleSendMessage = (text: string, attachments?: Attachment[]) => {
   sendMessage(text, {
     selectedAgentId: selectedAgentId.value,
     selectedDir: selectedDir.value,
     selectedModel: selectedModel.value,
+    attachments,
   });
 };
 

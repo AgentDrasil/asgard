@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { humanfriendly, formatContextUsage, getContextColorClass, formatTimestamp } from "./format";
+import {
+  humanfriendly,
+  formatFileSize,
+  formatContextUsage,
+  getContextColorClass,
+  formatTimestamp,
+} from "./format";
 
 describe("humanfriendly format tests", () => {
   it("formats numbers smaller than 1024", () => {
@@ -17,6 +23,18 @@ describe("humanfriendly format tests", () => {
   it("formats numbers in M range (1024*1024 base)", () => {
     expect(humanfriendly(1048576)).toBe("1.0M");
     expect(humanfriendly(2097152)).toBe("2.0M");
+  });
+});
+
+describe("formatFileSize tests", () => {
+  it("formats byte sizes properly", () => {
+    expect(formatFileSize(undefined)).toBe("0 B");
+    expect(formatFileSize(0)).toBe("0 B");
+    expect(formatFileSize(500)).toBe("500 B");
+    expect(formatFileSize(1024)).toBe("1.0 KB");
+    expect(formatFileSize(12697)).toBe("12.4 KB");
+    expect(formatFileSize(1048576)).toBe("1.0 MB");
+    expect(formatFileSize(1073741824)).toBe("1.0 GB");
   });
 });
 

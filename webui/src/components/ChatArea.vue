@@ -373,7 +373,7 @@ onUnmounted(() => {
               />
 
               <!-- User Chat Bubble -->
-              <UserMessage v-else-if="msg.role === 'user'" :message="msg" />
+              <UserMessage v-else-if="msg.role === 'user'" :message="msg" :session-id="sessionId" />
 
               <!-- Activity / Tool / Reasoning / Error -->
               <ActivityMessage

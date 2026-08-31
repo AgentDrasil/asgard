@@ -7,7 +7,7 @@ import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
-import type { ChatMessage, AgentInfo, ActiveView } from "../types";
+import type { ChatMessage, AgentInfo, ActiveView, Attachment } from "../types";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
 const router = useRouter();
@@ -40,7 +40,7 @@ const activeArtifactPath = ref<string | null>(null);
 const modifiedFiles = ref<string[]>([]);
 
 const emit = defineEmits<{
-  (e: "send", text: string): void;
+  (e: "send", text: string, attachments?: Attachment[]): void;
   (e: "open-diff", gitRoot: string): void;
   (e: "close-diff"): void;
   (e: "toggle-terminal"): void;
@@ -229,7 +229,8 @@ function navigateToVcs(gitRoot?: string) {
         />
         <ChatInput
           v-else
-          @send="(text) => emit('send', text)"
+          :sessionId="sessionId"
+          @send="(text, atts) => emit('send', text, atts)"
           :loading="loading"
           v-model="chatInputText"
         />
