@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -267,43 +266,64 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if info.Size() > maxReadFileSize {
-		writeJSONError(w, http.StatusBadRequest, "file size exceeds maximum allowed limit (5MB)")
-		return
-	}
+	ext := strings.TrimPrefix(filepath.Ext(absTarget), ".")
+	name := filepath.Base(absTarget)
 
-	contentBytes, err := os.ReadFile(absTarget)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to read file content: "+err.Error())
-		return
-	}
+	rawParam := r.URL.Query().Get("raw")
+	isRaw := rawParam == "1" || strings.EqualFold(rawParam, "true")
 
-	isBinary := false
-	previewLen := len(contentBytes)
-	if previewLen > 512 {
-		previewLen = 512
-	}
-	if previewLen > 0 {
-		preview := contentBytes[:previewLen]
-		if bytes.IndexByte(preview, 0) != -1 {
-			isBinary = true
-		} else {
-			mimeType := http.DetectContentType(preview)
-			if strings.HasPrefix(mimeType, "application/octet-stream") {
-				isBinary = true
-			}
+	if isRaw {
+		// Whitelist check: only allow media/PDF files
+		if !isMediaExt(ext) {
+			writeJSONError(w, http.StatusForbidden, "access denied: streaming is only permitted for media files")
+			return
 		}
+
+		file, err := os.Open(absTarget)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to open file: "+err.Error())
+			return
+		}
+		defer func() { _ = file.Close() }()
+
+		mimeType := detectMimeType(ext, nil)
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+
+		http.ServeContent(w, r, name, info.ModTime(), file)
+		return
+	}
+
+	// Non-raw mode: check if media or binary without full memory buffer
+	isBinary, err := isBinaryOrMediaFile(absTarget, ext)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to probe file: "+err.Error())
+		return
 	}
 
 	var contentStr string
-	if !isBinary {
+	if isBinary {
+		contentStr = ""
+	} else {
+		// Only check size limit for text files
+		if info.Size() > maxReadFileSize {
+			writeJSONError(w, http.StatusBadRequest, "file size exceeds maximum allowed limit (5MB)")
+			return
+		}
+
+		contentBytes, err := os.ReadFile(absTarget)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to read file content: "+err.Error())
+			return
+		}
 		contentStr = string(contentBytes)
 	}
 
 	resp := FileContentResponse{
 		Path:      relPath,
-		Name:      filepath.Base(absTarget),
-		Ext:       strings.TrimPrefix(filepath.Ext(absTarget), "."),
+		Name:      name,
+		Ext:       ext,
 		Size:      info.Size(),
 		Content:   contentStr,
 		IsBinary:  isBinary,

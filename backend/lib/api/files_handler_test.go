@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -234,6 +235,8 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 	bigFile := filepath.Join(workspaceDir, "large.txt")
 	f, err := os.Create(bigFile)
 	require.NoError(t, err)
+	_, err = f.Write(bytes.Repeat([]byte("a"), 1024))
+	require.NoError(t, err)
 	require.NoError(t, f.Truncate(maxReadFileSize+1024))
 	require.NoError(t, f.Close())
 
@@ -248,10 +251,16 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 	symlinkPath := filepath.Join(workspaceDir, "leak_symlink.txt")
 	require.NoError(t, os.Symlink(outsideFile, symlinkPath))
 
+	// Media files for raw streaming tests
+	pngFile := filepath.Join(workspaceDir, "image.png")
+	pngBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03}
+	require.NoError(t, os.WriteFile(pngFile, pngBytes, 0644))
+
 	tests := []struct {
 		name          string
 		sessionID     string
 		filePath      string
+		raw           string
 		expectedCode  int
 		checkResponse func(t *testing.T, rec *httptest.ResponseRecorder)
 	}{
@@ -259,6 +268,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Valid source file read",
 			sessionID:    chatID,
 			filePath:     "main.go",
+			raw:          "",
 			expectedCode: http.StatusOK,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				var resp FileContentResponse
@@ -276,6 +286,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Non-existent file",
 			sessionID:    chatID,
 			filePath:     "not_exist.go",
+			raw:          "",
 			expectedCode: http.StatusNotFound,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Contains(t, rec.Body.String(), "file not found")
@@ -285,6 +296,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Directory requested instead of file",
 			sessionID:    chatID,
 			filePath:     "somedir",
+			raw:          "",
 			expectedCode: http.StatusBadRequest,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Contains(t, rec.Body.String(), "requested path is a directory, not a file")
@@ -294,6 +306,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Oversized file (>5MB)",
 			sessionID:    chatID,
 			filePath:     "large.txt",
+			raw:          "",
 			expectedCode: http.StatusBadRequest,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Contains(t, rec.Body.String(), "file size exceeds maximum allowed limit")
@@ -303,6 +316,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Binary file detection",
 			sessionID:    chatID,
 			filePath:     "data.bin",
+			raw:          "",
 			expectedCode: http.StatusOK,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				var resp FileContentResponse
@@ -317,6 +331,7 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Path traversal attack via ../",
 			sessionID:    chatID,
 			filePath:     "../../etc/passwd",
+			raw:          "",
 			expectedCode: http.StatusForbidden,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Contains(t, rec.Body.String(), "access denied")
@@ -326,9 +341,33 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			name:         "Symlink escape attack",
 			sessionID:    chatID,
 			filePath:     "leak_symlink.txt",
+			raw:          "",
 			expectedCode: http.StatusForbidden,
 			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Contains(t, rec.Body.String(), "access denied: path escapes workspace boundary")
+			},
+		},
+		{
+			name:         "Workspace Files Raw Endpoint & Security Headers",
+			sessionID:    chatID,
+			filePath:     "image.png",
+			raw:          "1",
+			expectedCode: http.StatusOK,
+			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+				assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+				assert.Equal(t, "default-src 'none'; sandbox", rec.Header().Get("Content-Security-Policy"))
+				assert.Equal(t, pngBytes, rec.Body.Bytes())
+			},
+		},
+		{
+			name:         "Workspace Files Raw Non-Media Denied",
+			sessionID:    chatID,
+			filePath:     "main.go",
+			raw:          "1",
+			expectedCode: http.StatusForbidden,
+			checkResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				assert.Contains(t, rec.Body.String(), "access denied: streaming is only permitted for media files")
 			},
 		},
 	}
@@ -338,6 +377,9 @@ func TestFilesContentHandler_TableDriven(t *testing.T) {
 			t.Parallel()
 
 			reqURL := "/api/files/content?session_id=" + tt.sessionID + "&path=" + tt.filePath
+			if tt.raw != "" {
+				reqURL += "&raw=" + tt.raw
+			}
 			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
 			rec := httptest.NewRecorder()
 			server.ServeHTTP(rec, req)

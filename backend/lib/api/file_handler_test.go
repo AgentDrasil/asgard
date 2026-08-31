@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -164,5 +165,142 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		server.ServeHTTP(rr, req)
 		assert.Equal(t, http.StatusForbidden, rr.Code)
 		assert.Contains(t, rr.Body.String(), "access denied")
+	})
+
+	t.Run("Valid Workspace Raw Media Stream", func(t *testing.T) {
+		pngPath := filepath.Join(tempWorkspaceDir, "sample.png")
+		fakePngBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D}
+		err = os.WriteFile(pngPath, fakePngBytes, 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "sample.png")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=sample.png&raw=1", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, "image/png", rr.Header().Get("Content-Type"))
+		assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+		assert.Equal(t, "default-src 'none'; sandbox", rr.Header().Get("Content-Security-Policy"))
+		assert.Equal(t, fakePngBytes, rr.Body.Bytes())
+	})
+
+	t.Run("Security Headers on Raw SVG Response", func(t *testing.T) {
+		svgPath := filepath.Join(tempWorkspaceDir, "vector.svg")
+		svgBytes := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`)
+		err = os.WriteFile(svgPath, svgBytes, 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "vector.svg")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=vector.svg&raw=true", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, "image/svg+xml", rr.Header().Get("Content-Type"))
+		assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+		assert.Equal(t, "default-src 'none'; sandbox", rr.Header().Get("Content-Security-Policy"))
+	})
+
+	t.Run("Non-Media Extension Raw Request Rejected", func(t *testing.T) {
+		htmlPath := filepath.Join(tempWorkspaceDir, "index.html")
+		err = os.WriteFile(htmlPath, []byte("<html><body>XSS</body></html>"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "index.html")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=index.html&raw=1", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "access denied: streaming is only permitted for media files")
+	})
+
+	t.Run("HTTP Range Request for Video", func(t *testing.T) {
+		mp4Path := filepath.Join(tempWorkspaceDir, "sample.mp4")
+		fakeMp4Bytes := []byte("0123456789abcdefghijklmnopqrstuvwxyz")
+		err = os.WriteFile(mp4Path, fakeMp4Bytes, 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "sample.mp4")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=sample.mp4&raw=1", nil)
+		req.Header.Set("Range", "bytes=0-9")
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusPartialContent, rr.Code)
+		assert.Equal(t, "bytes 0-9/36", rr.Header().Get("Content-Range"))
+		assert.Equal(t, []byte("0123456789"), rr.Body.Bytes())
+		assert.Equal(t, "video/mp4", rr.Header().Get("Content-Type"))
+	})
+
+	t.Run("Zero-Buffer Metadata for Media", func(t *testing.T) {
+		largePngPath := filepath.Join(tempWorkspaceDir, "large.png")
+		f, err := os.Create(largePngPath)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(maxReadFileSize+1024*1024)) // 6MB
+		require.NoError(t, f.Close())
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "large.png")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=large.png", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.True(t, resp.IsBinary)
+		assert.Empty(t, resp.Content)
+		assert.Equal(t, "png", resp.Ext)
+		assert.Equal(t, int64(maxReadFileSize+1024*1024), resp.Size)
+	})
+
+	t.Run("Oversized Text File Rejected", func(t *testing.T) {
+		largeTxtPath := filepath.Join(tempWorkspaceDir, "huge.txt")
+		f, err := os.Create(largeTxtPath)
+		require.NoError(t, err)
+		_, err = f.Write(bytes.Repeat([]byte("a"), 1024))
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(maxReadFileSize+1024))
+		require.NoError(t, f.Close())
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "huge.txt")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=huge.txt", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "file size exceeds maximum allowed limit")
 	})
 }

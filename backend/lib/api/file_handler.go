@@ -20,6 +20,7 @@ type WorkspaceFileResponse struct {
 	Ext       string    `json:"ext"`
 	Size      int64     `json:"size"`
 	Content   string    `json:"content"`
+	IsBinary  bool      `json:"isBinary,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -96,26 +97,67 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if info.Size() > maxReadFileSize {
-		writeJSONError(w, http.StatusBadRequest, "file size exceeds maximum allowed limit (5MB)")
-		return
-	}
-
-	contentBytes, err := os.ReadFile(absPath)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to read file content: "+err.Error())
-		return
-	}
-
 	ext := strings.TrimPrefix(filepath.Ext(absPath), ".")
 	name := filepath.Base(absPath)
+
+	rawParam := r.URL.Query().Get("raw")
+	isRaw := rawParam == "1" || strings.EqualFold(rawParam, "true")
+
+	if isRaw {
+		// Whitelist check: only allow media/PDF files
+		if !isMediaExt(ext) {
+			writeJSONError(w, http.StatusForbidden, "access denied: streaming is only permitted for media files")
+			return
+		}
+
+		file, err := os.Open(absPath)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to open file: "+err.Error())
+			return
+		}
+		defer func() { _ = file.Close() }()
+
+		mimeType := detectMimeType(ext, nil)
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+
+		http.ServeContent(w, r, name, info.ModTime(), file)
+		return
+	}
+
+	// Non-raw mode: check if media or binary without full memory buffer
+	isBinary, err := isBinaryOrMediaFile(absPath, ext)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to probe file: "+err.Error())
+		return
+	}
+
+	var contentStr string
+	if isBinary {
+		contentStr = ""
+	} else {
+		// Only check size limit for text files
+		if info.Size() > maxReadFileSize {
+			writeJSONError(w, http.StatusBadRequest, "file size exceeds maximum allowed limit (5MB)")
+			return
+		}
+
+		contentBytes, err := os.ReadFile(absPath)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to read file content: "+err.Error())
+			return
+		}
+		contentStr = string(contentBytes)
+	}
 
 	resp := WorkspaceFileResponse{
 		Path:      reqPath,
 		Name:      name,
 		Ext:       ext,
 		Size:      info.Size(),
-		Content:   string(contentBytes),
+		Content:   contentStr,
+		IsBinary:  isBinary,
 		UpdatedAt: info.ModTime(),
 	}
 
