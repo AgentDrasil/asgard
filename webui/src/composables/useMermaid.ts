@@ -68,6 +68,16 @@ export async function initMermaid(theme?: MermaidTheme): Promise<void> {
     securityLevel: "loose",
     fontFamily: "inherit",
     theme: currentTheme,
+    flowchart: {
+      useMaxWidth: false,
+      htmlLabels: true,
+    },
+    sequence: {
+      useMaxWidth: false,
+    },
+    gantt: {
+      useMaxWidth: false,
+    },
   };
   mermaid.initialize(config);
   isInitialized.value = true;
@@ -135,7 +145,19 @@ export async function renderDiagram(code: string, idPrefix?: string): Promise<Re
 
   try {
     const { svg, bindFunctions } = await mermaid.render(id, code);
-    return { svg, bindFunctions };
+    // Clean inline style max-width restrictions that mermaid injects to avoid blurry rasterized scaling
+    const cleanedSvg = svg.replace(
+      /<svg\b([^>]*)\bstyle="([^"]*)"([^>]*)>/i,
+      (_match, p1, style, p3) => {
+        const filteredStyle = style
+          .split(";")
+          .map((s: string) => s.trim())
+          .filter((s: string) => !s.startsWith("max-width"))
+          .join("; ");
+        return `<svg ${p1} style="${filteredStyle}" ${p3}>`;
+      },
+    );
+    return { svg: cleanedSvg, bindFunctions };
   } catch (err: unknown) {
     // If mermaid inserted an error element in the DOM before failing, clean it up if necessary
     if (typeof document !== "undefined") {

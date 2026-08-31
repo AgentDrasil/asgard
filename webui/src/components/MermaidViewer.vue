@@ -421,7 +421,7 @@ onUnmounted(() => {
 
       <!-- SVG Content Wrapper (Inline view keeps rendered DOM mounted for reference stability) -->
       <div
-        class="flex items-center justify-center p-4 transition-transform duration-75 ease-out will-change-transform"
+        class="mermaid-canvas flex items-center justify-center p-4 transition-transform duration-75 ease-out"
         :style="{
           transform: `translate(${panX}px, ${panY}px) scale(${zoomLevel})`,
           transformOrigin: 'center center',
@@ -540,7 +540,7 @@ onUnmounted(() => {
         <!-- Diagram in fullscreen -->
         <div
           v-else
-          class="flex items-center justify-center p-8 transition-transform duration-75 ease-out will-change-transform"
+          class="mermaid-canvas flex items-center justify-center p-8 transition-transform duration-75 ease-out"
           :style="{
             transform: `translate(${panX}px, ${panY}px) scale(${zoomLevel})`,
             transformOrigin: 'center center',
@@ -557,5 +557,19 @@ onUnmounted(() => {
   max-width: 100%;
   height: auto;
   user-select: none;
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+}
+
+:deep(foreignObject) {
+  overflow: visible;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:deep(.mermaid-canvas) {
+  /* Prevent browser from caching low-res subpixel raster textures during transform */
+  transform-style: flat;
 }
 </style>
