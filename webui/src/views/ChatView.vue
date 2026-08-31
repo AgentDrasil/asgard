@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
 import ChatInput from "../components/ChatInput.vue";
@@ -7,7 +7,6 @@ import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
-import ArtifactViewer from "../components/ArtifactViewer.vue";
 import type { ChatMessage, AgentInfo, ActiveView } from "../types";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
@@ -39,63 +38,6 @@ const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: tru
 // Artifacts state management
 const activeArtifactPath = ref<string | null>(null);
 const modifiedFiles = ref<string[]>([]);
-
-// Resizable artifact panel width logic
-const DEFAULT_ARTIFACT_WIDTH = 500;
-const MIN_ARTIFACT_WIDTH = 300;
-const MAX_ARTIFACT_WIDTH = 900;
-
-const artifactWidth = ref(DEFAULT_ARTIFACT_WIDTH);
-const isResizingArtifact = ref(false);
-const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
-
-const updateWindowWidth = () => {
-  isDesktop.value = window.innerWidth >= 768;
-};
-
-const startArtifactResize = (e: MouseEvent) => {
-  e.preventDefault();
-  isResizingArtifact.value = true;
-  document.addEventListener("mousemove", handleArtifactMouseMove);
-  document.addEventListener("mouseup", stopArtifactResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
-};
-
-const handleArtifactMouseMove = (e: MouseEvent) => {
-  if (!isResizingArtifact.value) return;
-  const newWidth = Math.min(
-    Math.max(window.innerWidth - e.clientX, MIN_ARTIFACT_WIDTH),
-    MAX_ARTIFACT_WIDTH,
-  );
-  artifactWidth.value = newWidth;
-};
-
-const stopArtifactResize = () => {
-  if (isResizingArtifact.value) {
-    isResizingArtifact.value = false;
-    localStorage.setItem("asgard_artifact_width", artifactWidth.value.toString());
-    document.removeEventListener("mousemove", handleArtifactMouseMove);
-    document.removeEventListener("mouseup", stopArtifactResize);
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  }
-};
-
-onMounted(() => {
-  window.addEventListener("resize", updateWindowWidth);
-  const savedWidth = localStorage.getItem("asgard_artifact_width");
-  if (savedWidth) {
-    const parsed = parseInt(savedWidth, 10);
-    if (!isNaN(parsed) && parsed >= MIN_ARTIFACT_WIDTH && parsed <= MAX_ARTIFACT_WIDTH) {
-      artifactWidth.value = parsed;
-    }
-  }
-});
-
-onUnmounted(() => {
-  window.removeEventListener("resize", updateWindowWidth);
-});
 
 const emit = defineEmits<{
   (e: "send", text: string): void;
@@ -212,100 +154,64 @@ function navigateToVcs(gitRoot?: string) {
 
 <template>
   <div class="flex-1 flex flex-col h-full overflow-hidden relative">
-    <!-- Top Area: Split ChatArea / DiffView / FileView & ArtifactViewer -->
-    <div class="flex-1 flex h-full overflow-hidden relative min-h-0">
-      <!-- Left: VCS / File / Chat Area -->
-      <div
-        class="flex-1 flex flex-col h-full overflow-hidden relative min-w-0"
-        :class="
-          activeView === 'chat' && isArtifactDrawerOpen && activeArtifactPath
-            ? 'hidden md:flex'
-            : 'flex'
-        "
-      >
-        <!-- VCS View -->
-        <DiffView
-          v-if="activeView === 'vcs'"
-          :sessionId="sessionId"
-          :runDir="runDir"
-          :gitRoot="gitRoot"
-          :isTerminalOpen="isTerminalOpen"
-          v-model:selectedCommit="selectedCommit"
-          v-model:selectedFilePath="selectedFilePath"
-          v-model:chatInputText="chatInputText"
-          v-model:isVCSSidebarOpen="isVCSSidebarOpen"
-          @close="navigateToChat"
-          @open-file-view="navigateToFiles"
-          @toggle-terminal="emit('toggle-terminal')"
-        />
+    <!-- Top Area: DiffView / FileView / ChatArea -->
+    <div class="flex-1 flex flex-col h-full overflow-hidden relative min-h-0">
+      <!-- VCS View -->
+      <DiffView
+        v-if="activeView === 'vcs'"
+        :sessionId="sessionId"
+        :runDir="runDir"
+        :gitRoot="gitRoot"
+        :isTerminalOpen="isTerminalOpen"
+        v-model:selectedCommit="selectedCommit"
+        v-model:selectedFilePath="selectedFilePath"
+        v-model:chatInputText="chatInputText"
+        v-model:isVCSSidebarOpen="isVCSSidebarOpen"
+        @close="navigateToChat"
+        @open-file-view="navigateToFiles"
+        @toggle-terminal="emit('toggle-terminal')"
+      />
 
-        <!-- File View -->
-        <FileView
-          v-else-if="activeView === 'file'"
-          :sessionId="sessionId"
-          :runDir="runDir"
-          :gitRoot="gitRoot"
-          :isTerminalOpen="isTerminalOpen"
-          v-model:isFileTreeOpen="isFileTreeOpen"
-          v-model:chatInputText="chatInputText"
-          v-model:selectedFilePath="selectedFilePath"
-          @close="navigateToChat"
-          @open-vcs="navigateToVcs()"
-          @toggle-terminal="emit('toggle-terminal')"
-          @open-search="emit('open-search')"
-        />
+      <!-- File View -->
+      <FileView
+        v-else-if="activeView === 'file'"
+        :sessionId="sessionId"
+        :runDir="runDir"
+        :gitRoot="gitRoot"
+        :isTerminalOpen="isTerminalOpen"
+        v-model:isFileTreeOpen="isFileTreeOpen"
+        v-model:chatInputText="chatInputText"
+        v-model:selectedFilePath="selectedFilePath"
+        @close="navigateToChat"
+        @open-vcs="navigateToVcs()"
+        @toggle-terminal="emit('toggle-terminal')"
+        @open-search="emit('open-search')"
+      />
 
-        <!-- Chat View -->
-        <ChatArea
-          v-else
-          :messages="messages"
-          :loading="loading"
-          :activeAgent="activeAgent"
-          :agents="agents"
-          :runDir="runDir"
-          :sessionId="sessionId"
-          :isTerminalOpen="isTerminalOpen"
-          :modifiedFiles="modifiedFiles"
-          :isArtifactDrawerOpen="isArtifactDrawerOpen"
-          :workingAgentLabel="workingAgentLabel"
-          v-model:isDetailsOpen="isDetailsOpen"
-          @open-diff="navigateToVcs"
-          @open-file-view="navigateToFiles"
-          @open-artifact="handleOpenArtifact"
-          @toggle-terminal="emit('toggle-terminal')"
-          @toggle-sidebar="emit('toggle-sidebar')"
-          @toggle-artifact-drawer="toggleArtifactDrawer"
-          @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
-        />
-      </div>
-
-      <!-- Right: Resizable Artifact Panel (Only in Chat View) -->
-      <div
-        v-if="activeView === 'chat' && isArtifactDrawerOpen && activeArtifactPath"
-        class="w-full md:w-auto h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
-        :class="{
-          'transition-none': isResizingArtifact,
-          'transition-[width] duration-200': !isResizingArtifact,
-        }"
-        :style="{
-          width: isDesktop ? `${artifactWidth}px` : '100%',
-        }"
-      >
-        <!-- Resizer Handle on Left Edge of Artifact Panel -->
-        <div
-          @mousedown="startArtifactResize"
-          class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
-          title="Drag to resize panel"
-        ></div>
-
-        <ArtifactViewer
-          :sessionId="sessionId"
-          :activeFilePath="activeArtifactPath"
-          :modifiedFiles="modifiedFiles"
-          @close="isArtifactDrawerOpen = false"
-          @select-file="(f) => (activeArtifactPath = f)"
-        />
-      </div>
+      <!-- Chat View -->
+      <ChatArea
+        v-else
+        :messages="messages"
+        :loading="loading"
+        :activeAgent="activeAgent"
+        :agents="agents"
+        :runDir="runDir"
+        :sessionId="sessionId"
+        :isTerminalOpen="isTerminalOpen"
+        :modifiedFiles="modifiedFiles"
+        :activeArtifactPath="activeArtifactPath"
+        :isArtifactDrawerOpen="isArtifactDrawerOpen"
+        :workingAgentLabel="workingAgentLabel"
+        v-model:isDetailsOpen="isDetailsOpen"
+        @open-diff="navigateToVcs"
+        @open-file-view="navigateToFiles"
+        @open-artifact="handleOpenArtifact"
+        @select-artifact="(f) => (activeArtifactPath = f)"
+        @toggle-terminal="emit('toggle-terminal')"
+        @toggle-sidebar="emit('toggle-sidebar')"
+        @toggle-artifact-drawer="toggleArtifactDrawer"
+        @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
+      />
     </div>
 
     <!-- Bottom Area: WorkflowControlPanel / ChatInput (Chat View only) & TerminalPanel -->

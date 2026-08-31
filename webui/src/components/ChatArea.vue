@@ -12,6 +12,7 @@ import UserMessage from "./chat/UserMessage.vue";
 import AssistantMessage from "./chat/AssistantMessage.vue";
 import ActivityMessage from "./chat/ActivityMessage.vue";
 import AskUserCard from "./chat/AskUserCard.vue";
+import ArtifactViewer from "./ArtifactViewer.vue";
 
 const {
   toggleSidebarShortcut,
@@ -33,6 +34,7 @@ const props = withDefaults(
     isDetailsOpen?: boolean;
     isTerminalOpen?: boolean;
     modifiedFiles?: string[];
+    activeArtifactPath?: string | null;
     isArtifactDrawerOpen?: boolean;
     workingAgentLabel?: string | null;
   }>(),
@@ -40,6 +42,7 @@ const props = withDefaults(
     isDetailsOpen: true,
     isTerminalOpen: false,
     modifiedFiles: () => [],
+    activeArtifactPath: null,
     isArtifactDrawerOpen: false,
     workingAgentLabel: null,
   },
@@ -50,11 +53,54 @@ const emit = defineEmits<{
   (e: "open-diff", gitRoot: string): void;
   (e: "open-file-view"): void;
   (e: "open-artifact", file: string): void;
+  (e: "select-artifact", file: string): void;
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-artifact-drawer"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
 }>();
+
+// Resizable artifact panel width logic
+const DEFAULT_ARTIFACT_WIDTH = 500;
+const MIN_ARTIFACT_WIDTH = 300;
+const MAX_ARTIFACT_WIDTH = 900;
+
+const artifactWidth = ref(DEFAULT_ARTIFACT_WIDTH);
+const isResizingArtifact = ref(false);
+const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
+
+const updateWindowWidth = () => {
+  isDesktop.value = window.innerWidth >= 768;
+};
+
+const startArtifactResize = (e: MouseEvent) => {
+  e.preventDefault();
+  isResizingArtifact.value = true;
+  document.addEventListener("mousemove", handleArtifactMouseMove);
+  document.addEventListener("mouseup", stopArtifactResize);
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = "col-resize";
+};
+
+const handleArtifactMouseMove = (e: MouseEvent) => {
+  if (!isResizingArtifact.value) return;
+  const newWidth = Math.min(
+    Math.max(window.innerWidth - e.clientX, MIN_ARTIFACT_WIDTH),
+    MAX_ARTIFACT_WIDTH,
+  );
+  artifactWidth.value = newWidth;
+};
+
+const stopArtifactResize = () => {
+  if (isResizingArtifact.value) {
+    isResizingArtifact.value = false;
+    localStorage.setItem("asgard_artifact_width", artifactWidth.value.toString());
+    document.removeEventListener("mousemove", handleArtifactMouseMove);
+    document.removeEventListener("mouseup", stopArtifactResize);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  }
+};
 
 const gitRoot = ref("");
 
@@ -118,16 +164,25 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 
 onMounted(() => {
   window.addEventListener("keydown", handleGlobalKeydown);
+  window.addEventListener("resize", updateWindowWidth);
+  const savedWidth = localStorage.getItem("asgard_artifact_width");
+  if (savedWidth) {
+    const parsed = parseInt(savedWidth, 10);
+    if (!isNaN(parsed) && parsed >= MIN_ARTIFACT_WIDTH && parsed <= MAX_ARTIFACT_WIDTH) {
+      artifactWidth.value = parsed;
+    }
+  }
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown);
+  window.removeEventListener("resize", updateWindowWidth);
 });
 </script>
 
 <template>
   <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0 relative">
-    <!-- Header -->
+    <!-- Header (Full width across top) -->
     <header
       class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-start justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
     >
@@ -268,104 +323,146 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- Floating In-Page Find Bar -->
-    <FindBar
-      v-model="findState.query.value"
-      :isOpen="findState.isOpen.value"
-      :currentIndex="findState.currentIndex.value"
-      :totalMatches="findState.totalMatches.value"
-      @next="findState.findNext"
-      @prev="findState.findPrev"
-      @close="findState.close"
-    />
+    <!-- Main Content Area Under Header (Split into Message List on left & ArtifactViewer on right) -->
+    <div class="flex-1 flex h-full overflow-hidden relative min-h-0">
+      <!-- Left: Chat Messages Area -->
+      <div
+        class="flex-1 flex flex-col h-full overflow-hidden relative min-w-0"
+        :class="isArtifactDrawerOpen && activeArtifactPath ? 'hidden md:flex' : 'flex'"
+      >
+        <!-- Floating In-Page Find Bar -->
+        <FindBar
+          v-model="findState.query.value"
+          :isOpen="findState.isOpen.value"
+          :currentIndex="findState.currentIndex.value"
+          :totalMatches="findState.totalMatches.value"
+          @next="findState.findNext"
+          @prev="findState.findPrev"
+          @close="findState.close"
+        />
 
-    <!-- Message List -->
-    <div
-      ref="scrollContainerRef"
-      class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0 w-full"
-    >
-      <div class="max-w-4xl w-full mx-auto space-y-4 min-w-0">
-        <div v-for="msg in messages" :key="msg.id" class="w-full min-w-0">
-          <!-- Ask User Question Box -->
-          <AskUserCard
-            v-if="msg.role === 'ask_user'"
-            :message="msg"
-            :session-id="sessionId"
-            :active-agent="activeAgent"
-            :agents="agents"
-            :readonly="activeAgent?.type === 'workflow'"
-            @open-artifact="emit('open-artifact', $event)"
-            @ask-replied="(id, text) => emit('ask-replied', id, text)"
-          />
-
-          <!-- User Chat Bubble -->
-          <UserMessage v-else-if="msg.role === 'user'" :message="msg" />
-
-          <!-- Activity / Tool / Reasoning / Error -->
-          <ActivityMessage
-            v-else-if="
-              msg.role === 'activity' ||
-              msg.role === 'tool_call' ||
-              msg.role === 'tool_result' ||
-              msg.role === 'reasoning' ||
-              msg.role === 'error'
-            "
-            :message="msg"
-            :active-agent="activeAgent"
-            :agents="agents"
-            @open-artifact="emit('open-artifact', $event)"
-          />
-
-          <!-- Assistant Message -->
-          <AssistantMessage v-else :message="msg" :active-agent="activeAgent" :agents="agents" />
-        </div>
-
-        <!-- Agent Working state -->
+        <!-- Message List -->
         <div
-          v-if="showAgentWorking"
-          class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
+          ref="scrollContainerRef"
+          class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0 w-full"
         >
-          <span class="loading loading-ring loading-xs text-primary"></span>
-          <span>
-            Agent ({{ workingAgentLabel || activeAgent?.name || "Agent" }}) is working...
-          </span>
+          <div class="max-w-4xl w-full mx-auto space-y-4 min-w-0">
+            <div v-for="msg in messages" :key="msg.id" class="w-full min-w-0">
+              <!-- Ask User Question Box -->
+              <AskUserCard
+                v-if="msg.role === 'ask_user'"
+                :message="msg"
+                :session-id="sessionId"
+                :active-agent="activeAgent"
+                :agents="agents"
+                :readonly="activeAgent?.type === 'workflow'"
+                @open-artifact="emit('open-artifact', $event)"
+                @ask-replied="(id, text) => emit('ask-replied', id, text)"
+              />
+
+              <!-- User Chat Bubble -->
+              <UserMessage v-else-if="msg.role === 'user'" :message="msg" />
+
+              <!-- Activity / Tool / Reasoning / Error -->
+              <ActivityMessage
+                v-else-if="
+                  msg.role === 'activity' ||
+                  msg.role === 'tool_call' ||
+                  msg.role === 'tool_result' ||
+                  msg.role === 'reasoning' ||
+                  msg.role === 'error'
+                "
+                :message="msg"
+                :active-agent="activeAgent"
+                :agents="agents"
+                @open-artifact="emit('open-artifact', $event)"
+              />
+
+              <!-- Assistant Message -->
+              <AssistantMessage
+                v-else
+                :message="msg"
+                :active-agent="activeAgent"
+                :agents="agents"
+              />
+            </div>
+
+            <!-- Agent Working state -->
+            <div
+              v-if="showAgentWorking"
+              class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
+            >
+              <span class="loading loading-ring loading-xs text-primary"></span>
+              <span>
+                Agent ({{ workingAgentLabel || activeAgent?.name || "Agent" }}) is working...
+              </span>
+            </div>
+          </div>
         </div>
+
+        <!-- Scroll to bottom button -->
+        <Transition
+          enter-active-class="transition duration-200 ease-out"
+          enter-from-class="opacity-0 translate-y-2 scale-95"
+          enter-to-class="opacity-100 translate-y-0 scale-100"
+          leave-active-class="transition duration-150 ease-in"
+          leave-from-class="opacity-100 translate-y-0 scale-100"
+          leave-to-class="opacity-0 translate-y-2 scale-95"
+        >
+          <button
+            v-if="showScrollBottom"
+            @click="scrollToBottom"
+            class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md"
+            :class="
+              hasNewMessages
+                ? 'btn-primary shadow-xl shadow-primary/40'
+                : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
+            "
+            :title="scrollButtonLabel"
+            :aria-label="scrollButtonLabel"
+          >
+            <span
+              v-if="hasNewMessages"
+              class="absolute -top-1 -right-1 flex h-3 w-3 pointer-events-none"
+              aria-hidden="true"
+            >
+              <span
+                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"
+              ></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+            </span>
+            <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
+          </button>
+        </Transition>
+      </div>
+
+      <!-- Right: Resizable Artifact Panel (Under Header) -->
+      <div
+        v-if="isArtifactDrawerOpen && activeArtifactPath"
+        class="w-full md:w-auto h-full shadow-2xl z-20 md:z-auto flex relative shrink-0"
+        :class="{
+          'transition-none': isResizingArtifact,
+          'transition-[width] duration-200': !isResizingArtifact,
+        }"
+        :style="{
+          width: isDesktop ? `${artifactWidth}px` : '100%',
+        }"
+      >
+        <!-- Resizer Handle on Left Edge of Artifact Panel -->
+        <div
+          @mousedown="startArtifactResize"
+          class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
+          title="Drag to resize panel"
+        ></div>
+
+        <ArtifactViewer
+          :sessionId="sessionId || ''"
+          :activeFilePath="activeArtifactPath"
+          :modifiedFiles="modifiedFiles"
+          @close="emit('toggle-artifact-drawer')"
+          @select-file="(f) => emit('select-artifact', f)"
+        />
       </div>
     </div>
-
-    <!-- Scroll to bottom button -->
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0 translate-y-2 scale-95"
-      enter-to-class="opacity-100 translate-y-0 scale-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100 translate-y-0 scale-100"
-      leave-to-class="opacity-0 translate-y-2 scale-95"
-    >
-      <button
-        v-if="showScrollBottom"
-        @click="scrollToBottom"
-        class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md"
-        :class="
-          hasNewMessages
-            ? 'btn-primary shadow-xl shadow-primary/40'
-            : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
-        "
-        :title="scrollButtonLabel"
-        :aria-label="scrollButtonLabel"
-      >
-        <span
-          v-if="hasNewMessages"
-          class="absolute -top-1 -right-1 flex h-3 w-3 pointer-events-none"
-          aria-hidden="true"
-        >
-          <span
-            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"
-          ></span>
-          <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-        </span>
-        <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
-      </button>
-    </Transition>
   </div>
 </template>
