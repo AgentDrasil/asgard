@@ -17,6 +17,8 @@ import MarkdownContent from "../MarkdownContent.vue";
 import FindBar from "../FindBar.vue";
 import MediaViewer from "../common/MediaViewer.vue";
 import CsvViewer from "../common/CsvViewer.vue";
+import A2UIRenderer from "../a2ui/A2UIRenderer.vue";
+import { isA2UIManifest, parseA2UIManifest } from "../../utils/a2uiUtils";
 import type { CommentEntry, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
@@ -41,6 +43,7 @@ const isLoading = ref(false);
 const errorMessage = ref("");
 const markdownMode = ref<"preview" | "source">("preview");
 const csvMode = ref<"table" | "source">("table");
+const a2uiMode = ref<"dashboard" | "source">("dashboard");
 
 // Out-of-order response guard
 let reqSequence = 0;
@@ -49,6 +52,16 @@ let reqSequence = 0;
 const activeLine = ref<number | null>(null);
 const widgetInput = ref("");
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
+
+const isA2UI = computed(() => {
+  if (!fileData.value) return false;
+  return isA2UIManifest(fileData.value.name, fileData.value.path, fileData.value.content);
+});
+
+const parsedA2UIManifest = computed(() => {
+  if (!isA2UI.value || !fileData.value?.content) return null;
+  return parseA2UIManifest(fileData.value.content);
+});
 
 const isMarkdownFile = computed(() => {
   if (!fileData.value) return false;
@@ -137,6 +150,9 @@ async function loadContent() {
       if (isCsvFile(data.ext, data.path)) {
         csvMode.value = "table";
       }
+      if (isA2UIManifest(data.name, data.path, data.content)) {
+        a2uiMode.value = "dashboard";
+      }
       emit("file-loaded", data);
     }
   } catch (err: any) {
@@ -223,7 +239,14 @@ const codeContainerRef = ref<HTMLElement | null>(null);
 const findState = useInPageFind(codeContainerRef);
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
-  if (isMedia.value || isBinaryOnly.value || (isCsv.value && csvMode.value === "table")) return;
+  if (
+    isMedia.value ||
+    isBinaryOnly.value ||
+    (isCsv.value && csvMode.value === "table") ||
+    (isA2UI.value && a2uiMode.value === "dashboard")
+  ) {
+    return;
+  }
 
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
@@ -248,14 +271,15 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown);
 });
 
-// Watch fileData, markdownMode, and csvMode to re-run or clear find highlights
-watch([() => fileData.value, markdownMode, csvMode], () => {
+// Watch fileData, markdownMode, csvMode, and a2uiMode to re-run or clear find highlights
+watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
   if (
     findState.isOpen.value &&
     findState.query.value.trim() &&
     !isMedia.value &&
     !isBinaryOnly.value &&
-    (!isCsv.value || csvMode.value === "source")
+    (!isCsv.value || csvMode.value === "source") &&
+    (!isA2UI.value || a2uiMode.value === "source")
   ) {
     nextTick(() => {
       findState.performSearch();
@@ -274,6 +298,39 @@ watch([() => fileData.value, markdownMode, csvMode], () => {
       class="px-3 py-1.5 bg-base-200/60 border-b border-base-300 flex items-center justify-end text-xs font-mono shrink-0 gap-2"
     >
       <div class="flex items-center gap-1.5 shrink-0">
+        <!-- A2UI Dashboard Toggle -->
+        <div
+          v-if="isA2UI && parsedA2UIManifest"
+          class="join bg-base-300/60 p-0.5 rounded-lg shrink-0"
+        >
+          <button
+            @click="a2uiMode = 'dashboard'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              a2uiMode === 'dashboard'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+            title="A2UI Dashboard Preview"
+          >
+            <Icon icon="material-symbols:dashboard-customize-outline" class="h-3 w-3" />
+            <span>Dashboard</span>
+          </button>
+          <button
+            @click="a2uiMode = 'source'"
+            :class="[
+              'join-item btn btn-xs border-none font-medium gap-1 text-[11px]',
+              a2uiMode === 'source'
+                ? 'btn-primary shadow-xs'
+                : 'btn-ghost text-base-content/70 hover:text-base-content',
+            ]"
+            title="Raw JSON Source"
+          >
+            <Icon icon="octicon:code-24" class="h-3 w-3" />
+            <span>Source</span>
+          </button>
+        </div>
+
         <!-- Markdown Preview Toggle (if markdown file) -->
         <div v-if="isMarkdownFile" class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
@@ -330,9 +387,9 @@ watch([() => fileData.value, markdownMode, csvMode], () => {
           </button>
         </div>
 
-        <!-- Find in File Button (hidden when table view is active) -->
+        <!-- Find in File Button (hidden when table or dashboard view is active) -->
         <button
-          v-if="!isCsv || csvMode === 'source'"
+          v-if="(!isCsv || csvMode === 'source') && (!isA2UI || a2uiMode === 'source')"
           @click="findState.toggle()"
           class="btn btn-xs border-none font-medium gap-1 text-[11px]"
           :class="
@@ -350,7 +407,12 @@ watch([() => fileData.value, markdownMode, csvMode], () => {
 
     <!-- Floating In-Page Find Bar -->
     <FindBar
-      v-if="!isMedia && !isBinaryOnly && (!isCsv || csvMode === 'source')"
+      v-if="
+        !isMedia &&
+        !isBinaryOnly &&
+        (!isCsv || csvMode === 'source') &&
+        (!isA2UI || a2uiMode === 'source')
+      "
       v-model="findState.query.value"
       :isOpen="findState.isOpen.value"
       :currentIndex="findState.currentIndex.value"
@@ -423,6 +485,18 @@ watch([() => fileData.value, markdownMode, csvMode], () => {
         :fileSize="fileData.size"
         mediaCategory="binary"
       />
+
+      <!-- A2UI Dashboard Preview Mode -->
+      <div
+        v-else-if="isA2UI && parsedA2UIManifest && a2uiMode === 'dashboard' && fileData"
+        class="p-4 sm:p-6 max-w-7xl mx-auto overflow-y-auto w-full h-full"
+      >
+        <A2UIRenderer
+          :manifest="parsedA2UIManifest"
+          :sessionId="sessionId"
+          :manifestPath="filePath"
+        />
+      </div>
 
       <!-- CSV Table Preview Mode -->
       <CsvViewer

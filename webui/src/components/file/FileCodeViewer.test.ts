@@ -20,6 +20,20 @@ vi.mock("../../composables/useShiki", () => ({
   }),
 }));
 
+// Mock Chart.js
+vi.mock("chart.js", () => {
+  function MockChart() {
+    return {
+      destroy: vi.fn<() => void>(),
+    };
+  }
+  MockChart.register = vi.fn<() => void>();
+  return {
+    Chart: MockChart,
+    registerables: [],
+  };
+});
+
 describe("FileCodeViewer.vue", () => {
   let root: HTMLElement;
 
@@ -204,6 +218,77 @@ describe("FileCodeViewer.vue", () => {
 
     expect(root.textContent).toContain("Comment · main.ts · line 1");
     expect(root.querySelector("textarea")).not.toBeNull();
+
+    app.unmount();
+  });
+
+  it("renders A2UIRenderer for ui_manifest.json and supports dashboard/source toggling", async () => {
+    const manifestJson = JSON.stringify({
+      schemaVersion: "1.0",
+      title: "Workspace Financial Hub",
+      kpis: [
+        {
+          id: "k1",
+          label: "Net Capital",
+          value: 750000,
+          format: "currency",
+        },
+      ],
+      tabs: [
+        {
+          id: "t1",
+          label: "Overview",
+          widgets: [
+            {
+              id: "w1",
+              type: "key-val-list",
+              title: "Capital Distribution",
+              items: [{ label: "Growth Fund", value: 400000, format: "currency" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    vi.spyOn(api, "getFileContent").mockResolvedValueOnce({
+      path: "/data/output/ui_manifest.json",
+      name: "ui_manifest.json",
+      ext: "json",
+      size: manifestJson.length,
+      content: manifestJson,
+      isBinary: false,
+      updatedAt: "2026-08-31T10:00:00Z",
+    });
+
+    const app = createApp({
+      render() {
+        return h(FileCodeViewer, {
+          sessionId: "sess-abc",
+          filePath: "/data/output/ui_manifest.json",
+          comments: new Map(),
+        });
+      },
+    });
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("Workspace Financial Hub");
+      expect(root.textContent).toContain("Net Capital");
+      expect(root.textContent).toContain("$750,000.00");
+    });
+
+    // Check dashboard toggle button exists in toolbar
+    const sourceBtn = Array.from(root.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Source"),
+    );
+    expect(sourceBtn).toBeDefined();
+
+    // Click Source button to view code table
+    sourceBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(root.querySelector("table")).not.toBeNull();
+    });
 
     app.unmount();
   });

@@ -208,6 +208,15 @@ export function resolveViewerCategory(
 
 export function getFileIcon(ext?: string, path?: string): string {
   const fileExt = extractExt(ext, path);
+  const baseName = (path || "").split("/").pop()?.toLowerCase();
+  if (
+    baseName === "ui_manifest.json" ||
+    baseName === "ui-manifest.json" ||
+    (baseName && baseName.endsWith(".a2ui.json"))
+  ) {
+    return "material-symbols:dashboard-customize-outline";
+  }
+
   if (isImageFile(fileExt)) {
     return "vscode-icons:file-type-image";
   }

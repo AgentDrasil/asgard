@@ -92,7 +92,14 @@ describe("useInPageFind", () => {
   });
 
   it("clears highlights and resets counts on clearHighlights", () => {
-    const mockQuerySelectorAll = vi.fn<() => Element[]>().mockReturnValue([]);
+    const mockMark = {
+      parentNode: {
+        insertBefore: vi.fn<() => void>(),
+        removeChild: vi.fn<() => void>(),
+      },
+      firstChild: null,
+    } as unknown as Element;
+    const mockQuerySelectorAll = vi.fn<() => Element[]>().mockReturnValue([mockMark]);
     const mockNormalize = vi.fn<() => void>();
     const mockContainer = {
       querySelectorAll: mockQuerySelectorAll,

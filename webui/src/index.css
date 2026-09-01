@@ -87,3 +87,161 @@ body,
 .fade-leave-to {
   opacity: 0;
 }
+
+/* ==========================================================================
+   A2UI Dashboard Badge Tag Styles (High-Contrast & Dual-Theme Support)
+   ========================================================================== */
+.badge-tag-emerald {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(52, 211, 153, 0.4) !important;
+}
+
+.badge-tag-cyan {
+  background-color: rgba(6, 182, 212, 0.18) !important;
+  color: #22d3ee !important;
+  border: 1px solid rgba(34, 211, 238, 0.4) !important;
+}
+
+.badge-tag-sky {
+  background-color: rgba(14, 165, 233, 0.18) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(56, 189, 248, 0.4) !important;
+}
+
+.badge-tag-indigo {
+  background-color: rgba(99, 102, 241, 0.18) !important;
+  color: #a5b4fc !important;
+  border: 1px solid rgba(165, 180, 252, 0.4) !important;
+}
+
+.badge-tag-purple {
+  background-color: rgba(168, 85, 247, 0.18) !important;
+  color: #c084fc !important;
+  border: 1px solid rgba(192, 132, 252, 0.4) !important;
+}
+
+.badge-tag-rose {
+  background-color: rgba(244, 63, 94, 0.18) !important;
+  color: #fb7185 !important;
+  border: 1px solid rgba(251, 113, 133, 0.4) !important;
+}
+
+.badge-tag-amber {
+  background-color: rgba(245, 158, 11, 0.18) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(251, 191, 36, 0.4) !important;
+}
+
+.badge-tag-orange {
+  background-color: rgba(249, 115, 22, 0.18) !important;
+  color: #fb923c !important;
+  border: 1px solid rgba(251, 146, 60, 0.4) !important;
+}
+
+.badge-tag-yellow {
+  background-color: rgba(234, 179, 8, 0.18) !important;
+  color: #facc15 !important;
+  border: 1px solid rgba(250, 204, 21, 0.4) !important;
+}
+
+.badge-tag-teal {
+  background-color: rgba(20, 184, 166, 0.18) !important;
+  color: #2dd4bf !important;
+  border: 1px solid rgba(45, 212, 191, 0.4) !important;
+}
+
+.badge-tag-slate {
+  background-color: rgba(148, 163, 184, 0.18) !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(203, 213, 225, 0.35) !important;
+}
+
+/* Light Theme Adjustments for Maximum Readability */
+[data-theme="light"] .badge-tag-emerald,
+[data-theme="latte"] .badge-tag-emerald,
+[data-theme="cupcake"] .badge-tag-emerald {
+  background-color: #d1fae5 !important;
+  color: #065f46 !important;
+  border-color: #a7f3d0 !important;
+}
+
+[data-theme="light"] .badge-tag-cyan,
+[data-theme="latte"] .badge-tag-cyan,
+[data-theme="cupcake"] .badge-tag-cyan {
+  background-color: #cffafe !important;
+  color: #155e75 !important;
+  border-color: #a5f3fc !important;
+}
+
+[data-theme="light"] .badge-tag-sky,
+[data-theme="latte"] .badge-tag-sky,
+[data-theme="cupcake"] .badge-tag-sky {
+  background-color: #e0f2fe !important;
+  color: #0369a1 !important;
+  border-color: #bae6fd !important;
+}
+
+[data-theme="light"] .badge-tag-indigo,
+[data-theme="latte"] .badge-tag-indigo,
+[data-theme="cupcake"] .badge-tag-indigo {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+  border-color: #c7d2fe !important;
+}
+
+[data-theme="light"] .badge-tag-purple,
+[data-theme="latte"] .badge-tag-purple,
+[data-theme="cupcake"] .badge-tag-purple {
+  background-color: #f3e8ff !important;
+  color: #6b21a8 !important;
+  border-color: #e9d5ff !important;
+}
+
+[data-theme="light"] .badge-tag-rose,
+[data-theme="latte"] .badge-tag-rose,
+[data-theme="cupcake"] .badge-tag-rose {
+  background-color: #ffe4e6 !important;
+  color: #9f1239 !important;
+  border-color: #fecdd3 !important;
+}
+
+[data-theme="light"] .badge-tag-amber,
+[data-theme="latte"] .badge-tag-amber,
+[data-theme="cupcake"] .badge-tag-amber {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #fde68a !important;
+}
+
+[data-theme="light"] .badge-tag-orange,
+[data-theme="latte"] .badge-tag-orange,
+[data-theme="cupcake"] .badge-tag-orange {
+  background-color: #ffedd5 !important;
+  color: #9a3412 !important;
+  border-color: #fed7aa !important;
+}
+
+[data-theme="light"] .badge-tag-yellow,
+[data-theme="latte"] .badge-tag-yellow,
+[data-theme="cupcake"] .badge-tag-yellow {
+  background-color: #fef9c3 !important;
+  color: #854d0e !important;
+  border-color: #fef08a !important;
+}
+
+[data-theme="light"] .badge-tag-teal,
+[data-theme="latte"] .badge-tag-teal,
+[data-theme="cupcake"] .badge-tag-teal {
+  background-color: #ccfbf1 !important;
+  color: #115e59 !important;
+  border-color: #99f6e4 !important;
+}
+
+[data-theme="light"] .badge-tag-slate,
+[data-theme="latte"] .badge-tag-slate,
+[data-theme="cupcake"] .badge-tag-slate {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}

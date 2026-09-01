@@ -22,6 +22,20 @@ vi.mock("../composables/useShiki", () => ({
   }),
 }));
 
+// Mock Chart.js
+vi.mock("chart.js", () => {
+  function MockChart() {
+    return {
+      destroy: vi.fn<() => void>(),
+    };
+  }
+  MockChart.register = vi.fn<() => void>();
+  return {
+    Chart: MockChart,
+    registerables: [],
+  };
+});
+
 describe("ArtifactViewer.vue", () => {
   let root: HTMLElement;
 
@@ -339,6 +353,80 @@ describe("ArtifactViewer.vue", () => {
     expect(root.querySelector('[data-icon="octicon:file-code-24"]')).not.toBeNull();
     // Toolbar raw link should not be present for non-media binary
     expect(root.querySelector('a[title="Open in new window / Download"]')).toBeNull();
+
+    app.unmount();
+  });
+
+  it("renders A2UIRenderer for ui_manifest.json artifact and allows toggling source", async () => {
+    const manifestJson = JSON.stringify({
+      schemaVersion: "1.0",
+      title: "Wealth Dashboard",
+      kpis: [
+        {
+          id: "k1",
+          label: "Portfolio Value",
+          value: 500000,
+          format: "currency",
+        },
+      ],
+      tabs: [
+        {
+          id: "t1",
+          label: "Assets",
+          widgets: [
+            {
+              id: "w1",
+              type: "key-val-list",
+              title: "Holdings Breakdown",
+              items: [{ label: "Tech", value: 350000, format: "currency" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        path: "/workspace/data/ui_manifest.json",
+        name: "ui_manifest.json",
+        ext: "json",
+        size: manifestJson.length,
+        content: manifestJson,
+        isBinary: false,
+        updatedAt: "2026-08-31T10:00:00Z",
+      }),
+    } as Response);
+
+    const app = createApp({
+      render() {
+        return h(ArtifactViewer, {
+          sessionId: "sess-123",
+          activeFilePath: "/workspace/data/ui_manifest.json",
+          modifiedFiles: ["/workspace/data/ui_manifest.json"],
+        });
+      },
+    });
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("Wealth Dashboard");
+      expect(root.textContent).toContain("Portfolio Value");
+      expect(root.textContent).toContain("$500,000.00");
+    });
+
+    // Check dashboard toggle button exists
+    const sourceBtn = Array.from(root.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Source"),
+    );
+    expect(sourceBtn).toBeDefined();
+
+    // Click Source button to view raw code
+    sourceBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(root.querySelector("pre.shiki")).not.toBeNull();
+    });
 
     app.unmount();
   });

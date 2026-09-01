@@ -27,6 +27,12 @@ export function useInPageFind(
     if (!containerRef.value) return;
     const container = containerRef.value;
     const existingMarks = container.querySelectorAll("mark.asgard-find-match");
+    if (existingMarks.length === 0) {
+      matches.value = [];
+      totalMatches.value = 0;
+      currentIndex.value = 0;
+      return;
+    }
     existingMarks.forEach((mark) => {
       const parent = mark.parentNode;
       if (parent) {
