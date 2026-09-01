@@ -5,6 +5,7 @@ import type {
   ConfigFileResponse,
   ConfigSaveResponse,
   DirInfo,
+  FileScope,
   FileSearchResult,
   FileTreeEntry,
   FirebaseWebpushWebConfig,
@@ -451,7 +452,7 @@ export async function getFileTree(sessionId: string, subPath = ""): Promise<File
 export async function getFileContent(
   sessionId: string,
   path: string,
-  scope?: "workspace" | "tmp" | string,
+  scope?: FileScope,
 ): Promise<WorkspaceFileContent | null> {
   if (!sessionId || !path) return null;
   try {

@@ -51,10 +51,10 @@ type FileSearchResponse struct {
 	Files []FileSearchResult `json:"files"`
 }
 
-func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower string, maxResults int, visitedCanonical map[string]bool) ([]FileSearchResult, bool) {
+func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower string, maxResults int, visitedCanonical map[string]bool) []FileSearchResult {
 	var results []FileSearchResult
 	if maxResults <= 0 {
-		return results, false
+		return results
 	}
 
 	evalRootDir, err := filepath.EvalSymlinks(rootDir)
@@ -62,7 +62,6 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 		evalRootDir = rootDir
 	}
 
-	limitReached := false
 	_ = filepath.WalkDir(rootDir, func(p string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -78,7 +77,10 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 			}
 		}
 
+		var evalP string
+		var isSymlink bool
 		if d.Type()&os.ModeSymlink != 0 {
+			isSymlink = true
 			info, statErr := os.Stat(p)
 			if statErr != nil {
 				// Broken symlink: silently ignore
@@ -88,20 +90,27 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 				// WalkDir never descends into symlinks; SkipDir here would skip remaining siblings.
 				return nil
 			}
+
+			// Resolve symlink target
+			resolved, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				return nil
+			}
+			evalP = resolved
 		} else if d.IsDir() {
 			return nil
-		}
-
-		// Check symlink target and canonical path
-		evalP, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			// Broken symlink
-			return nil
+		} else {
+			// Non-symlink file under evalRootDir: construct canonical path directly
+			relToRoot, err := filepath.Rel(rootDir, p)
+			if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+				return nil
+			}
+			evalP = filepath.Join(evalRootDir, relToRoot)
 		}
 
 		// Out-of-bounds escape check: evalP must be inside evalRootDir
 		relToEvalRoot, err := filepath.Rel(evalRootDir, evalP)
-		if err != nil || strings.HasPrefix(relToEvalRoot, "..") {
+		if err != nil || relToEvalRoot == ".." || strings.HasPrefix(relToEvalRoot, ".."+string(filepath.Separator)) {
 			return nil
 		}
 
@@ -112,7 +121,7 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 		visitedCanonical[evalP] = true
 
 		rel, relErr := filepath.Rel(rootDir, p)
-		if relErr != nil || strings.HasPrefix(rel, "..") {
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil
 		}
 
@@ -126,7 +135,11 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 
 		if queryLower == "" || strings.Contains(strings.ToLower(fullRelPath), queryLower) {
 			var size int64
-			if info, infoErr := d.Info(); infoErr == nil {
+			if isSymlink {
+				if statInfo, statErr := os.Stat(p); statErr == nil {
+					size = statInfo.Size()
+				}
+			} else if info, infoErr := d.Info(); infoErr == nil {
 				size = info.Size()
 			} else if statInfo, statErr := os.Stat(p); statErr == nil {
 				size = statInfo.Size()
@@ -141,7 +154,6 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 			})
 
 			if len(results) >= maxResults {
-				limitReached = true
 				return filepath.SkipAll
 			}
 		}
@@ -149,7 +161,7 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 		return nil
 	})
 
-	return results, limitReached
+	return results
 }
 
 func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) {
@@ -176,6 +188,10 @@ func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) 
 	}
 
 	return runDir, http.StatusOK, nil
+}
+
+func isPathEscaping(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string) (string, string, int, error) {
@@ -210,7 +226,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 
 		absTarget := filepath.Join(baseTmp, sub)
 		relLex, errLex := filepath.Rel(baseTmp, absTarget)
-		if errLex != nil || strings.HasPrefix(relLex, "..") {
+		if errLex != nil || isPathEscaping(relLex) {
 			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
 
@@ -223,7 +239,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 		}
 
 		rel, err := filepath.Rel(evalTmpBase, evalTarget)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || isPathEscaping(rel) {
 			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
 
@@ -254,7 +270,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 			}
 			absTarget := filepath.Join(baseTmp, sub)
 			relLex, errLex := filepath.Rel(baseTmp, absTarget)
-			if errLex != nil || strings.HasPrefix(relLex, "..") {
+			if errLex != nil || isPathEscaping(relLex) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 			}
 			evalTarget, err := filepath.EvalSymlinks(absTarget)
@@ -265,7 +281,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 			}
 			rel, err := filepath.Rel(evalTmpBase, evalTarget)
-			if err != nil || strings.HasPrefix(rel, "..") {
+			if err != nil || isPathEscaping(rel) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 			}
 			relClean := filepath.ToSlash(rel)
@@ -281,7 +297,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 		resolveAsWs := func() (string, string, int, error) {
 			absTarget := filepath.Join(cleanRunDir, cleanReq)
 			relLex, errLex := filepath.Rel(cleanRunDir, absTarget)
-			if errLex != nil || strings.HasPrefix(relLex, "..") {
+			if errLex != nil || isPathEscaping(relLex) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
 			}
 			evalTarget, err := filepath.EvalSymlinks(absTarget)
@@ -292,7 +308,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 			}
 			rel, err := filepath.Rel(evalRunDir, evalTarget)
-			if err != nil || strings.HasPrefix(rel, "..") {
+			if err != nil || isPathEscaping(rel) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
 			}
 			relClean := filepath.ToSlash(rel)
@@ -341,7 +357,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 
 	// Pre-check lexical containment before symlink resolution
 	relLex, errLex := filepath.Rel(evalRunDir, absTarget)
-	if errLex != nil || strings.HasPrefix(relLex, "..") {
+	if errLex != nil || isPathEscaping(relLex) {
 		return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
 	}
 
@@ -354,7 +370,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 	}
 
 	rel, err := filepath.Rel(evalRunDir, evalTarget)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || isPathEscaping(rel) {
 		return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
 	}
 
@@ -622,24 +638,24 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 	relWsToTmp, errWsToTmp := filepath.Rel(evalTmpBase, evalRunDir)
 	relTmpToWs, errTmpToWs := filepath.Rel(evalRunDir, evalTmpBase)
 	isOverlapping := isRunDirSessionTmp ||
-		(errWsToTmp == nil && !strings.HasPrefix(relWsToTmp, "..")) ||
-		(errTmpToWs == nil && !strings.HasPrefix(relTmpToWs, ".."))
+		(errWsToTmp == nil && relWsToTmp != ".." && !strings.HasPrefix(relWsToTmp, ".."+string(filepath.Separator))) ||
+		(errTmpToWs == nil && relTmpToWs != ".." && !strings.HasPrefix(relTmpToWs, ".."+string(filepath.Separator)))
 
 	var results []FileSearchResult
 
 	if isOverlapping {
 		// Single scan on workspace to avoid duplicates
-		results, _ = searchDirectory(evalRunDir, "", "workspace", queryLower, limit, visitedCanonical)
+		results = searchDirectory(evalRunDir, "", "workspace", queryLower, limit, visitedCanonical)
 	} else {
 		// Disjoint directories: anti-starvation quota
 		wsLimit := limit - (limit / 4)
-		wsResults, _ := searchDirectory(evalRunDir, "", "workspace", queryLower, wsLimit, visitedCanonical)
+		wsResults := searchDirectory(evalRunDir, "", "workspace", queryLower, wsLimit, visitedCanonical)
 		results = append(results, wsResults...)
 
 		tmpLimit := limit - len(results)
 		if tmpLimit > 0 {
 			if tmpInfo, statErr := os.Stat(evalTmpBase); statErr == nil && tmpInfo.IsDir() {
-				tmpResults, _ := searchDirectory(evalTmpBase, "/tmp", "tmp", queryLower, tmpLimit, visitedCanonical)
+				tmpResults := searchDirectory(evalTmpBase, "/tmp", "tmp", queryLower, tmpLimit, visitedCanonical)
 				results = append(results, tmpResults...)
 			}
 		}

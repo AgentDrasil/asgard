@@ -151,12 +151,14 @@ export interface WorkspaceFileContent {
   updatedAt: string;
 }
 
+export type FileScope = "workspace" | "tmp";
+
 export interface FileSearchResult {
   path: string;
   name: string;
   ext: string;
   size: number;
-  scope?: "workspace" | "tmp";
+  scope?: FileScope;
 }
 
 export interface CommentEntry {

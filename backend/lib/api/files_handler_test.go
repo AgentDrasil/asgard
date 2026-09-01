@@ -1019,4 +1019,48 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		require.Len(t, resp.Files, 1)
 		assert.Equal(t, "lonely.txt", resp.Files[0].Name)
 	})
+
+	t.Run("Non-existent workspace directory gracefully returns empty search results", func(t *testing.T) {
+		nonExistChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(nonExistChatID, "test-agent", "", "", nil))
+
+		nonExistSess, sErr := repo.GetSession(nonExistChatID)
+		require.NoError(t, sErr)
+		nonExistSess.RunDir = filepath.Join(t.TempDir(), "does_not_exist")
+		require.NoError(t, repo.SaveSession(nonExistSess))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+nonExistChatID+"&query=test", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Empty(t, resp.Files)
+	})
+
+	t.Run("Files named with dotdot prefix are not misclassified as escaping", func(t *testing.T) {
+		dotChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(dotChatID, "test-agent", "", "", nil))
+
+		dotWs := t.TempDir()
+		dotSess, sErr := repo.GetSession(dotChatID)
+		require.NoError(t, sErr)
+		dotSess.RunDir = dotWs
+		require.NoError(t, repo.SaveSession(dotSess))
+
+		dotFileName := "..custom_file.txt"
+		require.NoError(t, os.WriteFile(filepath.Join(dotWs, dotFileName), []byte("content"), 0644))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+dotChatID+"&query=custom", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 1)
+		assert.Equal(t, dotFileName, resp.Files[0].Name)
+		assert.Equal(t, dotFileName, resp.Files[0].Path)
+	})
 }

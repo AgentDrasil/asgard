@@ -569,7 +569,8 @@ const commandList = computed<CommandItem[]>(() => [
       @close="isFileSearchOpen = false"
       @select-file="
         (path, scope) => {
-          selectedFilePath = path;
+          const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+          selectedFilePath = normalizedPath;
           isFileSearchOpen = false;
           const sessionId = activeSessionId || (route.params.id as string);
           if (sessionId) {

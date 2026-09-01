@@ -9,7 +9,7 @@ import { rebuildChatInputFromComments, commentKey } from "../../utils/commentUti
 import { humanfriendly } from "../../lib/format";
 import { getFileIcon } from "../../utils/fileUtils";
 import { buildFilesRoute, resolveViewFromRoute } from "../../utils/routeUtils";
-import type { CommentEntry, WorkspaceFileContent } from "../../types";
+import type { CommentEntry, FileScope, WorkspaceFileContent } from "../../types";
 
 const route = useRoute();
 const router = useRouter();
@@ -99,7 +99,7 @@ function handleSelectFile(path: string) {
   }
   if (props.sessionId) {
     const resolved = currentRouteState();
-    if (resolved.filePath !== path) {
+    if (resolved.filePath !== path || route.query.scope) {
       router.replace(buildFilesRoute(props.sessionId, path));
     }
   }
@@ -115,9 +115,9 @@ watch(selectedFilePath, (newPath) => {
   }
 });
 
-const currentScope = computed(() => {
+const currentScope = computed<FileScope | undefined>(() => {
   const scope = route.query.scope;
-  if (typeof scope === "string" && scope.trim() !== "") {
+  if (scope === "workspace" || scope === "tmp") {
     return scope;
   }
   return undefined;

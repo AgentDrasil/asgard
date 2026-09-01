@@ -3,6 +3,7 @@ import { ref, watch, nextTick, computed } from "vue";
 import { Icon } from "@iconify/vue";
 import { useFileSearchState } from "../../composables/useFileSearchState";
 import { humanfriendly } from "../../lib/format";
+import type { FileScope } from "../../types";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -12,7 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "select-file", path: string, scope?: string): void;
+  (e: "select-file", path: string, scope?: FileScope): void;
 }>();
 
 const inputRef = ref<HTMLInputElement | null>(null);
@@ -45,7 +46,7 @@ watch(
   { immediate: true },
 );
 
-function handleSelect(path: string, scope?: string) {
+function handleSelect(path: string, scope?: FileScope) {
   if (!path) return;
   emit("select-file", path, scope);
   emit("close");

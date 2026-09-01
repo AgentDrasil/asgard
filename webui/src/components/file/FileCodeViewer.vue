@@ -19,12 +19,12 @@ import MediaViewer from "../common/MediaViewer.vue";
 import CsvViewer from "../common/CsvViewer.vue";
 import A2UIRenderer from "../a2ui/A2UIRenderer.vue";
 import { isA2UIManifest, parseA2UIManifest } from "../../utils/a2uiUtils";
-import type { CommentEntry, WorkspaceFileContent } from "../../types";
+import type { CommentEntry, FileScope, WorkspaceFileContent } from "../../types";
 
 const props = defineProps<{
   sessionId: string;
   filePath: string | null;
-  scope?: "workspace" | "tmp" | string;
+  scope?: FileScope;
   comments: Map<string, CommentEntry>;
 }>();
 
