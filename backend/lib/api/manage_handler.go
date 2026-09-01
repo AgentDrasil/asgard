@@ -37,6 +37,10 @@ gemini_model_for_chat_title: "gemini-2.5-flash"
 chat_lang: "English (US)"
 doc_lang: "English (US)"
 comment_lang: "English (US)"
+providers:
+  - agy
+  - opencode
+  - simplest
 `
 
 func checkManageOrigin(r *http.Request) error {

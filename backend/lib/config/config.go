@@ -35,7 +35,38 @@ type Config struct {
 	ChatLang                string                    `yaml:"chat_lang"`
 	DocLang                 string                    `yaml:"doc_lang"`
 	CommentLang             string                    `yaml:"comment_lang"`
+	Providers               []string                  `yaml:"providers" json:"providers,omitempty"`
 	ConfigPath              string                    `yaml:"-" json:"-"`
+}
+
+var SupportedProviders = []string{"agy", "opencode", "simplest"}
+
+func isSupportedProvider(name string) bool {
+	for _, p := range SupportedProviders {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) GetProviders() []string {
+	if c == nil || len(c.Providers) == 0 {
+		return append([]string(nil), SupportedProviders...)
+	}
+	return append([]string(nil), c.Providers...)
+}
+
+func (c *Config) IsProviderEnabled(provider string) bool {
+	if c == nil || len(c.Providers) == 0 {
+		return true
+	}
+	for _, p := range c.Providers {
+		if p == provider {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) GetConfigPath() string {
@@ -119,6 +150,12 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing gemini_model_for_chat_title")
 	}
 
+	for _, p := range c.Providers {
+		if !isSupportedProvider(p) {
+			return fmt.Errorf("unsupported provider %q, must be one of %v", p, SupportedProviders)
+		}
+	}
+
 	return nil
 }
 
@@ -167,6 +204,20 @@ func ParseAndValidate(data []byte) (*Config, error) {
 
 	if cfg.CommentLang == "" {
 		cfg.CommentLang = DefaultLanguage
+	}
+
+	if len(cfg.Providers) == 0 {
+		cfg.Providers = append([]string(nil), SupportedProviders...)
+	} else {
+		seen := make(map[string]bool, len(cfg.Providers))
+		deduped := make([]string, 0, len(cfg.Providers))
+		for _, p := range cfg.Providers {
+			if !seen[p] {
+				seen[p] = true
+				deduped = append(deduped, p)
+			}
+		}
+		cfg.Providers = deduped
 	}
 
 	if err := cfg.validate(); err != nil {

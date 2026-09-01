@@ -316,3 +316,197 @@ func TestConfig_LanguageRules(t *testing.T) {
 		assert.Contains(t, rules, "- Code Comments and Docstrings: English")
 	})
 }
+
+func TestConfig_Providers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		yamlContent   string
+		wantProviders []string
+		wantErr       bool
+		errMsg        string
+	}{
+		{
+			name: "default when providers omitted",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+`,
+			wantProviders: []string{"agy", "opencode", "simplest"},
+		},
+		{
+			name: "default when explicit empty list",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers: []
+`,
+			wantProviders: []string{"agy", "opencode", "simplest"},
+		},
+		{
+			name: "custom subset single provider",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers:
+  - simplest
+`,
+			wantProviders: []string{"simplest"},
+		},
+		{
+			name: "custom subset multiple providers",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers:
+  - agy
+  - opencode
+`,
+			wantProviders: []string{"agy", "opencode"},
+		},
+		{
+			name: "duplicates deduplicated preserving order",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers:
+  - agy
+  - agy
+  - simplest
+  - agy
+`,
+			wantProviders: []string{"agy", "simplest"},
+		},
+		{
+			name: "invalid unknown provider",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers:
+  - invalid-cli
+`,
+			wantErr: true,
+			errMsg:  `unsupported provider "invalid-cli"`,
+		},
+		{
+			name: "invalid uppercase provider",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+providers:
+  - AGY
+`,
+			wantErr: true,
+			errMsg:  `unsupported provider "AGY"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			agentDir := filepath.Join(tempDir, "agent_root")
+			require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+
+			yamlData := fmt.Sprintf(tt.yamlContent, agentDir)
+			cfg, err := ParseAndValidate([]byte(yamlData))
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.errMsg)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantProviders, cfg.Providers)
+		})
+	}
+}
+
+func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil receiver", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.True(t, cfg.IsProviderEnabled("agy"))
+		assert.True(t, cfg.IsProviderEnabled("opencode"))
+		assert.True(t, cfg.IsProviderEnabled("simplest"))
+		assert.True(t, cfg.IsProviderEnabled("unknown"))
+
+		// Check copy isolation
+		providers := cfg.GetProviders()
+		providers[0] = "mutated"
+		assert.Equal(t, "agy", SupportedProviders[0])
+		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+	})
+
+	t.Run("empty config (no providers set)", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{}
+		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.True(t, cfg.IsProviderEnabled("agy"))
+		assert.True(t, cfg.IsProviderEnabled("opencode"))
+		assert.True(t, cfg.IsProviderEnabled("simplest"))
+		assert.True(t, cfg.IsProviderEnabled("unknown"))
+
+		// Check copy isolation
+		providers := cfg.GetProviders()
+		providers[0] = "mutated"
+		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+	})
+
+	t.Run("custom providers configured", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{
+			Providers: []string{"simplest"},
+		}
+		assert.Equal(t, []string{"simplest"}, cfg.GetProviders())
+		assert.True(t, cfg.IsProviderEnabled("simplest"))
+		assert.False(t, cfg.IsProviderEnabled("agy"))
+		assert.False(t, cfg.IsProviderEnabled("opencode"))
+
+		// Check copy isolation
+		providers := cfg.GetProviders()
+		providers[0] = "mutated"
+		assert.Equal(t, []string{"simplest"}, cfg.GetProviders())
+		assert.Equal(t, "simplest", cfg.Providers[0])
+	})
+}

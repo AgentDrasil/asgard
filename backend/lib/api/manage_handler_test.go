@@ -580,6 +580,116 @@ db: mysql
 	assert.Contains(t, w.Body.String(), "invalid configuration")
 }
 
+func TestManageHandler_SaveConfig_Providers_Valid(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "config.yaml")
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	validContent := `
+debug: true
+db: sqlite
+dsn: live.db
+agent_dir: "` + tmpDir + `"
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-2.5-flash
+providers:
+  - simplest
+`
+	body, _ := json.Marshal(SaveConfigRawRequest{Content: validContent})
+	req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	saved, err := os.ReadFile(cfgFilePath)
+	require.NoError(t, err)
+	assert.Equal(t, validContent, string(saved))
+}
+
+func TestManageHandler_SaveConfig_Providers_Invalid(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"test-model"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "test-model"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	cfgFilePath := filepath.Join(tmpDir, "config.yaml")
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
+	require.NoError(t, err)
+
+	invalidContent := `
+debug: true
+db: sqlite
+dsn: live.db
+agent_dir: "` + tmpDir + `"
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-2.5-flash
+providers:
+  - unknown-provider
+`
+	body, _ := json.Marshal(SaveConfigRawRequest{Content: invalidContent})
+	req := httptest.NewRequest(http.MethodPut, "/api/manage/config", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `unsupported provider \"unknown-provider\"`)
+}
+
 func TestManageConfig_Put_RenameFallbackOnMountErrors(t *testing.T) {
 	mockClients := map[string]types.CLIClient{
 		"agy": &mockClient{models: []string{"test-model"}},

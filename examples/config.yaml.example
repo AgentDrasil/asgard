@@ -11,6 +11,11 @@ gemini_model_for_chat_title: gemini-3.1-flash-lite
 chat_lang: English (US)
 doc_lang: English (US)
 comment_lang: English (US)
+# Enabled CLI providers (supported: agy, opencode, simplest; default: all enabled)
+providers:
+  - agy
+  - opencode
+  - simplest
 webui_path: /opt/asgard/webui
 firebase_webpush_web:
   api_key: [FIREBASE_API_KEY]
