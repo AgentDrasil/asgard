@@ -59,6 +59,22 @@ body,
   overflow: hidden;
 }
 
+/* Sidebar footer actions (Terminal / Usage & Quota / Settings):
+   tinted with the theme's neutral color to visually separate
+   them from the session list above. */
+.sidebar-footer {
+  background-color: color-mix(in oklab, var(--color-neutral) 14%, var(--color-base-300));
+  border-top-color: color-mix(in oklab, var(--color-neutral) 35%, transparent);
+}
+
+.sidebar-footer .sidebar-footer-btn:hover {
+  background-color: color-mix(in oklab, var(--color-neutral) 24%, var(--color-base-300));
+}
+
+.sidebar-footer .sidebar-footer-btn.is-active {
+  background-color: color-mix(in oklab, var(--color-neutral) 28%, var(--color-base-300));
+}
+
 /* In-page Find Highlights */
 .asgard-find-match {
   background-color: color-mix(in oklab, var(--color-warning, #f59e0b) 35%, transparent);

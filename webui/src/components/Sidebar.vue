@@ -205,13 +205,11 @@ onUnmounted(() => {
     </div>
 
     <!-- Bottom Actions & Settings Entry -->
-    <div
-      class="p-2 border-t border-base-100/50 bg-base-300 w-full flex flex-col items-center space-y-0.5"
-    >
+    <div class="sidebar-footer p-2 border-t w-full flex flex-col items-center space-y-0.5">
       <button
         @click="emit('toggle-terminal')"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:bg-base-200 hover:text-base-content',
+          'sidebar-footer-btn flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:text-base-content',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
         :title="`Terminal (${toggleTerminalShortcut})`"
@@ -223,7 +221,7 @@ onUnmounted(() => {
       <button
         @click="emit('open-quota')"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:bg-base-200 hover:text-base-content',
+          'sidebar-footer-btn flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/80 hover:text-base-content',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
         title="Usage & Quota"
@@ -235,9 +233,9 @@ onUnmounted(() => {
       <button
         @click="navigateToSettings"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium hover:bg-base-200',
+          'sidebar-footer-btn flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
           route.path.startsWith('/settings')
-            ? 'bg-base-200 text-primary font-semibold'
+            ? 'is-active text-primary font-semibold'
             : 'text-base-content/80 hover:text-base-content',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
