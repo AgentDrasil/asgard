@@ -5,7 +5,7 @@ import { formatFileSize } from "../../lib/format";
 import { getFileIcon } from "../../utils/fileUtils";
 
 defineProps<{
-  attachments: Attachment[];
+  attachments: (Attachment | File | { name: string; size: number })[];
   isUploading?: boolean;
 }>();
 

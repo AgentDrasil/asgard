@@ -1,7 +1,13 @@
 import { ref, computed, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
 import type { ChatSession, AgentInfo, ChatMessage, SessionEvent, Attachment } from "../types";
-import { getSession, getSessions, createSession, triggerAgentMessage } from "../lib/api";
+import {
+  getSession,
+  getSessions,
+  createSession,
+  triggerAgentMessage,
+  uploadAttachment,
+} from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
 
@@ -308,6 +314,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       selectedDir?: string;
       selectedModel?: string;
       attachments?: Attachment[];
+      pendingFiles?: File[];
     },
   ) => {
     let currentThreadId = activeSessionId.value;
@@ -346,6 +353,26 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         if (router) {
           await router.push(`/chat/${currentThreadId}`);
         }
+
+        if (opts?.pendingFiles && opts.pendingFiles.length > 0) {
+          const uploadedAttachments: Attachment[] = [];
+          for (const file of opts.pendingFiles) {
+            try {
+              const att = await uploadAttachment(currentThreadId, file);
+              uploadedAttachments.push(att);
+            } catch (err: any) {
+              console.error(`Failed to upload attachment ${file.name}:`, err);
+              pushErrorMessage(`Failed to upload ${file.name}: ${err?.message || err}`);
+            }
+          }
+          const combined = [...(opts?.attachments || []), ...uploadedAttachments];
+          const finalAttachments = combined.length > 0 ? combined : undefined;
+          userMsg.attachments = finalAttachments;
+          const msgIdx = rawMessages.value.findIndex((m) => m.id === userMsgId);
+          if (msgIdx > -1) {
+            rawMessages.value[msgIdx] = { ...userMsg };
+          }
+        }
       } else {
         rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
         loading.value = false;
@@ -373,7 +400,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       runDir: currentSession.runDir || opts?.selectedDir,
       model: opts?.selectedModel,
       metadata: { message_id: userMsgId },
-      attachments: opts?.attachments,
+      attachments: userMsg.attachments,
     });
 
     if (res?.conflict) {

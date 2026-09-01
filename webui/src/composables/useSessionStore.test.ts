@@ -317,6 +317,153 @@ describe("useSessionStore", () => {
     });
   });
 
+  it("should create session, upload pendingFiles, and pass uploaded attachments when activeSessionId is empty", async () => {
+    const mockCreatedSession: ChatSession = {
+      chatID: "new-session-123",
+      title: "New Session",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      messages: [],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+
+    const createSpy = vi.spyOn(api, "createSession").mockResolvedValue(mockCreatedSession);
+    const uploadSpy = vi.spyOn(api, "uploadAttachment").mockResolvedValue({
+      name: "doc.txt",
+      path: ".attachments/doc.txt",
+      size: 512,
+      mimeType: "text/plain",
+    });
+    const triggerSpy = vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "accepted",
+      chatId: "new-session-123",
+    });
+
+    const store = useSessionStore({ agents });
+    expect(store.activeSessionId.value).toBeNull();
+
+    const mockFile = new File(["test content"], "doc.txt", { type: "text/plain" });
+
+    await store.sendMessage("Analyze this document", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/workspace",
+      pendingFiles: [mockFile],
+    });
+
+    expect(createSpy).toHaveBeenCalledWith("agent-1", "/workspace");
+    expect(uploadSpy).toHaveBeenCalledWith("new-session-123", mockFile);
+    expect(store.activeSessionId.value).toBe("new-session-123");
+
+    const expectedAttachments = [
+      {
+        name: "doc.txt",
+        path: ".attachments/doc.txt",
+        size: 512,
+        mimeType: "text/plain",
+      },
+    ];
+
+    expect(store.messages.value.length).toBe(1);
+    expect(store.messages.value[0].content).toBe("Analyze this document");
+    expect(store.messages.value[0].attachments).toEqual(expectedAttachments);
+
+    expect(triggerSpy).toHaveBeenCalledWith("agent-1", {
+      prompt: "Analyze this document",
+      chatId: "new-session-123",
+      runDir: "/workspace",
+      model: undefined,
+      metadata: expect.objectContaining({
+        message_id: expect.stringMatching(/^user-/),
+      }),
+      attachments: expectedAttachments,
+    });
+  });
+
+  it("should handle partial pendingFiles upload failure gracefully and continue message sending", async () => {
+    const mockCreatedSession: ChatSession = {
+      chatID: "new-session-partial",
+      title: "New Session Partial",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      messages: [],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+
+    vi.spyOn(api, "createSession").mockResolvedValue(mockCreatedSession);
+    const uploadSpy = vi.spyOn(api, "uploadAttachment").mockImplementation(async (_id, file) => {
+      if (file.name === "fail.txt") {
+        throw new Error("Disk full");
+      }
+      return {
+        name: file.name,
+        path: `.attachments/${file.name}`,
+        size: 100,
+        mimeType: "text/plain",
+      };
+    });
+    const triggerSpy = vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "accepted",
+      chatId: "new-session-partial",
+    });
+
+    const store = useSessionStore({ agents });
+
+    const file1 = new File(["good"], "good.txt", { type: "text/plain" });
+    const file2 = new File(["fail"], "fail.txt", { type: "text/plain" });
+
+    await store.sendMessage("Partial upload test", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/workspace",
+      pendingFiles: [file1, file2],
+    });
+
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+
+    // Should push error message for failed file
+    expect(
+      store.messages.value.some(
+        (m) => m.role === "error" && m.content.includes("Failed to upload fail.txt"),
+      ),
+    ).toBe(true);
+
+    // User message should still contain the successfully uploaded attachment
+    const userMsg = store.messages.value.find((m) => m.role === "user");
+    expect(userMsg).toBeDefined();
+    expect(userMsg?.attachments).toEqual([
+      {
+        name: "good.txt",
+        path: ".attachments/good.txt",
+        size: 100,
+        mimeType: "text/plain",
+      },
+    ]);
+
+    // triggerAgentMessage should be called with the successful attachment
+    expect(triggerSpy).toHaveBeenCalledWith("agent-1", {
+      prompt: "Partial upload test",
+      chatId: "new-session-partial",
+      runDir: "/workspace",
+      model: undefined,
+      metadata: expect.objectContaining({
+        message_id: expect.stringMatching(/^user-/),
+      }),
+      attachments: [
+        {
+          name: "good.txt",
+          path: ".attachments/good.txt",
+          size: 100,
+          mimeType: "text/plain",
+        },
+      ],
+    });
+  });
+
   it("should handle 409 conflict when session is already running", async () => {
     const mockSession: ChatSession = {
       chatID: "session-409",
