@@ -112,3 +112,62 @@ func TestResolveSessionTmpPath(t *testing.T) {
 		}
 	}
 }
+
+func TestIsRelativeTmpPrefixedPath(t *testing.T) {
+	chatID := "session-123"
+
+	tests := []struct {
+		input     string
+		expectTmp bool
+		expectSub string
+	}{
+		{"tmp", true, ""},
+		{"tmp/plan.md", true, "plan.md"},
+		{"tmp/session-id", true, ""},
+		{"tmp/${session_id}", true, ""},
+		{"tmp/session-123", true, ""},
+		{"tmp/session-id/plan.md", true, "plan.md"},
+		{"tmp/${session_id}/plan.md", true, "plan.md"},
+		{"tmp/session-123/plan.md", true, "plan.md"},
+		{"tmp/sub/file.txt", true, "sub/file.txt"},
+		// Negative cases
+		{"tmpother/plan.md", false, ""},
+		{"src/main.go", false, ""},
+		{"plan.md", false, ""},
+		{"/tmp/plan.md", false, ""},
+	}
+
+	for _, tt := range tests {
+		isTmp, sub := isRelativeTmpPrefixedPath(tt.input, chatID)
+		assert.Equal(t, tt.expectTmp, isTmp, "isRelativeTmpPrefixedPath(%s)", tt.input)
+		if isTmp {
+			assert.Equal(t, tt.expectSub, sub, "subpath for %s", tt.input)
+		}
+	}
+}
+
+func TestNormalizeSessionRunDir_Extended(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	chatID := "session-123"
+	expectedSessionTmp := filepath.Join(tempHome, "tmp", chatID)
+
+	// Relative narrow forms
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("tmp", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("tmp/session-id", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("tmp/${session_id}", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("tmp/"+chatID, chatID))
+	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir("tmp/session-id/sub", chatID))
+
+	// Arbitrary relative path under workspace
+	assert.Equal(t, "tmp/arbitrary", NormalizeSessionRunDir("tmp/arbitrary", chatID))
+	assert.Equal(t, "src/main", NormalizeSessionRunDir("src/main", chatID))
+
+	// chatID == "" handling
+	assert.Equal(t, "", NormalizeSessionRunDir("", ""))
+	assert.Equal(t, ".", NormalizeSessionRunDir(".", ""))
+	assert.Equal(t, "tmp", NormalizeSessionRunDir("tmp", ""))
+	assert.Equal(t, "/tmp", NormalizeSessionRunDir("/tmp", ""))
+	assert.Equal(t, "src/main", NormalizeSessionRunDir("src/main", ""))
+}

@@ -145,7 +145,13 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **Real-Time Events Stream** (`GET /api/sessions/{session_id}/events`): Server-Sent Events (SSE) stream for real-time `SessionEvent` delivery (messages, activities, artifacts, status, done) with `Last-Event-ID` reconnection catch-up.
 *   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents.
 
-### 2. Management & Coordination API
+### 2. Workspace & File Browsing API
+*   **Workspace File Content** (`GET /api/v1/workspace/file`): Retrieves authorized file content or media streams (`?raw=true`) from session workspace or session tmp directory. Supports `session_id`, `path`, and optional `scope` (`tmp` or `workspace`) disambiguation parameters.
+*   **File Content** (`GET /api/files/content`): Reads workspace or session temporary file content with metadata. Supports `session_id`, `path`, and optional `scope` (`tmp` or `workspace`).
+*   **File Tree** (`GET /api/files/tree`): Lists directory contents and files within session workspace or session tmp directory. Supports `session_id`, optional `path`, and optional `scope` (`tmp` or `workspace`).
+*   **File Search** (`GET /api/files/search`): Searches for files by query inside session workspace.
+
+### 3. Management & Coordination API
 *   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).
 *   **Reload Configurations** (`POST /api/manage/reload`): Reloads the local agent definition YAML configurations dynamically without needing to restart the orchestrator server.
 *   **Team Discovery** (`GET /team`):

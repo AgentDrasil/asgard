@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -253,4 +254,39 @@ func TestSingleAgentExecutor_Attachments(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for SSE user message event with attachments")
 	}
+}
+
+func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDB := db.NewDBForTest(t)
+	err := dbmodels.AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	chatID := "test-chat-tmp-precreate"
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:      "test-agent-tmp",
+			Name:    "Test Agent Tmp",
+			RunDirs: []string{"tmp"},
+		},
+	}
+
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, nil, nil)
+
+	sessionTmpDir := filepath.Join(tempHome, "tmp", chatID)
+	assert.NoDirExists(t, sessionTmpDir)
+
+	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat
+	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
+		ChatID: chatID,
+		Prompt: "Test tmp run_dir creation",
+		RunDir: "tmp",
+	})
+
+	// The session tmp directory should have been automatically created before os.Stat
+	assert.DirExists(t, sessionTmpDir)
 }

@@ -76,11 +76,18 @@ func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) 
 	return runDir, http.StatusOK, nil
 }
 
-func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath string) (string, string, int, error) {
+func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string) (string, string, int, error) {
 	cleanRunDir := filepath.Clean(runDir)
+	baseTmp := GetSessionTmpBaseDir(sessionID)
+
 	evalRunDir, err := filepath.EvalSymlinks(cleanRunDir)
 	if err != nil {
-		return "", "", http.StatusInternalServerError, fmt.Errorf("failed to evaluate workspace directory: %w", err)
+		evalRunDir = cleanRunDir
+	}
+
+	evalTmpBase := baseTmp
+	if et, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
+		evalTmpBase = et
 	}
 
 	cleanReq := filepath.Clean(reqPath)
@@ -88,24 +95,19 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath string) (stri
 		return evalRunDir, "", http.StatusOK, nil
 	}
 
+	// Case 1: Explicit session tmp path (/tmp, .tmp, /tmp/..., .tmp/...)
 	if isTmp, sub := ResolveSessionTmpPath(cleanReq, sessionID); isTmp {
-		baseTmp := GetSessionTmpBaseDir(sessionID)
-		targetBase := baseTmp
-		if evalTmp, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
-			targetBase = evalTmp
-		}
-
 		sub = filepath.Clean(sub)
 		if sub == "." || sub == "" {
 			relResult := ""
-			if evalRunDir != targetBase {
+			if evalRunDir != evalTmpBase {
 				relResult = "/tmp"
 			}
-			return targetBase, relResult, http.StatusOK, nil
+			return evalTmpBase, relResult, http.StatusOK, nil
 		}
 
-		absTarget := filepath.Join(targetBase, sub)
-		relLex, errLex := filepath.Rel(targetBase, absTarget)
+		absTarget := filepath.Join(baseTmp, sub)
+		relLex, errLex := filepath.Rel(baseTmp, absTarget)
 		if errLex != nil || strings.HasPrefix(relLex, "..") {
 			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
@@ -118,7 +120,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath string) (stri
 			return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 		}
 
-		rel, err := filepath.Rel(targetBase, evalTarget)
+		rel, err := filepath.Rel(evalTmpBase, evalTarget)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
@@ -127,12 +129,107 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath string) (stri
 		if relClean == "." {
 			relClean = ""
 		}
-		if evalRunDir != targetBase {
+		if evalRunDir != evalTmpBase {
 			relClean = filepath.ToSlash(filepath.Join("/tmp", relClean))
 		}
 		return evalTarget, relClean, http.StatusOK, nil
 	}
 
+	// Case 2: Relative tmp/... path
+	if isRelTmp, sub := isRelativeTmpPrefixedPath(cleanReq, sessionID); isRelTmp {
+		sub = filepath.Clean(sub)
+		if sub == "." {
+			sub = ""
+		}
+
+		resolveAsTmp := func() (string, string, int, error) {
+			if sub == "" {
+				relResult := ""
+				if evalRunDir != evalTmpBase {
+					relResult = "/tmp"
+				}
+				return evalTmpBase, relResult, http.StatusOK, nil
+			}
+			absTarget := filepath.Join(baseTmp, sub)
+			relLex, errLex := filepath.Rel(baseTmp, absTarget)
+			if errLex != nil || strings.HasPrefix(relLex, "..") {
+				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+			}
+			evalTarget, err := filepath.EvalSymlinks(absTarget)
+			if err != nil {
+				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+				}
+				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
+			}
+			rel, err := filepath.Rel(evalTmpBase, evalTarget)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+			}
+			relClean := filepath.ToSlash(rel)
+			if relClean == "." {
+				relClean = ""
+			}
+			if evalRunDir != evalTmpBase {
+				relClean = filepath.ToSlash(filepath.Join("/tmp", relClean))
+			}
+			return evalTarget, relClean, http.StatusOK, nil
+		}
+
+		resolveAsWs := func() (string, string, int, error) {
+			absTarget := filepath.Join(cleanRunDir, cleanReq)
+			relLex, errLex := filepath.Rel(cleanRunDir, absTarget)
+			if errLex != nil || strings.HasPrefix(relLex, "..") {
+				return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
+			}
+			evalTarget, err := filepath.EvalSymlinks(absTarget)
+			if err != nil {
+				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+				}
+				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
+			}
+			rel, err := filepath.Rel(evalRunDir, evalTarget)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return "", "", http.StatusForbidden, errors.New("access denied: path escapes workspace boundary")
+			}
+			relClean := filepath.ToSlash(rel)
+			if relClean == "." {
+				relClean = ""
+			}
+			return evalTarget, relClean, http.StatusOK, nil
+		}
+
+		if scope == "tmp" {
+			return resolveAsTmp()
+		}
+		if scope == "workspace" {
+			return resolveAsWs()
+		}
+
+		// Auto disambiguation
+		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase)
+		if isRunDirSessionTmp {
+			return resolveAsTmp()
+		}
+
+		// runDir is project workspace: check workspace existence first
+		wsTarget := filepath.Join(cleanRunDir, cleanReq)
+		if _, err := os.Stat(wsTarget); err == nil {
+			return resolveAsWs()
+		}
+
+		// wsTarget does not exist, check if session tmp exists
+		tmpTarget := filepath.Join(baseTmp, sub)
+		if _, err := os.Stat(tmpTarget); err == nil {
+			return resolveAsTmp()
+		}
+
+		// Neither exists: fall back to workspace target so os.Stat returns standard 404
+		return resolveAsWs()
+	}
+
+	// Case 3: Ordinary workspace relative or absolute path (scope ignored)
 	cleanReqTrimmed := filepath.Clean(strings.TrimPrefix(reqPath, "/"))
 	if cleanReqTrimmed == "." || reqPath == "" {
 		return evalRunDir, "", http.StatusOK, nil
@@ -186,7 +283,8 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	subPath := r.URL.Query().Get("path")
-	targetDir, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, subPath)
+	scope := r.URL.Query().Get("scope")
+	targetDir, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, subPath, scope)
 	if err != nil {
 		writeJSONError(w, code, err.Error())
 		return
@@ -285,6 +383,7 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := r.URL.Query().Get("session_id")
 	filePath := r.URL.Query().Get("path")
+	scope := r.URL.Query().Get("scope")
 
 	if sessionID == "" || filePath == "" {
 		writeJSONError(w, http.StatusBadRequest, "session_id and path are required parameters")
@@ -297,7 +396,7 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absTarget, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, filePath)
+	absTarget, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, filePath, scope)
 	if err != nil {
 		writeJSONError(w, code, err.Error())
 		return

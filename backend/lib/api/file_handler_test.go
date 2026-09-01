@@ -313,4 +313,211 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 		assert.Contains(t, rr.Body.String(), "file size exceeds maximum allowed limit")
 	})
+
+	t.Run("Read Tmp File with tmp/ relative prefix (fallback)", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		err = os.MkdirAll(sessionTmpDir, 0755)
+		require.NoError(t, err)
+
+		targetFile := filepath.Join(sessionTmpDir, "code_review.md")
+		err = os.WriteFile(targetFile, []byte("# Code Review Feedback"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "/tmp/code_review.md")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/code_review.md", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "# Code Review Feedback", resp.Content)
+		assert.Equal(t, "/tmp/code_review.md", resp.Path)
+	})
+
+	t.Run("Read Tmp File with explicit scope=tmp", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		err = os.MkdirAll(sessionTmpDir, 0755)
+		require.NoError(t, err)
+
+		targetFile := filepath.Join(sessionTmpDir, "scope_review.md")
+		err = os.WriteFile(targetFile, []byte("# Scope Review"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "/tmp/scope_review.md")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/scope_review.md&scope=tmp", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "# Scope Review", resp.Content)
+	})
+
+	t.Run("Read File with non-tmp path and scope=tmp ignores scope", func(t *testing.T) {
+		mainPath := filepath.Join(tempWorkspaceDir, "main.go")
+		err := os.WriteFile(mainPath, []byte("package main\nfunc main(){}"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "main.go")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=main.go&scope=tmp", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "package main\nfunc main(){}", resp.Content)
+		assert.Equal(t, "main.go", resp.Path)
+	})
+
+	t.Run("Read Tmp File with scope=tmp when target not found -> 404", func(t *testing.T) {
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = append(sess.Artifacts, "/tmp/not_exist.md")
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/not_exist.md&scope=tmp", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.Contains(t, rr.Body.String(), "file not found")
+	})
+
+	t.Run("Read Tmp File with scope=tmp and traversal path -> 403", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/../../etc/passwd&scope=tmp", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "access denied")
+	})
+
+	t.Run("Legacy tmp/ path in session artifacts authorized after fallback", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		err = os.MkdirAll(sessionTmpDir, 0755)
+		require.NoError(t, err)
+
+		targetFile := filepath.Join(sessionTmpDir, "legacy_review.md")
+		err = os.WriteFile(targetFile, []byte("# Legacy Review"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = []string{"tmp/legacy_review.md"} // Legacy relative format
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		// Explicit request
+		reqExplicit := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=/tmp/legacy_review.md", nil)
+		rrExplicit := httptest.NewRecorder()
+		server.ServeHTTP(rrExplicit, reqExplicit)
+		assert.Equal(t, http.StatusOK, rrExplicit.Code)
+
+		// Relative fallback request
+		reqRel := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/legacy_review.md", nil)
+		rrRel := httptest.NewRecorder()
+		server.ServeHTTP(rrRel, reqRel)
+		assert.Equal(t, http.StatusOK, rrRel.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rrRel.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "/tmp/legacy_review.md", resp.Path)
+	})
+
+	t.Run("Legacy tmp/ path in session artifacts cannot authorize workspace file", func(t *testing.T) {
+		wsFile := filepath.Join(tempWorkspaceDir, "src", "target.go")
+		require.NoError(t, os.MkdirAll(filepath.Dir(wsFile), 0755))
+		require.NoError(t, os.WriteFile(wsFile, []byte("package src"), 0644))
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = []string{"tmp/src/target.go"} // legacy tmp entry
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=src/target.go", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "access denied")
+	})
+
+	t.Run("Coexisting workspace tmp and session tmp returns workspace by default", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		err = os.MkdirAll(sessionTmpDir, 0755)
+		require.NoError(t, err)
+
+		// Create in session tmp
+		err = os.WriteFile(filepath.Join(sessionTmpDir, "demo.txt"), []byte("session tmp demo"), 0644)
+		require.NoError(t, err)
+
+		// Create in workspace tmp
+		wsTmpDir := filepath.Join(tempWorkspaceDir, "tmp")
+		require.NoError(t, os.MkdirAll(wsTmpDir, 0755))
+		err = os.WriteFile(filepath.Join(wsTmpDir, "demo.txt"), []byte("workspace tmp demo"), 0644)
+		require.NoError(t, err)
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		// Only authorize workspace path
+		sess.Artifacts = []string{"tmp/demo.txt"}
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/demo.txt", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "workspace tmp demo", resp.Content)
+		assert.Equal(t, "tmp/demo.txt", resp.Path)
+
+		// If workspace file is unauthorized, returns 403 directly without fallback
+		sess.Artifacts = []string{"/tmp/demo.txt"} // authorized session tmp only
+		err = repo.SaveSession(sess)
+		require.NoError(t, err)
+
+		reqUnauth := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=tmp/demo.txt", nil)
+		rrUnauth := httptest.NewRecorder()
+		server.ServeHTTP(rrUnauth, reqUnauth)
+		assert.Equal(t, http.StatusForbidden, rrUnauth.Code)
+	})
 }

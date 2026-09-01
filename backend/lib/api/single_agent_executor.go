@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"uuid"
@@ -112,6 +113,10 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		if rd != "" {
 			if len(e.agent.Config.RunDirs) > 0 && !run.IsAllowedDir(rd, e.agent.Config.RunDirs) {
 				return "", fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
+			}
+			baseTmp := GetSessionTmpBaseDir(chatID)
+			if rd == baseTmp || strings.HasPrefix(rd, baseTmp+string(os.PathSeparator)) {
+				_ = os.MkdirAll(rd, 0755)
 			}
 			info, err := os.Stat(rd)
 			if err != nil {
@@ -335,10 +340,49 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 		agentName = name
 	}
 	targetFiles := toStringSlice(update.Metadata["target_files"])
+	baseTmp := GetSessionTmpBaseDir(chatID)
+	isRunDirSessionTmp := (workspaceDir != "" && (workspaceDir == baseTmp || NormalizeSessionRunDir(workspaceDir, chatID) == baseTmp))
+
 	var artifactFiles []string
 	for _, tf := range targetFiles {
-		if agents.IsArtifact(tf, agentConfig, workspaceDir) {
-			artifactFiles = append(artifactFiles, tf)
+		processedPath := tf
+
+		if isRelTmp, sub := isRelativeTmpPrefixedPath(tf, chatID); isRelTmp {
+			sub = filepath.Clean(sub)
+			if sub == "." {
+				sub = ""
+			}
+			canonicalTmpPath := "/tmp"
+			if sub != "" {
+				canonicalTmpPath = "/tmp/" + sub
+			}
+
+			if isRunDirSessionTmp {
+				processedPath = canonicalTmpPath
+			} else {
+				// workspaceDir is regular project workspace
+				wsFilePath := tf
+				if workspaceDir != "" && !filepath.IsAbs(tf) {
+					wsFilePath = filepath.Join(workspaceDir, tf)
+				}
+				if _, err := os.Stat(wsFilePath); err == nil {
+					// Exists in workspace -> keep original workspace relative path
+					processedPath = tf
+				} else {
+					// Does not exist in workspace, check session tmp
+					tmpFilePath := filepath.Join(baseTmp, sub)
+					if _, err := os.Stat(tmpFilePath); err == nil {
+						processedPath = canonicalTmpPath
+					} else {
+						processedPath = tf
+					}
+				}
+			}
+		}
+
+		if agents.IsArtifact(processedPath, agentConfig, workspaceDir) {
+			normalizedViewerPath := workflow.ViewerArtifactPath(processedPath, baseTmp)
+			artifactFiles = append(artifactFiles, normalizedViewerPath)
 		}
 	}
 	if len(artifactFiles) > 0 {

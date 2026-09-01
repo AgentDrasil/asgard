@@ -142,6 +142,73 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	assert.Contains(t, msg.TargetFiles, "src/main.go")
 }
 
+func TestRecordStatusUpdate_TmpPathDisambiguation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	testDB := db.NewDBForTest(t)
+	err = dbmodels.AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	chatID := "test-chat-tmp-disambiguation"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: "test-agent",
+	}))
+
+	workspaceDir := t.TempDir()
+
+	// Initialize git repo with .gitignore containing tmp/
+	cmd := exec.Command("git", "init", workspaceDir)
+	require.NoError(t, cmd.Run())
+	err = os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("tmp/\nscratch/\n*.tmp\n"), 0644)
+	require.NoError(t, err)
+
+	// 1. Session tmp file exists
+	sessionTmpDir := filepath.Join(home, "tmp", chatID)
+	require.NoError(t, os.MkdirAll(sessionTmpDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionTmpDir, "code_review.md"), []byte("# Review"), 0644))
+
+	// 2. Workspace tmp file exists and gitignored
+	wsTmpDir := filepath.Join(workspaceDir, "tmp")
+	require.NoError(t, os.MkdirAll(wsTmpDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(wsTmpDir, "local.txt"), []byte("ws local"), 0644))
+
+	agentConfig := &agentspec.AgentConfig{
+		Name: "TestAgent",
+	}
+
+	update := AgentStatusUpdate{
+		Content:   "Updated target files",
+		EntryType: "activity",
+		Metadata: map[string]any{
+			"target_files": []string{
+				"tmp/code_review.md", // exists in session tmp only -> normalized to /tmp/code_review.md
+				"tmp/local.txt",      // exists in workspace (gitignored) -> kept as tmp/local.txt
+				"tmp/unknown.txt",    // neither exists -> kept as tmp/unknown.txt
+			},
+		},
+	}
+
+	recordStatusUpdate(nil, repo, chatID, update, agentConfig, workspaceDir)
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.Contains(t, sess.Artifacts, "/tmp/code_review.md")
+	assert.Contains(t, sess.Artifacts, "tmp/local.txt")
+	assert.NotContains(t, sess.Artifacts, "/tmp/local.txt")
+	assert.Contains(t, sess.Artifacts, "tmp/unknown.txt")
+
+	require.Len(t, sess.Messages, 1)
+	msg := sess.Messages[0]
+	assert.Contains(t, msg.ArtifactFiles, "/tmp/code_review.md")
+	assert.Contains(t, msg.ArtifactFiles, "tmp/local.txt")
+	// TargetFiles must preserve original reported values for auditing
+	assert.Equal(t, []string{"tmp/code_review.md", "tmp/local.txt", "tmp/unknown.txt"}, msg.TargetFiles)
+}
+
 func TestAgentHandler_ModelsFilteredByEnabledProviders(t *testing.T) {
 	srv := &Server{
 		conf: &config.Config{

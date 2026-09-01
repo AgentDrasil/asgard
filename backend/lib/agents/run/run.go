@@ -30,8 +30,8 @@ func IsAllowedDir(path string, allowedDirs []string) bool {
 		if strings.HasPrefix(path, dir+string(filepath.Separator)) {
 			return true
 		}
-		// If allowedDirs contains "/tmp", also allow subdirectories under $HOME/tmp (sandbox session dirs)
-		if dir == "/tmp" && home != "" {
+		// If allowedDirs contains "/tmp" or "tmp", also allow subdirectories under $HOME/tmp (sandbox session dirs)
+		if (dir == "/tmp" || dir == "tmp") && home != "" {
 			userTmp := filepath.Join(home, "tmp")
 			if path == userTmp || strings.HasPrefix(path, userTmp+string(filepath.Separator)) {
 				return true
