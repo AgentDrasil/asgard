@@ -177,10 +177,7 @@ func normalizeAndValidateToken(raw string) (string, error) {
 		}
 
 		lower := strings.ToLower(p)
-		if mod, ok := validModifiers[p]; ok || validModifiers[lower] != "" {
-			if !ok {
-				mod = validModifiers[lower]
-			}
+		if mod, ok := validModifiers[lower]; ok {
 			normalizedModifiers = append(normalizedModifiers, mod)
 			continue
 		}

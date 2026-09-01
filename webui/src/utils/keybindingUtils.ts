@@ -245,7 +245,7 @@ function normalizeBaseKey(key: string): string {
 export function isSingleShortcutMatch(
   event: KeyboardEvent,
   shortcut: string,
-  os: SupportedOS,
+  _os: SupportedOS,
 ): boolean {
   const normalized = normalizeShortcut(shortcut);
   if (!normalized) return false;
@@ -263,17 +263,8 @@ export function isSingleShortcutMatch(
   const actualAlt = Boolean(event.altKey);
   const actualShift = Boolean(event.shiftKey);
 
-  let ctrlMatches = false;
-  let metaMatches = false;
-
-  if (os === "mac") {
-    ctrlMatches = actualCtrl === expectedCtrl;
-    metaMatches = actualMeta === expectedCmd;
-  } else {
-    // Windows / Linux: Ctrl in shortcut maps to ctrlKey. If Cmd is present, metaKey must match.
-    ctrlMatches = actualCtrl === expectedCtrl;
-    metaMatches = actualMeta === expectedCmd;
-  }
+  const ctrlMatches = actualCtrl === expectedCtrl;
+  const metaMatches = actualMeta === expectedCmd;
 
   if (!ctrlMatches || !metaMatches || actualAlt !== expectedAlt || actualShift !== expectedShift) {
     return false;

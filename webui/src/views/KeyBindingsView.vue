@@ -151,17 +151,10 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
   // Construct shortcut tokens
   const parts: string[] = [];
-  if (selectedOS.value === "mac") {
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.metaKey) parts.push("Cmd");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-  } else {
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.metaKey) parts.push("Cmd");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-  }
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.metaKey) parts.push("Cmd");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
 
   // Determine key part
   let keyPart = event.key;

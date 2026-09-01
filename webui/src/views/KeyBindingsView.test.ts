@@ -209,7 +209,7 @@ describe("KeyBindingsView.vue", () => {
     app.mount(root);
     await nextTick();
 
-    // Record the second action (toggle_artifacts) to the same key as toggle_sidebar (Ctrl+B)
+    // Record the second action (toggle_diff) to the same key as toggle_sidebar (Ctrl+B)
     const recordButtons = root.querySelectorAll('button[title="Record new shortcut"]');
     (recordButtons[1] as HTMLButtonElement).click();
     await nextTick();
