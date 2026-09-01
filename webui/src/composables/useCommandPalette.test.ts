@@ -14,11 +14,15 @@ describe("useCommandPalette", () => {
     { id: "cmd-3", title: "Git Commit", category: "Git", action: mockAction3 },
   ];
 
-  it("initializes with empty query, index 0, and all commands", () => {
+  it("initializes with empty query, index 0, and all commands sorted alphabetically", () => {
     const { query, selectedIndex, filteredCommands } = useCommandPalette(commandsList);
     expect(query.value).toBe("");
     expect(selectedIndex.value).toBe(0);
-    expect(filteredCommands.value).toEqual(commandsList);
+    expect(filteredCommands.value.map((c) => c.title)).toEqual([
+      "Git Commit",
+      "Open Settings",
+      "Toggle Terminal",
+    ]);
   });
 
   it("updates filteredCommands reactively when query changes and resets selectedIndex", () => {
@@ -96,9 +100,10 @@ describe("useCommandPalette", () => {
   it("selectCurrent returns the currently active command item", () => {
     const { navigateNext, selectCurrent } = useCommandPalette(commandsList);
 
-    expect(selectCurrent()?.id).toBe("cmd-1");
+    // Alphabetical order: Git Commit (cmd-3), Open Settings (cmd-1), Toggle Terminal (cmd-2)
+    expect(selectCurrent()?.id).toBe("cmd-3");
     navigateNext();
-    expect(selectCurrent()?.id).toBe("cmd-2");
+    expect(selectCurrent()?.id).toBe("cmd-1");
   });
 
   it("reset restores query to empty and selectedIndex to 0", () => {

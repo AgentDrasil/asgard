@@ -18,7 +18,7 @@ const fuseOptions: IFuseOptions<CommandItem> = {
 export function filterCommands(commands: CommandItem[], query: string): CommandItem[] {
   const trimmed = query.trim();
   if (!trimmed) {
-    return [...commands];
+    return [...commands].sort((a, b) => a.title.localeCompare(b.title));
   }
 
   const fuse = new Fuse(commands, fuseOptions);

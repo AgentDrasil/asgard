@@ -19,13 +19,13 @@ describe("filterCommands", () => {
     { id: "5", title: "Switch to vcs view", category: "View", action: dummyAction },
   ];
 
-  it("returns shallow copy of all commands when query is empty or whitespace", () => {
+  it("returns alphabetical copy of all commands when query is empty or whitespace", () => {
     const emptyRes = filterCommands(sampleCommands, "");
-    expect(emptyRes).toEqual(sampleCommands);
+    expect(emptyRes.map((c) => c.id)).toEqual(["4", "1", "5", "3", "2"]);
     expect(emptyRes).not.toBe(sampleCommands);
 
     const wsRes = filterCommands(sampleCommands, "   ");
-    expect(wsRes).toEqual(sampleCommands);
+    expect(wsRes.map((c) => c.id)).toEqual(["4", "1", "5", "3", "2"]);
   });
 
   it("filters case-insensitively and prioritizes title matches", () => {
