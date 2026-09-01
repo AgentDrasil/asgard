@@ -1,6 +1,8 @@
 import { onMounted, onUnmounted, readonly, ref, shallowRef } from "vue";
 import type { MermaidConfig } from "mermaid";
 
+import { isLightTheme } from "../utils/themeUtils";
+
 type MermaidAPI = typeof import("mermaid").default;
 
 export type MermaidTheme = "dark" | "default" | "forest" | "neutral" | "base";
@@ -9,18 +11,7 @@ export type MermaidTheme = "dark" | "default" | "forest" | "neutral" | "base";
  * Mapping DaisyUI / Catppuccin themes to standard Mermaid themes.
  */
 export function getMermaidTheme(docTheme: string | null): MermaidTheme {
-  switch (docTheme) {
-    case "latte":
-    case "light":
-    case "cupcake":
-      return "default";
-    case "frappe":
-    case "macchiato":
-    case "mocha":
-    case "dark":
-    default:
-      return "dark";
-  }
+  return isLightTheme(docTheme) ? "default" : "dark";
 }
 
 // Module-level singletons shared across all useMermaid() consumers.
