@@ -572,4 +572,23 @@ onUnmounted(() => {
   /* Prevent browser from caching low-res subpixel raster textures during transform */
   transform-style: flat;
 }
+
+:deep(text),
+:deep(.nodeLabel),
+:deep(.label text),
+:deep(.edgeLabel text) {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif !important;
+  font-size: 13px !important;
+}
+
+:deep(.edgeLabel text) {
+  font-size: 11px !important;
+}
 </style>

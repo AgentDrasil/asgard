@@ -58,6 +58,30 @@ async function loadMermaid(): Promise<MermaidAPI> {
 }
 
 /**
+ * Standardize legacy 'graph TD/LR/TB/RL/BT' to 'flowchart TD/LR/TB/RL/BT' for Mermaid v11 engine consistency.
+ * Legacy graph syntax causes dagre bounding box clipping and subgraph boundary overflow with CJK/multi-line text.
+ * Only the diagram declaration directive on the first active statement line is rewritten.
+ */
+export function sanitizeMermaidCode(code: string): string {
+  const trimmed = code.trim();
+  if (!trimmed) return "";
+
+  const lines = trimmed.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith("%%")) {
+      continue;
+    }
+    // Only inspect the first non-comment, non-empty directive line
+    if (/^graph\s+(TB|TD|BT|LR|RL)\b/i.test(line)) {
+      lines[i] = lines[i].replace(/^(\s*)graph\s+(TB|TD|BT|LR|RL)\b/i, "$1flowchart $2");
+    }
+    break;
+  }
+  return lines.join("\n");
+}
+
+/**
  * Initialize Mermaid global configuration asynchronously.
  */
 export async function initMermaid(theme?: MermaidTheme): Promise<void> {
@@ -66,11 +90,21 @@ export async function initMermaid(theme?: MermaidTheme): Promise<void> {
   const config: MermaidConfig = {
     startOnLoad: false,
     securityLevel: "loose",
-    fontFamily: "inherit",
+    htmlLabels: false,
     theme: currentTheme,
+    themeVariables: {
+      fontFamily:
+        "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      fontSize: "13px",
+    },
     flowchart: {
+      // Set useMaxWidth: false so Mermaid does not inject fixed max-width constraints on the SVG,
+      // allowing smooth, responsive vector scaling within our pan-zoom canvas.
       useMaxWidth: false,
-      htmlLabels: true,
+      nodeSpacing: 50,
+      rankSpacing: 65,
+      padding: 20,
+      curve: "basis",
     },
     sequence: {
       useMaxWidth: false,
@@ -131,9 +165,18 @@ export function generateUniqueId(prefix: string = "mermaid-svg"): string {
  * Catches syntax and rendering errors without throwing uncaught exceptions.
  */
 export async function renderDiagram(code: string, idPrefix?: string): Promise<RenderResult> {
-  const trimmed = code?.trim();
-  if (!trimmed) {
+  const sanitized = sanitizeMermaidCode(code || "");
+  if (!sanitized) {
     return {};
+  }
+
+  // Wait for document fonts to load completely before measuring SVG text bounding boxes
+  if (typeof document !== "undefined" && document.fonts) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // Ignore if document.fonts.ready rejects
+    }
   }
 
   const mermaid = await loadMermaid();
@@ -144,7 +187,7 @@ export async function renderDiagram(code: string, idPrefix?: string): Promise<Re
   const id = generateUniqueId(idPrefix || "mermaid");
 
   try {
-    const { svg, bindFunctions } = await mermaid.render(id, code);
+    const { svg, bindFunctions } = await mermaid.render(id, sanitized);
     // Clean inline style max-width restrictions that mermaid injects to avoid blurry rasterized scaling
     const cleanedSvg = svg.replace(
       /<svg\b([^>]*)\bstyle="([^"]*)"([^>]*)>/i,
@@ -193,5 +236,6 @@ export function useMermaid() {
     getMermaidTheme,
     initMermaid,
     renderDiagram,
+    sanitizeMermaidCode,
   };
 }
