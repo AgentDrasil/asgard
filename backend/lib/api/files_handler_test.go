@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -802,5 +803,220 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 			}
 		}
 		assert.True(t, foundTest)
+	})
+}
+
+func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	server := &Server{
+		conf: &config.Config{Host: "http://localhost:8080"},
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	chatID := uuid.NewV7().String()
+	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+
+	wsDir := t.TempDir()
+	sess.RunDir = wsDir
+	require.NoError(t, repo.SaveSession(sess))
+
+	sessionTmp := filepath.Join(tempHome, "tmp", chatID)
+
+	t.Run("Joint search in workspace and session tmp with scope and prefix", func(t *testing.T) {
+		require.NoError(t, os.MkdirAll(sessionTmp, 0755))
+
+		// Workspace file
+		require.NoError(t, os.WriteFile(filepath.Join(wsDir, "ws_sample.txt"), []byte("ws sample"), 0644))
+		// Session tmp file
+		require.NoError(t, os.WriteFile(filepath.Join(sessionTmp, "tmp_sample.txt"), []byte("tmp sample"), 0644))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+chatID+"&query=sample", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 2)
+
+		var wsFound, tmpFound bool
+		for _, f := range resp.Files {
+			switch f.Name {
+			case "ws_sample.txt":
+				wsFound = true
+				assert.Equal(t, "ws_sample.txt", f.Path)
+				assert.Equal(t, "workspace", f.Scope)
+			case "tmp_sample.txt":
+				tmpFound = true
+				assert.Equal(t, "/tmp/tmp_sample.txt", f.Path)
+				assert.Equal(t, "tmp", f.Scope)
+			}
+		}
+		assert.True(t, wsFound, "ws_sample.txt should be found")
+		assert.True(t, tmpFound, "tmp_sample.txt should be found with /tmp prefix and scope=tmp")
+	})
+
+	t.Run("Anti-starvation quota preserves quota for tmp directory", func(t *testing.T) {
+		starveWsDir := t.TempDir()
+		starveChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(starveChatID, "test-agent", "", "", nil))
+
+		starveSess, sErr := repo.GetSession(starveChatID)
+		require.NoError(t, sErr)
+		starveSess.RunDir = starveWsDir
+		require.NoError(t, repo.SaveSession(starveSess))
+
+		starveTmp := filepath.Join(tempHome, "tmp", starveChatID)
+		require.NoError(t, os.MkdirAll(starveTmp, 0755))
+
+		// Create 20 matching files in workspace
+		for i := 0; i < 20; i++ {
+			fName := filepath.Join(starveWsDir, "starve_item_"+string(rune('a'+i))+".go")
+			require.NoError(t, os.WriteFile(fName, []byte("package main"), 0644))
+		}
+
+		// Create 5 matching files in tmp
+		for i := 0; i < 5; i++ {
+			fName := filepath.Join(starveTmp, "starve_tmp_"+string(rune('a'+i))+".go")
+			require.NoError(t, os.WriteFile(fName, []byte("package main"), 0644))
+		}
+
+		// Limit = 10 -> wsLimit = 10 - 2 = 8, tmp gets remaining 2
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+starveChatID+"&query=starve&limit=10", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 10)
+
+		var wsCount, tmpCount int
+		for _, f := range resp.Files {
+			switch f.Scope {
+			case "workspace":
+				wsCount++
+			case "tmp":
+				tmpCount++
+				assert.True(t, strings.HasPrefix(f.Path, "/tmp/"))
+			}
+		}
+		assert.Equal(t, 8, wsCount, "ws count should be capped at wsLimit (8)")
+		assert.Equal(t, 2, tmpCount, "tmp count should take remaining quota (2)")
+	})
+
+	t.Run("Overlapping/Coinciding directory deduplication", func(t *testing.T) {
+		overlapChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(overlapChatID, "test-agent", "", "", nil))
+
+		overlapSess, sErr := repo.GetSession(overlapChatID)
+		require.NoError(t, sErr)
+		overlapSess.RunDir = "/tmp/session-id"
+		require.NoError(t, repo.SaveSession(overlapSess))
+
+		overlapTmp := filepath.Join(tempHome, "tmp", overlapChatID)
+		require.NoError(t, os.MkdirAll(overlapTmp, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(overlapTmp, "overlap_test.go"), []byte("package main"), 0644))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+overlapChatID+"&query=overlap", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 1)
+		assert.Equal(t, "overlap_test.go", resp.Files[0].Path)
+		assert.Equal(t, "workspace", resp.Files[0].Scope)
+	})
+
+	t.Run("Symlink security matrix", func(t *testing.T) {
+		symChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(symChatID, "test-agent", "", "", nil))
+
+		symWsDir := t.TempDir()
+		symSess, sErr := repo.GetSession(symChatID)
+		require.NoError(t, sErr)
+		symSess.RunDir = symWsDir
+		require.NoError(t, repo.SaveSession(symSess))
+
+		symTmp := filepath.Join(tempHome, "tmp", symChatID)
+		require.NoError(t, os.MkdirAll(symTmp, 0755))
+
+		// 1. Real file in tmp
+		realTmpFile := filepath.Join(symTmp, "real_target.txt")
+		require.NoError(t, os.WriteFile(realTmpFile, []byte("real content"), 0644))
+
+		// 2. Symlink inside tmp pointing to realTmpFile (should be deduplicated)
+		symlinkInside := filepath.Join(symTmp, "symlink_inside.txt")
+		require.NoError(t, os.Symlink(realTmpFile, symlinkInside))
+
+		// 3. Symlink pointing outside (escaping tmp to outside temp directory)
+		outsideDir := t.TempDir()
+		outsideFile := filepath.Join(outsideDir, "outside_secret.txt")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0644))
+		symlinkEscaping := filepath.Join(symTmp, "symlink_escaping.txt")
+		require.NoError(t, os.Symlink(outsideFile, symlinkEscaping))
+
+		// 4. Broken symlink
+		brokenSymlink := filepath.Join(symTmp, "broken_link.txt")
+		require.NoError(t, os.Symlink(filepath.Join(symTmp, "non_existent.txt"), brokenSymlink))
+
+		// 5. Symlink directory (e.g., node_modules -> external dir) should not prune sibling entries
+		realNodeModules := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(realNodeModules, "mod.txt"), []byte("mod"), 0644))
+		require.NoError(t, os.Symlink(realNodeModules, filepath.Join(symWsDir, "node_modules")))
+		require.NoError(t, os.WriteFile(filepath.Join(symWsDir, "package.json"), []byte("{}"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(symWsDir, "zzz_last.txt"), []byte("last"), 0644))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+symChatID+"&query=txt", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+		// Should contain real_target.txt (from tmp) and zzz_last.txt (from ws, sorted after node_modules symlink)
+		require.Len(t, resp.Files, 2)
+		names := []string{resp.Files[0].Name, resp.Files[1].Name}
+		assert.Contains(t, names, "real_target.txt")
+		assert.Contains(t, names, "zzz_last.txt")
+	})
+
+	t.Run("Non-existent session tmp directory does not error", func(t *testing.T) {
+		noTmpChatID := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(noTmpChatID, "test-agent", "", "", nil))
+
+		noTmpWs := t.TempDir()
+		noTmpSess, sErr := repo.GetSession(noTmpChatID)
+		require.NoError(t, sErr)
+		noTmpSess.RunDir = noTmpWs
+		require.NoError(t, repo.SaveSession(noTmpSess))
+
+		require.NoError(t, os.WriteFile(filepath.Join(noTmpWs, "lonely.txt"), []byte("lonely"), 0644))
+
+		// Ensure tmp directory does not exist
+		_ = os.RemoveAll(filepath.Join(tempHome, "tmp", noTmpChatID))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+noTmpChatID+"&query=lonely", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 1)
+		assert.Equal(t, "lonely.txt", resp.Files[0].Name)
 	})
 }

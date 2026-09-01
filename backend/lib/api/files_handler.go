@@ -40,14 +40,116 @@ type FileContentResponse struct {
 }
 
 type FileSearchResult struct {
-	Path string `json:"path"` // relative to session runDir
-	Name string `json:"name"`
-	Ext  string `json:"ext"`
-	Size int64  `json:"size"`
+	Path  string `json:"path"` // relative to session runDir, or prefixed with /tmp for session tmp
+	Name  string `json:"name"`
+	Ext   string `json:"ext"`
+	Size  int64  `json:"size"`
+	Scope string `json:"scope,omitempty"` // "workspace" | "tmp"
 }
 
 type FileSearchResponse struct {
 	Files []FileSearchResult `json:"files"`
+}
+
+func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower string, maxResults int, visitedCanonical map[string]bool) ([]FileSearchResult, bool) {
+	var results []FileSearchResult
+	if maxResults <= 0 {
+		return results, false
+	}
+
+	evalRootDir, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		evalRootDir = rootDir
+	}
+
+	limitReached := false
+	_ = filepath.WalkDir(rootDir, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+
+		name := d.Name()
+		if d.IsDir() {
+			if name == ".git" || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			if p == rootDir {
+				return nil
+			}
+		}
+
+		if d.Type()&os.ModeSymlink != 0 {
+			info, statErr := os.Stat(p)
+			if statErr != nil {
+				// Broken symlink: silently ignore
+				return nil
+			}
+			if info.IsDir() {
+				// WalkDir never descends into symlinks; SkipDir here would skip remaining siblings.
+				return nil
+			}
+		} else if d.IsDir() {
+			return nil
+		}
+
+		// Check symlink target and canonical path
+		evalP, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			// Broken symlink
+			return nil
+		}
+
+		// Out-of-bounds escape check: evalP must be inside evalRootDir
+		relToEvalRoot, err := filepath.Rel(evalRootDir, evalP)
+		if err != nil || strings.HasPrefix(relToEvalRoot, "..") {
+			return nil
+		}
+
+		// Deduplicate physical paths using visitedCanonical
+		if visitedCanonical[evalP] {
+			return nil
+		}
+		visitedCanonical[evalP] = true
+
+		rel, relErr := filepath.Rel(rootDir, p)
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return nil
+		}
+
+		var fullRelPath string
+		relSlash := filepath.ToSlash(rel)
+		if pathPrefix != "" {
+			fullRelPath = filepath.ToSlash(filepath.Join(pathPrefix, relSlash))
+		} else {
+			fullRelPath = relSlash
+		}
+
+		if queryLower == "" || strings.Contains(strings.ToLower(fullRelPath), queryLower) {
+			var size int64
+			if info, infoErr := d.Info(); infoErr == nil {
+				size = info.Size()
+			} else if statInfo, statErr := os.Stat(p); statErr == nil {
+				size = statInfo.Size()
+			}
+
+			results = append(results, FileSearchResult{
+				Path:  fullRelPath,
+				Name:  name,
+				Ext:   strings.TrimPrefix(filepath.Ext(name), "."),
+				Size:  size,
+				Scope: scope,
+			})
+
+			if len(results) >= maxResults {
+				limitReached = true
+				return filepath.SkipAll
+			}
+		}
+
+		return nil
+	})
+
+	return results, limitReached
 }
 
 func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) {
@@ -489,8 +591,13 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 	cleanRunDir := filepath.Clean(runDir)
 	evalRunDir, err := filepath.EvalSymlinks(cleanRunDir)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to evaluate workspace directory: "+err.Error())
-		return
+		evalRunDir = cleanRunDir
+	}
+
+	baseTmp := GetSessionTmpBaseDir(sessionID)
+	evalTmpBase := baseTmp
+	if et, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
+		evalTmpBase = et
 	}
 
 	query := r.URL.Query().Get("query")
@@ -507,60 +614,36 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
-	var results []FileSearchResult
 	queryLower := strings.ToLower(query)
+	visitedCanonical := make(map[string]bool)
 
-	_ = filepath.WalkDir(evalRunDir, func(p string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
+	// Check if runDir is session tmp or has overlap / parent-child containment
+	isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase || evalRunDir == evalTmpBase)
+	relWsToTmp, errWsToTmp := filepath.Rel(evalTmpBase, evalRunDir)
+	relTmpToWs, errTmpToWs := filepath.Rel(evalRunDir, evalTmpBase)
+	isOverlapping := isRunDirSessionTmp ||
+		(errWsToTmp == nil && !strings.HasPrefix(relWsToTmp, "..")) ||
+		(errTmpToWs == nil && !strings.HasPrefix(relTmpToWs, ".."))
 
-		name := d.Name()
-		if d.IsDir() {
-			if name == ".git" || name == "node_modules" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
+	var results []FileSearchResult
 
-		if d.Type()&os.ModeSymlink != 0 {
-			info, statErr := os.Stat(p)
-			if statErr == nil && info.IsDir() {
-				if name == ".git" || name == "node_modules" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
+	if isOverlapping {
+		// Single scan on workspace to avoid duplicates
+		results, _ = searchDirectory(evalRunDir, "", "workspace", queryLower, limit, visitedCanonical)
+	} else {
+		// Disjoint directories: anti-starvation quota
+		wsLimit := limit - (limit / 4)
+		wsResults, _ := searchDirectory(evalRunDir, "", "workspace", queryLower, wsLimit, visitedCanonical)
+		results = append(results, wsResults...)
 
-		rel, relErr := filepath.Rel(evalRunDir, p)
-		if relErr != nil || strings.HasPrefix(rel, "..") {
-			return nil
-		}
-
-		relSlash := filepath.ToSlash(rel)
-		if queryLower == "" || strings.Contains(strings.ToLower(relSlash), queryLower) {
-			var size int64
-			if info, infoErr := d.Info(); infoErr == nil {
-				size = info.Size()
-			} else if statInfo, statErr := os.Stat(p); statErr == nil {
-				size = statInfo.Size()
-			}
-
-			results = append(results, FileSearchResult{
-				Path: relSlash,
-				Name: name,
-				Ext:  strings.TrimPrefix(filepath.Ext(name), "."),
-				Size: size,
-			})
-
-			if len(results) >= limit {
-				return filepath.SkipAll
+		tmpLimit := limit - len(results)
+		if tmpLimit > 0 {
+			if tmpInfo, statErr := os.Stat(evalTmpBase); statErr == nil && tmpInfo.IsDir() {
+				tmpResults, _ := searchDirectory(evalTmpBase, "/tmp", "tmp", queryLower, tmpLimit, visitedCanonical)
+				results = append(results, tmpResults...)
 			}
 		}
-
-		return nil
-	})
+	}
 
 	if results == nil {
 		results = []FileSearchResult{}
