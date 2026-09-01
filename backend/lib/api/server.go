@@ -51,6 +51,7 @@ type Server struct {
 	customRunners    []workflow.NodeRunner
 	publicSrv        *http.Server
 	internalSrv      *http.Server
+	keybindingsMu    sync.Mutex
 	shutdownStarted  chan struct{}
 	shutdownOnce     sync.Once
 	shutdownErr      error
@@ -274,6 +275,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
 	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)
+	mux.HandleFunc("GET /api/keybindings", s.handleGetKeybindings)
+	mux.HandleFunc("PUT /api/manage/keybindings", s.handleSaveManageKeybindings)
 	mux.HandleFunc("POST /api/manage/restart", s.handleRestart)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
