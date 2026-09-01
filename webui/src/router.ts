@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 import NewChatView from "./views/NewChatView.vue";
 import ChatView from "./views/ChatView.vue";
 import SettingsView from "./views/SettingsView.vue";
+import KeyBindingsView from "./views/KeyBindingsView.vue";
 import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 
@@ -34,6 +35,11 @@ export const routes: RouteRecordRaw[] = [
     path: "/settings",
     name: "settings",
     component: SettingsView,
+  },
+  {
+    path: "/settings/keybindings",
+    name: "settings-keybindings",
+    component: KeyBindingsView,
   },
   {
     path: "/settings/config",

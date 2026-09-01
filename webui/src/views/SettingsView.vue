@@ -74,6 +74,10 @@ const navigateToConfig = () => {
   router.push("/settings/config");
 };
 
+const navigateToKeybindings = () => {
+  router.push("/settings/keybindings");
+};
+
 const navigateToLogs = () => {
   router.push("/settings/logs");
 };
@@ -229,6 +233,31 @@ const navigateBack = () => {
               <p class="text-xs text-base-content/70 leading-relaxed">
                 Open full-page YAML configuration editor with validation and save & restart
                 capability.
+              </p>
+            </div>
+            <Icon
+              icon="material-symbols:chevron-right"
+              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
+            />
+          </div>
+
+          <!-- Keyboard Shortcuts Card -->
+          <div
+            role="button"
+            tabindex="0"
+            @click="navigateToKeybindings"
+            @keydown.enter.space.prevent="navigateToKeybindings"
+            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+          >
+            <div class="space-y-1">
+              <div
+                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
+              >
+                <Icon icon="material-symbols:keyboard-outline" class="w-5 h-5 text-primary" />
+                <span>Keyboard Shortcuts</span>
+              </div>
+              <p class="text-xs text-base-content/70 leading-relaxed">
+                View and customize keyboard shortcuts for quick actions and panel toggling.
               </p>
             </div>
             <Icon
