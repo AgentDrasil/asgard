@@ -4,6 +4,8 @@ import {
   reloadAgents,
   getConfigFile,
   saveConfigFile,
+  getKeybindings,
+  saveKeybindings,
   restartServer,
   getFileTree,
   getFileContent,
@@ -348,6 +350,85 @@ describe("API Library", () => {
 
       const res = await saveConfigFile("port: 8080");
       expect(res).toEqual({ error: "Network offline" });
+    });
+  });
+
+  describe("getKeybindings", () => {
+    it("fetches keybindings successfully on 200 OK", async () => {
+      const mockResp = {
+        overrides: {
+          linux: { toggle_sidebar: "Ctrl+Alt+B" },
+        },
+        exists: true,
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResp,
+      } as Response);
+
+      const res = await getKeybindings();
+      expect(res).toEqual(mockResp);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/keybindings", undefined);
+    });
+
+    it("returns error on 500 corrupted file response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "yaml parse error" }),
+      } as Response);
+
+      const res = await getKeybindings();
+      expect(res).toEqual({
+        overrides: {},
+        error: "yaml parse error",
+      });
+    });
+
+    it("returns null on network failure and logs error", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network error"));
+
+      const res = await getKeybindings();
+      expect(res).toBeNull();
+      expect(consoleErrorSpy).toHaveBeenCalledWith("getKeybindings error:", expect.any(Error));
+    });
+  });
+
+  describe("saveKeybindings", () => {
+    it("saves keybindings successfully on 200 OK", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      } as Response);
+
+      const overrides = { linux: { toggle_sidebar: "Ctrl+Alt+B" } };
+      const res = await saveKeybindings(overrides);
+      expect(res).toEqual({ success: true });
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/manage/keybindings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides }),
+      });
+    });
+
+    it("returns error on non-ok response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "invalid key sequence" }),
+      } as Response);
+
+      const res = await saveKeybindings({ linux: { toggle_sidebar: "invalid" } });
+      expect(res).toEqual({ success: false, error: "invalid key sequence" });
+    });
+
+    it("handles network reject gracefully", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network disconnect"));
+
+      const res = await saveKeybindings({});
+      expect(res).toEqual({ success: false, error: "Network disconnect" });
     });
   });
 

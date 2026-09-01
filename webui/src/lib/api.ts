@@ -11,6 +11,8 @@ import type {
   GitActionResult,
   GitDiffFile,
   GitLogResponse,
+  KeybindingsApiResponse,
+  KeybindingsOverrides,
   SystemLogEntry,
   SystemLogsResponse,
   SystemStatusResponse,
@@ -119,6 +121,58 @@ export async function saveConfigFile(content: string): Promise<ConfigSaveRespons
   } catch (err: any) {
     console.error("saveConfigFile error:", err);
     return { error: err?.message || "Failed to save configuration" };
+  }
+}
+
+// Fetch keybindings from /api/keybindings (public GET)
+export async function getKeybindings(): Promise<KeybindingsApiResponse | null> {
+  try {
+    const res = await apiFetch("/api/keybindings");
+    if (res.status === 200) {
+      return await res.json();
+    }
+    if (res.status === 500) {
+      const body = await res.json().catch(() => null);
+      return {
+        overrides: {},
+        error: body?.error || "Failed to load keybindings (corrupted file)",
+      };
+    }
+    const body = await res.json().catch(() => null);
+    return {
+      overrides: {},
+      error: body?.error || `Failed to fetch keybindings (${res.status})`,
+    };
+  } catch (err: any) {
+    console.error("getKeybindings error:", err);
+    return null;
+  }
+}
+
+// Save keybindings to /api/manage/keybindings (protected PUT)
+export async function saveKeybindings(
+  overrides: KeybindingsOverrides,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await apiFetch("/api/manage/keybindings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ overrides }),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok) {
+      return { success: true };
+    }
+    return {
+      success: false,
+      error: body?.error || `Failed to save keybindings (${res.status})`,
+    };
+  } catch (err: any) {
+    console.error("saveKeybindings error:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to save keybindings",
+    };
   }
 }
 

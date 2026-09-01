@@ -216,3 +216,23 @@ export interface ToastItem {
   duration?: number;
   timestamp?: number;
 }
+
+export type SupportedOS = "linux" | "windows" | "mac";
+
+export type KeybindingCategory = "navigation" | "panel" | "chat" | "general";
+
+export interface KeybindingActionDef {
+  id: string;
+  title: string;
+  description: string;
+  category: KeybindingCategory;
+  defaultKeys: Record<SupportedOS, string | string[]>;
+}
+
+export type KeybindingsOverrides = Partial<Record<SupportedOS, Record<string, string | string[]>>>;
+
+export interface KeybindingsApiResponse {
+  overrides: KeybindingsOverrides;
+  exists?: boolean;
+  error?: string;
+}
