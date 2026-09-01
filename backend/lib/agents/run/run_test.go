@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/moznion/go-optional"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
@@ -237,4 +239,140 @@ func TestRun(t *testing.T) {
 	if !strings.Contains(string(langPromptContent), "Code Comments and Docstrings: English") {
 		t.Errorf("expected prompt file to contain 'Code Comments and Docstrings: English', got: %s", string(langPromptContent))
 	}
+}
+
+func setupTestRunEnv(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	origHome := os.Getenv("HOME")
+	origGopath := os.Getenv("GOPATH")
+	origGocache := os.Getenv("GOCACHE")
+
+	if origGopath != "" {
+		t.Setenv("GOPATH", origGopath)
+	} else if origHome != "" {
+		t.Setenv("GOPATH", filepath.Join(origHome, "go"))
+	}
+	if origGocache != "" {
+		t.Setenv("GOCACHE", origGocache)
+	} else if origHome != "" {
+		t.Setenv("GOCACHE", filepath.Join(origHome, ".cache", "go-build"))
+	}
+
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, subDir), 0755); err != nil {
+			t.Fatalf("failed to create %s dir: %v", subDir, err)
+		}
+	}
+
+	mockBwrapPath := filepath.Join(tmpDir, "bwrap")
+	scriptContent := "#!/bin/sh\nfor arg in \"$@\"; do\n  echo \"$arg\"\ndone\necho \"mock bwrap execution succeeded\"\n"
+	if err := os.WriteFile(mockBwrapPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write mock bwrap script: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+oldPath)
+
+	fakeAgy := &agentwrapper.FakeClient{
+		UsageFunc: func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+			return []types.ModelUsage{
+				{Model: "agy-model-zero", Remaining: 0.0},
+				{Model: "agy-model-low", Remaining: 0.15},
+				{Model: "agy-model-high", Remaining: 0.50},
+			}, nil
+		},
+	}
+	fakeOpencode := &agentwrapper.FakeClient{
+		UsageFunc: func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+			return []types.ModelUsage{
+				{Model: "opencode-model-high", Remaining: 0.80},
+			}, nil
+		},
+	}
+
+	agentwrapper.SetClients(map[string]types.CLIClient{
+		"agy":      fakeAgy,
+		"opencode": fakeOpencode,
+	})
+	t.Cleanup(func() { agentwrapper.SetClients(nil) })
+
+	return tmpDir
+}
+
+func TestRun_ExplicitModel_ProviderDisabled(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "test-agent",
+			Name: "Test Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "opencode", Model: "opencode-model-high"},
+			},
+			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
+		},
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+
+	conf := &config.Config{
+		Providers: []string{"simplest"},
+	}
+
+	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.Some("opencode-model-high"), "test-chat", StatusScope{}, conf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `provider "opencode" for model "opencode-model-high" is disabled in configuration`)
+}
+
+func TestRun_AutoSelection_FallbackSkipDisabledProvider(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "test-agent",
+			Name: "Test Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "agy-model-high"},
+				{CLI: "opencode", Model: "opencode-model-high"},
+			},
+			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
+		},
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+
+	conf := &config.Config{
+		Providers: []string{"opencode"},
+	}
+
+	out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "opencode-model-high")
+}
+
+func TestRun_AutoSelection_AllProvidersDisabled(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "test-agent",
+			Name: "Test Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "agy-model-high"},
+				{CLI: "opencode", Model: "opencode-model-high"},
+			},
+			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
+		},
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+
+	conf := &config.Config{
+		Providers: []string{"simplest"},
+	}
+
+	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no enabled CLI targets available for agent test-agent")
 }

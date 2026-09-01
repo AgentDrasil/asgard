@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -139,4 +140,38 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	assert.Contains(t, msg.ArtifactFiles, "/tmp/custom_rw_dir/data.json")
 	assert.NotContains(t, msg.ArtifactFiles, "src/main.go")
 	assert.Contains(t, msg.TargetFiles, "src/main.go")
+}
+
+func TestAgentHandler_ModelsFilteredByEnabledProviders(t *testing.T) {
+	srv := &Server{
+		conf: &config.Config{
+			Providers: []string{"agy"},
+		},
+		agents: []*agentspec.Agent{
+			{
+				Config: agentspec.AgentConfig{
+					ID:   "test-agent",
+					Name: "Test Agent",
+					CLI: []agentspec.CLITarget{
+						{CLI: "agy", Model: "agy-model-1"},
+						{CLI: "opencode", Model: "opencode-model-1"},
+					},
+				},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleAgents(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var res []AgentInfo
+	err := json.Unmarshal(w.Body.Bytes(), &res)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, []string{"agy-model-1"}, res[0].Models)
 }

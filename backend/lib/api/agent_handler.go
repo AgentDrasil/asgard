@@ -26,7 +26,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	for _, agent := range s.agents {
 		models := make([]string, 0, len(agent.Config.CLI))
 		for _, target := range agent.Config.CLI {
-			if target.Model != "" {
+			if target.Model != "" && s.conf.IsProviderEnabled(target.CLI) {
 				models = append(models, target.Model)
 			}
 		}

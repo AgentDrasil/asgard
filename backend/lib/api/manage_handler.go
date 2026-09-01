@@ -128,7 +128,7 @@ func (s *Server) validateModelContextWindows(agents []*agentspec.Agent) {
 			continue
 		}
 		for _, target := range a.Config.CLI {
-			if target.Model == "" {
+			if target.Model == "" || !s.conf.IsProviderEnabled(target.CLI) {
 				continue
 			}
 			// Deduplicate warnings by CLI and model pair to avoid spamming duplicate warnings across agents.

@@ -257,22 +257,33 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 		if selectedTarget == nil {
 			return nil, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
 		}
+		if !conf.IsProviderEnabled(selectedTarget.CLI) {
+			return nil, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
+		}
 		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
 		if quota <= 0 {
 			return nil, fmt.Errorf("model %q has no quota remaining (quota: %.2f)", selectedTarget.Model, quota)
 		}
 	} else {
+		hasEnabledTarget := false
 		for _, target := range agent.Config.CLI {
+			if !conf.IsProviderEnabled(target.CLI) {
+				continue
+			}
+			hasEnabledTarget = true
 			quota := agentwrapper.CheckQuota(target.CLI, target.Model)
 			if quota > MinAutoQuotaThreshold {
 				selectedTarget = &target
 				break
 			}
 		}
-	}
 
-	if selectedTarget == nil {
-		return nil, fmt.Errorf("no CLI target with more than 10%% quota remaining is available for agent %s", agent.Config.ID)
+		if selectedTarget == nil {
+			if !hasEnabledTarget {
+				return nil, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
+			}
+			return nil, fmt.Errorf("no CLI target with more than 10%% quota remaining is available for agent %s", agent.Config.ID)
+		}
 	}
 
 	runDir, err := resolveRunDir(agent, runDirOpt)
