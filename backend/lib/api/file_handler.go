@@ -149,33 +149,18 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessionID string) (string, error) {
-	if !isPathAuthorized(reqPath, allowedFiles, runDir) {
+	if !isPathAuthorized(reqPath, allowedFiles, runDir, sessionID) {
 		return "", errors.New("access denied: file not authorized in session")
 	}
 
 	cleanReq := filepath.Clean(reqPath)
 
-	var targetAbs string
-	// Check for /tmp paths (remap or direct tmp access)
-	if strings.HasPrefix(cleanReq, "/tmp/") || cleanReq == "/tmp" || strings.HasPrefix(cleanReq, ".tmp/") {
-		trimmed := strings.TrimPrefix(cleanReq, ".tmp/")
-		if strings.HasPrefix(cleanReq, "/tmp/") {
-			trimmed = strings.TrimPrefix(cleanReq, "/tmp/")
-		}
-
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", errors.New("access denied: failed to determine user home directory")
-		}
-
-		if sessionID == "" {
-			sessionID = "default"
-		}
-		targetAbs = filepath.Join(home, "tmp", sessionID, trimmed)
+	if isTmp, sub := ResolveSessionTmpPath(cleanReq, sessionID); isTmp {
+		baseTmp := GetSessionTmpBaseDir(sessionID)
+		targetAbs := filepath.Join(baseTmp, sub)
 
 		// Ensure it stays inside the session's temporary directory
-		sessionTmpDir := filepath.Join(home, "tmp", sessionID)
-		rel, err := filepath.Rel(sessionTmpDir, targetAbs)
+		rel, err := filepath.Rel(baseTmp, targetAbs)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			return "", errors.New("access denied: path escapes temporary directory boundary")
 		}
@@ -183,6 +168,7 @@ func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessi
 	}
 
 	// Normal workspace relative or absolute path
+	var targetAbs string
 	if filepath.IsAbs(cleanReq) {
 		targetAbs = cleanReq
 	} else {
@@ -198,22 +184,14 @@ func resolveAndValidatePath(runDir, reqPath string, allowedFiles []string, sessi
 	return targetAbs, nil
 }
 
-func isPathAuthorized(reqPath string, allowedFiles []string, runDir string) bool {
+func isPathAuthorized(reqPath string, allowedFiles []string, runDir, sessionID string) bool {
 	cleanReq := filepath.Clean(reqPath)
 	cleanRunDir := ""
 	if runDir != "" {
 		cleanRunDir = filepath.Clean(runDir)
 	}
 
-	normalizeTmpPath := func(p string) string {
-		p = filepath.Clean(p)
-		p = strings.TrimPrefix(p, ".tmp/")
-		p = strings.TrimPrefix(p, "tmp/")
-		p = strings.TrimPrefix(p, "/tmp/")
-		return "/tmp/" + p
-	}
-
-	isTmpReq := strings.HasPrefix(cleanReq, "/tmp/") || cleanReq == "/tmp" || strings.HasPrefix(cleanReq, ".tmp/")
+	isTmpReq, normReqTmp := NormalizeTmpPathForAuth(cleanReq, sessionID)
 
 	for _, allowed := range allowedFiles {
 		if allowed == "" {
@@ -221,8 +199,8 @@ func isPathAuthorized(reqPath string, allowedFiles []string, runDir string) bool
 		}
 		cleanAllowed := filepath.Clean(allowed)
 		if isTmpReq {
-			if strings.HasPrefix(cleanAllowed, "/tmp/") || cleanAllowed == "/tmp" || strings.HasPrefix(cleanAllowed, ".tmp/") || strings.HasPrefix(cleanAllowed, "tmp/") {
-				if normalizeTmpPath(cleanReq) == normalizeTmpPath(cleanAllowed) {
+			if isAllowedTmp, normAllowedTmp := NormalizeTmpPathForAuth(cleanAllowed, sessionID); isAllowedTmp {
+				if normReqTmp == normAllowedTmp {
 					return true
 				}
 			}

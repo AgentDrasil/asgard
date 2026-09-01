@@ -1,12 +1,10 @@
 package api
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestIsValidChatID(t *testing.T) {
@@ -36,21 +34,81 @@ func TestIsValidChatID(t *testing.T) {
 }
 
 func TestNormalizeSessionRunDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
 
 	chatID := "session-123"
-	expectedSessionTmp := filepath.Join(home, "tmp", chatID)
+	expectedSessionTmp := filepath.Join(tempHome, "tmp", chatID)
 
 	// /tmp -> ~/tmp/<chatID>
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp", chatID))
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp/", chatID))
 
-	// Empty string -> ~/tmp/<chatID>
+	// /tmp/session-id, /tmp/${session_id}, /tmp/<chatID> -> ~/tmp/<chatID>
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp/session-id", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp/${session_id}", chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp/"+chatID, chatID))
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir(".tmp/session-id", chatID))
+
+	// Subpaths under /tmp/session-id -> ~/tmp/<chatID>/subdir
+	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir("/tmp/session-id/sub", chatID))
+	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir("/tmp/"+chatID+"/sub", chatID))
+	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir(".tmp/session-id/sub", chatID))
+	assert.Equal(t, "/tmp/sub", NormalizeSessionRunDir("/tmp/sub", chatID))
+
+	// Empty string with chatID -> ~/tmp/<chatID>
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("", chatID))
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir(".", chatID))
 
+	// Empty string without chatID -> empty string
+	assert.Equal(t, "", NormalizeSessionRunDir("", ""))
+	assert.Equal(t, "/tmp", NormalizeSessionRunDir("/tmp", ""))
+
 	// Explicit custom path -> untouched clean path
-	customPath := filepath.Join(home, "src", "my-project")
+	customPath := filepath.Join(tempHome, "src", "my-project")
 	assert.Equal(t, customPath, NormalizeSessionRunDir(customPath, chatID))
+
+	// Pure function check: directory should not have been created by NormalizeSessionRunDir
+	assert.NoDirExists(t, expectedSessionTmp)
+}
+
+func TestResolveSessionTmpPath(t *testing.T) {
+	chatID := "session-123"
+
+	tests := []struct {
+		input      string
+		expectTmp  bool
+		expectSub  string
+		expectAuth string
+	}{
+		{"/tmp", true, "", "/tmp"},
+		{".tmp", true, "", "/tmp"},
+		{"/tmp/session-id", true, "", "/tmp"},
+		{"/tmp/${session_id}", true, "", "/tmp"},
+		{"/tmp/session-123", true, "", "/tmp"},
+		{".tmp/session-id", true, "", "/tmp"},
+		{"/tmp/session-id/plan.md", true, "plan.md", "/tmp/plan.md"},
+		{"/tmp/plan.md", true, "plan.md", "/tmp/plan.md"},
+		{".tmp/plan.md", true, "plan.md", "/tmp/plan.md"},
+		{"/tmp/session-123/plan.md", true, "plan.md", "/tmp/plan.md"},
+		{"/tmp/sub/file.txt", true, "sub/file.txt", "/tmp/sub/file.txt"},
+		// Relative paths without /tmp or .tmp prefix are NOT session tmp paths
+		{"tmp/plan.md", false, "", ""},
+		{"src/main.go", false, "", ""},
+		{"plan.md", false, "", ""},
+	}
+
+	for _, tt := range tests {
+		isTmp, sub := ResolveSessionTmpPath(tt.input, chatID)
+		assert.Equal(t, tt.expectTmp, isTmp, "ResolveSessionTmpPath(%s)", tt.input)
+		if isTmp {
+			assert.Equal(t, tt.expectSub, sub, "subpath for %s", tt.input)
+		}
+
+		isAuthTmp, normAuth := NormalizeTmpPathForAuth(tt.input, chatID)
+		assert.Equal(t, tt.expectTmp, isAuthTmp, "NormalizeTmpPathForAuth(%s)", tt.input)
+		if isAuthTmp {
+			assert.Equal(t, tt.expectAuth, normAuth, "auth norm for %s", tt.input)
+		}
+	}
 }

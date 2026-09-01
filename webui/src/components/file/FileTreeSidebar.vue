@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { getFileTree } from "../../lib/api";
 import { formatPath } from "../../utils/agentUtils";
+import { isSessionTmpDir } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
 
 const props = defineProps<{
@@ -26,11 +27,42 @@ const treeError = ref("");
 const treeVersion = ref(0);
 let treeReqId = 0;
 
+const activeRootScope = ref<"workdir" | "tmp">("workdir");
+
+const hasSeparateTmp = computed(() => {
+  return !isSessionTmpDir(props.runDir, props.sessionId);
+});
+
 const workspaceName = computed(() => {
   if (!props.runDir) return "Workspace";
   const parts = props.runDir.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts[parts.length - 1] || formatPath(props.runDir) || props.runDir;
 });
+
+// If selectedPath points inside tmp, automatically switch activeRootScope to tmp if separate
+watch(
+  () => props.selectedPath,
+  (newPath) => {
+    if (!hasSeparateTmp.value || !newPath) return;
+    const clean = newPath.replace(/\\/g, "/");
+    if (
+      clean === "/tmp" ||
+      clean === "tmp" ||
+      clean.startsWith("/tmp/") ||
+      clean.startsWith("tmp/") ||
+      clean.startsWith(".tmp/")
+    ) {
+      if (activeRootScope.value !== "tmp") {
+        activeRootScope.value = "tmp";
+      }
+    } else {
+      if (activeRootScope.value !== "workdir") {
+        activeRootScope.value = "workdir";
+      }
+    }
+  },
+  { immediate: true },
+);
 
 async function loadTree() {
   if (!props.sessionId) return;
@@ -38,7 +70,8 @@ async function loadTree() {
   isTreeLoading.value = true;
   treeError.value = "";
   try {
-    const entries = await getFileTree(props.sessionId, "");
+    const rootPath = hasSeparateTmp.value && activeRootScope.value === "tmp" ? "/tmp" : "";
+    const entries = await getFileTree(props.sessionId, rootPath);
     if (currentReq !== treeReqId) return;
     rootNodes.value = entries;
     treeVersion.value++;
@@ -58,7 +91,7 @@ function handleRefresh() {
 }
 
 watch(
-  () => [props.sessionId, props.runDir],
+  () => [props.sessionId, props.runDir, activeRootScope.value],
   () => {
     loadTree();
   },
@@ -103,7 +136,13 @@ const handleMouseMove = (e: MouseEvent) => {
 const stopResize = () => {
   if (isResizing.value) {
     isResizing.value = false;
-    localStorage.setItem("asgard_filetree_sidebar_width", sidebarWidth.value.toString());
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("asgard_filetree_sidebar_width", sidebarWidth.value.toString());
+      }
+    } catch {
+      // ignore
+    }
     document.removeEventListener("mousemove", handleMouseMove);
     document.removeEventListener("mouseup", stopResize);
     document.body.style.userSelect = "";
@@ -113,12 +152,18 @@ const stopResize = () => {
 
 onMounted(() => {
   window.addEventListener("resize", updateWindowWidth);
-  const saved = localStorage.getItem("asgard_filetree_sidebar_width");
-  if (saved) {
-    const parsed = parseInt(saved, 10);
-    if (!isNaN(parsed) && parsed >= MIN_SIDEBAR_WIDTH && parsed <= MAX_SIDEBAR_WIDTH) {
-      sidebarWidth.value = parsed;
+  try {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("asgard_filetree_sidebar_width");
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= MIN_SIDEBAR_WIDTH && parsed <= MAX_SIDEBAR_WIDTH) {
+          sidebarWidth.value = parsed;
+        }
+      }
     }
+  } catch {
+    // ignore
   }
 });
 
@@ -151,15 +196,38 @@ onUnmounted(() => {
 
     <!-- Sidebar Main Column -->
     <div class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-      <!-- Header: Workspace Name + Actions (Search, Refresh) -->
+      <!-- Header: Workspace / Tmp Selector + Actions (Search, Refresh) -->
       <div
-        class="p-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between gap-2 shrink-0"
+        class="p-2 bg-base-200 border-b border-base-300 flex items-center justify-between gap-2 shrink-0"
       >
-        <div class="flex items-center gap-1.5 min-w-0 font-mono text-xs">
+        <div
+          v-if="!hasSeparateTmp"
+          class="flex items-center gap-1.5 min-w-0 font-mono text-xs pl-0.5"
+        >
           <Icon icon="octicon:file-directory-fill-24" class="h-4 w-4 text-warning shrink-0" />
           <span class="font-bold text-base-content truncate" :title="runDir">
             {{ workspaceName }}
           </span>
+        </div>
+
+        <div v-else class="flex items-center gap-1.5 min-w-0 flex-1">
+          <Icon
+            :icon="
+              activeRootScope === 'tmp'
+                ? 'octicon:file-directory-24'
+                : 'octicon:file-directory-fill-24'
+            "
+            :class="activeRootScope === 'tmp' ? 'text-info' : 'text-warning'"
+            class="h-4 w-4 shrink-0"
+          />
+          <select
+            v-model="activeRootScope"
+            class="select select-bordered select-xs w-full max-w-full font-mono text-xs text-base-content focus:outline-none bg-base-100 h-7"
+            aria-label="Select directory scope"
+          >
+            <option value="workdir">{{ workspaceName }}</option>
+            <option value="tmp">/tmp (session)</option>
+          </select>
         </div>
 
         <div class="flex items-center gap-1 shrink-0">

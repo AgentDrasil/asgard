@@ -12,6 +12,7 @@ import {
   isCsvFile,
   getMediaCategory,
   resolveViewerCategory,
+  isSessionTmpDir,
 } from "./fileUtils";
 
 describe("fileUtils", () => {
@@ -241,6 +242,32 @@ describe("fileUtils", () => {
       expect(isAncestorDir("src/main.ts", "src/main.ts")).toBe(false);
       expect(isAncestorDir("src", "src")).toBe(false);
       expect(isAncestorDir("src/", "src/")).toBe(false);
+    });
+  });
+
+  describe("isSessionTmpDir", () => {
+    it("returns true for empty, /tmp, /tmp/session-id, and session-specific tmp directories", () => {
+      expect(isSessionTmpDir("")).toBe(true);
+      expect(isSessionTmpDir(null)).toBe(true);
+      expect(isSessionTmpDir(".")).toBe(true);
+      expect(isSessionTmpDir("/tmp")).toBe(true);
+      expect(isSessionTmpDir("/tmp/")).toBe(true);
+      expect(isSessionTmpDir(".tmp")).toBe(true);
+      expect(isSessionTmpDir(".tmp/")).toBe(true);
+      expect(isSessionTmpDir("/tmp/session-id")).toBe(true);
+      expect(isSessionTmpDir(".tmp/session-id")).toBe(true);
+      expect(isSessionTmpDir("/tmp/${session_id}")).toBe(true);
+      expect(isSessionTmpDir("/tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir(".tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/tmp/sess-123/sub", "sess-123")).toBe(true);
+    });
+
+    it("returns false for regular project directories and arbitrary nested paths", () => {
+      expect(isSessionTmpDir("/home/user/project")).toBe(false);
+      expect(isSessionTmpDir("src/my-project")).toBe(false);
+      expect(isSessionTmpDir("/var/www/html")).toBe(false);
+      expect(isSessionTmpDir("/home/user/other/tmp/sess-123", "sess-123")).toBe(false);
+      expect(isSessionTmpDir("/tmp/other-project", "sess-123")).toBe(false);
     });
   });
 });

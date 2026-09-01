@@ -369,3 +369,32 @@ export function extractHighlightedLines(html: string, expectedCount?: number): s
 
   return [];
 }
+
+/**
+ * Checks whether a given runDir corresponds to the session temporary directory (/tmp, /tmp/session-id, etc.).
+ */
+export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {
+  if (!runDir || runDir === "." || runDir === "") return true;
+  const normalized = runDir.replace(/\\/g, "/").trim().replace(/\/+$/, "");
+  if (
+    normalized === "/tmp" ||
+    normalized === ".tmp" ||
+    normalized === "/tmp/session-id" ||
+    normalized === ".tmp/session-id" ||
+    normalized === "/tmp/${session_id}" ||
+    normalized === ".tmp/${session_id}"
+  ) {
+    return true;
+  }
+  if (sessionId) {
+    if (
+      normalized === `/tmp/${sessionId}` ||
+      normalized === `.tmp/${sessionId}` ||
+      normalized.startsWith(`/tmp/${sessionId}/`) ||
+      normalized.startsWith(`.tmp/${sessionId}/`)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}

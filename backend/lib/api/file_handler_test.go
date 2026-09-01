@@ -144,6 +144,16 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "# Temp Markdown Document", resp.Content)
 		assert.Equal(t, "md", resp.Ext)
+
+		// Also test /tmp/session-id/<filename> path
+		reqSessionIdPath := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=/tmp/session-id/"+filepath.Base(tmpFile.Name()), nil)
+		rrSessionId := httptest.NewRecorder()
+		server.ServeHTTP(rrSessionId, reqSessionIdPath)
+		assert.Equal(t, http.StatusOK, rrSessionId.Code)
+		var respSessionId WorkspaceFileResponse
+		err = json.Unmarshal(rrSessionId.Body.Bytes(), &respSessionId)
+		require.NoError(t, err)
+		assert.Equal(t, "# Temp Markdown Document", respSessionId.Content)
 	})
 
 	t.Run("Read Tmp File - Unauthorized Denied", func(t *testing.T) {

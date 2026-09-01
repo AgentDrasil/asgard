@@ -509,6 +509,9 @@ func TestFilesSearchHandler_TableDriven(t *testing.T) {
 }
 
 func TestFilesHandler_TmpResolution(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
@@ -524,31 +527,108 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 
 	sess, err := repo.GetSession(chatID)
 	require.NoError(t, err)
-	sess.RunDir = "/tmp"
+	sess.RunDir = "/tmp/session-id"
 	require.NoError(t, repo.SaveSession(sess))
 
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	sessionTmp := filepath.Join(home, "tmp", chatID)
+	sessionTmp := filepath.Join(tempHome, "tmp", chatID)
 	require.NoError(t, os.MkdirAll(sessionTmp, 0755))
-	defer func() { _ = os.RemoveAll(sessionTmp) }()
 
 	testFile := filepath.Join(sessionTmp, "test.txt")
 	require.NoError(t, os.WriteFile(testFile, []byte("hello from session tmp"), 0644))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID, nil)
-	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
+	t.Run("File Tree with /tmp/session-id RunDir", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp FileTreeResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	found := false
-	for _, entry := range resp.Entries {
-		if entry.Name == "test.txt" {
-			found = true
-			break
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		found := false
+		for _, entry := range resp.Entries {
+			if entry.Name == "test.txt" {
+				found = true
+				break
+			}
 		}
-	}
-	assert.True(t, found, "expected test.txt in session tmp tree")
+		assert.True(t, found, "expected test.txt in session tmp tree")
+	})
+
+	t.Run("File Tree explicitly requesting /tmp/session-id path", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID+"&path=/tmp/session-id", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		found := false
+		for _, entry := range resp.Entries {
+			if entry.Name == "test.txt" {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected test.txt in /tmp/session-id tree")
+	})
+
+	t.Run("File Content with /tmp/session-id/test.txt", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=/tmp/session-id/test.txt", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "hello from session tmp", resp.Content)
+		assert.Equal(t, "test.txt", resp.Name)
+	})
+
+	t.Run("File Content with /tmp/test.txt", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=/tmp/test.txt", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "hello from session tmp", resp.Content)
+	})
+
+	t.Run("File Content with regular workspace and /tmp/session-id path", func(t *testing.T) {
+		wsDir := t.TempDir()
+		sess.RunDir = wsDir
+		require.NoError(t, repo.SaveSession(sess))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=/tmp/session-id/test.txt", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "hello from session tmp", resp.Content)
+	})
+
+	t.Run("Workspace with tmp/ subfolder is NOT hijacked by session tmp", func(t *testing.T) {
+		wsDir := t.TempDir()
+		sess.RunDir = wsDir
+		require.NoError(t, repo.SaveSession(sess))
+
+		wsTmpDir := filepath.Join(wsDir, "tmp")
+		require.NoError(t, os.MkdirAll(wsTmpDir, 0755))
+		wsTmpFile := filepath.Join(wsTmpDir, "local-temp.txt")
+		require.NoError(t, os.WriteFile(wsTmpFile, []byte("local workspace temp file"), 0644))
+
+		// Requesting workspace relative path tmp/local-temp.txt
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=tmp/local-temp.txt", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "local workspace temp file", resp.Content)
+		assert.Equal(t, "local-temp.txt", resp.Name)
+	})
 }

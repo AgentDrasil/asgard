@@ -67,26 +67,78 @@ func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) 
 	if sess == nil {
 		return "", http.StatusNotFound, errors.New("session not found")
 	}
-	if sess.RunDir == "" {
+
+	runDir := NormalizeSessionRunDir(sess.RunDir, sessionID)
+	if runDir == "" {
 		return "", http.StatusBadRequest, errors.New("session has no associated workspace directory")
 	}
 
-	return NormalizeSessionRunDir(sess.RunDir, sessionID), http.StatusOK, nil
+	return runDir, http.StatusOK, nil
 }
 
-func (s *Server) validateAndResolvePath(runDir, reqPath string) (string, string, int, error) {
+func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath string) (string, string, int, error) {
 	cleanRunDir := filepath.Clean(runDir)
 	evalRunDir, err := filepath.EvalSymlinks(cleanRunDir)
 	if err != nil {
 		return "", "", http.StatusInternalServerError, fmt.Errorf("failed to evaluate workspace directory: %w", err)
 	}
 
-	cleanReq := filepath.Clean(strings.TrimPrefix(reqPath, "/"))
+	cleanReq := filepath.Clean(reqPath)
 	if cleanReq == "." || reqPath == "" {
 		return evalRunDir, "", http.StatusOK, nil
 	}
 
-	absTarget := filepath.Join(evalRunDir, cleanReq)
+	if isTmp, sub := ResolveSessionTmpPath(cleanReq, sessionID); isTmp {
+		baseTmp := GetSessionTmpBaseDir(sessionID)
+		targetBase := baseTmp
+		if evalTmp, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
+			targetBase = evalTmp
+		}
+
+		sub = filepath.Clean(sub)
+		if sub == "." || sub == "" {
+			relResult := ""
+			if evalRunDir != targetBase {
+				relResult = "/tmp"
+			}
+			return targetBase, relResult, http.StatusOK, nil
+		}
+
+		absTarget := filepath.Join(targetBase, sub)
+		relLex, errLex := filepath.Rel(targetBase, absTarget)
+		if errLex != nil || strings.HasPrefix(relLex, "..") {
+			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+		}
+
+		evalTarget, err := filepath.EvalSymlinks(absTarget)
+		if err != nil {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+				return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+			}
+			return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
+		}
+
+		rel, err := filepath.Rel(targetBase, evalTarget)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+		}
+
+		relClean := filepath.ToSlash(rel)
+		if relClean == "." {
+			relClean = ""
+		}
+		if evalRunDir != targetBase {
+			relClean = filepath.ToSlash(filepath.Join("/tmp", relClean))
+		}
+		return evalTarget, relClean, http.StatusOK, nil
+	}
+
+	cleanReqTrimmed := filepath.Clean(strings.TrimPrefix(reqPath, "/"))
+	if cleanReqTrimmed == "." || reqPath == "" {
+		return evalRunDir, "", http.StatusOK, nil
+	}
+
+	absTarget := filepath.Join(evalRunDir, cleanReqTrimmed)
 
 	// Pre-check lexical containment before symlink resolution
 	relLex, errLex := filepath.Rel(evalRunDir, absTarget)
@@ -134,7 +186,7 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	subPath := r.URL.Query().Get("path")
-	targetDir, relPath, code, err := s.validateAndResolvePath(runDir, subPath)
+	targetDir, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, subPath)
 	if err != nil {
 		writeJSONError(w, code, err.Error())
 		return
@@ -245,7 +297,7 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absTarget, relPath, code, err := s.validateAndResolvePath(runDir, filePath)
+	absTarget, relPath, code, err := s.validateAndResolvePath(sessionID, runDir, filePath)
 	if err != nil {
 		writeJSONError(w, code, err.Error())
 		return
