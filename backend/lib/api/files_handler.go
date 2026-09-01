@@ -208,7 +208,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 		}
 
 		// Auto disambiguation
-		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase)
+		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase || evalRunDir == evalTmpBase)
 		if isRunDirSessionTmp {
 			return resolveAsTmp()
 		}

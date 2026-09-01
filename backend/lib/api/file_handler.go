@@ -246,7 +246,7 @@ func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs
 		}
 
 		// scope unprovided or invalid -> auto disambiguation
-		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase)
+		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase || evalRunDir == evalTmpBase)
 		if isRunDirSessionTmp {
 			target := filepath.Join(baseTmp, sub)
 			relLex, errLex := filepath.Rel(baseTmp, target)

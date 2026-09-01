@@ -92,6 +92,10 @@ func TestResolveSessionTmpPath(t *testing.T) {
 		{".tmp/plan.md", true, "plan.md", "/tmp/plan.md"},
 		{"/tmp/session-123/plan.md", true, "plan.md", "/tmp/plan.md"},
 		{"/tmp/sub/file.txt", true, "sub/file.txt", "/tmp/sub/file.txt"},
+		{"/tmp/sub/../x", true, "x", "/tmp/x"},
+		{"/tmp/../../etc/passwd", false, "", ""},
+		{".tmp/sub/../x", true, "x", "/tmp/x"},
+		{".tmp/../../etc/passwd", false, "", ""},
 		// Relative paths without /tmp or .tmp prefix are NOT session tmp paths
 		{"tmp/plan.md", false, "", ""},
 		{"src/main.go", false, "", ""},

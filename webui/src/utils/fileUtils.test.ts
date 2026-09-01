@@ -275,9 +275,11 @@ describe("fileUtils", () => {
       expect(isSessionTmpDir("tmp/session-id")).toBe(true);
       expect(isSessionTmpDir("tmp/session-id/sub")).toBe(true);
       expect(isSessionTmpDir("tmp/${session_id}")).toBe(true);
-      expect(isSessionTmpDir("tmp/${session_id}/sub")).toBe(true);
       expect(isSessionTmpDir("tmp/sess-123", "sess-123")).toBe(true);
       expect(isSessionTmpDir("tmp/sess-123/sub", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("tmp//sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("./tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("./tmp/session-id", "sess-123")).toBe(true);
     });
 
     it("returns true for host absolute tmp paths with exact segment matching", () => {

@@ -375,42 +375,37 @@ export function extractHighlightedLines(html: string, expectedCount?: number): s
  */
 export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {
   if (!runDir || runDir === "." || runDir === "") return true;
-  const normalized = runDir.replace(/\\/g, "/").trim().replace(/\/+$/, "");
+  let normalized = runDir.replace(/\\/g, "/").trim().replace(/\/+/g, "/");
+  normalized = normalized.replace(/^\.\//, "").replace(/\/+$/, "");
 
   // 1. Explicit bare directory or placeholder names (and subpaths)
-  const isBareOrPlaceholder = (path: string): boolean => {
-    return (
-      path === "tmp" ||
-      path === "/tmp" ||
-      path === ".tmp" ||
-      path === "tmp/session-id" ||
-      path === "/tmp/session-id" ||
-      path === ".tmp/session-id" ||
-      path === "tmp/${session_id}" ||
-      path === "/tmp/${session_id}" ||
-      path === ".tmp/${session_id}" ||
-      path.startsWith("tmp/session-id/") ||
-      path.startsWith("/tmp/session-id/") ||
-      path.startsWith(".tmp/session-id/") ||
-      path.startsWith("tmp/${session_id}/") ||
-      path.startsWith("/tmp/${session_id}/") ||
-      path.startsWith(".tmp/${session_id}/")
-    );
-  };
+  const exactBareDirs = ["tmp", "/tmp", ".tmp"];
+  if (exactBareDirs.includes(normalized)) {
+    return true;
+  }
 
-  if (isBareOrPlaceholder(normalized)) {
+  const placeholderPrefixes = [
+    "tmp/session-id",
+    "/tmp/session-id",
+    ".tmp/session-id",
+    "tmp/${session_id}",
+    "/tmp/${session_id}",
+    ".tmp/${session_id}",
+  ];
+
+  if (
+    placeholderPrefixes.some(
+      (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
+    )
+  ) {
     return true;
   }
 
   // 2. Matching with actual sessionId
   if (sessionId) {
+    const sessionPrefixes = [`tmp/${sessionId}`, `/tmp/${sessionId}`, `.tmp/${sessionId}`];
     if (
-      normalized === `tmp/${sessionId}` ||
-      normalized === `/tmp/${sessionId}` ||
-      normalized === `.tmp/${sessionId}` ||
-      normalized.startsWith(`tmp/${sessionId}/`) ||
-      normalized.startsWith(`/tmp/${sessionId}/`) ||
-      normalized.startsWith(`.tmp/${sessionId}/`)
+      sessionPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`))
     ) {
       return true;
     }

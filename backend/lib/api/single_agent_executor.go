@@ -116,7 +116,9 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 			}
 			baseTmp := GetSessionTmpBaseDir(chatID)
 			if rd == baseTmp || strings.HasPrefix(rd, baseTmp+string(os.PathSeparator)) {
-				_ = os.MkdirAll(rd, 0755)
+				if mkdirErr := os.MkdirAll(rd, 0755); mkdirErr != nil {
+					return "", fmt.Errorf("failed to create session temporary run_dir %q: %w", rd, mkdirErr)
+				}
 			}
 			info, err := os.Stat(rd)
 			if err != nil {

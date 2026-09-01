@@ -102,25 +102,8 @@ func isRelativeTmpNarrowRunDir(clean string, chatID string) (bool, string) {
 // isRelativeTmpPrefixedPath checks if clean matches relative "tmp" or "tmp/..." prefix,
 // stripping session-id, ${session_id}, or chatID placeholders, and extracting relative subpath.
 func isRelativeTmpPrefixedPath(clean string, chatID string) (bool, string) {
-	if clean == "tmp" {
-		return true, ""
-	}
-	if clean == "tmp/session-id" || clean == "tmp/${session_id}" {
-		return true, ""
-	}
-	if strings.HasPrefix(clean, "tmp/session-id/") {
-		return true, strings.TrimPrefix(clean, "tmp/session-id/")
-	}
-	if strings.HasPrefix(clean, "tmp/${session_id}/") {
-		return true, strings.TrimPrefix(clean, "tmp/${session_id}/")
-	}
-	if chatID != "" {
-		if clean == "tmp/"+chatID {
-			return true, ""
-		}
-		if strings.HasPrefix(clean, "tmp/"+chatID+"/") {
-			return true, strings.TrimPrefix(clean, "tmp/"+chatID+"/")
-		}
+	if isNarrow, sub := isRelativeTmpNarrowRunDir(clean, chatID); isNarrow {
+		return true, sub
 	}
 	if strings.HasPrefix(clean, "tmp/") {
 		sub := strings.TrimPrefix(clean, "tmp/")
