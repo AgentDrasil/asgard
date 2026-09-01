@@ -10,6 +10,7 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/internal/config"
 	"github.com/AgentDrasil/asgard/simplest/internal/prompt"
 	"github.com/AgentDrasil/asgard/simplest/internal/provider"
+	"github.com/AgentDrasil/asgard/simplest/internal/quota"
 	"github.com/AgentDrasil/asgard/simplest/internal/session"
 	"github.com/AgentDrasil/asgard/simplest/internal/tools"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
@@ -31,6 +32,20 @@ var (
 	DefaultConfigPath       = config.DefaultConfigPath
 	SetGlobalConfig         = config.SetGlobalConfig
 	ResetGlobalConfig       = config.ResetGlobalConfig
+	GetGlobalConfig         = config.GetGlobalConfig
+)
+
+// ---- quota & usage ----
+
+type (
+	ModelUsage   = types.ModelUsage
+	QuotaLimit   = types.QuotaLimit
+	UsageOptions = types.UsageOptions
+)
+
+var (
+	GetModelUsages          = quota.GetModelUsagesFromGlobal
+	GetModelUsagesForConfig = quota.GetModelUsages
 )
 
 // ---- prompt ----

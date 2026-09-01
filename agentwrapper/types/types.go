@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/AgentDrasil/asgard/llms"
 )
 
 // ReportFunc is called for each incremental update emitted by the agent during
@@ -35,28 +37,10 @@ type CLIClient interface {
 }
 
 // QuotaLimit represents a single specific quota limit (e.g. 5h, weekly).
-type QuotaLimit struct {
-	Name        string  `json:"name"`
-	Remaining   float64 `json:"remaining"`
-	RefreshDate int64   `json:"refresh_date,omitempty"`
-}
+type QuotaLimit = llms.QuotaLimit
 
 // ModelUsage represents the quota status for a single model.
-type ModelUsage struct {
-	// Model is the full model name, e.g. "Claude Sonnet 4.6 (Thinking)".
-	Model string `json:"model"`
-
-	// Remaining is the fraction of quota still available in [0, 1].
-	// 1.0 means fully available; 0.8 means 80% remaining.
-	Remaining float64 `json:"remaining"`
-
-	// RefreshDate is the unix timestamp (seconds since epoch) when the quota resets.
-	// 0 when quota is fully available.
-	RefreshDate int64 `json:"refresh_date,omitempty"`
-
-	// Limits holds the breakdown of individual quota limits.
-	Limits []QuotaLimit `json:"limits,omitempty"`
-}
+type ModelUsage = llms.ModelUsage
 
 // PromptResult is the structured response from a Prompt call.
 type PromptResult struct {

@@ -11,6 +11,7 @@ use (
 	./cmd/find-peer
 	./cmd/tester
 	./fakebash
+	./llms
 	./pkg/agentspec
 	./pkg/logger
 	./pkg/pluginsdk

@@ -31,18 +31,7 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	return result, nil
 }
 
-// Usage returns the ModelUsage list for all available models with Remaining = 1.0.
+// Usage returns the ModelUsage list for all available models from simplest.
 func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
-	models, err := Models(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]types.ModelUsage, 0, len(models))
-	for _, m := range models {
-		result = append(result, types.ModelUsage{
-			Model:     m,
-			Remaining: 1.0,
-		})
-	}
-	return result, nil
+	return simplest.GetModelUsages(ctx, simplest.UsageOptions{Detailed: opts.Detailed})
 }

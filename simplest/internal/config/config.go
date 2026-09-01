@@ -384,6 +384,11 @@ func ResetGlobalConfig() {
 	globalCfg = nil
 }
 
+// GetGlobalConfig returns the cached or loaded global configuration.
+func GetGlobalConfig() (*Config, error) {
+	return getOrLoadGlobalConfig()
+}
+
 func getOrLoadGlobalConfig() (*Config, error) {
 	globalMu.RLock()
 	if globalCfg != nil {

@@ -5,44 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms/zai"
 )
 
-type zaiQuotaResponse struct {
-	Success bool   `json:"success"`
-	Code    int    `json:"code"`
-	Msg     string `json:"msg"`
-	Data    struct {
-		Limits []struct {
-			Type          string  `json:"type"`
-			Usage         float64 `json:"usage"`
-			Remaining     float64 `json:"remaining"`
-			Percentage    float64 `json:"percentage"`
-			NextResetTime int64   `json:"nextResetTime"`
-		} `json:"limits"`
-	} `json:"data"`
-}
-
-func loadZaiToken() string {
-	if t := os.Getenv("ZAI_TOKEN"); t != "" {
-		return t
-	}
-	if t := os.Getenv("ZAI_API_TOKEN"); t != "" {
-		return t
-	}
-	if t := os.Getenv("ZAI_API_KEY"); t != "" {
-		return t
-	}
-
+func loadAuthToken() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -62,6 +36,11 @@ func loadZaiToken() string {
 		return ""
 	}
 	return auth.ZaiCodingPlan.Key
+}
+
+func isZaiCodingPlan(model string) bool {
+	m := strings.ToLower(model)
+	return m == "zai-coding-plan" || strings.HasPrefix(m, "zai-coding-plan/")
 }
 
 // Models runs "opencode models", parses the list of models, and returns them.
@@ -89,14 +68,14 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	return result, nil
 }
 
-// Usage runs "opencode models", parses the list of models, and returns a ModelUsage list with Remaining = 1.0.
+// Usage runs "opencode models", parses the list of models, and returns a ModelUsage list.
 func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
 	models, err := Models(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []types.ModelUsage
+	result := make([]types.ModelUsage, 0, len(models))
 	for _, m := range models {
 		result = append(result, types.ModelUsage{
 			Model:     m,
@@ -104,47 +83,29 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 		})
 	}
 
-	var hasZai bool
+	var hasZaiCodingPlan bool
 	for _, m := range result {
-		if strings.HasPrefix(m.Model, "zai-coding-plan") {
-			hasZai = true
+		if isZaiCodingPlan(m.Model) {
+			hasZaiCodingPlan = true
 			break
 		}
 	}
 
-	if hasZai {
-		token := loadZaiToken()
+	if hasZaiCodingPlan {
+		token := loadAuthToken()
 		if token != "" {
 			log.Debug().Msg("fetching zai quota from API")
-			req, err := http.NewRequestWithContext(ctx, "GET", "https://api.z.ai/api/monitor/usage/quota/limit", nil)
+			remainingVal, refreshDate, limits, err := zai.FetchQuota(ctx, token, opts.Detailed)
 			if err != nil {
-				log.Debug().Err(err).Msg("failed to create http request for zai quota")
+				log.Debug().Err(err).Msg("failed to fetch zai quota")
 			} else {
-				req.Header.Set("Authorization", "Bearer "+token)
-				client := &http.Client{Timeout: 10 * time.Second}
-				resp, err := client.Do(req)
-				if err != nil {
-					log.Debug().Err(err).Msg("failed to execute http request for zai quota")
-				} else {
-					defer func() { _ = resp.Body.Close() }()
-					var qr zaiQuotaResponse
-					if err := json.NewDecoder(resp.Body).Decode(&qr); err != nil {
-						log.Debug().Err(err).Msg("failed to decode zai quota response JSON")
-					} else if !qr.Success && qr.Code != 200 && (qr.Code != 0 || len(qr.Data.Limits) == 0) {
-						log.Debug().Int("code", qr.Code).Str("msg", qr.Msg).Msg("zai quota API returned failure")
-					} else {
-						remainingVal, refreshDate, limits := parseZaiLimits(qr.Data.Limits, opts.Detailed)
-						log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
-
-						// If we fetched limits, apply them to the matching model(s)
-						for i := range result {
-							if strings.HasPrefix(result[i].Model, "zai-coding-plan") {
-								result[i].Remaining = remainingVal
-								result[i].RefreshDate = refreshDate
-								if opts.Detailed {
-									result[i].Limits = limits
-								}
-							}
+				log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
+				for i := range result {
+					if isZaiCodingPlan(result[i].Model) {
+						result[i].Remaining = remainingVal
+						result[i].RefreshDate = refreshDate
+						if opts.Detailed {
+							result[i].Limits = limits
 						}
 					}
 				}
@@ -155,50 +116,4 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	}
 
 	return result, nil
-}
-
-func parseZaiLimits(limitsData []struct {
-	Type          string  `json:"type"`
-	Usage         float64 `json:"usage"`
-	Remaining     float64 `json:"remaining"`
-	Percentage    float64 `json:"percentage"`
-	NextResetTime int64   `json:"nextResetTime"`
-}, detailed bool) (float64, int64, []types.QuotaLimit) {
-	var remainingVal = 1.0
-	var refreshDate int64 = 0
-	var foundTokensLimit bool
-	var foundAnyLimit bool
-
-	var limits []types.QuotaLimit
-	for _, limit := range limitsData {
-		remVal := 1.0 - (limit.Percentage / 100.0)
-		if remVal < 0 {
-			remVal = 0
-		} else if remVal > 1.0 {
-			remVal = 1.0
-		}
-		refDate := limit.NextResetTime / 1000
-
-		if detailed {
-			limits = append(limits, types.QuotaLimit{
-				Name:        limit.Type,
-				Remaining:   remVal,
-				RefreshDate: refDate,
-			})
-		}
-
-		if limit.Type == "TOKENS_LIMIT" {
-			if !foundTokensLimit || remVal < remainingVal {
-				remainingVal = remVal
-				refreshDate = refDate
-				foundTokensLimit = true
-			}
-		} else if !foundTokensLimit && !foundAnyLimit {
-			remainingVal = remVal
-			refreshDate = refDate
-			foundAnyLimit = true
-		}
-	}
-
-	return remainingVal, refreshDate, limits
 }

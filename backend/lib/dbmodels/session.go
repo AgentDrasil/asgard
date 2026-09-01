@@ -41,7 +41,7 @@ func (a *Agents) Scan(value interface{}) error {
 
 type Attachment struct {
 	Name     string `json:"name"`
-	Path     string `json:"path"` // 沙箱内部路径，如 "/tmp/attachments/filename.ext"
+	Path     string `json:"path"` // Path inside sandbox, e.g. "/tmp/attachments/filename.ext"
 	Size     int64  `json:"size"`
 	MimeType string `json:"mimeType,omitempty"`
 }

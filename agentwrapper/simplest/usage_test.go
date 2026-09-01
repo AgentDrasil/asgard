@@ -45,3 +45,35 @@ func TestModelsAndUsage(t *testing.T) {
 	assert.Equal(t, 1.0, usages[0].Remaining)
 	assert.Equal(t, int64(0), usages[0].RefreshDate)
 }
+
+func TestUsage_ZaiCodingPlan(t *testing.T) {
+	t.Cleanup(func() {
+		simplest.ResetGlobalConfig()
+	})
+
+	simplest.SetGlobalConfig(&simplest.Config{
+		Providers: map[string]simplest.ProviderConfig{
+			"zai-coding-plan": {API: simplest.APIOpenAICompat, APIKey: "test-zai-key"},
+		},
+		Models: []simplest.ModelConfig{
+			{
+				ID:            "glm-5.3",
+				Name:          "GLM 5.3",
+				Provider:      "zai-coding-plan",
+				ContextWindow: 1048576,
+			},
+		},
+	})
+
+	ctx := context.Background()
+	opts := types.UsageOptions{Detailed: true}
+
+	models, err := Models(ctx, opts)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"zai-coding-plan/glm-5.3"}, models)
+
+	usages, err := Usage(ctx, opts)
+	require.NoError(t, err)
+	require.Len(t, usages, 1)
+	assert.Equal(t, "zai-coding-plan/glm-5.3", usages[0].Model)
+}

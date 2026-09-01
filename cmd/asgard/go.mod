@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/fakebash v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
@@ -75,6 +76,7 @@ replace (
 	github.com/AgentDrasil/asgard/agentwrapper => ../../agentwrapper
 	github.com/AgentDrasil/asgard/backend => ../../backend
 	github.com/AgentDrasil/asgard/fakebash => ../../fakebash
+	github.com/AgentDrasil/asgard/llms => ../../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../../pkg/logger
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../../pkg/pluginsdk

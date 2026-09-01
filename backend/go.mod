@@ -27,6 +27,7 @@ require (
 replace (
 	github.com/AgentDrasil/asgard/agentwrapper => ../agentwrapper
 	github.com/AgentDrasil/asgard/fakebash => ../fakebash
+	github.com/AgentDrasil/asgard/llms => ../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
@@ -38,6 +39,7 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.23.1 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
