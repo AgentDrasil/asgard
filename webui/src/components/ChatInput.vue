@@ -114,7 +114,7 @@ const processFiles = async (files: FileList | File[]) => {
       }
 
       if (currentTotalSize + file.size > MAX_TOTAL_FILES_SIZE) {
-        toast.error(`Total attachment size exceeds 50MB limit`);
+        toast.error("Total attachment size exceeds 50MB limit");
         continue;
       }
 

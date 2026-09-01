@@ -249,6 +249,78 @@ describe("WelcomeScreen.vue", () => {
     await nextTick();
 
     expect(mockToast.error).toHaveBeenCalledWith("Maximum 20 attachments allowed");
+    expect(root.querySelectorAll(".bg-primary-500\\/10")).toHaveLength(0);
+
+    app.unmount();
+  });
+
+  it("validates total file size over 50MB", async () => {
+    mockToast.error.mockClear();
+    const app = createApp({
+      render() {
+        return h(WelcomeScreen, {
+          agents: mockAgents,
+          selectedAgentId: "agent-1",
+          selectedDir: "/workspace/project",
+          prompt: "Build something",
+          loading: false,
+        });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(["a"], "file1.bin");
+    Object.defineProperty(file1, "size", { value: 18 * 1024 * 1024 });
+    const file2 = new File(["b"], "file2.bin");
+    Object.defineProperty(file2, "size", { value: 18 * 1024 * 1024 });
+    const file3 = new File(["c"], "file3.bin");
+    Object.defineProperty(file3, "size", { value: 18 * 1024 * 1024 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [file1, file2, file3],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change"));
+    await nextTick();
+
+    expect(mockToast.error).toHaveBeenCalledWith("Total attachment size exceeds 50MB limit");
+
+    app.unmount();
+  });
+
+  it("deduplicates identical files by name and size", async () => {
+    const app = createApp({
+      render() {
+        return h(WelcomeScreen, {
+          agents: mockAgents,
+          selectedAgentId: "agent-1",
+          selectedDir: "/workspace/project",
+          prompt: "Build something",
+          loading: false,
+        });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(["a"], "dup.txt");
+    Object.defineProperty(file1, "size", { value: 100 });
+    const file2 = new File(["b"], "dup.txt");
+    Object.defineProperty(file2, "size", { value: 100 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [file1, file2],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change"));
+    await nextTick();
+
+    expect(root.textContent).toContain("dup.txt");
+    const chips = root.querySelectorAll('button[title^="Remove "]');
+    expect(chips).toHaveLength(1);
 
     app.unmount();
   });

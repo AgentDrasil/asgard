@@ -405,4 +405,57 @@ describe("ChatInput.vue", () => {
 
     app.unmount();
   });
+
+  it("rejects files exceeding 50MB total size limit", async () => {
+    const toastModule = await import("../composables/useToast");
+    const mockToastError = vi.fn();
+    vi.spyOn(toastModule, "useToast").mockReturnValue({
+      error: mockToastError,
+      success: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+    } as any);
+
+    vi.spyOn(api, "uploadAttachment").mockImplementation(async (_sessId, file) => ({
+      name: file.name,
+      path: `.attachments/${file.name}`,
+      size: file.size,
+      mimeType: file.type,
+    }));
+
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const app = createApp({
+      render() {
+        return h(ChatInput, {
+          sessionId: "test-session-123",
+          loading: false,
+          modelValue: "",
+        });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(["payload1"], "large1.bin", { type: "application/octet-stream" });
+    Object.defineProperty(file1, "size", { value: 18 * 1024 * 1024 });
+    const file2 = new File(["payload2"], "large2.bin", { type: "application/octet-stream" });
+    Object.defineProperty(file2, "size", { value: 18 * 1024 * 1024 });
+    const file3 = new File(["payload3"], "large3.bin", { type: "application/octet-stream" });
+    Object.defineProperty(file3, "size", { value: 18 * 1024 * 1024 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [file1, file2, file3],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change"));
+
+    await vi.waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("Total attachment size exceeds 50MB limit");
+    });
+
+    app.unmount();
+  });
 });
