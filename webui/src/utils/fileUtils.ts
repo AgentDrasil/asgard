@@ -371,30 +371,62 @@ export function extractHighlightedLines(html: string, expectedCount?: number): s
 }
 
 /**
- * Checks whether a given runDir corresponds to the session temporary directory (/tmp, /tmp/session-id, etc.).
+ * Checks whether a given runDir corresponds to the session temporary directory (/tmp, tmp, /tmp/session-id, tmp/session-id, /home/<user>/tmp/<sessionId>, etc.).
  */
 export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {
   if (!runDir || runDir === "." || runDir === "") return true;
   const normalized = runDir.replace(/\\/g, "/").trim().replace(/\/+$/, "");
-  if (
-    normalized === "/tmp" ||
-    normalized === ".tmp" ||
-    normalized === "/tmp/session-id" ||
-    normalized === ".tmp/session-id" ||
-    normalized === "/tmp/${session_id}" ||
-    normalized === ".tmp/${session_id}"
-  ) {
+
+  // 1. Explicit bare directory or placeholder names (and subpaths)
+  const isBareOrPlaceholder = (path: string): boolean => {
+    return (
+      path === "tmp" ||
+      path === "/tmp" ||
+      path === ".tmp" ||
+      path === "tmp/session-id" ||
+      path === "/tmp/session-id" ||
+      path === ".tmp/session-id" ||
+      path === "tmp/${session_id}" ||
+      path === "/tmp/${session_id}" ||
+      path === ".tmp/${session_id}" ||
+      path.startsWith("tmp/session-id/") ||
+      path.startsWith("/tmp/session-id/") ||
+      path.startsWith(".tmp/session-id/") ||
+      path.startsWith("tmp/${session_id}/") ||
+      path.startsWith("/tmp/${session_id}/") ||
+      path.startsWith(".tmp/${session_id}/")
+    );
+  };
+
+  if (isBareOrPlaceholder(normalized)) {
     return true;
   }
+
+  // 2. Matching with actual sessionId
   if (sessionId) {
     if (
+      normalized === `tmp/${sessionId}` ||
       normalized === `/tmp/${sessionId}` ||
       normalized === `.tmp/${sessionId}` ||
+      normalized.startsWith(`tmp/${sessionId}/`) ||
       normalized.startsWith(`/tmp/${sessionId}/`) ||
       normalized.startsWith(`.tmp/${sessionId}/`)
     ) {
       return true;
     }
+
+    // 3. Host absolute path segments matching: /home/<user>/tmp/<sessionId> or /root/tmp/<sessionId> (and subpaths)
+    // Structure must strictly be /home/<user>/tmp/<sessionId>[/...] or /root/tmp/<sessionId>[/...]
+    const parts = normalized.split("/").filter(Boolean);
+    // For /home/<user>/tmp/<sessionId>, parts: ["home", "<user>", "tmp", sessionId, ...] (length >= 4)
+    if (parts.length >= 4 && parts[0] === "home" && parts[2] === "tmp" && parts[3] === sessionId) {
+      return true;
+    }
+    // For /root/tmp/<sessionId>, parts: ["root", "tmp", sessionId, ...] (length >= 3)
+    if (parts.length >= 3 && parts[0] === "root" && parts[1] === "tmp" && parts[2] === sessionId) {
+      return true;
+    }
   }
+
   return false;
 }
