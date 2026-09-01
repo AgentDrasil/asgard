@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import A2UIChart from "./A2UIChart.vue";
-import type { A2UIChartWidget } from "../../types/a2ui";
+import type { A2UIChartWidget } from "../../../types/a2ui";
 
 const mockChartInstances: any[] = [];
 const mockChartConstructor = vi.fn<(...args: any[]) => void>();

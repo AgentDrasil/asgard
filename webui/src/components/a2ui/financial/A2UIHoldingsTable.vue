@@ -2,14 +2,14 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
 import Papa from "papaparse";
-import type { A2UIHoldingsTableWidget, A2UIDataTableColumn } from "../../types/a2ui";
-import { resolveBadgeClass } from "../../utils/badgeHelper";
+import type { A2UIHoldingsTableWidget, A2UIDataTableColumn } from "../../../types/a2ui";
+import { resolveBadgeClass } from "../../../utils/badgeHelper";
 import {
   formatA2UIMoney,
   formatA2UIPercent,
   formatA2UINumber,
   fetchWorkspaceAsset,
-} from "../../utils/a2uiUtils";
+} from "../../../utils/a2uiUtils";
 
 const props = defineProps<{
   widget: A2UIHoldingsTableWidget;

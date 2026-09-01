@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
-import type { A2UIMarkdownWidget } from "../../types/a2ui";
-import MarkdownContent from "../MarkdownContent.vue";
-import { fetchWorkspaceAsset } from "../../utils/a2uiUtils";
+import type { A2UIMarkdownWidget } from "../../../types/a2ui";
+import MarkdownContent from "../../MarkdownContent.vue";
+import { fetchWorkspaceAsset } from "../../../utils/a2uiUtils";
 
 const props = defineProps<{
   widget: A2UIMarkdownWidget;

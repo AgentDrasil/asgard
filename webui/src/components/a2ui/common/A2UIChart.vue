@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onBeforeUnmount, nextTick } from "vue";
 import { Chart, registerables } from "chart.js";
-import type { A2UIChartWidget } from "../../types/a2ui";
-import { formatA2UIMoney } from "../../utils/a2uiUtils";
-import { isDarkTheme } from "../../utils/themeUtils";
+import type { A2UIChartWidget } from "../../../types/a2ui";
+import { formatA2UIMoney } from "../../../utils/a2uiUtils";
+import { isDarkTheme } from "../../../utils/themeUtils";
 
 if (typeof Chart?.register === "function") {
   Chart.register(...registerables);

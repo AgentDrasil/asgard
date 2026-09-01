@@ -2,7 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import type { A2UIManifest, A2UITab } from "../../types/a2ui";
-import A2UIKpiGrid from "./A2UIKpiGrid.vue";
+import A2UIKpiGrid from "./common/A2UIKpiGrid.vue";
 import A2UIWidgetHost from "./A2UIWidgetHost.vue";
 
 const props = defineProps<{

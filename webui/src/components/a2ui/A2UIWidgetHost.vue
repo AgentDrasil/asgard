@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { A2UIWidget } from "../../types/a2ui";
-import A2UIChart from "./A2UIChart.vue";
-import A2UIDataTable from "./A2UIDataTable.vue";
-import A2UIHoldingsTable from "./A2UIHoldingsTable.vue";
-import A2UIMarkdown from "./A2UIMarkdown.vue";
-import A2UIKeyValList from "./A2UIKeyValList.vue";
+import A2UIChart from "./common/A2UIChart.vue";
+import A2UIDataTable from "./common/A2UIDataTable.vue";
+import A2UIHoldingsTable from "./financial/A2UIHoldingsTable.vue";
+import A2UIMarkdown from "./common/A2UIMarkdown.vue";
+import A2UIKeyValList from "./common/A2UIKeyValList.vue";
 
 defineProps<{
   widget: A2UIWidget;

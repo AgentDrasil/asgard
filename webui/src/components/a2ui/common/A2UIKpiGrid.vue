@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Icon } from "@iconify/vue";
-import type { A2UIKpi } from "../../types/a2ui";
-import { formatA2UIMoney, formatA2UIPercent, formatA2UINumber } from "../../utils/a2uiUtils";
+import type { A2UIKpi } from "../../../types/a2ui";
+import { formatA2UIMoney, formatA2UIPercent, formatA2UINumber } from "../../../utils/a2uiUtils";
 
 defineProps<{
   kpis: A2UIKpi[];
