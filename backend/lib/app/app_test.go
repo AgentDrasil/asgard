@@ -329,3 +329,70 @@ db: "invalid_db"
 		_ = appInstance.Stop(ctx)
 	})
 }
+
+func TestApp_New_SelectiveValidation_SimplestOnly(t *testing.T) {
+	// Not parallel because t.Setenv modifies process environment
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SIMPLEST_CONFIG_PATH", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "test-key")
+
+	tempDir := t.TempDir()
+	conf := createTestConfig(t, tempDir)
+	conf.Providers = []string{"simplest"}
+	testDB := db.NewDBForTest(t)
+
+	appInstance, err := New(
+		WithConfig(conf),
+		WithDB(testDB),
+		WithSkipAgentValidation(false),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "ok", snap.Status)
+	assert.Empty(t, snap.Errors)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}
+
+func TestApp_New_SelectiveValidation_DisabledProviderSkipped(t *testing.T) {
+	// Not parallel because t.Setenv modifies process environment
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SIMPLEST_CONFIG_PATH", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	tempDir := t.TempDir()
+	conf := createTestConfig(t, tempDir)
+	conf.Providers = []string{"opencode"}
+	testDB := db.NewDBForTest(t)
+
+	appInstance, err := New(
+		WithConfig(conf),
+		WithDB(testDB),
+		WithSkipAgentValidation(false),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap.Status)
+	require.Len(t, snap.Errors, 1)
+	assert.Contains(t, snap.Errors[0], "opencode setup validation failed")
+	assert.NotContains(t, snap.Errors[0], "agy")
+	assert.NotContains(t, snap.Errors[0], "simplest")
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}

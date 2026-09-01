@@ -170,6 +170,7 @@ func New(opts ...Option) (*App, error) {
 	// 1. Resolve configuration
 	conf := options.Config
 	resolvedConfigPath := options.ConfigPath
+	configLoaded := conf != nil
 	if resolvedConfigPath == "" {
 		resolvedConfigPath = os.Getenv("CONFIG_PATH")
 		if resolvedConfigPath == "" {
@@ -183,21 +184,34 @@ func New(opts ...Option) (*App, error) {
 			log.Warn().Err(err).Msg("failed to load config, entering degraded salvage mode")
 			diagnostics.AddError("config", err.Error())
 			conf = salvageConfig(resolvedConfigPath)
+		} else {
+			configLoaded = true
 		}
 	}
 	if conf != nil && conf.ConfigPath == "" {
 		conf.ConfigPath = resolvedConfigPath
 	}
 
-	// 2. Validate CLI agent setups (unless skipped)
-	if !options.SkipAgentValidation {
-		if err := agentwrapper.ValidateAgySetup(); err != nil {
-			log.Warn().Err(err).Msg("agy agent setup validation failed")
-			diagnostics.AddError("cli_auth", err.Error())
-		}
-		if err := agentwrapper.ValidateOpencodeSetup(); err != nil {
-			log.Warn().Err(err).Msg("opencode agent setup validation failed")
-			diagnostics.AddError("cli_auth", err.Error())
+	// 2. Validate CLI agent setups (unless skipped or config failed to load)
+	if !options.SkipAgentValidation && configLoaded && conf != nil {
+		for _, provider := range conf.GetProviders() {
+			switch provider {
+			case "agy":
+				if err := agentwrapper.ValidateAgySetup(); err != nil {
+					log.Warn().Err(err).Msg("agy agent setup validation failed")
+					diagnostics.AddError("cli_auth", err.Error())
+				}
+			case "opencode":
+				if err := agentwrapper.ValidateOpencodeSetup(); err != nil {
+					log.Warn().Err(err).Msg("opencode agent setup validation failed")
+					diagnostics.AddError("cli_auth", err.Error())
+				}
+			case "simplest":
+				if err := agentwrapper.ValidateSimplestSetup(); err != nil {
+					log.Warn().Err(err).Msg("simplest agent setup validation failed")
+					diagnostics.AddError("cli_auth", err.Error())
+				}
+			}
 		}
 	}
 
