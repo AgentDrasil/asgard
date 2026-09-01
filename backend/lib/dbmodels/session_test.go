@@ -2,6 +2,7 @@ package dbmodels
 
 import (
 	"testing"
+	"time"
 
 	"github.com/moznion/go-optional"
 	"github.com/stretchr/testify/assert"
@@ -293,4 +294,117 @@ func TestResetAllRunningAgents(t *testing.T) {
 	assert.Equal(t, AgentStatusCompleted, sess3.Agents[0].Status)
 	assert.Equal(t, AgentStatusCompleted, sess3.Agents[1].Status)
 	assert.False(t, sess3.IsRunning())
+}
+
+func TestSessionRepository_SearchSessions(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	// Seed sessions
+	now := time.Now()
+	sessionsToSeed := []Session{
+		{
+			ChatID:    "sess-1",
+			Title:     "Refactor Authentication Flow",
+			UpdatedAt: now.Add(-10 * time.Minute),
+		},
+		{
+			ChatID:    "sess-2",
+			Title:     "Fix Bug in auth_controller",
+			UpdatedAt: now.Add(-5 * time.Minute),
+		},
+		{
+			ChatID:    "sess-3",
+			Title:     "Deploy to 100% Canary Cluster",
+			UpdatedAt: now.Add(-2 * time.Minute),
+		},
+		{
+			ChatID:    "sess-4",
+			Title:     "Canary_Release_v2",
+			UpdatedAt: now.Add(-1 * time.Minute),
+		},
+		{
+			ChatID:    "sess-5",
+			Title:     "Canary1Release",
+			UpdatedAt: now.Add(-30 * time.Second),
+		},
+	}
+
+	for _, s := range sessionsToSeed {
+		sess := s
+		require.NoError(t, repo.SaveSession(&sess))
+	}
+
+	tests := []struct {
+		name        string
+		query       string
+		limit       int
+		expectedIDs []string
+	}{
+		{
+			name:        "Case-insensitive match single",
+			query:       "refactor",
+			limit:       10,
+			expectedIDs: []string{"sess-1"},
+		},
+		{
+			name:        "Case-insensitive match multiple ordered by updated_at desc",
+			query:       "AUTH",
+			limit:       10,
+			expectedIDs: []string{"sess-2", "sess-1"},
+		},
+		{
+			name:        "Wildcard percent literal search",
+			query:       "100%",
+			limit:       10,
+			expectedIDs: []string{"sess-3"},
+		},
+		{
+			name:        "Wildcard underscore literal search",
+			query:       "Canary_",
+			limit:       10,
+			expectedIDs: []string{"sess-4"},
+		},
+		{
+			name:        "Empty query returns empty slice",
+			query:       "",
+			limit:       10,
+			expectedIDs: []string{},
+		},
+		{
+			name:        "Whitespace query returns empty slice",
+			query:       "   \t\n ",
+			limit:       10,
+			expectedIDs: []string{},
+		},
+		{
+			name:        "No matching sessions returns empty slice",
+			query:       "nonexistent-keyword-xyz",
+			limit:       10,
+			expectedIDs: []string{},
+		},
+		{
+			name:        "Limit parameter truncates results",
+			query:       "Canary",
+			limit:       2,
+			expectedIDs: []string{"sess-5", "sess-4"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := repo.SearchSessions(tt.query, tt.limit)
+			require.NoError(t, err)
+			require.NotNil(t, results, "Results slice should not be nil")
+
+			resultIDs := make([]string, 0, len(results))
+			for _, r := range results {
+				resultIDs = append(resultIDs, r.ChatID)
+			}
+			assert.Equal(t, tt.expectedIDs, resultIDs)
+		})
+	}
 }

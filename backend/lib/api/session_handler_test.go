@@ -337,3 +337,96 @@ nodes:
 	require.NoError(t, json.Unmarshal(recGetCompleted.Body.Bytes(), &sessRespCompleted))
 	assert.False(t, sessRespCompleted.IsRunning, "Session IsRunning must be false once completed")
 }
+
+func TestSessionHandler_SearchSessions(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	conf := &config.Config{
+		Host: "http://localhost:8080",
+	}
+
+	server := &Server{
+		conf: conf,
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	now := time.Now()
+	// Seed sessions
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-alpha-1",
+		Title:        "Project Alpha Architecture",
+		CurrentAgent: "agent-1",
+		RunDir:       "/tmp/alpha1",
+		Agents: dbmodels.Agents{
+			{Name: "agent-1", Status: dbmodels.AgentStatusRunning},
+		},
+		UpdatedAt: now.Add(-5 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-beta-1",
+		Title:        "Project Beta Plan",
+		CurrentAgent: "agent-2",
+		RunDir:       "/tmp/beta1",
+		Agents: dbmodels.Agents{
+			{Name: "agent-2", Status: dbmodels.AgentStatusCompleted},
+		},
+		UpdatedAt: now.Add(-2 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-alpha-2",
+		Title:        "alpha feature implementation",
+		CurrentAgent: "agent-1",
+		RunDir:       "/tmp/alpha2",
+		Agents: dbmodels.Agents{
+			{Name: "agent-1", Status: dbmodels.AgentStatusCompleted},
+		},
+		UpdatedAt: now.Add(-1 * time.Minute),
+	}))
+
+	// 1. Search with q=alpha -> should match chat-alpha-2 and chat-alpha-1 ordered by updated_at desc
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?q=alpha", nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var alphaSessions []ChatSession
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &alphaSessions))
+	require.Len(t, alphaSessions, 2)
+	assert.Equal(t, "chat-alpha-2", alphaSessions[0].ChatID)
+	assert.Equal(t, "alpha feature implementation", alphaSessions[0].Title)
+	assert.Equal(t, "agent-1", alphaSessions[0].CurrentAgent)
+	assert.Equal(t, "/tmp/alpha2", alphaSessions[0].RunDir)
+	assert.False(t, alphaSessions[0].IsRunning)
+
+	assert.Equal(t, "chat-alpha-1", alphaSessions[1].ChatID)
+	assert.Equal(t, "Project Alpha Architecture", alphaSessions[1].Title)
+	assert.Equal(t, "agent-1", alphaSessions[1].CurrentAgent)
+	assert.Equal(t, "/tmp/alpha1", alphaSessions[1].RunDir)
+	assert.True(t, alphaSessions[1].IsRunning)
+
+	// 2. Search with query=Beta -> should match chat-beta-1
+	reqBeta := httptest.NewRequest(http.MethodGet, "/api/sessions?query=Beta", nil)
+	rrBeta := httptest.NewRecorder()
+	server.ServeHTTP(rrBeta, reqBeta)
+	assert.Equal(t, http.StatusOK, rrBeta.Code)
+
+	var betaSessions []ChatSession
+	require.NoError(t, json.Unmarshal(rrBeta.Body.Bytes(), &betaSessions))
+	require.Len(t, betaSessions, 1)
+	assert.Equal(t, "chat-beta-1", betaSessions[0].ChatID)
+	assert.Equal(t, "Project Beta Plan", betaSessions[0].Title)
+
+	// 3. Search for nonexistent query -> should return 200 OK and empty array []
+	reqNone := httptest.NewRequest(http.MethodGet, "/api/sessions?q=nonexistent", nil)
+	rrNone := httptest.NewRecorder()
+	server.ServeHTTP(rrNone, reqNone)
+	assert.Equal(t, http.StatusOK, rrNone.Code)
+
+	var noneSessions []ChatSession
+	require.NoError(t, json.Unmarshal(rrNone.Body.Bytes(), &noneSessions))
+	require.NotNil(t, noneSessions)
+	assert.Empty(t, noneSessions)
+}

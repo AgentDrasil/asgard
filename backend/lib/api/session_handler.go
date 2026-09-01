@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"uuid"
 
 	"github.com/moznion/go-optional"
@@ -126,8 +127,20 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(chatSession)
 }
 
-func (s *Server) handleGetSessions(w http.ResponseWriter, _ *http.Request) {
-	dbSessions, err := s.repo.GetSessions()
+func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("query"))
+	}
+
+	var dbSessions []dbmodels.Session
+	var err error
+	if q != "" {
+		dbSessions, err = s.repo.SearchSessions(q, 20)
+	} else {
+		dbSessions, err = s.repo.GetSessions()
+	}
+
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

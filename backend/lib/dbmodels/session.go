@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/moznion/go-optional"
@@ -178,6 +179,36 @@ func (r *SessionRepository) GetSessions() ([]Session, error) {
 	var sessions []Session
 	err := r.db.Order("updated_at desc").Limit(20).Find(&sessions).Error
 	return sessions, err
+}
+
+// SearchSessions searches sessions by matching title (case-insensitive substring match).
+// Returns an empty slice (not nil) if query is empty or no matches are found.
+func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, error) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return make([]Session, 0), nil
+	}
+
+	if limit <= 0 {
+		limit = 20
+	} else if limit > 50 {
+		limit = 50
+	}
+
+	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(trimmed)
+
+	var sessions []Session
+	err := r.db.Where("LOWER(title) LIKE LOWER(?) ESCAPE '\\'", "%"+escaped+"%").
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&sessions).Error
+	if err != nil {
+		return nil, err
+	}
+	if sessions == nil {
+		sessions = make([]Session, 0)
+	}
+	return sessions, nil
 }
 
 // DeleteSession deletes a session by chat ID.
