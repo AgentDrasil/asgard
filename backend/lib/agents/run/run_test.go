@@ -303,20 +303,25 @@ func setupTestRunEnv(t *testing.T) string {
 	return tmpDir
 }
 
-func TestRun_ExplicitModel_ProviderDisabled(t *testing.T) {
-	tmpDir := setupTestRunEnv(t)
-
-	agent := &agentspec.Agent{
+func newTestAgent(t *testing.T, tmpDir string, cliTargets []agentspec.CLITarget) *agentspec.Agent {
+	t.Helper()
+	allowedDir := filepath.Join(tmpDir, "allowed-dir")
+	require.NoError(t, os.MkdirAll(allowedDir, 0755))
+	return &agentspec.Agent{
 		Config: agentspec.AgentConfig{
-			ID:   "test-agent",
-			Name: "Test Agent",
-			CLI: []agentspec.CLITarget{
-				{CLI: "opencode", Model: "opencode-model-high"},
-			},
-			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
+			ID:      "test-agent",
+			Name:    "Test Agent",
+			CLI:     cliTargets,
+			RunDirs: []string{allowedDir},
 		},
 	}
-	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+}
+
+func TestRun_ExplicitModel_ProviderDisabled(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "opencode", Model: "opencode-model-high"},
+	})
 
 	conf := &config.Config{
 		Providers: []string{"simplest"},
@@ -329,19 +334,10 @@ func TestRun_ExplicitModel_ProviderDisabled(t *testing.T) {
 
 func TestRun_AutoSelection_FallbackSkipDisabledProvider(t *testing.T) {
 	tmpDir := setupTestRunEnv(t)
-
-	agent := &agentspec.Agent{
-		Config: agentspec.AgentConfig{
-			ID:   "test-agent",
-			Name: "Test Agent",
-			CLI: []agentspec.CLITarget{
-				{CLI: "agy", Model: "agy-model-high"},
-				{CLI: "opencode", Model: "opencode-model-high"},
-			},
-			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
-		},
-	}
-	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-high"},
+		{CLI: "opencode", Model: "opencode-model-high"},
+	})
 
 	conf := &config.Config{
 		Providers: []string{"opencode"},
@@ -354,19 +350,10 @@ func TestRun_AutoSelection_FallbackSkipDisabledProvider(t *testing.T) {
 
 func TestRun_AutoSelection_AllProvidersDisabled(t *testing.T) {
 	tmpDir := setupTestRunEnv(t)
-
-	agent := &agentspec.Agent{
-		Config: agentspec.AgentConfig{
-			ID:   "test-agent",
-			Name: "Test Agent",
-			CLI: []agentspec.CLITarget{
-				{CLI: "agy", Model: "agy-model-high"},
-				{CLI: "opencode", Model: "opencode-model-high"},
-			},
-			RunDirs: []string{filepath.Join(tmpDir, "allowed-dir")},
-		},
-	}
-	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "allowed-dir"), 0755))
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-high"},
+		{CLI: "opencode", Model: "opencode-model-high"},
+	})
 
 	conf := &config.Config{
 		Providers: []string{"simplest"},

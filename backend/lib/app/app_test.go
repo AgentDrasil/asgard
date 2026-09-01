@@ -330,6 +330,45 @@ db: "invalid_db"
 	})
 }
 
+func TestApp_New_DegradedModeOnCorruptedConfig_SkipsAgentValidation(t *testing.T) {
+	// When config fails to load and enters salvage mode, agent validation should be skipped
+	// even when WithSkipAgentValidation(false) is configured.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SIMPLEST_CONFIG_PATH", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	corruptedYAML := `
+port: 7000
+db: "invalid_db"
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(corruptedYAML), 0644))
+
+	appInstance, err := New(
+		WithConfigPath(configPath),
+		WithSkipAgentValidation(false),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+
+	snap := appInstance.Server().Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap.Status)
+	assert.NotEmpty(t, snap.Errors)
+	// Confirm no cli_auth errors were recorded because agent validation was skipped
+	for _, errStr := range snap.Errors {
+		assert.NotContains(t, errStr, "agent setup validation failed")
+	}
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = appInstance.Stop(ctx)
+	})
+}
+
 func TestApp_New_SelectiveValidation_SimplestOnly(t *testing.T) {
 	// Not parallel because t.Setenv modifies process environment
 	t.Setenv("HOME", t.TempDir())

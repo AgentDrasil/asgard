@@ -249,8 +249,7 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 		reqModel := modelOpt.Unwrap()
 		for _, target := range agent.Config.CLI {
 			if target.Model == reqModel {
-				t := target
-				selectedTarget = &t
+				selectedTarget = &target
 				break
 			}
 		}

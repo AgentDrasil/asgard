@@ -193,7 +193,7 @@ func New(opts ...Option) (*App, error) {
 	}
 
 	// 2. Validate CLI agent setups (unless skipped or config failed to load)
-	if !options.SkipAgentValidation && configLoaded && conf != nil {
+	if !options.SkipAgentValidation && configLoaded {
 		for _, provider := range conf.GetProviders() {
 			switch provider {
 			case "agy":
