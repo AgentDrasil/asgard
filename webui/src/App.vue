@@ -23,6 +23,7 @@ import { useAgents } from "./composables/useAgents";
 import { useSessions } from "./composables/useSessions";
 import { useSessionStore } from "./composables/useSessionStore";
 import { useShortcuts } from "./composables/useShortcuts";
+import { resolveGlobalAction } from "./utils/keybindingUtils";
 
 const route = useRoute();
 const router = useRouter();
@@ -53,11 +54,15 @@ const {
 } = useRestartFlow();
 
 const {
+  currentOS,
+  activeBindings,
+  loadCustomKeybindings,
   toggleSidebarShortcut,
   toggleArtifactsShortcut,
   toggleDiffShortcut,
   toggleTerminalShortcut,
   toggleFileViewShortcut,
+  newChatShortcut,
 } = useShortcuts();
 
 const toggleTerminal = (type: "session" | "sidebar" = "session") => {
@@ -70,61 +75,53 @@ const toggleTerminal = (type: "session" | "sidebar" = "session") => {
 };
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
-  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
-  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
-
-  const isBareF1 =
-    (e.code === "F1" || e.key === "F1") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-
-  const isCommandPaletteKey =
-    isBareF1 || (ctrlKey && !e.altKey && (e.code === "KeyP" || e.key === "P" || e.key === "p"));
-
-  if (isCommandPaletteKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    isFileSearchOpen.value = false;
-    isCommandPaletteOpen.value = true;
-    return;
-  }
-
-  if (ctrlKey && !e.shiftKey && (e.code === "Backquote" || e.key === "`")) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isTerminalOpen.value) {
-      isTerminalOpen.value = false;
-    } else {
-      toggleTerminal("session");
-    }
-    return;
-  }
-
   const target = e.target as HTMLElement | null;
-  if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) {
-    return;
-  }
+  const isInputFocused = Boolean(
+    target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable),
+  );
 
-  if (ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyB") {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleSidebar();
-  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyB") {
-    e.preventDefault();
-    e.stopPropagation();
-    if (activeView.value === "vcs") {
-      isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
-    } else if (activeView.value === "file") {
-      isFileTreeOpen.value = !isFileTreeOpen.value;
-    } else {
-      isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
-    }
-  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyD") {
-    e.preventDefault();
-    e.stopPropagation();
-    navigateToVcs();
-  } else if (ctrlKey && e.altKey && !e.shiftKey && e.code === "KeyF") {
-    e.preventDefault();
-    e.stopPropagation();
-    navigateToFiles();
+  const action = resolveGlobalAction(
+    e,
+    activeBindings.value,
+    isInputFocused,
+    isTerminalOpen.value,
+    currentOS.value,
+  );
+
+  if (!action) return;
+
+  switch (action) {
+    case "command_palette":
+      isFileSearchOpen.value = false;
+      isCommandPaletteOpen.value = true;
+      break;
+    case "open_terminal_session":
+      toggleTerminal("session");
+      break;
+    case "close_terminal":
+      isTerminalOpen.value = false;
+      break;
+    case "toggle_sidebar":
+      toggleSidebar();
+      break;
+    case "toggle_artifacts":
+      if (activeView.value === "vcs") {
+        isVCSSidebarOpen.value = !isVCSSidebarOpen.value;
+      } else if (activeView.value === "file") {
+        isFileTreeOpen.value = !isFileTreeOpen.value;
+      } else {
+        isArtifactDrawerOpen.value = !isArtifactDrawerOpen.value;
+      }
+      break;
+    case "toggle_diff":
+      navigateToVcs();
+      break;
+    case "toggle_file_view":
+      navigateToFiles();
+      break;
+    case "new_chat":
+      handleNewChat(closeSidebarOnMobile);
+      break;
   }
 };
 
@@ -281,6 +278,7 @@ onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
   void checkSystemStatus();
+  void loadCustomKeybindings();
   await Promise.all([loadAgents(), loadSessions()]);
 });
 
@@ -356,6 +354,12 @@ const commandList = computed<CommandItem[]>(() => [
     title: "Open Settings",
     icon: "mynaui:cog",
     action: () => router.push("/settings"),
+  },
+  {
+    id: "open-keybindings",
+    title: "Open Keyboard Shortcuts",
+    icon: "material-symbols:keyboard-outline",
+    action: () => router.push("/settings/keybindings"),
   },
   {
     id: "open-logs",
@@ -448,6 +452,7 @@ const commandList = computed<CommandItem[]>(() => [
     id: "new-chat",
     title: "New Chat",
     icon: "mynaui:edit-one",
+    shortcut: newChatShortcut.value,
     action: () => handleNewChat(closeSidebarOnMobile),
   },
   {

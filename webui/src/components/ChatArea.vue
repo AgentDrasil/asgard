@@ -21,6 +21,7 @@ const {
   toggleTerminalShortcut,
   toggleFileViewShortcut,
   findShortcut,
+  matchShortcut,
 } = useShortcuts();
 
 const props = withDefaults(
@@ -153,15 +154,7 @@ const showAgentWorking = computed(() => {
 const findState = useInPageFind(scrollContainerRef);
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
-  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
-  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
-
-  if (
-    ctrlKey &&
-    !e.altKey &&
-    !e.shiftKey &&
-    (e.code === "KeyF" || e.key === "f" || e.key === "F")
-  ) {
+  if (matchShortcut(e, "find")) {
     e.preventDefault();
     e.stopPropagation();
     findState.open();

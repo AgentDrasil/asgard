@@ -7,7 +7,7 @@ import type { Attachment } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 
-const { modKey, sendShortcut } = useShortcuts();
+const { modKey, sendShortcut, matchShortcut } = useShortcuts();
 const toast = useToast();
 
 const props = defineProps<{
@@ -59,7 +59,7 @@ watch(text, (v) => {
 });
 
 const handleKeyDown = (e: KeyboardEvent) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+  if (matchShortcut(e, "send_message")) {
     e.preventDefault();
     handleSend();
   }

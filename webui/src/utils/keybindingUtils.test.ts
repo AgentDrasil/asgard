@@ -226,6 +226,26 @@ describe("keybindingUtils", () => {
       );
     });
 
+    it("triggers command_palette with F1 and Ctrl+Shift+P", () => {
+      const f1Event = new KeyboardEvent("keydown", {
+        code: "F1",
+        key: "F1",
+      });
+      expect(resolveGlobalAction(f1Event, defaultLinuxBindings, false, false, "linux")).toBe(
+        "command_palette",
+      );
+
+      const ctrlShiftPEvent = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        shiftKey: true,
+        code: "KeyP",
+        key: "P",
+      });
+      expect(resolveGlobalAction(ctrlShiftPEvent, defaultLinuxBindings, true, false, "linux")).toBe(
+        "command_palette",
+      );
+    });
+
     it("suppresses post-guard actions when input is focused", () => {
       const event = new KeyboardEvent("keydown", {
         ctrlKey: true,
@@ -254,6 +274,30 @@ describe("keybindingUtils", () => {
         "new_chat",
       );
       expect(resolveGlobalAction(event, defaultLinuxBindings, true, false, "linux")).toBeNull();
+    });
+
+    it("resolves according to customized activeBindings overrides", () => {
+      const customBindings = {
+        ...defaultLinuxBindings,
+        toggle_sidebar: ["Ctrl+Alt+S"],
+      };
+
+      const oldKey = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        code: "KeyB",
+        key: "b",
+      });
+      expect(resolveGlobalAction(oldKey, customBindings, false, false, "linux")).toBeNull();
+
+      const newKey = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        altKey: true,
+        code: "KeyS",
+        key: "s",
+      });
+      expect(resolveGlobalAction(newKey, customBindings, false, false, "linux")).toBe(
+        "toggle_sidebar",
+      );
     });
   });
 });

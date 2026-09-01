@@ -53,6 +53,38 @@ describe("ChatInput.vue", () => {
     app.unmount();
   });
 
+  it("sends message on Ctrl+Enter keydown", async () => {
+    let sentText = "";
+    const app = createApp({
+      render() {
+        return h(ChatInput, {
+          loading: false,
+          modelValue: "Sent via shortcut",
+          onSend: (text: string) => {
+            sentText = text;
+          },
+        });
+      },
+    });
+    app.mount(root);
+
+    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+
+    const enterEvent = new KeyboardEvent("keydown", {
+      ctrlKey: true,
+      key: "Enter",
+      code: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(enterEvent);
+    await nextTick();
+
+    expect(sentText).toBe("Sent via shortcut");
+    app.unmount();
+  });
+
   it("hides attach button when no sessionId is provided", async () => {
     const app = createApp({
       render() {
@@ -408,12 +440,12 @@ describe("ChatInput.vue", () => {
 
   it("rejects files exceeding 50MB total size limit", async () => {
     const toastModule = await import("../composables/useToast");
-    const mockToastError = vi.fn();
+    const mockToastError = vi.fn<(...args: any[]) => void>();
     vi.spyOn(toastModule, "useToast").mockReturnValue({
       error: mockToastError,
-      success: vi.fn(),
-      warning: vi.fn(),
-      info: vi.fn(),
+      success: vi.fn<(...args: any[]) => void>(),
+      warning: vi.fn<(...args: any[]) => void>(),
+      info: vi.fn<(...args: any[]) => void>(),
     } as any);
 
     vi.spyOn(api, "uploadAttachment").mockImplementation(async (_sessId, file) => ({

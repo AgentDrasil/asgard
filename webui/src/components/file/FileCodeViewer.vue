@@ -35,7 +35,7 @@ const emit = defineEmits<{
   (e: "file-loaded", data: WorkspaceFileContent | null): void;
 }>();
 
-const { findShortcut } = useShortcuts();
+const { findShortcut, matchShortcut } = useShortcuts();
 const { highlightToHtml } = useShiki();
 
 const fileData = ref<WorkspaceFileContent | null>(null);
@@ -248,15 +248,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     return;
   }
 
-  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
-  const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
-
-  if (
-    ctrlKey &&
-    !e.altKey &&
-    !e.shiftKey &&
-    (e.code === "KeyF" || e.key === "f" || e.key === "F")
-  ) {
+  if (matchShortcut(e, "find")) {
     e.preventDefault();
     e.stopPropagation();
     findState.open();
