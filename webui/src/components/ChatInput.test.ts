@@ -292,4 +292,117 @@ describe("ChatInput.vue", () => {
 
     app.unmount();
   });
+
+  it("rejects single files exceeding 20MB without calling uploadAttachment", async () => {
+    const uploadSpy = vi.spyOn(api, "uploadAttachment");
+
+    const app = createApp({
+      render() {
+        return h(ChatInput, {
+          loading: false,
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.mount(root);
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const largeFile = new File(["x".repeat(100)], "huge.zip", { type: "application/zip" });
+    Object.defineProperty(largeFile, "size", { value: 25 * 1024 * 1024 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [largeFile],
+      writable: true,
+    });
+
+    fileInput.dispatchEvent(new Event("change"));
+    await nextTick();
+
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(root.textContent).not.toContain("huge.zip");
+
+    app.unmount();
+  });
+
+  it("rejects files when total count exceeds 20", async () => {
+    const uploadSpy = vi.spyOn(api, "uploadAttachment");
+
+    const app = createApp({
+      render() {
+        return h(ChatInput, {
+          loading: false,
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.mount(root);
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = Array.from(
+      { length: 21 },
+      (_, i) => new File(["test"], `file-${i}.txt`, { type: "text/plain" }),
+    );
+
+    Object.defineProperty(fileInput, "files", {
+      value: files,
+      writable: true,
+    });
+
+    fileInput.dispatchEvent(new Event("change"));
+    await nextTick();
+
+    expect(uploadSpy).not.toHaveBeenCalled();
+
+    app.unmount();
+  });
+
+  it("deduplicates files before uploading", async () => {
+    const mockAttachment = {
+      name: "duplicate.txt",
+      path: ".attachments/duplicate.txt",
+      size: 100,
+      mimeType: "text/plain",
+    };
+    const uploadSpy = vi.spyOn(api, "uploadAttachment").mockResolvedValue(mockAttachment);
+
+    const app = createApp({
+      render() {
+        return h(ChatInput, {
+          loading: false,
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.mount(root);
+
+    const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(["content-a"], "duplicate.txt", { type: "text/plain" });
+    Object.defineProperty(file1, "size", { value: 100 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [file1],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change"));
+
+    await vi.waitFor(() => {
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // Try uploading the exact same file again
+    const file2 = new File(["content-b"], "duplicate.txt", { type: "text/plain" });
+    Object.defineProperty(file2, "size", { value: 100 });
+
+    Object.defineProperty(fileInput, "files", {
+      value: [file2],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change"));
+    await nextTick();
+
+    // uploadSpy should still only have been called once
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+
+    app.unmount();
+  });
 });

@@ -87,20 +87,52 @@ const triggerFileInput = () => {
   fileInputRef.value?.click();
 };
 
+const MAX_ATTACHMENTS = 20;
+const MAX_SINGLE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_TOTAL_FILES_SIZE = 50 * 1024 * 1024; // 50MB
+
 const processFiles = async (files: FileList | File[]) => {
   if (!props.sessionId || !files || files.length === 0) return;
 
+  const fileArray = Array.from(files);
+  if (attachments.value.length + fileArray.length > MAX_ATTACHMENTS) {
+    toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed`);
+    return;
+  }
+
+  let currentTotalSize = attachments.value.reduce((sum, a) => sum + a.size, 0);
+
   isUploading.value = true;
   try {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
       if (!file) continue;
+
+      if (file.size > MAX_SINGLE_FILE_SIZE) {
+        toast.error(`File "${file.name}" exceeds 20MB limit`);
+        continue;
+      }
+
+      if (currentTotalSize + file.size > MAX_TOTAL_FILES_SIZE) {
+        toast.error(`Total attachment size exceeds 50MB limit`);
+        continue;
+      }
+
+      // Avoid duplicate file (same name & size)
+      const isDuplicate = attachments.value.some(
+        (existing) => existing.name === file.name && existing.size === file.size,
+      );
+      if (isDuplicate) {
+        continue;
+      }
+
       try {
         const att = await uploadAttachment(props.sessionId, file);
         if (att) {
-          // Avoid duplicate attachment name in list
-          if (!attachments.value.some((a) => a.name === att.name)) {
+          // Avoid duplicate attachment name in list if response differs
+          if (!attachments.value.some((a) => a.name === att.name && a.size === att.size)) {
             attachments.value.push(att);
+            currentTotalSize += file.size;
           }
         }
       } catch (err: any) {
