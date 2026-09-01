@@ -4,8 +4,11 @@ import { Icon } from "@iconify/vue";
 import type { AgentInfo } from "../types";
 import { getDirInfo, getSubdirs } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
+import { useToast } from "../composables/useToast";
+import AttachmentChips from "./chat/AttachmentChips.vue";
 
 const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
+const toast = useToast();
 
 const props = defineProps<{
   agents: AgentInfo[];
@@ -21,9 +24,111 @@ const emit = defineEmits<{
   (e: "update:selectedDir", val: string): void;
   (e: "update:selectedModel", val: string): void;
   (e: "update:prompt", val: string): void;
-  (e: "submit"): void;
+  (e: "submit", files?: File[]): void;
   (e: "toggle-sidebar"): void;
 }>();
+
+const welcomeFiles = ref<File[]>([]);
+const isDragging = ref(false);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+let dragEnterCounter = 0;
+
+const MAX_ATTACHMENTS = 20;
+const MAX_SINGLE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_TOTAL_FILES_SIZE = 50 * 1024 * 1024; // 50MB
+
+const addFiles = (files: FileList | File[]) => {
+  const fileArray = Array.from(files);
+  if (fileArray.length === 0) return;
+
+  if (welcomeFiles.value.length + fileArray.length > MAX_ATTACHMENTS) {
+    toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed`);
+    return;
+  }
+
+  let currentTotalSize = welcomeFiles.value.reduce((sum, f) => sum + f.size, 0);
+
+  for (const file of fileArray) {
+    if (file.size > MAX_SINGLE_FILE_SIZE) {
+      toast.error(`File "${file.name}" exceeds 20MB limit`);
+      return;
+    }
+    if (currentTotalSize + file.size > MAX_TOTAL_FILES_SIZE) {
+      toast.error(`Total attachment size exceeds 50MB limit`);
+      return;
+    }
+    // Avoid duplicate files (same name & size)
+    const isDuplicate = welcomeFiles.value.some(
+      (existing) => existing.name === file.name && existing.size === file.size,
+    );
+    if (!isDuplicate) {
+      welcomeFiles.value.push(file);
+      currentTotalSize += file.size;
+    }
+  }
+};
+
+const removeFile = (index: number) => {
+  welcomeFiles.value.splice(index, 1);
+};
+
+const handleFileChange = (e: Event) => {
+  const target = e.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    addFiles(target.files);
+  }
+  if (fileInputRef.value) {
+    fileInputRef.value.value = "";
+  }
+};
+
+const handlePaste = (e: ClipboardEvent) => {
+  if (props.loading) return;
+  const files = e.clipboardData?.files;
+  if (files && files.length > 0) {
+    e.preventDefault();
+    addFiles(files);
+  }
+};
+
+const handleDragEnter = (e: DragEvent) => {
+  if (props.loading) return;
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+    dragEnterCounter++;
+    isDragging.value = true;
+  }
+};
+
+const handleDragOver = (e: DragEvent) => {
+  if (props.loading) return;
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+    e.preventDefault();
+  }
+};
+
+const handleDragLeave = (_e: DragEvent) => {
+  if (props.loading) return;
+  dragEnterCounter--;
+  if (dragEnterCounter <= 0) {
+    dragEnterCounter = 0;
+    isDragging.value = false;
+  }
+};
+
+const handleDrop = (e: DragEvent) => {
+  dragEnterCounter = 0;
+  isDragging.value = false;
+  if (props.loading) return;
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    addFiles(e.dataTransfer.files);
+  }
+};
+
+const triggerFileInput = () => {
+  if (props.loading) return;
+  fileInputRef.value?.click();
+};
 
 const localModel = computed({
   get: () => props.selectedModel || "",
@@ -207,7 +312,9 @@ const localPrompt = computed({
 
 const handleSubmit = () => {
   if (localPrompt.value.trim() && !props.loading) {
-    emit("submit");
+    const files = welcomeFiles.value.length > 0 ? [...welcomeFiles.value] : undefined;
+    emit("submit", files);
+    welcomeFiles.value = [];
   }
 };
 </script>
@@ -237,8 +344,16 @@ const handleSubmit = () => {
       class="flex-1 flex flex-col justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
     >
       <div
-        class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300"
+        class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300 transition-all"
+        @dragenter="handleDragEnter"
+        @dragover="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop"
+        :class="{ 'ring-2 ring-primary ring-inset': isDragging }"
       >
+        <!-- Hidden file input -->
+        <input ref="fileInputRef" type="file" multiple class="hidden" @change="handleFileChange" />
+
         <!-- App title & intro -->
         <div class="text-center space-y-1.5 sm:space-y-2">
           <h2
@@ -423,17 +538,35 @@ const handleSubmit = () => {
           </div>
         </div>
 
-        <!-- Prompt Textarea -->
-        <div class="form-control w-full">
-          <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text text-base-content">What would you like to build?</span>
-          </label>
+        <!-- Prompt Textarea & Attachments -->
+        <div class="form-control w-full space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="label p-0 font-semibold text-sm text-base-content/85">
+              <span class="label-text text-base-content">What would you like to build?</span>
+            </label>
+            <!-- Attach Files Button -->
+            <button
+              type="button"
+              @click="triggerFileInput"
+              :disabled="loading"
+              class="btn btn-ghost btn-xs gap-1 text-base-content/70 hover:text-base-content"
+              title="Attach files"
+            >
+              <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
+              <span>Attach files</span>
+            </button>
+          </div>
+
+          <!-- Attachment Chips List -->
+          <AttachmentChips :attachments="welcomeFiles" @remove="removeFile" />
+
           <textarea
             v-model="localPrompt"
             class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
             :placeholder="`Type your coding request here... (${sendShortcut} to submit)`"
             @keydown.ctrl.enter.prevent="handleSubmit"
             @keydown.meta.enter.prevent="handleSubmit"
+            @paste="handlePaste"
           ></textarea>
         </div>
 

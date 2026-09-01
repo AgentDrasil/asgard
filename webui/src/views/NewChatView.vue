@@ -13,7 +13,7 @@ const selectedModel = defineModel<string>("selectedModel");
 const prompt = defineModel<string>("prompt", { required: true });
 
 defineEmits<{
-  (e: "submit"): void;
+  (e: "submit", files?: File[]): void;
   (e: "toggle-sidebar"): void;
 }>();
 </script>
@@ -25,7 +25,7 @@ defineEmits<{
     v-model:selectedDir="selectedDir"
     v-model:selectedModel="selectedModel"
     v-model:prompt="prompt"
-    @submit="$emit('submit')"
+    @submit="(files) => $emit('submit', files)"
     @toggle-sidebar="$emit('toggle-sidebar')"
     :loading="loading"
   />

@@ -288,12 +288,13 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown, true);
 });
 
-const handleStartWelcomeChat = () => {
+const handleStartWelcomeChat = (files?: File[]) => {
   if (welcomePrompt.value.trim()) {
     sendMessage(welcomePrompt.value, {
       selectedAgentId: selectedAgentId.value,
       selectedDir: selectedDir.value,
       selectedModel: selectedModel.value,
+      pendingFiles: files,
     });
   }
 };
