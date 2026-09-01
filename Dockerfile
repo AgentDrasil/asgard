@@ -97,6 +97,7 @@ COPY backend/go.mod backend/go.sum* ./backend/
 COPY agentwrapper/go.mod agentwrapper/go.sum* ./agentwrapper/
 COPY agystatusline/go.mod agystatusline/go.sum* ./agystatusline/
 COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
+COPY llms/go.mod llms/go.sum* ./llms/
 COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
 COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
@@ -114,6 +115,7 @@ RUN (cd backend && go mod download) && \
     (cd agentwrapper && go mod download) && \
     (cd agystatusline && go mod download) && \
     (cd fakebash && go mod download) && \
+    (cd llms && go mod download) && \
     (cd pkg/agentspec && go mod download) && \
     (cd pkg/logger && go mod download) && \
     (cd pkg/pluginsdk && go mod download) && \
@@ -131,6 +133,7 @@ COPY backend/ ./backend/
 COPY agentwrapper/ ./agentwrapper/
 COPY agystatusline/ ./agystatusline/
 COPY fakebash/ ./fakebash/
+COPY llms/ ./llms/
 COPY pkg/ ./pkg/
 COPY plugins/ ./plugins/
 COPY cmd/ ./cmd/
