@@ -451,11 +451,13 @@ export async function getFileTree(sessionId: string, subPath = ""): Promise<File
 export async function getFileContent(
   sessionId: string,
   path: string,
+  scope?: "workspace" | "tmp" | string,
 ): Promise<WorkspaceFileContent | null> {
   if (!sessionId || !path) return null;
   try {
+    const scopeParam = scope ? `&scope=${encodeURIComponent(scope)}` : "";
     const res = await apiFetch(
-      `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+      `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}${scopeParam}`,
     );
     if (!res.ok) {
       const body = await res.json().catch(() => null);

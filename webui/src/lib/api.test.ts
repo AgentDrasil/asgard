@@ -204,6 +204,30 @@ describe("API Library", () => {
       );
     });
 
+    it("fetches file content successfully with scope parameter", async () => {
+      const mockContent = {
+        path: "/tmp/output.log",
+        name: "output.log",
+        ext: "log",
+        size: 120,
+        content: "log data",
+        isBinary: false,
+        updatedAt: "2026-08-19T00:00:00Z",
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockContent,
+      } as Response);
+
+      const res = await getFileContent("sess-123", "/tmp/output.log", "tmp");
+      expect(res).toEqual(mockContent);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/files/content?session_id=sess-123&path=%2Ftmp%2Foutput.log&scope=tmp",
+        undefined,
+      );
+    });
+
     it("throws error with backend error message on non-ok response", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue({
         ok: false,

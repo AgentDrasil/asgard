@@ -24,6 +24,7 @@ import type { CommentEntry, WorkspaceFileContent } from "../../types";
 const props = defineProps<{
   sessionId: string;
   filePath: string | null;
+  scope?: "workspace" | "tmp" | string;
   comments: Map<string, CommentEntry>;
 }>();
 
@@ -135,7 +136,7 @@ async function loadContent() {
   widgetInput.value = "";
 
   try {
-    const data = await getFileContent(props.sessionId, props.filePath);
+    const data = await getFileContent(props.sessionId, props.filePath, props.scope);
     if (currentReq !== reqSequence) return;
     if (!data) {
       fileData.value = null;
@@ -168,7 +169,7 @@ async function loadContent() {
 }
 
 watch(
-  () => [props.sessionId, props.filePath],
+  () => [props.sessionId, props.filePath, props.scope],
   () => {
     loadContent();
   },

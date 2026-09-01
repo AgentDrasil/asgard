@@ -568,12 +568,15 @@ const commandList = computed<CommandItem[]>(() => [
       :runDir="activeSession?.runDir || selectedDir"
       @close="isFileSearchOpen = false"
       @select-file="
-        (path) => {
+        (path, scope) => {
           selectedFilePath = path;
           isFileSearchOpen = false;
           const sessionId = activeSessionId || (route.params.id as string);
           if (sessionId) {
-            router.push(buildFilesRoute(sessionId, path));
+            router.push({
+              path: buildFilesRoute(sessionId, path),
+              query: scope ? { scope } : undefined,
+            });
           } else {
             activeView = 'file';
           }

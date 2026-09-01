@@ -156,6 +156,7 @@ export interface FileSearchResult {
   name: string;
   ext: string;
   size: number;
+  scope?: "workspace" | "tmp";
 }
 
 export interface CommentEntry {

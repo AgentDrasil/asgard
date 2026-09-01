@@ -12,7 +12,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "select-file", path: string): void;
+  (e: "select-file", path: string, scope?: string): void;
 }>();
 
 const inputRef = ref<HTMLInputElement | null>(null);
@@ -45,16 +45,16 @@ watch(
   { immediate: true },
 );
 
-function handleSelect(path: string) {
+function handleSelect(path: string, scope?: string) {
   if (!path) return;
-  emit("select-file", path);
+  emit("select-file", path, scope);
   emit("close");
 }
 
 function handleSelectCurrent() {
   const current = selectCurrent();
   if (current) {
-    handleSelect(current.path);
+    handleSelect(current.path, current.scope);
   }
 }
 
@@ -170,7 +170,7 @@ function getDirName(path: string): string {
             <div
               v-for="(file, index) in results"
               :key="file.path"
-              @click="handleSelect(file.path)"
+              @click="handleSelect(file.path, file.scope)"
               @mouseenter="selectedIndex = index"
               :class="[
                 'flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs select-none gap-3',
@@ -185,9 +185,21 @@ function getDirName(path: string): string {
                   class="h-4 w-4 shrink-0 text-base-content/70"
                 />
                 <div class="flex flex-col min-w-0">
-                  <span class="font-medium truncate font-mono text-[13px] text-base-content">{{
-                    file.name
-                  }}</span>
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="font-medium truncate font-mono text-[13px] text-base-content">{{
+                      file.name
+                    }}</span>
+                    <span
+                      v-if="
+                        file.scope === 'tmp' ||
+                        file.path.startsWith('/tmp/') ||
+                        file.path.startsWith('tmp/')
+                      "
+                      class="badge badge-xs badge-neutral text-[10px] px-1 py-0 h-4 font-mono text-base-content/70"
+                    >
+                      tmp
+                    </span>
+                  </div>
                   <span
                     v-if="getDirName(file.path)"
                     class="text-[11px] text-base-content/50 font-mono truncate"

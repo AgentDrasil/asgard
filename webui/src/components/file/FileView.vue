@@ -115,6 +115,14 @@ watch(selectedFilePath, (newPath) => {
   }
 });
 
+const currentScope = computed(() => {
+  const scope = route.query.scope;
+  if (typeof scope === "string" && scope.trim() !== "") {
+    return scope;
+  }
+  return undefined;
+});
+
 const breadcrumbParts = computed(() => {
   if (!selectedFilePath.value) return [];
   return selectedFilePath.value.split("/").filter(Boolean);
@@ -291,6 +299,7 @@ const breadcrumbParts = computed(() => {
           ref="codeViewerRef"
           :sessionId="sessionId"
           :filePath="selectedFilePath"
+          :scope="currentScope"
           :comments="comments"
           @file-loaded="(data) => (currentFileData = data)"
           @add-comment="handleAddComment"
