@@ -209,6 +209,20 @@ export async function getSessions(): Promise<ChatSession[]> {
   return [];
 }
 
+export async function searchSessions(query: string, signal?: AbortSignal): Promise<ChatSession[]> {
+  if (!query || !query.trim()) return [];
+  try {
+    const res = await apiFetch(`/api/sessions?q=${encodeURIComponent(query.trim())}`, { signal });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err: any) {
+    if (err?.name !== "AbortError") {
+      console.error("searchSessions error:", err);
+    }
+    return [];
+  }
+}
+
 export async function createSession(
   currentAgent?: string,
   runDir?: string,
