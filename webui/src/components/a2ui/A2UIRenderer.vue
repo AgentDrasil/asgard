@@ -117,11 +117,7 @@ function getActiveTab(): A2UITab | undefined {
             :key="w.id"
             :class="w.colSpan === 2 ? 'lg:col-span-2' : ''"
           >
-            <A2UIWidgetHost
-              :widget="w"
-              :sessionId="sessionId"
-              :manifestPath="manifestPath"
-            />
+            <A2UIWidgetHost :widget="w" :sessionId="sessionId" :manifestPath="manifestPath" />
           </div>
         </div>
 
@@ -141,22 +137,14 @@ function getActiveTab(): A2UITab | undefined {
                   : ''
             "
           >
-            <A2UIWidgetHost
-              :widget="w"
-              :sessionId="sessionId"
-              :manifestPath="manifestPath"
-            />
+            <A2UIWidgetHost :widget="w" :sessionId="sessionId" :manifestPath="manifestPath" />
           </div>
         </div>
 
         <!-- Stacked Layout (Default) -->
         <div v-else class="space-y-5">
           <div v-for="w in getActiveTab()?.widgets" :key="w.id">
-            <A2UIWidgetHost
-              :widget="w"
-              :sessionId="sessionId"
-              :manifestPath="manifestPath"
-            />
+            <A2UIWidgetHost :widget="w" :sessionId="sessionId" :manifestPath="manifestPath" />
           </div>
         </div>
       </div>

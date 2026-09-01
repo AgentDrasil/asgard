@@ -120,8 +120,7 @@ function renderChart() {
   if (!isDonutOrPie) {
     const isCurrency =
       props.widget.yAxisFormat === "currency" || props.widget.format === "currency";
-    const isPercent =
-      props.widget.yAxisFormat === "percent" || props.widget.format === "percent";
+    const isPercent = props.widget.yAxisFormat === "percent" || props.widget.format === "percent";
     const prefix = isCurrency ? "$" : "";
     const suffix = isPercent ? "%" : "";
 
@@ -137,7 +136,8 @@ function renderChart() {
           font: { size: 10 },
           callback: (value: any) => {
             if (typeof value === "number") {
-              if (value >= 1_000_000_000) return `${prefix}${(value / 1_000_000_000).toFixed(1)}B${suffix}`;
+              if (value >= 1_000_000_000)
+                return `${prefix}${(value / 1_000_000_000).toFixed(1)}B${suffix}`;
               if (value >= 1_000_000) return `${prefix}${(value / 1_000_000).toFixed(1)}M${suffix}`;
               if (value >= 10_000) return `${prefix}${(value / 1_000).toFixed(0)}k${suffix}`;
               return `${prefix}${value}${suffix}`;

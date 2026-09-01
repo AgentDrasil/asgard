@@ -54,9 +54,12 @@ export function isA2UIManifest(
     // Strict 2: Check for valid tabs structure with known A2UI widget types
     const hasValidTabs =
       Array.isArray(parsed.tabs) &&
-      parsed.tabs.some((tab: any) =>
-        Array.isArray(tab.widgets) &&
-        tab.widgets.some((w: any) => w && typeof w.type === "string" && VALID_WIDGET_TYPES.has(w.type)),
+      parsed.tabs.some(
+        (tab: any) =>
+          Array.isArray(tab.widgets) &&
+          tab.widgets.some(
+            (w: any) => w && typeof w.type === "string" && VALID_WIDGET_TYPES.has(w.type),
+          ),
       );
 
     const hasValidKpis =

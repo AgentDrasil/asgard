@@ -30,11 +30,7 @@ export function resolveBadgeClass(val: string | number | undefined | null, col?:
   if (["D", "F"].includes(clean)) return "badge-tag-rose font-bold";
 
   // 2. Tax Regimes / Accounts
-  if (
-    clean.includes("TAX-FREE") ||
-    clean === "FREE" ||
-    hasWord(clean, ["TFSA", "ROTH"])
-  ) {
+  if (clean.includes("TAX-FREE") || clean === "FREE" || hasWord(clean, ["TFSA", "ROTH"])) {
     return "badge-tag-emerald font-semibold";
   }
   if (
