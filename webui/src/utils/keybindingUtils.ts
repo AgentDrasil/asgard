@@ -58,14 +58,25 @@ export const DEFAULT_KEYBINDING_ACTIONS: KeybindingActionDef[] = [
     },
   },
   {
+    id: "search_files",
+    title: "Search Files in Workspace",
+    description: "Search and open files across the workspace",
+    category: "navigation",
+    defaultKeys: {
+      linux: "Ctrl+P",
+      windows: "Ctrl+P",
+      mac: "Cmd+P",
+    },
+  },
+  {
     id: "command_palette",
     title: "Command Palette",
     description: "Open the command palette for quick action search",
     category: "general",
     defaultKeys: {
-      linux: ["Ctrl+P", "Ctrl+Shift+P", "F1"],
-      windows: ["Ctrl+P", "Ctrl+Shift+P", "F1"],
-      mac: ["Cmd+P", "Cmd+Shift+P", "F1"],
+      linux: ["Ctrl+Shift+P", "F1"],
+      windows: ["Ctrl+Shift+P", "F1"],
+      mac: ["Cmd+Shift+P", "F1"],
     },
   },
   {
@@ -464,7 +475,14 @@ export function resolveGlobalAction(
   isTerminalOpen: boolean,
   os: SupportedOS,
 ): string | null {
-  // Pre-guard actions: command_palette, toggle_terminal
+  // Pre-guard actions: search_files, command_palette, toggle_terminal
+  const searchFilesKeys = activeBindings["search_files"] || [];
+  if (isKeyboardEventMatch(event, searchFilesKeys, os)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return "search_files";
+  }
+
   const commandPaletteKeys = activeBindings["command_palette"] || [];
   if (isKeyboardEventMatch(event, commandPaletteKeys, os)) {
     event.preventDefault();

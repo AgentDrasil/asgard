@@ -62,6 +62,7 @@ const {
   toggleDiffShortcut,
   toggleTerminalShortcut,
   toggleFileViewShortcut,
+  searchFilesShortcut,
   newChatShortcut,
 } = useShortcuts();
 
@@ -91,6 +92,15 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   if (!action) return;
 
   switch (action) {
+    case "search_files": {
+      const currentSessionId = activeSessionId.value || (route.params.id as string);
+      if (!currentSessionId) {
+        break;
+      }
+      isCommandPaletteOpen.value = false;
+      isFileSearchOpen.value = true;
+      break;
+    }
     case "command_palette":
       isFileSearchOpen.value = false;
       isCommandPaletteOpen.value = true;
@@ -170,6 +180,12 @@ const navigateToChat = () => {
   } else {
     activeView.value = "chat";
   }
+};
+
+const openFileSearch = () => {
+  const sessionId = activeSessionId.value || (route.params.id as string);
+  if (!sessionId) return;
+  isFileSearchOpen.value = true;
 };
 
 // 1. Agents Composable
@@ -389,8 +405,9 @@ const commandList = computed<CommandItem[]>(() => [
     id: "search-files",
     title: "Search Files in Workspace",
     icon: "octicon:file-code-24",
+    shortcut: searchFilesShortcut.value,
     action: () => {
-      isFileSearchOpen.value = true;
+      openFileSearch();
     },
   },
   {
@@ -536,7 +553,7 @@ const commandList = computed<CommandItem[]>(() => [
             }
           "
           @close-diff="navigateToChat"
-          @open-search="isFileSearchOpen = true"
+          @open-search="openFileSearch"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
           @ask-replied="handleAskReplied"
@@ -564,7 +581,7 @@ const commandList = computed<CommandItem[]>(() => [
       "
     />
 
-    <!-- Command Palette Modal (Ctrl+P / Cmd+P / F1 / Ctrl+Shift+P / Cmd+Shift+P) -->
+    <!-- Command Palette Modal (F1 / Ctrl+Shift+P / Cmd+Shift+P) -->
     <CommandPaletteModal
       :isOpen="isCommandPaletteOpen"
       :commands="commandList"

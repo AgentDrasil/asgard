@@ -23,7 +23,7 @@ describe("useShortcuts", () => {
     vi.restoreAllMocks();
   });
 
-  it("provides 13 computed shortcut strings with modifier keys and isMac boolean", () => {
+  it("provides 12 computed shortcut strings with modifier keys and isMac boolean", () => {
     const {
       isMac: hookIsMac,
       modKey,
@@ -34,8 +34,7 @@ describe("useShortcuts", () => {
       toggleTerminalShortcut,
       sendShortcut,
       commandPaletteShortcut,
-      commandPaletteShiftShortcut,
-      commandPaletteF1Shortcut,
+      searchFilesShortcut,
       toggleFileViewShortcut,
       findShortcut,
       newChatShortcut,
@@ -52,9 +51,8 @@ describe("useShortcuts", () => {
     expect(toggleDiffShortcut.value).toBe(`${expectedMod}+${expectedAlt}+D`);
     expect(toggleTerminalShortcut.value).toBe(`${expectedMod}+\``);
     expect(sendShortcut.value).toBe(`${expectedMod}+Enter`);
-    expect(commandPaletteShortcut.value).toBe(`${expectedMod}+P`);
-    expect(commandPaletteShiftShortcut.value).toBe(`${expectedMod}+Shift+P`);
-    expect(commandPaletteF1Shortcut.value).toBe("F1");
+    expect(commandPaletteShortcut.value).toBe(`${expectedMod}+Shift+P / F1`);
+    expect(searchFilesShortcut.value).toBe(`${expectedMod}+P`);
     expect(toggleFileViewShortcut.value).toBe(`${expectedMod}+${expectedAlt}+F`);
     expect(findShortcut.value).toBe(`${expectedMod}+F`);
     expect(newChatShortcut.value).toBe(`${expectedMod}+${expectedAlt}+N`);

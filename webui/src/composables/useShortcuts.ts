@@ -66,22 +66,13 @@ export function useShortcuts() {
     formatShortcutDisplay(activeBindings.value["send_message"] || [], currentOS.value),
   );
 
-  // Command palette variants:
-  // Note: activeBindings["command_palette"] is string[] (e.g. ["Ctrl+P", "Ctrl+Shift+P", "F1"])
-  const commandPaletteShortcut = computed(() => {
-    const keys = activeBindings.value["command_palette"] || [];
-    // If customized or default, format the primary key or entire list
-    return keys.length > 0 ? formatShortcutDisplay(keys[0], currentOS.value) : "Unassigned";
-  });
+  const commandPaletteShortcut = computed(() =>
+    formatShortcutDisplay(activeBindings.value["command_palette"] || [], currentOS.value),
+  );
 
-  const commandPaletteShiftShortcut = computed(() => {
-    const keys = activeBindings.value["command_palette"] || [];
-    return keys.length > 1
-      ? formatShortcutDisplay(keys[1], currentOS.value)
-      : `${modKey.value}+Shift+P`;
-  });
-
-  const commandPaletteF1Shortcut = computed(() => "F1");
+  const searchFilesShortcut = computed(() =>
+    formatShortcutDisplay(activeBindings.value["search_files"] || [], currentOS.value),
+  );
 
   const toggleFileViewShortcut = computed(() =>
     formatShortcutDisplay(activeBindings.value["toggle_file_view"] || [], currentOS.value),
@@ -183,8 +174,7 @@ export function useShortcuts() {
     toggleTerminalShortcut,
     sendShortcut,
     commandPaletteShortcut,
-    commandPaletteShiftShortcut,
-    commandPaletteF1Shortcut,
+    searchFilesShortcut,
     toggleFileViewShortcut,
     findShortcut,
     newChatShortcut,

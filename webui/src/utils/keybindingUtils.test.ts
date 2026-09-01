@@ -13,14 +13,15 @@ import {
 
 describe("keybindingUtils", () => {
   describe("DEFAULT_KEYBINDING_ACTIONS", () => {
-    it("defines 9 default actions with standard ASCII keys", () => {
-      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(9);
+    it("defines 10 default actions with standard ASCII keys", () => {
+      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(10);
       const ids = DEFAULT_KEYBINDING_ACTIONS.map((a) => a.id);
       expect(ids).toContain("toggle_sidebar");
       expect(ids).toContain("toggle_artifacts");
       expect(ids).toContain("toggle_diff");
       expect(ids).toContain("toggle_file_view");
       expect(ids).toContain("toggle_terminal");
+      expect(ids).toContain("search_files");
       expect(ids).toContain("command_palette");
       expect(ids).toContain("find");
       expect(ids).toContain("send_message");
@@ -29,12 +30,14 @@ describe("keybindingUtils", () => {
 
     it("getDefaultBindingsForOS returns normalized array values", () => {
       const linuxBindings = getDefaultBindingsForOS("linux");
-      expect(linuxBindings["command_palette"]).toEqual(["Ctrl+P", "Ctrl+Shift+P", "F1"]);
+      expect(linuxBindings["search_files"]).toEqual(["Ctrl+P"]);
+      expect(linuxBindings["command_palette"]).toEqual(["Ctrl+Shift+P", "F1"]);
       expect(linuxBindings["toggle_terminal"]).toEqual(["Ctrl+Backquote"]);
       expect(linuxBindings["toggle_sidebar"]).toEqual(["Ctrl+B"]);
 
       const macBindings = getDefaultBindingsForOS("mac");
-      expect(macBindings["command_palette"]).toEqual(["Cmd+P", "Cmd+Shift+P", "F1"]);
+      expect(macBindings["search_files"]).toEqual(["Cmd+P"]);
+      expect(macBindings["command_palette"]).toEqual(["Cmd+Shift+P", "F1"]);
       expect(macBindings["toggle_terminal"]).toEqual(["Cmd+Backquote"]);
     });
   });
@@ -64,7 +67,7 @@ describe("keybindingUtils", () => {
     });
 
     it("matches command palette multi-bindings on linux/mac", () => {
-      const bindings = ["Ctrl+P", "Ctrl+Shift+P", "F1"];
+      const bindings = ["Ctrl+Shift+P", "F1"];
       const f1Event = new KeyboardEvent("keydown", {
         code: "F1",
         key: "F1",
@@ -100,14 +103,14 @@ describe("keybindingUtils", () => {
     });
 
     it("strictly rejects extra modifiers (M-3 negative assertions)", () => {
-      // Ctrl+Alt+P should NOT trigger command_palette (["Ctrl+P", "Ctrl+Shift+P", "F1"])
+      // Ctrl+Alt+P should NOT trigger command_palette (["Ctrl+Shift+P", "F1"])
       const ctrlAltP = new KeyboardEvent("keydown", {
         ctrlKey: true,
         altKey: true,
         code: "KeyP",
         key: "p",
       });
-      expect(isKeyboardEventMatch(ctrlAltP, ["Ctrl+P", "Ctrl+Shift+P", "F1"], "linux")).toBe(false);
+      expect(isKeyboardEventMatch(ctrlAltP, ["Ctrl+Shift+P", "F1"], "linux")).toBe(false);
 
       // Shift+F1 should NOT trigger command_palette
       const shiftF1 = new KeyboardEvent("keydown", {
@@ -115,7 +118,7 @@ describe("keybindingUtils", () => {
         code: "F1",
         key: "F1",
       });
-      expect(isKeyboardEventMatch(shiftF1, ["Ctrl+P", "Ctrl+Shift+P", "F1"], "linux")).toBe(false);
+      expect(isKeyboardEventMatch(shiftF1, ["Ctrl+Shift+P", "F1"], "linux")).toBe(false);
 
       // Ctrl+Shift+` should NOT trigger toggle_terminal (Ctrl+Backquote)
       const ctrlShiftBackquote = new KeyboardEvent("keydown", {
@@ -133,9 +136,7 @@ describe("keybindingUtils", () => {
       expect(formatShortcutDisplay("Cmd+Alt+B", "mac")).toBe("⌘+⌥+B");
       expect(formatShortcutDisplay("Cmd+Alt+B", "linux")).toBe("Cmd+Alt+B");
       expect(formatShortcutDisplay("Ctrl+Backquote", "linux")).toBe("Ctrl+`");
-      expect(formatShortcutDisplay(["Ctrl+P", "Ctrl+Shift+P", "F1"], "linux")).toBe(
-        "Ctrl+P / Ctrl+Shift+P / F1",
-      );
+      expect(formatShortcutDisplay(["Ctrl+Shift+P", "F1"], "linux")).toBe("Ctrl+Shift+P / F1");
       expect(formatShortcutDisplay([], "linux")).toBe("Unassigned");
       expect(formatShortcutDisplay("", "linux")).toBe("Unassigned");
     });
@@ -191,7 +192,7 @@ describe("keybindingUtils", () => {
   describe("resolveGlobalAction", () => {
     const defaultLinuxBindings = getDefaultBindingsForOS("linux");
 
-    it("triggers pre-guard command_palette even when input is focused", () => {
+    it("triggers pre-guard search_files even when input is focused", () => {
       const event = new KeyboardEvent("keydown", {
         ctrlKey: true,
         code: "KeyP",
@@ -202,7 +203,7 @@ describe("keybindingUtils", () => {
       const stopSpy = vi.spyOn(event, "stopPropagation");
 
       const action = resolveGlobalAction(event, defaultLinuxBindings, true, false, "linux");
-      expect(action).toBe("command_palette");
+      expect(action).toBe("search_files");
       expect(preventSpy).toHaveBeenCalled();
       expect(stopSpy).toHaveBeenCalled();
     });

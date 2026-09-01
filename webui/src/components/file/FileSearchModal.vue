@@ -99,7 +99,7 @@ function getDirName(path: string): string {
 <template>
   <Transition name="fade">
     <div
-      v-if="isOpen"
+      v-if="isOpen && sessionId"
       class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-start justify-center pt-20 sm:pt-28 p-4"
       @click.self="emit('close')"
       @keydown.esc.prevent="emit('close')"
