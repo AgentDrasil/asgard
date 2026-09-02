@@ -168,7 +168,11 @@ const handleClear = () => {
 };
 
 const navigateBackToSettings = () => {
-  router.push("/settings");
+  if (window.history.state?.back) {
+    router.back();
+  } else {
+    router.push("/settings");
+  }
 };
 </script>
 

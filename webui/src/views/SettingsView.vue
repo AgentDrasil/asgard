@@ -83,7 +83,11 @@ const navigateToLogs = () => {
 };
 
 const navigateBack = () => {
-  router.push("/newchat");
+  if (window.history.state?.back) {
+    router.back();
+  } else {
+    router.push("/newchat");
+  }
 };
 </script>
 

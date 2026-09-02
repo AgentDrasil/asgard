@@ -92,7 +92,11 @@ onBeforeRouteLeave(() => {
 });
 
 const handleBack = () => {
-  router.push("/settings");
+  if (window.history.state?.back) {
+    router.back();
+  } else {
+    router.push("/settings");
+  }
 };
 
 const handleBeforeUnload = (e: BeforeUnloadEvent) => {
