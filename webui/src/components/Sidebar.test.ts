@@ -14,7 +14,7 @@ vi.mock("@iconify/vue", () => ({
 }));
 
 // Mock vue-router
-const mockPush = vi.fn();
+const mockPush = vi.fn<() => void>();
 let mockCurrentRoute = { path: "/chat/123" };
 
 vi.mock("vue-router", () => ({

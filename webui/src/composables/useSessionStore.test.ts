@@ -775,7 +775,7 @@ describe("useSessionStore", () => {
     vi.spyOn(api, "archiveSession").mockResolvedValue(true);
     vi.spyOn(api, "getSession").mockResolvedValue(mockSessions[0]);
 
-    const pushSpy = vi.fn().mockResolvedValue(undefined);
+    const pushSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const mockRouter: any = { push: pushSpy };
 
     const store = useSessionStore({ router: mockRouter });
