@@ -146,7 +146,7 @@ describe("DashboardView.vue", () => {
     await nextTick();
   };
 
-  it("renders 3-column kanban board and classifies all unarchived completed sessions correctly", async () => {
+  it("renders 4-column kanban board and classifies unarchived sessions into running, waiting, recent-completed, and completed correctly", async () => {
     const app = createApp({
       render() {
         return h(DashboardView);
@@ -166,16 +166,18 @@ describe("DashboardView.vue", () => {
     expect(waitingCards.length).toBe(1);
     expect(waitingCards[0].textContent).toContain("Waiting For Feedback");
 
-    // 3. Completed column (includes both recent and >3h old unarchived sessions)
-    const completedCards = root.querySelectorAll('[data-test="session-card-completed"]');
-    expect(completedCards.length).toBe(2);
-    expect(completedCards[0].textContent).toContain("Recently Done Task");
-    expect(completedCards[1].textContent).toContain("Old Completed Task");
+    // 3. Recently Completed column (< 3h)
+    const recentCards = root.querySelectorAll('[data-test="session-card-recent-completed"]');
+    expect(recentCards.length).toBe(1);
+    expect(recentCards[0].textContent).toContain("Recently Done Task");
 
-    // Old completed task should appear in completed column
-    expect(root.textContent).toContain("Old Completed Task");
+    // 4. Completed column (>= 3h)
+    const completedCards = root.querySelectorAll('[data-test="session-card-completed"]');
+    expect(completedCards.length).toBe(1);
+    expect(completedCards[0].textContent).toContain("Old Completed Task");
 
     // Check path formatting (~/workspace/proj)
+    expect(recentCards[0].textContent).toContain("~/workspace/proj");
     expect(completedCards[0].textContent).toContain("~/workspace/proj");
 
     // Check dynamic agent icon rendering
@@ -255,6 +257,7 @@ describe("DashboardView.vue", () => {
 
     expect(root.querySelectorAll('[data-test="session-card-running"]').length).toBe(0);
     expect(root.querySelectorAll('[data-test="session-card-waiting"]').length).toBe(1);
+    expect(root.querySelectorAll('[data-test="session-card-recent-completed"]').length).toBe(0);
     expect(root.querySelectorAll('[data-test="session-card-completed"]').length).toBe(0);
 
     app.unmount();

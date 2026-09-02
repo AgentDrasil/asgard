@@ -424,6 +424,7 @@ export const en = {
     metrics: {
       running: "Running: {count}",
       waiting: "Waiting: {count}",
+      recentCompleted: "Recently Completed: {count}",
       completed: "Completed: {count}",
       archived: "Archived: {count}",
     },
@@ -441,12 +442,14 @@ export const en = {
     columns: {
       running: "Running",
       waiting: "Waiting for User",
+      recentCompleted: "Recently Completed",
       completed: "Completed",
     },
     cards: {
       runningBadge: "Running",
       waitingBadge: "Awaiting Reply",
-      completedBadge: "Done",
+      recentCompletedBadge: "Done",
+      completedBadge: "Completed",
       archivedBadge: "Archived",
       archiveTooltip: "Archive session",
       activeTime: "Active: {time}",
@@ -458,7 +461,8 @@ export const en = {
     empty: {
       running: "No running tasks",
       waiting: "No questions awaiting reply",
-      completed: "No completed or idle tasks",
+      recentCompleted: "No sessions completed recently",
+      completed: "No earlier completed tasks",
       archivedTitle: "No archived sessions",
       archivedDesc:
         "Click the archive button on a card in the Kanban view to move sessions into this list",
