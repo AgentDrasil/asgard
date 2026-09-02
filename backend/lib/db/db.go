@@ -25,7 +25,7 @@ func NewDB(conf *config.Config) (*gorm.DB, error) {
 
 	config := &gorm.Config{
 		Logger:      newLogger,
-		PrepareStmt: true,
+		PrepareStmt: conf.DB != "sqlite",
 	}
 
 	if conf.DB == "sqlite" {

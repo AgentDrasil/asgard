@@ -51,6 +51,7 @@ func TestNewDB_SQLiteConfig(t *testing.T) {
 		err = db.Raw("PRAGMA journal_mode").Scan(&journalMode).Error
 		require.NoError(t, err)
 		assert.Equal(t, "wal", journalMode)
+		assert.False(t, db.Config.PrepareStmt)
 	})
 
 	t.Run("concurrent writes", func(t *testing.T) {
@@ -79,6 +80,46 @@ func TestNewDB_SQLiteConfig(t *testing.T) {
 		}
 
 		for i := 0; i < concurrency; i++ {
+			require.NoError(t, <-errCh)
+		}
+	})
+
+	t.Run("concurrent transactions and reads", func(t *testing.T) {
+		t.Parallel()
+		dbPath := filepath.Join(t.TempDir(), "concurrent_reads.db")
+		db, err := NewDB(&config.Config{
+			DB:  "sqlite",
+			DSN: dbPath,
+		})
+		require.NoError(t, err)
+
+		type Item struct {
+			ID   uint `gorm:"primaryKey"`
+			Name string
+		}
+		require.NoError(t, db.AutoMigrate(&Item{}))
+
+		const workers = 10
+		errCh := make(chan error, workers*2)
+
+		// Concurrent transactions performing writes
+		for i := 0; i < workers; i++ {
+			go func(idx int) {
+				errCh <- db.Transaction(func(tx *gorm.DB) error {
+					return tx.Create(&Item{Name: "item"}).Error
+				})
+			}(i)
+		}
+
+		// Concurrent reads querying items
+		for i := 0; i < workers; i++ {
+			go func(idx int) {
+				var items []Item
+				errCh <- db.Where("name = ?", "item").Find(&items).Error
+			}(i)
+		}
+
+		for i := 0; i < workers*2; i++ {
 			require.NoError(t, <-errCh)
 		}
 	})
