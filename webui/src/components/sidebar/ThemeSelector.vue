@@ -1,24 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, computed } from "vue";
 import { APP_THEMES } from "../../themes/terminal";
 
-const currentTheme = ref("dark");
+const currentTheme = ref(document.documentElement.getAttribute("data-theme") || "dark");
 
 const daisyUiThemes = computed(() => APP_THEMES.filter((t) => t.group === "DaisyUI Themes"));
 const catppuccinThemes = computed(() => APP_THEMES.filter((t) => t.group === "Catppuccin Themes"));
-
-onMounted(() => {
-  const saved = localStorage.getItem("theme");
-  if (saved && APP_THEMES.some((t) => t.id === saved)) {
-    currentTheme.value = saved;
-  } else {
-    const docTheme = document.documentElement.getAttribute("data-theme");
-    if (docTheme && APP_THEMES.some((t) => t.id === docTheme)) {
-      currentTheme.value = docTheme;
-    }
-  }
-  document.documentElement.setAttribute("data-theme", currentTheme.value);
-});
 
 const onThemeChange = (event: Event) => {
   const target = event.target as HTMLSelectElement;

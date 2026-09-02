@@ -2,6 +2,14 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      try {
+        var t = localStorage.getItem("theme");
+        if (t && /^[a-z0-9-_]+$/.test(t)) {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta
       name="viewport"
