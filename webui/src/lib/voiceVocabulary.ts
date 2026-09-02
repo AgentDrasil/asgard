@@ -1,0 +1,38 @@
+/**
+ * Preset vocabulary for domain bias in Gemini Live speech transcription.
+ * Kept under 100 items for Gemini Live API constraints.
+ */
+export const PRESET_VOICE_VOCABULARY: string[] = [
+  "Asgard",
+  "Git",
+  "GitHub",
+  "Docker",
+  "TypeScript",
+  "JavaScript",
+  "Golang",
+  "Python",
+  "Bubblewrap",
+  "bwrap",
+  "fakebash",
+  "fakebashd",
+  "gRPC",
+  "WebSocket",
+  "AudioWorklet",
+  "Tailwind",
+  "DaisyUI",
+  "Vite",
+  "Pinia",
+  "Vue",
+  "Terminal",
+  "SSE",
+  "REST",
+  "API",
+  "Commit",
+  "Rebase",
+  "Merge",
+  "Diff",
+  "PR",
+  "Pull Request",
+  "Workflow",
+  "DAG",
+];

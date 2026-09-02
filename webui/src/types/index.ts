@@ -241,3 +241,18 @@ export interface KeybindingsApiResponse {
   exists?: boolean;
   error?: string;
 }
+
+export interface VoiceTokenResponse {
+  token: string;
+  expireTime: string;
+  model: string;
+}
+
+export interface TranscriptionEvent {
+  type: "interim" | "final";
+  text: string;
+}
+
+export type VoiceInputState = "idle" | "connecting" | "recording" | "stopping" | "error";
+
+export type VoiceErrorCode = "micDenied" | "voiceUnavailable" | "sessionTimeout" | "network";

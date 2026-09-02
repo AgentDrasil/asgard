@@ -18,6 +18,7 @@ import type {
   SystemLogsResponse,
   SystemStatusResponse,
   TriggerAgentMessageParams,
+  VoiceTokenResponse,
   WorkspaceFileContent,
 } from "../types";
 
@@ -538,4 +539,13 @@ export function getRawFileContentUrl(sessionId: string, path: string): string {
 
 export function getRawWorkspaceFileUrl(sessionId: string, path: string): string {
   return `/api/v1/workspace/file?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`;
+}
+
+export async function getVoiceToken(): Promise<VoiceTokenResponse> {
+  const res = await apiFetch("/api/voice/token", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Failed to fetch voice token: ${res.status}`);
+  }
+  return await res.json();
 }
