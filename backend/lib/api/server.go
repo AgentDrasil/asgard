@@ -55,6 +55,9 @@ type Server struct {
 	shutdownStarted  chan struct{}
 	shutdownOnce     sync.Once
 	shutdownErr      error
+	geminiAPIKey     string
+	voiceAuthURL     string
+	voiceHTTPClient  *http.Client
 }
 
 // ServerOption mutates a Server during construction (functional options).
@@ -139,6 +142,27 @@ func (s *Server) Diagnostics() *SystemDiagnostics {
 	return s.diagnostics
 }
 
+// WithVoiceAPIKey overrides the Gemini API key used for voice tokens.
+func WithVoiceAPIKey(key string) ServerOption {
+	return func(s *Server) {
+		s.geminiAPIKey = key
+	}
+}
+
+// WithVoiceAuthURL overrides the Google GenAI auth tokens endpoint for testing.
+func WithVoiceAuthURL(url string) ServerOption {
+	return func(s *Server) {
+		s.voiceAuthURL = url
+	}
+}
+
+// WithVoiceHTTPClient overrides the HTTP client used for fetching voice tokens.
+func WithVoiceHTTPClient(client *http.Client) ServerOption {
+	return func(s *Server) {
+		s.voiceHTTPClient = client
+	}
+}
+
 func (s *Server) requireRepo(w http.ResponseWriter) bool {
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -163,6 +187,14 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
 	}
 
+	geminiKey := ""
+	if conf != nil {
+		geminiKey = conf.GeminiAPIKey
+	}
+	if geminiKey == "" {
+		geminiKey = os.Getenv("GEMINI_API_KEY")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		conf:            conf,
@@ -172,6 +204,9 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		ctx:             ctx,
 		cancel:          cancel,
 		shutdownStarted: make(chan struct{}),
+		geminiAPIKey:    geminiKey,
+		voiceAuthURL:    DefaultGoogleAuthURL,
+		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
 
 	for _, opt := range opts {
@@ -303,6 +338,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/files/tree", s.handleFilesTree)
 	mux.HandleFunc("GET /api/files/content", s.handleFilesContent)
 	mux.HandleFunc("GET /api/files/search", s.handleFilesSearch)
+	mux.HandleFunc("POST /api/voice/token", s.handleCreateVoiceToken)
 
 	if s.conf != nil && s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))
