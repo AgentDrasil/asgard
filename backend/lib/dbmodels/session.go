@@ -137,8 +137,20 @@ type Session struct {
 	// Artifacts generated in session
 	Artifacts Artifacts `gorm:"type:text"`
 
+	IsArchived bool `gorm:"default:false"`
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// HasUnrepliedAskUser returns true if there is an unreplied ask_user message in the session.
+func (s *Session) HasUnrepliedAskUser() bool {
+	for _, m := range s.Messages {
+		if m.Role == "ask_user" && !m.Replied {
+			return true
+		}
+	}
+	return false
 }
 
 // IsRunning returns true if any agent in the session has status AgentStatusRunning.
@@ -176,15 +188,28 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
-// GetSessions retrieves all sessions.
-func (r *SessionRepository) GetSessions() ([]Session, error) {
+// GetSessions retrieves sessions, filtering by archived status.
+// By default (or when includeArchived is false), only active (unarchived) sessions are returned.
+// When includeArchived is true, only archived sessions are returned.
+func (r *SessionRepository) GetSessions(includeArchived ...bool) ([]Session, error) {
+	archived := len(includeArchived) > 0 && includeArchived[0]
+
 	var sessions []Session
-	err := r.db.Order("updated_at desc").Limit(20).Find(&sessions).Error
+	err := r.db.Where("COALESCE(is_archived, false) = ?", archived).
+		Order("updated_at desc").
+		Limit(20).
+		Find(&sessions).Error
 	return sessions, err
+}
+
+// ArchiveSession archives a session by chat ID.
+func (r *SessionRepository) ArchiveSession(chatID string) error {
+	return r.db.Model(&Session{}).Where("chat_id = ?", chatID).Update("is_archived", true).Error
 }
 
 // SearchSessions searches sessions by matching title (case-insensitive substring match).
 // Returns an empty slice (not nil) if query is empty or no matches are found.
+// By default, it only searches unarchived sessions.
 func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, error) {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
@@ -200,7 +225,7 @@ func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, 
 	escaped := sqlLikeReplacer.Replace(trimmed)
 
 	var sessions []Session
-	err := r.db.Where("LOWER(title) LIKE LOWER(?) ESCAPE '\\'", "%"+escaped+"%").
+	err := r.db.Where("COALESCE(is_archived, false) = false AND LOWER(title) LIKE LOWER(?) ESCAPE '\\'", "%"+escaped+"%").
 		Order("updated_at desc").
 		Limit(limit).
 		Find(&sessions).Error

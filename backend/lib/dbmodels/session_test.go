@@ -426,3 +426,142 @@ func TestSessionRepository_SearchSessions(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionRepository_ArchiveAndFilter(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	now := time.Now()
+	// Insert 2 active sessions and 1 archived session
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:     "active-1",
+		Title:      "Active Session 1",
+		IsArchived: false,
+		UpdatedAt:  now.Add(-2 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:     "active-2",
+		Title:      "Active Session 2",
+		IsArchived: false,
+		UpdatedAt:  now.Add(-1 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:     "archived-1",
+		Title:      "Archived Session 1",
+		IsArchived: true,
+		UpdatedAt:  now.Add(-3 * time.Minute),
+	}))
+
+	// 1. Default GetSessions() should only return the 2 active sessions
+	activeList, err := repo.GetSessions()
+	require.NoError(t, err)
+	require.Len(t, activeList, 2)
+	assert.Equal(t, "active-2", activeList[0].ChatID)
+	assert.Equal(t, "active-1", activeList[1].ChatID)
+	assert.False(t, activeList[0].IsArchived)
+	assert.False(t, activeList[1].IsArchived)
+
+	// 2. GetSessions(false) should also return active sessions
+	activeListExplicit, err := repo.GetSessions(false)
+	require.NoError(t, err)
+	require.Len(t, activeListExplicit, 2)
+
+	// 3. GetSessions(true) should return the 1 archived session
+	archivedList, err := repo.GetSessions(true)
+	require.NoError(t, err)
+	require.Len(t, archivedList, 1)
+	assert.Equal(t, "archived-1", archivedList[0].ChatID)
+	assert.True(t, archivedList[0].IsArchived)
+
+	// 4. ArchiveSession should update IsArchived to true
+	require.NoError(t, repo.ArchiveSession("active-1"))
+
+	sess, err := repo.GetSession("active-1")
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	assert.True(t, sess.IsArchived)
+
+	// Now GetSessions() should return 1 active, and GetSessions(true) should return 2 archived
+	activeListAfter, err := repo.GetSessions()
+	require.NoError(t, err)
+	require.Len(t, activeListAfter, 1)
+	assert.Equal(t, "active-2", activeListAfter[0].ChatID)
+
+	archivedListAfter, err := repo.GetSessions(true)
+	require.NoError(t, err)
+	require.Len(t, archivedListAfter, 2)
+
+	// 5. SearchSessions should not return archived sessions
+	searchResults, err := repo.SearchSessions("Session", 10)
+	require.NoError(t, err)
+	require.Len(t, searchResults, 1)
+	assert.Equal(t, "active-2", searchResults[0].ChatID)
+}
+
+func TestSession_HasUnrepliedAskUser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		session  Session
+		expected bool
+	}{
+		{
+			name: "no messages",
+			session: Session{
+				Messages: Messages{},
+			},
+			expected: false,
+		},
+		{
+			name: "only user and assistant messages",
+			session: Session{
+				Messages: Messages{
+					{Role: "user", Content: "hello"},
+					{Role: "assistant", Content: "world"},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "unreplied ask_user message",
+			session: Session{
+				Messages: Messages{
+					{Role: "user", Content: "hello"},
+					{Role: "ask_user", Content: "approve?", Replied: false},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "replied ask_user message",
+			session: Session{
+				Messages: Messages{
+					{Role: "user", Content: "hello"},
+					{Role: "ask_user", Content: "approve?", Replied: true, ReplyText: "yes"},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "multiple ask_user messages, last one unreplied",
+			session: Session{
+				Messages: Messages{
+					{Role: "ask_user", Content: "approve 1?", Replied: true, ReplyText: "yes"},
+					{Role: "ask_user", Content: "approve 2?", Replied: false},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, tt.session.HasUnrepliedAskUser())
+		})
+	}
+}

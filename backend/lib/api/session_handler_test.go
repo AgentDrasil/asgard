@@ -430,3 +430,94 @@ func TestSessionHandler_SearchSessions(t *testing.T) {
 	require.NotNil(t, noneSessions)
 	assert.Empty(t, noneSessions)
 }
+
+func TestSessionHandler_ArchiveSession(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	conf := &config.Config{
+		Host: "http://localhost:8080",
+	}
+
+	server := &Server{
+		conf: conf,
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	now := time.Now()
+	chatID := "test-archive-chat-id"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		Title:        "Archive Target Session",
+		CurrentAgent: "test-agent",
+		RunDir:       "/tmp/test",
+		IsArchived:   false,
+		CreatedAt:    now.Add(-10 * time.Minute),
+		UpdatedAt:    now.Add(-5 * time.Minute),
+		Messages: []dbmodels.ChatMessage{
+			{
+				ID:      "msg-ask-1",
+				Role:    "ask_user",
+				Content: "Need approval",
+				Replied: false,
+			},
+		},
+	}))
+
+	// 1. Verify GET /api/sessions/:id returns isWaitingForUser: true, isArchived: false, createdAt, updatedAt
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/sessions/"+chatID, nil)
+	rrGet := httptest.NewRecorder()
+	server.ServeHTTP(rrGet, reqGet)
+	assert.Equal(t, http.StatusOK, rrGet.Code)
+
+	var initialSession ChatSession
+	require.NoError(t, json.Unmarshal(rrGet.Body.Bytes(), &initialSession))
+	assert.Equal(t, chatID, initialSession.ChatID)
+	assert.False(t, initialSession.IsArchived)
+	assert.True(t, initialSession.IsWaitingForUser)
+	require.NotNil(t, initialSession.CreatedAt)
+	require.NotNil(t, initialSession.UpdatedAt)
+
+	// 2. Call POST /api/sessions/:id/archive with invalid ID -> 400 Bad Request
+	reqInvalid := httptest.NewRequest(http.MethodPost, "/api/sessions/invalid%20id/archive", nil)
+	rrInvalid := httptest.NewRecorder()
+	server.ServeHTTP(rrInvalid, reqInvalid)
+	assert.Equal(t, http.StatusBadRequest, rrInvalid.Code)
+
+	// 3. Call POST /api/sessions/:id/archive with valid ID -> 200 OK {"status": "success"}
+	reqArchive := httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/archive", nil)
+	rrArchive := httptest.NewRecorder()
+	server.ServeHTTP(rrArchive, reqArchive)
+	assert.Equal(t, http.StatusOK, rrArchive.Code)
+
+	var archiveResp map[string]string
+	require.NoError(t, json.Unmarshal(rrArchive.Body.Bytes(), &archiveResp))
+	assert.Equal(t, "success", archiveResp["status"])
+
+	// 4. Verify GET /api/sessions does NOT return the archived session
+	reqListActive := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	rrListActive := httptest.NewRecorder()
+	server.ServeHTTP(rrListActive, reqListActive)
+	assert.Equal(t, http.StatusOK, rrListActive.Code)
+
+	var activeList []ChatSession
+	require.NoError(t, json.Unmarshal(rrListActive.Body.Bytes(), &activeList))
+	assert.Empty(t, activeList)
+
+	// 5. Verify GET /api/sessions?archived=true DOES return the archived session
+	reqListArchived := httptest.NewRequest(http.MethodGet, "/api/sessions?archived=true", nil)
+	rrListArchived := httptest.NewRecorder()
+	server.ServeHTTP(rrListArchived, reqListArchived)
+	assert.Equal(t, http.StatusOK, rrListArchived.Code)
+
+	var archivedList []ChatSession
+	require.NoError(t, json.Unmarshal(rrListArchived.Body.Bytes(), &archivedList))
+	require.Len(t, archivedList, 1)
+	assert.Equal(t, chatID, archivedList[0].ChatID)
+	assert.True(t, archivedList[0].IsArchived)
+	assert.True(t, archivedList[0].IsWaitingForUser)
+	require.NotNil(t, archivedList[0].CreatedAt)
+	require.NotNil(t, archivedList[0].UpdatedAt)
+}
