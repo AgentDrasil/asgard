@@ -1,4 +1,12 @@
-import { ref, watch, unref, type Ref, type ComputedRef } from "vue";
+import {
+  ref,
+  watch,
+  unref,
+  onScopeDispose,
+  getCurrentScope,
+  type Ref,
+  type ComputedRef,
+} from "vue";
 import { searchFiles } from "../lib/api";
 import type { FileSearchResult } from "../types";
 
@@ -18,6 +26,19 @@ export function useFileSearchState(sessionIdSource?: SessionIdSource, debounceMs
 
   let currentAbortController: AbortController | null = null;
   let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = null;
+      }
+      if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+      }
+    });
+  }
 
   const getSessionId = (): string => {
     if (!sessionIdSource) return "";

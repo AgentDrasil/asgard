@@ -80,7 +80,7 @@ describe("useSessionSearchState", () => {
     expect(selectedIndex.value).toBe(1);
   });
 
-  it("executes search on query change with debounce", async () => {
+  it("executes search on query change with default 200ms debounce", async () => {
     const mockSessions: ChatSession[] = [
       {
         chatID: "101",
@@ -92,19 +92,33 @@ describe("useSessionSearchState", () => {
     ];
     const searchSpy = vi.spyOn(api, "searchSessions").mockResolvedValue(mockSessions);
 
-    const { query, results, isLoading } = useSessionSearchState(150);
+    const { query, results, isLoading } = useSessionSearchState();
 
     query.value = "test";
     await nextTick();
 
-    // Before debounce
+    // Before debounce (100ms)
+    await vi.advanceTimersByTimeAsync(100);
     expect(searchSpy).not.toHaveBeenCalled();
 
-    // Advance timer to trigger debounce
-    await vi.advanceTimersByTimeAsync(150);
+    // Advance remaining timer to reach 200ms default
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(searchSpy).toHaveBeenCalledWith("test", expect.any(AbortSignal));
     expect(results.value).toEqual(mockSessions);
+    expect(isLoading.value).toBe(false);
+  });
+
+  it("handles search error and sets errorMessage", async () => {
+    vi.spyOn(api, "searchSessions").mockRejectedValue(new Error("Network error"));
+    const { query, results, errorMessage, isLoading } = useSessionSearchState(100);
+
+    query.value = "error query";
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(errorMessage.value).toBe("Network error");
+    expect(results.value).toEqual([]);
     expect(isLoading.value).toBe(false);
   });
 

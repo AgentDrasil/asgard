@@ -213,11 +213,15 @@ export async function searchSessions(query: string, signal?: AbortSignal): Promi
   if (!query || !query.trim()) return [];
   try {
     const res = await apiFetch(`/api/sessions?q=${encodeURIComponent(query.trim())}`, { signal });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `Failed to search sessions (${res.status})`);
+    }
     return await res.json();
   } catch (err: any) {
     if (err?.name !== "AbortError") {
       console.error("searchSessions error:", err);
+      throw err;
     }
     return [];
   }

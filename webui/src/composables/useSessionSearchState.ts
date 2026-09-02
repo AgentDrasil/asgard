@@ -1,4 +1,4 @@
-import { ref, watch } from "vue";
+import { ref, watch, onScopeDispose, getCurrentScope } from "vue";
 import { searchSessions } from "../lib/api";
 import type { ChatSession } from "../types";
 
@@ -11,6 +11,19 @@ export function useSessionSearchState(debounceMs = 200) {
 
   let currentAbortController: AbortController | null = null;
   let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = null;
+      }
+      if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+      }
+    });
+  }
 
   const executeSearch = async (searchQuery: string) => {
     if (currentAbortController) {

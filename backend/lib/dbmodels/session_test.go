@@ -392,6 +392,24 @@ func TestSessionRepository_SearchSessions(t *testing.T) {
 			limit:       2,
 			expectedIDs: []string{"sess-5", "sess-4"},
 		},
+		{
+			name:        "Limit <= 0 defaults to 20",
+			query:       "Canary",
+			limit:       0,
+			expectedIDs: []string{"sess-5", "sess-4", "sess-3"},
+		},
+		{
+			name:        "Limit negative defaults to 20",
+			query:       "Canary",
+			limit:       -5,
+			expectedIDs: []string{"sess-5", "sess-4", "sess-3"},
+		},
+		{
+			name:        "Limit > 50 clamped to 50",
+			query:       "Canary",
+			limit:       100,
+			expectedIDs: []string{"sess-5", "sess-4", "sess-3"},
+		},
 	}
 
 	for _, tt := range tests {

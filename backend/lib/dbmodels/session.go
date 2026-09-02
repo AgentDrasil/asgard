@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var sqlLikeReplacer = strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")
+
 type Agents []Agent
 
 // Value implements driver.Valuer
@@ -195,7 +197,7 @@ func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, 
 		limit = 50
 	}
 
-	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(trimmed)
+	escaped := sqlLikeReplacer.Replace(trimmed)
 
 	var sessions []Session
 	err := r.db.Where("LOWER(title) LIKE LOWER(?) ESCAPE '\\'", "%"+escaped+"%").

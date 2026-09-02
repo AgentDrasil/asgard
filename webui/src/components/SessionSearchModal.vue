@@ -43,7 +43,6 @@ watch(
 );
 
 function handleSelect(session: ChatSession) {
-  if (!session) return;
   emit("select-session", session);
   emit("close");
 }
@@ -67,10 +66,7 @@ function getDisplayTitle(session: ChatSession): string {
 }
 
 function getDirName(path?: string): string {
-  if (!path) return "";
-  const lastSlash = path.lastIndexOf("/");
-  if (lastSlash <= 0) return "";
-  return path.substring(0, lastSlash);
+  return path?.trim() || "";
 }
 </script>
 

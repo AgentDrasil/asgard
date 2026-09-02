@@ -218,4 +218,52 @@ describe("SessionSearchModal.vue", () => {
 
     app.unmount();
   });
+
+  it("renders empty results message when no sessions match query", async () => {
+    vi.spyOn(api, "searchSessions").mockResolvedValue([]);
+
+    const app = createApp({
+      render() {
+        return h(SessionSearchModal, { isOpen: true });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    const input = root.querySelector("input") as HTMLInputElement;
+    input.value = "nonexistent";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+
+    expect(root.textContent).toContain('No sessions found matching "nonexistent"');
+    expect(root.querySelectorAll(".cursor-pointer").length).toBe(0);
+
+    app.unmount();
+  });
+
+  it("renders error state when search fails", async () => {
+    vi.spyOn(api, "searchSessions").mockRejectedValue(new Error("Database offline"));
+
+    const app = createApp({
+      render() {
+        return h(SessionSearchModal, { isOpen: true });
+      },
+    });
+    app.mount(root);
+    await nextTick();
+
+    const input = root.querySelector("input") as HTMLInputElement;
+    input.value = "fail";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+
+    expect(root.querySelector(".alert-error")).not.toBeNull();
+    expect(root.textContent).toContain("Database offline");
+
+    app.unmount();
+  });
 });
