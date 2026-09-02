@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useSessionSearchState } from "../composables/useSessionSearchState";
 import type { ChatSession } from "../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   isOpen: boolean;
@@ -91,7 +94,7 @@ function getDirName(path?: string): string {
             ref="inputRef"
             v-model="query"
             type="text"
-            placeholder="Search sessions by title, agent or workspace..."
+            :placeholder="t('sessionSearch.placeholder')"
             class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
             @keydown.down.prevent="navigateNext"
             @keydown.up.prevent="navigatePrevious"
@@ -102,7 +105,7 @@ function getDirName(path?: string): string {
             v-if="query"
             @click="handleClear"
             class="btn btn-ghost btn-xs btn-circle text-base-content/60 hover:text-base-content"
-            title="Clear search"
+            :title="t('sessionSearch.clearSearch')"
           >
             <Icon icon="mynaui:x" class="h-4 w-4" />
           </button>
@@ -127,7 +130,7 @@ function getDirName(path?: string): string {
             class="py-12 px-4 text-center text-base-content/40 text-xs flex flex-col items-center gap-2"
           >
             <Icon icon="octicon:comment-discussion-24" class="h-8 w-8 text-base-content/20" />
-            <span>Type to search sessions</span>
+            <span>{{ t("sessionSearch.typeToSearch") }}</span>
           </div>
 
           <!-- No Results Found State -->
@@ -136,10 +139,7 @@ function getDirName(path?: string): string {
             class="py-12 px-4 text-center text-base-content/50 text-xs flex flex-col items-center gap-2"
           >
             <Icon icon="octicon:search-24" class="h-8 w-8 text-base-content/20" />
-            <span
-              >No sessions found matching
-              <strong class="text-base-content/80">"{{ query }}"</strong></span
-            >
+            <span>{{ t("sessionSearch.noResults", { query }) }}</span>
           </div>
 
           <!-- Results List -->
@@ -175,7 +175,7 @@ function getDirName(path?: string): string {
                       v-if="session.isRunning"
                       class="badge badge-xs badge-success text-success text-[10px] px-1 py-0 h-4 font-mono shrink-0"
                     >
-                      running
+                      {{ t("sessionSearch.running") }}
                     </span>
                   </div>
                   <span
@@ -208,20 +208,20 @@ function getDirName(path?: string): string {
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↑</kbd>
               <kbd class="kbd kbd-xs bg-base-100">↓</kbd>
-              <span class="ml-0.5">navigate</span>
+              <span class="ml-0.5">{{ t("sessionSearch.navigate") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↵</kbd>
-              <span class="ml-0.5">select</span>
+              <span class="ml-0.5">{{ t("sessionSearch.select") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">esc</kbd>
-              <span class="ml-0.5">close</span>
+              <span class="ml-0.5">{{ t("sessionSearch.close") }}</span>
             </span>
           </div>
 
           <div v-if="results.length > 0" class="font-mono">
-            {{ results.length }} session{{ results.length === 1 ? "" : "s" }}
+            {{ t("sessionSearch.sessionsCount", { count: results.length }) }}
           </div>
         </div>
       </div>

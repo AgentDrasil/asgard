@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import SessionList from "./sidebar/SessionList.vue";
+import LanguageSelector from "./sidebar/LanguageSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const { toggleSidebarShortcut, toggleTerminalShortcut } = useShortcuts();
@@ -130,7 +133,7 @@ onUnmounted(() => {
       v-if="isOpen"
       @mousedown="startResize"
       class="hidden md:block absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/40 active:bg-primary z-30 transition-colors"
-      title="Drag to resize sidebar"
+      :title="t('sidebar.dragToResize')"
     />
 
     <!-- Header / Toggle Sidebar Button -->
@@ -149,8 +152,8 @@ onUnmounted(() => {
         class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
         :title="
           isOpen
-            ? `Collapse Sidebar (${toggleSidebarShortcut})`
-            : `Expand Sidebar (${toggleSidebarShortcut})`
+            ? t('sidebar.collapseSidebar', { shortcut: toggleSidebarShortcut })
+            : t('sidebar.expandSidebar', { shortcut: toggleSidebarShortcut })
         "
       >
         <Icon icon="mynaui:sidebar" class="h-5 w-5 fill-current" />
@@ -165,10 +168,10 @@ onUnmounted(() => {
           'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        title="New chat"
+        :title="t('sidebar.newChat')"
       >
         <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
-        <span v-if="isOpen">New chat</span>
+        <span v-if="isOpen">{{ t("sidebar.newChat") }}</span>
       </button>
 
       <button
@@ -180,10 +183,10 @@ onUnmounted(() => {
             : 'text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        :title="isOpen ? undefined : 'Dashboard'"
+        :title="isOpen ? undefined : t('sidebar.dashboard')"
       >
         <Icon icon="mynaui:kanban" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">Dashboard</span>
+        <span v-if="isOpen">{{ t("sidebar.dashboard") }}</span>
       </button>
 
       <button
@@ -192,10 +195,10 @@ onUnmounted(() => {
           'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        title="Search sessions"
+        :title="t('sidebar.searchSessions')"
       >
         <Icon icon="material-symbols:search" class="h-5 w-5 fill-current" />
-        <span v-if="isOpen">Search sessions</span>
+        <span v-if="isOpen">{{ t("sidebar.searchSessions") }}</span>
       </button>
     </div>
 
@@ -210,10 +213,10 @@ onUnmounted(() => {
               ? 'btn-primary shadow-xs'
               : 'btn-ghost text-base-content/70 hover:text-base-content',
           ]"
-          title="List View Mode"
+          :title="t('sidebar.listView')"
         >
           <Icon icon="mynaui:list-solid" class="h-4 w-4 fill-current" />
-          <span>List</span>
+          <span>{{ t("sidebar.list") }}</span>
         </button>
         <button
           @click="toggleViewMode('agent')"
@@ -223,10 +226,10 @@ onUnmounted(() => {
               ? 'btn-primary shadow-xs'
               : 'btn-ghost text-base-content/70 hover:text-base-content',
           ]"
-          title="Group by Agent & Workspace"
+          :title="t('sidebar.byAgentView')"
         >
           <Icon icon="mynaui:grid" class="h-4 w-4 fill-current" />
-          <span>By Agent</span>
+          <span>{{ t("sidebar.byAgent") }}</span>
         </button>
       </div>
     </div>
@@ -247,18 +250,18 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- Bottom Actions & Settings Entry -->
-    <div class="p-2 border-t border-base-100 w-full flex flex-col items-center space-y-0.5">
+    <!-- Bottom Actions, Language Selector & Settings Entry -->
+    <div class="p-2 border-t border-base-100 w-full flex flex-col items-center space-y-1">
       <button
         @click="emit('toggle-terminal')"
         :class="[
           'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        :title="`Terminal (${toggleTerminalShortcut})`"
+        :title="t('sidebar.terminalWithShortcut', { shortcut: toggleTerminalShortcut })"
       >
         <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">Terminal</span>
+        <span v-if="isOpen">{{ t("sidebar.terminal") }}</span>
       </button>
 
       <button
@@ -267,10 +270,10 @@ onUnmounted(() => {
           'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        title="Usage & Quota"
+        :title="t('sidebar.usageAndQuota')"
       >
         <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">Usage & Quota</span>
+        <span v-if="isOpen">{{ t("sidebar.usageAndQuota") }}</span>
       </button>
 
       <button
@@ -282,11 +285,16 @@ onUnmounted(() => {
             : 'text-base-content/85 hover:bg-base-200',
           isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
         ]"
-        title="Settings"
+        :title="t('sidebar.settings')"
       >
         <Icon icon="mynaui:cog" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">Settings</span>
+        <span v-if="isOpen">{{ t("sidebar.settings") }}</span>
       </button>
+
+      <!-- Language Selector -->
+      <div v-if="isOpen" class="w-full pt-1">
+        <LanguageSelector />
+      </div>
     </div>
   </aside>
 </template>

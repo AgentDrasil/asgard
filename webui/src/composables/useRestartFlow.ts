@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { restartServer, getSystemStatus } from "../lib/api";
 import { useToast } from "./useToast";
+import { t } from "../i18n";
 
 let restartAbortController: AbortController | null = null;
 
@@ -28,15 +29,15 @@ export function useRestartFlow() {
     const accepted = await restartServer();
     if (!accepted) {
       isRestarting.value = false;
-      toast.error("Restart request rejected by server (HTTP error). Please check backend logs.", {
-        title: "Restart Failed",
+      toast.error(t("app.restartRejectedMessage"), {
+        title: t("app.restartFailedTitle"),
       });
       return;
     }
 
     // 2. Poll /api/system/status with backoff and timeout (120s)
-    toast.info("Server is restarting, page will refresh automatically once ready...", {
-      title: "Restarting",
+    toast.info(t("app.restartingMessage"), {
+      title: t("app.restartingTitle"),
       duration: 10000,
     });
 
@@ -60,7 +61,9 @@ export function useRestartFlow() {
         if (status !== null) {
           if (abortSignal.aborted) return;
           // Server is back online!
-          toast.success("Server is back online, refreshing page...", { title: "Restart Complete" });
+          toast.success(t("app.restartCompleteMessage"), {
+            title: t("app.restartCompleteTitle"),
+          });
           setTimeout(() => {
             if (!abortSignal.aborted) {
               window.location.reload();
@@ -75,10 +78,10 @@ export function useRestartFlow() {
 
       // Timeout reached
       isRestarting.value = false;
-      toast.error(
-        "Server restart probe timed out (120s). If the container is not configured with a restart policy (e.g. --restart=always), check Docker container status manually (docker ps / docker logs).",
-        { title: "Restart Timeout", duration: 0 },
-      );
+      toast.error(t("app.restartTimeoutMessage"), {
+        title: t("app.restartTimeoutTitle"),
+        duration: 0,
+      });
     };
 
     void pollStatus();

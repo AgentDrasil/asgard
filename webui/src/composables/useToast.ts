@@ -1,11 +1,13 @@
 import { ref, readonly } from "vue";
 import type { ToastItem } from "../types";
+import { translateServerMessage } from "../i18n/serverMessages";
 
 export type ToastType = "info" | "success" | "warning" | "error";
 
 export interface ToastOptions {
   title?: string;
   duration?: number;
+  translate?: boolean;
 }
 
 const toasts = ref<ToastItem[]>([]);
@@ -46,10 +48,12 @@ export function useToast() {
     const duration =
       options?.duration !== undefined ? options.duration : type === "error" ? 0 : 5000;
 
+    const finalMessage = options?.translate ? translateServerMessage(message) : message;
+
     const item: ToastItem = {
       id,
       type,
-      message,
+      message: finalMessage,
       title: options?.title,
       duration,
       timestamp: Date.now(),
@@ -61,7 +65,7 @@ export function useToast() {
     }
 
     // Avoid duplicate toast with identical type and message in active floating toasts
-    const existing = toasts.value.find((t) => t.type === type && t.message === message);
+    const existing = toasts.value.find((t) => t.type === type && t.message === finalMessage);
     if (existing) {
       return existing.id;
     }
@@ -84,6 +88,8 @@ export function useToast() {
   const warning = (message: string, options?: ToastOptions) =>
     addToast("warning", message, options);
   const error = (message: string, options?: ToastOptions) => addToast("error", message, options);
+  const errorFromServer = (rawMessage: string, options?: ToastOptions) =>
+    addToast("error", rawMessage, { ...options, translate: true });
 
   return {
     toasts: readonly(toasts),
@@ -96,5 +102,6 @@ export function useToast() {
     success,
     warning,
     error,
+    errorFromServer,
   };
 }

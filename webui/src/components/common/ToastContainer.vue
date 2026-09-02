@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import { useToast } from "../../composables/useToast";
 import type { ToastItem } from "../../types";
 
+const { t } = useI18n();
 const { toasts, removeToast } = useToast();
 const copiedId = ref<string | null>(null);
 
@@ -71,8 +73,8 @@ const alertIcon = (type: ToastItem["type"]) => {
         <button
           @click="copyMessage(toast)"
           class="btn btn-ghost btn-xs btn-circle text-current hover:bg-current/15"
-          title="Copy notification"
-          aria-label="Copy notification"
+          :title="t('toasts.copyNotification')"
+          :aria-label="t('toasts.copyNotification')"
         >
           <Icon
             :icon="copiedId === toast.id ? 'solar:check-circle-linear' : 'solar:copy-linear'"
@@ -82,8 +84,8 @@ const alertIcon = (type: ToastItem["type"]) => {
         <button
           @click="removeToast(toast.id)"
           class="btn btn-ghost btn-xs btn-circle text-current hover:bg-current/15"
-          title="Close notification"
-          aria-label="Close notification"
+          :title="t('toasts.closeNotification')"
+          :aria-label="t('toasts.closeNotification')"
         >
           <Icon icon="solar:close-circle-linear" class="w-4 h-4" />
         </button>

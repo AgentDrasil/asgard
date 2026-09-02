@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import type { ChatSession, AgentInfo } from "../../types";
 import { getAgentIcon } from "../../utils/agentUtils";
 import SessionItem from "../SessionItem.vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   sessions: ChatSession[];
@@ -33,7 +36,7 @@ const toggleWorkspaceCollapse = (key: string) => {
 
 // Helper for display path of runDir / workspace
 const formatWorkspaceName = (runDir?: string): string => {
-  if (!runDir) return "Default Workspace";
+  if (!runDir) return t("sidebar.defaultWorkspace");
   const trimmed = runDir.replace(/[/\\]+$/, "");
   const parts = trimmed.split(/[/\\]/);
   return parts[parts.length - 1] || runDir;
@@ -56,8 +59,8 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
   const agentMap: Record<string, Record<string, ChatSession[]>> = {};
 
   for (const session of props.sessions) {
-    const agentKey = session.currentAgent || "Unknown Agent";
-    const dirKey = session.runDir || "Default Workspace";
+    const agentKey = session.currentAgent || t("sidebar.unknownAgent");
+    const dirKey = session.runDir || t("sidebar.defaultWorkspace");
 
     if (!agentMap[agentKey]) {
       agentMap[agentKey] = {};
@@ -90,7 +93,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
 
 <template>
   <div v-if="sessions.length === 0" class="text-xs text-base-content/50 text-center py-6">
-    No active sessions
+    {{ t("sidebar.noActiveSessions") }}
   </div>
 
   <!-- 1. List Mode -->
@@ -135,7 +138,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
           <button
             @click.stop="emit('new-chat', agentGroup.agentName)"
             class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
-            title="New chat with this agent"
+            :title="t('sidebar.newChatWithAgent')"
           >
             <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
           </button>
@@ -171,7 +174,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
               <button
                 @click.stop="emit('new-chat', agentGroup.agentName, wsGroup.runDir)"
                 class="btn btn-ghost btn-xs p-1 h-6 min-h-0 w-6 rounded text-base-content/70 hover:text-primary hover:bg-base-300 flex items-center justify-center"
-                title="New chat with this agent and workspace"
+                :title="t('sidebar.newChatWithAgentAndWorkspace')"
               >
                 <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
               </button>

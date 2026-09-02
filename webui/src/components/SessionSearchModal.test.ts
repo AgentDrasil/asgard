@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import SessionSearchModal from "./SessionSearchModal.vue";
+import { i18n, setLocale } from "../i18n";
 import * as api from "../lib/api";
 import type { ChatSession } from "../types";
 
@@ -36,6 +37,7 @@ describe("SessionSearchModal.vue", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    setLocale("en", false);
     root = document.createElement("div");
     document.body.appendChild(root);
   });
@@ -54,6 +56,7 @@ describe("SessionSearchModal.vue", () => {
         return h(SessionSearchModal, { isOpen: true });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -78,6 +81,7 @@ describe("SessionSearchModal.vue", () => {
         return h(SessionSearchModal, { isOpen: true });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -129,6 +133,7 @@ describe("SessionSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -166,6 +171,7 @@ describe("SessionSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -207,6 +213,7 @@ describe("SessionSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -227,6 +234,7 @@ describe("SessionSearchModal.vue", () => {
         return h(SessionSearchModal, { isOpen: true });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -251,6 +259,7 @@ describe("SessionSearchModal.vue", () => {
         return h(SessionSearchModal, { isOpen: true });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -263,6 +272,25 @@ describe("SessionSearchModal.vue", () => {
 
     expect(root.querySelector(".alert-error")).not.toBeNull();
     expect(root.textContent).toContain("Database offline");
+
+    app.unmount();
+  });
+
+  it("renders localized UI in Chinese", async () => {
+    setLocale("zh-CN", false);
+
+    const app = createApp({
+      render() {
+        return h(SessionSearchModal, { isOpen: true });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const input = root.querySelector("input") as HTMLInputElement;
+    expect(input.placeholder).toBe("按标题、Agent 或工作区搜索会话...");
+    expect(root.textContent).toContain("输入关键词搜索会话");
 
     app.unmount();
   });

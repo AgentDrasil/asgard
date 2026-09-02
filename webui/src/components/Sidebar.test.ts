@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import Sidebar from "./Sidebar.vue";
+import { i18n, setLocale } from "../i18n";
 import type { ChatSession } from "../types";
 
 // Mock @iconify/vue
@@ -40,6 +41,7 @@ describe("Sidebar.vue", () => {
   beforeEach(() => {
     mockPush.mockReset();
     mockCurrentRoute = { path: "/chat/123" };
+    setLocale("en", false);
     root = document.createElement("div");
     document.body.appendChild(root);
   });
@@ -59,6 +61,7 @@ describe("Sidebar.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -84,6 +87,7 @@ describe("Sidebar.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -111,6 +115,7 @@ describe("Sidebar.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -138,6 +143,7 @@ describe("Sidebar.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -147,6 +153,32 @@ describe("Sidebar.vue", () => {
     await nextTick();
 
     expect(archivedId).toBe("sess-1");
+
+    app.unmount();
+  });
+
+  it("renders localized text in Chinese", async () => {
+    setLocale("zh-CN", false);
+
+    const app = createApp({
+      render() {
+        return h(Sidebar, {
+          sessions: mockSessions,
+          activeSessionId: "sess-1",
+          isOpen: true,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const buttons = Array.from(root.querySelectorAll("button"));
+    const newChatBtn = buttons.find((btn) => btn.textContent?.includes("新建会话"));
+    expect(newChatBtn).toBeDefined();
+
+    const dashboardBtn = buttons.find((btn) => btn.textContent?.includes("看板"));
+    expect(dashboardBtn).toBeDefined();
 
     app.unmount();
   });

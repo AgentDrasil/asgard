@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
@@ -26,6 +27,7 @@ import { useSessionStore } from "./composables/useSessionStore";
 import { useShortcuts } from "./composables/useShortcuts";
 import { resolveGlobalAction } from "./utils/keybindingUtils";
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -294,18 +296,18 @@ const checkSystemStatus = async () => {
     if (status.status === "degraded") {
       if (status.errors && status.errors.length > 0) {
         for (const err of status.errors) {
-          toast.error(err, { title: "System Degraded" });
+          toast.error(err, { title: t("app.systemDegraded"), translate: true });
         }
       } else {
-        toast.warning("System is currently running in degraded mode", {
-          title: "System Degraded",
+        toast.warning(t("app.systemRunningDegraded"), {
+          title: t("app.systemDegraded"),
         });
       }
     }
 
     if (status.warnings && status.warnings.length > 0) {
       for (const warn of status.warnings) {
-        toast.warning(warn, { title: "System Warning" });
+        toast.warning(warn, { title: t("app.systemWarning"), translate: true });
       }
     }
   } catch (e) {
@@ -369,18 +371,20 @@ const reloadApp = async () => {
   try {
     const result = await reloadAgents();
     if (result.success) {
-      toast.success("Agent configuration reloaded successfully", {
-        title: "Reload Success",
+      toast.success(t("app.reloadSuccessMessage"), {
+        title: t("app.reloadSuccessTitle"),
       });
       await Promise.all([loadAgents(), loadSessions()]);
     } else {
-      toast.error(result.error || "Failed to reload agent configuration", {
-        title: "Reload Error",
+      toast.error(result.error || t("app.reloadErrorMessage"), {
+        title: t("app.reloadErrorTitle"),
+        translate: true,
       });
     }
   } catch (err: any) {
-    toast.error(err?.message || "Failed to reload agent configuration", {
-      title: "Reload Error",
+    toast.error(err?.message || t("app.reloadErrorMessage"), {
+      title: t("app.reloadErrorTitle"),
+      translate: true,
     });
   } finally {
     isReloadingAgents.value = false;
@@ -390,55 +394,55 @@ const reloadApp = async () => {
 const commandList = computed<CommandItem[]>(() => [
   {
     id: "open-dashboard",
-    title: "Open Dashboard",
+    title: t("commands.openDashboard"),
     icon: "mynaui:kanban",
     action: () => router.push("/dashboard"),
   },
   {
     id: "open-settings",
-    title: "Open Settings",
+    title: t("commands.openSettings"),
     icon: "mynaui:cog",
     action: () => router.push("/settings"),
   },
   {
     id: "open-keybindings",
-    title: "Open Keyboard Shortcuts",
+    title: t("commands.openKeybindings"),
     icon: "material-symbols:keyboard-outline",
     action: () => router.push("/settings/keybindings"),
   },
   {
     id: "open-logs",
-    title: "Open System Logs & Diagnostics",
+    title: t("commands.openLogs"),
     icon: "mynaui:terminal",
     action: () => router.push("/settings/logs"),
   },
   {
     id: "edit-config",
-    title: "Open Config Editor",
+    title: t("commands.editConfig"),
     icon: "mynaui:cog-three",
     action: () => router.push("/settings/config"),
   },
   {
     id: "reload-agents",
-    title: "Reload Agents",
+    title: t("commands.reloadAgents"),
     icon: "mynaui:refresh",
     action: () => reloadApp(),
   },
   {
     id: "restart-server",
-    title: "Restart Server",
+    title: t("commands.restartServer"),
     icon: "mynaui:power",
     action: () => openRestartConfirm(),
   },
   {
     id: "search-sessions",
-    title: "Search Sessions",
+    title: t("commands.searchSessions"),
     icon: "material-symbols:search",
     action: () => openSessionSearch(),
   },
   {
     id: "search-files",
-    title: "Search Files in Workspace",
+    title: t("commands.searchFiles"),
     icon: "octicon:file-code-24",
     shortcut: searchFilesShortcut.value,
     action: () => {
@@ -447,14 +451,14 @@ const commandList = computed<CommandItem[]>(() => [
   },
   {
     id: "toggle-left-panel",
-    title: "Toggle Left Panel",
+    title: t("commands.toggleLeftPanel"),
     icon: "mynaui:sidebar",
     shortcut: toggleSidebarShortcut.value,
     action: () => toggleSidebar(),
   },
   {
     id: "toggle-right-panel",
-    title: "Toggle Right Panel",
+    title: t("commands.toggleRightPanel"),
     icon: "codicon:layout-sidebar-right",
     shortcut: toggleArtifactsShortcut.value,
     action: () => {
@@ -469,47 +473,47 @@ const commandList = computed<CommandItem[]>(() => [
   },
   {
     id: "toggle-terminal-session",
-    title: "Toggle Terminal (Current Session)",
+    title: t("commands.toggleTerminalSession"),
     icon: "codicon:layout-panel",
     shortcut: toggleTerminalShortcut.value,
     action: () => toggleTerminal("session"),
   },
   {
     id: "toggle-terminal-global",
-    title: "Toggle Terminal (Global)",
+    title: t("commands.toggleTerminalGlobal"),
     icon: "mynaui:terminal",
     action: () => toggleTerminal("sidebar"),
   },
   {
     id: "switch-chat-view",
-    title: "Switch to Chat View",
+    title: t("commands.switchChatView"),
     icon: "material-symbols:chat-outline",
     action: () => navigateToChat(),
   },
   {
     id: "switch-vcs-view",
-    title: "Switch to VCS View",
+    title: t("commands.switchVcsView"),
     icon: "octicon:git-branch-24",
     shortcut: toggleDiffShortcut.value,
     action: () => navigateToVcs(),
   },
   {
     id: "switch-files-view",
-    title: "Switch to Files View",
+    title: t("commands.switchFilesView"),
     icon: "octicon:file-code-24",
     shortcut: toggleFileViewShortcut.value,
     action: () => navigateToFiles(),
   },
   {
     id: "new-chat",
-    title: "New Chat",
+    title: t("commands.newChat"),
     icon: "mynaui:edit-one",
     shortcut: newChatShortcut.value,
     action: () => handleNewChat(closeSidebarOnMobile),
   },
   {
     id: "new-chat-same-current",
-    title: "New Chat (Same with Current)",
+    title: t("commands.newChatSameCurrent"),
     icon: "mynaui:copy",
     action: () =>
       handleNewChat(
@@ -520,7 +524,7 @@ const commandList = computed<CommandItem[]>(() => [
   },
   {
     id: "show-quota",
-    title: "Show Quota (Usage)",
+    title: t("commands.showQuota"),
     icon: "mynaui:chart-bar-one",
     action: () => {
       isQuotaModalOpen.value = true;
@@ -662,9 +666,11 @@ const commandList = computed<CommandItem[]>(() => [
               <Icon icon="mynaui:danger" class="h-6 w-6" />
             </div>
             <div class="space-y-1">
-              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
+              <h3 class="font-bold text-lg text-base-content">
+                {{ t("app.restartConfirmTitle") }}
+              </h3>
               <p class="text-sm text-base-content/70 leading-relaxed">
-                This will gracefully terminate the current Asgard backend process.
+                {{ t("app.restartConfirmDesc") }}
               </p>
             </div>
           </div>
@@ -674,16 +680,13 @@ const commandList = computed<CommandItem[]>(() => [
           >
             <div class="font-semibold text-warning flex items-center gap-1.5">
               <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
-              <span>Prerequisites</span>
+              <span>{{ t("app.prerequisites") }}</span>
             </div>
             <p>
-              Please ensure your Docker container is configured with an automatic restart policy
-              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
-              otherwise the container will not restart after the process exits.
+              {{ t("app.prerequisitesDesc") }}
             </p>
             <p class="text-base-content/60 text-[11px]">
-              The page will poll system status and automatically refresh once the server is back
-              online.
+              {{ t("app.restartNote") }}
             </p>
           </div>
 
@@ -693,7 +696,7 @@ const commandList = computed<CommandItem[]>(() => [
               class="btn btn-ghost btn-sm"
               :disabled="isRestarting"
             >
-              Cancel
+              {{ t("common.cancel") }}
             </button>
             <button
               @click="triggerRestartWorkflow"
@@ -701,7 +704,7 @@ const commandList = computed<CommandItem[]>(() => [
               :disabled="isRestarting"
             >
               <Icon icon="mynaui:power" class="h-4 w-4" />
-              <span>Confirm Restart</span>
+              <span>{{ t("app.confirmRestart") }}</span>
             </button>
           </div>
         </div>

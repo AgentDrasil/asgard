@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useCommandPalette } from "../composables/useCommandPalette";
 import type { CommandItem } from "../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   isOpen: boolean;
@@ -85,7 +88,7 @@ function handleClear() {
             ref="inputRef"
             v-model="query"
             type="text"
-            placeholder="Type a command or search..."
+            :placeholder="t('commands.palette.placeholder')"
             class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
             @keydown.down.prevent="navigateNext"
             @keydown.up.prevent="navigatePrevious"
@@ -96,7 +99,7 @@ function handleClear() {
             v-if="query"
             @click="handleClear"
             class="btn btn-ghost btn-xs btn-circle text-base-content/60 hover:text-base-content"
-            title="Clear search"
+            :title="t('commands.palette.clearSearch')"
           >
             <Icon icon="mynaui:x" class="h-4 w-4" />
           </button>
@@ -110,10 +113,7 @@ function handleClear() {
             class="py-12 px-4 text-center text-base-content/50 text-xs flex flex-col items-center gap-2"
           >
             <Icon icon="octicon:search-24" class="h-8 w-8 text-base-content/20" />
-            <span
-              >No commands found matching
-              <strong class="text-base-content/80">"{{ query }}"</strong></span
-            >
+            <span>{{ t("commands.palette.noCommandsFound", { query }) }}</span>
           </div>
 
           <!-- Commands List -->
@@ -165,20 +165,20 @@ function handleClear() {
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↑</kbd>
               <kbd class="kbd kbd-xs bg-base-100">↓</kbd>
-              <span class="ml-0.5">navigate</span>
+              <span class="ml-0.5">{{ t("commands.palette.navigate") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↵</kbd>
-              <span class="ml-0.5">execute</span>
+              <span class="ml-0.5">{{ t("commands.palette.execute") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">esc</kbd>
-              <span class="ml-0.5">close</span>
+              <span class="ml-0.5">{{ t("commands.palette.close") }}</span>
             </span>
           </div>
 
           <div v-if="filteredCommands.length > 0" class="font-mono">
-            {{ filteredCommands.length }} command{{ filteredCommands.length === 1 ? "" : "s" }}
+            {{ t("commands.palette.commandsCount", { count: filteredCommands.length }) }}
           </div>
         </div>
       </div>

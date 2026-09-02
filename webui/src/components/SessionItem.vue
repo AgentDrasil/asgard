@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import type { ChatSession } from "../types";
 import { Icon } from "@iconify/vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   session: ChatSession;
@@ -117,7 +120,7 @@ const handleArchive = () => {
       <button
         @click.stop="handleDelete"
         class="btn btn-ghost btn-xs text-error hover:bg-error/20 p-1.5 h-8 w-8 rounded-md flex items-center justify-center"
-        title="Delete session"
+        :title="t('sidebar.deleteSession')"
       >
         <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current text-error" />
       </button>
@@ -139,7 +142,7 @@ const handleArchive = () => {
       :style="{ transform: `translateX(${swipeOffset}px)` }"
     >
       <span class="truncate min-w-0 select-none flex-1">{{
-        session.title || "Untitled Chat"
+        session.title || t("sidebar.untitledChat")
       }}</span>
 
       <div class="flex items-center gap-1 shrink-0">
@@ -152,7 +155,7 @@ const handleArchive = () => {
               ? 'text-primary-content hover:bg-white/20'
               : 'text-base-content/70 hover:text-base-content hover:bg-base-100',
           ]"
-          title="Archive session"
+          :title="t('sidebar.archiveSession')"
         >
           <Icon icon="mynaui:archive" class="h-4 w-4 fill-current" />
         </button>
@@ -164,7 +167,7 @@ const handleArchive = () => {
             'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 hidden [@media(pointer:fine)]:flex items-center justify-center',
             isActive ? 'text-primary-content hover:bg-white/20' : 'text-error hover:bg-error/10',
           ]"
-          title="Delete session"
+          :title="t('sidebar.deleteSession')"
         >
           <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
         </button>

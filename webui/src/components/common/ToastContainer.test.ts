@@ -3,9 +3,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, nextTick } from "vue";
 import ToastContainer from "./ToastContainer.vue";
 import { useToast } from "../../composables/useToast";
+import { i18n, setLocale } from "../../i18n";
 
 describe("ToastContainer component", () => {
   beforeEach(() => {
+    setLocale("en", false);
     const { clear } = useToast();
     clear();
     document.body.innerHTML = "";
@@ -18,6 +20,7 @@ describe("ToastContainer component", () => {
     document.body.appendChild(root);
 
     const app = createApp(ToastContainer);
+    app.use(i18n);
     app.mount(root);
 
     error("Backend connection degraded: missing token", { title: "Auth Degraded" });
@@ -55,6 +58,7 @@ describe("ToastContainer component", () => {
     document.body.appendChild(root);
 
     const app = createApp(ToastContainer);
+    app.use(i18n);
     app.mount(root);
 
     error("docker exec -it asgard-cli auth --token test", { title: "Auth Degraded" });

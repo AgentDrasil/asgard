@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { apiFetch } from "../../lib/api";
+import { formatQuotaResetRelative } from "../../i18n/timeUtils";
+
+const { t } = useI18n();
 
 interface QuotaLimit {
   name: string;
@@ -34,13 +38,13 @@ const fetchQuotas = async () => {
   try {
     const res = await apiFetch("/api/quota");
     if (!res.ok) {
-      throw new Error(`Server returned status ${res.status}`);
+      throw new Error(t("quota.statusError", { status: res.status }));
     }
     const data = await res.json();
     quotas.value = data;
   } catch (err: any) {
     console.error("Failed to fetch quotas:", err);
-    quotaError.value = err.message || "Failed to load quota information";
+    quotaError.value = err.message || t("quota.failedToFetch");
   } finally {
     quotaLoading.value = false;
   }
@@ -73,26 +77,9 @@ const getTextColorClass = (fraction: number) => {
 };
 
 const formatRefreshDate = (timestamp?: number) => {
-  if (!timestamp) return "No reset pending";
+  if (!timestamp) return t("time.noResetPending");
   const date = new Date(timestamp * 1000);
   return date.toLocaleString();
-};
-
-const getRelativeTime = (timestamp?: number) => {
-  if (!timestamp) return "";
-  const diffMs = timestamp * 1000 - Date.now();
-  if (diffMs <= 0) return "(resets now)";
-  const diffSec = Math.floor(diffMs / 1000);
-  const hours = Math.floor(diffSec / 3600);
-  const minutes = Math.floor((diffSec % 3600) / 60);
-  if (hours > 24) {
-    const days = Math.floor(hours / 24);
-    return `(in ${days}d ${hours % 24}h)`;
-  }
-  if (hours > 0) {
-    return `(in ${hours}h ${minutes}m)`;
-  }
-  return `(in ${minutes}m)`;
 };
 
 defineExpose({
@@ -116,7 +103,7 @@ defineExpose({
         >
           <div class="flex items-center gap-2">
             <Icon icon="mynaui:chart-bar-one" class="h-6 w-6 text-primary" />
-            <h2 class="text-lg font-bold text-base-content">Model Quota Details</h2>
+            <h2 class="text-lg font-bold text-base-content">{{ t("quota.title") }}</h2>
           </div>
           <button
             @click="closeModal"
@@ -133,13 +120,13 @@ defineExpose({
             class="flex flex-col items-center justify-center py-12 space-y-3"
           >
             <span class="loading loading-spinner loading-lg text-primary"></span>
-            <span class="text-sm text-base-content/70">Fetching current quota data...</span>
+            <span class="text-sm text-base-content/70">{{ t("quota.fetching") }}</span>
           </div>
 
           <div v-else-if="quotaError" class="alert alert-error flex items-start gap-3">
             <Icon icon="mynaui:danger" class="h-6 w-6 shrink-0" />
             <div>
-              <h3 class="font-bold">Error loading quota</h3>
+              <h3 class="font-bold">{{ t("quota.errorTitle") }}</h3>
               <div class="text-xs">{{ quotaError }}</div>
             </div>
           </div>
@@ -147,7 +134,9 @@ defineExpose({
           <div v-else class="space-y-6">
             <div v-for="(models, cliName) in quotas" :key="cliName" class="space-y-3">
               <div class="flex items-center gap-2 border-b border-base-100/60 pb-1.5">
-                <span class="text-xs font-bold uppercase tracking-wider text-primary/80">CLI:</span>
+                <span class="text-xs font-bold uppercase tracking-wider text-primary/80">{{
+                  t("quota.cli")
+                }}</span>
                 <span
                   class="text-sm font-semibold capitalize bg-primary/10 text-primary px-2.5 py-0.5 rounded-full"
                   >{{ cliName }}</span
@@ -172,7 +161,7 @@ defineExpose({
                             : 'bg-success/10 text-success',
                       ]"
                     >
-                      {{ Math.round(m.remaining * 100) }}% remaining
+                      {{ t("quota.remaining", { pct: Math.round(m.remaining * 100) }) }}
                     </span>
                   </div>
 
@@ -187,8 +176,12 @@ defineExpose({
                     <div class="flex justify-between text-[11px] text-base-content/50">
                       <span>0%</span>
                       <span v-if="m.refresh_date" class="italic text-right truncate max-w-[80%]">
-                        Resets {{ formatRefreshDate(m.refresh_date) }}
-                        {{ getRelativeTime(m.refresh_date) }}
+                        {{
+                          t("quota.resetsAt", {
+                            date: formatRefreshDate(m.refresh_date),
+                            relative: formatQuotaResetRelative(m.refresh_date, t),
+                          })
+                        }}
                       </span>
                       <span>100%</span>
                     </div>
@@ -197,7 +190,7 @@ defineExpose({
                   <!-- Specific Detailed Limits (if any) -->
                   <div v-else class="space-y-2">
                     <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
-                      Quota Limits Breakdown
+                      {{ t("quota.limitsBreakdown") }}
                     </h5>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div
@@ -226,7 +219,11 @@ defineExpose({
                           v-if="lim.refresh_date"
                           class="text-[9px] text-base-content/40 truncate"
                         >
-                          Reset: {{ formatRefreshDate(lim.refresh_date) }}
+                          {{
+                            t("quota.resetPrefix", {
+                              date: formatRefreshDate(lim.refresh_date),
+                            })
+                          }}
                         </div>
                       </div>
                     </div>
@@ -239,7 +236,7 @@ defineExpose({
               v-if="Object.keys(quotas).length === 0"
               class="text-center py-8 text-base-content/50 text-sm"
             >
-              No quota information returned from CLI.
+              {{ t("quota.noQuotaInfo") }}
             </div>
           </div>
         </div>
@@ -255,9 +252,9 @@ defineExpose({
               icon="mynaui:refresh"
               :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading }]"
             />
-            Refresh
+            {{ t("quota.refresh") }}
           </button>
-          <button @click="closeModal" class="btn btn-primary btn-sm">Close</button>
+          <button @click="closeModal" class="btn btn-primary btn-sm">{{ t("quota.close") }}</button>
         </div>
       </div>
     </div>

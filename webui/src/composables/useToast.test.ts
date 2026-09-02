@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useToast } from "./useToast";
+import { setLocale } from "../i18n";
 
 describe("useToast composable", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    setLocale("en", false);
     const { clear, clearToastHistory } = useToast();
     clear();
     clearToastHistory();
@@ -43,6 +45,23 @@ describe("useToast composable", () => {
       message: "Error msg",
       duration: 0,
     });
+  });
+
+  it("translates server error message explicitly when requested", () => {
+    const { toasts, errorFromServer, error } = useToast();
+    setLocale("zh-CN", false);
+
+    // 1. errorFromServer translates known server error
+    errorFromServer("agent not found");
+    expect(toasts.value[0].message).toBe("未找到指定的 Agent");
+
+    // 2. error without translate option preserves exact text without tampering
+    error("agent not found");
+    expect(toasts.value[1].message).toBe("agent not found");
+
+    // 3. Unknown server error passes through verbatim safely
+    errorFromServer("Custom unknown database socket error 500");
+    expect(toasts.value[2].message).toBe("Custom unknown database socket error 500");
   });
 
   it("removes toast by ID", () => {
