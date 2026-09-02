@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createApp, h, nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import ChatInput from "./ChatInput.vue";
 import * as api from "../lib/api";
 import { i18n } from "../i18n";
@@ -502,5 +502,261 @@ describe("ChatInput.vue", () => {
     });
 
     app.unmount();
+  });
+
+  describe("Voice Input Integration", () => {
+    let mockVoiceInputState: any;
+    let registeredCallbacks: any;
+
+    beforeEach(async () => {
+      const voiceModule = await import("../composables/useVoiceInput");
+      mockVoiceInputState = {
+        isRecording: ref(false),
+        isConnecting: ref(false),
+        isStopping: ref(false),
+        interimText: ref(""),
+        livePreviewText: ref(""),
+        error: ref(null),
+        startRecording: vi.fn<() => Promise<void>>(),
+        stopRecording: vi.fn<() => Promise<void>>(),
+        cancelRecording: vi.fn<() => void>(),
+      };
+
+      vi.spyOn(voiceModule, "useVoiceInput").mockImplementation((callbacks?: any) => {
+        registeredCallbacks = callbacks;
+        return {
+          isRecording: mockVoiceInputState.isRecording,
+          isConnecting: mockVoiceInputState.isConnecting,
+          isStopping: mockVoiceInputState.isStopping,
+          interimText: mockVoiceInputState.interimText,
+          livePreviewText: mockVoiceInputState.livePreviewText,
+          error: mockVoiceInputState.error,
+          state: ref("idle"),
+          startRecording: mockVoiceInputState.startRecording,
+          stopRecording: mockVoiceInputState.stopRecording,
+          cancelRecording: mockVoiceInputState.cancelRecording,
+        } as any;
+      });
+    });
+
+    it("should render VoiceInputButton in both standard input and expanded modal", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      // Standard input voice button (first one)
+      const voiceBtns = root.querySelectorAll('button[title^="Start voice recording"]');
+      expect(voiceBtns.length).toBe(2); // One in standard bar, one in dialog
+
+      app.unmount();
+    });
+
+    it("should toggle voice recording when button is clicked", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      const voiceBtn = root.querySelectorAll(
+        'button[title^="Start voice recording"]',
+      )[0] as HTMLButtonElement;
+      expect(voiceBtn).not.toBeNull();
+
+      // Click when idle -> startRecording
+      voiceBtn.click();
+      expect(mockVoiceInputState.startRecording).toHaveBeenCalled();
+
+      // Set recording to true -> title becomes "Stop recording"
+      mockVoiceInputState.isRecording.value = true;
+      await nextTick();
+
+      const stopBtn = root.querySelector('button[title^="Stop recording"]') as HTMLButtonElement;
+      expect(stopBtn).not.toBeNull();
+
+      stopBtn.click();
+      expect(mockVoiceInputState.stopRecording).toHaveBeenCalled();
+
+      app.unmount();
+    });
+
+    it("should render interim text preview banner when recording with interimText or livePreviewText", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      expect(root.querySelector('[data-testid="voice-preview-banner"]')).toBeNull();
+
+      mockVoiceInputState.isRecording.value = true;
+      mockVoiceInputState.livePreviewText.value = "Hello from speech";
+      await nextTick();
+
+      const banner = root.querySelector('[data-testid="voice-preview-banner"]');
+      expect(banner).not.toBeNull();
+      expect(banner?.textContent).toContain("Hello from speech");
+      expect(banner?.textContent).toContain("Recording...");
+
+      app.unmount();
+    });
+
+    it("should append finalized speech transcription to existing text draft with space", async () => {
+      let currentVal = "Existing draft";
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: currentVal,
+            "onUpdate:modelValue": (v: string) => {
+              currentVal = v;
+            },
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      expect(registeredCallbacks?.onFinalText).toBeDefined();
+      registeredCallbacks.onFinalText("additional voice note");
+      await nextTick();
+
+      expect(currentVal).toBe("Existing draft additional voice note");
+
+      app.unmount();
+    });
+
+    it("should not modify draft if finalized speech transcription is empty string", async () => {
+      let currentVal = "Unchanged text";
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: currentVal,
+            "onUpdate:modelValue": (v: string) => {
+              currentVal = v;
+            },
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      expect(registeredCallbacks?.onFinalText).toBeDefined();
+      registeredCallbacks.onFinalText("   ");
+      await nextTick();
+
+      expect(currentVal).toBe("Unchanged text");
+
+      app.unmount();
+    });
+
+    it("should disable voice button when isStopping is true", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      mockVoiceInputState.isStopping.value = true;
+      await nextTick();
+
+      const stoppingBtn = root.querySelector(
+        'button[title^="Processing transcription..."]',
+      ) as HTMLButtonElement;
+      expect(stoppingBtn).not.toBeNull();
+      expect(stoppingBtn.disabled).toBe(true);
+
+      stoppingBtn.click();
+      expect(mockVoiceInputState.stopRecording).not.toHaveBeenCalled();
+      expect(mockVoiceInputState.startRecording).not.toHaveBeenCalled();
+
+      app.unmount();
+    });
+
+    it("should trigger cancelRecording on component unmount and modal close", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      // Open modal
+      const expandBtn = root.querySelector(
+        'button[title^="Expand input editor"]',
+      ) as HTMLButtonElement;
+      expandBtn.click();
+      await nextTick();
+
+      // While recording, closing modal should call cancelRecording
+      mockVoiceInputState.isRecording.value = true;
+      const closeModalBtn = root.querySelector('button[title^="Close modal"]') as HTMLButtonElement;
+      closeModalBtn.click();
+      await nextTick();
+
+      expect(mockVoiceInputState.cancelRecording).toHaveBeenCalled();
+
+      // Unmounting component should also call cancelRecording
+      app.unmount();
+      expect(mockVoiceInputState.cancelRecording).toHaveBeenCalledTimes(2);
+    });
+
+    it("should trigger localized toast notification using VOICE_ERROR_I18N_MAP when voiceError is set", async () => {
+      const toastModule = await import("../composables/useToast");
+      const mockToastError = vi.fn<(...args: any[]) => void>();
+      vi.spyOn(toastModule, "useToast").mockReturnValue({
+        error: mockToastError,
+        success: vi.fn<(...args: any[]) => void>(),
+        warning: vi.fn<(...args: any[]) => void>(),
+        info: vi.fn<(...args: any[]) => void>(),
+      } as any);
+
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      mockVoiceInputState.error.value = "micDenied";
+      await nextTick();
+
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Microphone access denied. Please grant permission in browser settings.",
+      );
+
+      app.unmount();
+    });
   });
 });

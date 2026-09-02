@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { Icon } from "@iconify/vue";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useToast } from "../composables/useToast";
-import type { Attachment } from "../types";
+import { useVoiceInput } from "../composables/useVoiceInput";
+import type { Attachment, VoiceErrorCode } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
+import VoiceInputButton from "./chat/VoiceInputButton.vue";
 import { t } from "../i18n";
 
 const { modKey, sendShortcut, matchShortcut } = useShortcuts();
@@ -75,11 +77,66 @@ const handleSend = () => {
   isModalOpen.value = false;
 };
 
+const VOICE_ERROR_I18N_MAP: Record<VoiceErrorCode, string> = {
+  micDenied: "chat.micPermissionDenied",
+  voiceUnavailable: "chat.voiceUnavailable",
+  sessionTimeout: "chat.voiceSessionTimeout",
+  network: "chat.voiceUnavailable",
+};
+
+const handleVoiceFinalText = (finalText: string) => {
+  const trimmed = finalText.trim();
+  if (!trimmed) return; // 空文本直接 no-op
+  if (!text.value) {
+    text.value = trimmed;
+  } else if (/\s$/.test(text.value)) {
+    text.value += trimmed;
+  } else {
+    text.value += " " + trimmed;
+  }
+};
+
+const {
+  isRecording,
+  isConnecting,
+  isStopping,
+  interimText,
+  livePreviewText,
+  error: voiceError,
+  startRecording,
+  stopRecording,
+  cancelRecording,
+} = useVoiceInput({
+  onFinalText: handleVoiceFinalText,
+});
+
+watch(voiceError, (code) => {
+  if (code) {
+    const key = VOICE_ERROR_I18N_MAP[code] || "chat.voiceUnavailable";
+    toast.error(t(key));
+  }
+});
+
+const handleVoiceToggle = () => {
+  if (isRecording.value) {
+    void stopRecording();
+  } else {
+    void startRecording();
+  }
+};
+
+onBeforeUnmount(() => {
+  cancelRecording();
+});
+
 const openModal = () => {
   isModalOpen.value = true;
 };
 
 const closeModal = () => {
+  if (isRecording.value) {
+    cancelRecording();
+  }
   isModalOpen.value = false;
 };
 
@@ -229,8 +286,21 @@ const handleDrop = (e: DragEvent) => {
         @remove="removeAttachment"
       />
 
+      <!-- Voice Recording Interim Preview Banner -->
+      <div
+        v-if="isRecording && (livePreviewText || interimText)"
+        class="flex items-center gap-2 px-3 py-2 bg-base-200/90 border border-primary/30 rounded-xl text-xs text-base-content/90 animate-fade-in shadow-xs"
+        data-testid="voice-preview-banner"
+      >
+        <span class="loading loading-ring loading-xs text-primary shrink-0"></span>
+        <span class="font-medium text-primary shrink-0">{{ $t("chat.recording") }}</span>
+        <span class="truncate italic opacity-85">
+          {{ livePreviewText || interimText || $t("chat.voiceInterimPlaceholder") }}
+        </span>
+      </div>
+
       <div class="relative flex items-center w-full min-w-0">
-        <!-- Left Buttons Join/Group (Expand & Attach) -->
+        <!-- Left Buttons Join/Group (Expand, Attach & Voice) -->
         <div class="absolute left-2.5 sm:left-3 z-10 flex items-center gap-1">
           <!-- Expand Button -->
           <button
@@ -258,6 +328,15 @@ const handleDrop = (e: DragEvent) => {
           >
             <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
           </button>
+
+          <!-- Voice Input Button (Standard) -->
+          <VoiceInputButton
+            :is-recording="isRecording"
+            :is-connecting="isConnecting"
+            :is-stopping="isStopping"
+            :disabled="loading || isUploading"
+            @toggle="handleVoiceToggle"
+          />
         </div>
 
         <textarea
@@ -268,7 +347,7 @@ const handleDrop = (e: DragEvent) => {
           rows="1"
           :disabled="loading"
           class="textarea textarea-bordered bg-base-200 text-base-content w-full rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
-          :class="sessionId ? 'pl-20 sm:pl-22 pr-11 sm:pr-12' : 'pl-11 sm:pl-12 pr-11 sm:pr-12'"
+          :class="sessionId ? 'pl-28 sm:pl-30 pr-11 sm:pr-12' : 'pl-20 sm:pl-22 pr-11 sm:pr-12'"
         ></textarea>
 
         <!-- Send Button (Right) -->
@@ -313,6 +392,19 @@ const handleDrop = (e: DragEvent) => {
           />
         </div>
 
+        <!-- Voice Recording Interim Preview Banner inside Modal -->
+        <div
+          v-if="isRecording && (livePreviewText || interimText)"
+          class="flex items-center gap-2 px-3 py-2 mb-3 bg-base-200/90 border border-primary/30 rounded-xl text-xs text-base-content/90 animate-fade-in shadow-xs"
+          data-testid="modal-voice-preview-banner"
+        >
+          <span class="loading loading-ring loading-xs text-primary shrink-0"></span>
+          <span class="font-medium text-primary shrink-0">{{ $t("chat.recording") }}</span>
+          <span class="truncate italic opacity-85">
+            {{ livePreviewText || interimText || $t("chat.voiceInterimPlaceholder") }}
+          </span>
+        </div>
+
         <div class="flex-1 min-h-[250px] flex flex-col mb-4">
           <textarea
             v-model="text"
@@ -337,6 +429,16 @@ const handleDrop = (e: DragEvent) => {
               <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
               <span class="hidden sm:inline">{{ $t("chat.attach") }}</span>
             </button>
+
+            <!-- Voice Input Button (Modal) -->
+            <VoiceInputButton
+              :is-recording="isRecording"
+              :is-connecting="isConnecting"
+              :is-stopping="isStopping"
+              :disabled="loading || isUploading"
+              @toggle="handleVoiceToggle"
+            />
+
             <span class="text-xs text-base-content/60 hidden sm:inline">
               {{ $t("chat.pressToSend", { mod: modKey }) }}
             </span>
