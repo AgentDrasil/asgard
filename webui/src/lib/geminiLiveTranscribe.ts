@@ -20,6 +20,8 @@ export interface GeminiLiveTranscribeCallbacks {
   onClose?: () => void;
 }
 
+const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -59,6 +61,11 @@ export class GeminiLiveTranscribeClient {
         }
 
         this.ws = new WebSocketClass(wsUrl);
+        try {
+          this.ws.binaryType = "arraybuffer";
+        } catch {
+          // ignore if binaryType is read-only or unsupported in mock environment
+        }
       } catch (err: unknown) {
         const error = err instanceof Error ? err : new Error(String(err));
         this.callbacks.onError?.(error);
@@ -157,13 +164,23 @@ export class GeminiLiveTranscribeClient {
     if (typeof data === "string") {
       payloadStr = data;
     } else if (data instanceof ArrayBuffer) {
-      payloadStr = new TextDecoder().decode(data);
+      payloadStr = textDecoder ? textDecoder.decode(data) : new TextDecoder().decode(data);
     } else {
       return;
     }
 
     try {
       const parsed = JSON.parse(payloadStr);
+
+      const finalText =
+        parsed?.serverContent?.inputTranscription?.text ?? parsed?.inputTranscription?.text;
+
+      if (typeof finalText === "string") {
+        this.callbacks.onTranscription?.({
+          type: "final",
+          text: finalText,
+        });
+      }
 
       const interimText =
         parsed?.serverContent?.interimInputTranscription?.text ??
@@ -173,16 +190,6 @@ export class GeminiLiveTranscribeClient {
         this.callbacks.onTranscription?.({
           type: "interim",
           text: interimText,
-        });
-      }
-
-      const finalText =
-        parsed?.serverContent?.inputTranscription?.text ?? parsed?.inputTranscription?.text;
-
-      if (typeof finalText === "string") {
-        this.callbacks.onTranscription?.({
-          type: "final",
-          text: finalText,
         });
       }
     } catch {

@@ -50,6 +50,7 @@ const handleClick = () => {
         : 'btn-ghost hover:bg-base-300 text-base-content/70 hover:text-base-content hover:scale-105 active:scale-95',
     ]"
     :title="buttonTitle"
+    :aria-label="t('chat.voiceInput')"
   >
     <span v-if="isConnecting || isStopping" class="loading loading-spinner loading-xs"></span>
     <Icon v-else-if="isRecording" icon="material-symbols:graphic-eq" class="h-4 w-4 fill-current" />

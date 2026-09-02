@@ -8,7 +8,13 @@ import { GeminiLiveTranscribeClient } from "../lib/geminiLiveTranscribe";
 
 vi.mock("../lib/api");
 vi.mock("../lib/audioRecorder");
-vi.mock("../lib/geminiLiveTranscribe");
+vi.mock("../lib/geminiLiveTranscribe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/geminiLiveTranscribe")>();
+  return {
+    ...actual,
+    GeminiLiveTranscribeClient: vi.fn(),
+  };
+});
 
 describe("useVoiceInput", () => {
   let mockGetVoiceToken: any;

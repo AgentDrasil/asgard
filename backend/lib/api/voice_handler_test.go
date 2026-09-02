@@ -15,7 +15,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 )
 
-func newTestServer(t *testing.T, opts ...ServerOption) *Server {
+func newVoiceTestServer(t *testing.T, opts ...ServerOption) *Server {
 	t.Helper()
 	cfg := &config.Config{
 		AgentDir: t.TempDir(),
@@ -53,7 +53,7 @@ func TestCreateVoiceToken_Success(t *testing.T) {
 	}))
 	t.Cleanup(mockUpstream.Close)
 
-	server := newTestServer(
+	server := newVoiceTestServer(
 		t,
 		WithVoiceAPIKey("secret-test-key"),
 		WithVoiceAuthURL(mockUpstream.URL),
@@ -124,7 +124,7 @@ func TestCreateVoiceToken_DefensiveFieldParsing(t *testing.T) {
 			}))
 			t.Cleanup(mockUpstream.Close)
 
-			server := newTestServer(
+			server := newVoiceTestServer(
 				t,
 				WithVoiceAPIKey("secret-test-key"),
 				WithVoiceAuthURL(mockUpstream.URL),
@@ -149,7 +149,7 @@ func TestCreateVoiceToken_DefensiveFieldParsing(t *testing.T) {
 func TestCreateVoiceToken_MissingAPIKey(t *testing.T) {
 	t.Parallel()
 
-	server := newTestServer(
+	server := newVoiceTestServer(
 		t,
 		WithVoiceAPIKey(""),
 	)
@@ -197,7 +197,7 @@ func TestCreateVoiceToken_UpstreamError(t *testing.T) {
 			}))
 			t.Cleanup(mockUpstream.Close)
 
-			server := newTestServer(
+			server := newVoiceTestServer(
 				t,
 				WithVoiceAPIKey("secret-test-key"),
 				WithVoiceAuthURL(mockUpstream.URL),
@@ -249,7 +249,7 @@ func TestCreateVoiceToken_MalformedUpstreamResponse(t *testing.T) {
 			}))
 			t.Cleanup(mockUpstream.Close)
 
-			server := newTestServer(
+			server := newVoiceTestServer(
 				t,
 				WithVoiceAPIKey("secret-test-key"),
 				WithVoiceAuthURL(mockUpstream.URL),

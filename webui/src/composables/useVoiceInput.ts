@@ -245,7 +245,6 @@ export function useVoiceInput(callbacks?: UseVoiceInputCallbacks, options?: UseV
           if (epoch !== sessionEpoch) {
             return;
           }
-          console.error("AudioRecorder error:", _recErr);
           setError("micDenied");
           cancelRecording();
         },
@@ -320,6 +319,9 @@ export function useVoiceInput(callbacks?: UseVoiceInputCallbacks, options?: UseV
     }
 
     // 3. Start bounded fallback timer
+    if (hasFinalized) {
+      return;
+    }
     clearFinalizeTimer();
     const timeoutMs = options?.finalizationTimeoutMs ?? FINALIZATION_TIMEOUT_MS;
     finalizeTimerId = setTimeout(() => {

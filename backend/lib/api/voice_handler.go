@@ -45,14 +45,16 @@ type VoiceTokenResponse struct {
 	Model      string `json:"model"`
 }
 
+func writeVoiceError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
 // handleCreateVoiceToken issues an ephemeral token restricted to Gemini live voice transcription.
 func (s *Server) handleCreateVoiceToken(w http.ResponseWriter, r *http.Request) {
 	if s.geminiAPIKey == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": "Gemini API key is not configured",
-		})
+		writeVoiceError(w, http.StatusServiceUnavailable, "Gemini API key is not configured")
 		return
 	}
 
@@ -78,18 +80,14 @@ func (s *Server) handleCreateVoiceToken(w http.ResponseWriter, r *http.Request) 
 	reqBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal voice token request")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create voice token request"})
+		writeVoiceError(w, http.StatusInternalServerError, "failed to create voice token request")
 		return
 	}
 
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, authURL, bytes.NewReader(reqBytes))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create upstream voice token request")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to initialize upstream request"})
+		writeVoiceError(w, http.StatusInternalServerError, "failed to initialize upstream request")
 		return
 	}
 
@@ -99,40 +97,30 @@ func (s *Server) handleCreateVoiceToken(w http.ResponseWriter, r *http.Request) 
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to reach Google voice auth service")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("failed to contact upstream voice auth service: %v", err)})
+		writeVoiceError(w, http.StatusBadGateway, fmt.Sprintf("failed to contact upstream voice auth service: %v", err))
 		return
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to read response from Google voice auth service")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to read upstream voice auth response"})
+		writeVoiceError(w, http.StatusBadGateway, "failed to read upstream voice auth response")
 		return
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Warn().Int("status", resp.StatusCode).Str("response", string(bodyBytes)).Msg("upstream voice auth returned error")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error": fmt.Sprintf("upstream voice auth error (status %d): %s", resp.StatusCode, string(bodyBytes)),
-		})
+		writeVoiceError(w, http.StatusBadGateway, fmt.Sprintf("upstream voice auth error (status %d): %s", resp.StatusCode, string(bodyBytes)))
 		return
 	}
 
 	var upstreamResp googleAuthTokenResp
 	if err := json.Unmarshal(bodyBytes, &upstreamResp); err != nil {
 		log.Error().Err(err).Str("response", string(bodyBytes)).Msg("failed to decode upstream voice token response")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid response from upstream voice auth"})
+		writeVoiceError(w, http.StatusBadGateway, "invalid response from upstream voice auth")
 		return
 	}
 
@@ -142,9 +130,7 @@ func (s *Server) handleCreateVoiceToken(w http.ResponseWriter, r *http.Request) 
 	}
 	if token == "" {
 		log.Error().Str("response", string(bodyBytes)).Msg("upstream voice auth response missing token/name")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "upstream voice auth response missing token"})
+		writeVoiceError(w, http.StatusBadGateway, "upstream voice auth response missing token")
 		return
 	}
 

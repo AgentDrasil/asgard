@@ -118,7 +118,7 @@ watch(voiceError, (code) => {
 });
 
 const handleVoiceToggle = () => {
-  if (isRecording.value) {
+  if (isRecording.value || isConnecting.value) {
     void stopRecording();
   } else {
     void startRecording();

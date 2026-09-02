@@ -209,6 +209,7 @@ describe("AudioRecorder", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("should initialize AudioContext with targetSampleRate 16000", async () => {
