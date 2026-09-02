@@ -30,6 +30,17 @@ describe("FileSearchModal.vue", () => {
     document.body.removeChild(root);
   });
 
+  const mountWithI18n = (props: Record<string, any>) => {
+    const app = createApp({
+      render() {
+        return h(FileSearchModal as any, props);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    return app;
+  };
+
   it("renders search input and triggers file search on input with debounce", async () => {
     const mockFiles: FileSearchResult[] = [
       { path: "src/main.ts", name: "main.ts", ext: "ts", size: 1024, scope: "workspace" },
@@ -37,16 +48,10 @@ describe("FileSearchModal.vue", () => {
     ];
     const searchSpy = vi.spyOn(api, "searchFiles").mockResolvedValue(mockFiles);
 
-    const app = createApp({
-      render() {
-        return h(FileSearchModal, {
-          isOpen: true,
-          sessionId: "sess-test",
-        });
-      },
+    const app = mountWithI18n({
+      isOpen: true,
+      sessionId: "sess-test",
     });
-    app.use(i18n);
-    app.mount(root);
     await nextTick();
 
     const input = root.querySelector("input") as HTMLInputElement;
@@ -87,23 +92,17 @@ describe("FileSearchModal.vue", () => {
     let selectedScope: string | undefined = "";
     let closed = false;
 
-    const app = createApp({
-      render() {
-        return h(FileSearchModal, {
-          isOpen: true,
-          sessionId: "sess-test",
-          "onSelect-file": (path: string, scope?: string) => {
-            selectedPath = path;
-            selectedScope = scope;
-          },
-          onClose: () => {
-            closed = true;
-          },
-        });
+    const app = mountWithI18n({
+      isOpen: true,
+      sessionId: "sess-test",
+      "onSelect-file": (path: string, scope?: string) => {
+        selectedPath = path;
+        selectedScope = scope;
+      },
+      onClose: () => {
+        closed = true;
       },
     });
-    app.use(i18n);
-    app.mount(root);
     await nextTick();
 
     const input = root.querySelector("input") as HTMLInputElement;
@@ -135,20 +134,14 @@ describe("FileSearchModal.vue", () => {
     let selectedPath = "";
     let selectedScope: string | undefined = "";
 
-    const app = createApp({
-      render() {
-        return h(FileSearchModal, {
-          isOpen: true,
-          sessionId: "sess-test",
-          "onSelect-file": (path: string, scope?: string) => {
-            selectedPath = path;
-            selectedScope = scope;
-          },
-        });
+    const app = mountWithI18n({
+      isOpen: true,
+      sessionId: "sess-test",
+      "onSelect-file": (path: string, scope?: string) => {
+        selectedPath = path;
+        selectedScope = scope;
       },
     });
-    app.use(i18n);
-    app.mount(root);
     await nextTick();
 
     const input = root.querySelector("input") as HTMLInputElement;
@@ -175,19 +168,13 @@ describe("FileSearchModal.vue", () => {
   it("emits close event on Escape key", async () => {
     let closed = false;
 
-    const app = createApp({
-      render() {
-        return h(FileSearchModal, {
-          isOpen: true,
-          sessionId: "sess-test",
-          onClose: () => {
-            closed = true;
-          },
-        });
+    const app = mountWithI18n({
+      isOpen: true,
+      sessionId: "sess-test",
+      onClose: () => {
+        closed = true;
       },
     });
-    app.use(i18n);
-    app.mount(root);
     await nextTick();
 
     const input = root.querySelector("input") as HTMLInputElement;

@@ -9,6 +9,8 @@ import {
   detectConflicts,
   calculateDelta,
   resolveGlobalAction,
+  getActionTitleKey,
+  getActionDescriptionKey,
 } from "./keybindingUtils";
 
 describe("keybindingUtils", () => {
@@ -298,6 +300,19 @@ describe("keybindingUtils", () => {
       });
       expect(resolveGlobalAction(newKey, customBindings, false, false, "linux")).toBe(
         "toggle_sidebar",
+      );
+    });
+  });
+
+  describe("getActionTitleKey & getActionDescriptionKey", () => {
+    it("returns correct i18n translation keys for action IDs", () => {
+      expect(getActionTitleKey("toggle_sidebar")).toBe("keybindings.actions.toggle_sidebar.title");
+      expect(getActionDescriptionKey("toggle_sidebar")).toBe(
+        "keybindings.actions.toggle_sidebar.description",
+      );
+      expect(getActionTitleKey("search_files")).toBe("keybindings.actions.search_files.title");
+      expect(getActionDescriptionKey("search_files")).toBe(
+        "keybindings.actions.search_files.description",
       );
     });
   });

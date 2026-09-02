@@ -144,6 +144,10 @@ const isActionModified = (actionId: string): boolean => {
   return Boolean(osOverrides && actionId in osOverrides);
 };
 
+const osDisplayName = (os: SupportedOS): string => {
+  return os === "mac" ? "macOS" : os === "linux" ? "Linux" : "Windows";
+};
+
 // Recorder logic
 const startRecording = (actionId: string) => {
   if (!isCurrentOS.value) return;
@@ -348,7 +352,7 @@ onUnmounted(() => {
         <div class="text-xs text-base-content/60">
           {{
             t("keybindings.showingFor", {
-              os: selectedOS === "mac" ? "macOS" : selectedOS === "linux" ? "Linux" : "Windows",
+              os: osDisplayName(selectedOS),
             })
           }}
         </div>
@@ -360,7 +364,7 @@ onUnmounted(() => {
         <span>
           {{
             t("keybindings.viewOnlyNotice", {
-              os: currentOS === "mac" ? "macOS" : currentOS === "linux" ? "Linux" : "Windows",
+              os: osDisplayName(currentOS),
             })
           }}
         </span>

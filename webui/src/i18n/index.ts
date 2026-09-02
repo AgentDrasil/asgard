@@ -2,6 +2,7 @@ import { createI18n, useI18n } from "vue-i18n";
 import en from "./locales/en";
 import zhCN from "./locales/zh-CN";
 
+// Re-export useI18n for convenient module consumption and backwards compatibility
 export { useI18n };
 
 export type SupportedLocale = "en" | "zh-CN";

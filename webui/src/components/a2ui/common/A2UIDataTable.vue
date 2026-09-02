@@ -5,7 +5,6 @@ import Papa from "papaparse";
 import { useI18n } from "vue-i18n";
 import type { A2UIDataTableWidget, A2UIDataTableColumn } from "../../../types/a2ui";
 
-const { t } = useI18n();
 import { resolveBadgeClass } from "../../../utils/badgeHelper";
 import {
   formatA2UIMoney,
@@ -13,6 +12,8 @@ import {
   formatA2UINumber,
   fetchWorkspaceAsset,
 } from "../../../utils/a2uiUtils";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   widget: A2UIDataTableWidget;
