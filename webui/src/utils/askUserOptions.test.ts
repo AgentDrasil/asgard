@@ -27,5 +27,21 @@ describe("askUserOptions", () => {
       const content = "Options: Option A / Option B\nAdditional notes here";
       expect(parseOptions(content)).toEqual(["Option A", "Option B"]);
     });
+
+    it("keeps slashes inside a label as part of one option", () => {
+      const content =
+        "No CLI target has enough quota.\nOptions: Wait for quota recovery, then continue / Use opencode zai-coding-plan/glm-5.3-flash/high / Cancel run";
+      expect(parseOptions(content)).toEqual([
+        "Wait for quota recovery, then continue",
+        "Use opencode zai-coding-plan/glm-5.3-flash/high",
+        "Cancel run",
+      ]);
+    });
+
+    it("falls back to trimming bare slashes without surrounding spaces", () => {
+      // Legacy tolerant behavior: "a/b" without spaces is a single option,
+      // while stray " / " separators still split.
+      expect(parseOptions("Options: a/b")).toEqual(["a/b"]);
+    });
   });
 });

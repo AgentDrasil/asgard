@@ -876,6 +876,22 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 					Headless:          rc.Headless || defn.NoHuman,
 				}
 
+				// Quota suspension gateway: lets the agent runner park this
+				// node for a user decision when no CLI target has usable
+				// quota. seq counts re-suspensions within one execution so
+				// each new ask_user message gets a unique, deterministic ID.
+				if node.Type == workflowspec.NodeTypeAgent && !nctx.Headless {
+					quotaSeq := 0
+					nctx.SuspendQuota = func(prompt string, options []string) (string, error) {
+						quotaSeq++
+						return e.runQuotaSuspension(gctx, rc, node, iteration, quotaSeq, store, dagSpec, snapshotStates, func() {
+							mu.Lock()
+							hasSuspended = true
+							mu.Unlock()
+						}, emit, prompt, options)
+					}
+				}
+
 				var result *workflowspec.NodeResult
 				var err error
 				if node.Type == workflowspec.NodeTypeHuman {

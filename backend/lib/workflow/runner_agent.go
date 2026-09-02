@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -241,7 +242,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		outCh := make(chan runOutcome, 1)
 
 		go func(currentPrompt string, currentSession optional.Option[string]) {
-			runOut, runErr := run.Run(ctx, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, nctx.SessionID, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, r.conf)
+			runOut, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless})
 			outCh <- runOutcome{out: runOut, err: runErr}
 		}(prompt, session)
 
@@ -513,6 +514,144 @@ func toArtifactMap(paths []string) map[string]string {
 		m[p] = p
 	}
 	return m
+}
+
+// errQuotaCancelled reports that the user explicitly cancelled the agent run
+// while it was suspended waiting for a CLI quota decision.
+var errQuotaCancelled = errors.New("run cancelled by user while waiting for CLI quota")
+
+// quotaDecision classifies a user reply to a quota suspension prompt.
+type quotaDecision int
+
+const (
+	quotaDecisionContinue quotaDecision = iota
+	quotaDecisionTarget
+	quotaDecisionCancel
+)
+
+// runWithQuotaDecisions invokes run.Run and, whenever no CLI target has usable
+// quota, suspends the run for a user decision instead of failing the node:
+//
+//   - "Wait for quota recovery, then continue": re-check quotas and re-suspend
+//     with a fresh prompt while still exhausted (manual continue only).
+//   - "Use <cli> <model>": force the chosen target on the next attempt even
+//     below the automatic-selection threshold (explicit selection only needs
+//     quota > 0).
+//   - "Cancel run": fail the node with errQuotaCancelled.
+//
+// Headless runs (or runs without a suspension gateway) keep the legacy
+// fail-fast behavior with the informative *run.NoQuotaError.
+func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope) ([]byte, error) {
+	forcedModel := modelOpt
+	for {
+		out, runErr := run.Run(ctx, agent, prompt, session, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
+		var nq *run.NoQuotaError
+		if !errors.As(runErr, &nq) {
+			return out, runErr
+		}
+		if nctx.Headless || nctx.SuspendQuota == nil {
+			return out, runErr
+		}
+
+		log.Warn().
+			Err(nq).
+			Str("session_id", nctx.SessionID).
+			Str("node_id", node.ID).
+			Str("agent_id", node.AgentID).
+			Msgf("[AgentRunner] Agent %q for node %q has no CLI target with usable quota; suspending for user decision", node.AgentID, node.ID)
+
+		if nctx.EventEmitter != nil {
+			nctx.EventEmitter(WorkflowEvent{
+				Type:      EventNodeStatusUpdate,
+				NodeID:    node.ID,
+				NodeType:  workflowspec.NodeTypeAgent,
+				AgentID:   node.AgentID,
+				AgentName: agent.Config.Name,
+				Status:    workflowspec.StatusRunning,
+				Message:   "No CLI target has enough quota remaining; waiting for your decision...",
+				EntryType: "activity",
+			})
+		}
+
+		reply, suspErr := nctx.SuspendQuota(buildQuotaPrompt(nq, agent), quotaOptions(nq))
+		if suspErr != nil {
+			return out, fmt.Errorf("waiting for quota decision: %w", suspErr)
+		}
+
+		decision, targetModel := classifyQuotaReply(reply, agent.Config.CLI)
+		switch decision {
+		case quotaDecisionCancel:
+			log.Info().
+				Str("session_id", nctx.SessionID).
+				Str("node_id", node.ID).
+				Str("agent_id", node.AgentID).
+				Msgf("[AgentRunner] Agent %q for node %q cancelled by user while waiting for quota", node.AgentID, node.ID)
+			return nil, errQuotaCancelled
+		case quotaDecisionTarget:
+			log.Info().
+				Str("session_id", nctx.SessionID).
+				Str("node_id", node.ID).
+				Str("agent_id", node.AgentID).
+				Str("forced_model", targetModel).
+				Msgf("[AgentRunner] User forced CLI target %q for agent %q on node %q", targetModel, node.AgentID, node.ID)
+			forcedModel = optional.Some(targetModel)
+		default:
+			// Continue: keep the current selection policy and re-check quota.
+		}
+	}
+}
+
+// buildQuotaPrompt renders the suspension prompt shown to the user, listing
+// every configured CLI target with its remaining quota.
+func buildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Agent %q (%s) cannot start: no CLI target has enough quota remaining", agent.Config.Name, agent.Config.ID)
+	if nq.ExplicitModel != "" {
+		fmt.Fprintf(&sb, " (selected model %s is out of quota)", nq.ExplicitModel)
+	}
+	sb.WriteString(".\n\nCurrent quota status:\n")
+	for _, t := range nq.Targets {
+		if !t.Enabled {
+			fmt.Fprintf(&sb, "- %s %s: provider disabled\n", t.CLI, t.Model)
+			continue
+		}
+		fmt.Fprintf(&sb, "- %s %s: %.0f%% remaining (automatic selection needs more than %.0f%%)\n", t.CLI, t.Model, t.Remaining*100, nq.MinThreshold*100)
+	}
+	sb.WriteString("\nYou can wait for quota to recover and continue, force a specific target with whatever quota is left, or cancel the run.")
+	return sb.String()
+}
+
+// quotaOptions builds the option buttons offered on the quota suspension
+// prompt. Labels never contain " / " so the frontend option parser keeps each
+// label a single button even though model IDs contain "/".
+func quotaOptions(nq *run.NoQuotaError) []string {
+	opts := []string{"Wait for quota recovery, then continue"}
+	for _, t := range nq.Targets {
+		if t.Enabled && t.Remaining > 0 {
+			opts = append(opts, fmt.Sprintf("Use %s %s", t.CLI, t.Model))
+		}
+	}
+	return append(opts, "Cancel run")
+}
+
+// classifyQuotaReply maps a user reply to a quota decision. Replies match the
+// exact option labels produced by quotaOptions, but free-text replies are
+// interpreted leniently: any reply naming a configured cli+model forces that
+// target, replies containing "cancel" cancel, everything else continues.
+func classifyQuotaReply(reply string, targets []agentspec.CLITarget) (quotaDecision, string) {
+	lower := strings.ToLower(strings.TrimSpace(reply))
+	if lower == "" {
+		return quotaDecisionContinue, ""
+	}
+	if strings.Contains(lower, "cancel") || strings.Contains(lower, "abort") {
+		return quotaDecisionCancel, ""
+	}
+	for _, t := range targets {
+		if strings.Contains(lower, strings.ToLower(t.CLI)) && strings.Contains(lower, strings.ToLower(t.Model)) {
+			return quotaDecisionTarget, t.Model
+		}
+	}
+	return quotaDecisionContinue, ""
 }
 
 func resolveAgentPrompt(nctx *NodeContext, node *workflowspec.NodeSpec, resuming bool) (string, error) {

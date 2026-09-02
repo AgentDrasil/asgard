@@ -42,6 +42,12 @@ type NodeContext struct {
 	// Headless marks no-interaction execution; node runners use it to
 	// suppress interactive behavior (e.g. human nodes).
 	Headless bool
+	// SuspendQuota, when set, lets a runner park the run for a user decision
+	// when no CLI target has usable quota. It blocks until the user replies
+	// and returns the reply text (typically one of the offered options), or
+	// an error when delivery fails or the run is cancelled. Nil means
+	// suspension is unavailable; runners must degrade gracefully (fail fast).
+	SuspendQuota func(prompt string, options []string) (string, error)
 }
 
 // Interpolate expands ${...} placeholders in text using run-scoped variables

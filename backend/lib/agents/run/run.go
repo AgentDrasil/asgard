@@ -235,10 +235,67 @@ func stderrTail(stderr string) string {
 
 const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection
 
+// QuotaTargetStatus describes the quota state of one configured CLI target.
+type QuotaTargetStatus struct {
+	CLI       string  `json:"cli"`
+	Model     string  `json:"model"`
+	Remaining float64 `json:"remaining"`
+	Enabled   bool    `json:"enabled"`
+}
+
+// NoQuotaError reports that no CLI target of an agent can currently be run:
+// either every enabled target is at or below MinAutoQuotaThreshold (automatic
+// selection) or the explicitly selected model has no quota left. It carries a
+// per-target snapshot so callers (e.g. the workflow engine) can surface the
+// quota situation to the user and offer targeted overrides.
+type NoQuotaError struct {
+	AgentID       string              `json:"agent_id"`
+	ExplicitModel string              `json:"explicit_model,omitempty"`
+	MinThreshold  float64             `json:"min_threshold"`
+	Targets       []QuotaTargetStatus `json:"targets"`
+}
+
+func (e *NoQuotaError) Error() string {
+	var sb strings.Builder
+	if e.ExplicitModel != "" {
+		fmt.Fprintf(&sb, "model %q has no quota remaining for agent %s", e.ExplicitModel, e.AgentID)
+	} else {
+		fmt.Fprintf(&sb, "no CLI target with more than %.0f%% quota remaining is available for agent %s", e.MinThreshold*100, e.AgentID)
+	}
+	for _, t := range e.Targets {
+		state := fmt.Sprintf("%.0f%% quota remaining", t.Remaining*100)
+		if !t.Enabled {
+			state = "provider disabled"
+		}
+		fmt.Fprintf(&sb, "; %s %s: %s", t.CLI, t.Model, state)
+	}
+	return sb.String()
+}
+
+// quotaStatuses snapshots the quota state of every configured CLI target of
+// the agent. Disabled providers are recorded without a usage query.
+func quotaStatuses(agent *agentspec.Agent, conf *config.Config) []QuotaTargetStatus {
+	statuses := make([]QuotaTargetStatus, 0, len(agent.Config.CLI))
+	for _, target := range agent.Config.CLI {
+		st := QuotaTargetStatus{
+			CLI:     target.CLI,
+			Model:   target.Model,
+			Enabled: conf.IsProviderEnabled(target.CLI),
+		}
+		if st.Enabled {
+			st.Remaining = agentwrapper.CheckQuota(target.CLI, target.Model)
+		}
+		statuses = append(statuses, st)
+	}
+	return statuses
+}
+
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
 // If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
 // If selected model has <= 0 quota, it returns an error immediately with NO fallback.
+// Quota exhaustion is reported as *NoQuotaError so callers can distinguish it
+// from execution failures and react (e.g. suspend for a user decision).
 func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
 	if len(agent.Config.CLI) == 0 {
 		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
@@ -261,16 +318,24 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 		}
 		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
 		if quota <= 0 {
-			return nil, fmt.Errorf("model %q has no quota remaining (quota: %.2f)", selectedTarget.Model, quota)
+			return nil, &NoQuotaError{
+				AgentID:       agent.Config.ID,
+				ExplicitModel: reqModel,
+				MinThreshold:  MinAutoQuotaThreshold,
+				Targets:       quotaStatuses(agent, conf),
+			}
 		}
 	} else {
 		hasEnabledTarget := false
+		var statuses []QuotaTargetStatus
 		for _, target := range agent.Config.CLI {
 			if !conf.IsProviderEnabled(target.CLI) {
+				statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Enabled: false})
 				continue
 			}
 			hasEnabledTarget = true
 			quota := agentwrapper.CheckQuota(target.CLI, target.Model)
+			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: quota, Enabled: true})
 			if quota > MinAutoQuotaThreshold {
 				selectedTarget = &target
 				break
@@ -281,7 +346,11 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 			if !hasEnabledTarget {
 				return nil, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
 			}
-			return nil, fmt.Errorf("no CLI target with more than 10%% quota remaining is available for agent %s", agent.Config.ID)
+			return nil, &NoQuotaError{
+				AgentID:      agent.Config.ID,
+				MinThreshold: MinAutoQuotaThreshold,
+				Targets:      statuses,
+			}
 		}
 	}
 

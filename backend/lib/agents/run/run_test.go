@@ -363,3 +363,69 @@ func TestRun_AutoSelection_AllProvidersDisabled(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enabled CLI targets available for agent test-agent")
 }
+
+func TestRun_NoQuotaError_AutoSelection_TypedSnapshot(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-zero"}, // 0% quota
+	})
+
+	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
+	require.Error(t, err)
+
+	var nq *NoQuotaError
+	require.ErrorAs(t, err, &nq)
+	assert.Equal(t, "test-agent", nq.AgentID)
+	assert.Empty(t, nq.ExplicitModel)
+	assert.InDelta(t, MinAutoQuotaThreshold, nq.MinThreshold, 0.0001)
+	require.Len(t, nq.Targets, 1)
+	assert.Equal(t, "agy", nq.Targets[0].CLI)
+	assert.Equal(t, "agy-model-zero", nq.Targets[0].Model)
+	assert.True(t, nq.Targets[0].Enabled)
+	assert.InDelta(t, 0.0, nq.Targets[0].Remaining, 0.0001)
+	assert.Contains(t, err.Error(), "no CLI target with more than 10% quota")
+}
+
+func TestRun_NoQuotaError_ExplicitModel_TypedSnapshot(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-zero"}, // 0% quota
+		{CLI: "agy", Model: "agy-model-high"}, // 50% quota
+	})
+
+	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.Some("agy-model-zero"), "test-chat", StatusScope{}, nil)
+	require.Error(t, err)
+
+	var nq *NoQuotaError
+	require.ErrorAs(t, err, &nq)
+	assert.Equal(t, "agy-model-zero", nq.ExplicitModel)
+	assert.Contains(t, err.Error(), "has no quota remaining")
+	// Snapshot covers every configured target so the user can switch.
+	require.Len(t, nq.Targets, 2)
+	assert.InDelta(t, 0.0, nq.Targets[0].Remaining, 0.0001)
+	assert.InDelta(t, 0.50, nq.Targets[1].Remaining, 0.0001)
+}
+
+func TestRun_NoQuotaError_DisabledProviderMarkedInSnapshot(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	// agy disabled -> only opencode enabled, and it has quota, so this run
+	// succeeds; instead force NoQuota by leaving the sole enabled provider
+	// exhausted via an agent whose opencode model is not in the usage list
+	// (unknown models report 0 remaining).
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-high"},
+		{CLI: "opencode", Model: "opencode-model-unknown"},
+	})
+
+	conf := &config.Config{Providers: []string{"opencode"}}
+
+	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	require.Error(t, err)
+
+	var nq *NoQuotaError
+	require.ErrorAs(t, err, &nq)
+	require.Len(t, nq.Targets, 2)
+	assert.False(t, nq.Targets[0].Enabled, "agy should be marked disabled")
+	assert.Zero(t, nq.Targets[0].Remaining)
+	assert.True(t, nq.Targets[1].Enabled)
+}
