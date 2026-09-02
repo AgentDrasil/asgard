@@ -117,6 +117,33 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "missing gemini_model_for_chat_title",
 		},
+		{
+			name: "invalid ui_lang",
+			config: Config{
+				DB:                      "sqlite",
+				DSN:                     "test.db",
+				AgentDir:                "./agents",
+				Host:                    "127.0.0.1",
+				GeminiAPIKey:            "test-key",
+				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
+				UILang:                  "fr",
+			},
+			wantErr: true,
+			errMsg:  `invalid ui_lang "fr", must be 'en' or 'zh-CN'`,
+		},
+		{
+			name: "valid ui_lang zh-CN",
+			config: Config{
+				DB:                      "sqlite",
+				DSN:                     "test.db",
+				AgentDir:                "./agents",
+				Host:                    "127.0.0.1",
+				GeminiAPIKey:            "test-key",
+				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
+				UILang:                  "zh-CN",
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -265,6 +292,99 @@ comment_lang: English (US)
 			assert.Equal(t, tt.wantCommentLang, cfg.CommentLang)
 		})
 	}
+}
+
+func TestLoadConfig_UILang(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		yamlContent string
+		wantUILang  string
+	}{
+		{
+			name: "default en when ui_lang omitted",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+`,
+			wantUILang: "en",
+		},
+		{
+			name: "default en when ui_lang empty",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+ui_lang: ""
+`,
+			wantUILang: "en",
+		},
+		{
+			name: "custom ui_lang zh-CN",
+			yamlContent: `
+debug: true
+db: sqlite
+dsn: test.db
+agent_dir: %s
+host: 127.0.0.1
+gemini_api_key: test-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+ui_lang: zh-CN
+`,
+			wantUILang: "zh-CN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			agentDir := filepath.Join(tempDir, "agent_root")
+			require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+
+			yamlData := fmt.Sprintf(tt.yamlContent, agentDir)
+			configPath := filepath.Join(tempDir, "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, []byte(yamlData), 0644))
+
+			cfg, err := LoadConfig(configPath)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantUILang, cfg.UILang)
+			assert.Equal(t, tt.wantUILang, cfg.GetUILang())
+		})
+	}
+}
+
+func TestConfig_GetUILang(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config returns default en", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Equal(t, "en", cfg.GetUILang())
+	})
+
+	t.Run("empty config returns default en", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{}
+		assert.Equal(t, "en", cfg.GetUILang())
+	})
+
+	t.Run("custom config returns configured ui_lang", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{UILang: "zh-CN"}
+		assert.Equal(t, "zh-CN", cfg.GetUILang())
+	})
 }
 
 func TestConfig_LanguageRules(t *testing.T) {

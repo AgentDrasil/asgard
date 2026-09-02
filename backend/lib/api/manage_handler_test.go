@@ -170,6 +170,7 @@ teams:
 	conf := &config.Config{
 		AgentDir: tmpDir,
 		Port:     8080,
+		UILang:   "zh-CN",
 		FirebaseWebpushWeb: &config.FirebaseWebpushWebConfig{
 			APIKey:   "test-key",
 			VapidKey: "test-vapid",
@@ -187,6 +188,7 @@ teams:
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"apiKey":"test-key"`)
 	assert.Contains(t, w.Body.String(), `"vapidKey":"test-vapid"`)
+	assert.Contains(t, w.Body.String(), `"default_ui_lang":"zh-CN"`)
 }
 
 func TestSystemStatusHandler_OkAndDegraded(t *testing.T) {

@@ -426,12 +426,14 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 // ConfigResponse represents the public configuration sent to web clients.
 type ConfigResponse struct {
 	FirebaseWebpushWeb *config.FirebaseWebpushWebConfig `json:"firebase_webpush_web,omitempty"`
+	DefaultUILang      string                           `json:"default_ui_lang,omitempty"`
 }
 
 // handleConfig handles GET /api/config.
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	resp := ConfigResponse{
 		FirebaseWebpushWeb: s.conf.FirebaseWebpushWeb,
+		DefaultUILang:      s.conf.GetUILang(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

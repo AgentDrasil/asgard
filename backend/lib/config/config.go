@@ -35,9 +35,12 @@ type Config struct {
 	ChatLang                string                    `yaml:"chat_lang"`
 	DocLang                 string                    `yaml:"doc_lang"`
 	CommentLang             string                    `yaml:"comment_lang"`
+	UILang                  string                    `yaml:"ui_lang"`
 	Providers               []string                  `yaml:"providers" json:"providers,omitempty"`
 	ConfigPath              string                    `yaml:"-" json:"-"`
 }
+
+var SupportedUILangs = []string{"en", "zh-CN"}
 
 var SupportedProviders = []string{"agy", "opencode", "simplest"}
 
@@ -97,6 +100,13 @@ func (c *Config) GetCommentLang() string {
 	return c.CommentLang
 }
 
+func (c *Config) GetUILang() string {
+	if c == nil || c.UILang == "" {
+		return "en"
+	}
+	return c.UILang
+}
+
 func (c *Config) LanguageRules() string {
 	return fmt.Sprintf(`## Language Preferences
 
@@ -148,6 +158,10 @@ func (c *Config) validate() error {
 	}
 	if c.GeminiModelForChatTitle == "" {
 		return fmt.Errorf("missing gemini_model_for_chat_title")
+	}
+
+	if c.UILang != "" && c.UILang != "en" && c.UILang != "zh-CN" {
+		return fmt.Errorf("invalid ui_lang %q, must be 'en' or 'zh-CN'", c.UILang)
 	}
 
 	for _, p := range c.Providers {
@@ -204,6 +218,10 @@ func ParseAndValidate(data []byte) (*Config, error) {
 
 	if cfg.CommentLang == "" {
 		cfg.CommentLang = DefaultLanguage
+	}
+
+	if cfg.UILang == "" {
+		cfg.UILang = "en"
 	}
 
 	if len(cfg.Providers) == 0 {
