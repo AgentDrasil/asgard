@@ -74,6 +74,9 @@ type RunContext struct {
 	// TmpDir explicitly inherits the parent run's temp directory when
 	// non-empty (skips derivation and MkdirAll).
 	TmpDir string
+	// SessionDir explicitly inherits the parent run's session directory when
+	// non-empty (skips derivation and MkdirAll).
+	SessionDir string
 	// EmitEvent receives engine lifecycle events; may be nil.
 	EmitEvent func(event WorkflowEvent)
 	// Resume marks a re-driven run from a persisted snapshot.
@@ -297,6 +300,28 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 		}
 		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating tmp dir: %w", err)
+		}
+	}
+
+	sessionDir := rc.SessionDir
+	if sessionDir == "" {
+		sessionDir = workflowspec.Interpolate(defn.SessionDir, func(key string) (string, bool) {
+			switch key {
+			case "session_id":
+				return rc.SessionID, true
+			case "run_dir":
+				return rc.RunDir, true
+			}
+			return "", false
+		})
+		if sessionDir == "" {
+			sessionDir = DefaultSessionDir(rc.SessionID)
+		}
+		if !filepath.IsAbs(sessionDir) {
+			sessionDir = filepath.Join(rc.RunDir, sessionDir)
+		}
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating session dir: %w", err)
 		}
 	}
 
@@ -863,6 +888,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 					RunID:             rc.RunID,
 					RunDir:            rc.RunDir,
 					TmpDir:            tmpDir,
+					SessionDir:        sessionDir,
 					Input:             rc.Input,
 					Defn:              defn,
 					Node:              node,

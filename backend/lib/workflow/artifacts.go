@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// tmpDirRefRe matches `${tmp_dir}/...` references in raw (un-interpolated)
-// node prompts, e.g. `${tmp_dir}/plan/plan.md`.
-var tmpDirRefRe = regexp.MustCompile(`\$\{tmp_dir\}(/[^\s"'` + "`" + `\)\]}>,;]*)`)
+// scopedDirRefRe matches `${tmp_dir}/...` and `${session_dir}/...` references
+// in raw (un-interpolated) node prompts, e.g. `${tmp_dir}/plan/plan.md`.
+var scopedDirRefRe = regexp.MustCompile(`\$\{(tmp_dir|session_dir)\}(/[^\s"'` + "`" + `\)\]}>,;]*)`)
 
 // absPathRe matches absolute filesystem paths in interpolated prompt text,
 // e.g. /home/user/tmp/0198a.../plan/plan.md.
@@ -40,11 +40,17 @@ func DefaultSessionDir(sessionID string) string {
 }
 
 // ExtractArtifactPaths collects artifact file paths referenced by a human
-// node prompt: explicit `${tmp_dir}/...` references from the raw prompt plus
-// absolute paths under the run's tmp/run directories found in the
-// interpolated prompt. Only paths that exist as regular files are returned,
-// in order of first appearance.
+// node prompt: explicit `${tmp_dir}/...` / `${session_dir}/...` references
+// from the raw prompt plus absolute paths under the run's tmp/session/run
+// directories found in the interpolated prompt. Only paths that exist as
+// regular files are returned, in order of first appearance.
 func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) []string {
+	return ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, "")
+}
+
+// ExtractArtifactPathsInSession extends ExtractArtifactPaths with the run's
+// session directory (sandbox /session).
+func ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, sessionDir string) []string {
 	var ordered []string
 	seen := make(map[string]bool)
 	add := func(p string) {
@@ -56,12 +62,15 @@ func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) 
 		ordered = append(ordered, p)
 	}
 
-	for _, m := range tmpDirRefRe.FindAllStringSubmatch(rawPrompt, -1) {
-		add(filepath.Join(tmpDir, m[1]))
+	scopedDirs := map[string]string{"tmp_dir": tmpDir, "session_dir": sessionDir}
+	for _, m := range scopedDirRefRe.FindAllStringSubmatch(rawPrompt, -1) {
+		if dir := scopedDirs[m[1]]; dir != "" {
+			add(filepath.Join(dir, m[2]))
+		}
 	}
 	for _, m := range absPathRe.FindAllString(interpolatedPrompt, -1) {
 		p := filepath.Clean(strings.TrimRight(m, ".,;:!?"))
-		if isUnderDir(p, tmpDir) || isUnderDir(p, runDir) {
+		if isUnderDir(p, tmpDir) || isUnderDir(p, runDir) || isUnderDir(p, sessionDir) {
 			add(p)
 		}
 	}

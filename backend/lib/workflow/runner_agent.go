@@ -436,7 +436,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 
 // checkRequiredOutputs checks if all required output file paths exist and are non-empty.
 // Paths are interpolated against the node context and evaluated against the host filesystem.
-// Note: Variable paths like ${tmp_dir} and ${run_dir} correspond to directories mounted
+// Note: Variable paths like ${tmp_dir}, ${session_dir} and ${run_dir} correspond to directories mounted
 // into the sandbox container.
 // Returns a slice of missing or empty file paths.
 func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string {

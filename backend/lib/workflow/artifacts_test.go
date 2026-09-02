@@ -45,6 +45,25 @@ func TestExtractArtifactPaths(t *testing.T) {
 	assert.Equal(t, []string{planPath}, got)
 }
 
+func TestExtractArtifactPathsWithSessionDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	runDir := t.TempDir()
+	sessionDir := t.TempDir()
+
+	reportPath := filepath.Join(sessionDir, "report.md")
+	require.NoError(t, os.WriteFile(reportPath, []byte("report"), 0o644))
+
+	raw := "See report (${session_dir}/report.md) and tmp (${tmp_dir}/x.md)."
+	interpolated := "See report (" + reportPath + ") and tmp (" + filepath.Join(tmpDir, "x.md") + ")."
+
+	got := ExtractArtifactPathsInSession(raw, interpolated, tmpDir, runDir, sessionDir)
+	assert.Equal(t, []string{reportPath}, got)
+
+	// Absolute session path in interpolated text is also picked up.
+	got2 := ExtractArtifactPathsInSession("", "also "+reportPath, tmpDir, runDir, sessionDir)
+	assert.Equal(t, []string{reportPath}, got2)
+}
+
 func TestViewerArtifactPath(t *testing.T) {
 	tmpDir := filepath.Join(t.TempDir(), "sess")
 	require.NoError(t, os.MkdirAll(tmpDir, 0o755))

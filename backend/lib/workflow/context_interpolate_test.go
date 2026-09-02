@@ -28,3 +28,18 @@ func TestNodeContextInterpolateLoopIteration(t *testing.T) {
 		nctx.Interpolate("unknown ${loops.missing.iteration} stays verbatim"),
 	)
 }
+
+func TestNodeContextInterpolateSessionDir(t *testing.T) {
+	nctx := &NodeContext{
+		SessionID:  "sess-1",
+		RunDir:     "/home/user/project",
+		TmpDir:     "/home/user/tmp/sess-1",
+		SessionDir: "/home/user/session/sess-1",
+		Input:      "hello",
+		Node:       &workflowspec.NodeSpec{ID: "n1"},
+		Defn:       &workflowspec.WorkflowDefinition{Name: "t"},
+	}
+	assert.Equal(t, "/home/user/session/sess-1/report.md", nctx.Interpolate("${session_dir}/report.md"))
+	assert.Equal(t, "/home/user/tmp/sess-1/report.md", nctx.Interpolate("${tmp_dir}/report.md"))
+	assert.Equal(t, "sess-1:/home/user/session/sess-1", nctx.Interpolate("${session_id}:${session_dir}"))
+}

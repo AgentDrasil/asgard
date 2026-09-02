@@ -17,6 +17,9 @@ type NodeContext struct {
 	RunID     string
 	RunDir    string
 	TmpDir    string
+	// SessionDir is the per-chat persistent directory (~/session/<sessionID>,
+	// sandbox /session). Interpolated as ${session_dir}.
+	SessionDir string
 	// Input is the initial user prompt that triggered the workflow run.
 	Input string
 	// Defn is the workflow definition this node belongs to.
@@ -51,7 +54,7 @@ type NodeContext struct {
 }
 
 // Interpolate expands ${...} placeholders in text using run-scoped variables
-// (session_id, run_dir, tmp_dir, input) and node result fields
+// (session_id, run_dir, tmp_dir, session_dir, input) and node result fields
 // (nodes.<id>.status / exit_code / output / output_file).
 func (nctx *NodeContext) Interpolate(text string) string {
 	return workflowspec.Interpolate(text, nctx.resolveVar)
@@ -65,6 +68,8 @@ func (nctx *NodeContext) resolveVar(key string) (string, bool) {
 		return nctx.RunDir, true
 	case "tmp_dir":
 		return nctx.TmpDir, true
+	case "session_dir":
+		return nctx.SessionDir, true
 	case "input", "prompt":
 		return nctx.Input, true
 	case "node.id":

@@ -51,7 +51,7 @@ func TestNewDB_SQLiteConfig(t *testing.T) {
 		err = db.Raw("PRAGMA journal_mode").Scan(&journalMode).Error
 		require.NoError(t, err)
 		assert.Equal(t, "wal", journalMode)
-		assert.False(t, db.Config.PrepareStmt)
+		assert.False(t, db.Config.PrepareStmt) //nolint:staticcheck // gorm.DB.Config is not embedded; selector is intentional
 	})
 
 	t.Run("concurrent writes", func(t *testing.T) {

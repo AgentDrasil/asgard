@@ -18,10 +18,11 @@ type MountDirsConfig struct {
 
 // WorkflowDefinition is the parsed YAML workflow definition.
 type WorkflowDefinition struct {
-	Name      string          `yaml:"name"`
-	TmpDir    string          `yaml:"tmp_dir"`
-	RunDirs   []string        `yaml:"run_dirs"`
-	MountDirs MountDirsConfig `yaml:"mount_dirs"`
+	Name       string          `yaml:"name"`
+	TmpDir     string          `yaml:"tmp_dir"`
+	SessionDir string          `yaml:"session_dir"`
+	RunDirs    []string        `yaml:"run_dirs"`
+	MountDirs  MountDirsConfig `yaml:"mount_dirs"`
 	// MaxNodeExecutions is the global per-node execution cap (default 100).
 	MaxNodeExecutions int         `yaml:"max_node_executions"`
 	Loops             []*LoopSpec `yaml:"loops"`
@@ -130,7 +131,7 @@ type NodeSpec struct {
 	Fanout   *FanoutSpec `yaml:"fanout"`
 
 	// Output quality gate & retry fields.
-	// RequiredOutputs lists file paths (supporting ${tmp_dir}, ${run_dir}, ${session_id})
+	// RequiredOutputs lists file paths (supporting ${tmp_dir}, ${session_dir}, ${run_dir}, ${session_id})
 	// that must exist and be non-empty upon node completion.
 	RequiredOutputs []string `yaml:"required_outputs"`
 	// MaxRetries specifies the maximum self-correction retry attempts if required outputs are missing.

@@ -45,7 +45,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 
 	// Collect artifact files referenced by the prompt so the host app can
 	// register them for the session and surface them to the frontend.
-	artifactPaths := ExtractArtifactPaths(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir)
+	artifactPaths := ExtractArtifactPathsInSession(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir, nctx.SessionDir)
 	artifactViewerPaths := make([]string, 0, len(artifactPaths))
 	for _, p := range artifactPaths {
 		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPathInSession(p, nctx.TmpDir, DefaultSessionDir(nctx.SessionID)))
