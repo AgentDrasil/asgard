@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
 import { getSystemLogs } from "../lib/api";
+import { formatRelativeTime } from "../i18n/timeUtils";
 import type { SystemLogEntry } from "../types";
 
 const router = useRouter();
+const { t } = useI18n();
 const { toastHistory, clearToastHistory } = useToast();
 
 interface UnifiedLogItem {
@@ -58,18 +61,6 @@ const formatTime = (ts: number): string => {
     minute: "2-digit",
     second: "2-digit",
   });
-};
-
-const formatRelativeTime = (ts: number): string => {
-  const diffSec = Math.floor((Date.now() - ts) / 1000);
-  if (diffSec < 5) return "just now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDays = Math.floor(diffHr / 24);
-  return `${diffDays}d ago`;
 };
 
 // Merge backend diagnostic logs and frontend toast history
@@ -186,14 +177,14 @@ const navigateBackToSettings = () => {
         <button
           @click="navigateBackToSettings"
           class="btn btn-ghost btn-sm btn-square"
-          title="Back to Settings"
-          aria-label="Back to Settings"
+          :title="t('logs.backToSettings')"
+          :aria-label="t('logs.backToSettings')"
         >
           <Icon icon="material-symbols:arrow-back" class="w-5 h-5" />
         </button>
         <div class="flex items-center gap-2">
           <Icon icon="material-symbols:receipt-long-outline" class="w-5 h-5 text-primary" />
-          <h1 class="text-base font-semibold md:text-lg">System Logs & Diagnostics</h1>
+          <h1 class="text-base font-semibold md:text-lg">{{ t("logs.title") }}</h1>
         </div>
       </div>
 
@@ -202,22 +193,22 @@ const navigateBackToSettings = () => {
           @click="fetchLogs"
           class="btn btn-ghost btn-sm gap-1.5"
           :disabled="isLoading"
-          title="Refresh Logs"
+          :title="t('logs.refreshTooltip')"
         >
           <Icon
             icon="material-symbols:refresh"
             class="w-4 h-4"
             :class="{ 'animate-spin': isLoading }"
           />
-          <span class="hidden sm:inline">Refresh</span>
+          <span class="hidden sm:inline">{{ t("logs.refresh") }}</span>
         </button>
         <button
           @click="handleClear"
           class="btn btn-ghost btn-sm text-error gap-1.5"
-          title="Clear Toast History"
+          :title="t('logs.clearToastHistory')"
         >
           <Icon icon="material-symbols:delete-outline" class="w-4 h-4" />
-          <span class="hidden sm:inline">Clear Toast History</span>
+          <span class="hidden sm:inline">{{ t("logs.clearToastHistory") }}</span>
         </button>
       </div>
     </header>
@@ -226,20 +217,20 @@ const navigateBackToSettings = () => {
       <!-- Metrics Overview -->
       <div class="grid grid-cols-3 gap-3 md:gap-4">
         <div class="rounded-lg border border-base-300 bg-base-200/50 p-3 md:p-4">
-          <div class="text-xs text-base-content/60 font-medium">Total Entries</div>
+          <div class="text-xs text-base-content/60 font-medium">{{ t("logs.metrics.total") }}</div>
           <div class="mt-1 text-xl md:text-2xl font-bold">{{ totalCount }}</div>
         </div>
         <div class="rounded-lg border border-error/30 bg-error/5 p-3 md:p-4">
           <div class="text-xs text-error font-medium flex items-center gap-1">
             <Icon icon="material-symbols:error-outline" class="w-3.5 h-3.5" />
-            Errors
+            {{ t("logs.metrics.errors") }}
           </div>
           <div class="mt-1 text-xl md:text-2xl font-bold text-error">{{ errorCount }}</div>
         </div>
         <div class="rounded-lg border border-warning/30 bg-warning/5 p-3 md:p-4">
           <div class="text-xs text-warning font-medium flex items-center gap-1">
             <Icon icon="material-symbols:warning-amber-outline" class="w-3.5 h-3.5" />
-            Warnings
+            {{ t("logs.metrics.warnings") }}
           </div>
           <div class="mt-1 text-xl md:text-2xl font-bold text-warning">{{ warnCount }}</div>
         </div>
@@ -254,21 +245,21 @@ const navigateBackToSettings = () => {
             :class="selectedLevel === 'all' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
             @click="selectedLevel = 'all'"
           >
-            All ({{ totalCount }})
+            {{ t("logs.levels.all", { count: totalCount }) }}
           </button>
           <button
             class="join-item btn btn-xs md:btn-sm border-0 font-medium text-error"
             :class="selectedLevel === 'error' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
             @click="selectedLevel = 'error'"
           >
-            Errors ({{ errorCount }})
+            {{ t("logs.levels.error", { count: errorCount }) }}
           </button>
           <button
             class="join-item btn btn-xs md:btn-sm border-0 font-medium text-warning"
             :class="selectedLevel === 'warn' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
             @click="selectedLevel = 'warn'"
           >
-            Warnings ({{ warnCount }})
+            {{ t("logs.levels.warn", { count: warnCount }) }}
           </button>
         </div>
 
@@ -281,7 +272,7 @@ const navigateBackToSettings = () => {
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Search logs & diagnostics..."
+            :placeholder="t('logs.searchPlaceholder')"
             class="input input-sm w-full pl-9 pr-8 bg-base-200 border-base-300 rounded-lg text-sm"
           />
           <button
@@ -309,15 +300,17 @@ const navigateBackToSettings = () => {
                 v-if="item.level === 'error'"
                 class="badge badge-sm badge-error text-error-content font-bold uppercase"
               >
-                Error
+                {{ t("logs.badges.error") }}
               </span>
               <span
                 v-else-if="item.level === 'warn'"
                 class="badge badge-sm badge-warning text-warning-content font-bold uppercase"
               >
-                Warning
+                {{ t("logs.badges.warn") }}
               </span>
-              <span v-else class="badge badge-sm badge-info font-bold uppercase"> Info </span>
+              <span v-else class="badge badge-sm badge-info font-bold uppercase">
+                {{ t("logs.badges.info") }}
+              </span>
 
               <!-- Source Badge -->
               <span class="badge badge-sm badge-neutral font-mono text-xs opacity-80">
@@ -329,7 +322,7 @@ const navigateBackToSettings = () => {
                 {{ item.timeString }}
               </span>
               <span class="text-xs text-base-content/40"
-                >({{ formatRelativeTime(item.timestamp) }})</span
+                >({{ formatRelativeTime(item.timestamp, t) }})</span
               >
             </div>
 
@@ -337,7 +330,7 @@ const navigateBackToSettings = () => {
             <button
               @click="handleCopyLog(item)"
               class="btn btn-ghost btn-xs gap-1 text-base-content/60 hover:text-base-content"
-              :title="copiedId === item.id ? 'Copied!' : 'Copy log content'"
+              :title="copiedId === item.id ? t('logs.copiedTooltip') : t('logs.copyTooltip')"
             >
               <Icon
                 :icon="
@@ -348,7 +341,9 @@ const navigateBackToSettings = () => {
                 class="w-3.5 h-3.5"
                 :class="{ 'text-success': copiedId === item.id }"
               />
-              <span class="text-xs">{{ copiedId === item.id ? "Copied" : "Copy" }}</span>
+              <span class="text-xs">{{
+                copiedId === item.id ? t("logs.copied") : t("logs.copy")
+              }}</span>
             </button>
           </div>
 
@@ -372,7 +367,7 @@ const navigateBackToSettings = () => {
             <summary
               class="collapse-title text-xs font-semibold py-1.5 min-h-0 text-base-content/70"
             >
-              Details / Diagnostics Trace
+              {{ t("logs.details") }}
             </summary>
             <div
               class="collapse-content text-xs font-mono whitespace-pre-wrap break-all text-base-content/80 pt-1 select-text"
@@ -389,12 +384,12 @@ const navigateBackToSettings = () => {
         class="flex flex-col items-center justify-center py-16 text-center text-base-content/50 border border-dashed border-base-300 rounded-xl"
       >
         <Icon icon="material-symbols:check-circle-outline" class="w-12 h-12 text-success/60 mb-3" />
-        <div class="text-base font-medium text-base-content/80">No logs found</div>
+        <div class="text-base font-medium text-base-content/80">{{ t("logs.empty.title") }}</div>
         <div class="text-sm text-base-content/50 mt-1 max-w-sm">
           {{
             searchQuery || selectedLevel !== "all"
-              ? "No logs match your current filter criteria."
-              : "No diagnostic or system logs recorded since startup. System is healthy!"
+              ? t("logs.empty.filtered")
+              : t("logs.empty.healthy")
           }}
         </div>
       </div>

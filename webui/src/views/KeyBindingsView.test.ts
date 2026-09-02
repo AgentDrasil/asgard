@@ -4,6 +4,7 @@ import { createApp, h, nextTick } from "vue";
 import KeyBindingsView from "./KeyBindingsView.vue";
 import * as api from "../lib/api";
 import * as platform from "../utils/platform";
+import { i18n, setLocale } from "../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -30,6 +31,7 @@ describe("KeyBindingsView.vue", () => {
     document.body.appendChild(root);
     vi.restoreAllMocks();
     mockPush.mockReset();
+    setLocale("en");
 
     // Default mock platform to linux
     vi.spyOn(platform, "detectClientOS").mockReturnValue("linux");
@@ -49,6 +51,7 @@ describe("KeyBindingsView.vue", () => {
     if (root && root.parentNode) {
       root.parentNode.removeChild(root);
     }
+    setLocale("en");
   });
 
   it("renders with OS selector tabs and shows current OS badge", async () => {
@@ -57,6 +60,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -76,6 +80,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -108,6 +113,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -156,6 +162,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -185,6 +192,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -206,6 +214,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -241,6 +250,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     // Allow loadCustomKeybindings promise to settle
     await new Promise((r) => setTimeout(r, 10));
@@ -248,7 +258,9 @@ describe("KeyBindingsView.vue", () => {
 
     // Corrupted banner is visible
     expect(root.textContent).toContain("Configuration Loading Error");
-    expect(root.textContent).toContain("Saving is disabled to prevent overwriting");
+    expect(root.textContent).toContain(
+      "Saving is disabled to prevent overwriting existing settings",
+    );
 
     // Save button is disabled
     const saveBtn = root.querySelector("footer button.btn-primary") as HTMLButtonElement;
@@ -264,6 +276,7 @@ describe("KeyBindingsView.vue", () => {
         return h(KeyBindingsView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -298,6 +311,26 @@ describe("KeyBindingsView.vue", () => {
 
     // The shortcut should still be the original default (Ctrl+B), not modified by Shift+K
     expect(root.textContent).not.toContain("Shift+K");
+
+    app.unmount();
+  });
+
+  it("supports switching locale to zh-CN and translates labels and categories", async () => {
+    setLocale("zh-CN");
+    const app = createApp({
+      render() {
+        return h(KeyBindingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    expect(root.textContent).toContain("快捷键设置");
+    expect(root.textContent).toContain("当前系统");
+    expect(root.textContent).toContain("导航");
+    expect(root.textContent).toContain("恢复全部默认设置");
+    expect(root.textContent).toContain("保存更改");
 
     app.unmount();
   });

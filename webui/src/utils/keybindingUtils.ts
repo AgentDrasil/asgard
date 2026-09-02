@@ -522,3 +522,11 @@ export function resolveGlobalAction(
 
   return null;
 }
+
+export function getActionTitleKey(actionId: string): string {
+  return `keybindings.actions.${actionId}.title`;
+}
+
+export function getActionDescriptionKey(actionId: string): string {
+  return `keybindings.actions.${actionId}.description`;
+}

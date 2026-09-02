@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import type { SupportedOS } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
@@ -11,9 +12,12 @@ import {
   detectConflicts,
   formatShortcutDisplay,
   normalizeShortcut,
+  getActionTitleKey,
+  getActionDescriptionKey,
 } from "../utils/keybindingUtils";
 
 const router = useRouter();
+const { t, te } = useI18n();
 const toast = useToast();
 
 const {
@@ -72,16 +76,36 @@ const categories = [
   { id: "general", label: "General" },
 ] as const;
 
+const getActionTitle = (actionId: string, fallbackTitle: string): string => {
+  const key = getActionTitleKey(actionId);
+  return te(key) ? t(key) : fallbackTitle;
+};
+
+const getActionDescription = (actionId: string, fallbackDesc: string): string => {
+  const key = getActionDescriptionKey(actionId);
+  return te(key) ? t(key) : fallbackDesc;
+};
+
+const getCategoryLabel = (catId: string, fallbackLabel: string): string => {
+  const key = `keybindings.categories.${catId}`;
+  return te(key) ? t(key) : fallbackLabel;
+};
+
 const filteredActions = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) return DEFAULT_KEYBINDING_ACTIONS;
 
-  return DEFAULT_KEYBINDING_ACTIONS.filter(
-    (action) =>
+  return DEFAULT_KEYBINDING_ACTIONS.filter((action) => {
+    const title = getActionTitle(action.id, action.title);
+    const desc = getActionDescription(action.id, action.description);
+    return (
+      title.toLowerCase().includes(query) ||
+      desc.toLowerCase().includes(query) ||
       action.title.toLowerCase().includes(query) ||
       action.description.toLowerCase().includes(query) ||
-      action.id.toLowerCase().includes(query),
-  );
+      action.id.toLowerCase().includes(query)
+    );
+  });
 });
 
 const groupedActions = computed(() => {
@@ -104,7 +128,7 @@ const getActionConflicts = (actionId: string): string[] => {
       for (const otherId of conflictActionIds) {
         if (otherId !== actionId) {
           const actionDef = DEFAULT_KEYBINDING_ACTIONS.find((a) => a.id === otherId);
-          const name = actionDef ? actionDef.title : otherId;
+          const name = actionDef ? getActionTitle(actionDef.id, actionDef.title) : otherId;
           if (!conflictingActionNames.includes(name)) {
             conflictingActionNames.push(name);
           }
@@ -192,7 +216,7 @@ const handleResetAction = (actionId: string) => {
 const handleResetAll = () => {
   if (!isCurrentOS.value) return;
   resetAllShortcuts(selectedOS.value);
-  toast.info("Shortcuts reset to default for current OS", { title: "Reset Defaults" });
+  toast.info(t("keybindings.resetToast"), { title: t("keybindings.resetToastTitle") });
 };
 
 const handleSave = async () => {
@@ -202,15 +226,15 @@ const handleSave = async () => {
   try {
     const res = await saveCustomKeybindings(selectedOS.value);
     if (res.success) {
-      toast.success("Keyboard shortcuts saved successfully", { title: "Shortcuts Saved" });
+      toast.success(t("keybindings.savedToast"), { title: t("keybindings.savedToastTitle") });
     } else {
-      toast.error(res.error || "Failed to save keyboard shortcuts", {
-        title: "Save Failed",
+      toast.error(res.error || t("keybindings.saveFailedToast"), {
+        title: t("keybindings.saveFailedToastTitle"),
       });
     }
   } catch (err: any) {
-    toast.error(err?.message || "Failed to save keyboard shortcuts", {
-      title: "Save Failed",
+    toast.error(err?.message || t("keybindings.saveFailedToast"), {
+      title: t("keybindings.saveFailedToastTitle"),
     });
   } finally {
     isSaving.value = false;
@@ -245,14 +269,14 @@ onUnmounted(() => {
         <button
           @click="handleBack"
           class="btn btn-ghost btn-sm btn-square"
-          title="Back to Settings"
-          aria-label="Back to Settings"
+          :title="t('keybindings.backToSettings')"
+          :aria-label="t('keybindings.backToSettings')"
         >
           <Icon icon="material-symbols:arrow-back" class="w-5 h-5" />
         </button>
         <div class="flex items-center gap-2">
           <Icon icon="material-symbols:keyboard-outline" class="w-5 h-5 text-primary" />
-          <h1 class="text-base font-semibold md:text-lg">Keyboard Shortcuts</h1>
+          <h1 class="text-base font-semibold md:text-lg">{{ t("keybindings.title") }}</h1>
         </div>
       </div>
 
@@ -263,9 +287,9 @@ onUnmounted(() => {
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Search actions..."
+            :placeholder="t('keybindings.searchPlaceholder')"
             class="grow text-xs"
-            aria-label="Search actions"
+            :aria-label="t('keybindings.searchAria')"
           />
         </label>
       </div>
@@ -277,10 +301,9 @@ onUnmounted(() => {
       <div v-if="hasLoadError" class="alert alert-error shadow-sm text-sm" role="alert">
         <Icon icon="material-symbols:error-outline" class="w-5 h-5 shrink-0" />
         <div>
-          <h3 class="font-bold">Configuration Loading Error</h3>
+          <h3 class="font-bold">{{ t("keybindings.configLoadErrorTitle") }}</h3>
           <div class="text-xs">
-            Failed to parse server keys.yaml or file is corrupted. Saving is disabled to prevent
-            overwriting existing settings.
+            {{ t("keybindings.configLoadErrorDesc") }}
           </div>
         </div>
       </div>
@@ -296,9 +319,9 @@ onUnmounted(() => {
             @click="selectedOS = 'linux'"
           >
             <span>Linux</span>
-            <span v-if="currentOS === 'linux'" class="badge badge-primary badge-xs"
-              >Current OS</span
-            >
+            <span v-if="currentOS === 'linux'" class="badge badge-primary badge-xs">
+              {{ t("keybindings.currentOS") }}
+            </span>
           </button>
           <button
             class="tab text-xs sm:text-sm font-medium gap-1.5"
@@ -306,9 +329,9 @@ onUnmounted(() => {
             @click="selectedOS = 'windows'"
           >
             <span>Windows</span>
-            <span v-if="currentOS === 'windows'" class="badge badge-primary badge-xs"
-              >Current OS</span
-            >
+            <span v-if="currentOS === 'windows'" class="badge badge-primary badge-xs">
+              {{ t("keybindings.currentOS") }}
+            </span>
           </button>
           <button
             class="tab text-xs sm:text-sm font-medium gap-1.5"
@@ -316,24 +339,31 @@ onUnmounted(() => {
             @click="selectedOS = 'mac'"
           >
             <span>macOS</span>
-            <span v-if="currentOS === 'mac'" class="badge badge-primary badge-xs">Current OS</span>
+            <span v-if="currentOS === 'mac'" class="badge badge-primary badge-xs">
+              {{ t("keybindings.currentOS") }}
+            </span>
           </button>
         </div>
 
         <div class="text-xs text-base-content/60">
-          Showing keybindings for
-          <strong class="capitalize">{{ selectedOS === "mac" ? "macOS" : selectedOS }}</strong>
+          {{
+            t("keybindings.showingFor", {
+              os: selectedOS === "mac" ? "macOS" : selectedOS === "linux" ? "Linux" : "Windows",
+            })
+          }}
         </div>
       </div>
 
       <!-- Non-current OS Read-only Notice Banner -->
       <div v-if="!isCurrentOS" class="alert alert-warning shadow-sm text-xs py-2 px-3">
         <Icon icon="material-symbols:info-outline" class="w-4 h-4 shrink-0" />
-        <span
-          >Viewing mode only. You can only customize shortcuts for your current operating system ({{
-            currentOS === "mac" ? "macOS" : currentOS
-          }}).</span
-        >
+        <span>
+          {{
+            t("keybindings.viewOnlyNotice", {
+              os: currentOS === "mac" ? "macOS" : currentOS === "linux" ? "Linux" : "Windows",
+            })
+          }}
+        </span>
       </div>
 
       <!-- Keybindings Action Lists Grouped by Category -->
@@ -343,7 +373,7 @@ onUnmounted(() => {
             <h2
               class="text-sm font-semibold uppercase tracking-wider text-base-content/60 flex items-center gap-2"
             >
-              <span>{{ cat.label }}</span>
+              <span>{{ getCategoryLabel(cat.id, cat.label) }}</span>
               <span class="text-xs font-normal text-base-content/40"
                 >({{ groupedActions[cat.id].length }})</span
               >
@@ -361,16 +391,18 @@ onUnmounted(() => {
                 <!-- Left: Title, Description, Badges -->
                 <div class="space-y-1 min-w-0 flex-1">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-medium text-sm text-base-content">{{ action.title }}</span>
+                    <span class="font-medium text-sm text-base-content">{{
+                      getActionTitle(action.id, action.title)
+                    }}</span>
                     <span
                       v-if="isActionModified(action.id)"
                       class="badge badge-outline badge-info badge-xs"
                     >
-                      Modified
+                      {{ t("keybindings.modified") }}
                     </span>
                   </div>
                   <p class="text-xs text-base-content/70 leading-relaxed">
-                    {{ action.description }}
+                    {{ getActionDescription(action.id, action.description) }}
                   </p>
 
                   <!-- Conflict Warning if any -->
@@ -379,7 +411,11 @@ onUnmounted(() => {
                     class="flex items-center gap-1.5 text-xs text-error font-medium mt-1"
                   >
                     <Icon icon="material-symbols:warning" class="w-4 h-4 shrink-0" />
-                    <span>Conflicts with: {{ getActionConflicts(action.id).join(", ") }}</span>
+                    <span>{{
+                      t("keybindings.conflictsWith", {
+                        actions: getActionConflicts(action.id).join(", "),
+                      })
+                    }}</span>
                   </div>
                 </div>
 
@@ -391,7 +427,7 @@ onUnmounted(() => {
                       v-if="recordingActionId === action.id"
                       class="kbd kbd-sm bg-primary text-primary-content animate-pulse"
                     >
-                      Press shortcut keys... (Esc to cancel)
+                      {{ t("keybindings.pressKeys") }}
                     </kbd>
                     <template v-else>
                       <template v-if="(selectedOSBindings[action.id] || []).length > 0">
@@ -404,7 +440,7 @@ onUnmounted(() => {
                         </kbd>
                       </template>
                       <span v-else class="text-xs italic text-base-content/40 px-2">
-                        Unassigned
+                        {{ t("keybindings.unassigned") }}
                       </span>
                     </template>
                   </div>
@@ -413,17 +449,17 @@ onUnmounted(() => {
                   <div v-if="recordingActionId !== action.id" class="flex items-center gap-1 ml-2">
                     <button
                       class="btn btn-ghost btn-xs"
-                      title="Record new shortcut"
+                      :title="t('keybindings.recordTitle')"
                       :disabled="!isCurrentOS"
                       @click="startRecording(action.id)"
                     >
                       <Icon icon="material-symbols:edit-outline" class="w-3.5 h-3.5" />
-                      <span class="hidden md:inline">Record</span>
+                      <span class="hidden md:inline">{{ t("keybindings.record") }}</span>
                     </button>
 
                     <button
                       class="btn btn-ghost btn-xs text-base-content/70 hover:text-error"
-                      title="Clear shortcut"
+                      :title="t('keybindings.clearTitle')"
                       :disabled="!isCurrentOS || (selectedOSBindings[action.id] || []).length === 0"
                       @click="handleClear(action.id)"
                     >
@@ -433,7 +469,7 @@ onUnmounted(() => {
                     <button
                       v-if="isActionModified(action.id)"
                       class="btn btn-ghost btn-xs text-base-content/70 hover:text-primary"
-                      title="Reset to default"
+                      :title="t('keybindings.resetTitle')"
                       :disabled="!isCurrentOS"
                       @click="handleResetAction(action.id)"
                     >
@@ -451,7 +487,7 @@ onUnmounted(() => {
           class="text-center py-12 text-base-content/50 space-y-2"
         >
           <Icon icon="material-symbols:search-off" class="w-8 h-8 mx-auto text-base-content/30" />
-          <p class="text-sm">No actions match "{{ searchQuery }}"</p>
+          <p class="text-sm">{{ t("keybindings.noMatch", { query: searchQuery }) }}</p>
         </div>
       </div>
     </div>
@@ -466,7 +502,7 @@ onUnmounted(() => {
         @click="handleResetAll"
       >
         <Icon icon="material-symbols:restart-alt" class="w-4 h-4" />
-        <span>Reset All to Defaults</span>
+        <span>{{ t("keybindings.resetAll") }}</span>
       </button>
 
       <div class="flex items-center gap-3">
@@ -480,7 +516,7 @@ onUnmounted(() => {
             class="w-4 h-4"
             :class="{ 'animate-spin': isSaving }"
           />
-          <span>{{ isSaving ? "Saving..." : "Save Changes" }}</span>
+          <span>{{ isSaving ? t("keybindings.saving") : t("keybindings.saveChanges") }}</span>
         </button>
       </div>
     </footer>

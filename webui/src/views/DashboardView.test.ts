@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import DashboardView from "./DashboardView.vue";
 import * as api from "../lib/api";
+import { i18n, setLocale } from "../i18n";
 import type { ChatSession } from "../types";
 
 // Mock @iconify/vue
@@ -87,6 +88,7 @@ describe("DashboardView.vue", () => {
     document.body.appendChild(root);
     vi.restoreAllMocks();
     mockPush.mockReset();
+    setLocale("en");
 
     vi.spyOn(api, "getSessions").mockImplementation(async (archived = false) => {
       if (archived) return [...mockArchivedSessions];
@@ -100,6 +102,7 @@ describe("DashboardView.vue", () => {
     if (root && root.parentNode) {
       root.parentNode.removeChild(root);
     }
+    setLocale("en");
   });
 
   const flush = async () => {
@@ -113,6 +116,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -143,6 +147,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -163,6 +168,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -191,6 +197,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -215,6 +222,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -247,6 +255,7 @@ describe("DashboardView.vue", () => {
         return h(DashboardView);
       },
     });
+    app.use(i18n);
     app.mount(root);
     await flush();
 
@@ -256,6 +265,24 @@ describe("DashboardView.vue", () => {
 
     expect(root.querySelector('[data-test="empty-archived"]')).not.toBeNull();
     expect(root.textContent).toContain("No archived sessions");
+
+    app.unmount();
+  });
+
+  it("supports switching locale to zh-CN and translates headers", async () => {
+    setLocale("zh-CN");
+    const app = createApp({
+      render() {
+        return h(DashboardView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    expect(root.textContent).toContain("会话看板");
+    expect(root.textContent).toContain("看板视图");
+    expect(root.textContent).toContain("查看归档");
 
     app.unmount();
   });

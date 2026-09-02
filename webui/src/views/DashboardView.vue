@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
 import { getSessions, archiveSession } from "../lib/api";
 import { formatTimestamp } from "../lib/format";
+import { formatRelativeTime } from "../i18n/timeUtils";
 import type { ChatSession } from "../types";
 
 const router = useRouter();
+const { t } = useI18n();
 const toast = useToast();
 
 const activeSessions = ref<ChatSession[]>([]);
@@ -27,7 +30,7 @@ const fetchAllSessions = async () => {
     archivedSessions.value = archived;
   } catch (err) {
     console.error("Failed to load sessions for dashboard:", err);
-    toast.error("Failed to load session list");
+    toast.error(t("dashboard.loadFailed"));
   } finally {
     isLoading.value = false;
   }
@@ -113,7 +116,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
   try {
     const success = await archiveSession(chatID);
     if (success) {
-      toast.success("Session archived successfully");
+      toast.success(t("dashboard.archiveSuccess"));
       // Remove from activeSessions and add to archivedSessions
       activeSessions.value = activeSessions.value.filter((s) => s.chatID !== chatID);
       const updatedSession: ChatSession = { ...session, isArchived: true };
@@ -122,25 +125,14 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
         ...archivedSessions.value.filter((s) => s.chatID !== chatID),
       ];
     } else {
-      toast.error("Failed to archive session, please try again");
+      toast.error(t("dashboard.archiveFailed"));
     }
   } catch (err) {
     console.error("Archive error:", err);
-    toast.error("Unexpected error while archiving");
+    toast.error(t("dashboard.archiveUnexpectedError"));
   } finally {
     isArchiving.value[chatID] = false;
   }
-};
-
-const formatRelativeTime = (timeStr?: string): string => {
-  if (!timeStr) return "-";
-  const date = new Date(timeStr);
-  const diff = Date.now() - date.getTime();
-  if (isNaN(diff) || diff < 0) return "-";
-  if (diff < 60 * 1000) return "just now";
-  if (diff < 3600 * 1000) return `${Math.floor(diff / (60 * 1000))} minutes ago`;
-  if (diff < 24 * 3600 * 1000) return `${Math.floor(diff / (3600 * 1000))} hours ago`;
-  return `${Math.floor(diff / (24 * 3600 * 1000))} days ago`;
 };
 </script>
 
@@ -156,15 +148,15 @@ const formatRelativeTime = (timeStr?: string): string => {
           </div>
           <div>
             <h1 class="text-xl font-bold tracking-tight text-base-content flex items-center gap-2">
-              Session Board
+              {{ t("dashboard.title") }}
               <span
                 class="text-xs font-normal px-2 py-0.5 rounded-full bg-base-300 text-base-content/70"
               >
-                Dashboard
+                {{ t("dashboard.badge") }}
               </span>
             </h1>
             <p class="text-xs text-base-content/60 mt-0.5">
-              Real-time monitoring of multi-agent session status and progress
+              {{ t("dashboard.subtitle") }}
             </p>
           </div>
         </div>
@@ -175,33 +167,35 @@ const formatRelativeTime = (timeStr?: string): string => {
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20"
           >
             <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-            <span
-              >Running: <strong>{{ totalRunningCount }}</strong></span
-            >
+            <span>
+              <strong>{{ t("dashboard.metrics.running", { count: totalRunningCount }) }}</strong>
+            </span>
           </div>
           <div
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-warning/10 text-warning border border-warning/20"
           >
             <span class="w-2 h-2 rounded-full bg-warning"></span>
-            <span
-              >Waiting: <strong>{{ totalWaitingCount }}</strong></span
-            >
+            <span>
+              <strong>{{ t("dashboard.metrics.waiting", { count: totalWaitingCount }) }}</strong>
+            </span>
           </div>
           <div
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success/10 text-success border border-success/20"
           >
             <span class="w-2 h-2 rounded-full bg-success"></span>
-            <span
-              >Recently Completed (&lt; 3h): <strong>{{ totalRecentCompletedCount }}</strong></span
-            >
+            <span>
+              <strong>{{
+                t("dashboard.metrics.recentCompleted", { count: totalRecentCompletedCount })
+              }}</strong>
+            </span>
           </div>
           <div
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-base-300 text-base-content/70 border border-base-300"
           >
             <Icon icon="lucide:archive" class="w-3.5 h-3.5" />
-            <span
-              >Archived: <strong>{{ totalArchivedCount }}</strong></span
-            >
+            <span>
+              <strong>{{ t("dashboard.metrics.archived", { count: totalArchivedCount }) }}</strong>
+            </span>
           </div>
         </div>
       </div>
@@ -222,7 +216,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             data-test="tab-kanban"
           >
             <Icon icon="lucide:kanban" class="w-4 h-4" />
-            Kanban View
+            {{ t("dashboard.tabs.kanban") }}
           </button>
           <button
             type="button"
@@ -234,7 +228,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             data-test="tab-archived"
           >
             <Icon icon="lucide:archive" class="w-4 h-4" />
-            View Archive
+            {{ t("dashboard.tabs.archived") }}
             <span v-if="totalArchivedCount > 0" class="badge badge-xs badge-neutral">
               {{ totalArchivedCount }}
             </span>
@@ -251,7 +245,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="Search sessions by title, agent, path..."
+              :placeholder="t('dashboard.searchPlaceholder')"
               class="input input-sm input-bordered w-full pl-9 pr-3 bg-base-100 focus:outline-primary text-sm"
               data-test="search-input"
             />
@@ -261,7 +255,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             class="btn btn-sm btn-outline btn-square border-base-300 hover:bg-base-200"
             :disabled="isLoading"
             @click="fetchAllSessions"
-            title="Refresh data"
+            :title="t('dashboard.refreshTooltip')"
             data-test="btn-refresh"
           >
             <Icon icon="lucide:refresh-cw" class="w-4 h-4" :class="{ 'animate-spin': isLoading }" />
@@ -278,7 +272,7 @@ const formatRelativeTime = (timeStr?: string): string => {
         class="flex flex-col items-center justify-center h-64 gap-3"
       >
         <span class="loading loading-spinner loading-lg text-primary"></span>
-        <p class="text-sm text-base-content/60">Loading session data...</p>
+        <p class="text-sm text-base-content/60">{{ t("dashboard.loading") }}</p>
       </div>
 
       <!-- Mode 1: Active Kanban View (3 Columns) -->
@@ -295,7 +289,9 @@ const formatRelativeTime = (timeStr?: string): string => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></span>
-              <h2 class="font-semibold text-sm text-base-content">Running</h2>
+              <h2 class="font-semibold text-sm text-base-content">
+                {{ t("dashboard.columns.running") }}
+              </h2>
             </div>
             <span class="badge badge-sm badge-primary font-mono">{{ runningSessions.length }}</span>
           </div>
@@ -316,11 +312,13 @@ const formatRelativeTime = (timeStr?: string): string => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-primary animate-pulse shrink-0">Running</span>
+                  <span class="badge badge-xs badge-primary animate-pulse shrink-0">
+                    {{ t("dashboard.cards.runningBadge") }}
+                  </span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="Archive session"
+                    :title="t('dashboard.cards.archiveTooltip')"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -340,7 +338,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-primary" />
-                  {{ session.currentAgent || "default" }}
+                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
                   v-if="session.runDir"
@@ -356,7 +354,11 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  Active: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  {{
+                    t("dashboard.cards.activeTime", {
+                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
+                    })
+                  }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -369,7 +371,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-running"
             >
               <Icon icon="lucide:check-circle-2" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">No running tasks</p>
+              <p class="text-xs">{{ t("dashboard.empty.running") }}</p>
             </div>
           </div>
         </div>
@@ -382,7 +384,9 @@ const formatRelativeTime = (timeStr?: string): string => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-warning"></span>
-              <h2 class="font-semibold text-sm text-base-content">Waiting for User</h2>
+              <h2 class="font-semibold text-sm text-base-content">
+                {{ t("dashboard.columns.waiting") }}
+              </h2>
             </div>
             <span class="badge badge-sm badge-warning font-mono">{{ waitingSessions.length }}</span>
           </div>
@@ -403,11 +407,13 @@ const formatRelativeTime = (timeStr?: string): string => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-warning shrink-0">Awaiting Reply</span>
+                  <span class="badge badge-xs badge-warning shrink-0">
+                    {{ t("dashboard.cards.waitingBadge") }}
+                  </span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="Archive session"
+                    :title="t('dashboard.cards.archiveTooltip')"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -427,7 +433,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-warning" />
-                  {{ session.currentAgent || "default" }}
+                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
                   v-if="session.runDir"
@@ -443,7 +449,11 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  Asked: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  {{
+                    t("dashboard.cards.askedTime", {
+                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
+                    })
+                  }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -456,7 +466,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-waiting"
             >
               <Icon icon="lucide:message-square-check" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">No questions awaiting reply</p>
+              <p class="text-xs">{{ t("dashboard.empty.waiting") }}</p>
             </div>
           </div>
         </div>
@@ -470,7 +480,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-success"></span>
               <h2 class="font-semibold text-sm text-base-content">
-                Recently Completed / Idle (&lt; 3h)
+                {{ t("dashboard.columns.completed") }}
               </h2>
             </div>
             <span class="badge badge-sm badge-success font-mono">{{
@@ -494,11 +504,13 @@ const formatRelativeTime = (timeStr?: string): string => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-success shrink-0">Done</span>
+                  <span class="badge badge-xs badge-success shrink-0">
+                    {{ t("dashboard.cards.completedBadge") }}
+                  </span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="Archive session"
+                    :title="t('dashboard.cards.archiveTooltip')"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -518,7 +530,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-success" />
-                  {{ session.currentAgent || "default" }}
+                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
                   v-if="session.runDir"
@@ -534,7 +546,11 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  Completed: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  {{
+                    t("dashboard.cards.completedTime", {
+                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
+                    })
+                  }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -547,7 +563,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-completed"
             >
               <Icon icon="lucide:clock" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">No sessions completed in the last 3 hours</p>
+              <p class="text-xs">{{ t("dashboard.empty.completed") }}</p>
             </div>
           </div>
         </div>
@@ -558,13 +574,15 @@ const formatRelativeTime = (timeStr?: string): string => {
         <div class="flex items-center justify-between pb-2 border-b border-base-300">
           <div class="flex items-center gap-2">
             <Icon icon="lucide:archive" class="w-5 h-5 text-base-content/70" />
-            <h2 class="font-bold text-base text-base-content">Archived Sessions</h2>
+            <h2 class="font-bold text-base text-base-content">
+              {{ t("dashboard.archivedSection.title") }}
+            </h2>
             <span class="badge badge-sm badge-neutral font-mono">{{
               filteredArchivedSessions.length
             }}</span>
           </div>
           <p class="text-xs text-base-content/50">
-            Click any archived card to view the full conversation history and artifacts
+            {{ t("dashboard.archivedSection.desc") }}
           </p>
         </div>
 
@@ -586,7 +604,9 @@ const formatRelativeTime = (timeStr?: string): string => {
               >
                 {{ session.title || session.chatID }}
               </h3>
-              <span class="badge badge-xs badge-neutral shrink-0">Archived</span>
+              <span class="badge badge-xs badge-neutral shrink-0">
+                {{ t("dashboard.cards.archivedBadge") }}
+              </span>
             </div>
 
             <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
@@ -594,7 +614,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-100 font-mono"
               >
                 <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-base-content/70" />
-                {{ session.currentAgent || "default" }}
+                {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
               </span>
               <span
                 v-if="session.runDir"
@@ -610,7 +630,11 @@ const formatRelativeTime = (timeStr?: string): string => {
               class="mt-3 pt-2 border-t border-base-300/50 flex items-center justify-between text-[11px] text-base-content/50"
             >
               <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                Archived: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                {{
+                  t("dashboard.cards.archivedTime", {
+                    time: formatRelativeTime(session.updatedAt || session.createdAt, t),
+                  })
+                }}
               </span>
               <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
             </div>
@@ -624,9 +648,11 @@ const formatRelativeTime = (timeStr?: string): string => {
           data-test="empty-archived"
         >
           <Icon icon="lucide:archive-x" class="w-12 h-12 mb-3 opacity-40" />
-          <h3 class="font-medium text-sm text-base-content/70">No archived sessions</h3>
+          <h3 class="font-medium text-sm text-base-content/70">
+            {{ t("dashboard.empty.archivedTitle") }}
+          </h3>
           <p class="text-xs text-base-content/50 mt-1">
-            Click the archive button on a card in the Kanban view to move sessions into this list
+            {{ t("dashboard.empty.archivedDesc") }}
           </p>
         </div>
       </div>

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRouter, onBeforeRouteLeave } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { getConfigFile, saveConfigFile } from "../lib/api";
 import { useToast } from "../composables/useToast";
 import { useRestartFlow } from "../composables/useRestartFlow";
 
 const router = useRouter();
+const { t } = useI18n();
 const toast = useToast();
 
 const {
@@ -42,17 +44,17 @@ const loadConfig = async () => {
       configContent.value = res.content;
       originalContent.value = res.content;
     } else {
-      errorMessage.value = "Failed to load configuration file from server.";
+      errorMessage.value = t("config.loadFailed");
     }
   } catch (err: any) {
-    errorMessage.value = err?.message || "Failed to load configuration file.";
+    errorMessage.value = err?.message || t("config.loadError");
   } finally {
     loading.value = false;
   }
 };
 
 const handleReloadFromDisk = () => {
-  if (isDirty() && !window.confirm("Reload from disk will discard unsaved changes. Continue?")) {
+  if (isDirty() && !window.confirm(t("config.reloadConfirm"))) {
     return;
   }
   void loadConfig();
@@ -66,17 +68,17 @@ const handleSave = async () => {
     const res = await saveConfigFile(configContent.value);
     if (res.error) {
       errorMessage.value = res.error;
-      toast.error(res.error, { title: "Config Save Failed" });
+      toast.error(res.error, { title: t("config.saveFailed") });
     } else {
       saveSuccess.value = true;
       originalContent.value = configContent.value;
-      toast.success("Configuration saved, restart server to apply changes", {
-        title: "Config Saved",
+      toast.success(t("config.saveSuccess"), {
+        title: t("config.saveSuccessTitle"),
       });
     }
   } catch (err: any) {
-    errorMessage.value = err?.message || "Failed to save configuration";
-    toast.error(errorMessage.value, { title: "Config Save Failed" });
+    errorMessage.value = err?.message || t("config.saveGenericError");
+    toast.error(errorMessage.value, { title: t("config.saveFailed") });
   } finally {
     saving.value = false;
   }
@@ -86,9 +88,7 @@ const isDirty = () => configContent.value !== originalContent.value;
 
 onBeforeRouteLeave(() => {
   if (!isDirty()) return true;
-  return window.confirm(
-    "You have unsaved changes. Are you sure you want to discard them and leave?",
-  );
+  return window.confirm(t("config.unsavedChangesConfirm"));
 });
 
 const handleBack = () => {
@@ -126,8 +126,8 @@ onUnmounted(() => {
         <button
           @click="handleBack"
           class="btn btn-ghost btn-sm btn-square"
-          title="Back to Settings"
-          aria-label="Back to Settings"
+          :title="t('config.backToSettings')"
+          :aria-label="t('config.backToSettings')"
         >
           <Icon icon="material-symbols:arrow-back" class="w-5 h-5" />
         </button>
@@ -135,7 +135,7 @@ onUnmounted(() => {
           <Icon icon="mynaui:cog" class="w-5 h-5 text-primary shrink-0" />
           <div class="min-w-0">
             <h1 class="text-base font-semibold md:text-lg leading-tight truncate">
-              Configuration Editor
+              {{ t("config.title") }}
             </h1>
             <span v-if="filePath" class="text-xs text-base-content/60 font-mono block truncate">{{
               filePath
@@ -149,10 +149,10 @@ onUnmounted(() => {
           @click="handleReloadFromDisk"
           class="btn btn-ghost btn-sm gap-1.5"
           :disabled="loading || saving"
-          title="Reload configuration from disk"
+          :title="t('config.reloadTitle')"
         >
           <Icon icon="mynaui:refresh" :class="['w-4 h-4', { 'animate-spin': loading }]" />
-          <span class="hidden sm:inline">Reload</span>
+          <span class="hidden sm:inline">{{ t("config.reload") }}</span>
         </button>
 
         <button
@@ -162,7 +162,7 @@ onUnmounted(() => {
         >
           <span v-if="saving" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="mynaui:save" class="w-4 h-4" />
-          <span>Save</span>
+          <span>{{ t("config.save") }}</span>
         </button>
       </div>
     </header>
@@ -172,7 +172,7 @@ onUnmounted(() => {
       <!-- Loading State -->
       <div v-if="loading" class="flex flex-col items-center justify-center py-20 space-y-3 flex-1">
         <span class="loading loading-spinner loading-lg text-primary"></span>
-        <span class="text-sm text-base-content/70">Loading configuration...</span>
+        <span class="text-sm text-base-content/70">{{ t("config.loading") }}</span>
       </div>
 
       <template v-else>
@@ -180,7 +180,7 @@ onUnmounted(() => {
         <div v-if="errorMessage" class="alert alert-error flex items-start gap-3 text-sm shrink-0">
           <Icon icon="mynaui:danger" class="h-5 w-5 shrink-0 mt-0.5" />
           <div class="flex-1 min-w-0">
-            <h4 class="font-bold">Validation Error</h4>
+            <h4 class="font-bold">{{ t("config.validationError") }}</h4>
             <pre class="text-xs whitespace-pre-wrap font-mono mt-1 overflow-x-auto">{{
               errorMessage
             }}</pre>
@@ -194,7 +194,7 @@ onUnmounted(() => {
         >
           <div class="flex items-center gap-2">
             <Icon icon="mynaui:check-circle" class="h-5 w-5 shrink-0" />
-            <span>Configuration saved. Restart the server to apply changes.</span>
+            <span>{{ t("config.saveSuccessBanner") }}</span>
           </div>
           <button
             @click="openRestartConfirm"
@@ -202,7 +202,7 @@ onUnmounted(() => {
             :disabled="isRestarting"
           >
             <Icon icon="mynaui:power" :class="['h-4 w-4', { 'animate-spin': isRestarting }]" />
-            <span>Restart Server</span>
+            <span>{{ t("config.restartServer") }}</span>
           </button>
         </div>
 
@@ -213,7 +213,7 @@ onUnmounted(() => {
           <textarea
             v-model="configContent"
             class="textarea w-full h-full resize-none border-0 rounded-none font-mono text-xs md:text-sm p-4 leading-relaxed bg-transparent focus:outline-hidden text-base-content"
-            placeholder="YAML configuration..."
+            :placeholder="t('config.placeholder')"
             spellcheck="false"
           ></textarea>
         </div>
@@ -235,9 +235,11 @@ onUnmounted(() => {
               <Icon icon="mynaui:danger" class="h-6 w-6" />
             </div>
             <div class="space-y-1">
-              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
+              <h3 class="font-bold text-lg text-base-content">
+                {{ t("app.restartConfirmTitle") }}
+              </h3>
               <p class="text-sm text-base-content/70 leading-relaxed">
-                This will gracefully terminate the current Asgard backend process.
+                {{ t("app.restartConfirmDesc") }}
               </p>
             </div>
           </div>
@@ -247,16 +249,13 @@ onUnmounted(() => {
           >
             <div class="font-semibold text-warning flex items-center gap-1.5">
               <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
-              <span>Prerequisites</span>
+              <span>{{ t("app.prerequisites") }}</span>
             </div>
             <p>
-              Please ensure your Docker container is configured with an automatic restart policy
-              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
-              otherwise the container will not restart after the process exits.
+              {{ t("app.prerequisitesDesc") }}
             </p>
             <p class="text-base-content/60 text-[11px]">
-              The page will poll system status and automatically refresh once the server is back
-              online.
+              {{ t("app.restartNote") }}
             </p>
           </div>
 
@@ -266,7 +265,7 @@ onUnmounted(() => {
               class="btn btn-ghost btn-sm"
               :disabled="isRestarting"
             >
-              Cancel
+              {{ t("common.cancel") }}
             </button>
             <button
               @click="triggerRestartWorkflow"
@@ -274,7 +273,7 @@ onUnmounted(() => {
               :disabled="isRestarting"
             >
               <Icon icon="mynaui:power" class="h-4 w-4" />
-              <span>Confirm Restart</span>
+              <span>{{ t("app.confirmRestart") }}</span>
             </button>
           </div>
         </div>

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
+import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
 import { reloadAgents, getSystemLogs } from "../lib/api";
 import { useToast } from "../composables/useToast";
 import { useRestartFlow } from "../composables/useRestartFlow";
 
 const router = useRouter();
+const { t } = useI18n();
 const toast = useToast();
 const { toastHistory } = toast;
 
@@ -53,17 +56,17 @@ const handleReloadAgents = async () => {
   try {
     const result = await reloadAgents();
     if (result.success) {
-      toast.success("Agent configuration reloaded successfully", {
-        title: "Reload Success",
+      toast.success(t("settings.reloadSuccessMessage"), {
+        title: t("settings.reloadSuccessTitle"),
       });
     } else {
-      toast.error(result.error || "Failed to reload agent configuration", {
-        title: "Reload Error",
+      toast.error(result.error || t("settings.reloadErrorMessage"), {
+        title: t("settings.reloadErrorTitle"),
       });
     }
   } catch (err: any) {
-    toast.error(err?.message || "Failed to reload agent configuration", {
-      title: "Reload Error",
+    toast.error(err?.message || t("settings.reloadErrorMessage"), {
+      title: t("settings.reloadErrorTitle"),
     });
   } finally {
     isReloading.value = false;
@@ -101,45 +104,66 @@ const navigateBack = () => {
         <button
           @click="navigateBack"
           class="btn btn-ghost btn-sm btn-square"
-          title="Back to Chat"
-          aria-label="Back to Chat"
+          :title="t('settings.backToChat')"
+          :aria-label="t('settings.backToChat')"
         >
           <Icon icon="material-symbols:arrow-back" class="w-5 h-5" />
         </button>
         <div class="flex items-center gap-2">
           <Icon icon="mynaui:cog" class="w-5 h-5 text-primary" />
-          <h1 class="text-base font-semibold md:text-lg">Settings</h1>
+          <h1 class="text-base font-semibold md:text-lg">{{ t("settings.title") }}</h1>
         </div>
       </div>
     </header>
 
     <!-- Main Content -->
     <div class="p-4 md:p-6 max-w-4xl w-full mx-auto space-y-6 flex-1">
-      <!-- Section: Appearance -->
+      <!-- Section: Preferences -->
       <section class="space-y-3">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          Appearance
+          {{ t("settings.preferences") }}
         </h2>
-        <div
-          class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
-        >
-          <div class="space-y-1">
-            <div class="font-medium text-base-content flex items-center gap-2">
-              <Icon icon="mdi:paint-outline" class="w-5 h-5 text-primary" />
-              <span>Theme</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          <!-- Language Setting Card -->
+          <div
+            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
+          >
+            <div class="space-y-1">
+              <div class="font-medium text-base-content flex items-center gap-2">
+                <Icon icon="material-symbols:translate" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.language") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70">
+                {{ t("settings.languageDesc") }}
+              </p>
             </div>
-            <p class="text-xs text-base-content/70">
-              Customize the look and feel of the interface (DaisyUI & Catppuccin themes).
-            </p>
+            <div class="w-36 shrink-0">
+              <LanguageSelector />
+            </div>
           </div>
-          <ThemeSelector />
+
+          <!-- Theme Setting Card -->
+          <div
+            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
+          >
+            <div class="space-y-1">
+              <div class="font-medium text-base-content flex items-center gap-2">
+                <Icon icon="mdi:paint-outline" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.theme") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70">
+                {{ t("settings.themeDesc") }}
+              </p>
+            </div>
+            <ThemeSelector />
+          </div>
         </div>
       </section>
 
       <!-- Section: System & Server Actions -->
       <section class="space-y-3">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          System & Server Actions
+          {{ t("settings.systemActions") }}
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           <!-- Reload Agents Card -->
@@ -149,10 +173,10 @@ const navigateBack = () => {
             <div class="space-y-1">
               <div class="font-medium text-base-content flex items-center gap-2">
                 <Icon icon="mynaui:refresh" class="w-5 h-5 text-info" />
-                <span>Reload Agents</span>
+                <span>{{ t("settings.reloadAgents") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                Hot-reload agent configurations and workspaces without stopping the server.
+                {{ t("settings.reloadAgentsDesc") }}
               </p>
             </div>
             <button
@@ -161,7 +185,7 @@ const navigateBack = () => {
               :disabled="isReloading || isRestarting"
             >
               <Icon icon="mynaui:refresh" :class="['w-4 h-4', { 'animate-spin': isReloading }]" />
-              <span>{{ isReloading ? "Reloading..." : "Reload Agents" }}</span>
+              <span>{{ isReloading ? t("settings.reloading") : t("settings.reloadAgents") }}</span>
             </button>
           </div>
 
@@ -172,11 +196,10 @@ const navigateBack = () => {
             <div class="space-y-1">
               <div class="font-medium text-base-content flex items-center gap-2">
                 <Icon icon="mynaui:power" class="w-5 h-5 text-error" />
-                <span>Restart Server</span>
+                <span>{{ t("settings.restartServer") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                Gracefully terminate and restart the backend service (requires auto-restart
-                container).
+                {{ t("settings.restartServerDesc") }}
               </p>
             </div>
             <button
@@ -185,7 +208,9 @@ const navigateBack = () => {
               :disabled="isRestarting"
             >
               <Icon icon="mynaui:power" :class="['w-4 h-4', { 'animate-spin': isRestarting }]" />
-              <span>{{ isRestarting ? "Restarting..." : "Restart Server" }}</span>
+              <span>{{
+                isRestarting ? t("settings.restarting") : t("settings.restartServer")
+              }}</span>
             </button>
           </div>
 
@@ -196,10 +221,10 @@ const navigateBack = () => {
             <div class="space-y-1">
               <div class="font-medium text-base-content flex items-center gap-2">
                 <Icon icon="mynaui:chart-bar-one" class="w-5 h-5 text-primary" />
-                <span>Usage & Quota</span>
+                <span>{{ t("settings.usageAndQuota") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                View current token usage, credit balance, and resource consumption details.
+                {{ t("settings.usageAndQuotaDesc") }}
               </p>
             </div>
             <button
@@ -207,7 +232,7 @@ const navigateBack = () => {
               class="btn btn-outline btn-sm w-full gap-2 mt-2"
             >
               <Icon icon="mynaui:chart-bar-one" class="w-4 h-4" />
-              <span>Check Quota</span>
+              <span>{{ t("settings.checkQuota") }}</span>
             </button>
           </div>
         </div>
@@ -216,7 +241,7 @@ const navigateBack = () => {
       <!-- Section: Navigation & Tools -->
       <section class="space-y-3">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          Configuration & Diagnostics
+          {{ t("settings.configAndDiagnostics") }}
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <!-- Edit Config Card -->
@@ -232,11 +257,10 @@ const navigateBack = () => {
                 class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="mynaui:cog" class="w-5 h-5 text-primary" />
-                <span>Edit Configuration</span>
+                <span>{{ t("settings.editConfig") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                Open full-page YAML configuration editor with validation and save & restart
-                capability.
+                {{ t("settings.editConfigDesc") }}
               </p>
             </div>
             <Icon
@@ -258,10 +282,10 @@ const navigateBack = () => {
                 class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="material-symbols:keyboard-outline" class="w-5 h-5 text-primary" />
-                <span>Keyboard Shortcuts</span>
+                <span>{{ t("settings.keyboardShortcuts") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                View and customize keyboard shortcuts for quick actions and panel toggling.
+                {{ t("settings.keyboardShortcutsDesc") }}
               </p>
             </div>
             <Icon
@@ -283,16 +307,16 @@ const navigateBack = () => {
                 class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="material-symbols:receipt-long-outline" class="w-5 h-5 text-primary" />
-                <span>System Logs & Diagnostics</span>
+                <span>{{ t("settings.logsAndDiagnostics") }}</span>
                 <span v-if="totalErrors > 0" class="badge badge-error badge-xs font-bold">
-                  {{ totalErrors }} error{{ totalErrors > 1 ? "s" : "" }}
+                  {{ t("settings.errorsCount", { count: totalErrors }) }}
                 </span>
                 <span v-else-if="totalWarnings > 0" class="badge badge-warning badge-xs font-bold">
-                  {{ totalWarnings }} warn
+                  {{ t("settings.warnsCount", { count: totalWarnings }) }}
                 </span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
-                View system startup diagnostics, error history, and active warnings.
+                {{ t("settings.logsAndDiagnosticsDesc") }}
               </p>
             </div>
             <Icon
@@ -322,9 +346,11 @@ const navigateBack = () => {
               <Icon icon="mynaui:danger" class="h-6 w-6" />
             </div>
             <div class="space-y-1">
-              <h3 class="font-bold text-lg text-base-content">Confirm Server Restart?</h3>
+              <h3 class="font-bold text-lg text-base-content">
+                {{ t("app.restartConfirmTitle") }}
+              </h3>
               <p class="text-sm text-base-content/70 leading-relaxed">
-                This will gracefully terminate the current Asgard backend process.
+                {{ t("app.restartConfirmDesc") }}
               </p>
             </div>
           </div>
@@ -334,16 +360,13 @@ const navigateBack = () => {
           >
             <div class="font-semibold text-warning flex items-center gap-1.5">
               <Icon icon="mynaui:info-triangle" class="h-4 w-4 shrink-0" />
-              <span>Prerequisites</span>
+              <span>{{ t("app.prerequisites") }}</span>
             </div>
             <p>
-              Please ensure your Docker container is configured with an automatic restart policy
-              (such as <code>--restart=always</code> or <code>--restart=unless-stopped</code>),
-              otherwise the container will not restart after the process exits.
+              {{ t("app.prerequisitesDesc") }}
             </p>
             <p class="text-base-content/60 text-[11px]">
-              The page will poll system status and automatically refresh once the server is back
-              online.
+              {{ t("app.restartNote") }}
             </p>
           </div>
 
@@ -353,7 +376,7 @@ const navigateBack = () => {
               class="btn btn-ghost btn-sm"
               :disabled="isRestarting"
             >
-              Cancel
+              {{ t("common.cancel") }}
             </button>
             <button
               @click="triggerRestartWorkflow"
@@ -361,7 +384,7 @@ const navigateBack = () => {
               :disabled="isRestarting"
             >
               <Icon icon="mynaui:power" class="h-4 w-4" />
-              <span>Confirm Restart</span>
+              <span>{{ t("app.confirmRestart") }}</span>
             </button>
           </div>
         </div>
