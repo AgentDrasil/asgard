@@ -539,6 +539,29 @@ func TestSessionRepository_GetSessionsLimit(t *testing.T) {
 	assert.Len(t, maxSessions, 25)
 }
 
+func TestNormalizeSessionLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    int
+		expected int
+	}{
+		{"zero defaults to DefaultSessionLimit", 0, DefaultSessionLimit},
+		{"negative defaults to DefaultSessionLimit", -10, DefaultSessionLimit},
+		{"positive below max returns itself", 42, 42},
+		{"at default limit returns default", DefaultSessionLimit, DefaultSessionLimit},
+		{"at max boundary returns max", MaxSessionLimit, MaxSessionLimit},
+		{"above max limit clamped to max", 2000, MaxSessionLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, NormalizeSessionLimit(tt.input))
+		})
+	}
+}
+
 func TestSession_HasUnrepliedAskUser(t *testing.T) {
 	t.Parallel()
 

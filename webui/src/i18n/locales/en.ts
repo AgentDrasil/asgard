@@ -424,7 +424,7 @@ export const en = {
     metrics: {
       running: "Running: {count}",
       waiting: "Waiting: {count}",
-      recentCompleted: "Completed: {count}",
+      completed: "Completed: {count}",
       archived: "Archived: {count}",
     },
     tabs: {

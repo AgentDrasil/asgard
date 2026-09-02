@@ -417,7 +417,7 @@ export const zhCN: MessageSchema = {
     metrics: {
       running: "运行中: {count}",
       waiting: "等待处理: {count}",
-      recentCompleted: "已完成: {count}",
+      completed: "已完成: {count}",
       archived: "已归档: {count}",
     },
     tabs: {

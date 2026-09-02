@@ -188,17 +188,33 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
+const (
+	// DefaultSessionLimit is the default limit for session listing queries.
+	DefaultSessionLimit = 500
+	// MaxSessionLimit is the maximum upper bound for session listing queries.
+	MaxSessionLimit = 1000
+)
+
+// NormalizeSessionLimit ensures the given limit falls within [1, MaxSessionLimit],
+// falling back to DefaultSessionLimit if limit is <= 0.
+func NormalizeSessionLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultSessionLimit
+	}
+	if limit > MaxSessionLimit {
+		return MaxSessionLimit
+	}
+	return limit
+}
+
 // GetSessions retrieves sessions, filtering by archived status and applying an optional limit.
 // By default (or when includeArchived is false), only active (unarchived) sessions are returned.
 // When includeArchived is true, only archived sessions are returned.
 // limit specifies the maximum number of sessions to return (default 500, max 1000).
 func (r *SessionRepository) GetSessions(includeArchived bool, limit ...int) ([]Session, error) {
-	queryLimit := 500
-	if len(limit) > 0 && limit[0] > 0 {
-		queryLimit = limit[0]
-	}
-	if queryLimit > 1000 {
-		queryLimit = 1000
+	queryLimit := DefaultSessionLimit
+	if len(limit) > 0 {
+		queryLimit = NormalizeSessionLimit(limit[0])
 	}
 
 	var sessions []Session

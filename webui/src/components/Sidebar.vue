@@ -179,11 +179,10 @@ onUnmounted(() => {
         v-if="!isOpen"
         @click="navigateToDashboard"
         :class="[
-          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
+          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium w-10 h-10 justify-center p-0',
           route.path === '/dashboard'
             ? 'bg-primary/10 text-primary font-semibold'
             : 'text-base-content/85 hover:bg-base-200',
-          'w-10 h-10 justify-center p-0',
         ]"
         :title="t('sidebar.dashboard')"
       >

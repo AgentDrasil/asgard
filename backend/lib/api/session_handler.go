@@ -153,14 +153,11 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	archived := r.URL.Query().Get("archived") == "true"
 
-	limit := 500
+	limit := dbmodels.DefaultSessionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
-			limit = parsed
+		if parsed, err := strconv.Atoi(limitStr); err == nil {
+			limit = dbmodels.NormalizeSessionLimit(parsed)
 		}
-	}
-	if limit > 1000 {
-		limit = 1000
 	}
 
 	var dbSessions []dbmodels.Session
