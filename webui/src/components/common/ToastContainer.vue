@@ -70,7 +70,7 @@ const alertIcon = (type: ToastItem["type"]) => {
       <div class="flex items-center gap-1 shrink-0">
         <button
           @click="copyMessage(toast)"
-          class="btn btn-ghost btn-xs btn-circle opacity-70 hover:opacity-100"
+          class="btn btn-ghost btn-xs btn-circle text-current hover:bg-current/15"
           title="Copy notification"
           aria-label="Copy notification"
         >
@@ -81,7 +81,7 @@ const alertIcon = (type: ToastItem["type"]) => {
         </button>
         <button
           @click="removeToast(toast.id)"
-          class="btn btn-ghost btn-xs btn-circle opacity-70 hover:opacity-100"
+          class="btn btn-ghost btn-xs btn-circle text-current hover:bg-current/15"
           title="Close notification"
           aria-label="Close notification"
         >
