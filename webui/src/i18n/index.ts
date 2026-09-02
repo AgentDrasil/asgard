@@ -1,3 +1,4 @@
+import type { Plugin } from "vue";
 import { createI18n, useI18n } from "vue-i18n";
 import en from "./locales/en";
 import zhCN from "./locales/zh-CN";
@@ -33,7 +34,7 @@ export function getInitialLocale(): SupportedLocale {
   return "en";
 }
 
-export const i18n = createI18n({
+const rawI18n = createI18n({
   legacy: false,
   locale: getInitialLocale(),
   fallbackLocale: "en",
@@ -42,6 +43,8 @@ export const i18n = createI18n({
     "zh-CN": zhCN,
   },
 });
+
+export const i18n = rawI18n as typeof rawI18n & Plugin;
 
 export function setLocale(locale: string, persist = true): boolean {
   if (!isValidLocale(locale)) {
