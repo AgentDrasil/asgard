@@ -13,6 +13,8 @@ import {
   getMediaCategory,
   resolveViewerCategory,
   isSessionTmpDir,
+  isTmpScopePath,
+  isSessionScopePath,
 } from "./fileUtils";
 
 describe("fileUtils", () => {
@@ -299,6 +301,48 @@ describe("fileUtils", () => {
       expect(isSessionTmpDir("tmpother")).toBe(false);
       expect(isSessionTmpDir("tmpother/file.txt")).toBe(false);
       expect(isSessionTmpDir("src/tmp")).toBe(false);
+    });
+  });
+
+  describe("isTmpScopePath", () => {
+    it("matches /tmp namespace paths", () => {
+      expect(isTmpScopePath("/tmp")).toBe(true);
+      expect(isTmpScopePath("tmp")).toBe(true);
+      expect(isTmpScopePath(".tmp")).toBe(true);
+      expect(isTmpScopePath("/tmp/file.txt")).toBe(true);
+      expect(isTmpScopePath("tmp/file.txt")).toBe(true);
+      expect(isTmpScopePath(".tmp/file.txt")).toBe(true);
+      expect(isTmpScopePath("\\tmp\\file.txt")).toBe(true);
+    });
+
+    it("rejects non-tmp paths", () => {
+      expect(isTmpScopePath(null)).toBe(false);
+      expect(isTmpScopePath(undefined)).toBe(false);
+      expect(isTmpScopePath("")).toBe(false);
+      expect(isTmpScopePath("/session/file.txt")).toBe(false);
+      expect(isTmpScopePath("tmpother/file.txt")).toBe(false);
+      expect(isTmpScopePath("src/main.go")).toBe(false);
+    });
+  });
+
+  describe("isSessionScopePath", () => {
+    it("matches /session namespace paths", () => {
+      expect(isSessionScopePath("/session")).toBe(true);
+      expect(isSessionScopePath("session")).toBe(true);
+      expect(isSessionScopePath(".session")).toBe(true);
+      expect(isSessionScopePath("/session/file.txt")).toBe(true);
+      expect(isSessionScopePath("session/file.txt")).toBe(true);
+      expect(isSessionScopePath(".session/file.txt")).toBe(true);
+      expect(isSessionScopePath("\\session\\file.txt")).toBe(true);
+    });
+
+    it("rejects non-session paths", () => {
+      expect(isSessionScopePath(null)).toBe(false);
+      expect(isSessionScopePath(undefined)).toBe(false);
+      expect(isSessionScopePath("")).toBe(false);
+      expect(isSessionScopePath("/tmp/file.txt")).toBe(false);
+      expect(isSessionScopePath("sessionother/file.txt")).toBe(false);
+      expect(isSessionScopePath("src/main.go")).toBe(false);
     });
   });
 });

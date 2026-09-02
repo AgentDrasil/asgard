@@ -129,3 +129,35 @@ func TestDefaultTmpDirUnderHomeTmp(t *testing.T) {
 	require.True(t, filepath.IsAbs(dir))
 	assert.Contains(t, dir, filepath.Join("tmp", "sess-1"))
 }
+
+func TestDefaultSessionDirUnderHomeSession(t *testing.T) {
+	dir := DefaultSessionDir("sess-1")
+	require.True(t, filepath.IsAbs(dir))
+	assert.Contains(t, dir, filepath.Join("session", "sess-1"))
+}
+
+func TestViewerArtifactPathInSession(t *testing.T) {
+	tmpDir := filepath.Join(t.TempDir(), "tmpsess")
+	sessionDir := filepath.Join(t.TempDir(), "sess")
+	require.NoError(t, os.MkdirAll(tmpDir, 0o755))
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+
+	// tmp dir still wins for paths under it
+	assert.Equal(t, "/tmp/plan/plan.md", ViewerArtifactPathInSession(filepath.Join(tmpDir, "plan", "plan.md"), tmpDir, sessionDir))
+	// session dir paths map to /session/<rel>
+	assert.Equal(t, "/session/report.md", ViewerArtifactPathInSession(filepath.Join(sessionDir, "report.md"), tmpDir, sessionDir))
+	assert.Equal(t, "/session/notes/deep.md", ViewerArtifactPathInSession(filepath.Join(sessionDir, "notes", "deep.md"), tmpDir, sessionDir))
+	// Literal session forms normalize
+	assert.Equal(t, "/session/x.md", ViewerArtifactPathInSession(".session/x.md", tmpDir, sessionDir))
+	assert.Equal(t, "/session", ViewerArtifactPathInSession(".session", tmpDir, sessionDir))
+	assert.Equal(t, "/session/y.md", ViewerArtifactPathInSession("/session/y.md", tmpDir, sessionDir))
+	// Outside paths pass through
+	outside := filepath.Join(t.TempDir(), "report.md")
+	assert.Equal(t, outside, ViewerArtifactPathInSession(outside, tmpDir, sessionDir))
+	// ArtifactViewerPathsInSession (output is sorted by host path pre-mapping)
+	got := ArtifactViewerPathsInSession(map[string]string{
+		"r.md": filepath.Join(sessionDir, "r.md"),
+		"t.md": filepath.Join(tmpDir, "t.md"),
+	}, tmpDir, sessionDir)
+	assert.ElementsMatch(t, []string{"/session/r.md", "/tmp/t.md"}, got)
+}

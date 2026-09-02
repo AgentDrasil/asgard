@@ -4,7 +4,7 @@ import { Icon } from "@iconify/vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { getFileTree } from "../../lib/api";
 import { formatPath } from "../../utils/agentUtils";
-import { isSessionTmpDir } from "../../utils/fileUtils";
+import { isSessionTmpDir, isTmpScopePath, isSessionScopePath } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
 
 const props = defineProps<{
@@ -27,7 +27,7 @@ const treeError = ref("");
 const treeVersion = ref(0);
 let treeReqId = 0;
 
-const activeRootScope = ref<"workdir" | "tmp">("workdir");
+const activeRootScope = ref<"workdir" | "tmp" | "session">("workdir");
 
 const hasSeparateTmp = computed(() => {
   return !isSessionTmpDir(props.runDir, props.sessionId);
@@ -39,21 +39,15 @@ const workspaceName = computed(() => {
   return parts[parts.length - 1] || formatPath(props.runDir) || props.runDir;
 });
 
-// If selectedPath points inside tmp, automatically switch activeRootScope to tmp if separate
+// If selectedPath points inside tmp/session, automatically switch activeRootScope if separate
 watch(
   () => props.selectedPath,
   (newPath) => {
     if (!hasSeparateTmp.value || !newPath) return;
-    const clean = newPath.replace(/\\/g, "/");
-    if (
-      clean === "/tmp" ||
-      clean === "tmp" ||
-      clean.startsWith("/tmp/") ||
-      clean.startsWith("tmp/") ||
-      clean.startsWith(".tmp/")
-    ) {
-      if (activeRootScope.value !== "tmp") {
-        activeRootScope.value = "tmp";
+    if (isTmpScopePath(newPath) || isSessionScopePath(newPath)) {
+      const target = isSessionScopePath(newPath) ? "session" : "tmp";
+      if (activeRootScope.value !== target) {
+        activeRootScope.value = target;
       }
     } else {
       if (activeRootScope.value !== "workdir") {
@@ -70,7 +64,12 @@ async function loadTree() {
   isTreeLoading.value = true;
   treeError.value = "";
   try {
-    const rootPath = hasSeparateTmp.value && activeRootScope.value === "tmp" ? "/tmp" : "";
+    let rootPath = "";
+    if (hasSeparateTmp.value && activeRootScope.value === "tmp") {
+      rootPath = "/tmp";
+    } else if (activeRootScope.value === "session") {
+      rootPath = "/session";
+    }
     const entries = await getFileTree(props.sessionId, rootPath);
     if (currentReq !== treeReqId) return;
     rootNodes.value = entries;
@@ -213,11 +212,17 @@ onUnmounted(() => {
         <div v-else class="flex items-center gap-1.5 min-w-0 flex-1">
           <Icon
             :icon="
-              activeRootScope === 'tmp'
-                ? 'octicon:file-directory-24'
-                : 'octicon:file-directory-fill-24'
+              activeRootScope === 'workdir'
+                ? 'octicon:file-directory-fill-24'
+                : 'octicon:file-directory-24'
             "
-            :class="activeRootScope === 'tmp' ? 'text-info' : 'text-warning'"
+            :class="
+              activeRootScope === 'tmp'
+                ? 'text-info'
+                : activeRootScope === 'session'
+                  ? 'text-success'
+                  : 'text-warning'
+            "
             class="h-4 w-4 shrink-0"
           />
           <select
@@ -227,6 +232,7 @@ onUnmounted(() => {
           >
             <option value="workdir">{{ workspaceName }}</option>
             <option value="tmp">/tmp (session)</option>
+            <option value="session">/session (session)</option>
           </select>
         </div>
 

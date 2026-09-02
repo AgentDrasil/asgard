@@ -520,4 +520,53 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		server.ServeHTTP(rrUnauth, reqUnauth)
 		assert.Equal(t, http.StatusForbidden, rrUnauth.Code)
 	})
+
+	t.Run("Session namespace artifact authorized via /session path", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		sessionNsDir := filepath.Join(home, "session", chatID)
+		require.NoError(t, os.MkdirAll(sessionNsDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(sessionNsDir, "report.md"), []byte("session ns report"), 0644))
+
+		sess, err := repo.GetSession(chatID)
+		require.NoError(t, err)
+		sess.Artifacts = []string{"/session/report.md"}
+		require.NoError(t, repo.SaveSession(sess))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=/session/report.md", nil)
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp WorkspaceFileResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+		assert.Equal(t, "session ns report", resp.Content)
+		assert.Equal(t, "/session/report.md", resp.Path)
+
+		// Legacy relative session entry authorizes the same file
+		sess.Artifacts = []string{"session/report.md"}
+		require.NoError(t, repo.SaveSession(sess))
+		rr2 := httptest.NewRecorder()
+		server.ServeHTTP(rr2, req)
+		assert.Equal(t, http.StatusOK, rr2.Code)
+
+		// Unauthorized session file
+		sess.Artifacts = []string{"/session/other.md"}
+		require.NoError(t, repo.SaveSession(sess))
+		rr3 := httptest.NewRecorder()
+		server.ServeHTTP(rr3, req)
+		assert.Equal(t, http.StatusForbidden, rr3.Code)
+
+		// scope=session resolves relative session/... path
+		sess.Artifacts = []string{"/session/report.md"}
+		require.NoError(t, repo.SaveSession(sess))
+		reqScoped := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/file?session_id="+chatID+"&path=session/report.md&scope=session", nil)
+		rr4 := httptest.NewRecorder()
+		server.ServeHTTP(rr4, reqScoped)
+		assert.Equal(t, http.StatusOK, rr4.Code)
+		var resp4 WorkspaceFileResponse
+		require.NoError(t, json.Unmarshal(rr4.Body.Bytes(), &resp4))
+		assert.Equal(t, "session ns report", resp4.Content)
+	})
 }

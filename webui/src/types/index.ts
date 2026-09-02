@@ -151,7 +151,7 @@ export interface WorkspaceFileContent {
   updatedAt: string;
 }
 
-export type FileScope = "workspace" | "tmp";
+export type FileScope = "workspace" | "tmp" | "session";
 
 export interface FileSearchResult {
   path: string;

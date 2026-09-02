@@ -44,7 +44,7 @@ type FileSearchResult struct {
 	Name  string `json:"name"`
 	Ext   string `json:"ext"`
 	Size  int64  `json:"size"`
-	Scope string `json:"scope,omitempty"` // "workspace" | "tmp"
+	Scope string `json:"scope,omitempty"` // "workspace" | "tmp" | "session"
 }
 
 type FileSearchResponse struct {
@@ -194,93 +194,84 @@ func isPathEscaping(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string) (string, string, int, error) {
-	cleanRunDir := filepath.Clean(runDir)
-	baseTmp := GetSessionTmpBaseDir(sessionID)
-
-	evalRunDir, err := filepath.EvalSymlinks(cleanRunDir)
-	if err != nil {
-		evalRunDir = cleanRunDir
+// resolveNamespacedScopedPath handles paths targeting a session namespace ("tmp" or "session"):
+// explicit forms (/<ns>, .<ns>, /<ns>/...) and relative forms (<ns>, <ns>/...).
+// It returns handled=false when cleanReq does not target the namespace.
+func resolveNamespacedScopedPath(ns string, sessionID, cleanRunDir, evalRunDir, cleanReq, scope string) (bool, string, string, int, error) {
+	base := GetSessionScopedBaseDir(ns, sessionID)
+	evalBase := base
+	if eb, evalErr := filepath.EvalSymlinks(base); evalErr == nil {
+		evalBase = eb
 	}
 
-	evalTmpBase := baseTmp
-	if et, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
-		evalTmpBase = et
-	}
-
-	cleanReq := filepath.Clean(reqPath)
-	if cleanReq == "." || reqPath == "" {
-		return evalRunDir, "", http.StatusOK, nil
-	}
-
-	// Case 1: Explicit session tmp path (/tmp, .tmp, /tmp/..., .tmp/...)
-	if isTmp, sub := ResolveSessionTmpPath(cleanReq, sessionID); isTmp {
+	// Explicit namespace path (/<ns>, .<ns>, /<ns>/...)
+	if isNs, sub := ResolveSessionScopedPath(cleanReq, sessionID, ns); isNs {
 		sub = filepath.Clean(sub)
 		if sub == "." || sub == "" {
 			relResult := ""
-			if evalRunDir != evalTmpBase {
-				relResult = "/tmp"
+			if evalRunDir != evalBase {
+				relResult = "/" + ns
 			}
-			return evalTmpBase, relResult, http.StatusOK, nil
+			return true, evalBase, relResult, http.StatusOK, nil
 		}
 
-		absTarget := filepath.Join(baseTmp, sub)
-		relLex, errLex := filepath.Rel(baseTmp, absTarget)
+		absTarget := filepath.Join(base, sub)
+		relLex, errLex := filepath.Rel(base, absTarget)
 		if errLex != nil || isPathEscaping(relLex) {
-			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+			return true, "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
 
 		evalTarget, err := filepath.EvalSymlinks(absTarget)
 		if err != nil {
 			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-				return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+				return true, "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", cleanReq)
 			}
-			return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
+			return true, "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 		}
 
-		rel, err := filepath.Rel(evalTmpBase, evalTarget)
+		rel, err := filepath.Rel(evalBase, evalTarget)
 		if err != nil || isPathEscaping(rel) {
-			return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
+			return true, "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 		}
 
 		relClean := filepath.ToSlash(rel)
 		if relClean == "." {
 			relClean = ""
 		}
-		if evalRunDir != evalTmpBase {
-			relClean = filepath.ToSlash(filepath.Join("/tmp", relClean))
+		if evalRunDir != evalBase {
+			relClean = filepath.ToSlash(filepath.Join("/"+ns, relClean))
 		}
-		return evalTarget, relClean, http.StatusOK, nil
+		return true, evalTarget, relClean, http.StatusOK, nil
 	}
 
-	// Case 2: Relative tmp/... path
-	if isRelTmp, sub := isRelativeTmpPrefixedPath(cleanReq, sessionID); isRelTmp {
+	// Relative namespace path (<ns>, <ns>/...)
+	if isRelNs, sub := isRelativeScopedPrefixedPath(cleanReq, sessionID, ns); isRelNs {
 		sub = filepath.Clean(sub)
 		if sub == "." {
 			sub = ""
 		}
 
-		resolveAsTmp := func() (string, string, int, error) {
+		resolveAsNs := func() (string, string, int, error) {
 			if sub == "" {
 				relResult := ""
-				if evalRunDir != evalTmpBase {
-					relResult = "/tmp"
+				if evalRunDir != evalBase {
+					relResult = "/" + ns
 				}
-				return evalTmpBase, relResult, http.StatusOK, nil
+				return evalBase, relResult, http.StatusOK, nil
 			}
-			absTarget := filepath.Join(baseTmp, sub)
-			relLex, errLex := filepath.Rel(baseTmp, absTarget)
+			absTarget := filepath.Join(base, sub)
+			relLex, errLex := filepath.Rel(base, absTarget)
 			if errLex != nil || isPathEscaping(relLex) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 			}
 			evalTarget, err := filepath.EvalSymlinks(absTarget)
 			if err != nil {
 				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", cleanReq)
 				}
 				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 			}
-			rel, err := filepath.Rel(evalTmpBase, evalTarget)
+			rel, err := filepath.Rel(evalBase, evalTarget)
 			if err != nil || isPathEscaping(rel) {
 				return "", "", http.StatusForbidden, errors.New("access denied: path escapes temporary directory boundary")
 			}
@@ -288,8 +279,8 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 			if relClean == "." {
 				relClean = ""
 			}
-			if evalRunDir != evalTmpBase {
-				relClean = filepath.ToSlash(filepath.Join("/tmp", relClean))
+			if evalRunDir != evalBase {
+				relClean = filepath.ToSlash(filepath.Join("/"+ns, relClean))
 			}
 			return evalTarget, relClean, http.StatusOK, nil
 		}
@@ -303,7 +294,7 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 			evalTarget, err := filepath.EvalSymlinks(absTarget)
 			if err != nil {
 				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", reqPath)
+					return "", "", http.StatusNotFound, fmt.Errorf("file not found: %s", cleanReq)
 				}
 				return "", "", http.StatusBadRequest, fmt.Errorf("failed to evaluate path: %w", err)
 			}
@@ -318,33 +309,63 @@ func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string
 			return evalTarget, relClean, http.StatusOK, nil
 		}
 
-		if scope == "tmp" {
-			return resolveAsTmp()
+		if scope == ns {
+			target, rel, code, err := resolveAsNs()
+			return true, target, rel, code, err
 		}
 		if scope == "workspace" {
-			return resolveAsWs()
+			target, rel, code, err := resolveAsWs()
+			return true, target, rel, code, err
 		}
 
 		// Auto disambiguation
-		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase || evalRunDir == evalTmpBase)
-		if isRunDirSessionTmp {
-			return resolveAsTmp()
+		isRunDirNsBase := (cleanRunDir == base || cleanRunDir == evalBase || evalRunDir == evalBase)
+		if isRunDirNsBase {
+			target, rel, code, err := resolveAsNs()
+			return true, target, rel, code, err
 		}
 
 		// runDir is project workspace: check workspace existence first
 		wsTarget := filepath.Join(cleanRunDir, cleanReq)
 		if _, err := os.Stat(wsTarget); err == nil {
-			return resolveAsWs()
+			target, rel, code, err := resolveAsWs()
+			return true, target, rel, code, err
 		}
 
-		// wsTarget does not exist, check if session tmp exists
-		tmpTarget := filepath.Join(baseTmp, sub)
-		if _, err := os.Stat(tmpTarget); err == nil {
-			return resolveAsTmp()
+		// wsTarget does not exist, check if session namespace target exists
+		nsTarget := filepath.Join(base, sub)
+		if _, err := os.Stat(nsTarget); err == nil {
+			target, rel, code, err := resolveAsNs()
+			return true, target, rel, code, err
 		}
 
 		// Neither exists: fall back to workspace target so os.Stat returns standard 404
-		return resolveAsWs()
+		target, rel, code, err := resolveAsWs()
+		return true, target, rel, code, err
+	}
+
+	return false, "", "", http.StatusOK, nil
+}
+
+func (s *Server) validateAndResolvePath(sessionID, runDir, reqPath, scope string) (string, string, int, error) {
+	cleanRunDir := filepath.Clean(runDir)
+
+	evalRunDir, err := filepath.EvalSymlinks(cleanRunDir)
+	if err != nil {
+		evalRunDir = cleanRunDir
+	}
+
+	cleanReq := filepath.Clean(reqPath)
+	if cleanReq == "." || reqPath == "" {
+		return evalRunDir, "", http.StatusOK, nil
+	}
+
+	// Namespaced paths (/tmp, /session and their relative forms)
+	for _, ns := range []string{"tmp", "session"} {
+		handled, target, rel, code, err := resolveNamespacedScopedPath(ns, sessionID, cleanRunDir, evalRunDir, cleanReq, scope)
+		if handled {
+			return target, rel, code, err
+		}
 	}
 
 	// Case 3: Ordinary workspace relative or absolute path (scope ignored)
@@ -657,6 +678,26 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 			if tmpInfo, statErr := os.Stat(evalTmpBase); statErr == nil && tmpInfo.IsDir() {
 				tmpResults := searchDirectory(evalTmpBase, "/tmp", "tmp", queryLower, tmpLimit, visitedCanonical)
 				results = append(results, tmpResults...)
+			}
+		}
+	}
+
+	// Session namespace (/session): scan when disjoint from runDir with remaining quota
+	baseSession := GetSessionScopedBaseDir("session", sessionID)
+	evalSessionBase := baseSession
+	if es, evalErr := filepath.EvalSymlinks(baseSession); evalErr == nil {
+		evalSessionBase = es
+	}
+	relWsToSess, errWsToSess := filepath.Rel(evalSessionBase, evalRunDir)
+	relSessToWs, errSessToWs := filepath.Rel(evalRunDir, evalSessionBase)
+	isSessionOverlapping := (errWsToSess == nil && relWsToSess != ".." && !strings.HasPrefix(relWsToSess, ".."+string(filepath.Separator))) ||
+		(errSessToWs == nil && relSessToWs != ".." && !strings.HasPrefix(relSessToWs, ".."+string(filepath.Separator)))
+	if !isSessionOverlapping {
+		sessLimit := limit - len(results)
+		if sessLimit > 0 {
+			if sessInfo, statErr := os.Stat(evalSessionBase); statErr == nil && sessInfo.IsDir() {
+				sessResults := searchDirectory(evalSessionBase, "/session", "session", queryLower, sessLimit, visitedCanonical)
+				results = append(results, sessResults...)
 			}
 		}
 	}

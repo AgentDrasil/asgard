@@ -253,6 +253,8 @@ func TestBuildArgs(t *testing.T) {
 	// Verify required bwrap components
 	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
 	assert.Contains(t, argStr, "--bind "+expectedTmpDir+" /tmp")
+	expectedSessionDir := filepath.Join(home, "session", "test-chat")
+	assert.Contains(t, argStr, "--bind "+expectedSessionDir+" /session")
 	assert.Contains(t, argStr, "--setenv HOME "+home)
 	assert.Contains(t, argStr, "--bind "+runDir+" "+runDir)
 	assert.Contains(t, argStr, "--chdir "+runDir)
@@ -302,6 +304,8 @@ func TestBuildArgs(t *testing.T) {
 
 	expectedDefaultTmpDir := filepath.Join(home, "tmp", "default")
 	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp")
+	expectedDefaultSessionDir := filepath.Join(home, "session", "default")
+	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultSessionDir+" /session")
 
 	// Verify opencode specific mounts
 	cacheDir := filepath.Join(home, ".cache")
@@ -386,6 +390,10 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
 		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
+	}
+	expectedSessionDir := filepath.Join(tmpDir, "session", "test-chat")
+	if !strings.Contains(argStr, "--bind "+expectedSessionDir+" /session") {
+		t.Errorf("expected '--bind %s /session' in args, got: %s", expectedSessionDir, argStr)
 	}
 	if !strings.Contains(argStr, "--bind "+tmpDir+" "+tmpDir) {
 		t.Errorf("expected home bind mount, got: %s", argStr)

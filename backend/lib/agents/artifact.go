@@ -39,12 +39,14 @@ func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir s
 		}
 	}
 
-	// Resolve target to absolute if possible, but keep /tmp and .tmp separate from workspace.
+	// Resolve target to absolute if possible, but keep /tmp, .tmp, /session and .session separate from workspace.
 	var absTarget string
 	if filepath.IsAbs(cleanTarget) {
 		absTarget = cleanTarget
 	} else if cleanTarget != "/tmp" && !strings.HasPrefix(cleanTarget, "/tmp/") &&
-		cleanTarget != ".tmp" && !strings.HasPrefix(cleanTarget, ".tmp/") && absWorkspace != "" {
+		cleanTarget != ".tmp" && !strings.HasPrefix(cleanTarget, ".tmp/") &&
+		cleanTarget != "/session" && !strings.HasPrefix(cleanTarget, "/session/") &&
+		cleanTarget != ".session" && !strings.HasPrefix(cleanTarget, ".session/") && absWorkspace != "" {
 		absTarget = filepath.Clean(filepath.Join(absWorkspace, cleanTarget))
 	}
 
@@ -62,9 +64,11 @@ func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir s
 		}
 	}
 
-	// 2. Sandbox temp files (/tmp/ or .tmp/) outside the workspace are always artifacts.
+	// 2. Sandbox temp/session files (/tmp/, .tmp/, /session/ or .session/) outside the workspace are always artifacts.
 	if trimmedTarget == "/tmp" || strings.HasPrefix(trimmedTarget, "/tmp/") ||
-		trimmedTarget == ".tmp" || strings.HasPrefix(trimmedTarget, ".tmp/") {
+		trimmedTarget == ".tmp" || strings.HasPrefix(trimmedTarget, ".tmp/") ||
+		trimmedTarget == "/session" || strings.HasPrefix(trimmedTarget, "/session/") ||
+		trimmedTarget == ".session" || strings.HasPrefix(trimmedTarget, ".session/") {
 		return true
 	}
 

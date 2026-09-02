@@ -85,6 +85,18 @@ func setupTmpDir(home string, chatID string) (string, error) {
 	return tmpDir, nil
 }
 
+// setupSessionDir determines the host directory for sandbox /session (e.g. /home/user/session/<chatID>) and ensures it exists.
+func setupSessionDir(home string, chatID string) (string, error) {
+	if chatID == "" {
+		chatID = "default"
+	}
+	sessionDir := filepath.Join(home, "session", chatID)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return "", fmt.Errorf("creating session directory %q: %w", sessionDir, err)
+	}
+	return sessionDir, nil
+}
+
 // appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH, TZ).
 func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string, error) {
 	// Basic safety isolation flags
@@ -100,6 +112,13 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 		return nil, err
 	}
 	args = append(args, "--bind", tmpDir, "/tmp")
+
+	// Mount chatID session directory to /session
+	sessionDir, err := setupSessionDir(home, chatID)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--bind", sessionDir, "/session")
 
 	// Mount system paths and all PATH directories as read-only
 	mountedPaths := make(map[string]bool)

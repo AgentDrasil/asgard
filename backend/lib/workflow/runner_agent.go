@@ -273,7 +273,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 				if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
 					for _, tf := range targetFiles {
 						if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
-							vPath := ViewerArtifactPath(tf, nctx.TmpDir)
+							vPath := ViewerArtifactPathInSession(tf, nctx.TmpDir, DefaultSessionDir(nctx.SessionID))
 							stepArtifacts = append(stepArtifacts, vPath)
 							if !seenArtifacts[vPath] {
 								seenArtifacts[vPath] = true
@@ -285,7 +285,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 					for _, item := range targetFilesAny {
 						if tf, ok := item.(string); ok && tf != "" {
 							if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
-								vPath := ViewerArtifactPath(tf, nctx.TmpDir)
+								vPath := ViewerArtifactPathInSession(tf, nctx.TmpDir, DefaultSessionDir(nctx.SessionID))
 								stepArtifacts = append(stepArtifacts, vPath)
 								if !seenArtifacts[vPath] {
 									seenArtifacts[vPath] = true

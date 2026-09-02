@@ -200,6 +200,16 @@ function getDirName(path: string): string {
                     >
                       tmp
                     </span>
+                    <span
+                      v-else-if="
+                        file.scope === 'session' ||
+                        file.path.startsWith('/session/') ||
+                        file.path.startsWith('session/')
+                      "
+                      class="badge badge-xs badge-neutral text-[10px] px-1 py-0 h-4 font-mono text-base-content/70"
+                    >
+                      session
+                    </span>
                   </div>
                   <span
                     v-if="getDirName(file.path)"

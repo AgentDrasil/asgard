@@ -371,6 +371,40 @@ export function extractHighlightedLines(html: string, expectedCount?: number): s
 }
 
 /**
+ * Checks whether a given path belongs to the session /tmp namespace
+ * (/tmp, tmp, .tmp and their subpaths).
+ */
+export function isTmpScopePath(path?: string | null): boolean {
+  if (!path) return false;
+  const clean = path.replace(/\\/g, "/").trim();
+  return (
+    clean === "/tmp" ||
+    clean === "tmp" ||
+    clean === ".tmp" ||
+    clean.startsWith("/tmp/") ||
+    clean.startsWith("tmp/") ||
+    clean.startsWith(".tmp/")
+  );
+}
+
+/**
+ * Checks whether a given path belongs to the session /session namespace
+ * (/session, session, .session and their subpaths).
+ */
+export function isSessionScopePath(path?: string | null): boolean {
+  if (!path) return false;
+  const clean = path.replace(/\\/g, "/").trim();
+  return (
+    clean === "/session" ||
+    clean === "session" ||
+    clean === ".session" ||
+    clean.startsWith("/session/") ||
+    clean.startsWith("session/") ||
+    clean.startsWith(".session/")
+  );
+}
+
+/**
  * Checks whether a given runDir corresponds to the session temporary directory (/tmp, tmp, /tmp/session-id, tmp/session-id, /home/<user>/tmp/<sessionId>, etc.).
  */
 export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {

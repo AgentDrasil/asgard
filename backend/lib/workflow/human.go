@@ -48,7 +48,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	artifactPaths := ExtractArtifactPaths(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir)
 	artifactViewerPaths := make([]string, 0, len(artifactPaths))
 	for _, p := range artifactPaths {
-		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPath(p, nctx.TmpDir))
+		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPathInSession(p, nctx.TmpDir, DefaultSessionDir(nctx.SessionID)))
 	}
 
 	replyCh := make(chan string, 1)

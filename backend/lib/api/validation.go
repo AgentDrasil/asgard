@@ -17,12 +17,18 @@ func IsValidChatID(chatID string) bool {
 
 // GetSessionTmpBaseDir returns the host temporary directory for the session without creating it.
 func GetSessionTmpBaseDir(chatID string) string {
+	return GetSessionScopedBaseDir("tmp", chatID)
+}
+
+// GetSessionScopedBaseDir returns the host base directory for the given session
+// namespace ("tmp" or "session") without creating it (e.g. $HOME/<ns>/<chatID>).
+func GetSessionScopedBaseDir(ns string, chatID string) string {
 	if chatID == "" {
 		chatID = "default"
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
-		return filepath.Join(home, "tmp", chatID)
+		return filepath.Join(home, ns, chatID)
 	}
 	return filepath.Join(os.TempDir(), chatID)
 }
@@ -31,6 +37,8 @@ func GetSessionTmpBaseDir(chatID string) string {
 // If runDir is empty, ".", "/tmp", "/tmp/session-id", "/tmp/${session_id}", "/tmp/<chatID>",
 // "tmp", "tmp/session-id", "tmp/${session_id}", or "tmp/<chatID>",
 // it resolves to the session temporary directory ($HOME/tmp/<chatID> or /tmp/<chatID>).
+// Analogous "session" forms (e.g. "/session", "session", "session/<chatID>/sub") resolve to
+// the session namespace directory ($HOME/session/<chatID>).
 // Subpaths under /tmp/session-id, /tmp/<chatID>, tmp/session-id, or tmp/<chatID> (e.g. /tmp/session-id/subdir)
 // are resolved relative to the session temp dir.
 // Otherwise, it returns the cleaned absolute path or cleaned relative path.
@@ -60,40 +68,60 @@ func NormalizeSessionRunDir(runDir string, chatID string) string {
 		return filepath.Join(baseTmp, sub)
 	}
 
+	if isSess, sub := isExplicitScopedPath(clean, chatID, "session"); isSess {
+		return joinScopedBase("session", chatID, sub)
+	}
+	if isSess, sub := isRelativeScopedNarrowRunDir(clean, chatID, "session"); isSess {
+		return joinScopedBase("session", chatID, sub)
+	}
+
 	return clean
 }
 
+func joinScopedBase(ns string, chatID string, sub string) string {
+	base := GetSessionScopedBaseDir(ns, chatID)
+	sub = filepath.Clean(sub)
+	if sub == "" || sub == "." {
+		return base
+	}
+	return filepath.Join(base, sub)
+}
+
 func isSessionTmpPath(clean string, chatID string) (bool, string) {
+	return isSessionScopedPath(clean, chatID, "tmp")
+}
+
+func isSessionScopedPath(clean string, chatID string, ns string) (bool, string) {
 	if clean == "" || clean == "." {
 		return true, ""
 	}
-	if isExplicit, sub := isExplicitSessionTmpPath(clean, chatID); isExplicit {
+	if isExplicit, sub := isExplicitScopedPath(clean, chatID, ns); isExplicit {
 		return true, sub
 	}
-	return isRelativeTmpNarrowRunDir(clean, chatID)
+	return isRelativeScopedNarrowRunDir(clean, chatID, ns)
 }
 
-// isRelativeTmpNarrowRunDir checks if clean matches relative "tmp" narrow forms for runDir
-// (tmp, tmp/session-id, tmp/${session_id}, tmp/<chatID> and their subpaths).
-func isRelativeTmpNarrowRunDir(clean string, chatID string) (bool, string) {
-	if clean == "tmp" {
+// isRelativeScopedNarrowRunDir checks if clean matches relative narrow forms for runDir
+// (<ns>, <ns>/session-id, <ns>/${session_id}, <ns>/<chatID> and their subpaths).
+func isRelativeScopedNarrowRunDir(clean string, chatID string, ns string) (bool, string) {
+	if clean == ns {
 		return true, ""
 	}
-	if clean == "tmp/session-id" || clean == "tmp/${session_id}" {
+	if clean == ns+"/session-id" || clean == ns+"/${session_id}" {
 		return true, ""
 	}
-	if strings.HasPrefix(clean, "tmp/session-id/") {
-		return true, strings.TrimPrefix(clean, "tmp/session-id/")
+	if strings.HasPrefix(clean, ns+"/session-id/") {
+		return true, strings.TrimPrefix(clean, ns+"/session-id/")
 	}
-	if strings.HasPrefix(clean, "tmp/${session_id}/") {
-		return true, strings.TrimPrefix(clean, "tmp/${session_id}/")
+	if strings.HasPrefix(clean, ns+"/${session_id}/") {
+		return true, strings.TrimPrefix(clean, ns+"/${session_id}/")
 	}
 	if chatID != "" {
-		if clean == "tmp/"+chatID {
+		if clean == ns+"/"+chatID {
 			return true, ""
 		}
-		if strings.HasPrefix(clean, "tmp/"+chatID+"/") {
-			return true, strings.TrimPrefix(clean, "tmp/"+chatID+"/")
+		if strings.HasPrefix(clean, ns+"/"+chatID+"/") {
+			return true, strings.TrimPrefix(clean, ns+"/"+chatID+"/")
 		}
 	}
 	return false, ""
@@ -102,40 +130,46 @@ func isRelativeTmpNarrowRunDir(clean string, chatID string) (bool, string) {
 // isRelativeTmpPrefixedPath checks if clean matches relative "tmp" or "tmp/..." prefix,
 // stripping session-id, ${session_id}, or chatID placeholders, and extracting relative subpath.
 func isRelativeTmpPrefixedPath(clean string, chatID string) (bool, string) {
-	if isNarrow, sub := isRelativeTmpNarrowRunDir(clean, chatID); isNarrow {
+	return isRelativeScopedPrefixedPath(clean, chatID, "tmp")
+}
+
+// isRelativeScopedPrefixedPath checks if clean matches relative "<ns>" or "<ns>/..." prefix,
+// stripping session-id, ${session_id}, or chatID placeholders, and extracting relative subpath.
+func isRelativeScopedPrefixedPath(clean string, chatID string, ns string) (bool, string) {
+	if isNarrow, sub := isRelativeScopedNarrowRunDir(clean, chatID, ns); isNarrow {
 		return true, sub
 	}
-	if strings.HasPrefix(clean, "tmp/") {
-		sub := strings.TrimPrefix(clean, "tmp/")
+	if strings.HasPrefix(clean, ns+"/") {
+		sub := strings.TrimPrefix(clean, ns+"/")
 		stripped := stripSessionIDPrefix(sub, chatID)
 		return true, stripped
 	}
 	return false, ""
 }
 
-func isExplicitSessionTmpPath(clean string, chatID string) (bool, string) {
-	if clean == "/tmp" || clean == ".tmp" {
+func isExplicitScopedPath(clean string, chatID string, ns string) (bool, string) {
+	if clean == "/"+ns || clean == "."+ns {
 		return true, ""
 	}
-	if strings.HasPrefix(clean, ".tmp/") {
-		sub := strings.TrimPrefix(clean, ".tmp/")
+	if strings.HasPrefix(clean, "."+ns+"/") {
+		sub := strings.TrimPrefix(clean, "."+ns+"/")
 		return true, stripSessionIDPrefix(sub, chatID)
 	}
-	if clean == "/tmp/session-id" || clean == "/tmp/${session_id}" {
+	if clean == "/"+ns+"/session-id" || clean == "/"+ns+"/${session_id}" {
 		return true, ""
 	}
-	if strings.HasPrefix(clean, "/tmp/session-id/") {
-		return true, strings.TrimPrefix(clean, "/tmp/session-id/")
+	if strings.HasPrefix(clean, "/"+ns+"/session-id/") {
+		return true, strings.TrimPrefix(clean, "/"+ns+"/session-id/")
 	}
-	if strings.HasPrefix(clean, "/tmp/${session_id}/") {
-		return true, strings.TrimPrefix(clean, "/tmp/${session_id}/")
+	if strings.HasPrefix(clean, "/"+ns+"/${session_id}/") {
+		return true, strings.TrimPrefix(clean, "/"+ns+"/${session_id}/")
 	}
 	if chatID != "" {
-		if clean == "/tmp/"+chatID {
+		if clean == "/"+ns+"/"+chatID {
 			return true, ""
 		}
-		if strings.HasPrefix(clean, "/tmp/"+chatID+"/") {
-			return true, strings.TrimPrefix(clean, "/tmp/"+chatID+"/")
+		if strings.HasPrefix(clean, "/"+ns+"/"+chatID+"/") {
+			return true, strings.TrimPrefix(clean, "/"+ns+"/"+chatID+"/")
 		}
 	}
 	return false, ""
@@ -144,8 +178,14 @@ func isExplicitSessionTmpPath(clean string, chatID string) (bool, string) {
 // ResolveSessionTmpPath checks if reqPath explicitly targets the session's tmp namespace (/tmp, .tmp, /tmp/session-id, etc.)
 // and extracts the normalized subpath inside the session temporary directory.
 func ResolveSessionTmpPath(reqPath, sessionID string) (bool, string) {
+	return ResolveSessionScopedPath(reqPath, sessionID, "tmp")
+}
+
+// ResolveSessionScopedPath checks if reqPath explicitly targets the session's namespace
+// (/<ns>, .<ns>, /<ns>/session-id, etc.) and extracts the normalized subpath inside it.
+func ResolveSessionScopedPath(reqPath, sessionID string, ns string) (bool, string) {
 	clean := filepath.Clean(reqPath)
-	if isTmp, sub := isExplicitSessionTmpPath(clean, sessionID); isTmp {
+	if isTmp, sub := isExplicitScopedPath(clean, sessionID, ns); isTmp {
 		sub = filepath.Clean(sub)
 		if sub == "." {
 			sub = ""
@@ -153,8 +193,8 @@ func ResolveSessionTmpPath(reqPath, sessionID string) (bool, string) {
 		return true, sub
 	}
 
-	if strings.HasPrefix(clean, "/tmp/") {
-		sub := strings.TrimPrefix(clean, "/tmp/")
+	if strings.HasPrefix(clean, "/"+ns+"/") {
+		sub := strings.TrimPrefix(clean, "/"+ns+"/")
 		sub = stripSessionIDPrefix(sub, sessionID)
 		sub = filepath.Clean(sub)
 		if sub == "." {
@@ -168,11 +208,16 @@ func ResolveSessionTmpPath(reqPath, sessionID string) (bool, string) {
 
 // NormalizeTmpPathForAuth returns canonical /tmp/... path representation for authorization checks.
 func NormalizeTmpPathForAuth(reqPath, sessionID string) (bool, string) {
-	if isTmp, sub := ResolveSessionTmpPath(reqPath, sessionID); isTmp {
+	return NormalizeScopedPathForAuth(reqPath, sessionID, "tmp")
+}
+
+// NormalizeScopedPathForAuth returns canonical /<ns>/... path representation for authorization checks.
+func NormalizeScopedPathForAuth(reqPath, sessionID string, ns string) (bool, string) {
+	if isTmp, sub := ResolveSessionScopedPath(reqPath, sessionID, ns); isTmp {
 		if sub == "" {
-			return true, "/tmp"
+			return true, "/" + ns
 		}
-		return true, "/tmp/" + sub
+		return true, "/" + ns + "/" + sub
 	}
 	return false, ""
 }

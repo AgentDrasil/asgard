@@ -117,7 +117,7 @@ watch(selectedFilePath, (newPath) => {
 
 const currentScope = computed<FileScope | undefined>(() => {
   const scope = route.query.scope;
-  if (scope === "workspace" || scope === "tmp") {
+  if (scope === "workspace" || scope === "tmp" || scope === "session") {
     return scope;
   }
   return undefined;

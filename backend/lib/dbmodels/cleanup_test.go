@@ -23,6 +23,10 @@ func TestCleanExpiredSessions(t *testing.T) {
 	// Use t.TempDir() as isolated tmp base
 	tmpBase := t.TempDir()
 
+	// Session base is derived as a sibling of the tmp base
+	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
+	t.Cleanup(func() { _ = os.RemoveAll(sessionBase) })
+
 	expiredID := "test-expired-session-id"
 	recentID := "test-recent-session-id"
 	runningID := "test-running-session-id"
@@ -32,11 +36,15 @@ func TestCleanExpiredSessions(t *testing.T) {
 	recentTmpDir := filepath.Join(tmpBase, recentID)
 	runningTmpDir := filepath.Join(tmpBase, runningID)
 	orphanTmpDir := filepath.Join(tmpBase, orphanID)
+	expiredSessionDir := filepath.Join(sessionBase, expiredID)
+	orphanSessionDir := filepath.Join(sessionBase, orphanID)
 
 	require.NoError(t, os.MkdirAll(expiredTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(recentTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(runningTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(orphanTmpDir, 0755))
+	require.NoError(t, os.MkdirAll(expiredSessionDir, 0755))
+	require.NoError(t, os.MkdirAll(orphanSessionDir, 0755))
 
 	now := time.Now()
 	expiredTime := now.AddDate(0, -1, -1) // > 1 month ago
@@ -68,6 +76,7 @@ func TestCleanExpiredSessions(t *testing.T) {
 
 	// Set orphan directory & content modification times to expiredTime
 	require.NoError(t, os.Chtimes(orphanTmpDir, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(orphanSessionDir, expiredTime, expiredTime))
 
 	cutoff := now.AddDate(0, -1, 0)
 	err = repo.CleanExpiredSessions(CleanExpiredSessionsOptions{
@@ -95,6 +104,13 @@ func TestCleanExpiredSessions(t *testing.T) {
 
 	_, errOrphanDir := os.Stat(orphanTmpDir)
 	assert.True(t, os.IsNotExist(errOrphanDir))
+
+	// Verify session directory state
+	_, errExpiredSessionDir := os.Stat(expiredSessionDir)
+	assert.True(t, os.IsNotExist(errExpiredSessionDir))
+
+	_, errOrphanSessionDir := os.Stat(orphanSessionDir)
+	assert.True(t, os.IsNotExist(errOrphanSessionDir))
 
 	_, errRecentDir := os.Stat(recentTmpDir)
 	assert.False(t, os.IsNotExist(errRecentDir))

@@ -806,6 +806,140 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 	})
 }
 
+func TestFilesHandler_SessionResolution(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	server := &Server{
+		conf: &config.Config{Host: "http://localhost:8080"},
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	chatID := uuid.NewV7().String()
+	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
+
+	wsDir := t.TempDir()
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	sess.RunDir = wsDir
+	require.NoError(t, repo.SaveSession(sess))
+
+	sessionDir := filepath.Join(tempHome, "session", chatID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0755))
+
+	testFile := filepath.Join(sessionDir, "notes.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("hello from session ns"), 0644))
+
+	t.Run("File Tree from /session", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID+"&path=/session", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Entries, 1)
+		assert.Equal(t, "notes.md", resp.Entries[0].Name)
+		assert.Equal(t, "/session/notes.md", resp.Entries[0].Path)
+	})
+
+	t.Run("File Tree subdir via /session/session-id", func(t *testing.T) {
+		require.NoError(t, os.MkdirAll(filepath.Join(sessionDir, "sub"), 0755))
+		req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+chatID+"&path=/session/session-id", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		found := false
+		for _, e := range resp.Entries {
+			if e.Name == "sub" {
+				found = true
+				assert.True(t, e.IsDir)
+				assert.Equal(t, "/session/sub", e.Path)
+			}
+		}
+		assert.True(t, found, "expected sub dir in session tree")
+	})
+
+	t.Run("File Content via /session path", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=/session/notes.md", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "hello from session ns", resp.Content)
+		assert.Equal(t, "/session/notes.md", resp.Path)
+	})
+
+	t.Run("File Content via session/ relative path with scope=session", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=session/notes.md&scope=session", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileContentResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "hello from session ns", resp.Content)
+	})
+
+	t.Run("File Content session path traversal rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/content?session_id="+chatID+"&path=/session/../../etc/passwd", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		// /session/../../etc/passwd is not an explicit /session/... subpath after Clean
+		// (Clean resolves ..), so it lands in workspace resolution and must not escape.
+		assert.NotEqual(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("File Search includes session scope with /session prefix", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+chatID+"&query=notes", nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileSearchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Files, 1)
+		assert.Equal(t, "/session/notes.md", resp.Files[0].Path)
+		assert.Equal(t, "session", resp.Files[0].Scope)
+	})
+
+	t.Run("RunDir under session namespace resolves like tmp", func(t *testing.T) {
+		sessRunDirChat := uuid.NewV7().String()
+		require.NoError(t, repo.UpdateAgentSession(sessRunDirChat, "test-agent", "", "", nil))
+
+		sessRunDirSess, sErr := repo.GetSession(sessRunDirChat)
+		require.NoError(t, sErr)
+		sessRunDirSess.RunDir = "session/session-id"
+		require.NoError(t, repo.SaveSession(sessRunDirSess))
+
+		sessRunDirPath := filepath.Join(tempHome, "session", sessRunDirChat)
+		require.NoError(t, os.MkdirAll(sessRunDirPath, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(sessRunDirPath, "rd.txt"), []byte("rd"), 0644))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/files/tree?session_id="+sessRunDirChat, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resp FileTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Len(t, resp.Entries, 1)
+		assert.Equal(t, "rd.txt", resp.Entries[0].Name)
+		assert.Equal(t, "rd.txt", resp.Entries[0].Path)
+	})
+}
+
 func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)

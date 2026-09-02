@@ -74,7 +74,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 
 	scope := r.URL.Query().Get("scope")
 
-	targetAbs, isTmp, authPath, err := resolveAndValidatePath(runDir, reqPath, scope, sessionID)
+	targetAbs, ns, authPath, err := resolveAndValidatePath(runDir, reqPath, scope, sessionID)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "access denied") {
 			writeJSONError(w, http.StatusForbidden, err.Error())
@@ -84,7 +84,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isPathAuthorized(authPath, sessionModifiedFiles, runDir, sessionID, isTmp) {
+	if !isPathAuthorized(authPath, sessionModifiedFiles, runDir, sessionID, ns) {
 		writeJSONError(w, http.StatusForbidden, "access denied: file not authorized in session")
 		return
 	}
@@ -141,7 +141,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	displayPath := reqPath
-	if isTmp {
+	if ns != "" {
 		displayPath = authPath
 	}
 
@@ -160,14 +160,17 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs string, isTmp bool, authPath string, err error) {
+// resolveAndValidateNamespacedPath handles workspace/file paths targeting a session
+// namespace ("tmp" or "session"): explicit forms (/<ns>, .<ns>, /<ns>/...) and relative
+// forms (<ns>, <ns>/...). It returns handled=false when cleanReq does not target the namespace.
+func resolveAndValidateNamespacedPath(ns string, runDir, reqPath, scope, sessionID string) (bool, string, string, string, error) {
 	cleanReq := filepath.Clean(reqPath)
 	cleanRunDir := filepath.Clean(runDir)
-	baseTmp := GetSessionTmpBaseDir(sessionID)
+	base := GetSessionScopedBaseDir(ns, sessionID)
 
-	evalTmpBase := baseTmp
-	if et, evalErr := filepath.EvalSymlinks(baseTmp); evalErr == nil {
-		evalTmpBase = et
+	evalBase := base
+	if eb, evalErr := filepath.EvalSymlinks(base); evalErr == nil {
+		evalBase = eb
 	}
 
 	evalRunDir := cleanRunDir
@@ -175,92 +178,93 @@ func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs
 		evalRunDir = er
 	}
 
-	// Case 1: Explicit session tmp path (/tmp, .tmp, /tmp/..., .tmp/...)
-	if isExplicit, sub := ResolveSessionTmpPath(cleanReq, sessionID); isExplicit {
+	nsPrefix := "/" + ns
+
+	// Explicit namespace path (/<ns>, .<ns>, /<ns>/...)
+	if isExplicit, sub := ResolveSessionScopedPath(cleanReq, sessionID, ns); isExplicit {
 		sub = filepath.Clean(sub)
 		if sub == "." {
 			sub = ""
 		}
-		target := filepath.Join(baseTmp, sub)
-		relLex, errLex := filepath.Rel(baseTmp, target)
+		target := filepath.Join(base, sub)
+		relLex, errLex := filepath.Rel(base, target)
 		if errLex != nil || strings.HasPrefix(relLex, "..") {
-			return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+			return true, "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 		}
 
 		evalTarget, errEval := filepath.EvalSymlinks(target)
 		if errEval == nil {
-			relEval, errRel := filepath.Rel(evalTmpBase, evalTarget)
+			relEval, errRel := filepath.Rel(evalBase, evalTarget)
 			if errRel != nil || strings.HasPrefix(relEval, "..") {
-				return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+				return true, "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 			}
 		}
 
-		canonicalAuth := "/tmp"
+		canonicalAuth := nsPrefix
 		if sub != "" {
-			canonicalAuth = "/tmp/" + sub
+			canonicalAuth = nsPrefix + "/" + sub
 		}
-		return target, true, canonicalAuth, nil
+		return true, target, ns, canonicalAuth, nil
 	}
 
-	// Case 2: Relative tmp/... path
-	if isRelTmp, sub := isRelativeTmpPrefixedPath(cleanReq, sessionID); isRelTmp {
+	// Relative namespace path (<ns>, <ns>/...)
+	if isRelNs, sub := isRelativeScopedPrefixedPath(cleanReq, sessionID, ns); isRelNs {
 		sub = filepath.Clean(sub)
 		if sub == "." {
 			sub = ""
 		}
-		canonicalAuth := "/tmp"
+		canonicalAuth := nsPrefix
 		if sub != "" {
-			canonicalAuth = "/tmp/" + sub
+			canonicalAuth = nsPrefix + "/" + sub
 		}
 
-		if scope == "tmp" {
-			target := filepath.Join(baseTmp, sub)
-			relLex, errLex := filepath.Rel(baseTmp, target)
+		resolveAsNs := func() (string, string, string, error) {
+			target := filepath.Join(base, sub)
+			relLex, errLex := filepath.Rel(base, target)
 			if errLex != nil || strings.HasPrefix(relLex, "..") {
-				return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+				return "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 			}
 			evalTarget, errEval := filepath.EvalSymlinks(target)
 			if errEval == nil {
-				relEval, errRel := filepath.Rel(evalTmpBase, evalTarget)
+				relEval, errRel := filepath.Rel(evalBase, evalTarget)
 				if errRel != nil || strings.HasPrefix(relEval, "..") {
-					return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+					return "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 				}
 			}
-			return target, true, canonicalAuth, nil
+			return target, ns, canonicalAuth, nil
 		}
 
-		if scope == "workspace" {
+		resolveAsWs := func() (string, string, string, error) {
 			target := filepath.Join(cleanRunDir, cleanReq)
 			relLex, errLex := filepath.Rel(cleanRunDir, target)
 			if errLex != nil || strings.HasPrefix(relLex, "..") {
-				return "", false, "", errors.New("access denied: path escapes workspace boundary")
+				return "", "", "", errors.New("access denied: path escapes workspace boundary")
 			}
 			evalTarget, errEval := filepath.EvalSymlinks(target)
 			if errEval == nil {
 				relEval, errRel := filepath.Rel(evalRunDir, evalTarget)
 				if errRel != nil || strings.HasPrefix(relEval, "..") {
-					return "", false, "", errors.New("access denied: path escapes workspace boundary")
+					return "", "", "", errors.New("access denied: path escapes workspace boundary")
 				}
 			}
-			return target, false, cleanReq, nil
+			return target, "", cleanReq, nil
+		}
+
+		if scope == ns {
+			target, resolvedNs, auth, err := resolveAsNs()
+			return true, target, resolvedNs, auth, err
+		}
+
+		if scope == "workspace" {
+			target, resolvedNs, auth, err := resolveAsWs()
+			return true, target, resolvedNs, auth, err
 		}
 
 		// scope unprovided or invalid -> auto disambiguation
-		isRunDirSessionTmp := (cleanRunDir == baseTmp || cleanRunDir == evalTmpBase || evalRunDir == evalTmpBase)
-		if isRunDirSessionTmp {
-			target := filepath.Join(baseTmp, sub)
-			relLex, errLex := filepath.Rel(baseTmp, target)
-			if errLex != nil || strings.HasPrefix(relLex, "..") {
-				return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
-			}
-			evalTarget, errEval := filepath.EvalSymlinks(target)
-			if errEval == nil {
-				relEval, errRel := filepath.Rel(evalTmpBase, evalTarget)
-				if errRel != nil || strings.HasPrefix(relEval, "..") {
-					return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
-				}
-			}
-			return target, true, canonicalAuth, nil
+		isRunDirNsBase := (cleanRunDir == base || cleanRunDir == evalBase || evalRunDir == evalBase)
+		if isRunDirNsBase {
+			target, resolvedNs, auth, err := resolveAsNs()
+			return true, target, resolvedNs, auth, err
 		}
 
 		// runDir is project workspace
@@ -268,44 +272,64 @@ func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs
 		if _, err := os.Stat(wsTarget); err == nil {
 			relLex, errLex := filepath.Rel(cleanRunDir, wsTarget)
 			if errLex != nil || strings.HasPrefix(relLex, "..") {
-				return "", false, "", errors.New("access denied: path escapes workspace boundary")
+				return true, "", "", "", errors.New("access denied: path escapes workspace boundary")
 			}
 			evalTarget, errEval := filepath.EvalSymlinks(wsTarget)
 			if errEval == nil {
 				relEval, errRel := filepath.Rel(evalRunDir, evalTarget)
 				if errRel != nil || strings.HasPrefix(relEval, "..") {
-					return "", false, "", errors.New("access denied: path escapes workspace boundary")
+					return true, "", "", "", errors.New("access denied: path escapes workspace boundary")
 				}
 			}
-			return wsTarget, false, cleanReq, nil
+			return true, wsTarget, "", cleanReq, nil
 		}
 
-		// wsTarget does not exist, check if session tmp exists
-		tmpTarget := filepath.Join(baseTmp, sub)
-		if _, err := os.Stat(tmpTarget); err == nil {
-			relLex, errLex := filepath.Rel(baseTmp, tmpTarget)
+		// wsTarget does not exist, check if session namespace target exists
+		nsTarget := filepath.Join(base, sub)
+		if _, err := os.Stat(nsTarget); err == nil {
+			relLex, errLex := filepath.Rel(base, nsTarget)
 			if errLex != nil || strings.HasPrefix(relLex, "..") {
-				return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+				return true, "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 			}
-			evalTarget, errEval := filepath.EvalSymlinks(tmpTarget)
+			evalTarget, errEval := filepath.EvalSymlinks(nsTarget)
 			if errEval == nil {
-				relEval, errRel := filepath.Rel(evalTmpBase, evalTarget)
+				relEval, errRel := filepath.Rel(evalBase, evalTarget)
 				if errRel != nil || strings.HasPrefix(relEval, "..") {
-					return "", false, "", errors.New("access denied: path escapes temporary directory boundary")
+					return true, "", "", "", errors.New("access denied: path escapes temporary directory boundary")
 				}
 			}
-			return tmpTarget, true, canonicalAuth, nil
+			return true, nsTarget, ns, canonicalAuth, nil
 		}
 
 		// Neither exists: fall back to workspace target so os.Stat returns standard 404
 		relLex, errLex := filepath.Rel(cleanRunDir, wsTarget)
 		if errLex != nil || strings.HasPrefix(relLex, "..") {
-			return "", false, "", errors.New("access denied: path escapes workspace boundary")
+			return true, "", "", "", errors.New("access denied: path escapes workspace boundary")
 		}
-		return wsTarget, false, cleanReq, nil
+		return true, wsTarget, "", cleanReq, nil
+	}
+
+	return false, "", "", "", nil
+}
+
+func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs string, ns string, authPath string, err error) {
+	// Namespaced paths (/tmp, /session and their relative forms)
+	for _, namespace := range []string{"tmp", "session"} {
+		handled, target, resolvedNs, auth, err := resolveAndValidateNamespacedPath(namespace, runDir, reqPath, scope, sessionID)
+		if handled {
+			return target, resolvedNs, auth, err
+		}
 	}
 
 	// Case 3: Ordinary workspace relative or absolute path (scope ignored)
+	cleanReq := filepath.Clean(reqPath)
+	cleanRunDir := filepath.Clean(runDir)
+
+	evalRunDir := cleanRunDir
+	if er, evalErr := filepath.EvalSymlinks(cleanRunDir); evalErr == nil {
+		evalRunDir = er
+	}
+
 	var targetAbsPath string
 	if filepath.IsAbs(cleanReq) {
 		targetAbsPath = cleanReq
@@ -315,20 +339,20 @@ func resolveAndValidatePath(runDir, reqPath, scope, sessionID string) (targetAbs
 
 	relLex, errLex := filepath.Rel(cleanRunDir, targetAbsPath)
 	if errLex != nil || strings.HasPrefix(relLex, "..") {
-		return "", false, "", errors.New("access denied: path escapes workspace boundary")
+		return "", "", "", errors.New("access denied: path escapes workspace boundary")
 	}
 	evalTarget, errEval := filepath.EvalSymlinks(targetAbsPath)
 	if errEval == nil {
 		relEval, errRel := filepath.Rel(evalRunDir, evalTarget)
 		if errRel != nil || strings.HasPrefix(relEval, "..") {
-			return "", false, "", errors.New("access denied: path escapes workspace boundary")
+			return "", "", "", errors.New("access denied: path escapes workspace boundary")
 		}
 	}
 
-	return targetAbsPath, false, cleanReq, nil
+	return targetAbsPath, "", cleanReq, nil
 }
 
-func isPathAuthorized(authPath string, allowedFiles []string, runDir, sessionID string, isTmp bool) bool {
+func isPathAuthorized(authPath string, allowedFiles []string, runDir, sessionID string, ns string) bool {
 	cleanAuth := filepath.Clean(authPath)
 	cleanRunDir := ""
 	if runDir != "" {
@@ -341,20 +365,20 @@ func isPathAuthorized(authPath string, allowedFiles []string, runDir, sessionID 
 		}
 		cleanAllowed := filepath.Clean(allowed)
 
-		if isTmp {
-			// Check if cleanAllowed is explicit tmp
-			if isAllowedTmp, normAllowedTmp := NormalizeTmpPathForAuth(cleanAllowed, sessionID); isAllowedTmp {
-				if cleanAuth == normAllowedTmp {
+		if ns != "" {
+			// Check if cleanAllowed is explicit namespace path
+			if isAllowedNs, normAllowedNs := NormalizeScopedPathForAuth(cleanAllowed, sessionID, ns); isAllowedNs {
+				if cleanAuth == normAllowedNs {
 					return true
 				}
 			}
-			// Md2: Check legacy relative tmp/ entry in allowedFiles
-			if isRelTmp, sub := isRelativeTmpPrefixedPath(cleanAllowed, sessionID); isRelTmp {
-				normRelTmp := "/tmp"
+			// Md2: Check legacy relative namespace entry in allowedFiles
+			if isRelNs, sub := isRelativeScopedPrefixedPath(cleanAllowed, sessionID, ns); isRelNs {
+				normRelNs := "/" + ns
 				if sub != "" && sub != "." {
-					normRelTmp = "/tmp/" + sub
+					normRelNs = "/" + ns + "/" + sub
 				}
-				if cleanAuth == normRelTmp {
+				if cleanAuth == normRelNs {
 					return true
 				}
 			}

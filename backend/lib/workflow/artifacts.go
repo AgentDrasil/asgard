@@ -28,6 +28,17 @@ func DefaultTmpDir(sessionID string) string {
 	return filepath.Join(os.TempDir(), sessionID)
 }
 
+// DefaultSessionDir returns the per-run session directory for a session:
+// <home>/session/<sessionID>, the same host directory the sandbox binds as /session
+// (see bwrap.setupSessionDir). Falls back to os.TempDir()/<sessionID> when no
+// home dir is resolvable.
+func DefaultSessionDir(sessionID string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, "session", sessionID)
+	}
+	return filepath.Join(os.TempDir(), sessionID)
+}
+
 // ExtractArtifactPaths collects artifact file paths referenced by a human
 // node prompt: explicit `${tmp_dir}/...` references from the raw prompt plus
 // absolute paths under the run's tmp/run directories found in the
@@ -69,10 +80,23 @@ func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) 
 // are presented as /tmp/<rel> so the file endpoint can remap them back to
 // <home>/tmp/<sessionID>/<rel>; other paths pass through unchanged.
 func ViewerArtifactPath(path, tmpDir string) string {
+	return ViewerArtifactPathInSession(path, tmpDir, "")
+}
+
+// ViewerArtifactPathInSession extends ViewerArtifactPath with the run's session
+// dir (the sandbox /session): paths under sessionDir are presented as
+// /session/<rel> so the file endpoint can remap them back to
+// <home>/session/<sessionID>/<rel>.
+func ViewerArtifactPathInSession(path, tmpDir, sessionDir string) string {
 	clean := filepath.Clean(path)
 	if tmpDir != "" {
 		if rel, err := filepath.Rel(filepath.Clean(tmpDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 			return filepath.Join("/tmp", rel)
+		}
+	}
+	if sessionDir != "" {
+		if rel, err := filepath.Rel(filepath.Clean(sessionDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("/session", rel)
 		}
 	}
 	if strings.HasPrefix(clean, ".tmp/") {
@@ -81,7 +105,13 @@ func ViewerArtifactPath(path, tmpDir string) string {
 	if clean == ".tmp" {
 		return "/tmp"
 	}
-	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" {
+	if strings.HasPrefix(clean, ".session/") {
+		return "/session/" + strings.TrimPrefix(clean, ".session/")
+	}
+	if clean == ".session" {
+		return "/session"
+	}
+	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" || strings.HasPrefix(clean, "/session/") || clean == "/session" {
 		return clean
 	}
 	return path
@@ -90,6 +120,12 @@ func ViewerArtifactPath(path, tmpDir string) string {
 // ArtifactViewerPaths converts a node result's artifact map (declared name →
 // host path) into a stable, sorted list of viewer-facing paths.
 func ArtifactViewerPaths(artifacts map[string]string, tmpDir string) []string {
+	return ArtifactViewerPathsInSession(artifacts, tmpDir, "")
+}
+
+// ArtifactViewerPathsInSession extends ArtifactViewerPaths with the run's
+// session dir (see ViewerArtifactPathInSession).
+func ArtifactViewerPathsInSession(artifacts map[string]string, tmpDir, sessionDir string) []string {
 	if len(artifacts) == 0 {
 		return nil
 	}
@@ -100,7 +136,7 @@ func ArtifactViewerPaths(artifacts map[string]string, tmpDir string) []string {
 	sort.Strings(paths)
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, ViewerArtifactPath(p, tmpDir))
+		out = append(out, ViewerArtifactPathInSession(p, tmpDir, sessionDir))
 	}
 	return out
 }

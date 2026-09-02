@@ -175,3 +175,75 @@ func TestNormalizeSessionRunDir_Extended(t *testing.T) {
 	assert.Equal(t, "/tmp", NormalizeSessionRunDir("/tmp", ""))
 	assert.Equal(t, "src/main", NormalizeSessionRunDir("src/main", ""))
 }
+
+func TestSessionNamespacePaths(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	chatID := "session-123"
+	expectedSessionDir := filepath.Join(tempHome, "session", chatID)
+
+	assert.Equal(t, expectedSessionDir, GetSessionScopedBaseDir("session", chatID))
+
+	// NormalizeSessionRunDir session forms
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("/session", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("/session/", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("/session/session-id", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("/session/${session_id}", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("/session/"+chatID, chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir(".session/session-id", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("session", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("session/session-id", chatID))
+	assert.Equal(t, expectedSessionDir, NormalizeSessionRunDir("session/"+chatID, chatID))
+	assert.Equal(t, filepath.Join(expectedSessionDir, "sub"), NormalizeSessionRunDir("/session/session-id/sub", chatID))
+	assert.Equal(t, filepath.Join(expectedSessionDir, "sub"), NormalizeSessionRunDir("session/"+chatID+"/sub", chatID))
+
+	// ResolveSessionScopedPath for session namespace
+	tests := []struct {
+		input      string
+		expectNs   bool
+		expectSub  string
+		expectAuth string
+	}{
+		{"/session", true, "", "/session"},
+		{".session", true, "", "/session"},
+		{"/session/session-id", true, "", "/session"},
+		{"/session/${session_id}", true, "", "/session"},
+		{"/session/" + chatID, true, "", "/session"},
+		{".session/session-id", true, "", "/session"},
+		{"/session/session-id/plan.md", true, "plan.md", "/session/plan.md"},
+		{"/session/plan.md", true, "plan.md", "/session/plan.md"},
+		{".session/plan.md", true, "plan.md", "/session/plan.md"},
+		{"/session/" + chatID + "/plan.md", true, "plan.md", "/session/plan.md"},
+		{"/session/sub/file.txt", true, "sub/file.txt", "/session/sub/file.txt"},
+		{"/session/../../etc/passwd", false, "", ""},
+		// Relative paths are NOT explicit session paths
+		{"session/plan.md", false, "", ""},
+		{"src/main.go", false, "", ""},
+	}
+	for _, tt := range tests {
+		isNs, sub := ResolveSessionScopedPath(tt.input, chatID, "session")
+		assert.Equal(t, tt.expectNs, isNs, "ResolveSessionScopedPath(%s)", tt.input)
+		if isNs {
+			assert.Equal(t, tt.expectSub, sub, "subpath for %s", tt.input)
+		}
+		isAuthNs, normAuth := NormalizeScopedPathForAuth(tt.input, chatID, "session")
+		assert.Equal(t, tt.expectNs, isAuthNs, "NormalizeScopedPathForAuth(%s)", tt.input)
+		if isAuthNs {
+			assert.Equal(t, tt.expectAuth, normAuth, "auth norm for %s", tt.input)
+		}
+	}
+
+	// Relative session-prefixed paths
+	isNs, sub := isRelativeScopedPrefixedPath("session/plan.md", chatID, "session")
+	assert.True(t, isNs)
+	assert.Equal(t, "plan.md", sub)
+	isNs, sub = isRelativeScopedPrefixedPath("session/session-id/plan.md", chatID, "session")
+	assert.True(t, isNs)
+	assert.Equal(t, "plan.md", sub)
+	isNs, _ = isRelativeScopedPrefixedPath("sessionother/plan.md", chatID, "session")
+	assert.False(t, isNs)
+
+	// Pure function check: no directory created
+	assert.NoDirExists(t, expectedSessionDir)
+}

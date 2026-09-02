@@ -51,6 +51,8 @@ graph TD
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
+Both sandboxes bind-mount per-chat host directories: `~/tmp/<chat-id>` at `/tmp` and `~/session/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
+
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
     *   System directories (`/bin`, `/usr/bin`, etc.) are mounted read-only.
@@ -76,7 +78,7 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
 ### Key Capabilities
 - **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
 - **Heterogeneous Node Types**:
-  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox).
+  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `~/session/<chat-id>`).
   - `command`: Executes sandboxed or direct bash shell commands.
   - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.
@@ -146,10 +148,10 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents.
 
 ### 2. Workspace & File Browsing API
-*   **Workspace File Content** (`GET /api/v1/workspace/file`): Retrieves authorized file content or media streams (`?raw=true`) from session workspace or session tmp directory. Supports `session_id`, `path`, and optional `scope` (`tmp` or `workspace`) disambiguation parameters.
-*   **File Content** (`GET /api/files/content`): Reads workspace or session temporary file content with metadata. Supports `session_id`, `path`, and optional `scope` (`tmp` or `workspace`).
-*   **File Tree** (`GET /api/files/tree`): Lists directory contents and files within session workspace or session tmp directory. Supports `session_id`, optional `path`, and optional `scope` (`tmp` or `workspace`).
-*   **File Search** (`GET /api/files/search`): Searches for files by query inside session workspace.
+*   **Workspace File Content** (`GET /api/v1/workspace/file`): Retrieves authorized file content or media streams (`?raw=true`) from session workspace, session tmp, or session `/session` directory. Supports `session_id`, `path`, and optional `scope` (`tmp`, `session`, or `workspace`) disambiguation parameters.
+*   **File Content** (`GET /api/files/content`): Reads workspace, session temporary, or session `/session` file content with metadata. Supports `session_id`, `path`, and optional `scope` (`tmp`, `session`, or `workspace`).
+*   **File Tree** (`GET /api/files/tree`): Lists directory contents and files within session workspace, session tmp, or session `/session` directory. Supports `session_id`, optional `path`, and optional `scope` (`tmp`, `session`, or `workspace`).
+*   **File Search** (`GET /api/files/search`): Searches for files by query inside session workspace, session tmp (`/tmp` prefix), and session directory (`/session` prefix).
 
 ### 3. Management & Coordination API
 *   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).

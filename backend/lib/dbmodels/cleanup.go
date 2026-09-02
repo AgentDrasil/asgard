@@ -18,7 +18,7 @@ type CleanExpiredSessionsOptions struct {
 }
 
 // CleanExpiredSessions deletes inactive, non-running sessions and their corresponding
-// session temporary directories (e.g. ~/tmp/<chatID>) older than cutoff.
+// session directories (e.g. ~/tmp/<chatID> and ~/session/<chatID>) older than cutoff.
 func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOptions) error {
 	var expiredSessions []Session
 	if err := r.db.Where("updated_at < ?", opts.Cutoff).Find(&expiredSessions).Error; err != nil {
@@ -32,6 +32,19 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			log.Warn().Err(err).Msg("CleanExpiredSessions: could not determine user home directory")
 		} else {
 			tmpDir = filepath.Join(homeDir, "tmp")
+		}
+	}
+
+	// Session dirs (sandbox /session) live as a sibling of the tmp base (~/session when tmp defaults to ~/tmp)
+	sessionDir := ""
+	if tmpDir != "" {
+		sessionDir = filepath.Join(filepath.Dir(tmpDir), "session")
+	}
+
+	cleanupBases := make([]string, 0, 2)
+	for _, base := range []string{tmpDir, sessionDir} {
+		if base != "" {
+			cleanupBases = append(cleanupBases, base)
 		}
 	}
 
@@ -51,40 +64,43 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			continue
 		}
 
-		// 3. Remove session folder under tmpDir/<chatID>
-		if tmpDir != "" && sess.ChatID != "" {
-			sessionTmpPath := filepath.Join(tmpDir, sess.ChatID)
-			if err := os.RemoveAll(sessionTmpPath); err != nil {
-				log.Warn().Err(err).Str("path", sessionTmpPath).Msg("Failed to remove session tmp dir")
-				errs = append(errs, fmt.Errorf("remove tmp dir %s: %w", sessionTmpPath, err))
+		// 3. Remove session folder under tmpDir/<chatID> and sessionDir/<chatID>
+		if sess.ChatID != "" {
+			for _, base := range cleanupBases {
+				sessionPath := filepath.Join(base, sess.ChatID)
+				if err := os.RemoveAll(sessionPath); err != nil {
+					log.Warn().Err(err).Str("path", sessionPath).Msg("Failed to remove session dir")
+					errs = append(errs, fmt.Errorf("remove dir %s: %w", sessionPath, err))
+				}
 			}
 		}
 	}
 
-	// 4. Clean orphan directories in tmpDir whose chat_id does not exist in DB and latest mtime < cutoff
-	if tmpDir != "" {
-		entries, err := os.ReadDir(tmpDir)
-		if err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
+	// 4. Clean orphan directories under tmpDir/sessionDir whose chat_id does not exist in DB and latest mtime < cutoff
+	for _, base := range cleanupBases {
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
 
-				dirPath := filepath.Join(tmpDir, entry.Name())
-				latestMtime := getLatestModTime(dirPath, entry)
-				if !latestMtime.Before(opts.Cutoff) {
-					continue
-				}
+			dirPath := filepath.Join(base, entry.Name())
+			latestMtime := getLatestModTime(dirPath, entry)
+			if !latestMtime.Before(opts.Cutoff) {
+				continue
+			}
 
-				name := entry.Name()
-				var count int64
-				if err := r.db.Model(&Session{}).Where("chat_id = ?", name).Count(&count).Error; err == nil && count == 0 {
-					if err := os.RemoveAll(dirPath); err != nil {
-						log.Warn().Err(err).Str("path", dirPath).Msg("Failed to remove orphan tmp dir")
-						errs = append(errs, fmt.Errorf("remove orphan tmp dir %s: %w", dirPath, err))
-					} else {
-						log.Info().Str("path", dirPath).Msg("Removed orphan session tmp dir")
-					}
+			name := entry.Name()
+			var count int64
+			if err := r.db.Model(&Session{}).Where("chat_id = ?", name).Count(&count).Error; err == nil && count == 0 {
+				if err := os.RemoveAll(dirPath); err != nil {
+					log.Warn().Err(err).Str("path", dirPath).Msg("Failed to remove orphan session dir")
+					errs = append(errs, fmt.Errorf("remove orphan session dir %s: %w", dirPath, err))
+				} else {
+					log.Info().Str("path", dirPath).Msg("Removed orphan session dir")
 				}
 			}
 		}

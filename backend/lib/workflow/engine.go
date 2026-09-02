@@ -956,7 +956,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 					Status:    result.Status,
 					Message:   msg,
 					Output:    nodeOutput,
-					Artifacts: ArtifactViewerPaths(result.Artifacts, tmpDir),
+					Artifacts: ArtifactViewerPathsInSession(result.Artifacts, tmpDir, DefaultSessionDir(rc.SessionID)),
 				})
 				evaluateDownstream(node.ID)
 				mu.Unlock()
