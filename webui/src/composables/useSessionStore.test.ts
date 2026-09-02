@@ -749,4 +749,44 @@ describe("useSessionStore", () => {
     expect(store.loading.value).toBe(false);
     expect(store.workingAgentLabel.value).toBeNull();
   });
+
+  it("should archive session by id and filter from sessions list", async () => {
+    const mockSessions: ChatSession[] = [
+      { chatID: "s-1", title: "Session 1", currentAgent: "a1", runDir: "/dir1" },
+      { chatID: "s-2", title: "Session 2", currentAgent: "a2", runDir: "/dir2" },
+    ];
+
+    vi.spyOn(api, "archiveSession").mockResolvedValue(true);
+
+    const store = useSessionStore();
+    store.sessions.value = [...mockSessions];
+
+    const result = await store.archiveSessionById("s-1");
+    expect(result).toBe(true);
+    expect(store.sessions.value.length).toBe(1);
+    expect(store.sessions.value[0].chatID).toBe("s-2");
+  });
+
+  it("should redirect to /dashboard when archiving active session if router is provided", async () => {
+    const mockSessions: ChatSession[] = [
+      { chatID: "s-1", title: "Active Session", currentAgent: "a1", runDir: "/dir1" },
+    ];
+
+    vi.spyOn(api, "archiveSession").mockResolvedValue(true);
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSessions[0]);
+
+    const pushSpy = vi.fn().mockResolvedValue(undefined);
+    const mockRouter: any = { push: pushSpy };
+
+    const store = useSessionStore({ router: mockRouter });
+    await store.openSession("s-1");
+    store.sessions.value = [...mockSessions];
+
+    expect(store.activeSessionId.value).toBe("s-1");
+
+    const result = await store.archiveSessionById("s-1");
+    expect(result).toBe(true);
+    expect(store.sessions.value.length).toBe(0);
+    expect(pushSpy).toHaveBeenCalledWith("/dashboard");
+  });
 });

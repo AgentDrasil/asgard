@@ -2,6 +2,7 @@ import type { Ref } from "vue";
 import type { RouteLocationNormalizedLoaded, Router } from "vue-router";
 import type { AgentInfo } from "../types";
 import { deleteSessionFromLocal } from "../lib/api";
+import { useToast } from "./useToast";
 
 export function useSessions(
   route: RouteLocationNormalizedLoaded,
@@ -11,7 +12,10 @@ export function useSessions(
   selectedDir: Ref<string>,
   activeSessionId: Ref<string | null>,
   loadSessions: () => Promise<void>,
+  archiveSessionById?: (id: string) => Promise<boolean>,
 ) {
+  const toast = useToast();
+
   const handleSelectSession = (id: string, onSelect?: () => void) => {
     if (route.params.id !== id) {
       router.push(`/chat/${id}`);
@@ -43,9 +47,31 @@ export function useSessions(
     }
   };
 
+  const handleArchiveSession = async (id: string) => {
+    if (!id) return false;
+    try {
+      if (archiveSessionById) {
+        const success = await archiveSessionById(id);
+        if (success) {
+          toast.success("会话已成功归档");
+          return true;
+        } else {
+          toast.error("归档会话失败，请重试");
+          return false;
+        }
+      }
+      return false;
+    } catch (err: any) {
+      console.error("handleArchiveSession error:", err);
+      toast.error(err?.message || "归档操作异常");
+      return false;
+    }
+  };
+
   return {
     handleSelectSession,
     handleNewChat,
     handleDeleteSession,
+    handleArchiveSession,
   };
 }

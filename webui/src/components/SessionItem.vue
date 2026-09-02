@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "select-session", id: string): void;
   (e: "delete-session", id: string): void;
+  (e: "archive-session", id: string): void;
 }>();
 
 const swipeOffset = ref(0);
@@ -95,6 +96,10 @@ const handleDelete = () => {
   isOpenSwipe.value = false;
   emit("delete-session", props.session.chatID);
 };
+
+const handleArchive = () => {
+  emit("archive-session", props.session.chatID);
+};
 </script>
 
 <template>
@@ -137,17 +142,33 @@ const handleDelete = () => {
         session.title || "Untitled Chat"
       }}</span>
 
-      <!-- Desktop Mouse Hover Delete Button (Only on devices with cursor/mouse precision) -->
-      <button
-        @click.stop="handleDelete"
-        :class="[
-          'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 shrink-0 hidden [@media(pointer:fine)]:flex items-center justify-center',
-          isActive ? 'text-primary-content hover:bg-white/20' : 'text-error hover:bg-error/10',
-        ]"
-        title="Delete session"
-      >
-        <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
-      </button>
+      <div class="flex items-center gap-1 shrink-0">
+        <!-- Desktop Mouse Hover Archive Button -->
+        <button
+          @click.stop="handleArchive"
+          :class="[
+            'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 hidden [@media(pointer:fine)]:flex items-center justify-center',
+            isActive
+              ? 'text-primary-content hover:bg-white/20'
+              : 'text-base-content/70 hover:text-base-content hover:bg-base-100',
+          ]"
+          title="Archive session"
+        >
+          <Icon icon="mynaui:archive" class="h-4 w-4 fill-current" />
+        </button>
+
+        <!-- Desktop Mouse Hover Delete Button (Only on devices with cursor/mouse precision) -->
+        <button
+          @click.stop="handleDelete"
+          :class="[
+            'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 hidden [@media(pointer:fine)]:flex items-center justify-center',
+            isActive ? 'text-primary-content hover:bg-white/20' : 'text-error hover:bg-error/10',
+          ]"
+          title="Delete session"
+        >
+          <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
+        </button>
+      </div>
     </div>
   </div>
 </template>

@@ -27,17 +27,27 @@ const emit = defineEmits<{
   (e: "select-session", id: string): void;
   (e: "new-chat", agentId?: string, runDir?: string): void;
   (e: "delete-session", id: string): void;
+  (e: "archive-session", id: string): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-terminal"): void;
   (e: "open-quota"): void;
   (e: "open-session-search"): void;
 }>();
 
+const navigateToDashboard = () => {
+  if (typeof window !== "undefined" && window.innerWidth < 768 && props.isOpen) {
+    emit("toggle-sidebar");
+  }
+  router.push("/dashboard");
+};
+
 const viewMode = ref<"list" | "agent">("list");
 
 const toggleViewMode = (mode: "list" | "agent") => {
   viewMode.value = mode;
-  localStorage.setItem("asgard_sidebar_view_mode", mode);
+  if (typeof localStorage !== "undefined" && localStorage) {
+    localStorage.setItem("asgard_sidebar_view_mode", mode);
+  }
 };
 
 // Resizable sidebar width logic
@@ -66,7 +76,9 @@ const handleMouseMove = (e: MouseEvent) => {
 const stopResize = () => {
   if (isResizing.value) {
     isResizing.value = false;
-    localStorage.setItem("asgard_sidebar_width", sidebarWidth.value.toString());
+    if (typeof localStorage !== "undefined" && localStorage) {
+      localStorage.setItem("asgard_sidebar_width", sidebarWidth.value.toString());
+    }
     document.removeEventListener("mousemove", handleMouseMove);
     document.removeEventListener("mouseup", stopResize);
     document.body.style.userSelect = "";
@@ -79,16 +91,18 @@ const navigateToSettings = () => {
 };
 
 onMounted(() => {
-  const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
-  if (savedViewMode === "list" || savedViewMode === "agent") {
-    viewMode.value = savedViewMode;
-  }
+  if (typeof localStorage !== "undefined" && localStorage) {
+    const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
+    if (savedViewMode === "list" || savedViewMode === "agent") {
+      viewMode.value = savedViewMode;
+    }
 
-  const savedWidth = localStorage.getItem("asgard_sidebar_width");
-  if (savedWidth) {
-    const parsed = parseInt(savedWidth, 10);
-    if (!isNaN(parsed) && parsed >= MIN_WIDTH && parsed <= MAX_WIDTH) {
-      sidebarWidth.value = parsed;
+    const savedWidth = localStorage.getItem("asgard_sidebar_width");
+    if (savedWidth) {
+      const parsed = parseInt(savedWidth, 10);
+      if (!isNaN(parsed) && parsed >= MIN_WIDTH && parsed <= MAX_WIDTH) {
+        sidebarWidth.value = parsed;
+      }
     }
   }
 });
@@ -158,6 +172,21 @@ onUnmounted(() => {
       </button>
 
       <button
+        @click="navigateToDashboard"
+        :class="[
+          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
+          route.path === '/dashboard'
+            ? 'bg-primary/10 text-primary font-semibold'
+            : 'text-base-content/85 hover:bg-base-200',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        :title="isOpen ? undefined : 'Dashboard'"
+      >
+        <Icon icon="mynaui:kanban" class="h-5 w-5 fill-current shrink-0" />
+        <span v-if="isOpen">Dashboard</span>
+      </button>
+
+      <button
         @click="emit('open-session-search')"
         :class="[
           'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
@@ -212,6 +241,7 @@ onUnmounted(() => {
           :view-mode="viewMode"
           @select-session="emit('select-session', $event)"
           @delete-session="emit('delete-session', $event)"
+          @archive-session="emit('archive-session', $event)"
           @new-chat="(agentId, dir) => emit('new-chat', agentId, dir)"
         />
       </template>

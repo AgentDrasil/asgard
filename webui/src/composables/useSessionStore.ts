@@ -4,6 +4,7 @@ import type { ChatSession, AgentInfo, ChatMessage, SessionEvent, Attachment } fr
 import {
   getSession,
   getSessions,
+  archiveSession,
   createSession,
   triggerAgentMessage,
   uploadAttachment,
@@ -464,6 +465,21 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     { immediate: true },
   );
 
+  const archiveSessionById = async (id: string): Promise<boolean> => {
+    const success = await archiveSession(id);
+    if (success) {
+      sessions.value = sessions.value.filter((s) => s.chatID !== id);
+      if (activeSessionId.value === id) {
+        if (router) {
+          await router.push("/dashboard");
+        } else {
+          closeSession();
+        }
+      }
+    }
+    return success;
+  };
+
   return {
     sessions,
     activeSessionId,
@@ -479,6 +495,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     openSession,
     closeSession,
     loadSessions,
+    archiveSessionById,
     updateMessageReply,
     sendMessage,
   };

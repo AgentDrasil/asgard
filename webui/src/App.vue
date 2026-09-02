@@ -207,20 +207,23 @@ const {
   openSession,
   closeSession,
   loadSessions,
+  archiveSessionById,
   sendMessage,
   updateMessageReply,
 } = store;
 
 // 3. Sessions Navigation & Operations
-const { handleSelectSession, handleNewChat, handleDeleteSession } = useSessions(
-  route,
-  router,
-  agents,
-  selectedAgentId,
-  selectedDir,
-  activeSessionId,
-  loadSessions,
-);
+const { handleSelectSession, handleNewChat, handleDeleteSession, handleArchiveSession } =
+  useSessions(
+    route,
+    router,
+    agents,
+    selectedAgentId,
+    selectedDir,
+    activeSessionId,
+    loadSessions,
+    archiveSessionById,
+  );
 
 // Keep the VCS git root in sync with the effective workspace directory so the
 // VCS entry point is available on direct loads (e.g. refresh while in file view).
@@ -386,6 +389,12 @@ const reloadApp = async () => {
 
 const commandList = computed<CommandItem[]>(() => [
   {
+    id: "open-dashboard",
+    title: "Open Dashboard",
+    icon: "mynaui:kanban",
+    action: () => router.push("/dashboard"),
+  },
+  {
     id: "open-settings",
     title: "Open Settings",
     icon: "mynaui:cog",
@@ -538,6 +547,7 @@ const commandList = computed<CommandItem[]>(() => [
       @select-session="(id) => handleSelectSession(id, closeSidebarOnMobile)"
       @new-chat="(agentId, runDir) => handleNewChat(closeSidebarOnMobile, agentId, runDir)"
       @delete-session="handleDeleteSession"
+      @archive-session="handleArchiveSession"
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="() => toggleTerminal('sidebar')"
       @open-quota="isQuotaModalOpen = true"
@@ -574,6 +584,7 @@ const commandList = computed<CommandItem[]>(() => [
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
+          @archive-session="handleArchiveSession"
           @open-diff="
             (gitRoot: string) => {
               currentGitRoot = gitRoot;

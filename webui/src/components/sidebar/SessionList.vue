@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "select-session", id: string): void;
   (e: "delete-session", id: string): void;
+  (e: "archive-session", id: string): void;
   (e: "new-chat", agentId?: string, runDir?: string): void;
 }>();
 
@@ -102,6 +103,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
         :is-active="activeSessionId === session.chatID"
         @select-session="emit('select-session', $event)"
         @delete-session="emit('delete-session', $event)"
+        @archive-session="emit('archive-session', $event)"
       />
     </div>
   </template>
@@ -187,6 +189,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
                 :is-active="activeSessionId === session.chatID"
                 @select-session="emit('select-session', $event)"
                 @delete-session="emit('delete-session', $event)"
+                @archive-session="emit('archive-session', $event)"
               />
             </div>
           </template>
