@@ -30,15 +30,6 @@ type AskUserResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-type AgentStatusUpdate struct {
-	ChatID    string         `json:"chat_id"`
-	StepIndex int            `json:"step_index"`
-	Source    string         `json:"source"`
-	EntryType string         `json:"entry_type"`
-	Content   string         `json:"content"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-}
-
 const askUserUsage = `Usage: ask-user <question>
 
 Send a question to the human user and block until they reply.
@@ -114,15 +105,14 @@ func main() {
 	}
 
 	askUserURL := internalHost + "/api/ask-user"
-	statusURL := internalHost + "/agent-status"
 
-	msgID := fmt.Sprintf("ask-%s", uuid.NewV7().String())
-	sendAgentStatus(statusURL, chatID, msgID, questionText, agentID, agentName)
-
-	// Send AskUser request and long-poll host until user replies
+	// Send AskUser request and long-poll host until user replies.
+	// The /api/ask-user handler is the single authoritative writer of the
+	// ask_user chat message; posting the question to /agent-status as well
+	// would duplicate it in the transcript (two dialogs in the webui).
 	reqBody, err := json.Marshal(AskUserRequest{
 		ChatID:    chatID,
-		MessageID: msgID,
+		MessageID: fmt.Sprintf("ask-%s", uuid.NewV7().String()),
 		Question:  questionText,
 		AgentID:   agentID,
 		AgentName: agentName,
@@ -167,28 +157,4 @@ func main() {
 	log.Info().Str("reply", askResp.Reply).Msg("ask-user: user reply received, continuing execution")
 	fmt.Print(askResp.Reply)
 	fmt.Println()
-}
-
-func sendAgentStatus(statusURL string, chatID string, msgID string, questionText string, agentID string, agentName string) {
-	update := AgentStatusUpdate{
-		ChatID:    chatID,
-		StepIndex: 0,
-		Source:    "ask-user",
-		EntryType: "ask_user",
-		Content:   questionText,
-		Metadata: map[string]any{
-			"message_id": msgID,
-			"agent_id":   agentID,
-			"agent_name": agentName,
-		},
-	}
-	data, err := json.Marshal(update)
-	if err != nil {
-		return
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(statusURL, "application/json", bytes.NewBuffer(data))
-	if err == nil {
-		_ = resp.Body.Close()
-	}
 }
