@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/plugins/notebook
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0

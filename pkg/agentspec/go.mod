@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/pkg/agentspec
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0

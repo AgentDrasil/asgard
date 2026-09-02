@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/call-peer
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0

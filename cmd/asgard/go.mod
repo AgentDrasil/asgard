@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/asgard
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/backend v0.0.0
