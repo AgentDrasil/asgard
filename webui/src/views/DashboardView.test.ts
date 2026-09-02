@@ -4,7 +4,7 @@ import { createApp, h, nextTick } from "vue";
 import DashboardView from "./DashboardView.vue";
 import * as api from "../lib/api";
 import { i18n, setLocale } from "../i18n";
-import type { ChatSession } from "../types";
+import type { ChatSession, AgentInfo } from "../types";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -23,6 +23,17 @@ vi.mock("vue-router", () => ({
   }),
 }));
 
+// Mock useToast
+const mockToastError = vi.fn<() => string>();
+vi.mock("../composables/useToast", () => ({
+  useToast: () => ({
+    error: mockToastError,
+    success: vi.fn<() => string>(),
+    info: vi.fn<() => string>(),
+    warning: vi.fn<() => string>(),
+  }),
+}));
+
 describe("DashboardView.vue", () => {
   let root: HTMLElement;
 
@@ -32,7 +43,7 @@ describe("DashboardView.vue", () => {
       chatID: "sess-running-1",
       title: "Running Task 1",
       currentAgent: "coder",
-      runDir: "/workspace/proj",
+      runDir: "/home/user/workspace/proj",
       isRunning: true,
       isWaitingForUser: false,
       isArchived: false,
@@ -42,7 +53,7 @@ describe("DashboardView.vue", () => {
       chatID: "sess-waiting-1",
       title: "Waiting For Feedback",
       currentAgent: "architect",
-      runDir: "/workspace/proj",
+      runDir: "/home/user/workspace/proj",
       isRunning: false,
       isWaitingForUser: true,
       isArchived: false,
@@ -52,7 +63,7 @@ describe("DashboardView.vue", () => {
       chatID: "sess-recent-1",
       title: "Recently Done Task",
       currentAgent: "tester",
-      runDir: "/workspace/proj",
+      runDir: "/home/user/workspace/proj",
       isRunning: false,
       isWaitingForUser: false,
       isArchived: false,
@@ -62,7 +73,7 @@ describe("DashboardView.vue", () => {
       chatID: "sess-old-1",
       title: "Old Completed Task",
       currentAgent: "coder",
-      runDir: "/workspace/proj",
+      runDir: "/home/user/workspace/proj",
       isRunning: false,
       isWaitingForUser: false,
       isArchived: false,
@@ -75,11 +86,35 @@ describe("DashboardView.vue", () => {
       chatID: "sess-archived-1",
       title: "Archived Project Alpha",
       currentAgent: "coder",
-      runDir: "/workspace/old",
+      runDir: "/home/user/workspace/old",
       isRunning: false,
       isWaitingForUser: false,
       isArchived: true,
       updatedAt: new Date(now - 24 * 3600 * 1000).toISOString(),
+    },
+  ];
+
+  const mockAgents: AgentInfo[] = [
+    {
+      id: "coder",
+      name: "coder",
+      description: "Coder Agent",
+      icon: "fluent-color:code-24",
+      run_dirs: ["/home/user/workspace/proj"],
+    },
+    {
+      id: "architect",
+      name: "architect",
+      description: "Architect Agent",
+      icon: "fluent-color:building-24",
+      run_dirs: ["/home/user/workspace/proj"],
+    },
+    {
+      id: "tester",
+      name: "tester",
+      description: "Tester Agent",
+      icon: "fluent-color:beaker-24",
+      run_dirs: ["/home/user/workspace/proj"],
     },
   ];
 
@@ -95,6 +130,7 @@ describe("DashboardView.vue", () => {
       return [...mockActiveSessions];
     });
 
+    vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
     vi.spyOn(api, "archiveSession").mockResolvedValue(true);
   });
 
@@ -110,7 +146,7 @@ describe("DashboardView.vue", () => {
     await nextTick();
   };
 
-  it("renders 3-column kanban board and classifies sessions correctly", async () => {
+  it("renders 3-column kanban board and classifies all unarchived completed sessions correctly", async () => {
     const app = createApp({
       render() {
         return h(DashboardView);
@@ -130,13 +166,21 @@ describe("DashboardView.vue", () => {
     expect(waitingCards.length).toBe(1);
     expect(waitingCards[0].textContent).toContain("Waiting For Feedback");
 
-    // 3. Recently Completed column (< 3h)
+    // 3. Completed column (includes both recent and >3h old unarchived sessions)
     const completedCards = root.querySelectorAll('[data-test="session-card-completed"]');
-    expect(completedCards.length).toBe(1);
+    expect(completedCards.length).toBe(2);
     expect(completedCards[0].textContent).toContain("Recently Done Task");
+    expect(completedCards[1].textContent).toContain("Old Completed Task");
 
-    // Old completed task (> 3h) should not appear in any column
-    expect(root.textContent).not.toContain("Old Completed Task");
+    // Old completed task should appear in completed column
+    expect(root.textContent).toContain("Old Completed Task");
+
+    // Check path formatting (~/workspace/proj)
+    expect(completedCards[0].textContent).toContain("~/workspace/proj");
+
+    // Check dynamic agent icon rendering
+    const coderIcon = runningCards[0].querySelector('[data-icon="fluent-color:code-24"]');
+    expect(coderIcon).not.toBeNull();
 
     app.unmount();
   });
@@ -285,5 +329,69 @@ describe("DashboardView.vue", () => {
     expect(root.textContent).toContain("查看归档");
 
     app.unmount();
+  });
+
+  describe("Automatic 5s Polling", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      mockToastError.mockClear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("polls active sessions every 5 seconds and does not toast on poll error", async () => {
+      const getSessionsSpy = vi
+        .spyOn(api, "getSessions")
+        .mockImplementation(async (archived = false) => {
+          if (archived) return [...mockArchivedSessions];
+          return [...mockActiveSessions];
+        });
+      vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
+
+      const app = createApp({
+        render() {
+          return h(DashboardView);
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      // Flush initial fetch
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getSessionsSpy).toHaveBeenCalledWith(false);
+      expect(getSessionsSpy).toHaveBeenCalledWith(true);
+      mockToastError.mockClear();
+      getSessionsSpy.mockClear();
+
+      // Advance by 5000ms
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(getSessionsSpy).toHaveBeenCalledTimes(1);
+      expect(getSessionsSpy).toHaveBeenCalledWith(false);
+      expect(mockToastError).not.toHaveBeenCalled();
+
+      // Real failure path: getSessions swallows error and resolves []
+      getSessionsSpy.mockResolvedValueOnce([]);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(getSessionsSpy).toHaveBeenCalledTimes(2);
+      expect(mockToastError).not.toHaveBeenCalled();
+      // Ensure the board was not blanked out and still contains completed sessions
+      expect(root.textContent).toContain("Old Completed Task");
+      expect(root.textContent).toContain("Recently Done Task");
+
+      // Defensive path: When polling throws/rejects, it should catch silently without error toast
+      getSessionsSpy.mockRejectedValueOnce(new Error("Network error"));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(getSessionsSpy).toHaveBeenCalledTimes(3);
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(root.textContent).toContain("Old Completed Task");
+
+      // Clean unmount stops interval
+      app.unmount();
+      getSessionsSpy.mockClear();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(getSessionsSpy).not.toHaveBeenCalled();
+    });
   });
 });

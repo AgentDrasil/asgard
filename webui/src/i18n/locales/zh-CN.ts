@@ -417,7 +417,7 @@ export const zhCN: MessageSchema = {
     metrics: {
       running: "运行中: {count}",
       waiting: "等待处理: {count}",
-      recentCompleted: "近期完成 (< 3h): {count}",
+      recentCompleted: "已完成: {count}",
       archived: "已归档: {count}",
     },
     tabs: {
@@ -434,7 +434,7 @@ export const zhCN: MessageSchema = {
     columns: {
       running: "运行中",
       waiting: "等待用户回复",
-      completed: "近期完成 / 空闲 (< 3h)",
+      completed: "已完成 / 闲置",
     },
     cards: {
       runningBadge: "运行中",
@@ -451,7 +451,7 @@ export const zhCN: MessageSchema = {
     empty: {
       running: "暂无运行中的任务",
       waiting: "暂无等待回复的提问",
-      completed: "最近 3 小时内暂无已完成的会话",
+      completed: "暂无已完成或闲置的会话",
       archivedTitle: "暂无已归档会话",
       archivedDesc: "在看板视图中点击卡片上的归档按钮，可将会话移入此列表中",
     },

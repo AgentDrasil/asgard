@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
-import { getSessions, archiveSession } from "../lib/api";
+import { getSessions, archiveSession, getAgents } from "../lib/api";
 import { formatTimestamp } from "../lib/format";
 import { formatRelativeTime } from "../i18n/timeUtils";
-import type { ChatSession } from "../types";
+import { getAgentIcon, formatPath } from "../utils/agentUtils";
+import type { ChatSession, AgentInfo } from "../types";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -15,19 +16,26 @@ const toast = useToast();
 
 const activeSessions = ref<ChatSession[]>([]);
 const archivedSessions = ref<ChatSession[]>([]);
+const agents = ref<AgentInfo[]>([]);
 const isLoading = ref(false);
+const isPolling = ref(false);
 const isArchiving = ref<Record<string, boolean>>({});
 const searchQuery = ref("");
 const viewMode = ref<"kanban" | "archived">("kanban");
 
-const THREE_HOURS_MS = 3 * 3600 * 1000;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 const fetchAllSessions = async () => {
   isLoading.value = true;
   try {
-    const [active, archived] = await Promise.all([getSessions(false), getSessions(true)]);
+    const [active, archived, agentList] = await Promise.all([
+      getSessions(false),
+      getSessions(true),
+      getAgents(),
+    ]);
     activeSessions.value = active;
     archivedSessions.value = archived;
+    agents.value = agentList;
   } catch (err) {
     console.error("Failed to load sessions for dashboard:", err);
     toast.error(t("dashboard.loadFailed"));
@@ -36,8 +44,36 @@ const fetchAllSessions = async () => {
   }
 };
 
+const pollSessions = async () => {
+  if (isPolling.value) return;
+  isPolling.value = true;
+  try {
+    const active = await getSessions(false);
+    // getSessions swallows errors and returns []; skip the update so a
+    // transient failure cannot blank the board (archive flow already
+    // updates activeSessions optimistically, manual refresh does a full fetch).
+    if (active.length > 0) {
+      activeSessions.value = active;
+    }
+  } catch (err) {
+    console.error("Failed to poll active sessions for dashboard:", err);
+  } finally {
+    isPolling.value = false;
+  }
+};
+
 onMounted(() => {
   void fetchAllSessions();
+  pollInterval = setInterval(() => {
+    void pollSessions();
+  }, 5000);
+});
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
 });
 
 const filterSession = (session: ChatSession, query: string): boolean => {
@@ -64,13 +100,11 @@ const waitingSessions = computed(() => {
   );
 });
 
-const recentCompletedSessions = computed(() => {
-  const now = Date.now();
-  return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
-    const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
-    return now - time < THREE_HOURS_MS && filterSession(s, searchQuery.value);
-  });
+const completedSessions = computed(() => {
+  return activeSessions.value.filter(
+    (s) =>
+      !s.isArchived && !s.isRunning && !s.isWaitingForUser && filterSession(s, searchQuery.value),
+  );
 });
 
 const filteredArchivedSessions = computed(() => {
@@ -87,13 +121,9 @@ const totalWaitingCount = computed(() => {
   return activeSessions.value.filter((s) => !s.isArchived && s.isWaitingForUser).length;
 });
 
-const totalRecentCompletedCount = computed(() => {
-  const now = Date.now();
-  return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
-    const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
-    return now - time < THREE_HOURS_MS;
-  }).length;
+const totalCompletedCount = computed(() => {
+  return activeSessions.value.filter((s) => !s.isArchived && !s.isRunning && !s.isWaitingForUser)
+    .length;
 });
 
 const totalArchivedCount = computed(() => {
@@ -185,7 +215,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
             <span class="w-2 h-2 rounded-full bg-success"></span>
             <span>
               <strong>{{
-                t("dashboard.metrics.recentCompleted", { count: totalRecentCompletedCount })
+                t("dashboard.metrics.recentCompleted", { count: totalCompletedCount })
               }}</strong>
             </span>
           </div>
@@ -337,7 +367,10 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                 <span
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
-                  <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-primary" />
+                  <Icon
+                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    class="w-3.5 h-3.5 text-primary"
+                  />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
@@ -346,7 +379,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   :title="session.runDir"
                 >
                   <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ session.runDir }}
+                  {{ formatPath(session.runDir) }}
                 </span>
               </div>
 
@@ -432,7 +465,10 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                 <span
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
-                  <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-warning" />
+                  <Icon
+                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    class="w-3.5 h-3.5 text-warning"
+                  />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
@@ -441,7 +477,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   :title="session.runDir"
                 >
                   <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ session.runDir }}
+                  {{ formatPath(session.runDir) }}
                 </span>
               </div>
 
@@ -471,7 +507,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
           </div>
         </div>
 
-        <!-- Column 3: Recently Completed / Idle (< 3h) -->
+        <!-- Column 3: Completed / Idle -->
         <div
           class="flex flex-col rounded-xl bg-base-200/50 border border-base-300 p-4 min-h-[500px]"
           data-test="column-completed"
@@ -484,14 +520,14 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
               </h2>
             </div>
             <span class="badge badge-sm badge-success font-mono">{{
-              recentCompletedSessions.length
+              completedSessions.length
             }}</span>
           </div>
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
             <div
-              v-for="session in recentCompletedSessions"
+              v-for="session in completedSessions"
               :key="session.chatID"
               class="card bg-base-100 hover:border-success/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
               @click="handleNavigate(session.chatID)"
@@ -529,7 +565,10 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                 <span
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
-                  <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-success" />
+                  <Icon
+                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    class="w-3.5 h-3.5 text-success"
+                  />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
                 </span>
                 <span
@@ -538,7 +577,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   :title="session.runDir"
                 >
                   <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ session.runDir }}
+                  {{ formatPath(session.runDir) }}
                 </span>
               </div>
 
@@ -558,7 +597,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
 
             <!-- Empty State -->
             <div
-              v-if="recentCompletedSessions.length === 0"
+              v-if="completedSessions.length === 0"
               class="flex-1 flex flex-col items-center justify-center p-6 text-center text-base-content/40 border border-dashed border-base-300 rounded-lg"
               data-test="empty-completed"
             >
@@ -613,7 +652,10 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
               <span
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-100 font-mono"
               >
-                <Icon icon="lucide:bot" class="w-3.5 h-3.5 text-base-content/70" />
+                <Icon
+                  :icon="getAgentIcon(session.currentAgent, agents)"
+                  class="w-3.5 h-3.5 text-base-content/70"
+                />
                 {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
               </span>
               <span
@@ -622,7 +664,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                 :title="session.runDir"
               >
                 <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                {{ session.runDir }}
+                {{ formatPath(session.runDir) }}
               </span>
             </div>
 
