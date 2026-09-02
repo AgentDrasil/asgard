@@ -305,7 +305,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
         <div class="flex items-center gap-2 flex-1 sm:max-w-md">
           <div class="relative flex-1">
             <Icon
-              icon="lucide:search"
+              icon="octicon:search-24"
               class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
             />
             <input

@@ -160,20 +160,8 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- New Chat Button (above view mode switch) -->
+    <!-- Action buttons (Dashboard when collapsed, New Chat, Search) -->
     <div :class="['px-2 pt-1 pb-1 w-full flex flex-col items-center']">
-      <button
-        @click="emit('new-chat')"
-        :class="[
-          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
-          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
-        ]"
-        :title="t('sidebar.newChat')"
-      >
-        <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
-        <span v-if="isOpen">{{ t("sidebar.newChat") }}</span>
-      </button>
-
       <button
         v-if="!isOpen"
         @click="navigateToDashboard"
@@ -186,6 +174,18 @@ onUnmounted(() => {
         :title="t('sidebar.dashboard')"
       >
         <Icon icon="mynaui:kanban" class="h-5 w-5 fill-current shrink-0" />
+      </button>
+
+      <button
+        @click="emit('new-chat')"
+        :class="[
+          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        :title="t('sidebar.newChat')"
+      >
+        <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
+        <span v-if="isOpen">{{ t("sidebar.newChat") }}</span>
       </button>
 
       <button
