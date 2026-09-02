@@ -165,9 +165,14 @@ func TestSessionHandler(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, runningSession.IsRunning)
 
-	// 4. Test limit 20 and ordering by update time
-	// Delete chat-1 first so we start clean
+	// 4. Test default limit (returns all 22 sessions) and ordering by update time
+	// Delete chat-1 and createdSession first so we start clean
 	req = httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id=chat-1", nil)
+	rr = httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id="+createdSession.ChatID, nil)
 	rr = httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -183,7 +188,7 @@ func TestSessionHandler(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// GET /api/sessions should return 20 sessions
+	// GET /api/sessions should return all 22 sessions (default limit is 500)
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	rr = httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
@@ -191,11 +196,11 @@ func TestSessionHandler(t *testing.T) {
 
 	err = json.Unmarshal(rr.Body.Bytes(), &sessions)
 	require.NoError(t, err)
-	assert.Len(t, sessions, 20)
+	assert.Len(t, sessions, 22)
 
 	// The first session in the list should be the last one inserted (chat-22)
 	assert.Equal(t, "chat-22", sessions[0].ChatID)
-	assert.Equal(t, "chat-3", sessions[19].ChatID) // chat-1 and chat-2 are pushed out of the top 20
+	assert.Equal(t, "chat-1", sessions[21].ChatID)
 }
 
 func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
@@ -520,4 +525,85 @@ func TestSessionHandler_ArchiveSession(t *testing.T) {
 	assert.True(t, archivedList[0].IsWaitingForUser)
 	require.NotNil(t, archivedList[0].CreatedAt)
 	require.NotNil(t, archivedList[0].UpdatedAt)
+}
+
+func TestSessionHandler_GetSessionsLimit(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	conf := &config.Config{Host: "http://localhost:8080"}
+	server := &Server{conf: conf, repo: repo}
+	server.mux = server.buildMuxLocked()
+
+	now := time.Now()
+	for i := 1; i <= 25; i++ {
+		require.NoError(t, repo.SaveSession(&dbmodels.Session{
+			ChatID:     fmt.Sprintf("limit-chat-%02d", i),
+			Title:      fmt.Sprintf("Limit Chat %02d", i),
+			IsArchived: false,
+			UpdatedAt:  now.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	tests := []struct {
+		name          string
+		queryURL      string
+		expectedCount int
+		firstChatID   string
+		lastChatID    string
+	}{
+		{
+			name:          "Default limit returns all 25",
+			queryURL:      "/api/sessions",
+			expectedCount: 25,
+			firstChatID:   "limit-chat-25",
+			lastChatID:    "limit-chat-01",
+		},
+		{
+			name:          "Custom limit=5 returns 5 newest sessions",
+			queryURL:      "/api/sessions?limit=5",
+			expectedCount: 5,
+			firstChatID:   "limit-chat-25",
+			lastChatID:    "limit-chat-21",
+		},
+		{
+			name:          "Invalid limit string falls back to default 500",
+			queryURL:      "/api/sessions?limit=invalid",
+			expectedCount: 25,
+			firstChatID:   "limit-chat-25",
+			lastChatID:    "limit-chat-01",
+		},
+		{
+			name:          "Negative limit falls back to default 500",
+			queryURL:      "/api/sessions?limit=-10",
+			expectedCount: 25,
+			firstChatID:   "limit-chat-25",
+			lastChatID:    "limit-chat-01",
+		},
+		{
+			name:          "Large limit clamped to 1000",
+			queryURL:      "/api/sessions?limit=5000",
+			expectedCount: 25,
+			firstChatID:   "limit-chat-25",
+			lastChatID:    "limit-chat-01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.queryURL, nil)
+			rr := httptest.NewRecorder()
+			server.ServeHTTP(rr, req)
+			assert.Equal(t, http.StatusOK, rr.Code)
+
+			var sessions []ChatSession
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &sessions))
+			assert.Len(t, sessions, tt.expectedCount)
+			if tt.expectedCount > 0 {
+				assert.Equal(t, tt.firstChatID, sessions[0].ChatID)
+				assert.Equal(t, tt.lastChatID, sessions[len(sessions)-1].ChatID)
+			}
+		})
+	}
 }

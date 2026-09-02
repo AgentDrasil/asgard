@@ -188,16 +188,23 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
-// GetSessions retrieves sessions, filtering by archived status.
+// GetSessions retrieves sessions, filtering by archived status and applying an optional limit.
 // By default (or when includeArchived is false), only active (unarchived) sessions are returned.
 // When includeArchived is true, only archived sessions are returned.
-func (r *SessionRepository) GetSessions(includeArchived ...bool) ([]Session, error) {
-	archived := len(includeArchived) > 0 && includeArchived[0]
+// limit specifies the maximum number of sessions to return (default 500, max 1000).
+func (r *SessionRepository) GetSessions(includeArchived bool, limit ...int) ([]Session, error) {
+	queryLimit := 500
+	if len(limit) > 0 && limit[0] > 0 {
+		queryLimit = limit[0]
+	}
+	if queryLimit > 1000 {
+		queryLimit = 1000
+	}
 
 	var sessions []Session
-	err := r.db.Where("COALESCE(is_archived, false) = ?", archived).
+	err := r.db.Where("COALESCE(is_archived, false) = ?", includeArchived).
 		Order("updated_at desc").
-		Limit(20).
+		Limit(queryLimit).
 		Find(&sessions).Error
 	return sessions, err
 }

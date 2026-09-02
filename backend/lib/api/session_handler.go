@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -152,12 +153,22 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	archived := r.URL.Query().Get("archived") == "true"
 
+	limit := 500
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
 	var dbSessions []dbmodels.Session
 	var err error
 	if q != "" {
-		dbSessions, err = s.repo.SearchSessions(q, 20)
+		dbSessions, err = s.repo.SearchSessions(q, limit)
 	} else {
-		dbSessions, err = s.repo.GetSessions(archived)
+		dbSessions, err = s.repo.GetSessions(archived, limit)
 	}
 
 	if err != nil {

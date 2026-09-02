@@ -199,15 +199,20 @@ export async function getSession(chatID: string): Promise<ChatSession | null> {
   return null;
 }
 
-export async function getSessions(archived = false): Promise<ChatSession[]> {
+export async function getSessions(archived = false, limit?: number): Promise<ChatSession[]> {
   try {
-    const url = archived ? "/api/sessions?archived=true" : "/api/sessions";
+    const params = new URLSearchParams();
+    if (archived) params.set("archived", "true");
+    if (limit && limit > 0) params.set("limit", limit.toString());
+    const query = params.toString();
+    const url = query ? `/api/sessions?${query}` : "/api/sessions";
     const res = await apiFetch(url);
-    if (res.ok) return await res.json();
+    if (!res.ok) throw new Error("Failed to fetch sessions");
+    return await res.json();
   } catch (err) {
-    console.error("Failed to fetch sessions from backend:", err);
+    console.error("getSessions error:", err);
+    return [];
   }
-  return [];
 }
 
 export async function archiveSession(chatID: string): Promise<boolean> {

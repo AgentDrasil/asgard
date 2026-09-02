@@ -623,6 +623,21 @@ describe("API Library", () => {
       expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
     });
 
+    it("fetches active sessions with limit parameter", async () => {
+      const mockSessions = [
+        { chatID: "sess-1", title: "Active 1", currentAgent: "coder", runDir: "/tmp" },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockSessions,
+      } as Response);
+
+      const res = await getSessions(false, 500);
+      expect(res).toEqual(mockSessions);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions?limit=500", undefined);
+    });
+
     it("fetches archived sessions when archived is true", async () => {
       const mockArchived = [
         {
@@ -644,15 +659,36 @@ describe("API Library", () => {
       expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions?archived=true", undefined);
     });
 
+    it("fetches archived sessions with limit parameter", async () => {
+      const mockArchived = [
+        {
+          chatID: "sess-2",
+          title: "Archived 1",
+          currentAgent: "coder",
+          runDir: "/tmp",
+          isArchived: true,
+        },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockArchived,
+      } as Response);
+
+      const res = await getSessions(true, 500);
+      expect(res).toEqual(mockArchived);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/sessions?archived=true&limit=500",
+        undefined,
+      );
+    });
+
     it("returns empty array on network failure", async () => {
       vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
 
       const res = await getSessions();
       expect(res).toEqual([]);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to fetch sessions from backend:",
-        expect.any(Error),
-      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith("getSessions error:", expect.any(Error));
     });
   });
 

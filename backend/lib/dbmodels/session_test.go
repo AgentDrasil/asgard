@@ -1,6 +1,7 @@
 package dbmodels
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestSessionRepository(t *testing.T) {
 	assert.Nil(t, sessions3)
 
 	// Test GetSessions
-	allSessions, err := repo.GetSessions()
+	allSessions, err := repo.GetSessions(false)
 	assert.NoError(t, err)
 	assert.Len(t, allSessions, 1)
 	assert.Equal(t, chatID, allSessions[0].ChatID)
@@ -455,8 +456,8 @@ func TestSessionRepository_ArchiveAndFilter(t *testing.T) {
 		UpdatedAt:  now.Add(-3 * time.Minute),
 	}))
 
-	// 1. Default GetSessions() should only return the 2 active sessions
-	activeList, err := repo.GetSessions()
+	// 1. Default GetSessions(false) should return the 2 active sessions
+	activeList, err := repo.GetSessions(false)
 	require.NoError(t, err)
 	require.Len(t, activeList, 2)
 	assert.Equal(t, "active-2", activeList[0].ChatID)
@@ -484,8 +485,8 @@ func TestSessionRepository_ArchiveAndFilter(t *testing.T) {
 	require.NotNil(t, sess)
 	assert.True(t, sess.IsArchived)
 
-	// Now GetSessions() should return 1 active, and GetSessions(true) should return 2 archived
-	activeListAfter, err := repo.GetSessions()
+	// Now GetSessions(false) should return 1 active, and GetSessions(true) should return 2 archived
+	activeListAfter, err := repo.GetSessions(false)
 	require.NoError(t, err)
 	require.Len(t, activeListAfter, 1)
 	assert.Equal(t, "active-2", activeListAfter[0].ChatID)
@@ -499,6 +500,43 @@ func TestSessionRepository_ArchiveAndFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, searchResults, 1)
 	assert.Equal(t, "active-2", searchResults[0].ChatID)
+}
+
+func TestSessionRepository_GetSessionsLimit(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+
+	now := time.Now()
+	// Batch insert 25 active sessions
+	for i := 1; i <= 25; i++ {
+		require.NoError(t, repo.SaveSession(&Session{
+			ChatID:     fmt.Sprintf("sess-%02d", i),
+			Title:      fmt.Sprintf("Session %02d", i),
+			IsArchived: false,
+			UpdatedAt:  now.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	// 1. Default GetSessions(false) should return all 25 sessions (breaking the old 20 limit)
+	allSessions, err := repo.GetSessions(false)
+	require.NoError(t, err)
+	assert.Len(t, allSessions, 25)
+	assert.Equal(t, "sess-25", allSessions[0].ChatID)
+
+	// 2. Custom limit GetSessions(false, 10) should accurately return 10 sessions
+	limitedSessions, err := repo.GetSessions(false, 10)
+	require.NoError(t, err)
+	assert.Len(t, limitedSessions, 10)
+	assert.Equal(t, "sess-25", limitedSessions[0].ChatID)
+	assert.Equal(t, "sess-16", limitedSessions[9].ChatID)
+
+	// 3. Limit > 1000 clamped to 1000
+	maxSessions, err := repo.GetSessions(false, 2000)
+	require.NoError(t, err)
+	assert.Len(t, maxSessions, 25)
 }
 
 func TestSession_HasUnrepliedAskUser(t *testing.T) {
