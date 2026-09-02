@@ -51,7 +51,7 @@ describe("Sidebar.vue", () => {
     document.body.removeChild(root);
   });
 
-  it("renders Dashboard button with text when sidebar is open", async () => {
+  it("navigates to /dashboard when Asgard logo is clicked and does not render text dashboard button when open", async () => {
     const app = createApp({
       render() {
         return h(Sidebar, {
@@ -65,14 +65,18 @@ describe("Sidebar.vue", () => {
     app.mount(root);
     await nextTick();
 
-    const buttons = Array.from(root.querySelectorAll("button"));
-    const dashboardBtn = buttons.find((btn) => btn.textContent?.includes("Dashboard"));
-    expect(dashboardBtn).toBeDefined();
-    expect(dashboardBtn?.textContent).toContain("Dashboard");
+    const logo = root.querySelector("h1");
+    expect(logo).not.toBeNull();
+    expect(logo?.textContent?.trim()).toBe("Asgard");
+    expect(logo?.getAttribute("title")).toBe("Dashboard");
 
-    dashboardBtn?.click();
+    logo?.click();
     await nextTick();
     expect(mockPush).toHaveBeenCalledWith("/dashboard");
+
+    const buttons = Array.from(root.querySelectorAll("button"));
+    const dashboardBtn = buttons.find((btn) => btn.textContent?.includes("Dashboard"));
+    expect(dashboardBtn).toBeUndefined();
 
     app.unmount();
   });
@@ -103,7 +107,7 @@ describe("Sidebar.vue", () => {
     app.unmount();
   });
 
-  it("highlights Dashboard button when route is /dashboard", async () => {
+  it("highlights collapsed Dashboard button when route is /dashboard", async () => {
     mockCurrentRoute = { path: "/dashboard" };
 
     const app = createApp({
@@ -111,7 +115,7 @@ describe("Sidebar.vue", () => {
         return h(Sidebar, {
           sessions: mockSessions,
           activeSessionId: null,
-          isOpen: true,
+          isOpen: false,
         });
       },
     });
@@ -120,7 +124,7 @@ describe("Sidebar.vue", () => {
     await nextTick();
 
     const buttons = Array.from(root.querySelectorAll("button"));
-    const dashboardBtn = buttons.find((btn) => btn.textContent?.includes("Dashboard"));
+    const dashboardBtn = buttons.find((btn) => btn.getAttribute("title") === "Dashboard");
     expect(dashboardBtn).toBeDefined();
     expect(dashboardBtn?.className).toContain("bg-primary/10");
     expect(dashboardBtn?.className).toContain("text-primary");
@@ -177,8 +181,8 @@ describe("Sidebar.vue", () => {
     const newChatBtn = buttons.find((btn) => btn.textContent?.includes("新建会话"));
     expect(newChatBtn).toBeDefined();
 
-    const dashboardBtn = buttons.find((btn) => btn.textContent?.includes("看板"));
-    expect(dashboardBtn).toBeDefined();
+    const logo = root.querySelector("h1");
+    expect(logo?.getAttribute("title")).toBe("看板");
 
     app.unmount();
   });

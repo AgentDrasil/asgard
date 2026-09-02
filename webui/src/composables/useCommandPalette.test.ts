@@ -117,8 +117,9 @@ describe("useCommandPalette", () => {
     expect(selectedIndex.value).toBe(0);
   });
 
-  it("filters and executes core commands (Settings, Logs, Config, Reload, Restart, Search Files)", () => {
+  it("filters and executes core commands (Dashboard, Settings, Logs, Config, Reload, Restart, Search Files)", () => {
     const actions = {
+      openDashboard: vi.fn<() => void>(),
       openSettings: vi.fn<() => void>(),
       openLogs: vi.fn<() => void>(),
       editConfig: vi.fn<() => void>(),
@@ -128,6 +129,7 @@ describe("useCommandPalette", () => {
     };
 
     const coreCommands: CommandItem[] = [
+      { id: "open-dashboard", title: "Open Dashboard", action: actions.openDashboard },
       { id: "open-settings", title: "Open Settings", action: actions.openSettings },
       { id: "open-logs", title: "Open System Logs & Diagnostics", action: actions.openLogs },
       { id: "edit-config", title: "Open Config Editor", action: actions.editConfig },
@@ -137,6 +139,13 @@ describe("useCommandPalette", () => {
     ];
 
     const { query, filteredCommands, selectCurrent } = useCommandPalette(coreCommands);
+
+    // Test Dashboard command
+    query.value = "dashboard";
+    expect(filteredCommands.value).toHaveLength(1);
+    expect(filteredCommands.value[0].id).toBe("open-dashboard");
+    selectCurrent()?.action();
+    expect(actions.openDashboard).toHaveBeenCalledTimes(1);
 
     // Test Settings command
     query.value = "settings";

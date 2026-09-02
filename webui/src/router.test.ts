@@ -8,6 +8,12 @@ import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 
 describe("router configuration", () => {
+  it("redirects root path '/' to '/dashboard'", () => {
+    const rootRoute = routes.find((r) => r.path === "/");
+    expect(rootRoute).toBeDefined();
+    expect(rootRoute?.redirect).toBe("/dashboard");
+  });
+
   it("registers routes for /dashboard, /settings, /settings/keybindings, /settings/config, and /settings/logs with actual components", () => {
     const dashboardRoute = routes.find((r) => r.path === "/dashboard");
     const settingsRoute = routes.find((r) => r.path === "/settings");

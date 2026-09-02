@@ -10,7 +10,7 @@ import LogView from "./views/LogView.vue";
 export const routes: RouteRecordRaw[] = [
   {
     path: "/",
-    redirect: "/newchat",
+    redirect: "/dashboard",
   },
   {
     path: "/newchat",

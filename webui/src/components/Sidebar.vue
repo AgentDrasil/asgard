@@ -143,7 +143,8 @@ onUnmounted(() => {
       <h1
         v-if="isOpen"
         class="text-lg font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent truncate cursor-pointer"
-        @click="router.push('/newchat')"
+        @click="navigateToDashboard"
+        :title="t('sidebar.dashboard')"
       >
         Asgard
       </h1>
@@ -175,18 +176,18 @@ onUnmounted(() => {
       </button>
 
       <button
+        v-if="!isOpen"
         @click="navigateToDashboard"
         :class="[
           'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
           route.path === '/dashboard'
             ? 'bg-primary/10 text-primary font-semibold'
             : 'text-base-content/85 hover:bg-base-200',
-          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+          'w-10 h-10 justify-center p-0',
         ]"
-        :title="isOpen ? undefined : t('sidebar.dashboard')"
+        :title="t('sidebar.dashboard')"
       >
         <Icon icon="mynaui:kanban" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">{{ t("sidebar.dashboard") }}</span>
       </button>
 
       <button
