@@ -5,7 +5,6 @@ import { useI18n } from "vue-i18n";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import SessionList from "./sidebar/SessionList.vue";
-import LanguageSelector from "./sidebar/LanguageSelector.vue";
 import { useShortcuts } from "../composables/useShortcuts";
 
 const { t } = useI18n();
@@ -250,51 +249,48 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- Bottom Actions, Language Selector & Settings Entry -->
-    <div class="p-2 border-t border-base-100 w-full flex flex-col items-center space-y-1">
+    <!-- Bottom Actions & Settings Toolbar -->
+    <div
+      :class="[
+        'p-2 border-t border-base-100 w-full',
+        isOpen ? 'flex items-center justify-around gap-1' : 'flex flex-col items-center space-y-1',
+      ]"
+    >
       <button
         @click="emit('toggle-terminal')"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
-          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+          'flex items-center justify-center rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
+          isOpen ? 'flex-1 py-2 gap-1.5' : 'w-10 h-10 p-0',
         ]"
         :title="t('sidebar.terminalWithShortcut', { shortcut: toggleTerminalShortcut })"
       >
         <Icon icon="mynaui:terminal" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">{{ t("sidebar.terminal") }}</span>
       </button>
 
       <button
         @click="emit('open-quota')"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
-          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+          'flex items-center justify-center rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
+          isOpen ? 'flex-1 py-2 gap-1.5' : 'w-10 h-10 p-0',
         ]"
         :title="t('sidebar.usageAndQuota')"
       >
         <Icon icon="mynaui:chart-bar-one" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">{{ t("sidebar.usageAndQuota") }}</span>
       </button>
 
       <button
         @click="navigateToSettings"
         :class="[
-          'flex items-center gap-3 py-2 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
+          'flex items-center justify-center rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium',
           route.path.startsWith('/settings')
             ? 'bg-primary/10 text-primary font-semibold'
             : 'text-base-content/85 hover:bg-base-200',
-          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+          isOpen ? 'flex-1 py-2 gap-1.5' : 'w-10 h-10 p-0',
         ]"
         :title="t('sidebar.settings')"
       >
         <Icon icon="mynaui:cog" class="h-5 w-5 fill-current shrink-0" />
-        <span v-if="isOpen">{{ t("sidebar.settings") }}</span>
       </button>
-
-      <!-- Language Selector -->
-      <div v-if="isOpen" class="w-full pt-1">
-        <LanguageSelector />
-      </div>
     </div>
   </aside>
 </template>

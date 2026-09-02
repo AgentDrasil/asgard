@@ -441,7 +441,7 @@ export const en = {
     columns: {
       running: "Running",
       waiting: "Waiting for User",
-      completed: "Completed / Idle",
+      completed: "Completed",
     },
     cards: {
       runningBadge: "Running",

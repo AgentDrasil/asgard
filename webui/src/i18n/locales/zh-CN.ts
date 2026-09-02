@@ -434,7 +434,7 @@ export const zhCN: MessageSchema = {
     columns: {
       running: "运行中",
       waiting: "等待用户回复",
-      completed: "已完成 / 闲置",
+      completed: "已完成",
     },
     cards: {
       runningBadge: "运行中",
