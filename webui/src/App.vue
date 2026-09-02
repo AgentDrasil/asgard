@@ -9,7 +9,7 @@ import SessionSearchModal from "./components/SessionSearchModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
-import { getSystemStatus, reloadAgents } from "./lib/api";
+import { getDirInfo, getSystemStatus, reloadAgents } from "./lib/api";
 import { useToast } from "./composables/useToast";
 import { useRestartFlow } from "./composables/useRestartFlow";
 import type { ActiveView, Attachment, CommandItem } from "./types";
@@ -146,10 +146,6 @@ const navigateToVcs = () => {
       activeView.value = "chat";
     }
   } else {
-    const gitRootCandidate = activeSession.value?.runDir || selectedDir.value;
-    if (gitRootCandidate) {
-      currentGitRoot.value = gitRootCandidate;
-    }
     if (sessionId) {
       router.push(buildVcsRoute(sessionId, selectedCommit.value, selectedFilePath.value));
     } else {
@@ -224,6 +220,24 @@ const { handleSelectSession, handleNewChat, handleDeleteSession } = useSessions(
   selectedDir,
   activeSessionId,
   loadSessions,
+);
+
+// Keep the VCS git root in sync with the effective workspace directory so the
+// VCS entry point is available on direct loads (e.g. refresh while in file view).
+const effectiveRunDir = computed(() => activeSession.value?.runDir || selectedDir.value);
+watch(
+  effectiveRunDir,
+  async (dir) => {
+    if (!dir) {
+      currentGitRoot.value = "";
+      return;
+    }
+    const info = await getDirInfo(dir);
+    if (effectiveRunDir.value === dir) {
+      currentGitRoot.value = info.gitRoot || "";
+    }
+  },
+  { immediate: true },
 );
 
 let prevSessionId: string | null = null;
