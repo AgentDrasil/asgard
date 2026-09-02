@@ -58,7 +58,7 @@ const formatRawMarkdown = (content: string) => {
     <div class="flex items-center gap-2 mb-2 select-none">
       <Icon :icon="getAgentIcon(message.agentName, agents, activeAgent)" class="h-4 w-4 shrink-0" />
       <span class="text-xs font-bold text-base-content/70">
-        {{ message.agentName || activeAgent?.name || "Agent" }}
+        {{ message.agentName || activeAgent?.name || $t("chat.agent") }}
       </span>
       <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
         {{ formatTimestamp(message.timestamp) }}
@@ -78,7 +78,7 @@ const formatRawMarkdown = (content: string) => {
       <button
         @click="toggleRaw"
         class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
-        :title="showRaw ? 'Show Rendered HTML' : 'Show Raw Markdown'"
+        :title="showRaw ? $t('chat.showRenderedHtml') : $t('chat.showRawMarkdown')"
       >
         <Icon
           :icon="
@@ -91,7 +91,7 @@ const formatRawMarkdown = (content: string) => {
       <button
         @click="copyMessage(message.content)"
         class="btn btn-sm btn-ghost btn-square text-base-content/60 hover:text-base-content"
-        :title="copied ? 'Copied!' : 'Copy message content'"
+        :title="copied ? $t('chat.copied') : $t('chat.copyMessageContent')"
       >
         <Icon
           :icon="copied ? 'material-symbols:check-circle-outline-rounded' : 'mage:copy'"

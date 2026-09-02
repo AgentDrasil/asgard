@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../types";
 import { parseOptions } from "./askUserOptions";
 import { getMessageArtifactFiles } from "./messageUtils";
+import { t } from "../i18n";
 
 export type WorkflowStage = "running" | "waiting_human" | "completed" | "failed" | "idle";
 
@@ -48,7 +49,7 @@ export function computeWorkflowPanelState(
       pendingMessage: latest,
       pendingMessages,
       options,
-      statusText: `${agentLabel} is waiting for human input`,
+      statusText: t("chat.workflow.waitingForInputStatus", { agent: agentLabel }),
       targetFiles,
       artifactFiles,
     };
@@ -62,7 +63,7 @@ export function computeWorkflowPanelState(
       pendingMessage: null,
       pendingMessages: [],
       options: [],
-      statusText: `${agentLabel} is running...`,
+      statusText: t("chat.workflow.runningStatus", { agent: agentLabel }),
       targetFiles: [],
       artifactFiles: [],
     };
@@ -96,7 +97,7 @@ export function computeWorkflowPanelState(
         pendingMessage: null,
         pendingMessages: [],
         options: [],
-        statusText: "Workflow completed",
+        statusText: t("chat.workflow.completed"),
         targetFiles: [],
         artifactFiles: [],
       };
@@ -109,7 +110,7 @@ export function computeWorkflowPanelState(
     pendingMessage: null,
     pendingMessages: [],
     options: [],
-    statusText: `${activeAgentName || "Workflow"} is ready`,
+    statusText: t("chat.workflow.readyStatus", { agent: activeAgentName || "Workflow" }),
     targetFiles: [],
     artifactFiles: [],
   };

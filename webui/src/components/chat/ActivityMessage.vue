@@ -26,7 +26,7 @@ const emit = defineEmits<{
       <summary
         class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
       >
-        <span>💭</span> Thinking Process
+        <span>💭</span> {{ $t("chat.thinkingProcess") }}
         <span
           v-if="message.timestamp"
           class="text-[10px] font-mono font-normal text-base-content/40 ml-auto mr-4"
@@ -52,7 +52,9 @@ const emit = defineEmits<{
     <div class="rounded-lg border border-error/40 bg-error/10 p-3 space-y-1.5 min-w-0">
       <div class="flex items-center gap-2 select-none min-w-0">
         <Icon icon="material-symbols:error-circle-rounded" class="h-4 w-4 text-error shrink-0" />
-        <span class="text-xs font-bold text-error uppercase tracking-wider shrink-0"> Error </span>
+        <span class="text-xs font-bold text-error uppercase tracking-wider shrink-0">
+          {{ $t("chat.error") }}
+        </span>
         <span v-if="message.agentName" class="text-xs font-mono text-error/70 truncate min-w-0">
           {{ message.agentName }}
         </span>
@@ -76,7 +78,7 @@ const emit = defineEmits<{
     <div class="flex items-center gap-2 mb-1.5 select-none">
       <Icon :icon="getAgentIcon(message.agentName, agents, activeAgent)" class="h-4 w-4 shrink-0" />
       <span class="text-xs font-bold text-base-content/70">
-        {{ message.agentName || activeAgent?.name || "Agent" }}
+        {{ message.agentName || activeAgent?.name || $t("chat.agent") }}
       </span>
       <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
         {{ formatTimestamp(message.timestamp) }}
@@ -96,7 +98,7 @@ const emit = defineEmits<{
             (message.activityType || message.role) === "TOOL_CALL" ||
             (message.activityType || message.role) === "tool_call" ||
             (message.activityType || message.role) === "tool_result"
-              ? "TOOL"
+              ? $t("chat.tool")
               : message.activityType || message.role
           }}
         </span>
@@ -108,7 +110,12 @@ const emit = defineEmits<{
           class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2 space-y-1.5"
         >
           <div class="text-emerald-400 font-bold text-xs select-none">
-            📄 Target File{{ getMessageArtifactFiles(message).length > 1 ? "s" : "" }}:
+            📄
+            {{
+              getMessageArtifactFiles(message).length > 1
+                ? $t("chat.targetFiles")
+                : $t("chat.targetFileSingle")
+            }}
           </div>
           <div class="flex flex-wrap gap-1.5">
             <button
@@ -116,7 +123,7 @@ const emit = defineEmits<{
               :key="file"
               @click="emit('open-artifact', file)"
               class="btn btn-xs gap-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white border-none font-mono normal-case h-6 min-h-0 px-2 max-w-full"
-              :title="`Open artifact: ${file}`"
+              :title="$t('chat.openArtifactTitle', { file })"
             >
               <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0" />
               <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>

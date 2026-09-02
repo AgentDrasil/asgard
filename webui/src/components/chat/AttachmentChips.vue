@@ -30,7 +30,7 @@ defineEmits<{
         type="button"
         @click="$emit('remove', idx)"
         class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-base-300"
-        title="Remove attachment"
+        :title="$t('chat.removeAttachment')"
       >
         <Icon icon="material-symbols:close" class="h-3.5 w-3.5" />
       </button>
@@ -42,7 +42,7 @@ defineEmits<{
       class="badge badge-lg gap-2 py-3.5 px-3 bg-base-200/80 border border-base-300 shadow-xs text-xs font-mono text-base-content/70 select-none"
     >
       <span class="loading loading-spinner loading-xs text-primary"></span>
-      <span>Uploading attachment...</span>
+      <span>{{ $t("chat.uploadingAttachment") }}</span>
     </div>
   </div>
 </template>

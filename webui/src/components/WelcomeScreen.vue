@@ -6,6 +6,7 @@ import { getDirInfo, getSubdirs } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useToast } from "../composables/useToast";
 import AttachmentChips from "./chat/AttachmentChips.vue";
+import { t } from "../i18n";
 
 const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
 const toast = useToast();
@@ -42,7 +43,7 @@ const addFiles = (files: FileList | File[]) => {
   if (fileArray.length === 0) return;
 
   if (welcomeFiles.value.length + fileArray.length > MAX_ATTACHMENTS) {
-    toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed`);
+    toast.error(t("chat.maxAttachmentsExceeded", { max: MAX_ATTACHMENTS }));
     return;
   }
 
@@ -50,11 +51,11 @@ const addFiles = (files: FileList | File[]) => {
 
   for (const file of fileArray) {
     if (file.size > MAX_SINGLE_FILE_SIZE) {
-      toast.error(`File "${file.name}" exceeds 20MB limit`);
+      toast.error(t("chat.fileSizeExceeded", { name: file.name }));
       return;
     }
     if (currentTotalSize + file.size > MAX_TOTAL_FILES_SIZE) {
-      toast.error("Total attachment size exceeds 50MB limit");
+      toast.error(t("chat.totalSizeExceeded"));
       return;
     }
     // Avoid duplicate files (same name & size)
@@ -329,13 +330,13 @@ const handleSubmit = () => {
         <button
           @click="emit('toggle-sidebar')"
           class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0"
-          :title="`Toggle Menu (${toggleSidebarShortcut})`"
+          :title="$t('chat.toggleMenu', { shortcut: toggleSidebarShortcut })"
         >
           <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
         <span class="text-sm font-bold text-base-content flex items-center gap-2">
           <Icon icon="mynaui:edit-one" class="h-5 w-5 text-primary" />
-          <span>New Chat</span>
+          <span>{{ $t("chat.newChat") }}</span>
         </span>
       </div>
     </header>
@@ -359,17 +360,17 @@ const handleSubmit = () => {
           <h2
             class="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-cyan-600 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent"
           >
-            Start a Chat
+            {{ $t("chat.startAChat") }}
           </h2>
           <p class="text-xs sm:text-sm text-base-content/60">
-            Select an agent, workspace directory, and start building.
+            {{ $t("chat.startSubtitle") }}
           </p>
         </div>
 
         <!-- Agent Selection -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text text-base-content">Select Coding Agent</span>
+            <span class="label-text text-base-content">{{ $t("chat.selectAgent") }}</span>
           </label>
           <select
             v-model="localAgentId"
@@ -395,14 +396,14 @@ const handleSubmit = () => {
         <!-- Model Selection (Optional) -->
         <div class="form-control w-full" v-if="currentAgentModels.length > 0">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text text-base-content">Select Model (Optional)</span>
+            <span class="label-text text-base-content">{{ $t("chat.selectModelOptional") }}</span>
           </label>
           <select
             v-model="localModel"
             class="select select-bordered w-full bg-base-100 border-base-300 text-base-content focus:outline-none disabled:bg-base-200 disabled:opacity-60"
           >
             <option value="" class="bg-base-100 text-base-content">
-              Auto (Default quota-based fallback logic)
+              {{ $t("chat.autoModelFallback") }}
             </option>
             <option
               v-for="m in currentAgentModels"
@@ -414,14 +415,14 @@ const handleSubmit = () => {
             </option>
           </select>
           <p class="text-xs text-base-content/60 mt-1.5 leading-relaxed break-words">
-            If selected, no quota fallback will be performed if quota is depleted.
+            {{ $t("chat.modelFallbackNotice") }}
           </p>
         </div>
 
         <!-- Run Directory Selection -->
         <div class="form-control w-full">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text text-base-content">Workspace (Run Directory)</span>
+            <span class="label-text text-base-content">{{ $t("chat.workspaceRunDir") }}</span>
           </label>
           <select
             :value="baseDir"
@@ -439,14 +440,14 @@ const handleSubmit = () => {
             </option>
           </select>
           <p class="text-xs text-warning mt-1.5 break-words" v-if="runDirs.length === 0">
-            No directories available for this agent
+            {{ $t("chat.noDirsAvailable") }}
           </p>
         </div>
 
         <!-- Subdirectory Selection (Theme-Aware Unified Cascader Row) -->
         <div class="form-control w-full" v-if="runDirs.length > 0">
           <label class="label font-semibold text-sm text-base-content/85">
-            <span class="label-text text-base-content">Subdirectory (optional)</span>
+            <span class="label-text text-base-content">{{ $t("chat.subdirectoryOptional") }}</span>
           </label>
 
           <div class="p-3.5 bg-base-100 rounded-xl border border-base-300 shadow-sm space-y-3">
@@ -456,7 +457,7 @@ const handleSubmit = () => {
             >
               <div class="flex items-center justify-between min-w-0">
                 <div class="flex items-center gap-1.5 min-w-0 pr-2">
-                  <span class="text-primary font-semibold shrink-0">Full Path:</span>
+                  <span class="text-primary font-semibold shrink-0">{{ $t("chat.fullPath") }}</span>
                   <span
                     class="truncate bg-base-200 px-2 py-0.5 rounded text-base-content font-semibold border border-base-300/40"
                   >
@@ -469,11 +470,11 @@ const handleSubmit = () => {
                   @click="resetSubSegments"
                   class="btn btn-ghost btn-xs text-error/80 hover:text-error shrink-0"
                 >
-                  Reset
+                  {{ $t("chat.reset") }}
                 </button>
               </div>
               <div v-if="selectedGitRoot" class="flex items-center gap-1.5 min-w-0 pr-2">
-                <span class="text-primary font-semibold shrink-0">Git Root:</span>
+                <span class="text-primary font-semibold shrink-0">{{ $t("chat.gitRoot") }}</span>
                 <span
                   class="truncate bg-base-200 px-2 py-0.5 rounded text-base-content font-semibold border border-base-300/40"
                 >
@@ -507,7 +508,7 @@ const handleSubmit = () => {
                       class="select select-bordered select-sm h-8 min-h-0 py-0 pl-2.5 pr-7 rounded-lg bg-base-100 border-base-300 font-mono text-xs text-base-content focus:outline-none max-w-48"
                       :disabled="loadingLevels[levelIndex]"
                     >
-                      <option value="">-- Stop here --</option>
+                      <option value="">{{ $t("chat.stopHere") }}</option>
                       <option v-for="dir in subdirs" :key="dir" :value="dir">{{ dir }}/</option>
                     </select>
 
@@ -528,7 +529,7 @@ const handleSubmit = () => {
                   <span class="text-base-content/40 font-bold select-none text-xs">/</span>
                   <div
                     class="h-8 inline-flex items-center justify-center px-3 rounded-lg bg-base-200/60 border border-base-300/50 text-base-content/50 font-mono text-xs shrink-0"
-                    title="End of folders"
+                    :title="$t('chat.endOfFolders')"
                   >
                     <Icon icon="mdi:dollar" class="w-4 h-4 text-base-content/60" />
                   </div>
@@ -542,7 +543,7 @@ const handleSubmit = () => {
         <div class="form-control w-full space-y-2">
           <div class="flex items-center justify-between">
             <label class="label p-0 font-semibold text-sm text-base-content/85">
-              <span class="label-text text-base-content">What would you like to build?</span>
+              <span class="label-text text-base-content">{{ $t("chat.promptLabel") }}</span>
             </label>
             <!-- Attach Files Button -->
             <button
@@ -550,10 +551,10 @@ const handleSubmit = () => {
               @click="triggerFileInput"
               :disabled="loading"
               class="btn btn-ghost btn-xs gap-1 text-base-content/70 hover:text-base-content"
-              title="Attach files"
+              :title="$t('chat.attachFiles')"
             >
               <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
-              <span>Attach files</span>
+              <span>{{ $t("chat.attachFiles") }}</span>
             </button>
           </div>
 
@@ -563,7 +564,7 @@ const handleSubmit = () => {
           <textarea
             v-model="localPrompt"
             class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
-            :placeholder="`Type your coding request here... (${sendShortcut} to submit)`"
+            :placeholder="$t('chat.promptPlaceholder', { shortcut: sendShortcut })"
             @keydown.ctrl.enter.prevent="handleSubmit"
             @keydown.meta.enter.prevent="handleSubmit"
             @paste="handlePaste"
@@ -578,7 +579,9 @@ const handleSubmit = () => {
         >
           <span v-if="loading" class="loading loading-spinner loading-xs"></span>
           <span>{{
-            currentAgent?.type === "workflow" ? "Start Workflow Run" : "Start Agent Run"
+            currentAgent?.type === "workflow"
+              ? $t("chat.startWorkflowRun")
+              : $t("chat.startAgentRun")
           }}</span>
         </button>
       </div>

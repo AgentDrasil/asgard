@@ -61,7 +61,11 @@ const selectOptionAndReply = (option: string) => {
           class="h-5 w-5 shrink-0 text-warning"
         />
         <span class="text-xs font-bold text-base-content">
-          {{ message.agentName || activeAgent?.name || "Agent" }} is asking:
+          {{
+            $t("chat.isAsking", {
+              agent: message.agentName || activeAgent?.name || $t("chat.agent"),
+            })
+          }}
         </span>
         <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
           {{ formatTimestamp(message.timestamp) }}
@@ -77,7 +81,7 @@ const selectOptionAndReply = (option: string) => {
         <div
           class="text-[11px] font-bold uppercase tracking-wider text-base-content/50 select-none"
         >
-          Files to review
+          {{ $t("chat.filesToReview") }}
         </div>
         <div class="flex flex-wrap gap-2">
           <button
@@ -85,7 +89,7 @@ const selectOptionAndReply = (option: string) => {
             :key="file"
             @click="emit('open-artifact', file)"
             class="btn btn-xs gap-1.5 bg-base-200/80 hover:bg-warning/20 border border-warning/40 text-base-content font-mono normal-case h-7 min-h-0 px-2.5 max-w-full"
-            :title="`Open artifact: ${file}`"
+            :title="$t('chat.openArtifactTitle', { file })"
           >
             <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0 text-warning" />
             <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
@@ -121,7 +125,7 @@ const selectOptionAndReply = (option: string) => {
           v-model="inlineInput"
           @keydown.enter="submitReply()"
           type="text"
-          placeholder="Type your reply to agent..."
+          :placeholder="$t('chat.typeReplyPlaceholder')"
           class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
           :disabled="isSubmitting"
         />
@@ -132,7 +136,7 @@ const selectOptionAndReply = (option: string) => {
         >
           <span v-if="isSubmitting" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="fluent:send-24-filled" class="h-3.5 w-3.5" />
-          Reply
+          {{ $t("chat.reply") }}
         </button>
       </div>
       <div
@@ -140,7 +144,9 @@ const selectOptionAndReply = (option: string) => {
         class="text-xs font-semibold text-success flex items-center gap-1.5 pt-2 border-t border-warning/20"
       >
         <Icon icon="fluent:checkmark-circle-24-filled" class="h-4 w-4" />
-        <span>Replied: {{ message.replyText || submittedText || inlineInput }}</span>
+        <span>{{
+          $t("chat.replied", { text: message.replyText || submittedText || inlineInput })
+        }}</span>
       </div>
     </div>
   </div>

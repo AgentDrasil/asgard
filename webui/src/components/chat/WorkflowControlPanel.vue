@@ -179,7 +179,7 @@ const getOptionButtonClass = (opt: string): string => {
         class="flex items-center gap-3 py-1 text-sm font-medium text-base-content"
       >
         <span class="loading loading-spinner loading-sm text-primary"></span>
-        <span>Resuming workflow and executing next step...</span>
+        <span>{{ $t("chat.workflow.resuming") }}</span>
       </div>
 
       <!-- Stage: Waiting Human Decision -->
@@ -190,7 +190,7 @@ const getOptionButtonClass = (opt: string): string => {
           <div class="flex items-center gap-2 min-w-0">
             <Icon icon="fluent:pause-circle-24-filled" class="h-5 w-5 text-warning shrink-0" />
             <span class="text-sm font-bold text-base-content truncate">
-              Workflow Paused · Waiting for Human Decision
+              {{ $t("chat.workflow.waitingHuman") }}
             </span>
             <span
               v-if="currentAgentName"
@@ -211,7 +211,7 @@ const getOptionButtonClass = (opt: string): string => {
                 @click="selectedIndex = Math.max(0, selectedIndex - 1)"
                 :disabled="selectedIndex <= 0 || isSubmitting"
                 class="btn btn-ghost btn-xs btn-square h-5 w-5 min-h-0 text-base-content/70 hover:text-base-content disabled:opacity-30"
-                title="Previous decision"
+                :title="$t('chat.workflow.prevDecision')"
               >
                 <Icon icon="lucide:chevron-left" class="h-3.5 w-3.5" />
               </button>
@@ -225,14 +225,14 @@ const getOptionButtonClass = (opt: string): string => {
                 "
                 :disabled="selectedIndex >= state.pendingMessages.length - 1 || isSubmitting"
                 class="btn btn-ghost btn-xs btn-square h-5 w-5 min-h-0 text-base-content/70 hover:text-base-content disabled:opacity-30"
-                title="Next decision"
+                :title="$t('chat.workflow.nextDecision')"
               >
                 <Icon icon="lucide:chevron-right" class="h-3.5 w-3.5" />
               </button>
             </div>
-            <span class="badge badge-warning badge-sm font-semibold uppercase shrink-0"
-              >Waiting Human</span
-            >
+            <span class="badge badge-warning badge-sm font-semibold uppercase shrink-0">
+              {{ $t("chat.workflow.waitingHumanBadge") }}
+            </span>
           </div>
         </div>
 
@@ -241,7 +241,7 @@ const getOptionButtonClass = (opt: string): string => {
           <div
             class="text-[11px] font-bold uppercase tracking-wider text-base-content/60 select-none"
           >
-            Files to review
+            {{ $t("chat.filesToReview") }}
           </div>
           <div class="flex flex-wrap gap-2">
             <button
@@ -250,7 +250,7 @@ const getOptionButtonClass = (opt: string): string => {
               type="button"
               @click="emit('open-artifact', file)"
               class="btn btn-xs gap-1.5 bg-base-100 hover:bg-warning/20 border border-warning/40 text-base-content font-mono normal-case h-7 min-h-0 px-2.5 max-w-full"
-              :title="`Open artifact: ${file}`"
+              :title="$t('chat.openArtifactTitle', { file })"
             >
               <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0 text-warning" />
               <span class="truncate max-w-[260px]">{{ formatPath(file) }}</span>
@@ -281,7 +281,7 @@ const getOptionButtonClass = (opt: string): string => {
             v-model="customInput"
             @keydown.enter="handleReply(customInput)"
             type="text"
-            placeholder="Enter custom feedback or additional instructions..."
+            :placeholder="$t('chat.workflow.customFeedbackPlaceholder')"
             class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
             :disabled="isSubmitting"
           />
@@ -292,7 +292,7 @@ const getOptionButtonClass = (opt: string): string => {
             :disabled="!customInput.trim() || isSubmitting"
           >
             <Icon icon="fluent:send-24-filled" class="h-3.5 w-3.5" />
-            Resume
+            {{ $t("chat.workflow.resume") }}
           </button>
         </div>
       </div>
@@ -303,7 +303,13 @@ const getOptionButtonClass = (opt: string): string => {
         class="flex items-center gap-3 py-1 text-sm font-medium text-base-content"
       >
         <span class="loading loading-spinner loading-sm text-primary"></span>
-        <span>{{ workingAgentLabel || activeAgent?.name || "Workflow" }} is running...</span>
+        <span>
+          {{
+            $t("chat.workflow.isRunning", {
+              agent: workingAgentLabel || activeAgent?.name || $t("chat.agent"),
+            })
+          }}
+        </span>
       </div>
 
       <!-- Stage: Failed -->
@@ -315,7 +321,9 @@ const getOptionButtonClass = (opt: string): string => {
           <Icon icon="fluent:dismiss-circle-24-filled" class="h-5 w-5 shrink-0" />
           <span class="truncate">{{ state.statusText }}</span>
         </div>
-        <span class="badge badge-error badge-sm font-semibold uppercase shrink-0">Failed</span>
+        <span class="badge badge-error badge-sm font-semibold uppercase shrink-0">
+          {{ $t("chat.workflow.failedBadge") }}
+        </span>
       </div>
 
       <!-- Stage: Completed -->
@@ -325,18 +333,24 @@ const getOptionButtonClass = (opt: string): string => {
       >
         <div class="flex items-center gap-2 text-sm font-medium text-success">
           <Icon icon="fluent:checkmark-circle-24-filled" class="h-5 w-5 shrink-0" />
-          <span>Workflow completed</span>
+          <span>{{ $t("chat.workflow.completed") }}</span>
         </div>
-        <span class="badge badge-success badge-sm font-semibold uppercase">Completed</span>
+        <span class="badge badge-success badge-sm font-semibold uppercase">
+          {{ $t("chat.workflow.completedBadge") }}
+        </span>
       </div>
 
       <!-- Stage: Idle -->
       <div v-else class="flex items-center justify-between gap-2 py-1 text-sm text-base-content/70">
         <div class="flex items-center gap-2 font-medium">
           <Icon icon="fluent:play-circle-24-filled" class="h-5 w-5 text-base-content/50 shrink-0" />
-          <span>{{ activeAgent?.name || "Workflow" }} not started</span>
+          <span>
+            {{ $t("chat.workflow.notStarted", { agent: activeAgent?.name || $t("chat.agent") }) }}
+          </span>
         </div>
-        <span class="badge badge-ghost badge-sm uppercase">Idle</span>
+        <span class="badge badge-ghost badge-sm uppercase">
+          {{ $t("chat.workflow.idleBadge") }}
+        </span>
       </div>
     </div>
   </div>

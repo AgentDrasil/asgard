@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, h } from "vue";
 import UserMessage from "./UserMessage.vue";
 import type { ChatMessage } from "../../types";
+import { i18n } from "../../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -38,6 +39,7 @@ describe("UserMessage.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     expect(root.textContent).toContain("Hello from test");
@@ -77,6 +79,7 @@ describe("UserMessage.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     expect(root.textContent).toContain("Here is the architectural diagram and code");

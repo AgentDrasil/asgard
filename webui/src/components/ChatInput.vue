@@ -6,6 +6,7 @@ import { useToast } from "../composables/useToast";
 import type { Attachment } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
+import { t } from "../i18n";
 
 const { modKey, sendShortcut, matchShortcut } = useShortcuts();
 const toast = useToast();
@@ -96,7 +97,7 @@ const processFiles = async (files: FileList | File[]) => {
 
   const fileArray = Array.from(files);
   if (attachments.value.length + fileArray.length > MAX_ATTACHMENTS) {
-    toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed`);
+    toast.error(t("chat.maxAttachmentsExceeded", { max: MAX_ATTACHMENTS }));
     return;
   }
 
@@ -109,12 +110,12 @@ const processFiles = async (files: FileList | File[]) => {
       if (!file) continue;
 
       if (file.size > MAX_SINGLE_FILE_SIZE) {
-        toast.error(`File "${file.name}" exceeds 20MB limit`);
+        toast.error(t("chat.fileSizeExceeded", { name: file.name }));
         continue;
       }
 
       if (currentTotalSize + file.size > MAX_TOTAL_FILES_SIZE) {
-        toast.error("Total attachment size exceeds 50MB limit");
+        toast.error(t("chat.totalSizeExceeded"));
         continue;
       }
 
@@ -137,7 +138,12 @@ const processFiles = async (files: FileList | File[]) => {
         }
       } catch (err: any) {
         console.error("Failed to upload attachment:", err);
-        toast.error(`Failed to upload "${file.name}": ${err?.message || "upload failed"}`);
+        toast.error(
+          t("chat.failedToUpload", {
+            name: file.name,
+            error: err?.message || t("chat.uploadFailed"),
+          }),
+        );
       }
     }
   } finally {
@@ -236,7 +242,7 @@ const handleDrop = (e: DragEvent) => {
                 ? 'btn-success'
                 : 'btn-neutral bg-base-300 text-base-content hover:bg-base-300/80 border-none'
             "
-            title="Expand input editor"
+            :title="$t('chat.expandInputEditor')"
           >
             <Icon icon="iconoir:expand" class="h-4 w-4" />
           </button>
@@ -248,7 +254,7 @@ const handleDrop = (e: DragEvent) => {
             type="button"
             :disabled="loading || isUploading"
             class="btn btn-circle btn-sm btn-ghost hover:bg-base-300 text-base-content/70 hover:text-base-content hover:scale-105 active:scale-95 transition-all"
-            title="Attach file"
+            :title="$t('chat.attachFile')"
           >
             <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
           </button>
@@ -258,7 +264,7 @@ const handleDrop = (e: DragEvent) => {
           v-model="text"
           @keydown="handleKeyDown"
           @paste="handlePaste"
-          :placeholder="`${sendShortcut} to send...`"
+          :placeholder="$t('chat.inputPlaceholder', { shortcut: sendShortcut })"
           rows="1"
           :disabled="loading"
           class="textarea textarea-bordered bg-base-200 text-base-content w-full rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
@@ -270,7 +276,7 @@ const handleDrop = (e: DragEvent) => {
           @click="handleSend"
           :disabled="!canSend"
           class="btn btn-circle btn-primary btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"
-          :title="`Send message (${sendShortcut})`"
+          :title="$t('chat.sendMessageShortcut', { shortcut: sendShortcut })"
         >
           <span v-if="loading || isUploading" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="material-symbols:send" class="h-4 w-4 fill-current" />
@@ -284,15 +290,15 @@ const handleDrop = (e: DragEvent) => {
         <div class="flex items-center justify-between border-b border-base-300 pb-3 mb-4">
           <div class="flex items-center gap-2">
             <Icon icon="material-symbols:edit-note-rounded" class="h-5 w-5 text-primary" />
-            <h3 class="font-bold text-lg">Edit Chat Input</h3>
+            <h3 class="font-bold text-lg">{{ $t("chat.editChatInput") }}</h3>
             <span v-if="lineCount > 1" class="badge badge-sm badge-neutral">
-              {{ lineCount }} lines
+              {{ $t("chat.linesCount", { count: lineCount }) }}
             </span>
           </div>
           <button
             @click="closeModal"
             class="btn btn-sm btn-circle btn-ghost"
-            title="Close modal (Esc)"
+            :title="$t('chat.closeModalEsc')"
           >
             <Icon icon="material-symbols:close" class="h-5 w-5" />
           </button>
@@ -312,7 +318,7 @@ const handleDrop = (e: DragEvent) => {
             v-model="text"
             @keydown="handleKeyDown"
             @paste="handlePaste"
-            :placeholder="`Type multiline prompt here... (${sendShortcut} to send)`"
+            :placeholder="$t('chat.promptMultilinePlaceholder', { shortcut: sendShortcut })"
             :disabled="loading"
             class="textarea textarea-bordered bg-base-200 text-base-content w-full flex-1 p-4 rounded-xl leading-relaxed focus:outline-none focus:border-primary text-sm font-mono resize-none"
           ></textarea>
@@ -326,22 +332,21 @@ const handleDrop = (e: DragEvent) => {
               type="button"
               :disabled="loading || isUploading"
               class="btn btn-sm btn-ghost gap-1.5 text-base-content/70 hover:text-base-content"
-              title="Attach file"
+              :title="$t('chat.attachFile')"
             >
               <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
-              <span class="hidden sm:inline">Attach</span>
+              <span class="hidden sm:inline">{{ $t("chat.attach") }}</span>
             </button>
             <span class="text-xs text-base-content/60 hidden sm:inline">
-              Press <kbd class="kbd kbd-xs">{{ modKey }}</kbd> +
-              <kbd class="kbd kbd-xs">Enter</kbd> to send
+              {{ $t("chat.pressToSend", { mod: modKey }) }}
             </span>
           </div>
           <div class="flex items-center gap-2 ml-auto">
-            <button @click="closeModal" class="btn btn-sm btn-ghost">Done</button>
+            <button @click="closeModal" class="btn btn-sm btn-ghost">{{ $t("chat.done") }}</button>
             <button @click="handleSend" :disabled="!canSend" class="btn btn-sm btn-primary gap-2">
               <span v-if="loading || isUploading" class="loading loading-spinner loading-xs"></span>
               <Icon v-else icon="material-symbols:send" class="h-4 w-4" />
-              Send
+              {{ $t("chat.send") }}
             </button>
           </div>
         </div>

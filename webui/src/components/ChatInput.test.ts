@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import ChatInput from "./ChatInput.vue";
 import * as api from "../lib/api";
+import { i18n } from "../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -38,6 +39,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const sendBtn = root.querySelector('button[title^="Send message"]') as HTMLButtonElement;
@@ -66,6 +68,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
@@ -94,6 +97,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const attachBtn = root.querySelector('button[title="Attach file"]');
@@ -127,6 +131,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const attachBtn = root.querySelector('button[title="Attach file"]') as HTMLButtonElement;
@@ -180,6 +185,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
@@ -218,6 +224,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const container = root.firstElementChild as HTMLElement;
@@ -261,6 +268,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
@@ -304,6 +312,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
@@ -336,6 +345,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
@@ -367,6 +377,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
@@ -405,6 +416,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     const fileInput = root.querySelector('input[type="file"]') as HTMLInputElement;
@@ -467,6 +479,7 @@ describe("ChatInput.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 

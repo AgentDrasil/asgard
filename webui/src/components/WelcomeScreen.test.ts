@@ -6,6 +6,7 @@ import NewChatView from "../views/NewChatView.vue";
 import * as api from "../lib/api";
 import * as toastModule from "../composables/useToast";
 import type { AgentInfo } from "../types";
+import { i18n } from "../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -62,6 +63,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -97,6 +99,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -129,6 +132,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -167,6 +171,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -203,6 +208,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -235,6 +241,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -267,6 +274,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -302,6 +310,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -342,6 +351,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -381,6 +391,7 @@ describe("WelcomeScreen.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 

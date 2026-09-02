@@ -19,7 +19,7 @@ defineProps<{
       <span v-if="message.timestamp" class="font-normal font-mono">
         {{ formatTimestamp(message.timestamp) }}
       </span>
-      <span class="uppercase font-bold">You</span>
+      <span class="uppercase font-bold">{{ $t("chat.you") }}</span>
     </div>
     <div
       class="chat-bubble chat-bubble-primary text-primary-content text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
@@ -50,7 +50,7 @@ defineProps<{
             target="_blank"
             download
             class="btn btn-ghost btn-xs btn-circle text-primary-content opacity-75 hover:opacity-100 hover:bg-black/20 shrink-0"
-            :title="`Download ${att.name}`"
+            :title="$t('chat.downloadAttachment', { name: att.name })"
           >
             <Icon icon="material-symbols:download" class="h-3.5 w-3.5" />
           </a>

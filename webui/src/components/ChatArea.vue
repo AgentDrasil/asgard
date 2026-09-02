@@ -13,6 +13,7 @@ import AssistantMessage from "./chat/AssistantMessage.vue";
 import ActivityMessage from "./chat/ActivityMessage.vue";
 import AskUserCard from "./chat/AskUserCard.vue";
 import ArtifactViewer from "./ArtifactViewer.vue";
+import { t } from "../i18n";
 
 const {
   toggleSidebarShortcut,
@@ -132,7 +133,7 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom, hasNewMessages } =
 });
 
 const scrollButtonLabel = computed(() =>
-  hasNewMessages.value ? "New messages below (Click to scroll)" : "Scroll to bottom",
+  hasNewMessages.value ? t("chat.scrollBottomNew") : t("chat.scrollBottom"),
 );
 
 const hasUnrepliedAskUser = computed(() => {
@@ -189,7 +190,7 @@ onUnmounted(() => {
         <button
           @click="emit('toggle-sidebar')"
           class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0 mt-0.5"
-          :title="`Toggle Menu (${toggleSidebarShortcut})`"
+          :title="$t('chat.toggleMenu', { shortcut: toggleSidebarShortcut })"
         >
           <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
@@ -198,10 +199,10 @@ onUnmounted(() => {
           <button
             @click="emit('update:isDetailsOpen', !isDetailsOpen)"
             class="flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate h-7 sm:h-8"
-            title="Toggle Workspace Info"
+            :title="$t('chat.toggleWorkspaceInfo')"
           >
             <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
-            <span class="font-bold truncate">{{ activeAgent?.name || "Coding Agent" }}</span>
+            <span class="font-bold truncate">{{ activeAgent?.name || $t("chat.agent") }}</span>
             <Icon
               :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
               class="h-3.5 w-3.5 text-base-content/70 shrink-0"
@@ -210,7 +211,7 @@ onUnmounted(() => {
 
           <div v-if="isDetailsOpen" class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5">
             <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
-              Workspace:
+              {{ $t("chat.workspace") }}
               <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
                 formatPath(runDir)
               }}</span>
@@ -219,7 +220,7 @@ onUnmounted(() => {
               v-if="gitRoot"
               class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
             >
-              Git Root:
+              {{ $t("chat.gitRoot") }}
               <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
                 formatPath(gitRoot)
               }}</span>
@@ -238,37 +239,37 @@ onUnmounted(() => {
               ? 'btn-primary shadow-xs'
               : 'btn-ghost text-base-content/70 hover:text-base-content bg-base-300/60'
           "
-          :title="`Find in chat (${findShortcut})`"
+          :title="$t('chat.findInChat', { shortcut: findShortcut })"
         >
           <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
-          <span class="hidden xl:inline">Find</span>
+          <span class="hidden xl:inline">{{ $t("chat.find") }}</span>
         </button>
 
         <!-- View Switcher Join Group (Chat / VCS / Files) -->
         <div class="join bg-base-300/60 p-0.5 rounded-lg shrink-0">
           <button
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
-            title="Chat View"
+            :title="$t('chat.chatView')"
           >
             <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Chat</span>
+            <span class="hidden sm:inline">{{ $t("chat.chat") }}</span>
           </button>
           <button
             v-if="gitRoot"
             @click="emit('open-diff', gitRoot)"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to VCS View (${toggleDiffShortcut})`"
+            :title="$t('chat.switchToVcsView', { shortcut: toggleDiffShortcut })"
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">VCS</span>
+            <span class="hidden sm:inline">{{ $t("chat.vcs") }}</span>
           </button>
           <button
             @click="emit('open-file-view')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to File View (${toggleFileViewShortcut})`"
+            :title="$t('chat.switchToFileView', { shortcut: toggleFileViewShortcut })"
           >
             <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Files</span>
+            <span class="hidden sm:inline">{{ $t("chat.files") }}</span>
           </button>
         </div>
 
@@ -284,10 +285,10 @@ onUnmounted(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
+            :title="$t('chat.toggleTerminalPanel', { shortcut: toggleTerminalShortcut })"
           >
             <Icon icon="codicon:layout-panel" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Terminal</span>
+            <span class="hidden xl:inline">{{ $t("chat.terminal") }}</span>
           </button>
 
           <!-- Toggle Artifacts Right Sidebar Button -->
@@ -302,10 +303,10 @@ onUnmounted(() => {
                   ? 'btn-secondary text-secondary-content shadow-xs font-semibold'
                   : 'btn-ghost text-base-content/50 hover:text-base-content'
             "
-            :title="`Toggle Artifacts Sidebar (${toggleArtifactsShortcut})`"
+            :title="$t('chat.toggleArtifactsSidebar', { shortcut: toggleArtifactsShortcut })"
           >
             <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Artifacts</span>
+            <span class="hidden xl:inline">{{ $t("chat.artifacts") }}</span>
             <span
               v-if="modifiedFiles && modifiedFiles.length > 0"
               class="badge badge-xs font-bold"
@@ -399,7 +400,11 @@ onUnmounted(() => {
             >
               <span class="loading loading-ring loading-xs text-primary"></span>
               <span>
-                Agent ({{ workingAgentLabel || activeAgent?.name || "Agent" }}) is working...
+                {{
+                  $t("chat.agentWorking", {
+                    agent: workingAgentLabel || activeAgent?.name || $t("chat.agent"),
+                  })
+                }}
               </span>
             </div>
           </div>
@@ -461,7 +466,7 @@ onUnmounted(() => {
           v-if="!isArtifactExpanded"
           @mousedown="startArtifactResize"
           class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
-          title="Drag to resize panel"
+          :title="$t('chat.dragToResizePanel')"
         ></div>
 
         <ArtifactViewer

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import ChatArea from "./ChatArea.vue";
 import type { AgentInfo, ChatMessage } from "../types";
+import { i18n } from "../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -111,6 +112,7 @@ describe("ChatArea.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -136,6 +138,7 @@ describe("ChatArea.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -184,6 +187,7 @@ describe("ChatArea.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -218,6 +222,7 @@ describe("ChatArea.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
