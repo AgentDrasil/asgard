@@ -18,6 +18,21 @@ tidy:
     done
     go work sync
 
+# Update go mod dependencies across all modules and sync workspace
+update-go-deps:
+    @for d in {{module_dirs}}; do \
+        echo "Updating dependencies in $d..."; \
+        (cd "$d" && go get -u -t ./...) || exit 1; \
+    done
+    @just tidy
+
+# Update pnpm dependencies in webui
+update-pnpm-deps:
+    cd webui && pnpm update
+
+# Update both Go and pnpm dependencies
+update-deps: update-go-deps update-pnpm-deps
+
 # Run golangci-lint
 lint:
     golangci-lint run {{module_patterns}}

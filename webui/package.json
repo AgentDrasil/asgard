@@ -23,31 +23,31 @@
     "dompurify": "^3.4.14",
     "firebase": "^12.18.0",
     "fuse.js": "^7.5.0",
-    "katex": "^0.18.4",
-    "marked": "^18.0.10",
-    "mermaid": "^11.17.0",
+    "katex": "^0.18.5",
+    "marked": "^18.0.11",
+    "mermaid": "^11.17.2",
     "papaparse": "^5.7.0",
     "shiki": "^4.4.3",
-    "vue": "^3.5.41",
+    "vue": "^3.5.42",
     "vue-i18n": "^11.4.10",
-    "vue-router": "^5.2.0"
+    "vue-router": "^5.3.0"
   },
   "devDependencies": {
     "@catppuccin/daisyui": "^2.1.1",
     "@iconify/vue": "^5.0.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "@types/papaparse": "^5.5.2",
     "@vitejs/plugin-vue": "^6.0.8",
-    "daisyui": "^5.7.19",
-    "jsdom": "^26.0.0",
+    "daisyui": "^5.7.25",
+    "jsdom": "^26.1.0",
     "oxfmt": "^0.64.0",
-    "oxlint": "^1.79.0",
+    "oxlint": "^1.80.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.2.1",
+    "vite": "^8.2.2",
     "vitest": "^4.1.11",
-    "vue-tsc": "^3.3.10"
+    "vue-tsc": "^3.3.11"
   },
   "packageManager": "pnpm@11.3.0"
 }
