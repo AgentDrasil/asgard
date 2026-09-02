@@ -182,6 +182,9 @@ var exactModelContextTable = map[string]int{
 	"gemini-3.7-flash-high":    1048576,
 	"gemini-3.7-flash-low":     1048576,
 	"gemini-3.7-flash-medium":  1048576,
+	"gemini-3.8-flash-high":    1048576,
+	"gemini-3.8-flash-low":     1048576,
+	"gemini-3.8-flash-medium":  1048576,
 
 	// opencode
 	"opencode/big-pickle":                      200000,
