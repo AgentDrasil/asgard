@@ -55,6 +55,8 @@ export interface ChatSession {
   runDir: string;
   gitRoot?: string;
   isRunning?: boolean;
+  isWaitingForUser?: boolean;
+  isArchived?: boolean;
   createdAt?: string;
   updatedAt?: string;
   messages?: ChatMessage[];

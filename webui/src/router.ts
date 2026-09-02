@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import NewChatView from "./views/NewChatView.vue";
 import ChatView from "./views/ChatView.vue";
+import DashboardView from "./views/DashboardView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import KeyBindingsView from "./views/KeyBindingsView.vue";
 import ConfigEditView from "./views/ConfigEditView.vue";
@@ -15,6 +16,11 @@ export const routes: RouteRecordRaw[] = [
     path: "/newchat",
     name: "newchat",
     component: NewChatView,
+  },
+  {
+    path: "/dashboard",
+    name: "dashboard",
+    component: DashboardView,
   },
   {
     path: "/chat/:id",

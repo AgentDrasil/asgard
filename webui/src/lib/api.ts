@@ -199,14 +199,28 @@ export async function getSession(chatID: string): Promise<ChatSession | null> {
   return null;
 }
 
-export async function getSessions(): Promise<ChatSession[]> {
+export async function getSessions(archived = false): Promise<ChatSession[]> {
   try {
-    const res = await apiFetch("/api/sessions");
+    const url = archived ? "/api/sessions?archived=true" : "/api/sessions";
+    const res = await apiFetch(url);
     if (res.ok) return await res.json();
   } catch (err) {
     console.error("Failed to fetch sessions from backend:", err);
   }
   return [];
+}
+
+export async function archiveSession(chatID: string): Promise<boolean> {
+  if (!chatID) return false;
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(chatID)}/archive`, {
+      method: "POST",
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("Failed to archive session:", err);
+    return false;
+  }
 }
 
 export async function searchSessions(query: string, signal?: AbortSignal): Promise<ChatSession[]> {

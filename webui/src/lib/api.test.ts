@@ -17,6 +17,8 @@ import {
   uploadAttachment,
   getAttachmentUrl,
   triggerAgentMessage,
+  getSessions,
+  archiveSession,
 } from "./api";
 
 describe("API Library", () => {
@@ -602,6 +604,95 @@ describe("API Library", () => {
           attachments,
         }),
       });
+    });
+  });
+
+  describe("getSessions", () => {
+    it("fetches active sessions when archived is false or omitted", async () => {
+      const mockSessions = [
+        { chatID: "sess-1", title: "Active 1", currentAgent: "coder", runDir: "/tmp" },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockSessions,
+      } as Response);
+
+      const res = await getSessions();
+      expect(res).toEqual(mockSessions);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
+    });
+
+    it("fetches archived sessions when archived is true", async () => {
+      const mockArchived = [
+        {
+          chatID: "sess-2",
+          title: "Archived 1",
+          currentAgent: "coder",
+          runDir: "/tmp",
+          isArchived: true,
+        },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockArchived,
+      } as Response);
+
+      const res = await getSessions(true);
+      expect(res).toEqual(mockArchived);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions?archived=true", undefined);
+    });
+
+    it("returns empty array on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
+
+      const res = await getSessions();
+      expect(res).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to fetch sessions from backend:",
+        expect.any(Error),
+      );
+    });
+  });
+
+  describe("archiveSession", () => {
+    it("returns false if chatID is empty", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const res = await archiveSession("");
+      expect(res).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("returns true on successful 200 OK archive response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+      } as Response);
+
+      const res = await archiveSession("sess-123");
+      expect(res).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions/sess-123/archive", {
+        method: "POST",
+      });
+    });
+
+    it("returns false on non-ok HTTP status", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 404,
+      } as Response);
+
+      const res = await archiveSession("sess-nonexistent");
+      expect(res).toBe(false);
+    });
+
+    it("returns false on network error and logs error", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Connection reset"));
+
+      const res = await archiveSession("sess-123");
+      expect(res).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to archive session:", expect.any(Error));
     });
   });
 });
