@@ -5,6 +5,7 @@ import { Icon } from "@iconify/vue";
 import Sidebar from "./components/Sidebar.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
+import SessionSearchModal from "./components/SessionSearchModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
@@ -32,6 +33,7 @@ const welcomePrompt = ref("");
 const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
 const isCommandPaletteOpen = ref(false);
+const isSessionSearchOpen = ref(false);
 const isQuotaModalOpen = ref(false);
 const selectedFilePath = ref<string | null>(null);
 const selectedCommit = ref<string | null>(null);
@@ -186,6 +188,10 @@ const openFileSearch = () => {
   const sessionId = activeSessionId.value || (route.params.id as string);
   if (!sessionId) return;
   isFileSearchOpen.value = true;
+};
+
+const openSessionSearch = () => {
+  isSessionSearchOpen.value = true;
 };
 
 // 1. Agents Composable
@@ -402,6 +408,12 @@ const commandList = computed<CommandItem[]>(() => [
     action: () => openRestartConfirm(),
   },
   {
+    id: "search-sessions",
+    title: "Search Sessions",
+    icon: "material-symbols:search",
+    action: () => openSessionSearch(),
+  },
+  {
     id: "search-files",
     title: "Search Files in Workspace",
     icon: "octicon:file-code-24",
@@ -515,6 +527,7 @@ const commandList = computed<CommandItem[]>(() => [
       @toggle-sidebar="toggleSidebar"
       @toggle-terminal="() => toggleTerminal('sidebar')"
       @open-quota="isQuotaModalOpen = true"
+      @open-session-search="openSessionSearch"
     />
 
     <!-- Main Content Area -->
@@ -581,6 +594,18 @@ const commandList = computed<CommandItem[]>(() => [
           } else {
             activeView = 'file';
           }
+        }
+      "
+    />
+
+    <!-- Session Search Modal (triggered from Sidebar or Command Palette) -->
+    <SessionSearchModal
+      :isOpen="isSessionSearchOpen"
+      @close="isSessionSearchOpen = false"
+      @select-session="
+        (session) => {
+          handleSelectSession(session.chatID, closeSidebarOnMobile);
+          isSessionSearchOpen = false;
         }
       "
     />

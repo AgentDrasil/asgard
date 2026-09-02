@@ -30,6 +30,7 @@ const emit = defineEmits<{
   (e: "toggle-sidebar"): void;
   (e: "toggle-terminal"): void;
   (e: "open-quota"): void;
+  (e: "open-session-search"): void;
 }>();
 
 const viewMode = ref<"list" | "agent">("list");
@@ -154,6 +155,18 @@ onUnmounted(() => {
       >
         <Icon icon="mynaui:edit-one" class="h-5 w-5 fill-current" />
         <span v-if="isOpen">New chat</span>
+      </button>
+
+      <button
+        @click="emit('open-session-search')"
+        :class="[
+          'flex items-center gap-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
+          isOpen ? 'w-full px-3' : 'w-10 h-10 justify-center p-0',
+        ]"
+        title="Search sessions"
+      >
+        <Icon icon="material-symbols:search" class="h-5 w-5 fill-current" />
+        <span v-if="isOpen">Search sessions</span>
       </button>
     </div>
 
