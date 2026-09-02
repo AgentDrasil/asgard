@@ -27,7 +27,7 @@ const fetchAllSessions = async () => {
     archivedSessions.value = archived;
   } catch (err) {
     console.error("Failed to load sessions for dashboard:", err);
-    toast.error("加载会话列表失败");
+    toast.error("Failed to load session list");
   } finally {
     isLoading.value = false;
   }
@@ -113,7 +113,7 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
   try {
     const success = await archiveSession(chatID);
     if (success) {
-      toast.success("会话已成功归档");
+      toast.success("Session archived successfully");
       // Remove from activeSessions and add to archivedSessions
       activeSessions.value = activeSessions.value.filter((s) => s.chatID !== chatID);
       const updatedSession: ChatSession = { ...session, isArchived: true };
@@ -122,11 +122,11 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
         ...archivedSessions.value.filter((s) => s.chatID !== chatID),
       ];
     } else {
-      toast.error("归档会话失败，请重试");
+      toast.error("Failed to archive session, please try again");
     }
   } catch (err) {
     console.error("Archive error:", err);
-    toast.error("归档操作异常");
+    toast.error("Unexpected error while archiving");
   } finally {
     isArchiving.value[chatID] = false;
   }
@@ -137,10 +137,10 @@ const formatRelativeTime = (timeStr?: string): string => {
   const date = new Date(timeStr);
   const diff = Date.now() - date.getTime();
   if (isNaN(diff) || diff < 0) return "-";
-  if (diff < 60 * 1000) return "刚刚";
-  if (diff < 3600 * 1000) return `${Math.floor(diff / (60 * 1000))} 分钟前`;
-  if (diff < 24 * 3600 * 1000) return `${Math.floor(diff / (3600 * 1000))} 小时前`;
-  return `${Math.floor(diff / (24 * 3600 * 1000))} 天前`;
+  if (diff < 60 * 1000) return "just now";
+  if (diff < 3600 * 1000) return `${Math.floor(diff / (60 * 1000))} minutes ago`;
+  if (diff < 24 * 3600 * 1000) return `${Math.floor(diff / (3600 * 1000))} hours ago`;
+  return `${Math.floor(diff / (24 * 3600 * 1000))} days ago`;
 };
 </script>
 
@@ -156,14 +156,16 @@ const formatRelativeTime = (timeStr?: string): string => {
           </div>
           <div>
             <h1 class="text-xl font-bold tracking-tight text-base-content flex items-center gap-2">
-              会话看板
+              Session Board
               <span
                 class="text-xs font-normal px-2 py-0.5 rounded-full bg-base-300 text-base-content/70"
               >
                 Dashboard
               </span>
             </h1>
-            <p class="text-xs text-base-content/60 mt-0.5">实时监控多 Agent 会话状态与执行进展</p>
+            <p class="text-xs text-base-content/60 mt-0.5">
+              Real-time monitoring of multi-agent session status and progress
+            </p>
           </div>
         </div>
 
@@ -174,7 +176,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           >
             <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
             <span
-              >运行中: <strong>{{ totalRunningCount }}</strong></span
+              >Running: <strong>{{ totalRunningCount }}</strong></span
             >
           </div>
           <div
@@ -182,7 +184,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           >
             <span class="w-2 h-2 rounded-full bg-warning"></span>
             <span
-              >等待用户: <strong>{{ totalWaitingCount }}</strong></span
+              >Waiting: <strong>{{ totalWaitingCount }}</strong></span
             >
           </div>
           <div
@@ -190,7 +192,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           >
             <span class="w-2 h-2 rounded-full bg-success"></span>
             <span
-              >最近完成 (&lt; 3h): <strong>{{ totalRecentCompletedCount }}</strong></span
+              >Recently Completed (&lt; 3h): <strong>{{ totalRecentCompletedCount }}</strong></span
             >
           </div>
           <div
@@ -198,7 +200,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           >
             <Icon icon="lucide:archive" class="w-3.5 h-3.5" />
             <span
-              >已归档: <strong>{{ totalArchivedCount }}</strong></span
+              >Archived: <strong>{{ totalArchivedCount }}</strong></span
             >
           </div>
         </div>
@@ -220,7 +222,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             data-test="tab-kanban"
           >
             <Icon icon="lucide:kanban" class="w-4 h-4" />
-            看板视图
+            Kanban View
           </button>
           <button
             type="button"
@@ -232,7 +234,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             data-test="tab-archived"
           >
             <Icon icon="lucide:archive" class="w-4 h-4" />
-            查看归档
+            View Archive
             <span v-if="totalArchivedCount > 0" class="badge badge-xs badge-neutral">
               {{ totalArchivedCount }}
             </span>
@@ -249,7 +251,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="搜索会话标题、Agent、路径..."
+              placeholder="Search sessions by title, agent, path..."
               class="input input-sm input-bordered w-full pl-9 pr-3 bg-base-100 focus:outline-primary text-sm"
               data-test="search-input"
             />
@@ -259,7 +261,7 @@ const formatRelativeTime = (timeStr?: string): string => {
             class="btn btn-sm btn-outline btn-square border-base-300 hover:bg-base-200"
             :disabled="isLoading"
             @click="fetchAllSessions"
-            title="刷新数据"
+            title="Refresh data"
             data-test="btn-refresh"
           >
             <Icon icon="lucide:refresh-cw" class="w-4 h-4" :class="{ 'animate-spin': isLoading }" />
@@ -276,7 +278,7 @@ const formatRelativeTime = (timeStr?: string): string => {
         class="flex flex-col items-center justify-center h-64 gap-3"
       >
         <span class="loading loading-spinner loading-lg text-primary"></span>
-        <p class="text-sm text-base-content/60">正在加载会话数据...</p>
+        <p class="text-sm text-base-content/60">Loading session data...</p>
       </div>
 
       <!-- Mode 1: Active Kanban View (3 Columns) -->
@@ -293,7 +295,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></span>
-              <h2 class="font-semibold text-sm text-base-content">运行中 (Running)</h2>
+              <h2 class="font-semibold text-sm text-base-content">Running</h2>
             </div>
             <span class="badge badge-sm badge-primary font-mono">{{ runningSessions.length }}</span>
           </div>
@@ -318,7 +320,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="归档会话"
+                    title="Archive session"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -354,7 +356,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  活跃: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  Active: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -367,7 +369,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-running"
             >
               <Icon icon="lucide:check-circle-2" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">暂无正在运行的任务</p>
+              <p class="text-xs">No running tasks</p>
             </div>
           </div>
         </div>
@@ -380,7 +382,7 @@ const formatRelativeTime = (timeStr?: string): string => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-warning"></span>
-              <h2 class="font-semibold text-sm text-base-content">等待用户 (Waiting)</h2>
+              <h2 class="font-semibold text-sm text-base-content">Waiting for User</h2>
             </div>
             <span class="badge badge-sm badge-warning font-mono">{{ waitingSessions.length }}</span>
           </div>
@@ -401,11 +403,11 @@ const formatRelativeTime = (timeStr?: string): string => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-warning shrink-0">待回复</span>
+                  <span class="badge badge-xs badge-warning shrink-0">Awaiting Reply</span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="归档会话"
+                    title="Archive session"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -441,7 +443,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  提问时间: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  Asked: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -454,7 +456,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-waiting"
             >
               <Icon icon="lucide:message-square-check" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">暂无等待回复的提问</p>
+              <p class="text-xs">No questions awaiting reply</p>
             </div>
           </div>
         </div>
@@ -467,7 +469,9 @@ const formatRelativeTime = (timeStr?: string): string => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full bg-success"></span>
-              <h2 class="font-semibold text-sm text-base-content">最近完成 / 空闲 (&lt; 3h)</h2>
+              <h2 class="font-semibold text-sm text-base-content">
+                Recently Completed / Idle (&lt; 3h)
+              </h2>
             </div>
             <span class="badge badge-sm badge-success font-mono">{{
               recentCompletedSessions.length
@@ -494,7 +498,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    title="归档会话"
+                    title="Archive session"
                     :disabled="isArchiving[session.chatID]"
                     @click.stop="handleArchive(session, $event)"
                     data-test="btn-archive"
@@ -530,7 +534,7 @@ const formatRelativeTime = (timeStr?: string): string => {
                 class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
               >
                 <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  完成于: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                  Completed: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
                 </span>
                 <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
               </div>
@@ -543,7 +547,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               data-test="empty-completed"
             >
               <Icon icon="lucide:clock" class="w-8 h-8 mb-2 opacity-50" />
-              <p class="text-xs">3小时内暂无新完成的会话</p>
+              <p class="text-xs">No sessions completed in the last 3 hours</p>
             </div>
           </div>
         </div>
@@ -554,12 +558,14 @@ const formatRelativeTime = (timeStr?: string): string => {
         <div class="flex items-center justify-between pb-2 border-b border-base-300">
           <div class="flex items-center gap-2">
             <Icon icon="lucide:archive" class="w-5 h-5 text-base-content/70" />
-            <h2 class="font-bold text-base text-base-content">已归档会话列表</h2>
+            <h2 class="font-bold text-base text-base-content">Archived Sessions</h2>
             <span class="badge badge-sm badge-neutral font-mono">{{
               filteredArchivedSessions.length
             }}</span>
           </div>
-          <p class="text-xs text-base-content/50">点击任意已归档卡片可快速查看历史完整对话与产物</p>
+          <p class="text-xs text-base-content/50">
+            Click any archived card to view the full conversation history and artifacts
+          </p>
         </div>
 
         <!-- Archived Grid -->
@@ -580,7 +586,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               >
                 {{ session.title || session.chatID }}
               </h3>
-              <span class="badge badge-xs badge-neutral shrink-0">已归档</span>
+              <span class="badge badge-xs badge-neutral shrink-0">Archived</span>
             </div>
 
             <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
@@ -604,7 +610,7 @@ const formatRelativeTime = (timeStr?: string): string => {
               class="mt-3 pt-2 border-t border-base-300/50 flex items-center justify-between text-[11px] text-base-content/50"
             >
               <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                归档于: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
+                Archived: {{ formatRelativeTime(session.updatedAt || session.createdAt) }}
               </span>
               <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
             </div>
@@ -618,9 +624,9 @@ const formatRelativeTime = (timeStr?: string): string => {
           data-test="empty-archived"
         >
           <Icon icon="lucide:archive-x" class="w-12 h-12 mb-3 opacity-40" />
-          <h3 class="font-medium text-sm text-base-content/70">暂无已归档会话</h3>
+          <h3 class="font-medium text-sm text-base-content/70">No archived sessions</h3>
           <p class="text-xs text-base-content/50 mt-1">
-            在看板视图中点击卡片上的归档按钮，可将会话移入此归档列表
+            Click the archive button on a card in the Kanban view to move sessions into this list
           </p>
         </div>
       </div>

@@ -35,7 +35,7 @@ describe("useMermaid composable", () => {
     // Preserves unknown direction
     expect(sanitizeMermaidCode("graph UNKNOWN\n  A --> B")).toBe("graph UNKNOWN\n  A --> B");
     // Does NOT alter occurrences of graph inside multiline node labels
-    const multilineLabelCode = `flowchart TD\n  A["第一行\ngraph TD inside label\n第三行"] --> B`;
+    const multilineLabelCode = `flowchart TD\n  A["First line\ngraph TD inside label\nThird line"] --> B`;
     expect(sanitizeMermaidCode(multilineLabelCode)).toBe(multilineLabelCode);
   });
 
@@ -86,13 +86,13 @@ describe("useMermaid composable", () => {
       bindFunctions: undefined,
     });
 
-    const code = `graph TD\n  subgraph S["useSessionStore.ts - 会话状态与消息发送"]\n    A["POST /api/agents/:id/message"]\n  end\n  B["2. 发送带附件消息"] --> S`;
+    const code = `graph TD\n  subgraph S["useSessionStore.ts - session state and message sending"]\n    A["POST /api/agents/:id/message"]\n  end\n  B["2. Send message with attachments"] --> S`;
     const result = await renderDiagram(code);
     expect(result.error).toBeUndefined();
     expect(result.svg).toContain("mock subgraph");
     expect(renderSpy).toHaveBeenCalledWith(
       expect.stringMatching(/^mermaid-/),
-      `flowchart TD\n  subgraph S["useSessionStore.ts - 会话状态与消息发送"]\n    A["POST /api/agents/:id/message"]\n  end\n  B["2. 发送带附件消息"] --> S`,
+      `flowchart TD\n  subgraph S["useSessionStore.ts - session state and message sending"]\n    A["POST /api/agents/:id/message"]\n  end\n  B["2. Send message with attachments"] --> S`,
     );
 
     renderSpy.mockRestore();

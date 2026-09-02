@@ -53,17 +53,17 @@ export function useSessions(
       if (archiveSessionById) {
         const success = await archiveSessionById(id);
         if (success) {
-          toast.success("会话已成功归档");
+          toast.success("Session archived successfully");
           return true;
         } else {
-          toast.error("归档会话失败，请重试");
+          toast.error("Failed to archive session, please try again");
           return false;
         }
       }
       return false;
     } catch (err: any) {
       console.error("handleArchiveSession error:", err);
-      toast.error(err?.message || "归档操作异常");
+      toast.error(err?.message || "Unexpected error while archiving");
       return false;
     }
   };

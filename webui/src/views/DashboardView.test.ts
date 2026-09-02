@@ -255,7 +255,7 @@ describe("DashboardView.vue", () => {
     await flush();
 
     expect(root.querySelector('[data-test="empty-archived"]')).not.toBeNull();
-    expect(root.textContent).toContain("暂无已归档会话");
+    expect(root.textContent).toContain("No archived sessions");
 
     app.unmount();
   });
