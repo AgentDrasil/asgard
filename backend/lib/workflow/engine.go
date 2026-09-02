@@ -415,13 +415,19 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 		loopIter[id] = n
 	}
 
+	running := make(map[string]bool)
+
 	// snapshotStates deep-copies everything MarkWaitingHuman persists
 	// (settled results + loop/execution counters) under the engine lock.
 	snapshotStates := func() snapshotCapture {
 		mu.Lock()
 		defer mu.Unlock()
+		states := toPersistedStates(results)
+		for runningID := range running {
+			delete(states, runningID)
+		}
 		return snapshotCapture{
-			nodeStates:      toPersistedStates(results),
+			nodeStates:      states,
 			loopIterations:  copyIntMap(loopIter),
 			executionCounts: copyIntMap(executionCount),
 		}
@@ -470,7 +476,6 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 	}
 
 	readyQueue := make([]string, 0, len(defn.Nodes))
-	running := make(map[string]bool)
 	eventCh := make(chan struct{}, 100)
 
 	// enqueue admits a node for execution unless it is already queued or
@@ -789,9 +794,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 			if _, exists := nodeByID[nodeID]; !exists {
 				continue
 			}
-			if _, settled := results[nodeID]; settled {
-				continue
-			}
+			delete(results, nodeID)
 			enqueue(nodeID)
 		}
 	} else {
@@ -999,6 +1002,9 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 							}
 						}
 						captured := snapshotStates()
+						for nid := range suspendedNodesMap {
+							delete(captured.nodeStates, nid)
+						}
 						if err := store.RefreshSuspension(rc.RunID, captured.nodeStates, captured.loopIterations, captured.executionCounts, suspendedNodesMap); err != nil {
 							log.Warn().Err(err).Str("run_id", rc.RunID).Msg("refreshing suspension state failed")
 						}

@@ -1118,3 +1118,296 @@ nodes:
 
 	assert.NotEqual(t, RunStatusCanceled, res.Status, "human reply 'don't abort' must not cancel workflow")
 }
+
+func TestPlanReviewLoop_ResumeAfterRestartInSubsequentIteration(t *testing.T) {
+	yamlSpec := `
+name: test-plan-review-loop-restart
+nodes:
+  - id: intend_agent
+    type: command
+    command: "echo intend"
+
+  - id: plan_agent
+    type: command
+    depends:
+      - node: intend_agent
+      - node: plan_approval
+        when: "nodes.plan_approval.output == 'Request Changes'"
+    join: always
+    command: "echo plan"
+
+  - id: plan_review_agent
+    type: command
+    depends:
+      - node: plan_agent
+    command: "echo plan review"
+
+  - id: plan_approval
+    type: human
+    depends:
+      - node: plan_review_agent
+    prompt: "Approve or Request Changes?"
+    options: ["Approve", "Request Changes"]
+
+  - id: coding_agent
+    type: command
+    depends:
+      - node: plan_approval
+        when: "nodes.plan_approval.output == 'Approve'"
+    command: "echo coding"
+`
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	var runsMu sync.Mutex
+	planRuns := 0
+	codingRuns := 0
+
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+		runsMu.Lock()
+		defer runsMu.Unlock()
+		if nctx.Node.ID == "plan_agent" {
+			planRuns++
+		}
+		if nctx.Node.ID == "coding_agent" {
+			codingRuns++
+		}
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: "ok"}, nil
+	}}
+
+	engine1, store, suspender := newTestEngine(t)
+	engine1.registry.Register(runner)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	t.Cleanup(cancel1)
+
+	var lastMsgID string
+	var mu sync.Mutex
+
+	round1Replied := false
+	round2Suspended := make(chan struct{})
+	engine1.SetHumanSuspender(func(req SuspendRequest) error {
+		suspender.record(req)
+		mu.Lock()
+		lastMsgID = req.MessageID
+		mu.Unlock()
+
+		if !round1Replied {
+			round1Replied = true
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				_, _, _ = engine1.Resume(context.Background(), req.RunID, "Request Changes")
+			}()
+		} else {
+			close(round2Suspended)
+		}
+		return nil
+	})
+
+	runID := "run-loop-restart"
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "loop-restart-session",
+			RunID:     runID,
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	select {
+	case <-round2Suspended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for round 2 suspension")
+	}
+
+	runsMu.Lock()
+	assert.Equal(t, 2, planRuns, "plan_agent should have run twice before restart")
+	assert.Equal(t, 0, codingRuns, "coding_agent should not have run yet")
+	runsMu.Unlock()
+
+	snap := store.get(runID)
+	require.NotNil(t, snap)
+	assert.Equal(t, PersistStatusWaitingHuman, snap.Status)
+	assert.NotContains(t, snap.NodeStates, "plan_approval", "suspended node must not be saved as settled in snapshot")
+
+	// Simulate restart
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get(runID).Status == PersistStatusCancelled
+	}, "engine1 cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	mu.Lock()
+	msgID := lastMsgID
+	mu.Unlock()
+	require.NotEmpty(t, msgID)
+
+	engine2, _, _ := newTestEngine(t)
+	engine2.registry.Register(runner)
+	engine2.SetRunStore(store)
+
+	outcome, res, err := engine2.ResumeByMessageID(context.Background(), msgID, "Approve", nil)
+	require.NoError(t, err)
+	assert.Equal(t, ResumeReDriven, outcome)
+	require.NotNil(t, res)
+	assert.Equal(t, RunStatusCompleted, res.Status)
+
+	runsMu.Lock()
+	defer runsMu.Unlock()
+	assert.Equal(t, 2, planRuns, "plan_agent ran twice")
+	assert.Equal(t, 1, codingRuns, "coding_agent should have run after approval in resumed engine")
+}
+
+func TestPlanReviewLoop_ResumeAfterRestartWithRequestChanges(t *testing.T) {
+	yamlSpec := `
+name: test-plan-review-loop-restart-changes
+nodes:
+  - id: intend_agent
+    type: command
+    command: "echo intend"
+
+  - id: plan_agent
+    type: command
+    depends:
+      - node: intend_agent
+      - node: plan_approval
+        when: "nodes.plan_approval.output == 'Request Changes'"
+    join: always
+    command: "echo plan"
+
+  - id: plan_review_agent
+    type: command
+    depends:
+      - node: plan_agent
+    command: "echo plan review"
+
+  - id: plan_approval
+    type: human
+    depends:
+      - node: plan_review_agent
+    prompt: "Approve or Request Changes?"
+    options: ["Approve", "Request Changes"]
+
+  - id: coding_agent
+    type: command
+    depends:
+      - node: plan_approval
+        when: "nodes.plan_approval.output == 'Approve'"
+    command: "echo coding"
+`
+	defn, err := workflowspec.ParseDefinition([]byte(yamlSpec))
+	require.NoError(t, err)
+
+	var runsMu sync.Mutex
+	planRuns := 0
+	codingRuns := 0
+
+	runner := &funcRunner{fn: func(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+		runsMu.Lock()
+		defer runsMu.Unlock()
+		if nctx.Node.ID == "plan_agent" {
+			planRuns++
+		}
+		if nctx.Node.ID == "coding_agent" {
+			codingRuns++
+		}
+		return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, ExitCode: 0, Output: "ok"}, nil
+	}}
+
+	engine1, store, suspender := newTestEngine(t)
+	engine1.registry.Register(runner)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	t.Cleanup(cancel1)
+
+	var lastMsgID string
+	var mu sync.Mutex
+
+	round1Replied := false
+	round2Suspended := make(chan struct{})
+	engine1.SetHumanSuspender(func(req SuspendRequest) error {
+		suspender.record(req)
+		mu.Lock()
+		lastMsgID = req.MessageID
+		mu.Unlock()
+
+		if !round1Replied {
+			round1Replied = true
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				_, _, _ = engine1.Resume(context.Background(), req.RunID, "Request Changes")
+			}()
+		} else {
+			close(round2Suspended)
+		}
+		return nil
+	})
+
+	runID := "run-loop-restart-changes"
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "loop-restart-changes-session",
+			RunID:     runID,
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	select {
+	case <-round2Suspended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for round 2 suspension")
+	}
+
+	snap := store.get(runID)
+	require.NotNil(t, snap)
+	assert.Equal(t, PersistStatusWaitingHuman, snap.Status)
+
+	// Simulate restart
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get(runID).Status == PersistStatusCancelled
+	}, "engine1 cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	mu.Lock()
+	msgID := lastMsgID
+	mu.Unlock()
+
+	// Engine 2 post-restart
+	engine2, _, suspender2 := newTestEngine(t)
+	engine2.registry.Register(runner)
+	engine2.SetRunStore(store)
+
+	round3Suspended := make(chan struct{})
+	engine2.SetHumanSuspender(func(req SuspendRequest) error {
+		suspender2.record(req)
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			_, _, _ = engine2.Resume(context.Background(), req.RunID, "Approve")
+		}()
+		close(round3Suspended)
+		return nil
+	})
+
+	// Re-drive with "Request Changes": should re-enter plan_agent (run 3) and plan_review_agent, then suspend at plan_approval
+	outcome, res, err := engine2.ResumeByMessageID(context.Background(), msgID, "Request Changes", nil)
+	require.NoError(t, err)
+	assert.Equal(t, ResumeReDriven, outcome)
+	require.NotNil(t, res)
+
+	select {
+	case <-round3Suspended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for round 3 suspension after Request Changes")
+	}
+
+	waitFor(t, func() bool {
+		runsMu.Lock()
+		defer runsMu.Unlock()
+		return codingRuns == 1
+	}, "coding_agent completed after round 3 approval")
+
+	runsMu.Lock()
+	defer runsMu.Unlock()
+	assert.Equal(t, 3, planRuns, "plan_agent should have run 3 times (twice before restart, once after restart via Request Changes)")
+	assert.Equal(t, 1, codingRuns, "coding_agent should run once after round 3 Approve")
+}

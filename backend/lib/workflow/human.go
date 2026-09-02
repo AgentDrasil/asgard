@@ -27,6 +27,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 
 	if reply := rc.HumanReplies[node.ID]; reply != "" {
+		delete(rc.HumanReplies, node.ID)
 		return humanReplyResult(nctx, reply)
 	}
 
@@ -95,6 +96,10 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 			}
 		}
 		captured := snapshotStates() // waitMu -> mu lock ordering compliant
+		delete(captured.nodeStates, node.ID)
+		for nid := range suspendedNodesMap {
+			delete(captured.nodeStates, nid)
+		}
 		if err := store.MarkWaitingHuman(&RunSnapshot{
 			RunID:              rc.RunID,
 			SessionID:          rc.SessionID,
@@ -265,6 +270,15 @@ func (e *Engine) buildResumeContext(snap *RunSnapshot, replyText string, emit fu
 		}
 		if replyText != "" {
 			rc.HumanReplies[snap.SuspendedNodeID] = replyText
+		}
+	}
+
+	// Suspended nodes being re-driven/awakened are not settled historical results.
+	// Strip them from SeedNodes so they are not treated as pre-settled in the new execution.
+	if rc.SeedNodes != nil {
+		delete(rc.SeedNodes, snap.SuspendedNodeID)
+		for nid := range snap.SuspendedNodes {
+			delete(rc.SeedNodes, nid)
 		}
 	}
 	return rc

@@ -109,6 +109,10 @@ func (e *Engine) runQuotaSuspension(
 			}
 		}
 		captured := snapshotStates()
+		delete(captured.nodeStates, node.ID)
+		for nid := range suspendedNodesMap {
+			delete(captured.nodeStates, nid)
+		}
 		if err := store.MarkWaitingHuman(&RunSnapshot{
 			RunID:              rc.RunID,
 			SessionID:          rc.SessionID,
