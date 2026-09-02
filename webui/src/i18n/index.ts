@@ -1,6 +1,8 @@
-import { createI18n } from "vue-i18n";
+import { createI18n, useI18n } from "vue-i18n";
 import en from "./locales/en";
 import zhCN from "./locales/zh-CN";
+
+export { useI18n };
 
 export type SupportedLocale = "en" | "zh-CN";
 export const SUPPORTED_LOCALES: { value: SupportedLocale; label: string }[] = [

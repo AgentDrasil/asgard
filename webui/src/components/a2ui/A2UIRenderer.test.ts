@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import A2UIRenderer from "./A2UIRenderer.vue";
 import type { A2UIManifest } from "../../types/a2ui";
+import { i18n } from "../../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -112,6 +113,7 @@ describe("A2UIRenderer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await nextTick();
@@ -137,6 +139,7 @@ describe("A2UIRenderer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await nextTick();

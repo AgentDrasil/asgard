@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
+import { useI18n } from "vue-i18n";
 import { useMermaid } from "../composables/useMermaid";
 
-const props = withDefaults(
-  defineProps<{
-    code: string;
-    title?: string;
-  }>(),
-  {
-    title: "Mermaid Diagram",
-  },
-);
+const { t } = useI18n();
+
+const props = defineProps<{
+  code: string;
+  title?: string;
+}>();
+
+const displayTitle = computed(() => props.title || t("mermaid.defaultTitle"));
 
 const { activeMermaidTheme, renderDiagram } = useMermaid();
 
@@ -294,7 +294,7 @@ onUnmounted(() => {
     >
       <div class="flex items-center gap-1.5 font-medium text-base-content/80">
         <Icon icon="material-symbols:account-tree-outline" class="h-4 w-4 text-primary" />
-        <span>{{ title }}</span>
+        <span>{{ displayTitle }}</span>
         <span
           v-if="zoomLevel !== 1.0 && !showRaw && !errorMessage"
           class="rounded bg-base-300/80 px-1.5 py-0.5 text-[10px] font-mono text-base-content/70"
@@ -308,7 +308,7 @@ onUnmounted(() => {
         <button
           class="btn btn-ghost btn-xs h-7 px-2 text-base-content/70 hover:text-base-content"
           :class="{ 'btn-active bg-base-300/60 text-primary': showRaw }"
-          :title="showRaw ? 'Show Diagram' : 'Show Mermaid Code'"
+          :title="showRaw ? t('mermaid.showDiagramTitle') : t('mermaid.showCodeTitle')"
           type="button"
           @click="showRaw = !showRaw"
         >
@@ -316,13 +316,15 @@ onUnmounted(() => {
             :icon="showRaw ? 'material-symbols:preview' : 'material-symbols:code'"
             class="h-3.5 w-3.5"
           />
-          <span class="ml-1 hidden sm:inline">{{ showRaw ? "Chart" : "Code" }}</span>
+          <span class="ml-1 hidden sm:inline">{{
+            showRaw ? t("mermaid.chart") : t("mermaid.code")
+          }}</span>
         </button>
 
         <!-- Copy Code Button -->
         <button
           class="btn btn-ghost btn-xs h-7 px-2 text-base-content/70 hover:text-base-content"
-          :title="isCopied ? 'Copied!' : 'Copy Mermaid Code'"
+          :title="isCopied ? t('mermaid.copiedTitle') : t('mermaid.copyCodeTitle')"
           type="button"
           @click="handleCopy"
         >
@@ -339,7 +341,7 @@ onUnmounted(() => {
           <!-- Zoom In -->
           <button
             class="btn btn-ghost btn-xs h-7 px-1.5 text-base-content/70 hover:text-base-content"
-            title="Zoom In"
+            :title="t('mermaid.zoomInTitle')"
             type="button"
             @click="handleZoomIn"
           >
@@ -349,7 +351,7 @@ onUnmounted(() => {
           <!-- Zoom Out -->
           <button
             class="btn btn-ghost btn-xs h-7 px-1.5 text-base-content/70 hover:text-base-content"
-            title="Zoom Out"
+            :title="t('mermaid.zoomOutTitle')"
             type="button"
             @click="handleZoomOut"
           >
@@ -359,7 +361,7 @@ onUnmounted(() => {
           <!-- Reset Zoom -->
           <button
             class="btn btn-ghost btn-xs h-7 px-1.5 text-base-content/70 hover:text-base-content"
-            title="Reset View"
+            :title="t('mermaid.resetViewTitle')"
             type="button"
             @click="handleResetZoom"
           >
@@ -369,7 +371,7 @@ onUnmounted(() => {
           <!-- Fullscreen -->
           <button
             class="btn btn-ghost btn-xs h-7 px-1.5 text-base-content/70 hover:text-base-content"
-            title="Fullscreen Preview"
+            :title="t('mermaid.fullscreenTitle')"
             type="button"
             @click="handleToggleFullscreen"
           >
@@ -384,7 +386,7 @@ onUnmounted(() => {
       <div class="alert alert-warning text-xs mb-2 py-2 px-3 flex items-start gap-2 shadow-xs">
         <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0 mt-0.5 text-warning" />
         <div class="min-w-0 flex-1">
-          <div class="font-semibold">Mermaid Syntax Error</div>
+          <div class="font-semibold">{{ t("mermaid.syntaxError") }}</div>
           <div class="text-[11px] opacity-90 break-words font-mono mt-0.5">{{ errorMessage }}</div>
         </div>
       </div>
@@ -443,7 +445,7 @@ onUnmounted(() => {
       >
         <div class="flex items-center gap-2 font-medium text-sm text-base-content">
           <Icon icon="material-symbols:account-tree-outline" class="h-5 w-5 text-primary" />
-          <span>{{ title }}</span>
+          <span>{{ displayTitle }}</span>
           <span
             v-if="zoomLevel !== 1.0"
             class="rounded bg-base-300 px-2 py-0.5 text-xs font-mono text-base-content/70"
@@ -456,7 +458,7 @@ onUnmounted(() => {
           <!-- Zoom Controls in Fullscreen -->
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
-            title="Zoom In"
+            :title="t('mermaid.zoomInTitle')"
             type="button"
             @click="handleZoomIn"
           >
@@ -464,7 +466,7 @@ onUnmounted(() => {
           </button>
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
-            title="Zoom Out"
+            :title="t('mermaid.zoomOutTitle')"
             type="button"
             @click="handleZoomOut"
           >
@@ -472,7 +474,7 @@ onUnmounted(() => {
           </button>
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
-            title="Reset View"
+            :title="t('mermaid.resetViewTitle')"
             type="button"
             @click="handleResetZoom"
           >
@@ -484,7 +486,7 @@ onUnmounted(() => {
           <!-- Copy Button -->
           <button
             class="btn btn-ghost btn-sm h-8 px-2 text-base-content/70 hover:text-base-content"
-            :title="isCopied ? 'Copied!' : 'Copy Mermaid Code'"
+            :title="isCopied ? t('mermaid.copiedTitle') : t('mermaid.copyCodeTitle')"
             type="button"
             @click="handleCopy"
           >
@@ -498,7 +500,7 @@ onUnmounted(() => {
           <!-- Close Fullscreen -->
           <button
             class="btn btn-ghost btn-sm btn-circle h-8 w-8 text-base-content/70 hover:text-base-content hover:bg-base-300"
-            title="Exit Fullscreen (Esc)"
+            :title="t('mermaid.exitFullscreenTitle')"
             type="button"
             @click="handleToggleFullscreen"
           >
@@ -528,7 +530,7 @@ onUnmounted(() => {
           <div class="alert alert-warning text-sm mb-3 py-2 px-3 flex items-start gap-2 shadow-xs">
             <Icon icon="mynaui:danger" class="h-5 w-5 shrink-0 mt-0.5 text-warning" />
             <div class="min-w-0 flex-1">
-              <div class="font-semibold">Mermaid Syntax Error</div>
+              <div class="font-semibold">{{ t("mermaid.syntaxError") }}</div>
               <div class="text-xs opacity-90 break-words font-mono mt-1">{{ errorMessage }}</div>
             </div>
           </div>

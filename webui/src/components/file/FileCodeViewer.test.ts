@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import FileCodeViewer from "./FileCodeViewer.vue";
 import * as api from "../../lib/api";
+import { i18n } from "../../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -63,6 +64,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -101,6 +103,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -134,6 +137,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -165,6 +169,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -199,6 +204,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -269,6 +275,7 @@ describe("FileCodeViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {

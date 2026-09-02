@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import type { GitDiffFile } from "../../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   files: GitDiffFile[];
@@ -25,26 +28,54 @@ const filteredFiles = computed(() => {
     .filter(({ file }) => file.newPath.toLowerCase().includes(q));
 });
 
-function getFileStatus(file: GitDiffFile): { label: string; badgeClass: string } {
+function getFileStatus(file: GitDiffFile): { label: string; tooltip: string; badgeClass: string } {
   switch (file.status) {
     case "A":
-      return { label: "A", badgeClass: "badge-success text-success-content" };
+      return {
+        label: "A",
+        tooltip: t("vcs.fileStatusAdded"),
+        badgeClass: "badge-success text-success-content",
+      };
     case "D":
-      return { label: "D", badgeClass: "badge-error text-error-content" };
+      return {
+        label: "D",
+        tooltip: t("vcs.fileStatusDeleted"),
+        badgeClass: "badge-error text-error-content",
+      };
     case "R":
-      return { label: "R", badgeClass: "badge-info text-info-content" };
+      return {
+        label: "R",
+        tooltip: t("vcs.fileStatusRenamed"),
+        badgeClass: "badge-info text-info-content",
+      };
   }
   // Fallback for payloads without a status field
   if (file.oldPath === "/dev/null") {
-    return { label: "A", badgeClass: "badge-success text-success-content" };
+    return {
+      label: "A",
+      tooltip: t("vcs.fileStatusAdded"),
+      badgeClass: "badge-success text-success-content",
+    };
   }
   if (file.newPath === "/dev/null") {
-    return { label: "D", badgeClass: "badge-error text-error-content" };
+    return {
+      label: "D",
+      tooltip: t("vcs.fileStatusDeleted"),
+      badgeClass: "badge-error text-error-content",
+    };
   }
   if (file.oldPath && file.newPath && file.oldPath !== file.newPath) {
-    return { label: "R", badgeClass: "badge-info text-info-content" };
+    return {
+      label: "R",
+      tooltip: t("vcs.fileStatusRenamed"),
+      badgeClass: "badge-info text-info-content",
+    };
   }
-  return { label: "M", badgeClass: "badge-warning text-warning-content" };
+  return {
+    label: "M",
+    tooltip: t("vcs.fileStatusModified"),
+    badgeClass: "badge-warning text-warning-content",
+  };
 }
 
 function getFileNameAndDir(path: string) {
@@ -71,7 +102,7 @@ function isCommented(path: string): boolean {
         <input
           v-model="searchQuery"
           type="text"
-          placeholder="Filter files..."
+          :placeholder="t('vcs.filterFilesPlaceholder')"
           class="input input-xs w-full pl-8 pr-7 bg-base-100 border-base-300 focus:border-primary text-xs"
         />
         <button
@@ -94,14 +125,14 @@ function isCommented(path: string): boolean {
           icon="material-symbols:check-circle-outline-rounded"
           class="h-6 w-6 text-success/60"
         />
-        <span>No changed files</span>
+        <span>{{ t("vcs.noChangedFiles") }}</span>
       </div>
 
       <div
         v-else-if="filteredFiles.length === 0"
         class="py-4 text-center text-xs text-base-content/40"
       >
-        No matching files
+        {{ t("vcs.noMatchingFiles") }}
       </div>
 
       <button
@@ -121,7 +152,7 @@ function isCommented(path: string): boolean {
             'badge badge-xs font-bold text-[10px] shrink-0 w-4 h-4 p-0 flex items-center justify-center rounded',
             getFileStatus(file).badgeClass,
           ]"
-          :title="getFileStatus(file).label"
+          :title="getFileStatus(file).tooltip"
         >
           {{ getFileStatus(file).label }}
         </span>
@@ -143,7 +174,7 @@ function isCommented(path: string): boolean {
         <span
           v-if="isCommented(file.newPath)"
           class="badge badge-xs badge-warning shrink-0"
-          title="Contains comments"
+          :title="t('vcs.containsComments')"
         >
           💬
         </span>

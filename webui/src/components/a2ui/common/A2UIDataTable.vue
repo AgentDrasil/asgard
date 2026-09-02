@@ -2,7 +2,10 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
 import Papa from "papaparse";
+import { useI18n } from "vue-i18n";
 import type { A2UIDataTableWidget, A2UIDataTableColumn } from "../../../types/a2ui";
+
+const { t } = useI18n();
 import { resolveBadgeClass } from "../../../utils/badgeHelper";
 import {
   formatA2UIMoney,
@@ -230,7 +233,7 @@ function exportCsv() {
         class="btn btn-xs sm:btn-sm btn-outline border-base-300 text-base-content/80 hover:text-base-content gap-1 text-xs self-start sm:self-auto shrink-0"
       >
         <Icon icon="octicon:download-16" class="w-3.5 h-3.5 text-primary" />
-        <span>Export CSV</span>
+        <span>{{ t("a2ui.dataTable.exportCsv") }}</span>
       </button>
     </div>
 
@@ -251,7 +254,11 @@ function exportCsv() {
         <input
           v-model="searchQuery"
           type="text"
-          :placeholder="columns[0] ? `Search ${columns[0].label}...` : 'Search...'"
+          :placeholder="
+            columns[0]
+              ? t('a2ui.dataTable.searchPlaceholder', { label: columns[0].label })
+              : t('a2ui.dataTable.searchDefaultPlaceholder')
+          "
           class="input input-xs sm:input-sm input-bordered w-full pl-8 rounded-lg bg-base-100 text-xs text-base-content placeholder:text-base-content/40"
         />
       </div>
@@ -266,7 +273,7 @@ function exportCsv() {
           class="select select-xs sm:select-sm select-bordered bg-base-100 text-xs rounded-lg text-base-content"
           :class="activeFilters[f.key] ? 'border-primary/60 font-semibold' : 'border-base-300'"
         >
-          <option value="">All {{ f.label || f.key }}</option>
+          <option value="">{{ t("a2ui.dataTable.allFilter", { label: f.label || f.key }) }}</option>
           <option v-for="opt in filterOptionsMap[f.key] || []" :key="opt" :value="opt">
             {{ opt }}
           </option>
@@ -277,7 +284,7 @@ function exportCsv() {
       <button
         @click="resetFilters"
         class="btn btn-xs sm:btn-sm btn-ghost text-base-content/60 hover:text-base-content"
-        title="Reset Filters"
+        :title="t('a2ui.dataTable.resetFilters')"
       >
         <Icon icon="mynaui:refresh" class="w-3.5 h-3.5" />
       </button>
@@ -366,7 +373,7 @@ function exportCsv() {
               :colspan="columns.length"
               class="text-center py-8 text-base-content/50 font-sans text-xs"
             >
-              No matching records found
+              {{ t("a2ui.dataTable.noMatchingRecords") }}
             </td>
           </tr>
         </tbody>
@@ -375,7 +382,7 @@ function exportCsv() {
 
     <!-- Table Footer / Count -->
     <div class="flex justify-between items-center text-xs text-base-content/60 font-sans pt-1">
-      <span>Showing {{ processedRows.length }} rows</span>
+      <span>{{ t("a2ui.dataTable.showingRows", { count: processedRows.length }) }}</span>
     </div>
   </div>
 </template>

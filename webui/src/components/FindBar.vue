@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   modelValue: string;
@@ -65,7 +68,7 @@ onMounted(() => {
           @keydown.enter.exact.prevent="emit('next')"
           @keydown.shift.enter.prevent="emit('prev')"
           @keydown.esc.prevent="emit('close')"
-          placeholder="Find in page..."
+          :placeholder="t('findBar.placeholder')"
           class="input input-xs input-bordered bg-base-100 pl-2 pr-2 font-mono text-xs text-base-content focus:outline-none focus:border-primary w-36 sm:w-44 h-7 rounded-lg"
         />
       </div>
@@ -86,8 +89,8 @@ onMounted(() => {
           @click="emit('prev')"
           :disabled="totalMatches === 0"
           class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content disabled:opacity-30 h-7 w-7 rounded-lg"
-          title="Previous match (Shift+Enter)"
-          aria-label="Previous match"
+          :title="t('findBar.previousMatch')"
+          :aria-label="t('findBar.previousMatchAria')"
         >
           <Icon icon="lucide:chevron-up" class="h-4 w-4" />
         </button>
@@ -97,8 +100,8 @@ onMounted(() => {
           @click="emit('next')"
           :disabled="totalMatches === 0"
           class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content disabled:opacity-30 h-7 w-7 rounded-lg"
-          title="Next match (Enter)"
-          aria-label="Next match"
+          :title="t('findBar.nextMatch')"
+          :aria-label="t('findBar.nextMatchAria')"
         >
           <Icon icon="lucide:chevron-down" class="h-4 w-4" />
         </button>
@@ -107,8 +110,8 @@ onMounted(() => {
         <button
           @click="emit('close')"
           class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content h-7 w-7 rounded-lg ml-0.5"
-          title="Close (Esc)"
-          aria-label="Close find bar"
+          :title="t('findBar.close')"
+          :aria-label="t('findBar.closeAria')"
         >
           <Icon icon="lucide:x" class="h-4 w-4" />
         </button>

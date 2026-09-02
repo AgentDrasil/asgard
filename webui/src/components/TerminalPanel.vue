@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import TerminalView from "./TerminalView.vue";
 import { useTerminalTheme } from "../composables/useTerminalTheme";
 import { useShortcuts } from "../composables/useShortcuts";
 
+const { t } = useI18n();
 const { toggleTerminalShortcut } = useShortcuts();
 
 const props = withDefaults(
@@ -154,7 +156,7 @@ onUnmounted(() => {
         @touchstart.passive="startResize"
         @dblclick="resetHeight"
         class="h-2 w-full bg-base-300 hover:bg-primary/50 cursor-row-resize flex items-center justify-center group transition-colors shrink-0 z-10"
-        title="Drag to resize, double click to reset"
+        :title="t('terminal.dragToResize')"
       >
         <div
           class="w-10 h-1 rounded-full bg-base-content/20 group-hover:bg-primary transition-colors"
@@ -170,13 +172,15 @@ onUnmounted(() => {
           <button
             @click="emit('hide')"
             class="sm:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0 mr-0.5"
-            title="Back to Chat"
+            :title="t('terminal.backToChat')"
           >
             <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
           </button>
           <Icon icon="mynaui:terminal" class="h-4 w-4 text-primary shrink-0" />
           <span class="truncate">{{
-            terminalType === "sidebar" ? "Global Terminal" : "Terminal (Agent Workspace)"
+            terminalType === "sidebar"
+              ? t("terminal.globalTerminal")
+              : t("terminal.sessionTerminal")
           }}</span>
         </div>
         <div class="flex items-center gap-1 shrink-0">
@@ -184,7 +188,7 @@ onUnmounted(() => {
           <button
             @click="emit('hide')"
             class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            :title="`Hide Terminal (${toggleTerminalShortcut})`"
+            :title="t('terminal.hideTerminal', { shortcut: toggleTerminalShortcut })"
           >
             <Icon icon="ep:minus" class="h-3.5 w-3.5" />
           </button>
@@ -192,7 +196,7 @@ onUnmounted(() => {
           <button
             @click="toggleMaximize"
             class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            :title="isMaximized ? 'Restore Down' : 'Maximize Terminal'"
+            :title="isMaximized ? t('terminal.restoreTerminal') : t('terminal.maximizeTerminal')"
           >
             <Icon
               :icon="isMaximized ? 'octicon:screen-normal-24' : 'octicon:screen-full-24'"
@@ -203,7 +207,7 @@ onUnmounted(() => {
           <button
             @click="closeTerminal"
             class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            title="Close Terminal"
+            :title="t('terminal.closeTerminal')"
           >
             <Icon icon="ep:close" class="h-3.5 w-3.5" />
           </button>
@@ -237,19 +241,19 @@ onUnmounted(() => {
         <button
           @click="emit('hide')"
           class="btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
-          title="Back to Chat (Minimize)"
+          :title="t('terminal.backToChatMinimize')"
         >
           <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
         </button>
         <Icon icon="mynaui:terminal" class="h-5 w-5 text-primary shrink-0" />
-        <span class="truncate">Terminal</span>
+        <span class="truncate">{{ t("terminal.terminal") }}</span>
       </div>
       <div class="flex items-center gap-1 shrink-0">
         <!-- Close (destroy terminal) -->
         <button
           @click="closeTerminal"
           class="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-base-content"
-          title="Close Terminal"
+          :title="t('terminal.closeTerminal')"
         >
           <Icon icon="ep:close" class="h-5 w-5" />
         </button>

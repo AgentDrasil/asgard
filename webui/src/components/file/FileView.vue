@@ -5,12 +5,14 @@ import { Icon } from "@iconify/vue";
 import FileTreeSidebar from "./FileTreeSidebar.vue";
 import FileCodeViewer from "./FileCodeViewer.vue";
 import { useShortcuts } from "../../composables/useShortcuts";
+import { useI18n } from "vue-i18n";
 import { rebuildChatInputFromComments, commentKey } from "../../utils/commentUtils";
 import { humanfriendly } from "../../lib/format";
 import { getFileIcon } from "../../utils/fileUtils";
 import { buildFilesRoute, resolveViewFromRoute } from "../../utils/routeUtils";
 import type { CommentEntry, FileScope, WorkspaceFileContent } from "../../types";
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -183,13 +185,13 @@ const breadcrumbParts = computed(() => {
           <button
             @click="handleRefreshFile"
             class="btn btn-ghost btn-xs btn-circle text-base-content/60 hover:text-base-content shrink-0"
-            title="Refresh current file"
+            :title="t('files.refreshCurrentFile')"
           >
             <Icon icon="mynaui:refresh" class="h-3.5 w-3.5" />
           </button>
         </template>
         <template v-else>
-          <span class="font-bold text-base-content truncate">Workspace Files</span>
+          <span class="font-bold text-base-content truncate">{{ t("files.workspaceFiles") }}</span>
         </template>
       </div>
 
@@ -204,7 +206,7 @@ const breadcrumbParts = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
-            title="Files"
+            :title="t('files.filesTab')"
           >
             <Icon icon="mdi:file-tree" class="h-3.5 w-3.5" />
           </button>
@@ -216,7 +218,7 @@ const breadcrumbParts = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
-            title="Code"
+            :title="t('files.codeTab')"
           >
             <Icon icon="mdi:file-outline" class="h-3.5 w-3.5" />
           </button>
@@ -230,26 +232,26 @@ const breadcrumbParts = computed(() => {
           <button
             @click="emit('close')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to Chat View (${toggleFileViewShortcut})`"
+            :title="t('files.switchToChatTitle', { shortcut: toggleFileViewShortcut })"
           >
             <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Chat</span>
+            <span class="hidden sm:inline">{{ t("files.chat") }}</span>
           </button>
           <button
             v-if="gitRoot"
             @click="emit('open-vcs')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to VCS View (${toggleDiffShortcut})`"
+            :title="t('files.switchToVcsTitle', { shortcut: toggleDiffShortcut })"
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">VCS</span>
+            <span class="hidden sm:inline">{{ t("files.vcs") }}</span>
           </button>
           <button
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
-            title="Files View"
+            :title="t('files.filesViewTitle')"
           >
             <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Files</span>
+            <span class="hidden sm:inline">{{ t("files.files") }}</span>
           </button>
         </div>
 
@@ -264,10 +266,10 @@ const breadcrumbParts = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
+            :title="t('files.toggleTerminalTitle', { shortcut: toggleTerminalShortcut })"
           >
             <Icon icon="codicon:layout-panel" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Terminal</span>
+            <span class="hidden xl:inline">{{ t("files.terminal") }}</span>
           </button>
 
           <!-- Toggle File Tree Right Sidebar Button -->
@@ -279,10 +281,10 @@ const breadcrumbParts = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            :title="`Toggle File Explorer Sidebar (${toggleArtifactsShortcut})`"
+            :title="t('files.toggleSidebarTitle', { shortcut: toggleArtifactsShortcut })"
           >
             <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Sidebar</span>
+            <span class="hidden xl:inline">{{ t("files.sidebar") }}</span>
           </button>
         </div>
       </div>

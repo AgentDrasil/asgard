@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, h } from "vue";
 import ArtifactViewer from "./ArtifactViewer.vue";
+import { i18n } from "../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -69,6 +70,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -116,6 +118,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -157,6 +160,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -195,6 +199,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -233,6 +238,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -268,6 +274,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -304,6 +311,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -341,6 +349,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {
@@ -407,6 +416,7 @@ describe("ArtifactViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
 
     await vi.waitFor(() => {

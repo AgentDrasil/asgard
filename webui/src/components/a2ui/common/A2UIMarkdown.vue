@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import type { A2UIMarkdownWidget } from "../../../types/a2ui";
 import MarkdownContent from "../../MarkdownContent.vue";
 import { fetchWorkspaceAsset } from "../../../utils/a2uiUtils";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   widget: A2UIMarkdownWidget;
@@ -71,7 +74,7 @@ watch(
       <div class="flex items-center gap-2">
         <Icon icon="octicon:file-code-24" class="w-4 h-4 text-primary" />
         <h3 class="text-sm sm:text-base font-bold text-base-content">
-          {{ widget.title || widget.sourceMd || "Markdown Document" }}
+          {{ widget.title || widget.sourceMd || t("a2ui.markdown.defaultTitle") }}
         </h3>
       </div>
       <button
@@ -79,7 +82,7 @@ watch(
         class="btn btn-xs sm:btn-sm btn-outline border-base-300 gap-1.5 text-xs text-base-content/80 hover:text-base-content"
       >
         <Icon :icon="copied ? 'mynaui:check' : 'mynaui:copy'" class="w-3.5 h-3.5 text-primary" />
-        <span>{{ copied ? "Copied" : "Copy Markdown" }}</span>
+        <span>{{ copied ? t("a2ui.markdown.copied") : t("a2ui.markdown.copyMarkdown") }}</span>
       </button>
     </div>
 

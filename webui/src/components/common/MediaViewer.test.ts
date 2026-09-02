@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import MediaViewer from "./MediaViewer.vue";
+import { i18n } from "../../i18n";
 
 describe("MediaViewer.vue", () => {
   let root: HTMLElement;
@@ -23,6 +24,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -91,6 +93,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -124,6 +127,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -152,6 +156,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -179,6 +184,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -208,6 +214,7 @@ describe("MediaViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 

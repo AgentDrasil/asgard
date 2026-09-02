@@ -5,6 +5,7 @@ import { getFileContent, getRawFileContentUrl } from "../../lib/api";
 import { useShiki } from "../../composables/useShiki";
 import { useShortcuts } from "../../composables/useShortcuts";
 import { useInPageFind } from "../../composables/useInPageFind";
+import { useI18n } from "vue-i18n";
 import { commentKey } from "../../utils/commentUtils";
 import {
   mapExtToLang,
@@ -20,6 +21,8 @@ import CsvViewer from "../common/CsvViewer.vue";
 import A2UIRenderer from "../a2ui/A2UIRenderer.vue";
 import { isA2UIManifest, parseA2UIManifest } from "../../utils/a2uiUtils";
 import type { CommentEntry, FileScope, WorkspaceFileContent } from "../../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   sessionId: string;
@@ -304,10 +307,10 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="A2UI Dashboard Preview"
+            :title="t('files.codeViewer.dashboardTitle')"
           >
             <Icon icon="material-symbols:dashboard-customize-outline" class="h-3 w-3" />
-            <span>Dashboard</span>
+            <span>{{ t("files.codeViewer.dashboard") }}</span>
           </button>
           <button
             @click="a2uiMode = 'source'"
@@ -317,10 +320,10 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Raw JSON Source"
+            :title="t('files.codeViewer.rawSourceTitle')"
           >
             <Icon icon="octicon:code-24" class="h-3 w-3" />
-            <span>Source</span>
+            <span>{{ t("files.codeViewer.source") }}</span>
           </button>
         </div>
 
@@ -336,7 +339,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
             ]"
           >
             <Icon icon="octicon:markdown-24" class="h-3 w-3" />
-            <span>Preview</span>
+            <span>{{ t("files.codeViewer.preview") }}</span>
           </button>
           <button
             @click="markdownMode = 'source'"
@@ -348,7 +351,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
             ]"
           >
             <Icon icon="octicon:code-24" class="h-3 w-3" />
-            <span>Source</span>
+            <span>{{ t("files.codeViewer.source") }}</span>
           </button>
         </div>
 
@@ -364,7 +367,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
             ]"
           >
             <Icon icon="octicon:table-24" class="h-3 w-3" />
-            <span>Table</span>
+            <span>{{ t("files.codeViewer.table") }}</span>
           </button>
           <button
             @click="csvMode = 'source'"
@@ -376,7 +379,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
             ]"
           >
             <Icon icon="octicon:code-24" class="h-3 w-3" />
-            <span>Source</span>
+            <span>{{ t("files.codeViewer.source") }}</span>
           </button>
         </div>
 
@@ -390,10 +393,10 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
               ? 'btn-primary shadow-xs'
               : 'btn-ghost text-base-content/70 hover:text-base-content bg-base-300/60'
           "
-          :title="`Find in file (${findShortcut})`"
+          :title="t('files.codeViewer.findTitle', { shortcut: findShortcut })"
         >
           <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
-          <span class="hidden sm:inline">Find</span>
+          <span class="hidden sm:inline">{{ t("files.codeViewer.find") }}</span>
         </button>
       </div>
     </div>
@@ -423,7 +426,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
         class="flex items-center justify-center h-full text-base-content/50 gap-3"
       >
         <span class="loading loading-ring loading-md text-primary"></span>
-        <span class="text-sm">Loading file...</span>
+        <span class="text-sm">{{ t("files.codeViewer.loadingFile") }}</span>
       </div>
 
       <!-- Error State -->
@@ -440,16 +443,18 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
         class="flex flex-col items-center justify-center h-full gap-3 text-base-content/40 p-6 text-center"
       >
         <Icon icon="octicon:file-code-24" class="h-12 w-12 text-base-content/20" />
-        <p class="text-sm font-medium text-base-content/80">No file selected</p>
+        <p class="text-sm font-medium text-base-content/80">
+          {{ t("files.codeViewer.noFileSelected") }}
+        </p>
         <p class="text-xs max-w-xs text-base-content/60">
-          Select a file from the explorer sidebar or search across the workspace.
+          {{ t("files.codeViewer.noFileSelectedDesc") }}
         </p>
         <button
           @click="emit('open-search')"
           class="btn btn-sm btn-outline gap-1.5 text-xs font-semibold mt-2 hover:btn-primary"
         >
           <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
-          <span>Search Files</span>
+          <span>{{ t("files.codeViewer.searchFilesBtn") }}</span>
         </button>
       </div>
 
@@ -522,7 +527,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                 <td
                   class="w-12 px-2 py-0.5 text-right select-none text-base-content/40 hover:text-primary cursor-pointer border-r border-base-300 align-top group-hover:bg-base-200/80 shrink-0"
                   @click="toggleCommentWidget(idx + 1)"
-                  :title="`Click to comment on line ${idx + 1}`"
+                  :title="t('files.codeViewer.clickToComment', { line: idx + 1 })"
                 >
                   <div class="flex items-center justify-end gap-1">
                     <Icon
@@ -560,7 +565,12 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                           icon="material-symbols:chat-bubble-outline"
                           class="h-3.5 w-3.5 text-primary"
                         />
-                        <span>Comment · {{ fileData.name }} · line {{ activeLine }}</span>
+                        <span>{{
+                          t("files.codeViewer.commentHeader", {
+                            file: fileData.name,
+                            line: activeLine,
+                          })
+                        }}</span>
                       </div>
                       <button
                         @click="closeWidget"
@@ -582,7 +592,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                       <textarea
                         ref="textareaRef"
                         v-model="widgetInput"
-                        placeholder="Add a comment… it will appear in the chat input"
+                        :placeholder="t('files.codeViewer.addCommentPlaceholder')"
                         rows="3"
                         class="textarea textarea-bordered bg-base-100 text-base-content w-full text-xs font-sans resize-none focus:outline-none focus:border-primary"
                         @keydown.ctrl.enter.prevent="submitComment"
@@ -595,17 +605,19 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
                           class="btn btn-ghost btn-xs text-error hover:bg-error/10 gap-1"
                         >
                           <Icon icon="mynaui:trash-one" class="h-3.5 w-3.5" />
-                          Delete
+                          {{ t("files.codeViewer.delete") }}
                         </button>
                         <div class="flex gap-2 ml-auto">
-                          <button @click="closeWidget" class="btn btn-ghost btn-xs">Cancel</button>
+                          <button @click="closeWidget" class="btn btn-ghost btn-xs">
+                            {{ t("files.codeViewer.cancel") }}
+                          </button>
                           <button
                             @click="submitComment"
                             :disabled="!widgetInput.trim()"
                             class="btn btn-primary btn-xs gap-1 shadow-xs"
                           >
                             <Icon icon="material-symbols:add" class="h-3.5 w-3.5" />
-                            Add to Chat
+                            {{ t("files.codeViewer.addToChat") }}
                           </button>
                         </div>
                       </div>
@@ -626,7 +638,7 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
     >
       <Icon icon="material-symbols:chat-bubble-outline" class="h-4 w-4 text-warning shrink-0" />
       <span class="text-warning font-medium shrink-0">
-        {{ comments.size }} comment{{ comments.size > 1 ? "s" : "" }} in chat input
+        {{ t("files.codeViewer.commentsInInput", { count: comments.size }) }}
       </span>
       <div class="flex items-center gap-1 flex-wrap flex-1 min-w-0">
         <span
@@ -634,7 +646,12 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
           :key="key"
           class="badge badge-xs badge-warning gap-1 cursor-pointer hover:badge-error transition-colors"
           @click="emit('delete-comment', key)"
-          :title="`${entry.filePath}:${entry.lineNumber} — click to remove`"
+          :title="
+            t('files.codeViewer.clickToRemoveComment', {
+              file: entry.filePath,
+              line: entry.lineNumber,
+            })
+          "
         >
           {{ entry.filePath.split("/").pop() }}:{{ entry.lineNumber }}
           <Icon icon="mynaui:x" class="h-2.5 w-2.5" />
@@ -643,9 +660,9 @@ watch([() => fileData.value, markdownMode, csvMode, a2uiMode], () => {
       <button
         @click="emit('clear-comments')"
         class="btn btn-ghost btn-xs text-warning/70 hover:text-error ml-auto shrink-0"
-        title="Clear all comments"
+        :title="t('files.codeViewer.clearAllTitle')"
       >
-        Clear all
+        {{ t("files.codeViewer.clearAll") }}
       </button>
     </div>
   </div>

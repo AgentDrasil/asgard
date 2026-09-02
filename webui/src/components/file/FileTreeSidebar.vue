@@ -3,9 +3,12 @@ import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { Icon } from "@iconify/vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { getFileTree } from "../../lib/api";
+import { useI18n } from "vue-i18n";
 import { formatPath } from "../../utils/agentUtils";
 import { isSessionTmpDir, isTmpScopePath, isSessionScopePath } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   sessionId: string;
@@ -34,7 +37,7 @@ const hasSeparateTmp = computed(() => {
 });
 
 const workspaceName = computed(() => {
-  if (!props.runDir) return "Workspace";
+  if (!props.runDir) return t("sidebar.defaultWorkspace");
   const parts = props.runDir.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts[parts.length - 1] || formatPath(props.runDir) || props.runDir;
 });
@@ -190,7 +193,7 @@ onUnmounted(() => {
       v-if="isDesktop"
       @mousedown="startResize"
       class="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
-      title="Drag to resize File Tree sidebar"
+      :title="t('files.dragToResizeSidebar')"
     ></div>
 
     <!-- Sidebar Main Column -->
@@ -228,7 +231,7 @@ onUnmounted(() => {
           <select
             v-model="activeRootScope"
             class="select select-bordered select-xs w-full max-w-full font-mono text-xs text-base-content focus:outline-none bg-base-100 h-7"
-            aria-label="Select directory scope"
+            :aria-label="t('files.selectDirectoryScopeAria')"
           >
             <option value="workdir">{{ workspaceName }}</option>
             <option value="tmp">/tmp (session)</option>
@@ -242,7 +245,7 @@ onUnmounted(() => {
             @click="handleRefresh"
             :disabled="isTreeLoading || loading"
             class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-            title="Refresh File Tree"
+            :title="t('files.refreshTree')"
           >
             <Icon
               icon="mynaui:refresh"
@@ -260,7 +263,7 @@ onUnmounted(() => {
         >
           <span class="flex items-center gap-1.5 truncate">
             <Icon icon="material-symbols:search" class="h-3.5 w-3.5 text-base-content/40" />
-            <span class="text-[11px] truncate">Search files...</span>
+            <span class="text-[11px] truncate">{{ t("files.searchFilesPlaceholder") }}</span>
           </span>
         </button>
       </div>
@@ -273,7 +276,7 @@ onUnmounted(() => {
           class="flex items-center justify-center py-8 text-base-content/50 gap-2 text-xs"
         >
           <span class="loading loading-spinner loading-xs text-primary"></span>
-          <span>Loading files...</span>
+          <span>{{ t("files.loadingFiles") }}</span>
         </div>
 
         <!-- Error State -->
@@ -290,7 +293,7 @@ onUnmounted(() => {
           class="py-8 px-3 text-center text-xs text-base-content/40 flex flex-col items-center justify-center gap-1.5"
         >
           <Icon icon="octicon:file-directory-24" class="h-6 w-6 text-base-content/20" />
-          <span>Workspace is empty</span>
+          <span>{{ t("files.workspaceEmpty") }}</span>
         </div>
 
         <!-- Root Node List -->

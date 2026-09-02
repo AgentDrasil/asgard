@@ -2,7 +2,10 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { Icon } from "@iconify/vue";
 import Papa from "papaparse";
+import { useI18n } from "vue-i18n";
 import type { A2UIHoldingsTableWidget, A2UIDataTableColumn } from "../../../types/a2ui";
+
+const { t } = useI18n();
 import { resolveBadgeClass } from "../../../utils/badgeHelper";
 import {
   formatA2UIMoney,
@@ -367,7 +370,7 @@ function exportCsv() {
         class="btn btn-xs sm:btn-sm btn-outline border-base-300 text-base-content/80 hover:text-base-content gap-1 text-xs self-start sm:self-auto shrink-0"
       >
         <Icon icon="octicon:download-16" class="w-3.5 h-3.5 text-primary" />
-        <span>Export CSV</span>
+        <span>{{ t("a2ui.holdingsTable.exportCsv") }}</span>
       </button>
     </div>
 
@@ -390,10 +393,14 @@ function exportCsv() {
             ? 'btn-primary shadow-xs'
             : 'btn-outline border-base-300 text-base-content/70 hover:bg-base-300 hover:text-base-content'
         "
-        title="Consolidate positions with identical symbols across all accounts"
+        :title="t('a2ui.holdingsTable.consolidatePositions')"
       >
         <Icon icon="lucide:combine" class="w-3.5 h-3.5" />
-        <span>{{ isAggregateMode ? "Aggregated" : "Aggregate Assets" }}</span>
+        <span>{{
+          isAggregateMode
+            ? t("a2ui.holdingsTable.aggregated")
+            : t("a2ui.holdingsTable.aggregateAssets")
+        }}</span>
       </button>
 
       <!-- Search Input -->
@@ -405,7 +412,11 @@ function exportCsv() {
         <input
           v-model="searchQuery"
           type="text"
-          :placeholder="columns[0] ? `Search ${columns[0].label}...` : 'Search...'"
+          :placeholder="
+            columns[0]
+              ? t('a2ui.holdingsTable.searchPlaceholder', { label: columns[0].label })
+              : t('a2ui.holdingsTable.searchDefaultPlaceholder')
+          "
           class="input input-xs sm:input-sm input-bordered w-full pl-8 rounded-lg bg-base-100 text-xs text-base-content placeholder:text-base-content/40"
         />
       </div>
@@ -420,7 +431,9 @@ function exportCsv() {
           class="select select-xs sm:select-sm select-bordered bg-base-100 text-xs rounded-lg text-base-content"
           :class="activeFilters[f.key] ? 'border-primary/60 font-semibold' : 'border-base-300'"
         >
-          <option value="">All {{ f.label || f.key }}</option>
+          <option value="">
+            {{ t("a2ui.holdingsTable.allFilter", { label: f.label || f.key }) }}
+          </option>
           <option v-for="opt in filterOptionsMap[f.key] || []" :key="opt" :value="opt">
             {{ opt }}
           </option>
@@ -431,7 +444,7 @@ function exportCsv() {
       <button
         @click="resetFilters"
         class="btn btn-xs sm:btn-sm btn-ghost text-base-content/60 hover:text-base-content"
-        title="Reset Filters"
+        :title="t('a2ui.holdingsTable.resetFilters')"
       >
         <Icon icon="mynaui:refresh" class="w-3.5 h-3.5" />
       </button>
@@ -494,9 +507,9 @@ function exportCsv() {
                 class="flex flex-col gap-1 font-sans py-1 min-w-[140px]"
               >
                 <div class="flex items-center gap-1.5">
-                  <span class="badge badge-xs badge-tag-sky font-bold shrink-0 px-2 py-0.5"
-                    >{{ row.account_count }} Accounts</span
-                  >
+                  <span class="badge badge-xs badge-tag-sky font-bold shrink-0 px-2 py-0.5">{{
+                    t("a2ui.holdingsTable.accountsCount", { count: row.account_count })
+                  }}</span>
                 </div>
                 <div class="flex flex-col gap-0.5 text-[11px] text-base-content/80 leading-tight">
                   <span
@@ -535,7 +548,7 @@ function exportCsv() {
               :colspan="columns.length"
               class="text-center py-8 text-base-content/50 font-sans text-xs"
             >
-              No matching records found
+              {{ t("a2ui.holdingsTable.noMatchingRecords") }}
             </td>
           </tr>
         </tbody>
@@ -544,10 +557,11 @@ function exportCsv() {
 
     <!-- Table Footer / Count -->
     <div class="flex justify-between items-center text-xs text-base-content/60 font-sans pt-1">
-      <span
-        >Showing {{ processedRows.length }}
-        {{ isAggregateMode ? "consolidated items" : "rows" }}</span
-      >
+      <span>{{
+        isAggregateMode
+          ? t("a2ui.holdingsTable.showingConsolidated", { count: processedRows.length })
+          : t("a2ui.holdingsTable.showingRows", { count: processedRows.length })
+      }}</span>
     </div>
   </div>
 </template>

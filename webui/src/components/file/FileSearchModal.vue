@@ -2,8 +2,11 @@
 import { ref, watch, nextTick, computed } from "vue";
 import { Icon } from "@iconify/vue";
 import { useFileSearchState } from "../../composables/useFileSearchState";
+import { useI18n } from "vue-i18n";
 import { humanfriendly } from "../../lib/format";
 import type { FileScope } from "../../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   isOpen: boolean;
@@ -115,7 +118,7 @@ function getDirName(path: string): string {
             ref="inputRef"
             v-model="query"
             type="text"
-            placeholder="Search files by name or path..."
+            :placeholder="t('files.searchModal.placeholder')"
             class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
             @keydown.down.prevent="navigateNext"
             @keydown.up.prevent="navigatePrevious"
@@ -126,7 +129,7 @@ function getDirName(path: string): string {
             v-if="query"
             @click="query = ''"
             class="btn btn-ghost btn-xs btn-circle text-base-content/60 hover:text-base-content"
-            title="Clear search"
+            :title="t('files.searchModal.clearSearch')"
           >
             <Icon icon="mynaui:x" class="h-4 w-4" />
           </button>
@@ -151,7 +154,7 @@ function getDirName(path: string): string {
             class="py-12 px-4 text-center text-base-content/40 text-xs flex flex-col items-center gap-2"
           >
             <Icon icon="octicon:file-directory-fill-24" class="h-8 w-8 text-base-content/20" />
-            <span>Type to search files across the workspace</span>
+            <span>{{ t("files.searchModal.typeToSearch") }}</span>
           </div>
 
           <!-- No Results Found State -->
@@ -160,10 +163,7 @@ function getDirName(path: string): string {
             class="py-12 px-4 text-center text-base-content/50 text-xs flex flex-col items-center gap-2"
           >
             <Icon icon="octicon:search-24" class="h-8 w-8 text-base-content/20" />
-            <span
-              >No files found matching
-              <strong class="text-base-content/80">"{{ query }}"</strong></span
-            >
+            <span>{{ t("files.searchModal.noFilesFound", { query }) }}</span>
           </div>
 
           <!-- Results List -->
@@ -242,20 +242,20 @@ function getDirName(path: string): string {
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↑</kbd>
               <kbd class="kbd kbd-xs bg-base-100">↓</kbd>
-              <span class="ml-0.5">navigate</span>
+              <span class="ml-0.5">{{ t("files.searchModal.navigate") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">↵</kbd>
-              <span class="ml-0.5">select</span>
+              <span class="ml-0.5">{{ t("files.searchModal.select") }}</span>
             </span>
             <span class="flex items-center gap-1">
               <kbd class="kbd kbd-xs bg-base-100">esc</kbd>
-              <span class="ml-0.5">close</span>
+              <span class="ml-0.5">{{ t("files.searchModal.close") }}</span>
             </span>
           </div>
 
           <div v-if="results.length > 0" class="font-mono">
-            {{ results.length }} result{{ results.length === 1 ? "" : "s" }}
+            {{ t("files.searchModal.resultsCount", { count: results.length }) }}
           </div>
         </div>
       </div>

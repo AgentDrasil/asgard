@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import FileSearchModal from "./FileSearchModal.vue";
 import * as api from "../../lib/api";
+import { i18n } from "../../i18n";
 import type { FileSearchResult } from "../../types";
 
 // Mock @iconify/vue
@@ -44,6 +45,7 @@ describe("FileSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -100,6 +102,7 @@ describe("FileSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -144,6 +147,7 @@ describe("FileSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -182,6 +186,7 @@ describe("FileSearchModal.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 

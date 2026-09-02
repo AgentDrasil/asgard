@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import { humanfriendly } from "../../lib/format";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   src: string;
@@ -93,40 +96,40 @@ const formattedSize = computed(() => {
         <div class="flex items-center gap-1">
           <button
             class="btn btn-ghost btn-xs btn-square"
-            title="Zoom In"
-            aria-label="Zoom In"
+            :title="t('viewers.media.zoomIn')"
+            :aria-label="t('viewers.media.zoomIn')"
             @click="zoomIn"
           >
             <Icon icon="octicon:zoom-in-16" class="w-3.5 h-3.5" />
           </button>
           <button
             class="btn btn-ghost btn-xs btn-square"
-            title="Zoom Out"
-            aria-label="Zoom Out"
+            :title="t('viewers.media.zoomOut')"
+            :aria-label="t('viewers.media.zoomOut')"
             @click="zoomOut"
           >
             <Icon icon="octicon:zoom-out-16" class="w-3.5 h-3.5" />
           </button>
           <button
             class="btn btn-ghost btn-xs btn-square"
-            title="Fit to Window"
-            aria-label="Fit to Window"
+            :title="t('viewers.media.fitToWindow')"
+            :aria-label="t('viewers.media.fitToWindow')"
             @click="fitToWindow"
           >
             <Icon icon="octicon:screen-full-16" class="w-3.5 h-3.5" />
           </button>
           <button
             class="btn btn-ghost btn-xs px-2 text-xs"
-            title="Reset Zoom"
-            aria-label="Reset Zoom"
+            :title="t('viewers.media.resetZoom')"
+            :aria-label="t('viewers.media.resetZoom')"
             @click="resetZoom"
           >
             {{ Math.round(scale * 100) }}%
           </button>
           <button
             class="btn btn-ghost btn-xs btn-square"
-            title="Rotate"
-            aria-label="Rotate"
+            :title="t('viewers.media.rotate')"
+            :aria-label="t('viewers.media.rotate')"
             @click="rotate"
           >
             <Icon icon="octicon:sync-16" class="w-3.5 h-3.5" />
@@ -138,8 +141,8 @@ const formattedSize = computed(() => {
             rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
-            title="Download / Open Raw"
-            aria-label="Download / Open Raw"
+            :title="t('viewers.media.downloadOrOpen')"
+            :aria-label="t('viewers.media.downloadOrOpen')"
           >
             <Icon icon="octicon:download-16" class="w-3.5 h-3.5" />
           </a>
@@ -162,7 +165,7 @@ const formattedSize = computed(() => {
           class="flex flex-col items-center justify-center text-center p-6 text-error gap-2"
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
-          <p class="text-sm font-medium">Failed to load image</p>
+          <p class="text-sm font-medium">{{ t("viewers.media.failedToLoadImage") }}</p>
           <a
             v-if="src"
             :href="src"
@@ -170,7 +173,7 @@ const formattedSize = computed(() => {
             rel="noopener noreferrer"
             class="btn btn-sm btn-outline mt-2"
           >
-            Open Directly
+            {{ t("viewers.media.openDirectly") }}
           </a>
         </div>
         <img
@@ -209,8 +212,8 @@ const formattedSize = computed(() => {
             rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
-            title="Download / Open Raw"
-            aria-label="Download / Open Raw"
+            :title="t('viewers.media.downloadOrOpen')"
+            :aria-label="t('viewers.media.downloadOrOpen')"
           >
             <Icon icon="octicon:download-16" class="w-3.5 h-3.5" />
           </a>
@@ -222,7 +225,7 @@ const formattedSize = computed(() => {
           class="flex flex-col items-center justify-center text-center p-6 text-error gap-2"
         >
           <Icon icon="octicon:alert-16" class="w-8 h-8" />
-          <p class="text-sm font-medium">Failed to load video</p>
+          <p class="text-sm font-medium">{{ t("viewers.media.failedToLoadVideo") }}</p>
           <a
             v-if="src"
             :href="src"
@@ -230,7 +233,7 @@ const formattedSize = computed(() => {
             rel="noopener noreferrer"
             class="btn btn-sm btn-outline mt-2"
           >
-            Open Directly
+            {{ t("viewers.media.openDirectly") }}
           </a>
         </div>
         <video
@@ -275,7 +278,7 @@ const formattedSize = computed(() => {
             class="btn btn-sm btn-outline gap-1.5 w-full mt-2"
           >
             <Icon icon="octicon:download-16" class="w-4 h-4" />
-            Download Audio
+            {{ t("viewers.media.downloadAudio") }}
           </a>
         </div>
       </div>
@@ -298,10 +301,10 @@ const formattedSize = computed(() => {
             target="_blank"
             rel="noopener noreferrer"
             class="btn btn-ghost btn-xs gap-1 text-xs"
-            title="Open in New Tab"
+            :title="t('viewers.media.openInTab')"
           >
             <Icon icon="octicon:link-external-16" class="w-3.5 h-3.5" />
-            <span>Open in Tab</span>
+            <span>{{ t("viewers.media.openInTab") }}</span>
           </a>
           <a
             v-if="src"
@@ -310,8 +313,8 @@ const formattedSize = computed(() => {
             rel="noopener noreferrer"
             :download="fileName"
             class="btn btn-ghost btn-xs btn-square"
-            title="Download"
-            aria-label="Download"
+            :title="t('viewers.media.download')"
+            :aria-label="t('viewers.media.download')"
           >
             <Icon icon="octicon:download-16" class="w-3.5 h-3.5" />
           </a>
@@ -336,9 +339,12 @@ const formattedSize = computed(() => {
           <div>
             <h3 class="font-semibold text-base text-base-content break-all">{{ fileName }}</h3>
             <p class="text-xs text-base-content/50 mt-1">
-              Binary file <span v-if="formattedSize">({{ formattedSize }})</span>
+              {{ t("viewers.media.binaryFile") }}
+              <span v-if="formattedSize">({{ formattedSize }})</span>
             </p>
-            <p class="text-xs text-base-content/60 mt-2">This file cannot be previewed as text.</p>
+            <p class="text-xs text-base-content/60 mt-2">
+              {{ t("viewers.media.binaryCannotPreview") }}
+            </p>
           </div>
           <a
             v-if="src"
@@ -349,7 +355,7 @@ const formattedSize = computed(() => {
             class="btn btn-primary btn-sm gap-1.5 w-full mt-2"
           >
             <Icon icon="octicon:download-16" class="w-4 h-4" />
-            Download File
+            {{ t("viewers.media.downloadFile") }}
           </a>
         </div>
       </div>

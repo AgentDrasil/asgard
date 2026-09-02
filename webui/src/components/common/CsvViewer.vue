@@ -2,7 +2,10 @@
 import { ref, computed } from "vue";
 import Papa from "papaparse";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import { compareValues, type SortDirection } from "../../utils/tableSort";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -101,12 +104,15 @@ function handleSort(colIdx: number) {
     >
       <div class="flex items-center gap-2 text-base-content/70">
         <Icon icon="vscode-icons:file-type-excel" class="w-4 h-4 shrink-0" />
-        <span class="font-mono font-medium text-base-content"
-          >{{ parsedCsv.headers.length }} cols × {{ parsedCsv.rows.length }} rows</span
-        >
-        <span v-if="filterQuery" class="text-base-content/50"
-          >({{ displayRows.length }} shown)</span
-        >
+        <span class="font-mono font-medium text-base-content">{{
+          t("viewers.csv.colsAndRows", {
+            cols: parsedCsv.headers.length,
+            rows: parsedCsv.rows.length,
+          })
+        }}</span>
+        <span v-if="filterQuery" class="text-base-content/50">{{
+          t("viewers.csv.shown", { count: displayRows.length })
+        }}</span>
       </div>
 
       <div class="flex items-center gap-2">
@@ -118,7 +124,7 @@ function handleSort(colIdx: number) {
           <input
             v-model="filterQuery"
             type="text"
-            placeholder="Filter table..."
+            :placeholder="t('viewers.csv.filterPlaceholder')"
             class="input input-xs input-bordered pl-7 pr-6 font-mono text-xs w-36 sm:w-48 bg-base-100 focus:outline-none focus:border-primary"
           />
           <button
@@ -150,7 +156,7 @@ function handleSort(colIdx: number) {
               :key="idx"
               @click="handleSort(idx)"
               class="cursor-pointer select-none border-r border-base-300 hover:bg-base-300/80 transition-colors py-2 px-3 whitespace-nowrap text-left font-semibold group"
-              :title="`Click to sort by ${header}`"
+              :title="t('viewers.csv.clickToSort', { header })"
             >
               <div class="flex items-center justify-between gap-2">
                 <span class="truncate">{{ header }}</span>
@@ -207,7 +213,7 @@ function handleSort(colIdx: number) {
               :colspan="parsedCsv.headers.length + 1"
               class="text-center py-8 text-base-content/50"
             >
-              No matching records found
+              {{ t("viewers.csv.noMatchingRecords") }}
             </td>
           </tr>
         </tbody>
@@ -218,7 +224,7 @@ function handleSort(colIdx: number) {
         class="flex flex-col items-center justify-center h-full text-base-content/50 p-6 text-center"
       >
         <Icon icon="octicon:table-24" class="w-10 h-10 mb-2 opacity-30" />
-        <p>No table data to display</p>
+        <p>{{ t("viewers.csv.noData") }}</p>
       </div>
     </div>
   </div>

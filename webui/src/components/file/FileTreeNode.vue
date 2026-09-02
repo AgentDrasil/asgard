@@ -2,8 +2,11 @@
 import { ref, computed, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import { getFileTree } from "../../lib/api";
+import { useI18n } from "vue-i18n";
 import { getFileIcon, isAncestorDir } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -151,7 +154,7 @@ watch(
       <span
         v-if="isCommented"
         class="badge badge-xs badge-warning shrink-0 p-0.5"
-        title="Contains comments"
+        :title="t('files.containsComments')"
       >
         <Icon icon="material-symbols:chat-bubble-outline" class="h-2.5 w-2.5" />
       </span>
@@ -172,7 +175,7 @@ watch(
         :style="{ paddingLeft: `${(depth + 1) * 14 + 20}px` }"
         class="py-1 text-[11px] text-base-content/40 italic"
       >
-        (empty)
+        {{ t("files.emptyDir") }}
       </div>
       <FileTreeNode
         v-for="child in children"

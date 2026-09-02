@@ -4,7 +4,10 @@ import { Icon } from "@iconify/vue";
 import VCSFileList from "./VCSFileList.vue";
 import VCSCommitTree from "./VCSCommitTree.vue";
 import { gitPush, gitPull } from "../../lib/api";
+import { useI18n } from "vue-i18n";
 import type { GitDiffFile, GitCommit } from "../../types";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   sessionId?: string;
@@ -48,13 +51,13 @@ async function handlePush() {
   try {
     const res = await gitPush(props.sessionId);
     if (res.success) {
-      setActionFeedback("success", res.output || "Pushed successfully");
+      setActionFeedback("success", res.output || t("vcs.pushedSuccess"));
       emit("refresh");
     } else {
-      setActionFeedback("error", res.error || "Push failed");
+      setActionFeedback("error", res.error || t("vcs.pushFailed"));
     }
   } catch (err: any) {
-    setActionFeedback("error", err?.message || "Push failed");
+    setActionFeedback("error", err?.message || t("vcs.pushFailed"));
   } finally {
     isPushing.value = false;
   }
@@ -67,13 +70,13 @@ async function handlePull() {
   try {
     const res = await gitPull(props.sessionId);
     if (res.success) {
-      setActionFeedback("success", res.output || "Pulled successfully");
+      setActionFeedback("success", res.output || t("vcs.pulledSuccess"));
       emit("refresh");
     } else {
-      setActionFeedback("error", res.error || "Pull failed");
+      setActionFeedback("error", res.error || t("vcs.pullFailed"));
     }
   } catch (err: any) {
-    setActionFeedback("error", err?.message || "Pull failed");
+    setActionFeedback("error", err?.message || t("vcs.pullFailed"));
   } finally {
     isPulling.value = false;
   }
@@ -161,7 +164,7 @@ onMounted(() => {
           @click="emit('refresh')"
           :disabled="loading || isPushing || isPulling"
           class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content"
-          title="Refresh Git status"
+          :title="t('vcs.refreshStatusTitle')"
         >
           <Icon icon="mynaui:refresh" :class="['h-3.5 w-3.5', { 'animate-spin': loading }]" />
         </button>
@@ -174,11 +177,11 @@ onMounted(() => {
           @click="handlePull"
           :disabled="isPulling || isPushing || loading"
           class="btn btn-sm btn-outline gap-1.5 text-xs font-semibold hover:btn-primary"
-          title="Git Pull from remote"
+          :title="t('vcs.pullTitle')"
         >
           <span v-if="isPulling" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="octicon:repo-pull-24" class="h-3.5 w-3.5" />
-          <span>Pull</span>
+          <span>{{ t("vcs.pull") }}</span>
         </button>
 
         <!-- Push Button -->
@@ -186,11 +189,11 @@ onMounted(() => {
           @click="handlePush"
           :disabled="isPushing || isPulling || loading"
           class="btn btn-sm btn-primary gap-1.5 text-xs font-semibold shadow-xs"
-          title="Git Push to remote"
+          :title="t('vcs.pushTitle')"
         >
           <span v-if="isPushing" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="octicon:repo-push-24" class="h-3.5 w-3.5" />
-          <span>Push</span>
+          <span>{{ t("vcs.push") }}</span>
         </button>
       </div>
 
@@ -229,7 +232,7 @@ onMounted(() => {
       >
         <div class="flex items-center gap-1.5 text-xs font-bold text-base-content/80">
           <Icon icon="octicon:file-diff-24" class="h-3.5 w-3.5 text-primary" />
-          <span>{{ selectedCommit ? "Commit Files" : "Changed Files" }}</span>
+          <span>{{ selectedCommit ? t("vcs.commitFiles") : t("vcs.changedFiles") }}</span>
           <span class="badge badge-xs badge-neutral text-[10px] font-mono">{{ files.length }}</span>
         </div>
       </div>
@@ -247,7 +250,7 @@ onMounted(() => {
     <div
       @mousedown="startVerticalResize"
       class="h-1.5 w-full cursor-row-resize bg-base-300 hover:bg-primary/50 active:bg-primary transition-colors z-20 shrink-0 border-y border-base-content/10 flex items-center justify-center group select-none"
-      title="Drag to resize Files and Commits panels"
+      :title="t('vcs.dragToResizePanels')"
     >
       <div class="w-8 h-0.5 bg-base-content/20 group-hover:bg-primary-content/80 rounded"></div>
     </div>

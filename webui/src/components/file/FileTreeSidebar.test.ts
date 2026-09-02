@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import FileTreeSidebar from "./FileTreeSidebar.vue";
 import * as api from "../../lib/api";
+import { i18n } from "../../i18n";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -37,7 +38,7 @@ describe("FileTreeSidebar.vue", () => {
         });
       },
     });
-
+    app.use(i18n);
     app.mount(root);
     await nextTick();
     await nextTick();
@@ -68,7 +69,7 @@ describe("FileTreeSidebar.vue", () => {
         });
       },
     });
-
+    app.use(i18n);
     app.mount(root);
     await nextTick();
     await nextTick();
@@ -95,7 +96,7 @@ describe("FileTreeSidebar.vue", () => {
         });
       },
     });
-
+    app.use(i18n);
     app.mount(root);
     await nextTick();
     await nextTick();
@@ -127,7 +128,7 @@ describe("FileTreeSidebar.vue", () => {
         });
       },
     });
-
+    app.use(i18n);
     app.mount(root);
     await nextTick();
     await nextTick();
@@ -158,7 +159,7 @@ describe("FileTreeSidebar.vue", () => {
         });
       },
     });
-
+    app.use(i18n);
     app.mount(root);
     await nextTick();
     await nextTick();

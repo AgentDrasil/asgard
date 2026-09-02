@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import type { A2UIManifest, A2UITab } from "../../types/a2ui";
 import A2UIKpiGrid from "./common/A2UIKpiGrid.vue";
 import A2UIWidgetHost from "./A2UIWidgetHost.vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   manifest: A2UIManifest;
@@ -77,7 +80,7 @@ function getActiveTab(): A2UITab | undefined {
           v-if="manifest.asOfDate"
           class="text-[11px] font-mono px-2.5 py-1 rounded-md bg-base-300/80 text-base-content/70 border border-base-300 self-start sm:self-auto shrink-0"
         >
-          As of: {{ manifest.asOfDate }}
+          {{ t("a2ui.asOf", { date: manifest.asOfDate }) }}
         </div>
       </div>
 

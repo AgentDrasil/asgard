@@ -7,12 +7,14 @@ import "@git-diff-view/vue/styles/diff-view.css";
 import { Icon } from "@iconify/vue";
 import { getGitDiff, getGitLog } from "../lib/api";
 import VCSSidebar from "./vcs/VCSSidebar.vue";
-import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useShortcuts } from "../composables/useShortcuts";
+import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
+import { useI18n } from "vue-i18n";
 import { commentKey, rebuildChatInputFromComments } from "../utils/commentUtils";
 import { buildVcsRoute, resolveViewFromRoute } from "../utils/routeUtils";
 import { useDiffHighlighter, getDiffTheme } from "../composables/useDiffHighlighter";
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -419,7 +421,7 @@ const commentedFileList = computed(() => {
             v-else
             class="badge badge-xs badge-outline text-[10px] truncate hidden sm:inline-flex"
           >
-            Unstash
+            {{ t("vcs.unstash") }}
           </span>
 
           <!-- Refresh Button right next to branch name -->
@@ -427,7 +429,7 @@ const commentedFileList = computed(() => {
             @click="loadGitData"
             :disabled="loading"
             class="btn btn-ghost btn-xs btn-circle text-base-content/70 hover:text-base-content shrink-0 ml-0.5"
-            title="Refresh Git Diff & Log"
+            :title="t('vcs.refreshTitle')"
           >
             <Icon icon="mynaui:refresh" :class="['h-3.5 w-3.5', { 'animate-spin': loading }]" />
           </button>
@@ -446,7 +448,7 @@ const commentedFileList = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
-            title="Files"
+            :title="t('vcs.filesTab')"
           >
             <Icon icon="mdi:git" class="h-3.5 w-3.5" />
           </button>
@@ -458,7 +460,7 @@ const commentedFileList = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70',
             ]"
-            title="Diff"
+            :title="t('vcs.diffTab')"
           >
             <Icon icon="material-symbols:difference-outline" class="h-3.5 w-3.5" />
           </button>
@@ -475,10 +477,10 @@ const commentedFileList = computed(() => {
                   ? 'btn-primary shadow-xs'
                   : 'btn-ghost text-base-content/70 hover:text-base-content',
               ]"
-              title="Side by Side"
+              :title="t('vcs.splitTitle')"
             >
               <Icon icon="material-symbols:view-column-2-outline" class="h-3.5 w-3.5" />
-              Split
+              {{ t("vcs.split") }}
             </button>
             <button
               @click="viewMode = DiffModeEnum.Unified"
@@ -488,10 +490,10 @@ const commentedFileList = computed(() => {
                   ? 'btn-primary shadow-xs'
                   : 'btn-ghost text-base-content/70 hover:text-base-content',
               ]"
-              title="Unified"
+              :title="t('vcs.unifiedTitle')"
             >
               <Icon icon="material-symbols:view-stream-outline" class="h-3.5 w-3.5" />
-              Unified
+              {{ t("vcs.unified") }}
             </button>
           </div>
         </div>
@@ -504,25 +506,25 @@ const commentedFileList = computed(() => {
           <button
             @click="emit('close')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to Chat View (${toggleDiffShortcut})`"
+            :title="t('vcs.switchToChatTitle', { shortcut: toggleDiffShortcut })"
           >
             <Icon icon="material-symbols:chat-outline" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Chat</span>
+            <span class="hidden sm:inline">{{ t("vcs.chat") }}</span>
           </button>
           <button
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-primary shadow-xs"
-            title="VCS View"
+            :title="t('vcs.vcsViewTitle')"
           >
             <Icon icon="octicon:git-branch-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">VCS</span>
+            <span class="hidden sm:inline">{{ t("vcs.vcs") }}</span>
           </button>
           <button
             @click="emit('open-file-view')"
             class="join-item btn btn-xs border-none font-medium gap-1 sm:gap-1.5 btn-ghost text-base-content/70 hover:text-base-content"
-            :title="`Switch to File View (${toggleFileViewShortcut})`"
+            :title="t('vcs.switchToFileTitle', { shortcut: toggleFileViewShortcut })"
           >
             <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Files</span>
+            <span class="hidden sm:inline">{{ t("vcs.files") }}</span>
           </button>
         </div>
 
@@ -537,10 +539,10 @@ const commentedFileList = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            :title="`Toggle Terminal Panel (${toggleTerminalShortcut})`"
+            :title="t('vcs.toggleTerminalTitle', { shortcut: toggleTerminalShortcut })"
           >
             <Icon icon="codicon:layout-panel" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Terminal</span>
+            <span class="hidden xl:inline">{{ t("vcs.terminal") }}</span>
           </button>
 
           <!-- Toggle VCS Right Sidebar Button (VS Code style with same shortcut as Chat View) -->
@@ -552,10 +554,10 @@ const commentedFileList = computed(() => {
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content'
             "
-            :title="`Toggle VCS Sidebar (${toggleArtifactsShortcut})`"
+            :title="t('vcs.toggleSidebarTitle', { shortcut: toggleArtifactsShortcut })"
           >
             <Icon icon="codicon:layout-sidebar-right" class="h-3.5 w-3.5" />
-            <span class="hidden xl:inline">Sidebar</span>
+            <span class="hidden xl:inline">{{ t("vcs.sidebar") }}</span>
           </button>
         </div>
       </div>
@@ -580,7 +582,7 @@ const commentedFileList = computed(() => {
               v-if="selectedFile.oldPath && selectedFile.oldPath !== selectedFile.newPath"
               class="text-base-content/50 text-[10px]"
             >
-              (renamed from {{ selectedFile.oldPath }})
+              {{ t("vcs.renamedFrom", { oldPath: selectedFile.oldPath }) }}
             </span>
           </div>
 
@@ -598,7 +600,7 @@ const commentedFileList = computed(() => {
             class="flex items-center justify-center h-full text-base-content/50 gap-3"
           >
             <span class="loading loading-ring loading-md text-primary"></span>
-            <span class="text-sm">Loading diff...</span>
+            <span class="text-sm">{{ t("vcs.loadingDiff") }}</span>
           </div>
 
           <!-- Error -->
@@ -619,14 +621,10 @@ const commentedFileList = computed(() => {
               class="h-12 w-12 text-success"
             />
             <p class="text-sm font-medium text-base-content/80">
-              {{ selectedCommit ? "No changes in this commit" : "Working tree is clean" }}
+              {{ selectedCommit ? t("vcs.noChangesInCommit") : t("vcs.workingTreeClean") }}
             </p>
             <p class="text-xs max-w-xs">
-              {{
-                selectedCommit
-                  ? "Select another commit from the right sidebar to inspect changes."
-                  : "No unstaged or uncommitted modifications relative to HEAD."
-              }}
+              {{ selectedCommit ? t("vcs.selectAnotherCommit") : t("vcs.noUnstagedModifications") }}
             </p>
           </div>
 
@@ -658,11 +656,13 @@ const commentedFileList = computed(() => {
                         icon="material-symbols:chat-bubble-outline"
                         class="h-4 w-4 text-primary"
                       />
-                      <span
-                        >Comment · {{ selectedFile?.newPath }} · line {{ lineNumber }} ({{
-                          sideName(side)
-                        }})</span
-                      >
+                      <span>{{
+                        t("vcs.commentHeader", {
+                          file: selectedFile?.newPath,
+                          line: lineNumber,
+                          side: sideName(side),
+                        })
+                      }}</span>
                     </div>
                     <button
                       @click="
@@ -686,7 +686,7 @@ const commentedFileList = computed(() => {
                   <div class="p-3 space-y-2">
                     <textarea
                       v-model="widgetInput"
-                      placeholder="Add a comment… it will appear in the chat input"
+                      :placeholder="t('vcs.addCommentPlaceholder')"
                       rows="3"
                       class="textarea textarea-bordered bg-base-100 text-base-content w-full text-xs font-sans resize-none focus:outline-none focus:border-primary"
                       @keydown.ctrl.enter.prevent="submitComment"
@@ -704,7 +704,7 @@ const commentedFileList = computed(() => {
                         class="btn btn-ghost btn-xs text-error hover:bg-error/10 gap-1"
                       >
                         <Icon icon="mynaui:trash-one" class="h-3.5 w-3.5" />
-                        Delete
+                        {{ t("vcs.delete") }}
                       </button>
                       <div class="flex gap-2 ml-auto">
                         <button
@@ -714,7 +714,7 @@ const commentedFileList = computed(() => {
                           "
                           class="btn btn-ghost btn-xs"
                         >
-                          Cancel
+                          {{ t("vcs.cancel") }}
                         </button>
                         <button
                           @click="submitComment"
@@ -722,7 +722,7 @@ const commentedFileList = computed(() => {
                           class="btn btn-primary btn-xs gap-1"
                         >
                           <Icon icon="material-symbols:add" class="h-3.5 w-3.5" />
-                          Add to Chat
+                          {{ t("vcs.addToChat") }}
                         </button>
                       </div>
                     </div>
@@ -740,7 +740,7 @@ const commentedFileList = computed(() => {
         >
           <Icon icon="material-symbols:chat-bubble-outline" class="h-4 w-4 text-warning shrink-0" />
           <span class="text-xs text-warning font-medium">
-            {{ comments.size }} comment{{ comments.size > 1 ? "s" : "" }} added to chat input
+            {{ t("vcs.commentsAddedToInput", { count: comments.size }) }}
           </span>
           <div class="flex items-center gap-1 flex-wrap flex-1 min-w-0">
             <span
@@ -748,7 +748,9 @@ const commentedFileList = computed(() => {
               :key="key"
               class="badge badge-xs badge-warning gap-1 cursor-pointer hover:badge-error transition-colors"
               @click="deleteComment(key)"
-              :title="`${entry.filePath}:${entry.lineNumber} — click to remove`"
+              :title="
+                t('vcs.clickToRemoveComment', { file: entry.filePath, line: entry.lineNumber })
+              "
             >
               {{ entry.filePath.split("/").pop() }}:{{ entry.lineNumber }}
               <Icon icon="mynaui:x" class="h-2.5 w-2.5" />
@@ -760,9 +762,9 @@ const commentedFileList = computed(() => {
               chatInputText = '';
             "
             class="btn btn-ghost btn-xs text-warning/70 hover:text-error ml-auto shrink-0"
-            title="Clear all comments"
+            :title="t('vcs.clearAllTitle')"
           >
-            Clear all
+            {{ t("vcs.clearAll") }}
           </button>
         </div>
       </div>
@@ -790,7 +792,7 @@ const commentedFileList = computed(() => {
           v-if="isDesktop"
           @mousedown="startSidebarResize"
           class="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
-          title="Drag to resize VCS sidebar"
+          :title="t('vcs.dragToResizeSidebar')"
         ></div>
 
         <!-- Sidebar Content Component -->

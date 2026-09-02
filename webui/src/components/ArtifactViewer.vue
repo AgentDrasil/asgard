@@ -2,6 +2,7 @@
 import { ref, watch, computed, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
+import { useI18n } from "vue-i18n";
 import { useShiki } from "../composables/useShiki";
 import { useInPageFind } from "../composables/useInPageFind";
 import { getFileIcon, resolveViewerCategory, isCsvFile } from "../utils/fileUtils";
@@ -13,6 +14,7 @@ import CsvViewer from "./common/CsvViewer.vue";
 import A2UIRenderer from "./a2ui/A2UIRenderer.vue";
 import { isA2UIManifest, parseA2UIManifest } from "../utils/a2uiUtils";
 
+const { t } = useI18n();
 const { highlightBlock } = useShiki();
 
 const props = withDefaults(
@@ -202,7 +204,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         <button
           @click="emit('close')"
           class="md:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
-          title="Back to Chat"
+          :title="t('viewers.backToChat')"
         >
           <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
         </button>
@@ -210,7 +212,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         <span
           class="hidden sm:flex text-[11px] font-bold uppercase tracking-wider text-emerald-500 bg-emerald-500/10 border border-emerald-500/30 px-2 h-8 rounded items-center gap-1.5 shrink-0"
         >
-          Artifacts
+          {{ t("viewers.artifacts") }}
         </span>
 
         <!-- Dropdown Selector for Files -->
@@ -224,7 +226,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
               :value="activeFilePath || ''"
               @change="onFileSelectChange"
               class="select select-sm select-bordered w-full pl-8 pr-8 font-mono text-xs text-base-content bg-base-100 focus:outline-none focus:border-emerald-500 truncate"
-              title="Select file to preview"
+              :title="t('viewers.selectFileToPreview')"
             >
               <option v-for="file in modifiedFiles" :key="file" :value="file">
                 {{ formatPath(file) }}
@@ -245,10 +247,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Rendered Markdown Preview"
+            :title="t('viewers.renderedPreviewTitle')"
           >
             <Icon icon="material-symbols:preview" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Preview</span>
+            <span class="hidden sm:inline">{{ t("viewers.preview") }}</span>
           </button>
           <button
             @click="markdownViewMode = 'source'"
@@ -258,10 +260,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Raw Markdown Source"
+            :title="t('viewers.rawMarkdownSourceTitle')"
           >
             <Icon icon="material-symbols:code" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Source</span>
+            <span class="hidden sm:inline">{{ t("viewers.source") }}</span>
           </button>
         </div>
 
@@ -275,10 +277,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Table Preview"
+            :title="t('viewers.tablePreviewTitle')"
           >
             <Icon icon="octicon:table-24" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Table</span>
+            <span class="hidden sm:inline">{{ t("viewers.table") }}</span>
           </button>
           <button
             @click="csvViewMode = 'source'"
@@ -288,10 +290,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Raw CSV Source"
+            :title="t('viewers.rawCsvSourceTitle')"
           >
             <Icon icon="material-symbols:code" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Source</span>
+            <span class="hidden sm:inline">{{ t("viewers.source") }}</span>
           </button>
         </div>
 
@@ -305,10 +307,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="A2UI Dashboard Preview"
+            :title="t('viewers.dashboardPreviewTitle')"
           >
             <Icon icon="material-symbols:dashboard-customize-outline" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Dashboard</span>
+            <span class="hidden sm:inline">{{ t("viewers.dashboard") }}</span>
           </button>
           <button
             @click="a2uiViewMode = 'source'"
@@ -318,10 +320,10 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
                 ? 'btn-primary shadow-xs'
                 : 'btn-ghost text-base-content/70 hover:text-base-content',
             ]"
-            title="Raw JSON Source"
+            :title="t('viewers.rawJsonSourceTitle')"
           >
             <Icon icon="material-symbols:code" class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Source</span>
+            <span class="hidden sm:inline">{{ t("viewers.source") }}</span>
           </button>
         </div>
 
@@ -333,7 +335,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
           rel="noopener noreferrer"
           :download="fileData?.name"
           class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300 inline-flex items-center"
-          title="Open in new window / Download"
+          :title="t('viewers.openInNewWindow')"
         >
           <Icon icon="octicon:link-external-16" class="h-3.5 w-3.5" />
         </a>
@@ -352,7 +354,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
               ? 'bg-primary text-primary-content border-primary shadow-xs'
               : 'bg-base-300 hover:bg-base-300/80 text-base-content border-base-300',
           ]"
-          title="Find in artifact"
+          :title="t('viewers.findInArtifact')"
         >
           <Icon icon="material-symbols:search" class="h-3.5 w-3.5" />
         </button>
@@ -360,7 +362,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         <button
           @click="fetchFile(activeFilePath || '')"
           class="p-1.5 text-xs rounded bg-base-300 hover:bg-base-300/80 text-base-content transition-colors border border-base-300"
-          title="Refresh File Content"
+          :title="t('viewers.refreshFileContent')"
         >
           <Icon icon="octicon:sync-24" class="h-3.5 w-3.5" />
         </button>
@@ -374,9 +376,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
               ? 'bg-primary text-primary-content border-primary shadow-xs'
               : 'bg-base-300 hover:bg-base-300/80 text-base-content'
           "
-          :title="
-            isExpanded ? 'Exit full screen (Restore view)' : 'Full screen (Take over context area)'
-          "
+          :title="isExpanded ? t('viewers.exitFullScreen') : t('viewers.fullScreen')"
         >
           <Icon
             :icon="isExpanded ? 'octicon:screen-normal-24' : 'octicon:screen-full-24'"
@@ -415,7 +415,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         <div
           class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"
         ></div>
-        <span>Loading file content...</span>
+        <span>{{ t("viewers.loadingContent") }}</span>
       </div>
 
       <div
@@ -427,7 +427,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
           @click="fetchFile(activeFilePath || '')"
           class="mt-2 px-3 py-1 bg-base-300 text-base-content text-xs rounded hover:bg-base-300/80"
         >
-          Retry
+          {{ t("viewers.retry") }}
         </button>
       </div>
 
@@ -473,7 +473,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
       </div>
 
       <div v-else class="flex items-center justify-center h-full text-base-content/50 text-sm">
-        Select a file to preview
+        {{ t("viewers.selectToPreview") }}
       </div>
     </div>
   </div>

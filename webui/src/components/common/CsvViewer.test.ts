@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import CsvViewer from "./CsvViewer.vue";
+import { i18n } from "../../i18n";
 
 describe("CsvViewer.vue", () => {
   let root: HTMLElement;
@@ -21,6 +22,7 @@ describe("CsvViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 
@@ -67,6 +69,7 @@ describe("CsvViewer.vue", () => {
         });
       },
     });
+    app.use(i18n);
     app.mount(root);
     await nextTick();
 

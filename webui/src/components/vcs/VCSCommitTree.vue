@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Icon } from "@iconify/vue";
+import { useI18n } from "vue-i18n";
 import type { GitCommit } from "../../types";
+
+const { t } = useI18n();
 
 defineProps<{
   commits: GitCommit[];
@@ -36,7 +39,7 @@ function parseRefBadges(refs?: string): { name: string; isHead: boolean; isTag: 
     >
       <div class="flex items-center gap-1.5 text-xs font-bold text-base-content/80">
         <Icon icon="octicon:git-commit-24" class="h-4 w-4 text-primary" />
-        <span>Commits</span>
+        <span>{{ t("vcs.commits") }}</span>
         <span class="badge badge-xs badge-neutral text-[10px] font-mono">{{ commits.length }}</span>
       </div>
       <span v-if="loading" class="loading loading-spinner loading-xs text-primary"></span>
@@ -81,17 +84,19 @@ function parseRefBadges(refs?: string): { name: string; isHead: boolean; isTag: 
                 icon="material-symbols:edit-document-outline-rounded"
                 class="h-3.5 w-3.5 text-warning shrink-0"
               />
-              <span class="font-bold text-base-content truncate">Unstash</span>
+              <span class="font-bold text-base-content truncate">{{ t("vcs.unstash") }}</span>
             </div>
             <span
               v-if="unstashedCount > 0"
               class="badge badge-xs badge-warning text-[10px] font-mono shrink-0"
             >
-              {{ unstashedCount }} changed
+              {{ t("vcs.changedCount", { count: unstashedCount }) }}
             </span>
-            <span v-else class="text-[10px] text-base-content/40 font-mono shrink-0"> clean </span>
+            <span v-else class="text-[10px] text-base-content/40 font-mono shrink-0">
+              {{ t("vcs.clean") }}
+            </span>
           </div>
-          <p class="text-[11px] text-base-content/60 truncate mt-0.5">Working Directory & Stash</p>
+          <p class="text-[11px] text-base-content/60 truncate mt-0.5">{{ t("vcs.unstashDesc") }}</p>
         </button>
       </div>
 
