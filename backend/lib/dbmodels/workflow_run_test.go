@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -775,4 +776,106 @@ func TestAutoMigrate_BackfillLegacyWorkflowRuns(t *testing.T) {
 	hydratedStates, err := DecodeNodeStates(hydrated.NodeStates)
 	require.NoError(t, err)
 	assert.Equal(t, "legacy step1 output text", hydratedStates["step1"].Output)
+}
+
+func TestWorkflowRun_WriteOffloadedFiles_RunIDTraversalDefense(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	invalidRunIDs := []string{
+		"../escape",
+		"..",
+		".",
+		"sub/dir",
+		"sub\\dir",
+	}
+
+	for _, invalidID := range invalidRunIDs {
+		_, _, _, err := WriteOffloadedFiles(tempDir, invalidID, "spec", "input", nil)
+		require.Error(t, err, "runID %q should be rejected", invalidID)
+		assert.Contains(t, err.Error(), "invalid run id")
+	}
+}
+
+func TestWorkflowRun_AtomicWriteFile_AvoidsWriteAmplification(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "sample.txt")
+	content := []byte("constant content")
+
+	require.NoError(t, atomicWriteFile(targetPath, content))
+	info1, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	modTime1 := info1.ModTime()
+
+	// Small pause to guarantee different modtime if touched
+	time.Sleep(10 * time.Millisecond)
+
+	// Second write with identical content should skip write
+	require.NoError(t, atomicWriteFile(targetPath, content))
+	info2, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, modTime1, info2.ModTime(), "ModTime should not change when identical content is skipped")
+}
+
+func TestWorkflowRun_CleanOrphanTmpFiles(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	runDir := filepath.Join(tempDir, "workflows", "run-1")
+	require.NoError(t, os.MkdirAll(runDir, 0755))
+
+	tmpFile1 := filepath.Join(runDir, ".dag_spec.yaml.12345.tmp")
+	require.NoError(t, os.WriteFile(tmpFile1, []byte("tmp1"), 0644))
+	normalFile := filepath.Join(runDir, "dag_spec.yaml")
+	require.NoError(t, os.WriteFile(normalFile, []byte("spec"), 0644))
+
+	require.NoError(t, CleanOrphanTmpFiles(runDir))
+	assert.NoFileExists(t, tmpFile1, "orphan .tmp file should be removed")
+	assert.FileExists(t, normalFile, "normal file should be preserved")
+}
+
+func TestAutoMigrate_BackfillLegacyWorkflowRuns_CorruptedNodeStates(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+
+	err := testDB.Exec(`
+		CREATE TABLE workflow_runs (
+			run_id VARCHAR(64) PRIMARY KEY,
+			session_id VARCHAR(64) NOT NULL,
+			status VARCHAR(32) NOT NULL,
+			dag_spec TEXT,
+			input TEXT,
+			node_states TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
+	corruptedStates := "{this is not valid json}"
+	legacyYAML := "name: legacy-corrupted\n"
+
+	err = testDB.Exec(`
+		INSERT INTO workflow_runs (run_id, session_id, status, dag_spec, input, node_states)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "legacy-corrupt-1", "chat-corrupt-1", "WAITING_HUMAN", legacyYAML, "", corruptedStates).Error
+	require.NoError(t, err)
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	err = AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	var rawRow struct {
+		RunID       string `gorm:"column:run_id"`
+		NodeStates  string `gorm:"column:node_states"`
+		DAGSpecPath string `gorm:"column:dag_spec_path"`
+	}
+	err = testDB.Table("workflow_runs").Where("run_id = ?", "legacy-corrupt-1").Scan(&rawRow).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, corruptedStates, rawRow.NodeStates, "corrupted node_states should be preserved and not overwritten with empty json")
+	assert.NotEmpty(t, rawRow.DAGSpecPath, "dag_spec should still be offloaded successfully")
 }

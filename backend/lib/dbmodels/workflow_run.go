@@ -1,6 +1,7 @@
 package dbmodels
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,7 +169,12 @@ func workflowRunDir(sessionDir, runID string) string {
 }
 
 // atomicWriteFile writes data to targetPath via a unique temporary file with fsync and rename.
+// If targetPath already exists and its content is identical to data, it skips writing to avoid write amplification.
 func atomicWriteFile(targetPath string, data []byte) error {
+	if existing, err := os.ReadFile(targetPath); err == nil && bytes.Equal(existing, data) {
+		return nil
+	}
+
 	dir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
@@ -203,13 +209,44 @@ func atomicWriteFile(targetPath string, data []byte) error {
 		return fmt.Errorf("rename %s to %s: %w", tmpPath, targetPath, err)
 	}
 
+	// fsync parent directory to ensure directory entry persistence across crashes
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+
 	return nil
+}
+
+// CleanOrphanTmpFiles walks rootDir and removes any dangling temporary files created by atomicWriteFile.
+func CleanOrphanTmpFiles(rootDir string) error {
+	if _, err := os.Stat(rootDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && strings.HasPrefix(d.Name(), ".") && strings.HasSuffix(d.Name(), ".tmp") {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // WriteOffloadedFiles offloads DAGSpec, Input, and node outputs to the filesystem under sessionDir/workflows/runID/.
 // It writes files atomically (.tmp + Sync + Rename) and returns the paths and pruned NodeStates (Output cleared).
 func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states map[string]NodeState) (dagPath, inPath string, offloadedStates map[string]NodeState, err error) {
-	runDir := workflowRunDir(sessionDir, runID)
+	safeRunID := filepath.Clean(runID)
+	if safeRunID == "." || safeRunID == ".." || strings.Contains(safeRunID, "/") || strings.Contains(safeRunID, "\\") {
+		return "", "", nil, fmt.Errorf("invalid run id %q for offloaded path", runID)
+	}
+
+	runDir := workflowRunDir(sessionDir, safeRunID)
+	_ = CleanOrphanTmpFiles(runDir)
 	nodesDir := filepath.Join(runDir, "nodes")
 	if err := os.MkdirAll(nodesDir, 0755); err != nil {
 		return "", "", nil, fmt.Errorf("create run nodes dir: %w", err)

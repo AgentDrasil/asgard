@@ -1241,3 +1241,25 @@ func TestSearchDirectory_ExcludesSessionTranscriptAndWorkflows(t *testing.T) {
 	assert.Equal(t, "notes.txt", results[0].Name)
 	assert.Equal(t, "/session/notes.txt", results[0].Path)
 }
+
+func TestSearchDirectory_WorkspaceScopeNotAffectedBySessionNames(t *testing.T) {
+	t.Parallel()
+
+	tempWorkspace := t.TempDir()
+	// Create directory named "session" inside workspace, containing a workflows dir and messages.jsonl
+	wsSessionDir := filepath.Join(tempWorkspace, "session", "workflows")
+	require.NoError(t, os.MkdirAll(wsSessionDir, 0755))
+	wsWorkflowFile := filepath.Join(wsSessionDir, "workflow.yaml")
+	require.NoError(t, os.WriteFile(wsWorkflowFile, []byte("steps: []"), 0644))
+
+	wsMsgFile := filepath.Join(tempWorkspace, "session", "messages.jsonl")
+	require.NoError(t, os.WriteFile(wsMsgFile, []byte("data"), 0644))
+
+	visited := make(map[string]bool)
+	results := searchDirectory(tempWorkspace, "", "workspace", "", 50, visited)
+
+	require.Len(t, results, 2)
+	paths := []string{results[0].Path, results[1].Path}
+	assert.Contains(t, paths, "session/workflows/workflow.yaml")
+	assert.Contains(t, paths, "session/messages.jsonl")
+}

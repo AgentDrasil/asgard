@@ -648,17 +648,22 @@ func TestHandleGetSessions_MetadataOnlyOptimization(t *testing.T) {
 	server := &Server{conf: conf, repo: repo}
 	server.mux = server.buildMuxLocked()
 
-	// Create session with physical messages
+	// Create session with physical messages (1000 messages to verify scale)
 	chatID := "session-opt-1"
+	msgs := make([]dbmodels.ChatMessage, 1000)
+	for i := range msgs {
+		msgs[i] = dbmodels.ChatMessage{
+			ID:      fmt.Sprintf("m-%d", i),
+			Role:    "user",
+			Content: fmt.Sprintf("Message payload content %d", i),
+		}
+	}
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{
 		ChatID:       chatID,
 		Title:        "Large Message Session",
 		CurrentAgent: "agent-1",
 		RunDir:       "/",
-		Messages: []dbmodels.ChatMessage{
-			{ID: "m1", Role: "user", Content: "Hello world"},
-			{ID: "m2", Role: "assistant", Content: "Greetings"},
-		},
+		Messages:     msgs,
 	}))
 
 	// Ensure physical transcript exists

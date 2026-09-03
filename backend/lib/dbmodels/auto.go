@@ -49,8 +49,12 @@ func backfillLegacyWorkflowRuns(db *gorm.DB) error {
 
 	for _, row := range legacyRows {
 		sessionDir := defaultSessionDir(row.SessionID)
-		states, _ := DecodeNodeStates(row.NodeStates)
-		dagPath, inPath, offloadedStates, err := WriteOffloadedFiles(sessionDir, row.RunID, row.DAGSpec, row.Input, states)
+		states, decodeErr := DecodeNodeStates(row.NodeStates)
+		var offloadedStates map[string]NodeState
+		if decodeErr == nil {
+			offloadedStates = states
+		}
+		dagPath, inPath, offloadedStates, err := WriteOffloadedFiles(sessionDir, row.RunID, row.DAGSpec, row.Input, offloadedStates)
 		if err != nil {
 			return fmt.Errorf("backfill legacy workflow run %s: %w", row.RunID, err)
 		}
@@ -59,8 +63,10 @@ func backfillLegacyWorkflowRuns(db *gorm.DB) error {
 			"dag_spec_path": dagPath,
 			"input_path":    inPath,
 		}
-		if encodedStates, err := EncodeNodeStates(offloadedStates); err == nil {
-			updates["node_states"] = encodedStates
+		if decodeErr == nil {
+			if encodedStates, err := EncodeNodeStates(offloadedStates); err == nil {
+				updates["node_states"] = encodedStates
+			}
 		}
 		// Clear legacy raw values in table to complete the migration
 		updates["dag_spec"] = ""
