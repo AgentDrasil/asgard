@@ -2,12 +2,15 @@ package dbmodels
 
 import (
 	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/moznion/go-optional"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 )
@@ -20,6 +23,10 @@ func TestSessionRepository(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	chatID := "test-chat-id"
 
@@ -136,6 +143,7 @@ func TestSessionRepository(t *testing.T) {
 	assert.Error(t, err)
 	err = repo.AppendMessage("non-existent-id", ChatMessage{Content: "hello"})
 	assert.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	// 11. DeleteSession
 	err = repo.DeleteSession(chatID)
@@ -163,6 +171,10 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	chatID := "test-dedup-chat"
 	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID}))
@@ -181,8 +193,10 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.NotNil(t, sess)
 	require.Len(t, sess.Messages, 1)
 	assert.Equal(t, "Please approve plan", sess.Messages[0].Content)
+	assert.Equal(t, 1, sess.MessageCount)
+	assert.True(t, sess.HasAskUserUnreplied)
 
-	// 2. Append duplicate message with same ID but updated content/timestamp
+	// 2. Append duplicate message with same ID but updated content/timestamp -> message_count does not increase
 	msg1Updated := ChatMessage{
 		ID:        "msg-1",
 		Role:      "ask_user",
@@ -197,6 +211,7 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.Len(t, sess.Messages, 1, "Duplicate ID should update in-place instead of appending")
 	assert.Equal(t, "Please approve updated plan", sess.Messages[0].Content)
 	assert.Equal(t, int64(1005), sess.Messages[0].Timestamp)
+	assert.Equal(t, 1, sess.MessageCount, "MessageCount should not increment on in-place update")
 
 	// 3. Mark as replied, then append duplicate without Replied flag -> should preserve replied state
 	updatedMsg, err := repo.MarkAskUserReplied(chatID, "msg-1", "Approve")
@@ -204,6 +219,11 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.NotNil(t, updatedMsg)
 	assert.True(t, updatedMsg.Replied)
 	assert.Equal(t, "Approve", updatedMsg.ReplyText)
+
+	sess, err = repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, sess.HasAskUserUnreplied)
+
 	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
 		ID:        "msg-1",
 		Role:      "ask_user",
@@ -217,6 +237,7 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.Len(t, sess.Messages, 1)
 	assert.True(t, sess.Messages[0].Replied)
 	assert.Equal(t, "Approve", sess.Messages[0].ReplyText)
+	assert.False(t, sess.HasAskUserUnreplied)
 
 	// 4. Append message without ID -> should append normally
 	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
@@ -232,12 +253,17 @@ func TestAppendMessage_Deduplication(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 	require.Len(t, sess.Messages, 3)
+	assert.Equal(t, 3, sess.MessageCount)
 }
 
 func TestUpdateAgentSession_DefaultStatus(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	chatID := "test-status-chat"
 	err := repo.UpdateAgentSession(chatID, "agent-1", "cli/model", "sess-1", optional.None[string]())
@@ -255,6 +281,10 @@ func TestResetAllRunningAgents(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	// Session 1: running agent
 	require.NoError(t, repo.SaveSession(&Session{
@@ -303,6 +333,10 @@ func TestSessionRepository_SearchSessions(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	// Seed sessions
 	now := time.Now()
@@ -434,6 +468,10 @@ func TestSessionRepository_ArchiveAndFilter(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	now := time.Now()
 	// Insert 2 active sessions and 1 archived session
@@ -508,6 +546,10 @@ func TestSessionRepository_GetSessionsLimit(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, testDB.AutoMigrate(&Session{}))
 	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	now := time.Now()
 	// Batch insert 25 active sessions
@@ -617,6 +659,14 @@ func TestSession_HasUnrepliedAskUser(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name: "metadata flag HasAskUserUnreplied true even if Messages slice is empty",
+			session: Session{
+				HasAskUserUnreplied: true,
+				Messages:            Messages{},
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -625,4 +675,167 @@ func TestSession_HasUnrepliedAskUser(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.session.HasUnrepliedAskUser())
 		})
 	}
+}
+
+func TestSession_MessagesRemovedFromDB(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+
+	// Assert that sessions table does NOT have messages column
+	hasColumn := testDB.Migrator().HasColumn(&Session{}, "messages")
+	assert.False(t, hasColumn, "sessions table must NOT have messages column")
+
+	hasMessageCount := testDB.Migrator().HasColumn(&Session{}, "message_count")
+	assert.True(t, hasMessageCount, "sessions table must have message_count column")
+
+	hasAskUser := testDB.Migrator().HasColumn(&Session{}, "has_ask_user_unreplied")
+	assert.True(t, hasAskUser, "sessions table must have has_ask_user_unreplied column")
+
+	hasSummary := testDB.Migrator().HasColumn(&Session{}, "last_message_summary")
+	assert.True(t, hasSummary, "sessions table must have last_message_summary column")
+}
+
+func TestSession_AppendMessage_NonExistentSession(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	err := repo.AppendMessage("non-existent-session-id", ChatMessage{ID: "m1", Role: "user", Content: "hello"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	// Verify transcript was NOT created
+	msgs, err := ReadMessages(filepath.Join(tempDir, "non-existent-session-id"))
+	require.NoError(t, err)
+	assert.Empty(t, msgs)
+}
+
+func TestSession_MarkAskUserReplied_Transcript(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	// Non-existent session returns (nil, nil)
+	updatedMsg, err := repo.MarkAskUserReplied("non-existent", "m1", "reply")
+	require.NoError(t, err)
+	assert.Nil(t, updatedMsg)
+
+	// Existing session
+	chatID := "chat-replied-test"
+	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID}))
+
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{
+		ID:      "q1",
+		Role:    "ask_user",
+		Content: "Shall we proceed?",
+	}))
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.True(t, sess.HasAskUserUnreplied)
+
+	updatedMsg, err = repo.MarkAskUserReplied(chatID, "q1", "Yes, proceed!")
+	require.NoError(t, err)
+	require.NotNil(t, updatedMsg)
+	assert.True(t, updatedMsg.Replied)
+	assert.Equal(t, "Yes, proceed!", updatedMsg.ReplyText)
+
+	sess, err = repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, sess.HasAskUserUnreplied)
+}
+
+func TestSession_GetSessions_MetadataOnly(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	chatID := "metadata-only-chat"
+	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID, Title: "Metadata Chat"}))
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: "m1", Role: "user", Content: "some long content"}))
+
+	sessions, err := repo.GetSessions(false)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	assert.Equal(t, chatID, sessions[0].ChatID)
+	assert.Equal(t, 1, sessions[0].MessageCount)
+	assert.Equal(t, "some long content", sessions[0].LastMessageSummary)
+	assert.Empty(t, sessions[0].Messages, "GetSessions should only load metadata without messages")
+}
+
+func TestSession_SaveSession_FullFlushAtomicAndCountResync(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	chatID := "flush-chat"
+	sess := &Session{
+		ChatID: chatID,
+		Title:  "Flush Chat",
+		Messages: Messages{
+			{ID: "m1", Role: "user", Content: "first message"},
+			{ID: "m2", Role: "ask_user", Content: "question?"},
+		},
+	}
+	require.NoError(t, repo.SaveSession(sess))
+
+	loaded, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, 2, loaded.MessageCount)
+	assert.True(t, loaded.HasAskUserUnreplied)
+	assert.Equal(t, "question?", loaded.LastMessageSummary)
+	require.Len(t, loaded.Messages, 2)
+
+	// Test concurrent AppendMessage and SaveSession
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = repo.AppendMessage(chatID, ChatMessage{ID: "m3", Role: "user", Content: "concurrent append"})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = repo.SaveSession(&Session{
+			ChatID: chatID,
+			Title:  "Flush Chat Updated",
+			Messages: Messages{
+				{ID: "m1", Role: "user", Content: "first message"},
+				{ID: "m2", Role: "ask_user", Content: "question?"},
+				{ID: "m4", Role: "user", Content: "flush item"},
+			},
+		})
+	}()
+	wg.Wait()
+
+	finalSess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.NotNil(t, finalSess)
+	assert.NotEmpty(t, finalSess.Messages)
 }

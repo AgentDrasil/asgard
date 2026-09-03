@@ -91,6 +91,10 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	chatID := "test-chat-artifact-filtering"
 	err = repo.SaveSession(&dbmodels.Session{
@@ -152,6 +156,10 @@ func TestRecordStatusUpdate_TmpPathDisambiguation(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	chatID := "test-chat-tmp-disambiguation"
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{
 		ChatID:       chatID,

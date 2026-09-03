@@ -28,6 +28,10 @@ func TestSessionHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	conf := &config.Config{
 		Host: "http://localhost:8080",
 	}
@@ -211,6 +215,10 @@ func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -348,6 +356,10 @@ func TestSessionHandler_SearchSessions(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	conf := &config.Config{
 		Host: "http://localhost:8080",
 	}
@@ -441,6 +453,10 @@ func TestSessionHandler_ArchiveSession(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	conf := &config.Config{
 		Host: "http://localhost:8080",
 	}
@@ -532,6 +548,10 @@ func TestSessionHandler_GetSessionsLimit(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	conf := &config.Config{Host: "http://localhost:8080"}
 	server := &Server{conf: conf, repo: repo}
 	server.mux = server.buildMuxLocked()

@@ -22,6 +22,10 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 
@@ -168,6 +172,10 @@ func TestSingleAgentExecutor_Attachments(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 
@@ -265,6 +273,10 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	chatID := "test-chat-tmp-precreate"
 
 	agent := &agentspec.Agent{

@@ -26,6 +26,9 @@ func TestCleanExpiredSessions(t *testing.T) {
 	// Session base is derived as a sibling of the tmp base
 	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
 	t.Cleanup(func() { _ = os.RemoveAll(sessionBase) })
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(sessionBase, chatID)
+	})
 
 	expiredID := "test-expired-session-id"
 	recentID := "test-recent-session-id"

@@ -48,6 +48,10 @@ func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -282,6 +286,10 @@ func TestWorkflowPersist_Fanout_ZeroExtraRunRecordsAndMessageDeconfliction(t *te
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -676,6 +684,10 @@ func TestWorkflowPersist_LiveWaiterResume_NoPrematureDone(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -840,6 +852,10 @@ func TestWorkflowPersist_RedriveResume_StatusSync(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -988,6 +1004,10 @@ func TestWorkflowPersist_ResumeDuplicateReply_GuardSafety(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -1095,6 +1115,10 @@ func TestWorkflowPersist_ResumeError_RollbackSafety(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 

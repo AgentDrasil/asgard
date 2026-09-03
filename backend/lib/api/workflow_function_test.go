@@ -326,6 +326,10 @@ func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, r
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 
 	funcRegistry := workflow.NewFunctionRegistry()

@@ -30,6 +30,10 @@ func TestMessageTriggerHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 

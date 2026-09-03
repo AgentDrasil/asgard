@@ -4,7 +4,10 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moznion/go-optional"
@@ -68,32 +71,6 @@ type ChatMessage struct {
 
 type Messages []ChatMessage
 
-// Value implements driver.Valuer
-func (m Messages) Value() (driver.Value, error) {
-	if len(m) == 0 {
-		return nil, nil
-	}
-	return json.Marshal(m)
-}
-
-// Scan implements sql.Scanner
-func (m *Messages) Scan(value interface{}) error {
-	if value == nil {
-		*m = nil
-		return nil
-	}
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("failed to scan Messages: unsupported type %T", value)
-	}
-	return json.Unmarshal(bytes, m)
-}
-
 type Artifacts []string
 
 // Value implements driver.Valuer
@@ -132,8 +109,14 @@ type Session struct {
 	RunDir string
 	// Title of the session
 	Title string
-	// Messages of the session
-	Messages Messages `gorm:"type:text"`
+	// Messages of the session (not stored in DB, persisted in messages.jsonl)
+	Messages Messages `gorm:"-" json:"messages,omitempty"`
+	// MessageCount is the number of messages in the session
+	MessageCount int `gorm:"column:message_count;default:0" json:"messageCount"`
+	// HasAskUserUnreplied tracks whether there are any unreplied ask_user messages
+	HasAskUserUnreplied bool `gorm:"column:has_ask_user_unreplied;default:false" json:"hasAskUserUnreplied"`
+	// LastMessageSummary is a compact summary of the last message
+	LastMessageSummary string `gorm:"column:last_message_summary;type:text" json:"lastMessageSummary,omitempty"`
 	// Artifacts generated in session
 	Artifacts Artifacts `gorm:"type:text"`
 
@@ -144,7 +127,11 @@ type Session struct {
 }
 
 // HasUnrepliedAskUser returns true if there is an unreplied ask_user message in the session.
+// In memory or after GetSession/DB query, this provides O(1) query time.
 func (s *Session) HasUnrepliedAskUser() bool {
+	if s.HasAskUserUnreplied {
+		return true
+	}
 	for _, m := range s.Messages {
 		if m.Role == "ask_user" && !m.Replied {
 			return true
@@ -180,12 +167,41 @@ type Agent struct {
 	Status   AgentStatus       `json:"status,omitempty"`
 }
 
+func defaultSessionDir(chatID string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, "session", chatID)
+	}
+	return filepath.Join(os.TempDir(), chatID)
+}
+
 type SessionRepository struct {
-	db *gorm.DB
+	db             *gorm.DB
+	sessionDirFunc func(chatID string) string
+	sessionLocks   sync.Map // chatID string -> *sync.Mutex
 }
 
 func NewSessionRepository(db *gorm.DB) *SessionRepository {
-	return &SessionRepository{db: db}
+	return &SessionRepository{
+		db:             db,
+		sessionDirFunc: defaultSessionDir,
+	}
+}
+
+// SetSessionDirFunc overrides the directory resolver function (used for testing isolation).
+func (r *SessionRepository) SetSessionDirFunc(fn func(chatID string) string) {
+	r.sessionDirFunc = fn
+}
+
+func (r *SessionRepository) sessionDir(chatID string) string {
+	if r.sessionDirFunc != nil {
+		return r.sessionDirFunc(chatID)
+	}
+	return defaultSessionDir(chatID)
+}
+
+func (r *SessionRepository) getSessionLock(chatID string) *sync.Mutex {
+	actual, _ := r.sessionLocks.LoadOrStore(chatID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
 }
 
 const (
@@ -211,6 +227,7 @@ func NormalizeSessionLimit(limit int) int {
 // By default (or when includeArchived is false), only active (unarchived) sessions are returned.
 // When includeArchived is true, only archived sessions are returned.
 // limit specifies the maximum number of sessions to return (default 500, max 1000).
+// Only loads metadata from DB; Messages remains empty.
 func (r *SessionRepository) GetSessions(includeArchived bool, limit ...int) ([]Session, error) {
 	queryLimit := DefaultSessionLimit
 	if len(limit) > 0 {
@@ -261,12 +278,28 @@ func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, 
 	return sessions, nil
 }
 
-// DeleteSession deletes a session by chat ID.
+// DeleteSession deletes a session by chat ID and removes its session directory.
 func (r *SessionRepository) DeleteSession(chatID string) error {
-	return r.db.Delete(&Session{}, "chat_id = ?", chatID).Error
+	lock := r.getSessionLock(chatID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := r.db.Delete(&Session{}, "chat_id = ?", chatID).Error; err != nil {
+		return err
+	}
+
+	// Clean physical session directory (messages.jsonl, workflows, etc.)
+	dir := r.sessionDir(chatID)
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
+
+	// Remove lock entry from map while holding lock to avoid leaks
+	r.sessionLocks.Delete(chatID)
+	return nil
 }
 
-// GetSession retrieves the session for a given chat ID.
+// GetSession retrieves the session for a given chat ID and loads messages from messages.jsonl.
 func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
 	var session Session
 	err := r.db.First(&session, "chat_id = ?", chatID).Error
@@ -276,17 +309,52 @@ func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
 		}
 		return nil, err
 	}
+
+	// Read messages from transcript file
+	msgs, err := ReadMessages(r.sessionDir(chatID))
+	if err != nil {
+		return nil, fmt.Errorf("read session transcript: %w", err)
+	}
+	session.Messages = msgs
 	return &session, nil
 }
 
-// SaveSession saves or updates the session.
+// SaveSession saves or updates the session metadata and writes messages to messages.jsonl if len(Messages) > 0.
 func (r *SessionRepository) SaveSession(session *Session) error {
+	if len(session.Messages) > 0 {
+		lock := r.getSessionLock(session.ChatID)
+		lock.Lock()
+		defer lock.Unlock()
+
+		dir := r.sessionDir(session.ChatID)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create session dir: %w", err)
+		}
+		path := TranscriptFilePath(dir)
+		if err := writeAllMessagesAtomic(dir, path, session.Messages); err != nil {
+			return fmt.Errorf("save transcript: %w", err)
+		}
+
+		session.MessageCount = len(session.Messages)
+		hasUnreplied := false
+		for _, m := range session.Messages {
+			if m.Role == "ask_user" && !m.Replied {
+				hasUnreplied = true
+				break
+			}
+		}
+		session.HasAskUserUnreplied = hasUnreplied
+		if len(session.Messages) > 0 {
+			session.LastMessageSummary = TruncateSummary(session.Messages[len(session.Messages)-1].Content, 200)
+		}
+	}
+
 	return r.db.Save(session).Error
 }
 
 // UpsertSession creates the session if it does not exist; if it already exists,
 // only metadata columns (Title, CurrentAgent, RunDir, UpdatedAt) are updated so
-// that existing Messages, Agents and Artifacts are preserved.
+// that existing Agents, Artifacts and transcript are preserved.
 func (r *SessionRepository) UpsertSession(session *Session) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var existing Session
@@ -391,7 +459,6 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 }
 
 // ResetAllRunningAgents sets all agents with status AgentStatusRunning to AgentStatusCompleted across all sessions.
-// This is called at server startup to clear stale running states from crashes or unexpected restarts.
 func (r *SessionRepository) ResetAllRunningAgents() error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var sessions []Session
@@ -417,7 +484,6 @@ func (r *SessionRepository) ResetAllRunningAgents() error {
 }
 
 // GetAgentSessions returns the sessions map for a specific agent in a chat.
-// Returns nil if the session or agent is not found.
 func (r *SessionRepository) GetAgentSessions(chatID string, agentID string) (map[string]string, error) {
 	session, err := r.GetSession(chatID)
 	if err != nil {
@@ -457,74 +523,82 @@ func (r *SessionRepository) UpdateSessionTitle(chatID string, title string) erro
 }
 
 // AppendMessage appends a ChatMessage to a session by chat ID.
-// If a message with the same non-empty ID already exists, it updates the existing message in-place.
+// If a message with the same non-empty ID already exists, it updates the existing message in-place in messages.jsonl.
+// Checks session existence in DB first; if not found, returns gorm.ErrRecordNotFound without writing file.
 func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		var session Session
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
-		if err != nil {
-			return err
-		}
-		if msg.ID != "" {
-			for i, m := range session.Messages {
-				if m.ID == msg.ID {
-					if m.Replied && !msg.Replied {
-						msg.Replied = m.Replied
-						msg.ReplyText = m.ReplyText
-					}
-					session.Messages[i] = msg
-					return tx.Save(&session).Error
-				}
-			}
-		}
-		session.Messages = append(session.Messages, msg)
-		return tx.Save(&session).Error
-	})
-}
+	lock := r.getSessionLock(chatID)
+	lock.Lock()
+	defer lock.Unlock()
 
-// MarkAskUserReplied marks an ask_user ChatMessage as replied and sets its reply text.
-// Returns the updated ChatMessage on success.
-func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) (*ChatMessage, error) {
-	var updatedMsg *ChatMessage
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		var session Session
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
-		if err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return nil
-			}
-			return err
-		}
+	var session Session
+	if err := r.db.First(&session, "chat_id = ?", chatID).Error; err != nil {
+		return err
+	}
 
-		found := false
-		for i, m := range session.Messages {
-			if (messageID != "" && m.ID == messageID) || (messageID == "" && m.Role == "ask_user" && !m.Replied) {
-				session.Messages[i].Replied = true
-				session.Messages[i].ReplyText = replyText
-				msgCopy := session.Messages[i]
-				updatedMsg = &msgCopy
-				found = true
+	dir := r.sessionDir(chatID)
+	appended, err := AppendMessage(dir, msg)
+	if err != nil {
+		return fmt.Errorf("append transcript message: %w", err)
+	}
+
+	summary := TruncateSummary(msg.Content, 200)
+
+	// Re-check unreplied ask_user state in transcript
+	msgs, readErr := ReadMessages(dir)
+	hasUnreplied := false
+	if readErr == nil {
+		for _, m := range msgs {
+			if m.Role == "ask_user" && !m.Replied {
+				hasUnreplied = true
 				break
 			}
 		}
+	} else {
+		// Fallback to local logic if read fails
+		hasUnreplied = session.HasAskUserUnreplied || (msg.Role == "ask_user" && !msg.Replied)
+	}
 
-		if !found {
-			for i := len(session.Messages) - 1; i >= 0; i-- {
-				if session.Messages[i].Role == "ask_user" && !session.Messages[i].Replied {
-					session.Messages[i].Replied = true
-					session.Messages[i].ReplyText = replyText
-					msgCopy := session.Messages[i]
-					updatedMsg = &msgCopy
-					break
-				}
-			}
+	updates := map[string]any{
+		"last_message_summary":   summary,
+		"has_ask_user_unreplied": hasUnreplied,
+		"updated_at":             time.Now(),
+	}
+	if appended {
+		updates["message_count"] = gorm.Expr("message_count + 1")
+	}
+
+	return r.db.Model(&Session{}).Where("chat_id = ?", chatID).Updates(updates).Error
+}
+
+// MarkAskUserReplied marks an ask_user ChatMessage as replied and sets its reply text in messages.jsonl.
+// Returns the updated ChatMessage on success. Returns nil, nil if session does not exist in DB.
+func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, replyText string) (*ChatMessage, error) {
+	var session Session
+	if err := r.db.First(&session, "chat_id = ?", chatID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
 		}
-
-		return tx.Save(&session).Error
-	})
-	if err != nil {
 		return nil, err
 	}
+
+	lock := r.getSessionLock(chatID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	dir := r.sessionDir(chatID)
+	updatedMsg, hasUnreplied, err := MarkAskUserReplied(dir, messageID, replyText)
+	if err != nil {
+		return nil, fmt.Errorf("mark ask user replied in transcript: %w", err)
+	}
+
+	updates := map[string]any{
+		"has_ask_user_unreplied": hasUnreplied,
+		"updated_at":             time.Now(),
+	}
+	if err := r.db.Model(&Session{}).Where("chat_id = ?", chatID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
 	return updatedMsg, nil
 }
 
