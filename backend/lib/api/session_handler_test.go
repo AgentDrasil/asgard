@@ -211,6 +211,9 @@ func TestSessionHandler(t *testing.T) {
 }
 
 func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)

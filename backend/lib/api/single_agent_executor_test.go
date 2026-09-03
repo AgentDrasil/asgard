@@ -165,7 +165,8 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 }
 
 func TestSingleAgentExecutor_Attachments(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so executor tmp/session dirs land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	err := dbmodels.AutoMigrate(testDB)

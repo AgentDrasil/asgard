@@ -320,6 +320,9 @@ nodes:
 func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, register func(reg *workflow.FunctionRegistry)) (*Server, *dbmodels.SessionRepository, *dbmodels.WorkflowRunRepository, *gorm.DB) {
 	t.Helper()
 
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
@@ -372,8 +375,6 @@ func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, r
 }
 
 func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
-	t.Parallel()
-
 	var greetCalled atomic.Bool
 
 	s, repo, wfRepo, testDB := newFunctionTestServer(t, functionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
@@ -443,8 +444,6 @@ func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
 }
 
 func TestWorkflowFunctionNodeErrorFailsRun(t *testing.T) {
-	t.Parallel()
-
 	s, repo, _, testDB := newFunctionTestServer(t, failingFunctionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
 		reg.Register("explode", func(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
 			return "", errors.New("kaboom")

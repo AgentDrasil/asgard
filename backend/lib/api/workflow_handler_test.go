@@ -139,7 +139,8 @@ func TestRunWorkflow_PreExecutionError_Cleanup(t *testing.T) {
 }
 
 func TestWorkflowHandler_PersistAttachmentsAndEntryPrompt(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()

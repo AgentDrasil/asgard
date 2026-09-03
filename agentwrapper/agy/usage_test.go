@@ -11,6 +11,10 @@ import (
 )
 
 func TestModels(t *testing.T) {
+	// Isolate HOME so the real agy CLI cannot write its state into the
+	// developer's home; without credentials the run degrades to a skip.
+	t.Setenv("HOME", t.TempDir())
+
 	ctx := context.Background()
 	models, err := Models(ctx, types.UsageOptions{})
 	if err != nil {

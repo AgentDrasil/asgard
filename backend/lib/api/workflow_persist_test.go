@@ -39,6 +39,10 @@ nodes:
 
 func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
 	t.Helper()
+
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	// Pin the in-memory sqlite DB to a single pooled connection so the
 	// background resume goroutine always sees the migrated tables.
@@ -282,6 +286,9 @@ func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWorkflowPersist_Fanout_ZeroExtraRunRecordsAndMessageDeconfliction(t *testing.T) {
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
@@ -683,6 +690,9 @@ func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
 }
 
 func TestWorkflowPersist_LiveWaiterResume_NoPrematureDone(t *testing.T) {
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
@@ -853,6 +863,9 @@ nodes:
 }
 
 func TestWorkflowPersist_RedriveResume_StatusSync(t *testing.T) {
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
@@ -1008,6 +1021,9 @@ nodes:
 }
 
 func TestWorkflowPersist_ResumeDuplicateReply_GuardSafety(t *testing.T) {
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)
@@ -1236,7 +1252,9 @@ func TestWorkflowPersist_ResumeError_RollbackSafety(t *testing.T) {
 }
 
 func TestWorkflowRunPersistence_E2E(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
 	require.NoError(t, err)

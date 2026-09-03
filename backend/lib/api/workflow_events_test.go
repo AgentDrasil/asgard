@@ -41,7 +41,8 @@ nodes:
 }
 
 func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
@@ -147,7 +148,8 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 }
 
 func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
@@ -266,7 +268,8 @@ func waitForRunStatus(t *testing.T, gdb *gorm.DB, chatID, want string) {
 // ---------------------------------------------------------------------------
 
 func TestWorkflowEvents_Fanout_MetadataPropagated(t *testing.T) {
-	t.Parallel()
+	// Isolate HOME so engine session-dir fallbacks land in a test-owned directory
+	t.Setenv("HOME", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	sqlDB, err := testDB.DB()
