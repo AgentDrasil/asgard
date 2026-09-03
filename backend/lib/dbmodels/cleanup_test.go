@@ -23,8 +23,8 @@ func TestCleanExpiredSessions(t *testing.T) {
 	// Use t.TempDir() as isolated tmp base
 	tmpBase := t.TempDir()
 
-	// Session base is derived as a sibling of the tmp base
-	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
+	// Session base is derived as a sibling of the tmp base (~/data when tmp defaults to ~/tmp)
+	sessionBase := filepath.Join(filepath.Dir(tmpBase), "data")
 	t.Cleanup(func() { _ = os.RemoveAll(sessionBase) })
 	repo.SetSessionDirFunc(func(chatID string) string {
 		return filepath.Join(sessionBase, chatID)
@@ -131,7 +131,7 @@ func TestCleanExpiredSessions_CleansTranscriptAndWorkflowDirs(t *testing.T) {
 	repo := NewSessionRepository(dbConn)
 
 	tmpBase := t.TempDir()
-	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
+	sessionBase := filepath.Join(filepath.Dir(tmpBase), "data")
 	t.Cleanup(func() { _ = os.RemoveAll(sessionBase) })
 	repo.SetSessionDirFunc(func(chatID string) string {
 		return filepath.Join(sessionBase, chatID)

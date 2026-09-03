@@ -18,7 +18,7 @@ type CleanExpiredSessionsOptions struct {
 }
 
 // CleanExpiredSessions deletes inactive, non-running sessions and their corresponding
-// session directories (e.g. ~/tmp/<chatID> and ~/session/<chatID>) older than cutoff.
+// session directories (e.g. ~/tmp/<chatID> and ~/data/<chatID>) older than cutoff.
 func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOptions) error {
 	var expiredSessions []Session
 	if err := r.db.Where("updated_at < ?", opts.Cutoff).Find(&expiredSessions).Error; err != nil {
@@ -35,10 +35,10 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 		}
 	}
 
-	// Session dirs (sandbox /session) live as a sibling of the tmp base (~/session when tmp defaults to ~/tmp)
+	// Session dirs (sandbox /session) live as a sibling of the tmp base (~/data when tmp defaults to ~/tmp)
 	sessionDir := ""
 	if tmpDir != "" {
-		sessionDir = filepath.Join(filepath.Dir(tmpDir), "session")
+		sessionDir = filepath.Join(filepath.Dir(tmpDir), "data")
 	}
 
 	cleanupBases := make([]string, 0, 2)

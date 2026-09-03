@@ -85,12 +85,12 @@ func setupTmpDir(home string, chatID string) (string, error) {
 	return tmpDir, nil
 }
 
-// setupSessionDir determines the host directory for sandbox /session (e.g. /home/user/session/<chatID>) and ensures it exists.
+// setupSessionDir determines the host directory for sandbox /session (e.g. /home/user/data/<chatID>) and ensures it exists.
 func setupSessionDir(home string, chatID string) (string, error) {
 	if chatID == "" {
 		chatID = "default"
 	}
-	sessionDir := filepath.Join(home, "session", chatID)
+	sessionDir := filepath.Join(home, "data", chatID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return "", fmt.Errorf("creating session directory %q: %w", sessionDir, err)
 	}

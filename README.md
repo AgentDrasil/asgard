@@ -51,8 +51,8 @@ graph TD
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
-Both sandboxes bind-mount per-chat host directories: `~/tmp/<chat-id>` at `/tmp` and `~/session/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
-The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/session/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
+Both sandboxes bind-mount per-chat host directories: `~/tmp/<chat-id>` at `/tmp` and `~/data/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
+The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/data/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
@@ -79,7 +79,7 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
 ### Key Capabilities
 - **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
 - **Heterogeneous Node Types**:
-  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `~/session/<chat-id>`).
+  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `~/data/<chat-id>`).
   - `command`: Executes sandboxed or direct bash shell commands.
   - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.

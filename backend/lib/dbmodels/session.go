@@ -169,7 +169,7 @@ type Agent struct {
 
 func defaultSessionDir(chatID string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "session", chatID)
+		return filepath.Join(home, "data", chatID)
 	}
 	return filepath.Join(os.TempDir(), chatID)
 }

@@ -22,7 +22,7 @@ func TestSchedulerCleanExpiredSessions(t *testing.T) {
 	repo := dbmodels.NewSessionRepository(dbConn)
 
 	tmpBase := t.TempDir()
-	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
+	sessionBase := filepath.Join(filepath.Dir(tmpBase), "data")
 	repo.SetSessionDirFunc(func(chatID string) string {
 		return filepath.Join(sessionBase, chatID)
 	})
