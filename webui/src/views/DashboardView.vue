@@ -4,12 +4,18 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
+import { useShortcuts } from "../composables/useShortcuts";
 import { getSessions, archiveSession, getAgents } from "../lib/api";
 import { formatTimestamp } from "../lib/format";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import { getAgentIcon, formatPath } from "../utils/agentUtils";
 import type { ChatSession, AgentInfo } from "../types";
 
+const emit = defineEmits<{
+  (e: "toggle-sidebar"): void;
+}>();
+
+const { toggleSidebarShortcut } = useShortcuts();
 const router = useRouter();
 const { t } = useI18n();
 const toast = useToast();
@@ -199,6 +205,15 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
       <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <!-- Title & Stats -->
         <div class="flex items-center gap-3">
+          <button
+            @click="emit('toggle-sidebar')"
+            class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0"
+            :title="$t('chat.toggleMenu', { shortcut: toggleSidebarShortcut })"
+            :aria-label="$t('chat.toggleMenu', { shortcut: toggleSidebarShortcut })"
+            data-test="btn-toggle-sidebar"
+          >
+            <Icon icon="mynaui:sidebar" class="h-5 w-5" />
+          </button>
           <div class="p-2.5 rounded-lg bg-primary/10 text-primary">
             <Icon icon="lucide:layout-dashboard" class="w-6 h-6" />
           </div>

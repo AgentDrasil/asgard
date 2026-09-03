@@ -334,6 +334,29 @@ describe("DashboardView.vue", () => {
     app.unmount();
   });
 
+  it("emits toggle-sidebar when mobile toggle button is clicked", async () => {
+    let toggleSidebarEmitted = false;
+    const app = createApp({
+      render() {
+        return h(DashboardView, {
+          onToggleSidebar: () => {
+            toggleSidebarEmitted = true;
+          },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const toggleBtn = root.querySelector('[data-test="btn-toggle-sidebar"]') as HTMLButtonElement;
+    expect(toggleBtn).not.toBeNull();
+    toggleBtn.click();
+    expect(toggleSidebarEmitted).toBe(true);
+
+    app.unmount();
+  });
+
   describe("Automatic 5s Polling", () => {
     beforeEach(() => {
       vi.useFakeTimers();
