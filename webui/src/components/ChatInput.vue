@@ -86,7 +86,7 @@ const VOICE_ERROR_I18N_MAP: Record<VoiceErrorCode, string> = {
 
 const handleVoiceFinalText = (finalText: string) => {
   const trimmed = finalText.trim();
-  if (!trimmed) return; // 空文本直接 no-op
+  if (!trimmed) return; // no-op if empty
   if (!text.value) {
     text.value = trimmed;
   } else if (/\s$/.test(text.value)) {
