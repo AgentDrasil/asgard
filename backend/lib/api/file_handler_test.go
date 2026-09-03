@@ -529,7 +529,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionNsDir := filepath.Join(home, "session", chatID)
+		sessionNsDir := filepath.Join(home, "data", chatID)
 		require.NoError(t, os.MkdirAll(sessionNsDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(sessionNsDir, "report.md"), []byte("session ns report"), 0644))
 

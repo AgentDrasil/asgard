@@ -522,7 +522,7 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "session", chatID)
+		return filepath.Join(tempHome, "data", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -822,7 +822,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "session", chatID)
+		return filepath.Join(tempHome, "data", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -839,7 +839,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 	sess.RunDir = wsDir
 	require.NoError(t, repo.SaveSession(sess))
 
-	sessionDir := filepath.Join(tempHome, "session", chatID)
+	sessionDir := filepath.Join(tempHome, "data", chatID)
 	require.NoError(t, os.MkdirAll(sessionDir, 0755))
 
 	testFile := filepath.Join(sessionDir, "notes.md")
@@ -933,7 +933,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 		sessRunDirSess.RunDir = "session/session-id"
 		require.NoError(t, repo.SaveSession(sessRunDirSess))
 
-		sessRunDirPath := filepath.Join(tempHome, "session", sessRunDirChat)
+		sessRunDirPath := filepath.Join(tempHome, "data", sessRunDirChat)
 		require.NoError(t, os.MkdirAll(sessRunDirPath, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(sessRunDirPath, "rd.txt"), []byte("rd"), 0644))
 
@@ -959,7 +959,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "session", chatID)
+		return filepath.Join(tempHome, "data", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -1217,7 +1217,7 @@ func TestSearchDirectory_ExcludesSessionTranscriptAndWorkflows(t *testing.T) {
 
 	tempHome := t.TempDir()
 	sessionID := uuid.NewV7().String()
-	sessBase := filepath.Join(tempHome, "session", sessionID)
+	sessBase := filepath.Join(tempHome, "data", sessionID)
 	require.NoError(t, os.MkdirAll(sessBase, 0755))
 
 	// Create user-visible session file

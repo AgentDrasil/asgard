@@ -95,7 +95,7 @@ func ViewerArtifactPath(path, tmpDir string) string {
 // ViewerArtifactPathInSession extends ViewerArtifactPath with the run's session
 // dir (the sandbox /session): paths under sessionDir are presented as
 // /session/<rel> so the file endpoint can remap them back to
-// <home>/session/<sessionID>/<rel>.
+// <home>/data/<sessionID>/<rel>.
 func ViewerArtifactPathInSession(path, tmpDir, sessionDir string) string {
 	clean := filepath.Clean(path)
 	if tmpDir != "" {

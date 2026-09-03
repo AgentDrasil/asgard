@@ -21,16 +21,27 @@ func GetSessionTmpBaseDir(chatID string) string {
 }
 
 // GetSessionScopedBaseDir returns the host base directory for the given session
-// namespace ("tmp" or "session") without creating it (e.g. $HOME/<ns>/<chatID>).
+// namespace ("tmp" or "session") without creating it (e.g. $HOME/tmp/<chatID>
+// or $HOME/data/<chatID>; the "session" namespace is backed by the ~/data host
+// directory that the sandbox binds as /session, see bwrap.setupSessionDir).
 func GetSessionScopedBaseDir(ns string, chatID string) string {
 	if chatID == "" {
 		chatID = "default"
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
-		return filepath.Join(home, ns, chatID)
+		return filepath.Join(home, scopedNsHostDir(ns), chatID)
 	}
 	return filepath.Join(os.TempDir(), chatID)
+}
+
+// scopedNsHostDir maps a sandbox namespace to its host directory name under
+// $HOME: "tmp" → tmp, "session" → data.
+func scopedNsHostDir(ns string) string {
+	if ns == "session" {
+		return "data"
+	}
+	return ns
 }
 
 // NormalizeSessionRunDir normalizes the given run directory for a session.

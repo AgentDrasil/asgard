@@ -181,7 +181,7 @@ func TestSessionNamespacePaths(t *testing.T) {
 	t.Setenv("HOME", tempHome)
 
 	chatID := "session-123"
-	expectedSessionDir := filepath.Join(tempHome, "session", chatID)
+	expectedSessionDir := filepath.Join(tempHome, "data", chatID)
 
 	assert.Equal(t, expectedSessionDir, GetSessionScopedBaseDir("session", chatID))
 
