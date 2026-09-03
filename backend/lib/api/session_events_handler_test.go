@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,6 +25,10 @@ func TestSessionEventsHandler_SSEStream(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 
@@ -88,6 +93,10 @@ func TestSessionEventsHandler_LastEventIDReplay(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(10)
 	t.Cleanup(hub.Close)
 
@@ -159,6 +168,10 @@ func TestSessionEventsHandler_EvictedResync(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	hub := NewSessionEventHubWithCapacity(3)
 	t.Cleanup(hub.Close)
 

@@ -24,6 +24,10 @@ func TestWorkspaceFileHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	conf := &config.Config{Host: "http://localhost:8080"}
 
 	server := &Server{

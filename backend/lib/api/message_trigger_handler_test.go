@@ -51,7 +51,6 @@ func TestMessageTriggerHandler(t *testing.T) {
 	registry.Register(workflow.NewCommandRunner(false))
 	engine := workflow.NewEngine(registry)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(fmt.Sprintf(`
 name: test-sync-wf

@@ -117,6 +117,10 @@ cli:
 	err = dbmodels.AutoMigrate(testDB)
 	assert.NoError(t, err)
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 
 	srv, err := New(conf, testDB)
 	assert.NoError(t, err)

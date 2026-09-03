@@ -104,6 +104,10 @@ func TestWorkflowCronManager_ScheduleTrigger(t *testing.T) {
 	dbConn := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(dbConn))
 	repo := dbmodels.NewSessionRepository(dbConn)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	var mu sync.Mutex
 	var calls []struct {
@@ -156,6 +160,10 @@ func TestWorkflowCronManager_SingletonExecution(t *testing.T) {
 	dbConn := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(dbConn))
 	repo := dbmodels.NewSessionRepository(dbConn)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	release := make(chan struct{})
 	var started sync.WaitGroup
@@ -201,6 +209,10 @@ func TestWorkflowCronManager_SyntheticSession_UpsertPreservesMessages(t *testing
 	dbConn := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(dbConn))
 	repo := dbmodels.NewSessionRepository(dbConn)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	triggered := make(chan string, 4)
 	m := newTestCronManager(t, repo, func(ctx context.Context, agent *agentspec.Agent, chatID string, prompt string, headless bool) error {

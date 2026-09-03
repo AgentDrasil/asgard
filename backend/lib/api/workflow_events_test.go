@@ -48,7 +48,11 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	tempDir := t.TempDir()
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -59,7 +63,6 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(20)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML(tempDir)), 0644))
 
@@ -148,7 +151,11 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	tempDir := t.TempDir()
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -159,7 +166,6 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(20)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(humanNodeWorkflowYAML(tempDir)), 0644))
 
@@ -261,7 +267,11 @@ func TestWorkflowEvents_Fanout_MetadataPropagated(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	tempDir := t.TempDir()
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 
 	childYAML := `
@@ -292,7 +302,6 @@ nodes:
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	itemsFile := filepath.Join(tempDir, "items.txt")
 	require.NoError(t, os.WriteFile(itemsFile, []byte("item1\nitem2"), 0644))
 

@@ -27,6 +27,10 @@ func setupTestServer(t *testing.T) (*Server, *dbmodels.SessionRepository, string
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	conf := &config.Config{Host: "http://localhost:8080"}
 
 	server := &Server{
@@ -517,6 +521,9 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempHome, "session", chatID)
+	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
 		repo: repo,
@@ -814,6 +821,9 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempHome, "session", chatID)
+	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
 		repo: repo,
@@ -948,6 +958,9 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempHome, "session", chatID)
+	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
 		repo: repo,

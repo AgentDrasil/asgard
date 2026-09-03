@@ -89,6 +89,10 @@ func TestHandleGitDiff_WorkingAndCommit(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	sessionRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	srvWithRepo := &Server{repo: sessionRepo}
 
 	validSessionID := uuid.NewV7().String()
@@ -265,6 +269,10 @@ func TestHandleGitDiff_DeletedFiles(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	sessionRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	srv := &Server{repo: sessionRepo}
 
 	sessionID := uuid.NewV7().String()
@@ -358,6 +366,10 @@ func TestHandleGitLog_TableDriven(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	sessionRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	srvWithRepo := &Server{repo: sessionRepo}
 
 	validSessionID := uuid.NewV7().String()
@@ -500,6 +512,10 @@ func TestHandleGitPushPull_Validation(t *testing.T) {
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	tempSessionDir := t.TempDir()
+	sessionRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempSessionDir, chatID)
+	})
 	srvWithRepo := &Server{repo: sessionRepo}
 
 	nonGitSessionID := uuid.NewV7().String()

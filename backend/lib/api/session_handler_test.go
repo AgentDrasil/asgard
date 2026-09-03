@@ -230,7 +230,6 @@ func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	statusFlowYAML := fmt.Sprintf(`
 name: status-flow

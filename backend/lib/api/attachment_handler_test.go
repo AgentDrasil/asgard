@@ -49,6 +49,10 @@ func setupAttachmentTestServer(t *testing.T) (*Server, *dbmodels.SessionReposito
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	conf := &config.Config{
 		Host: "http://localhost:8080",
 	}

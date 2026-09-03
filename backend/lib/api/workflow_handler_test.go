@@ -28,7 +28,11 @@ func TestRunWorkflow_PreExecutionError_Cleanup(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
+	tempDir := t.TempDir()
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -39,7 +43,6 @@ func TestRunWorkflow_PreExecutionError_Cleanup(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	// Invalid YAML content to cause LoadDefinition failure
 	wfFile := filepath.Join(tempDir, "invalid_workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte("invalid: yaml: : : ["), 0644))
@@ -141,7 +144,11 @@ func TestWorkflowHandler_PersistAttachmentsAndEntryPrompt(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 
+	tempDir := t.TempDir()
 	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	store := newWorkflowRunStore(wfRepo)
 
@@ -153,7 +160,6 @@ func TestWorkflowHandler_PersistAttachmentsAndEntryPrompt(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(fmt.Sprintf(`
 name: test-wf-attachments

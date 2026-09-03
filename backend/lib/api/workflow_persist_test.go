@@ -699,7 +699,6 @@ func TestWorkflowPersist_LiveWaiterResume_NoPrematureDone(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	slowWorkflowYAML := fmt.Sprintf(`
 name: human-stream
@@ -1019,7 +1018,6 @@ func TestWorkflowPersist_ResumeDuplicateReply_GuardSafety(t *testing.T) {
 	hub := NewSessionEventHubWithCapacity(50)
 	t.Cleanup(hub.Close)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	// Command sleeps a bit to stay actively executing
 	sleepYAML := fmt.Sprintf(`

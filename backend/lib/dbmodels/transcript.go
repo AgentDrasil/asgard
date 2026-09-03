@@ -50,7 +50,7 @@ func AppendMessage(sessionDir string, msg ChatMessage) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("open transcript for append: %w", err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		if _, err := f.Write(data); err != nil {
 			return false, fmt.Errorf("write message line: %w", err)
@@ -135,7 +135,7 @@ func AppendMessage(sessionDir string, msg ChatMessage) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open transcript for append: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.Write(data); err != nil {
 		return false, fmt.Errorf("write message line: %w", err)
@@ -159,7 +159,7 @@ func ReadMessages(sessionDir string) (Messages, error) {
 		}
 		return nil, fmt.Errorf("open transcript: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var messages Messages
 	scanner := bufio.NewScanner(f)

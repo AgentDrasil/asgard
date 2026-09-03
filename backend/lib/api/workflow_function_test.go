@@ -335,7 +335,6 @@ func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, r
 	funcRegistry := workflow.NewFunctionRegistry()
 	register(funcRegistry)
 
-	tempDir := t.TempDir()
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
 	require.NoError(t, os.WriteFile(wfFile, []byte(makeWorkflowYAML(tempDir)), 0644))
 
