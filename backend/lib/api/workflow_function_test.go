@@ -317,7 +317,7 @@ nodes:
 `, tempDir)
 }
 
-func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, register func(reg *workflow.FunctionRegistry)) (*Server, *dbmodels.SessionRepository, *gorm.DB) {
+func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, register func(reg *workflow.FunctionRegistry)) (*Server, *dbmodels.SessionRepository, *dbmodels.WorkflowRunRepository, *gorm.DB) {
 	t.Helper()
 
 	testDB := db.NewDBForTest(t)
@@ -331,6 +331,9 @@ func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, r
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	funcRegistry := workflow.NewFunctionRegistry()
 	register(funcRegistry)
@@ -356,15 +359,16 @@ func newFunctionTestServer(t *testing.T, makeWorkflowYAML func(string) string, r
 	}
 
 	s := &Server{
-		conf:           conf,
-		repo:           repo,
-		eventHub:       hub,
-		workflowEngine: engine,
-		agents:         []*agentspec.Agent{agent},
-		ctx:            context.Background(),
+		conf:            conf,
+		repo:            repo,
+		eventHub:        hub,
+		workflowEngine:  engine,
+		workflowRunRepo: wfRepo,
+		agents:          []*agentspec.Agent{agent},
+		ctx:             context.Background(),
 	}
 
-	return s, repo, testDB
+	return s, repo, wfRepo, testDB
 }
 
 func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
@@ -372,7 +376,7 @@ func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
 
 	var greetCalled atomic.Bool
 
-	s, repo, testDB := newFunctionTestServer(t, functionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
+	s, repo, wfRepo, testDB := newFunctionTestServer(t, functionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
 		reg.Register("make_greeting", func(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
 			greetCalled.Store(true)
 			return "hello from go", nil
@@ -416,8 +420,11 @@ func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
 
 	// ...and persisted in the settled run snapshot.
 	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)
-	var run dbmodels.WorkflowRun
-	require.NoError(t, testDB.Where("session_id = ?", chatID).Order("updated_at DESC").First(&run).Error)
+	var rawRun dbmodels.WorkflowRun
+	require.NoError(t, testDB.Where("session_id = ?", chatID).Order("updated_at DESC").First(&rawRun).Error)
+	run, err := wfRepo.GetRun(rawRun.RunID)
+	require.NoError(t, err)
+	require.NotNil(t, run)
 	states, err := dbmodels.DecodeNodeStates(run.NodeStates)
 	require.NoError(t, err)
 	assert.Equal(t, "hello from go", states["greet"].Output, "function output must be persisted in node state")
@@ -438,7 +445,7 @@ func TestWorkflowFunctionNodeEndToEnd(t *testing.T) {
 func TestWorkflowFunctionNodeErrorFailsRun(t *testing.T) {
 	t.Parallel()
 
-	s, repo, testDB := newFunctionTestServer(t, failingFunctionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
+	s, repo, _, testDB := newFunctionTestServer(t, failingFunctionNodeWorkflowYAML, func(reg *workflow.FunctionRegistry) {
 		reg.Register("explode", func(ctx context.Context, nctx *workflow.NodeContext) (string, error) {
 			return "", errors.New("kaboom")
 		})

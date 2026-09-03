@@ -54,6 +54,9 @@ func TestWorkflowHumanNodeEmitsAskUserViaEvents(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(false))
@@ -157,6 +160,9 @@ func TestWorkflowHumanNodeSyncWaitReturnsImmediately(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunner(false))
@@ -273,6 +279,9 @@ func TestWorkflowEvents_Fanout_MetadataPropagated(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 
 	childYAML := `
 name: child-event-wf

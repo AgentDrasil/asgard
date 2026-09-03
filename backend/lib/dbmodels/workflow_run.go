@@ -2,12 +2,19 @@ package dbmodels
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// ErrOffloadedFileMissing is returned when an offloaded file (DAG spec, input, or node output) is missing.
+var ErrOffloadedFileMissing = errors.New("offloaded workflow run file missing")
 
 // Persisted workflow run statuses (WorkflowRun.Status).
 const (
@@ -28,8 +35,10 @@ type WorkflowRun struct {
 	SessionID string `gorm:"column:session_id;size:64;index:idx_session_status,priority:1"`
 	// Status is one of RUNNING, WAITING_HUMAN, COMPLETED, FAILED, CANCELLED.
 	Status string `gorm:"column:status;size:32;index:idx_session_status,priority:2"`
-	// DAGSpec is the raw YAML snapshot the run was started from.
-	DAGSpec string `gorm:"column:dag_spec;type:text"`
+	// DAGSpec is the raw YAML snapshot the run was started from (in-memory, offloaded to file).
+	DAGSpec string `gorm:"-" json:"dag_spec,omitempty"`
+	// DAGSpecPath is the absolute path to the offloaded DAG spec YAML file.
+	DAGSpecPath string `gorm:"column:dag_spec_path;size:512" json:"dag_spec_path,omitempty"`
 	// NodeStates is a JSON map[node_id]NodeState (status, exit_code, output_path).
 	NodeStates string `gorm:"column:node_states;type:text"`
 	// LoopIterations is a JSON map[loop_id]iteration_count captured at
@@ -52,9 +61,12 @@ type WorkflowRun struct {
 	SuspendedNodes string `gorm:"column:suspended_nodes;type:text"`
 	// ParentRunID records the parent run of a sub-workflow (inline) run.
 	ParentRunID string `gorm:"column:parent_run_id;size:64;index"`
-	// RunDir / Input preserve the original run context for resume.
+	// RunDir preserves the original working directory context for resume.
 	RunDir string `gorm:"column:run_dir"`
-	Input  string `gorm:"column:input;type:text"`
+	// Input preserves the original run input prompt (in-memory, offloaded to file).
+	Input string `gorm:"-" json:"input,omitempty"`
+	// InputPath is the absolute path to the offloaded input file.
+	InputPath string `gorm:"column:input_path;size:512" json:"input_path,omitempty"`
 
 	CreatedAt time.Time `gorm:"column:created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
@@ -150,16 +162,220 @@ func DecodeIntMap(raw string) (map[string]int, error) {
 	return m, nil
 }
 
+// workflowRunDir returns the absolute directory for a workflow run under sessionDir.
+func workflowRunDir(sessionDir, runID string) string {
+	return filepath.Join(sessionDir, "workflows", runID)
+}
+
+// atomicWriteFile writes data to targetPath via a unique temporary file with fsync and rename.
+func atomicWriteFile(targetPath string, data []byte) error {
+	dir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+
+	base := filepath.Base(targetPath)
+	tmp, err := os.CreateTemp(dir, "."+base+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("open tmp file in %s: %w", dir, err)
+	}
+	tmpPath := tmp.Name()
+
+	writeErr := func() error {
+		if _, err := tmp.Write(data); err != nil {
+			_ = tmp.Close()
+			return fmt.Errorf("write data to %s: %w", tmpPath, err)
+		}
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return fmt.Errorf("sync %s: %w", tmpPath, err)
+		}
+		return tmp.Close()
+	}()
+
+	if writeErr != nil {
+		_ = os.Remove(tmpPath)
+		return writeErr
+	}
+
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename %s to %s: %w", tmpPath, targetPath, err)
+	}
+
+	return nil
+}
+
+// WriteOffloadedFiles offloads DAGSpec, Input, and node outputs to the filesystem under sessionDir/workflows/runID/.
+// It writes files atomically (.tmp + Sync + Rename) and returns the paths and pruned NodeStates (Output cleared).
+func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states map[string]NodeState) (dagPath, inPath string, offloadedStates map[string]NodeState, err error) {
+	runDir := workflowRunDir(sessionDir, runID)
+	nodesDir := filepath.Join(runDir, "nodes")
+	if err := os.MkdirAll(nodesDir, 0755); err != nil {
+		return "", "", nil, fmt.Errorf("create run nodes dir: %w", err)
+	}
+
+	// 1. Offload DAGSpec
+	if dagSpec != "" {
+		dagPath = filepath.Join(runDir, "dag_spec.yaml")
+		if err := atomicWriteFile(dagPath, []byte(dagSpec)); err != nil {
+			return "", "", nil, fmt.Errorf("write offloaded dag_spec: %w", err)
+		}
+	}
+
+	// 2. Offload Input
+	if input != "" {
+		inPath = filepath.Join(runDir, "input.txt")
+		if err := atomicWriteFile(inPath, []byte(input)); err != nil {
+			return "", "", nil, fmt.Errorf("write offloaded input: %w", err)
+		}
+	}
+
+	// 3. Offload node outputs
+	offloadedStates = make(map[string]NodeState, len(states))
+	for nodeID, state := range states {
+		cloned := state
+		if cloned.Output != "" {
+			// Defensive path validation on nodeID (P2-F)
+			safeNodeID := filepath.Clean(nodeID)
+			if safeNodeID == "." || safeNodeID == ".." || strings.Contains(safeNodeID, "/") || strings.Contains(safeNodeID, "\\") {
+				return "", "", nil, fmt.Errorf("invalid node id %q for offloaded path", nodeID)
+			}
+
+			outPath := filepath.Join(nodesDir, safeNodeID+".log")
+			if err := atomicWriteFile(outPath, []byte(cloned.Output)); err != nil {
+				return "", "", nil, fmt.Errorf("write offloaded node output %s: %w", safeNodeID, err)
+			}
+			cloned.OutputPath = outPath
+			cloned.Output = ""
+		}
+		offloadedStates[nodeID] = cloned
+	}
+
+	return dagPath, inPath, offloadedStates, nil
+}
+
+// HydrateRun populates offloaded fields (DAGSpec, Input, and optionally node Outputs) from files.
+// Returns ErrOffloadedFileMissing if an expected file is missing.
+func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
+	if run == nil {
+		return nil
+	}
+
+	// 1. Hydrate DAGSpec
+	if run.DAGSpecPath != "" {
+		data, err := os.ReadFile(run.DAGSpecPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%w: %s", ErrOffloadedFileMissing, run.DAGSpecPath)
+			}
+			return fmt.Errorf("read offloaded dag spec: %w", err)
+		}
+		run.DAGSpec = string(data)
+	}
+
+	// 2. Hydrate Input
+	if run.InputPath != "" {
+		data, err := os.ReadFile(run.InputPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%w: %s", ErrOffloadedFileMissing, run.InputPath)
+			}
+			return fmt.Errorf("read offloaded input: %w", err)
+		}
+		run.Input = string(data)
+	}
+
+	// 3. Hydrate NodeOutputs if requested
+	if hydrateNodeOutput && run.NodeStates != "" {
+		states, err := DecodeNodeStates(run.NodeStates)
+		if err != nil {
+			return fmt.Errorf("decode node states during hydrate: %w", err)
+		}
+		updated := false
+		for nodeID, state := range states {
+			if state.OutputPath != "" {
+				data, err := os.ReadFile(state.OutputPath)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("%w: node %s: %s", ErrOffloadedFileMissing, nodeID, state.OutputPath)
+					}
+					return fmt.Errorf("read offloaded node output %s: %w", nodeID, err)
+				}
+				state.Output = string(data)
+				states[nodeID] = state
+				updated = true
+			}
+		}
+		if updated {
+			encoded, err := EncodeNodeStates(states)
+			if err != nil {
+				return fmt.Errorf("encode hydrated node states: %w", err)
+			}
+			run.NodeStates = encoded
+		}
+	}
+
+	return nil
+}
+
 type WorkflowRunRepository struct {
-	db *gorm.DB
+	db             *gorm.DB
+	sessionDirFunc func(sessionID string) string
 }
 
 func NewWorkflowRunRepository(db *gorm.DB) *WorkflowRunRepository {
-	return &WorkflowRunRepository{db: db}
+	return &WorkflowRunRepository{
+		db:             db,
+		sessionDirFunc: defaultSessionDir,
+	}
 }
 
-// SaveRun upserts the workflow run snapshot by run_id.
+// SetSessionDirFunc overrides the directory resolver function (used for testing isolation).
+func (r *WorkflowRunRepository) SetSessionDirFunc(fn func(sessionID string) string) {
+	r.sessionDirFunc = fn
+}
+
+func (r *WorkflowRunRepository) sessionDir(sessionID string) string {
+	if r.sessionDirFunc != nil {
+		return r.sessionDirFunc(sessionID)
+	}
+	return defaultSessionDir(sessionID)
+}
+
+// SaveRun offloads large content to files and saves the metadata and paths to the DB.
 func (r *WorkflowRunRepository) SaveRun(run *WorkflowRun) error {
+	if run == nil {
+		return nil
+	}
+
+	sessionDir := r.sessionDir(run.SessionID)
+
+	// Decode existing states if any
+	states, err := DecodeNodeStates(run.NodeStates)
+	if err != nil {
+		return fmt.Errorf("decode node states for offload: %w", err)
+	}
+
+	// Offload to files
+	dagPath, inPath, offloadedStates, err := WriteOffloadedFiles(sessionDir, run.RunID, run.DAGSpec, run.Input, states)
+	if err != nil {
+		return fmt.Errorf("offload workflow run files: %w", err)
+	}
+
+	if dagPath != "" {
+		run.DAGSpecPath = dagPath
+	}
+	if inPath != "" {
+		run.InputPath = inPath
+	}
+
+	encodedStates, err := EncodeNodeStates(offloadedStates)
+	if err != nil {
+		return fmt.Errorf("encode offloaded node states: %w", err)
+	}
+	run.NodeStates = encodedStates
+
 	return r.db.Save(run).Error
 }
 
@@ -170,12 +386,14 @@ func (r *WorkflowRunRepository) UpdateRunStatus(runID string, status string) err
 		Update("status", status).Error
 }
 
-// GetRun retrieves a workflow run by run ID. Returns (nil, nil) when not found.
-func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {
+// GetRunRow retrieves a workflow run by run ID without hydrating offloaded files from disk.
+// Offloaded fields (DAGSpec, Input, and NodeState.Output) stay empty.
+// Returns (nil, nil) when not found.
+func (r *WorkflowRunRepository) GetRunRow(runID string) (*WorkflowRun, error) {
 	var run WorkflowRun
 	err := r.db.First(&run, "run_id = ?", runID).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -183,7 +401,20 @@ func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {
 	return &run, nil
 }
 
-// FindWaitingHumanBySession returns the WAITING_HUMAN run for a session, or
+// GetRun retrieves a workflow run by run ID and hydrates offloaded fields.
+// Returns (nil, nil) when not found.
+func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {
+	run, err := r.GetRunRow(runID)
+	if err != nil || run == nil {
+		return nil, err
+	}
+	if err := HydrateRun(run, true); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// FindWaitingHumanBySession returns the WAITING_HUMAN run for a session (hydrated), or
 // (nil, nil) when none is suspended.
 func (r *WorkflowRunRepository) FindWaitingHumanBySession(sessionID string) (*WorkflowRun, error) {
 	var run WorkflowRun
@@ -192,15 +423,18 @@ func (r *WorkflowRunRepository) FindWaitingHumanBySession(sessionID string) (*Wo
 		Order("updated_at desc").
 		First(&run).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	if err := HydrateRun(&run, true); err != nil {
 		return nil, err
 	}
 	return &run, nil
 }
 
-// FindWaitingHumansBySession returns all WAITING_HUMAN runs of a session,
+// FindWaitingHumansBySession returns all WAITING_HUMAN runs of a session (hydrated),
 // most recently updated first. It supports multiple concurrent suspensions
 // within one session.
 func (r *WorkflowRunRepository) FindWaitingHumansBySession(sessionID string) ([]*WorkflowRun, error) {
@@ -211,6 +445,11 @@ func (r *WorkflowRunRepository) FindWaitingHumansBySession(sessionID string) ([]
 		Find(&runs).Error
 	if err != nil {
 		return nil, err
+	}
+	for _, run := range runs {
+		if err := HydrateRun(run, true); err != nil {
+			return nil, err
+		}
 	}
 	return runs, nil
 }
@@ -235,7 +474,7 @@ func escapeLike(value string) string {
 }
 
 // FindWaitingHumanByMessageID returns the WAITING_HUMAN run that owns the
-// given ask_user MessageID, or (nil, nil) when no run matches. It matches the
+// given ask_user MessageID (hydrated), or (nil, nil) when no run matches. It matches the
 // dedicated suspended_message_id column first, then falls back to a
 // quote-anchored, wildcard-escaped search inside the SuspendedNodes JSON so
 // prefix collisions (e.g. wf-run-review vs wf-run-review-2) cannot produce
@@ -246,9 +485,12 @@ func (r *WorkflowRunRepository) FindWaitingHumanByMessageID(messageID string) (*
 		Where("suspended_message_id = ? AND status = ?", messageID, WorkflowStatusWaitingHuman).
 		First(&run).Error
 	if err == nil {
+		if err := HydrateRun(&run, true); err != nil {
+			return nil, err
+		}
 		return &run, nil
 	}
-	if err != gorm.ErrRecordNotFound {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	pattern := `%"message_id":"` + escapeLike(messageID) + `"%`
@@ -256,9 +498,12 @@ func (r *WorkflowRunRepository) FindWaitingHumanByMessageID(messageID string) (*
 		Where("status = ? AND suspended_nodes LIKE ? ESCAPE '\\'", WorkflowStatusWaitingHuman, pattern).
 		First(&run).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	if err := HydrateRun(&run, true); err != nil {
 		return nil, err
 	}
 	return &run, nil
@@ -266,19 +511,26 @@ func (r *WorkflowRunRepository) FindWaitingHumanByMessageID(messageID string) (*
 
 // RefreshSuspension atomically overwrites the suspension-related columns of a
 // run: settled node states, loop iteration / execution counters and the
-// (possibly pruned) suspended node set. The most recently suspended node is
-// kept in the legacy SuspendedNodeID / SuspendedMessageID compatibility
+// (possibly pruned) suspended node set. Node outputs are offloaded to session filesystem.
+// The most recently suspended node is kept in the legacy SuspendedNodeID / SuspendedMessageID compatibility
 // columns when it is still part of the new set; otherwise the set's first
 // node (sorted by node ID) is promoted.
 func (r *WorkflowRunRepository) RefreshSuspension(runID string, states map[string]NodeState, loopIterations, executionCounts map[string]int, suspendedNodes map[string]SuspendedNodeInfo) error {
-	run, err := r.GetRun(runID)
+	run, err := r.GetRunRow(runID)
 	if err != nil {
 		return err
 	}
 	if run == nil {
 		return gorm.ErrRecordNotFound
 	}
-	nodeStates, err := EncodeNodeStates(states)
+
+	sessionDir := r.sessionDir(run.SessionID)
+	_, _, offloadedStates, err := WriteOffloadedFiles(sessionDir, runID, "", "", states)
+	if err != nil {
+		return fmt.Errorf("offload states during refresh suspension: %w", err)
+	}
+
+	nodeStates, err := EncodeNodeStates(offloadedStates)
 	if err != nil {
 		return err
 	}

@@ -53,6 +53,9 @@ func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -291,6 +294,9 @@ func TestWorkflowPersist_Fanout_ZeroExtraRunRecordsAndMessageDeconfliction(t *te
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	childYAML := `
@@ -689,6 +695,9 @@ func TestWorkflowPersist_LiveWaiterResume_NoPrematureDone(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -856,6 +865,9 @@ func TestWorkflowPersist_RedriveResume_StatusSync(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -1008,6 +1020,9 @@ func TestWorkflowPersist_ResumeDuplicateReply_GuardSafety(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -1118,6 +1133,9 @@ func TestWorkflowPersist_ResumeError_RollbackSafety(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -1215,4 +1233,137 @@ func TestWorkflowPersist_ResumeError_RollbackSafety(t *testing.T) {
 	}
 	assert.True(t, hasStatusTrue, "Must broadcast isRunning: true when starting resume")
 	assert.True(t, hasStatusFalse, "Must broadcast isRunning: false when rolling back on resume error")
+}
+
+func TestWorkflowRunPersistence_E2E(t *testing.T) {
+	t.Parallel()
+	testDB := db.NewDBForTest(t)
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	tempDir := t.TempDir()
+	sessionRepo := dbmodels.NewSessionRepository(testDB)
+	sessionRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	store := newWorkflowRunStore(wfRepo)
+
+	registry := workflow.NewNodeRunnerRegistry()
+	registry.Register(workflow.NewCommandRunner(false))
+	engine := workflow.NewEngine(registry)
+	engine.SetRunStore(store)
+
+	s := &Server{repo: sessionRepo, workflowEngine: engine}
+	engine.SetHumanSuspender(s.suspendWorkflowHuman)
+
+	chatID := "chat-wf-e2e-persistence"
+	runID := "run-wf-e2e-1"
+	runDir := t.TempDir()
+
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+	msgID := workflow.HumanMessageID(runID, "plan_approval")
+	require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID: msgID, Role: "ask_user", Content: "please approve the plan",
+	}))
+
+	originalYAML := askUserReplyTestYAML
+
+	// 1. StartRun & MarkWaitingHuman with node states
+	require.NoError(t, store.StartRun(&workflow.RunSnapshot{
+		RunID:     runID,
+		SessionID: chatID,
+		Status:    workflow.PersistStatusRunning,
+		DAGSpec:   originalYAML,
+		RunDir:    runDir,
+	}))
+
+	initialStates := map[string]workflow.PersistedNodeState{
+		"plan_approval": {
+			Status: "SUSPENDED",
+			Output: "Need manager review for spec v2",
+		},
+	}
+	require.NoError(t, store.MarkWaitingHuman(&workflow.RunSnapshot{
+		RunID:              runID,
+		SessionID:          chatID,
+		Status:             workflow.PersistStatusWaitingHuman,
+		DAGSpec:            originalYAML,
+		RunDir:             runDir,
+		NodeStates:         initialStates,
+		SuspendedNodeID:    "plan_approval",
+		SuspendedMessageID: msgID,
+		SuspendedNodes: map[string]workflow.SuspendedNodeInfo{
+			"plan_approval": {MessageID: msgID},
+		},
+	}))
+
+	// 2. Direct raw DB inspection to assert DB records pruned content and records paths
+	var rawRow struct {
+		RunID       string `gorm:"column:run_id"`
+		DAGSpecPath string `gorm:"column:dag_spec_path"`
+		InputPath   string `gorm:"column:input_path"`
+		NodeStates  string `gorm:"column:node_states"`
+	}
+	err = testDB.Table("workflow_runs").Where("run_id = ?", runID).Scan(&rawRow).Error
+	require.NoError(t, err)
+	assert.NotEmpty(t, rawRow.DAGSpecPath, "DAGSpecPath must be recorded in DB")
+	assert.FileExists(t, rawRow.DAGSpecPath, "DAGSpec offloaded file must exist on disk")
+
+	decodedStates, err := dbmodels.DecodeNodeStates(rawRow.NodeStates)
+	require.NoError(t, err)
+	assert.Empty(t, decodedStates["plan_approval"].Output, "DB JSON NodeState Output must be pruned")
+	assert.NotEmpty(t, decodedStates["plan_approval"].OutputPath, "OutputPath must be saved in DB JSON")
+	assert.FileExists(t, decodedStates["plan_approval"].OutputPath, "Node Output log file must exist on disk")
+
+	// 3. Transparent hydration via store.GetRun
+	hydratedSnap, err := store.GetRun(runID)
+	require.NoError(t, err)
+	require.NotNil(t, hydratedSnap)
+	assert.Equal(t, originalYAML, hydratedSnap.DAGSpec, "DAGSpec must be hydrated seamlessly")
+	assert.Equal(t, "Need manager review for spec v2", hydratedSnap.NodeStates["plan_approval"].Output, "Node Output must be hydrated seamlessly")
+
+	// 4. Resume via handleAskUserReply
+	rec := postAskUserReply(t, s, chatID, msgID, "Approved by manager")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Wait for terminal completion
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snap, err := store.GetRun(runID)
+		require.NoError(t, err)
+		if snap != nil && snap.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workflow run did not reach COMPLETED in time; snap=%+v", snap)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// 5. Post-settle verification
+	settledSnap, err := store.GetRun(runID)
+	require.NoError(t, err)
+	require.NotNil(t, settledSnap)
+	assert.Equal(t, workflow.PersistStatusCompleted, settledSnap.Status)
+	assert.Equal(t, originalYAML, settledSnap.DAGSpec)
+
+	// Direct DB check on settled state: raw DB node states remain pruned
+	err = testDB.Table("workflow_runs").Where("run_id = ?", runID).Scan(&rawRow).Error
+	require.NoError(t, err)
+	assert.NotEmpty(t, rawRow.DAGSpecPath)
+	assert.FileExists(t, rawRow.DAGSpecPath)
+	decodedSettledStates, err := dbmodels.DecodeNodeStates(rawRow.NodeStates)
+	require.NoError(t, err)
+	for nodeID, ns := range decodedSettledStates {
+		assert.Empty(t, ns.Output, "Node %s output in DB JSON must be empty", nodeID)
+		if ns.OutputPath != "" {
+			assert.FileExists(t, ns.OutputPath, "Node %s log file must exist on disk", nodeID)
+		}
+	}
 }

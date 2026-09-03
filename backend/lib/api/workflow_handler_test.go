@@ -34,6 +34,9 @@ func TestRunWorkflow_PreExecutionError_Cleanup(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()
@@ -150,6 +153,9 @@ func TestWorkflowHandler_PersistAttachmentsAndEntryPrompt(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()

@@ -140,6 +140,9 @@ func TestSessionHandler(t *testing.T) {
 
 	// Test workflowRunRepo status RUNNING detection
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	server.workflowRunRepo = wfRepo
 	require.NoError(t, wfRepo.SaveRun(&dbmodels.WorkflowRun{
 		RunID:     "run-wf-1",
@@ -220,6 +223,9 @@ func TestGetSessionByID_WorkflowRunningStatus(t *testing.T) {
 		return filepath.Join(tempDir, chatID)
 	})
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
 	store := newWorkflowRunStore(wfRepo)
 
 	registry := workflow.NewNodeRunnerRegistry()

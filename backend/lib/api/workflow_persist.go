@@ -73,7 +73,7 @@ func (s *workflowRunStore) MarkWaitingHuman(run *workflow.RunSnapshot) error {
 }
 
 func (s *workflowRunStore) SettleRun(runID string, status string, states map[string]workflow.PersistedNodeState) error {
-	run, err := s.repo.GetRun(runID)
+	run, err := s.repo.GetRunRow(runID)
 	if err != nil {
 		return err
 	}
