@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
-import type { AgentInfo } from "../types";
+import type { AgentInfo, VoiceErrorCode } from "../types";
 import { getDirInfo, getSubdirs } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useToast } from "../composables/useToast";
+import { useVoiceInput } from "../composables/useVoiceInput";
 import AttachmentChips from "./chat/AttachmentChips.vue";
+import VoiceInputButton from "./chat/VoiceInputButton.vue";
 import { t } from "../i18n";
 
 const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
@@ -311,7 +313,62 @@ const localPrompt = computed({
   set: (val) => emit("update:prompt", val),
 });
 
+const VOICE_ERROR_I18N_MAP: Record<VoiceErrorCode, string> = {
+  micDenied: "chat.micPermissionDenied",
+  voiceUnavailable: "chat.voiceUnavailable",
+  sessionTimeout: "chat.voiceSessionTimeout",
+  network: "chat.voiceUnavailable",
+};
+
+const handleVoiceFinalText = (finalText: string) => {
+  const trimmed = finalText.trim();
+  if (!trimmed) return;
+  if (!localPrompt.value) {
+    localPrompt.value = trimmed;
+  } else if (/\s$/.test(localPrompt.value)) {
+    localPrompt.value += trimmed;
+  } else {
+    localPrompt.value += " " + trimmed;
+  }
+};
+
+const {
+  isRecording,
+  isConnecting,
+  isStopping,
+  interimText,
+  livePreviewText,
+  error: voiceError,
+  startRecording,
+  stopRecording,
+  cancelRecording,
+} = useVoiceInput({
+  onFinalText: handleVoiceFinalText,
+});
+
+watch(voiceError, (code) => {
+  if (code) {
+    const key = VOICE_ERROR_I18N_MAP[code] || "chat.voiceUnavailable";
+    toast.error(t(key));
+  }
+});
+
+const handleVoiceToggle = () => {
+  if (isRecording.value || isConnecting.value) {
+    void stopRecording();
+  } else {
+    void startRecording();
+  }
+};
+
+onBeforeUnmount(() => {
+  cancelRecording();
+});
+
 const handleSubmit = () => {
+  if (isRecording.value) {
+    cancelRecording();
+  }
   if (localPrompt.value.trim() && !props.loading) {
     const files = welcomeFiles.value.length > 0 ? [...welcomeFiles.value] : undefined;
     emit("submit", files);
@@ -545,17 +602,39 @@ const handleSubmit = () => {
             <label class="label p-0 font-semibold text-sm text-base-content/85">
               <span class="label-text text-base-content">{{ $t("chat.promptLabel") }}</span>
             </label>
-            <!-- Attach Files Button -->
-            <button
-              type="button"
-              @click="triggerFileInput"
-              :disabled="loading"
-              class="btn btn-ghost btn-xs gap-1 text-base-content/70 hover:text-base-content"
-              :title="$t('chat.attachFiles')"
-            >
-              <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
-              <span>{{ $t("chat.attachFiles") }}</span>
-            </button>
+            <div class="flex items-center gap-1">
+              <!-- Voice Input Button -->
+              <VoiceInputButton
+                :is-recording="isRecording"
+                :is-connecting="isConnecting"
+                :is-stopping="isStopping"
+                :disabled="loading"
+                @toggle="handleVoiceToggle"
+              />
+              <!-- Attach Files Button -->
+              <button
+                type="button"
+                @click="triggerFileInput"
+                :disabled="loading"
+                class="btn btn-ghost btn-xs gap-1 text-base-content/70 hover:text-base-content"
+                :title="$t('chat.attachFiles')"
+              >
+                <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
+                <span>{{ $t("chat.attachFiles") }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Interim Transcript Preview -->
+          <div
+            v-if="isRecording"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-base-300 text-base-content text-xs border border-base-content/10 shadow-sm animate-pulse"
+          >
+            <span class="loading loading-ring loading-xs text-primary shrink-0"></span>
+            <span class="font-medium text-primary shrink-0">{{ $t("chat.recording") }}</span>
+            <span class="truncate italic opacity-85">
+              {{ livePreviewText || interimText || $t("chat.voiceInterimPlaceholder") }}
+            </span>
           </div>
 
           <!-- Attachment Chips List -->

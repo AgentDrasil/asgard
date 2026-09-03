@@ -12,7 +12,7 @@ vi.mock("../lib/geminiLiveTranscribe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/geminiLiveTranscribe")>();
   return {
     ...actual,
-    GeminiLiveTranscribeClient: vi.fn(),
+    GeminiLiveTranscribeClient: vi.fn<(...args: any[]) => any>(),
   };
 });
 

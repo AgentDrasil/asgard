@@ -412,4 +412,163 @@ describe("WelcomeScreen.vue", () => {
 
     app.unmount();
   });
+
+  describe("Voice Input Integration", () => {
+    let mockVoiceState: {
+      isRecording: { value: boolean };
+      isConnecting: { value: boolean };
+      isStopping: { value: boolean };
+      interimText: { value: string };
+      livePreviewText: { value: string };
+      error: { value: any };
+      startRecording: any;
+      stopRecording: any;
+      cancelRecording: any;
+    };
+    let registeredVoiceCallbacks: any = null;
+
+    beforeEach(async () => {
+      const voiceModule = await import("../composables/useVoiceInput");
+      const { ref } = await import("vue");
+      mockVoiceState = {
+        isRecording: ref(false),
+        isConnecting: ref(false),
+        isStopping: ref(false),
+        interimText: ref(""),
+        livePreviewText: ref(""),
+        error: ref(null),
+        startRecording: vi.fn<() => Promise<void>>(),
+        stopRecording: vi.fn<() => Promise<void>>(),
+        cancelRecording: vi.fn<() => void>(),
+      };
+
+      vi.spyOn(voiceModule, "useVoiceInput").mockImplementation((callbacks?: any) => {
+        registeredVoiceCallbacks = callbacks;
+        return {
+          ...mockVoiceState,
+          state: ref("idle"),
+        } as any;
+      });
+    });
+
+    it("renders VoiceInputButton in WelcomeScreen", async () => {
+      const app = createApp({
+        render() {
+          return h(WelcomeScreen, {
+            agents: mockAgents,
+            selectedAgentId: "agent-1",
+            selectedDir: "/workspace/project",
+            prompt: "Test prompt",
+            loading: false,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const voiceBtn = root.querySelector('button[title^="Start voice recording"]');
+      expect(voiceBtn).not.toBeNull();
+
+      app.unmount();
+    });
+
+    it("triggers startRecording and stopRecording on button click", async () => {
+      const app = createApp({
+        render() {
+          return h(WelcomeScreen, {
+            agents: mockAgents,
+            selectedAgentId: "agent-1",
+            selectedDir: "/workspace/project",
+            prompt: "",
+            loading: false,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const voiceBtn = root.querySelector(
+        'button[title^="Start voice recording"]',
+      ) as HTMLButtonElement;
+      expect(voiceBtn).not.toBeNull();
+
+      voiceBtn.click();
+      expect(mockVoiceState.startRecording).toHaveBeenCalled();
+
+      mockVoiceState.isRecording.value = true;
+      await nextTick();
+
+      const stopBtn = root.querySelector('button[title="Stop recording"]') as HTMLButtonElement;
+      expect(stopBtn).not.toBeNull();
+
+      stopBtn.click();
+      expect(mockVoiceState.stopRecording).toHaveBeenCalled();
+
+      app.unmount();
+    });
+
+    it("shows live preview banner during recording and commits final transcript", async () => {
+      let promptVal = "Initial";
+      const app = createApp({
+        render() {
+          return h(WelcomeScreen, {
+            agents: mockAgents,
+            selectedAgentId: "agent-1",
+            selectedDir: "/workspace/project",
+            prompt: promptVal,
+            "onUpdate:prompt": (val: string) => {
+              promptVal = val;
+            },
+            loading: false,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      mockVoiceState.isRecording.value = true;
+      mockVoiceState.livePreviewText.value = "speaking something";
+      await nextTick();
+
+      expect(root.textContent).toContain("speaking something");
+      expect(root.textContent).toContain("Recording...");
+
+      expect(registeredVoiceCallbacks?.onFinalText).toBeDefined();
+      registeredVoiceCallbacks.onFinalText("spoken words");
+      await nextTick();
+
+      expect(promptVal).toBe("Initial spoken words");
+
+      app.unmount();
+    });
+
+    it("cancels recording on unmount or submit", async () => {
+      mockVoiceState.isRecording.value = true;
+      let promptVal = "Ready to submit";
+      const app = createApp({
+        render() {
+          return h(WelcomeScreen, {
+            agents: mockAgents,
+            selectedAgentId: "agent-1",
+            selectedDir: "/workspace/project",
+            prompt: promptVal,
+            loading: false,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const submitBtn = root.querySelector("button.btn-primary") as HTMLButtonElement;
+      submitBtn.click();
+      expect(mockVoiceState.cancelRecording).toHaveBeenCalled();
+
+      app.unmount();
+      expect(mockVoiceState.cancelRecording).toHaveBeenCalledTimes(2);
+    });
+  });
 });
