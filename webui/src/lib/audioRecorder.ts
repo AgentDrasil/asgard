@@ -103,6 +103,10 @@ export class AudioRecorder {
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
       this.sourceNode.connect(this.workletNode);
 
+      if (this.audioContext.state === "suspended") {
+        await this.audioContext.resume();
+      }
+
       this.setState("recording");
     } catch (error: unknown) {
       this.cleanup();

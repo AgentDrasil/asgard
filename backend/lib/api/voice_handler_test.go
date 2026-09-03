@@ -82,10 +82,11 @@ func TestCreateVoiceToken_Success(t *testing.T) {
 	require.NotNil(t, storedBody)
 	m := *storedBody
 	assert.Equal(t, float64(1), m["uses"])
-	require.NotNil(t, m["live_connect_constraints"])
-	constraints, ok := m["live_connect_constraints"].(map[string]any)
+	assert.Equal(t, "model", m["fieldMask"])
+	require.NotNil(t, m["bidiGenerateContentSetup"])
+	setup, ok := m["bidiGenerateContentSetup"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, TranscribeLiveModel, constraints["model"])
+	assert.Equal(t, TranscribeLiveModel, setup["model"])
 }
 
 func TestCreateVoiceToken_DefensiveFieldParsing(t *testing.T) {

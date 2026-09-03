@@ -48,7 +48,7 @@ export class GeminiLiveTranscribeClient {
     return new Promise((resolve, reject) => {
       this.isExplicitlyClosed = false;
       const baseUrl = this.options.baseUrl || GEMINI_LIVE_WS_BASE_URL;
-      const wsUrl = `${baseUrl}?key=${encodeURIComponent(token)}`;
+      const wsUrl = `${baseUrl}?access_token=${encodeURIComponent(token)}`;
 
       try {
         const WebSocketClass =
@@ -121,8 +121,8 @@ export class GeminiLiveTranscribeClient {
         },
         inputAudioTranscription: {
           mode: "SMART",
+          customVocabulary: vocabulary.slice(0, 100),
         },
-        customVocabulary: vocabulary.slice(0, 100),
       },
     };
 
@@ -159,12 +159,18 @@ export class GeminiLiveTranscribeClient {
     this.ws.send(JSON.stringify(endMsg));
   }
 
-  private handleMessage(data: unknown): void {
+  private async handleMessage(data: unknown): Promise<void> {
     let payloadStr = "";
     if (typeof data === "string") {
       payloadStr = data;
     } else if (data instanceof ArrayBuffer) {
       payloadStr = textDecoder ? textDecoder.decode(data) : new TextDecoder().decode(data);
+    } else if (typeof Blob !== "undefined" && data instanceof Blob) {
+      try {
+        payloadStr = await data.text();
+      } catch {
+        return;
+      }
     } else {
       return;
     }
@@ -172,25 +178,49 @@ export class GeminiLiveTranscribeClient {
     try {
       const parsed = JSON.parse(payloadStr);
 
-      const finalText =
-        parsed?.serverContent?.inputTranscription?.text ?? parsed?.inputTranscription?.text;
+      const serverContent = parsed?.serverContent ?? parsed?.server_content;
 
-      if (typeof finalText === "string") {
+      // Extract final transcription (support both snake_case and camelCase, nested or top-level)
+      const finalObj =
+        serverContent?.input_transcription ??
+        serverContent?.inputTranscription ??
+        parsed?.input_transcription ??
+        parsed?.inputTranscription;
+      const finalText = finalObj?.text;
+
+      if (typeof finalText === "string" && finalText.trim().length > 0) {
         this.callbacks.onTranscription?.({
           type: "final",
           text: finalText,
         });
       }
 
-      const interimText =
-        parsed?.serverContent?.interimInputTranscription?.text ??
-        parsed?.interimInputTranscription?.text;
+      // Extract interim transcription (support both snake_case and camelCase, nested or top-level)
+      const interimObj =
+        serverContent?.interim_input_transcription ??
+        serverContent?.interimInputTranscription ??
+        parsed?.interim_input_transcription ??
+        parsed?.interimInputTranscription;
+      const interimText = interimObj?.text;
 
       if (typeof interimText === "string") {
         this.callbacks.onTranscription?.({
           type: "interim",
           text: interimText,
         });
+      }
+
+      // Fallback: modelTurn text parts
+      const modelTurn = serverContent?.modelTurn ?? serverContent?.model_turn;
+      if (modelTurn?.parts && Array.isArray(modelTurn.parts)) {
+        for (const part of modelTurn.parts) {
+          if (typeof part?.text === "string" && part.text.trim().length > 0) {
+            this.callbacks.onTranscription?.({
+              type: "final",
+              text: part.text,
+            });
+          }
+        }
       }
     } catch {
       // Ignore unparseable message

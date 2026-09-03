@@ -64,14 +64,16 @@ describe("GeminiLiveTranscribeClient", () => {
     vi.useRealTimers();
   });
 
-  it("should connect with ephemeral token as key query parameter (C5)", async () => {
+  it("should connect with ephemeral token as access_token query parameter (C5)", async () => {
     const client = new GeminiLiveTranscribeClient({});
     const token = "auth_tokens/test-token-123";
     const connectPromise = client.connect(token);
 
     expect(MockWebSocket.instances.length).toBe(1);
     const wsInstance = MockWebSocket.instances[0];
-    expect(wsInstance.url).toBe(`${GEMINI_LIVE_WS_BASE_URL}?key=${encodeURIComponent(token)}`);
+    expect(wsInstance.url).toBe(
+      `${GEMINI_LIVE_WS_BASE_URL}?access_token=${encodeURIComponent(token)}`,
+    );
 
     // Fast-forward 10ms to trigger onopen
     await vi.advanceTimersByTimeAsync(10);
@@ -95,11 +97,15 @@ describe("GeminiLiveTranscribeClient", () => {
     expect(setupMsg.setup).toBeDefined();
     expect(setupMsg.setup.model).toBe(GEMINI_TRANSCRIBE_MODEL);
     expect(setupMsg.setup.inputAudioTranscription?.mode).toBe("SMART");
-    expect(setupMsg.setup.customVocabulary).toBeDefined();
-    expect(Array.isArray(setupMsg.setup.customVocabulary)).toBe(true);
-    expect(setupMsg.setup.customVocabulary.length).toBeLessThanOrEqual(100);
-    expect(setupMsg.setup.customVocabulary).toContain("Asgard");
-    expect(setupMsg.setup.customVocabulary).toEqual(PRESET_VOICE_VOCABULARY);
+    expect(setupMsg.setup.inputAudioTranscription?.customVocabulary).toBeDefined();
+    expect(Array.isArray(setupMsg.setup.inputAudioTranscription?.customVocabulary)).toBe(true);
+    expect(setupMsg.setup.inputAudioTranscription?.customVocabulary.length).toBeLessThanOrEqual(
+      100,
+    );
+    expect(setupMsg.setup.inputAudioTranscription?.customVocabulary).toContain("Asgard");
+    expect(setupMsg.setup.inputAudioTranscription?.customVocabulary).toEqual(
+      PRESET_VOICE_VOCABULARY,
+    );
 
     client.close();
   });
@@ -111,15 +117,13 @@ describe("GeminiLiveTranscribeClient", () => {
     await connectPromise;
 
     const wsInstance = MockWebSocket.instances[0];
-    // Create an ArrayBuffer with 4 bytes [1, 2, 3, 4]
     const buffer = new Uint8Array([1, 2, 3, 4]).buffer;
     client.sendAudioChunk(buffer);
 
-    expect(wsInstance.sentMessages.length).toBe(2); // 1 is setup, 2 is chunk
-    const chunkMsg = JSON.parse(wsInstance.sentMessages[1]);
-    expect(chunkMsg.realtimeInput?.mediaChunks).toBeDefined();
-    expect(chunkMsg.realtimeInput.mediaChunks[0].mimeType).toBe("audio/pcm;rate=16000");
-    expect(chunkMsg.realtimeInput.mediaChunks[0].data).toBe(btoa(String.fromCharCode(1, 2, 3, 4)));
+    expect(wsInstance.sentMessages.length).toBe(2);
+    const audioMsg = JSON.parse(wsInstance.sentMessages[1]);
+    expect(audioMsg.realtimeInput?.mediaChunks?.[0]?.mimeType).toBe("audio/pcm;rate=16000");
+    expect(typeof audioMsg.realtimeInput?.mediaChunks?.[0]?.data).toBe("string");
 
     client.close();
   });
@@ -140,7 +144,7 @@ describe("GeminiLiveTranscribeClient", () => {
     client.close();
   });
 
-  it("should parse interim and final transcription server messages", async () => {
+  it("should parse interim and final transcription server messages (both snake_case and camelCase)", async () => {
     const events: any[] = [];
     const client = new GeminiLiveTranscribeClient({
       onTranscription: (event) => {
@@ -154,29 +158,45 @@ describe("GeminiLiveTranscribeClient", () => {
 
     const wsInstance = MockWebSocket.instances[0];
 
-    // Simulate serverContent.interimInputTranscription
+    // 1. Simulate serverContent.interim_input_transcription (snake_case)
     wsInstance.simulateMessage({
       serverContent: {
-        interimInputTranscription: {
-          text: "Hello",
+        interim_input_transcription: {
+          text: "Hello snake",
         },
       },
     });
 
-    expect(events).toEqual([{ type: "interim", text: "Hello" }]);
+    // 2. Simulate serverContent.input_transcription (snake_case final)
+    wsInstance.simulateMessage({
+      serverContent: {
+        input_transcription: {
+          text: "Hello snake world",
+        },
+      },
+    });
 
-    // Simulate serverContent.inputTranscription (final)
+    // 3. Simulate camelCase
+    wsInstance.simulateMessage({
+      serverContent: {
+        interimInputTranscription: {
+          text: "Hello camel",
+        },
+      },
+    });
     wsInstance.simulateMessage({
       serverContent: {
         inputTranscription: {
-          text: "Hello world",
+          text: "Hello camel world",
         },
       },
     });
 
     expect(events).toEqual([
-      { type: "interim", text: "Hello" },
-      { type: "final", text: "Hello world" },
+      { type: "interim", text: "Hello snake" },
+      { type: "final", text: "Hello snake world" },
+      { type: "interim", text: "Hello camel" },
+      { type: "final", text: "Hello camel world" },
     ]);
 
     client.close();

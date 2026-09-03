@@ -22,13 +22,14 @@ const (
 
 // googleAuthTokenReq is the payload sent to Google auth_tokens API.
 type googleAuthTokenReq struct {
-	Uses                   int                    `json:"uses"`
-	ExpireTime             string                 `json:"expireTime"`
-	LiveConnectConstraints liveConnectConstraints `json:"live_connect_constraints"`
+	Uses                     int                       `json:"uses,omitempty"`
+	ExpireTime               string                    `json:"expireTime,omitempty"`
+	BidiGenerateContentSetup *bidiGenerateContentSetup `json:"bidiGenerateContentSetup,omitempty"`
+	FieldMask                string                    `json:"fieldMask,omitempty"`
 }
 
-type liveConnectConstraints struct {
-	Model string `json:"model"`
+type bidiGenerateContentSetup struct {
+	Model string `json:"model,omitempty"`
 }
 
 // googleAuthTokenResp is the defensive response model parsed from Google auth_tokens API.
@@ -72,9 +73,10 @@ func (s *Server) handleCreateVoiceToken(w http.ResponseWriter, r *http.Request) 
 	reqBody := googleAuthTokenReq{
 		Uses:       1,
 		ExpireTime: expireTime,
-		LiveConnectConstraints: liveConnectConstraints{
+		BidiGenerateContentSetup: &bidiGenerateContentSetup{
 			Model: TranscribeLiveModel,
 		},
+		FieldMask: "model",
 	}
 
 	reqBytes, err := json.Marshal(reqBody)
