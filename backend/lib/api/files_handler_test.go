@@ -1211,3 +1211,33 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		assert.Equal(t, dotFileName, resp.Files[0].Path)
 	})
 }
+
+func TestSearchDirectory_ExcludesSessionTranscriptAndWorkflows(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	sessionID := uuid.NewV7().String()
+	sessBase := filepath.Join(tempHome, "session", sessionID)
+	require.NoError(t, os.MkdirAll(sessBase, 0755))
+
+	// Create user-visible session file
+	userFile := filepath.Join(sessBase, "notes.txt")
+	require.NoError(t, os.WriteFile(userFile, []byte("some notes"), 0644))
+
+	// Create messages.jsonl
+	transcriptFile := filepath.Join(sessBase, "messages.jsonl")
+	require.NoError(t, os.WriteFile(transcriptFile, []byte(`{"role":"user","content":"hello"}`), 0644))
+
+	// Create workflows/<runID>/nodes/node1.log
+	wfDir := filepath.Join(sessBase, "workflows", "run-1", "nodes")
+	require.NoError(t, os.MkdirAll(wfDir, 0755))
+	wfLog := filepath.Join(wfDir, "node1.log")
+	require.NoError(t, os.WriteFile(wfLog, []byte("node log output"), 0644))
+
+	visited := make(map[string]bool)
+	results := searchDirectory(sessBase, "/session", "session", "", 50, visited)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, "notes.txt", results[0].Name)
+	assert.Equal(t, "/session/notes.txt", results[0].Path)
+}

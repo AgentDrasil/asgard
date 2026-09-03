@@ -632,3 +632,141 @@ func TestSessionHandler_GetSessionsLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleGetSessions_MetadataOnlyOptimization(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	conf := &config.Config{Host: "http://localhost:8080"}
+	server := &Server{conf: conf, repo: repo}
+	server.mux = server.buildMuxLocked()
+
+	// Create session with physical messages
+	chatID := "session-opt-1"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		Title:        "Large Message Session",
+		CurrentAgent: "agent-1",
+		RunDir:       "/",
+		Messages: []dbmodels.ChatMessage{
+			{ID: "m1", Role: "user", Content: "Hello world"},
+			{ID: "m2", Role: "assistant", Content: "Greetings"},
+		},
+	}))
+
+	// Ensure physical transcript exists
+	sessDir := filepath.Join(tempDir, chatID)
+	require.FileExists(t, filepath.Join(sessDir, "messages.jsonl"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var sessions []ChatSession
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &sessions))
+	require.Len(t, sessions, 1)
+	assert.Equal(t, chatID, sessions[0].ChatID)
+	assert.Equal(t, "Large Message Session", sessions[0].Title)
+	// handleGetSessions returns metadata only; Messages is nil/omitted
+	assert.Nil(t, sessions[0].Messages)
+}
+
+func TestHandleGetSessionByID_LoadsTranscript(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	conf := &config.Config{Host: "http://localhost:8080"}
+	server := &Server{conf: conf, repo: repo}
+	server.mux = server.buildMuxLocked()
+
+	chatID := "session-load-1"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		Title:        "Session to Load",
+		CurrentAgent: "agent-alpha",
+		RunDir:       "/workspace",
+		Messages: []dbmodels.ChatMessage{
+			{ID: "msg-1", Role: "user", Content: "What is the status?"},
+			{ID: "msg-2", Role: "assistant", Content: "All systems nominal."},
+		},
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+chatID, nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var session ChatSession
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &session))
+	assert.Equal(t, chatID, session.ChatID)
+	require.Len(t, session.Messages, 2)
+	assert.Equal(t, "msg-1", session.Messages[0].ID)
+	assert.Equal(t, "What is the status?", session.Messages[0].Content)
+	assert.Equal(t, "msg-2", session.Messages[1].ID)
+	assert.Equal(t, "All systems nominal.", session.Messages[1].Content)
+}
+
+func TestHandleDeleteSession_RemovesFilesAndDir(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	conf := &config.Config{Host: "http://localhost:8080"}
+	server := &Server{conf: conf, repo: repo}
+	server.mux = server.buildMuxLocked()
+
+	chatID := "session-delete-1"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		Title:        "Session to Delete",
+		CurrentAgent: "agent-1",
+		RunDir:       "/",
+		Messages: []dbmodels.ChatMessage{
+			{ID: "m1", Role: "user", Content: "to be deleted"},
+		},
+	}))
+
+	sessDir := filepath.Join(tempDir, chatID)
+	require.DirExists(t, sessDir)
+	require.FileExists(t, filepath.Join(sessDir, "messages.jsonl"))
+
+	// Create a workflow dir under sessDir as well
+	wfDir := filepath.Join(sessDir, "workflows", "run-123")
+	require.NoError(t, os.MkdirAll(wfDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(wfDir, "run.json"), []byte("{}"), 0644))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id="+chatID, nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Verify DB record is deleted
+	dbSess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.Nil(t, dbSess)
+
+	// Verify physical directory is completely removed
+	_, errDir := os.Stat(sessDir)
+	assert.True(t, os.IsNotExist(errDir), "Physical session directory should be completely removed")
+}

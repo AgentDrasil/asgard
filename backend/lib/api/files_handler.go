@@ -72,9 +72,16 @@ func searchDirectory(rootDir string, pathPrefix string, scope string, queryLower
 			if name == ".git" || name == "node_modules" {
 				return filepath.SkipDir
 			}
+			if name == "workflows" && strings.Contains(filepath.ToSlash(p), "/session") {
+				return filepath.SkipDir
+			}
 			if p == rootDir {
 				return nil
 			}
+		}
+
+		if !d.IsDir() && name == "messages.jsonl" && strings.Contains(filepath.ToSlash(p), "/session") {
+			return nil
 		}
 
 		var evalP string

@@ -57,14 +57,14 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			continue
 		}
 
-		// 2. Delete session DB record
+		// 2. Delete session DB record and physical session directory
 		if err := r.DeleteSession(sess.ChatID); err != nil {
 			log.Error().Err(err).Str("chatID", sess.ChatID).Msg("Failed to delete expired session from db")
 			errs = append(errs, fmt.Errorf("delete session %s: %w", sess.ChatID, err))
 			continue
 		}
 
-		// 3. Remove session folder under tmpDir/<chatID> and sessionDir/<chatID>
+		// 3. Remove session folders under cleanupBases (e.g. tmpDir/<chatID>)
 		if sess.ChatID != "" {
 			for _, base := range cleanupBases {
 				sessionPath := filepath.Join(base, sess.ChatID)

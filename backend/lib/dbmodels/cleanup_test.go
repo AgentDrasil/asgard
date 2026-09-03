@@ -121,3 +121,70 @@ func TestCleanExpiredSessions(t *testing.T) {
 	_, errRunningDir := os.Stat(runningTmpDir)
 	assert.False(t, os.IsNotExist(errRunningDir))
 }
+
+func TestCleanExpiredSessions_CleansTranscriptAndWorkflowDirs(t *testing.T) {
+	t.Parallel()
+
+	dbConn := db.NewDBForTest(t)
+	require.NoError(t, AutoMigrate(dbConn))
+
+	repo := NewSessionRepository(dbConn)
+
+	tmpBase := t.TempDir()
+	sessionBase := filepath.Join(filepath.Dir(tmpBase), "session")
+	t.Cleanup(func() { _ = os.RemoveAll(sessionBase) })
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(sessionBase, chatID)
+	})
+
+	expiredID := "expired-sess-with-files"
+	orphanID := "orphan-sess-with-files"
+
+	now := time.Now()
+	expiredTime := now.AddDate(0, -1, -2)
+
+	// Setup expired session
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:    expiredID,
+		Title:     "Expired Session with Transcript and Workflows",
+		UpdatedAt: expiredTime,
+		Messages: []ChatMessage{
+			{ID: "m1", Role: "user", Content: "hello"},
+		},
+	}))
+	require.NoError(t, dbConn.Exec("UPDATE sessions SET updated_at = ? WHERE chat_id = ?", expiredTime, expiredID).Error)
+
+	// Create physical files for expired session
+	expiredSessDir := filepath.Join(sessionBase, expiredID)
+	expiredWfDir := filepath.Join(expiredSessDir, "workflows", "wf-run-1", "nodes")
+	require.NoError(t, os.MkdirAll(expiredWfDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(expiredWfDir, "node.log"), []byte("log data"), 0644))
+
+	// Setup orphan session directory in sessionBase
+	orphanSessDir := filepath.Join(sessionBase, orphanID)
+	orphanWfDir := filepath.Join(orphanSessDir, "workflows", "wf-run-orphan")
+	require.NoError(t, os.MkdirAll(orphanWfDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(orphanSessDir, "messages.jsonl"), []byte(`{"role":"user"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(orphanWfDir, "run.json"), []byte(`{}`), 0644))
+
+	// Set mod times to expiredTime
+	require.NoError(t, os.Chtimes(orphanSessDir, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(filepath.Join(orphanSessDir, "messages.jsonl"), expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(filepath.Join(orphanSessDir, "workflows"), expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(orphanWfDir, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(filepath.Join(orphanWfDir, "run.json"), expiredTime, expiredTime))
+
+	cutoff := now.AddDate(0, -1, 0)
+	err := repo.CleanExpiredSessions(CleanExpiredSessionsOptions{
+		Cutoff:  cutoff,
+		TmpBase: tmpBase,
+	})
+	require.NoError(t, err)
+
+	// Expired session and orphan session should have their directories deleted
+	_, errExpired := os.Stat(expiredSessDir)
+	assert.True(t, os.IsNotExist(errExpired), "Expired session dir should be removed")
+
+	_, errOrphan := os.Stat(orphanSessDir)
+	assert.True(t, os.IsNotExist(errOrphan), "Orphan session dir should be removed")
+}

@@ -49,9 +49,8 @@ graph TD
 
 ### 1. The Dual-Sandbox Concept
 
-When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
-
 Both sandboxes bind-mount per-chat host directories: `~/tmp/<chat-id>` at `/tmp` and `~/session/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
+The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/session/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
