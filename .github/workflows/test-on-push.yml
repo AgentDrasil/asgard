@@ -25,6 +25,9 @@ jobs:
           go.work.sum
           **/go.sum
 
+    - name: Download dependencies
+      run: go mod download
+
     - name: Install goimports
       run: go install golang.org/x/tools/cmd/goimports@${{ env.GOIMPORTS_VERSION }}
 
