@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
 import ChatArea from "./ChatArea.vue";
-import type { AgentInfo, ChatMessage } from "../types";
+import type { AgentInfo, ChatMessage, QueuedMessage } from "../types";
 import { i18n } from "../i18n";
 
 // Mock @iconify/vue
@@ -238,6 +238,95 @@ describe("ChatArea.vue", () => {
 
     // Find button has active class
     expect(findBtn.classList.contains("btn-primary")).toBe(true);
+
+    app.unmount();
+  });
+
+  it("renders queued messages in chat stream and emits edit-queued and delete-queued events", async () => {
+    const dummyQueued: QueuedMessage[] = [
+      {
+        id: "qmsg-1",
+        chatId: "sess-123",
+        prompt: "First queued task",
+        createdAt: "2026-09-03T20:00:00Z",
+        updatedAt: "2026-09-03T20:00:00Z",
+      },
+      {
+        id: "qmsg-2",
+        chatId: "sess-123",
+        prompt: "Second queued task",
+        createdAt: "2026-09-03T20:01:00Z",
+        updatedAt: "2026-09-03T20:01:00Z",
+      },
+    ];
+
+    let editedId = "";
+    let editedText = "";
+    let deletedId = "";
+
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+          queuedMessages: dummyQueued,
+          onEditQueued: (id: string, text: string) => {
+            editedId = id;
+            editedText = text;
+          },
+          onDeleteQueued: (id: string) => {
+            deletedId = id;
+          },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const queueContainer = root.querySelector('[data-testid="queued-messages-container"]');
+    expect(queueContainer).not.toBeNull();
+
+    const cards = root.querySelectorAll('[data-testid="queued-message-card"]');
+    expect(cards.length).toBe(2);
+    expect(cards[0].textContent).toContain("First queued task");
+    expect(cards[1].textContent).toContain("Second queued task");
+
+    // Click delete on first card
+    const deleteBtn = cards[0].querySelector(
+      '[data-testid="delete-queued-button"]',
+    ) as HTMLButtonElement;
+    expect(deleteBtn).not.toBeNull();
+    deleteBtn.click();
+    await nextTick();
+    expect(deletedId).toBe("qmsg-1");
+
+    // Click edit on second card
+    const editBtn = cards[1].querySelector(
+      '[data-testid="edit-queued-button"]',
+    ) as HTMLButtonElement;
+    expect(editBtn).not.toBeNull();
+    editBtn.click();
+    await nextTick();
+
+    const textarea = cards[1].querySelector(
+      '[data-testid="queued-edit-textarea"]',
+    ) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    textarea.value = "Updated second queued task";
+    textarea.dispatchEvent(new Event("input"));
+    await nextTick();
+
+    const saveBtn = cards[1].querySelector('[data-testid="save-edit-button"]') as HTMLButtonElement;
+    expect(saveBtn).not.toBeNull();
+    saveBtn.click();
+    await nextTick();
+
+    expect(editedId).toBe("qmsg-2");
+    expect(editedText).toBe("Updated second queued task");
 
     app.unmount();
   });

@@ -759,4 +759,165 @@ describe("ChatInput.vue", () => {
       app.unmount();
     });
   });
+
+  describe("Queue Mode and Limits", () => {
+    it("keeps input enabled and updates button title to Enqueue when isRunning is true and queue is not full", async () => {
+      let sentText = "";
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            isRunning: true,
+            queuedCount: 1,
+            modelValue: "Queued message 2",
+            onSend: (text: string) => {
+              sentText = text;
+            },
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.placeholder).toContain("Enqueue");
+
+      const sendBtn = root.querySelector(
+        '[data-testid="send-message-button"]',
+      ) as HTMLButtonElement;
+      expect(sendBtn.disabled).toBe(false);
+      expect(sendBtn.title).toContain("Enqueue");
+
+      sendBtn.click();
+      await nextTick();
+      expect(sentText).toBe("Queued message 2");
+
+      app.unmount();
+    });
+
+    it("disables input and shows warning banner when queue reaches 3 messages", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            isRunning: true,
+            queuedCount: 3,
+            modelValue: "Exceeding message",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const alertBanner = root.querySelector('[data-testid="queue-limit-alert"]');
+      expect(alertBanner).not.toBeNull();
+      expect(alertBanner?.textContent).toContain("Queue limit reached");
+
+      const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea.disabled).toBe(true);
+      expect(textarea.placeholder).toContain("Queue limit reached");
+
+      const sendBtn = root.querySelector(
+        '[data-testid="send-message-button"]',
+      ) as HTMLButtonElement;
+      expect(sendBtn.disabled).toBe(true);
+
+      app.unmount();
+    });
+
+    it("disables attachment button with plain text tooltip in queue mode", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            sessionId: "sess-123",
+            isRunning: true,
+            queuedCount: 1,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const attachBtn = root.querySelector(
+        '[data-testid="attach-file-button"]',
+      ) as HTMLButtonElement;
+      expect(attachBtn).not.toBeNull();
+      expect(attachBtn.disabled).toBe(true);
+      expect(attachBtn.title).toContain("Queued messages only support plain text");
+
+      app.unmount();
+    });
+
+    it("maintains queue mode when queuedCount > 0 and isRunning is false (e.g. ask_user state)", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            isRunning: false,
+            queuedCount: 1,
+            sessionId: "sess-123",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea.placeholder).toContain("Enqueue");
+
+      const attachBtn = root.querySelector(
+        '[data-testid="attach-file-button"]',
+      ) as HTMLButtonElement;
+      expect(attachBtn.disabled).toBe(true);
+
+      const sendBtn = root.querySelector(
+        '[data-testid="send-message-button"]',
+      ) as HTMLButtonElement;
+      expect(sendBtn.title).toContain("Enqueue");
+
+      app.unmount();
+    });
+
+    it("keeps input enabled in integrated wiring where loading is true while isRunning is true", async () => {
+      let sentText = "";
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: true, // App.vue passes loading=isInputBusy, which is true when isRunning=true
+            isRunning: true,
+            queuedCount: 1,
+            modelValue: "Queue message under integrated wiring",
+            onSend: (text: string) => {
+              sentText = text;
+            },
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.placeholder).toContain("Enqueue");
+
+      const sendBtn = root.querySelector(
+        '[data-testid="send-message-button"]',
+      ) as HTMLButtonElement;
+      expect(sendBtn.disabled).toBe(false);
+      expect(sendBtn.title).toContain("Enqueue");
+
+      sendBtn.click();
+      await nextTick();
+      expect(sentText).toBe("Queue message under integrated wiring");
+
+      app.unmount();
+    });
+  });
 });

@@ -204,6 +204,8 @@ const {
   activeAgent,
   messages,
   artifacts,
+  queuedMessages,
+  isRunning,
   workingAgentLabel,
   isInputBusy,
   openSession,
@@ -212,6 +214,8 @@ const {
   archiveSessionById,
   sendMessage,
   updateMessageReply,
+  editQueuedMessage,
+  deleteQueuedMessage,
 } = store;
 
 // 3. Sessions Navigation & Operations
@@ -351,6 +355,14 @@ const handleAskReplied = (msgId?: string, text?: string) => {
   if (msgId && text) {
     updateMessageReply(msgId, text);
   }
+};
+
+const handleEditQueued = (id: string, text: string) => {
+  void editQueuedMessage(id, text);
+};
+
+const handleDeleteQueued = (id: string) => {
+  void deleteQueuedMessage(id);
 };
 
 const toggleSidebar = () => {
@@ -573,6 +585,8 @@ const commandList = computed<CommandItem[]>(() => [
           :sessionId="activeSessionId || ''"
           :gitRoot="currentGitRoot"
           :terminalType="terminalType"
+          :queuedMessages="queuedMessages"
+          :isRunning="isRunning"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
           v-model:selectedCommit="selectedCommit"
@@ -599,6 +613,8 @@ const commandList = computed<CommandItem[]>(() => [
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
           @ask-replied="handleAskReplied"
+          @edit-queued="handleEditQueued"
+          @delete-queued="handleDeleteQueued"
         />
       </router-view>
     </main>

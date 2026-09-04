@@ -996,6 +996,70 @@ describe("useSessionStore", () => {
       ).toBe(true);
     });
 
+    it("should enqueue message and reject attachments when queuedCount > 0 and isRunning is false (ask_user state)", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-ask-user-queued",
+        title: "Ask User Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        isRunning: false, // Agent paused / awaiting ask_user
+        messages: [],
+        queuedMessages: [
+          {
+            id: "q-existing-1",
+            chatId: "session-ask-user-queued",
+            prompt: "Existing queue item",
+            createdAt: "1",
+            updatedAt: "1",
+          },
+        ],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const enqueueSpy = vi.spyOn(api, "enqueueMessage").mockResolvedValue({
+        id: "q-existing-2",
+        chatId: "session-ask-user-queued",
+        prompt: "Second queued message while paused",
+        createdAt: "2",
+        updatedAt: "2",
+      });
+      const triggerSpy = vi.spyOn(api, "triggerAgentMessage");
+
+      const store = useSessionStore();
+      await store.openSession("session-ask-user-queued");
+      expect(store.isRunning.value).toBe(false);
+      expect(store.queuedMessages.value.length).toBe(1);
+
+      // 1. Sending with attachment should be rejected
+      const file = new File(["test"], "test.png", { type: "image/png" });
+      await store.sendMessage("Prompt with attachment while paused", {
+        pendingFiles: [file],
+      });
+      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(triggerSpy).not.toHaveBeenCalled();
+      expect(
+        store.messages.value.some(
+          (m) => m.role === "error" && m.content.includes("排队消息仅支持纯文本，暂不支持上传附件"),
+        ),
+      ).toBe(true);
+
+      // 2. Sending text should enqueue, not trigger regular send or insert optimistic user message
+      await store.sendMessage("Second queued message while paused");
+      expect(enqueueSpy).toHaveBeenCalledWith(
+        "session-ask-user-queued",
+        "Second queued message while paused",
+        undefined,
+      );
+      expect(triggerSpy).not.toHaveBeenCalled();
+      expect(
+        store.messages.value.some(
+          (m) => m.role === "user" && m.content === "Second queued message while paused",
+        ),
+      ).toBe(false);
+      expect(store.queuedMessages.value.length).toBe(2);
+      expect(store.queuedMessages.value[1].id).toBe("q-existing-2");
+    });
+
     it("should edit queued message and silently handle 404", async () => {
       const mockSession: ChatSession = {
         chatID: "session-edit-queue",

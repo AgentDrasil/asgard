@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
-import type { ChatMessage, AgentInfo } from "../types";
+import type { ChatMessage, AgentInfo, QueuedMessage } from "../types";
 import { formatPath } from "../utils/agentUtils";
 import { getDirInfo } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
@@ -12,6 +12,7 @@ import UserMessage from "./chat/UserMessage.vue";
 import AssistantMessage from "./chat/AssistantMessage.vue";
 import ActivityMessage from "./chat/ActivityMessage.vue";
 import AskUserCard from "./chat/AskUserCard.vue";
+import QueuedMessageCard from "./chat/QueuedMessageCard.vue";
 import ArtifactViewer from "./ArtifactViewer.vue";
 import { t } from "../i18n";
 
@@ -39,6 +40,7 @@ const props = withDefaults(
     activeArtifactPath?: string | null;
     isArtifactDrawerOpen?: boolean;
     workingAgentLabel?: string | null;
+    queuedMessages?: QueuedMessage[];
   }>(),
   {
     isDetailsOpen: true,
@@ -47,6 +49,7 @@ const props = withDefaults(
     activeArtifactPath: null,
     isArtifactDrawerOpen: false,
     workingAgentLabel: null,
+    queuedMessages: () => [],
   },
 );
 
@@ -60,6 +63,8 @@ const emit = defineEmits<{
   (e: "toggle-sidebar"): void;
   (e: "toggle-artifact-drawer"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
+  (e: "edit-queued", id: string, text: string): void;
+  (e: "delete-queued", id: string): void;
 }>();
 
 // Resizable artifact panel width logic
@@ -406,6 +411,23 @@ onUnmounted(() => {
                   })
                 }}
               </span>
+            </div>
+
+            <!-- Queued Messages List -->
+            <div
+              v-if="queuedMessages && queuedMessages.length > 0"
+              class="space-y-3 pt-2"
+              data-testid="queued-messages-container"
+            >
+              <QueuedMessageCard
+                v-for="(qMsg, idx) in queuedMessages"
+                :key="qMsg.id"
+                :message="qMsg"
+                :index="idx"
+                :total="queuedMessages.length"
+                @edit="(id, text) => emit('edit-queued', id, text)"
+                @delete="(id) => emit('delete-queued', id)"
+              />
             </div>
           </div>
         </div>

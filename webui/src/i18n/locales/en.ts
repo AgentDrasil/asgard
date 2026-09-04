@@ -250,6 +250,18 @@ export const en = {
     typeReplyPlaceholder: "Type your reply to agent...",
     reply: "Reply",
     replied: "Replied: {text}",
+    queuedBadge: "Queued #{index}",
+    enqueue: "Enqueue",
+    enqueueTip: "Enqueue (runs after current task completes)",
+    queueLimitAlert:
+      "Queue limit reached (maximum 3 messages). Please wait for current task or cancel queued messages",
+    queueLimitPlaceholder: "Queue limit reached (maximum 3 messages)",
+    queueTextOnly: "Queued messages only support plain text",
+    queueClearedOnFail: "Task failed, all queued messages for this session have been cleared",
+    queueCardTip: "Runs after current task completes in order",
+    editQueued: "Edit queued message",
+    deleteQueued: "Delete queued message",
+    cancelQueued: "Cancel",
     workflow: {
       resuming: "Resuming workflow and executing next step...",
       waitingHuman: "Workflow Paused · Waiting for Human Decision",

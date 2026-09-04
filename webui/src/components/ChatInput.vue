@@ -13,11 +13,21 @@ import { t } from "../i18n";
 const { modKey, sendShortcut, matchShortcut } = useShortcuts();
 const toast = useToast();
 
-const props = defineProps<{
-  loading: boolean;
-  modelValue?: string;
-  sessionId?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    loading: boolean;
+    modelValue?: string;
+    sessionId?: string | null;
+    queuedCount?: number;
+    isRunning?: boolean;
+    activeAgentType?: string;
+  }>(),
+  {
+    queuedCount: 0,
+    isRunning: false,
+    activeAgentType: "agent",
+  },
+);
 
 const emit = defineEmits<{
   (e: "send", text: string, attachments?: Attachment[]): void;
@@ -32,6 +42,28 @@ const isDragging = ref(false);
 let dragEnterCounter = 0;
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
+const isQueueMode = computed(() => {
+  return (props.isRunning || (props.queuedCount || 0) > 0) && props.activeAgentType !== "workflow";
+});
+
+const isQueueFull = computed(() => {
+  return isQueueMode.value && (props.queuedCount || 0) >= 3;
+});
+
+const isInputDisabled = computed(() => {
+  return isQueueMode.value ? isQueueFull.value : props.loading;
+});
+
+const placeholderText = computed(() => {
+  if (isQueueFull.value) {
+    return t("chat.queueLimitPlaceholder");
+  }
+  if (isQueueMode.value) {
+    return t("chat.enqueueTip");
+  }
+  return t("chat.inputPlaceholder", { shortcut: sendShortcut.value });
+});
+
 const isMultiline = computed(() => {
   return text.value.includes("\n");
 });
@@ -42,7 +74,7 @@ const lineCount = computed(() => {
 });
 
 const canSend = computed(() => {
-  if (props.loading || isUploading.value) return false;
+  if (isInputDisabled.value || isUploading.value) return false;
   return text.value.trim().length > 0;
 });
 
@@ -141,7 +173,7 @@ const closeModal = () => {
 };
 
 const triggerFileInput = () => {
-  if (!props.sessionId || isUploading.value || props.loading) return;
+  if (!props.sessionId || isUploading.value || props.loading || isQueueMode.value) return;
   fileInputRef.value?.click();
 };
 
@@ -150,7 +182,7 @@ const MAX_SINGLE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 const MAX_TOTAL_FILES_SIZE = 50 * 1024 * 1024; // 50MB
 
 const processFiles = async (files: FileList | File[]) => {
-  if (!props.sessionId || !files || files.length === 0) return;
+  if (!props.sessionId || !files || files.length === 0 || isQueueMode.value) return;
 
   const fileArray = Array.from(files);
   if (attachments.value.length + fileArray.length > MAX_ATTACHMENTS) {
@@ -223,7 +255,7 @@ const removeAttachment = (index: number) => {
 };
 
 const handlePaste = (e: ClipboardEvent) => {
-  if (!props.sessionId || !e.clipboardData || !e.clipboardData.files) return;
+  if (!props.sessionId || !e.clipboardData || !e.clipboardData.files || isQueueMode.value) return;
   const files = e.clipboardData.files;
   if (files.length > 0) {
     e.preventDefault();
@@ -232,7 +264,7 @@ const handlePaste = (e: ClipboardEvent) => {
 };
 
 const handleDragEnter = (e: DragEvent) => {
-  if (!props.sessionId || props.loading) return;
+  if (!props.sessionId || props.loading || isQueueMode.value) return;
   if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
     dragEnterCounter++;
     isDragging.value = true;
@@ -240,14 +272,14 @@ const handleDragEnter = (e: DragEvent) => {
 };
 
 const handleDragOver = (e: DragEvent) => {
-  if (!props.sessionId || props.loading) return;
+  if (!props.sessionId || props.loading || isQueueMode.value) return;
   if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
     e.preventDefault();
   }
 };
 
 const handleDragLeave = (_e: DragEvent) => {
-  if (!props.sessionId || props.loading) return;
+  if (!props.sessionId || props.loading || isQueueMode.value) return;
   dragEnterCounter--;
   if (dragEnterCounter <= 0) {
     dragEnterCounter = 0;
@@ -258,7 +290,7 @@ const handleDragLeave = (_e: DragEvent) => {
 const handleDrop = (e: DragEvent) => {
   dragEnterCounter = 0;
   isDragging.value = false;
-  if (!props.sessionId || props.loading) return;
+  if (!props.sessionId || props.loading || isQueueMode.value) return;
   e.preventDefault();
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
     void processFiles(e.dataTransfer.files);
@@ -299,6 +331,18 @@ const handleDrop = (e: DragEvent) => {
         </span>
       </div>
 
+      <!-- Queue Limit Alert Banner -->
+      <div
+        v-if="isQueueFull"
+        class="alert alert-warning py-2 px-3 text-xs rounded-xl shadow-xs flex items-center justify-between"
+        data-testid="queue-limit-alert"
+      >
+        <div class="flex items-center gap-2">
+          <Icon icon="material-symbols:warning-rounded" class="w-4 h-4 shrink-0" />
+          <span>{{ $t("chat.queueLimitAlert") }}</span>
+        </div>
+      </div>
+
       <div class="relative flex items-center w-full min-w-0">
         <!-- Left Buttons Join/Group (Expand, Attach & Voice) -->
         <div class="absolute left-2.5 sm:left-3 z-10 flex items-center gap-1">
@@ -322,9 +366,10 @@ const handleDrop = (e: DragEvent) => {
             v-if="sessionId"
             @click="triggerFileInput"
             type="button"
-            :disabled="loading || isUploading"
+            :disabled="loading || isUploading || isQueueMode"
             class="btn btn-circle btn-sm btn-ghost hover:bg-base-300 text-base-content/70 hover:text-base-content hover:scale-105 active:scale-95 transition-all"
-            :title="$t('chat.attachFile')"
+            :title="isQueueMode ? $t('chat.queueTextOnly') : $t('chat.attachFile')"
+            data-testid="attach-file-button"
           >
             <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
           </button>
@@ -343,9 +388,9 @@ const handleDrop = (e: DragEvent) => {
           v-model="text"
           @keydown="handleKeyDown"
           @paste="handlePaste"
-          :placeholder="$t('chat.inputPlaceholder', { shortcut: sendShortcut })"
+          :placeholder="placeholderText"
           rows="1"
-          :disabled="loading"
+          :disabled="isInputDisabled"
           class="textarea textarea-bordered bg-base-200 text-base-content w-full rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
           :class="sessionId ? 'pl-28 sm:pl-30 pr-11 sm:pr-12' : 'pl-20 sm:pl-22 pr-11 sm:pr-12'"
         ></textarea>
@@ -355,7 +400,12 @@ const handleDrop = (e: DragEvent) => {
           @click="handleSend"
           :disabled="!canSend"
           class="btn btn-circle btn-primary btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"
-          :title="$t('chat.sendMessageShortcut', { shortcut: sendShortcut })"
+          :title="
+            isQueueMode
+              ? $t('chat.enqueueTip')
+              : $t('chat.sendMessageShortcut', { shortcut: sendShortcut })
+          "
+          data-testid="send-message-button"
         >
           <span v-if="loading || isUploading" class="loading loading-spinner loading-xs"></span>
           <Icon v-else icon="material-symbols:send" class="h-4 w-4 fill-current" />
@@ -410,8 +460,14 @@ const handleDrop = (e: DragEvent) => {
             v-model="text"
             @keydown="handleKeyDown"
             @paste="handlePaste"
-            :placeholder="$t('chat.promptMultilinePlaceholder', { shortcut: sendShortcut })"
-            :disabled="loading"
+            :placeholder="
+              isQueueFull
+                ? $t('chat.queueLimitPlaceholder')
+                : isQueueMode
+                  ? $t('chat.enqueueTip')
+                  : $t('chat.promptMultilinePlaceholder', { shortcut: sendShortcut })
+            "
+            :disabled="isInputDisabled"
             class="textarea textarea-bordered bg-base-200 text-base-content w-full flex-1 p-4 rounded-xl leading-relaxed focus:outline-none focus:border-primary text-sm font-mono resize-none"
           ></textarea>
         </div>
@@ -422,9 +478,9 @@ const handleDrop = (e: DragEvent) => {
               v-if="sessionId"
               @click="triggerFileInput"
               type="button"
-              :disabled="loading || isUploading"
+              :disabled="loading || isUploading || isQueueMode"
               class="btn btn-sm btn-ghost gap-1.5 text-base-content/70 hover:text-base-content"
-              :title="$t('chat.attachFile')"
+              :title="isQueueMode ? $t('chat.queueTextOnly') : $t('chat.attachFile')"
             >
               <Icon icon="material-symbols:attach-file" class="h-4 w-4" />
               <span class="hidden sm:inline">{{ $t("chat.attach") }}</span>
@@ -445,10 +501,19 @@ const handleDrop = (e: DragEvent) => {
           </div>
           <div class="flex items-center gap-2 ml-auto">
             <button @click="closeModal" class="btn btn-sm btn-ghost">{{ $t("chat.done") }}</button>
-            <button @click="handleSend" :disabled="!canSend" class="btn btn-sm btn-primary gap-2">
+            <button
+              @click="handleSend"
+              :disabled="!canSend"
+              class="btn btn-sm btn-primary gap-2"
+              :title="
+                isQueueMode
+                  ? $t('chat.enqueueTip')
+                  : $t('chat.sendMessageShortcut', { shortcut: sendShortcut })
+              "
+            >
               <span v-if="loading || isUploading" class="loading loading-spinner loading-xs"></span>
               <Icon v-else icon="material-symbols:send" class="h-4 w-4" />
-              {{ $t("chat.send") }}
+              {{ isQueueMode ? $t("chat.enqueue") : $t("chat.send") }}
             </button>
           </div>
         </div>

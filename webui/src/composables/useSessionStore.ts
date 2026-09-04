@@ -374,7 +374,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   ) => {
     let currentThreadId = activeSessionId.value;
 
-    if (currentThreadId && isRunning.value) {
+    if (currentThreadId && (isRunning.value || queuedMessages.value.length > 0)) {
       if (
         (opts?.attachments && opts.attachments.length > 0) ||
         (opts?.pendingFiles && opts.pendingFiles.length > 0)

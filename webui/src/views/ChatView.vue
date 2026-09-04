@@ -7,23 +7,31 @@ import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
-import type { ChatMessage, AgentInfo, ActiveView, Attachment } from "../types";
+import type { ChatMessage, AgentInfo, ActiveView, Attachment, QueuedMessage } from "../types";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
 const router = useRouter();
 
-const props = defineProps<{
-  messages: ChatMessage[];
-  artifacts?: string[];
-  loading: boolean;
-  activeAgent: AgentInfo | null;
-  agents?: AgentInfo[];
-  runDir: string;
-  sessionId: string;
-  gitRoot: string;
-  terminalType?: "session" | "sidebar";
-  workingAgentLabel?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    messages: ChatMessage[];
+    artifacts?: string[];
+    loading: boolean;
+    activeAgent: AgentInfo | null;
+    agents?: AgentInfo[];
+    runDir: string;
+    sessionId: string;
+    gitRoot: string;
+    terminalType?: "session" | "sidebar";
+    workingAgentLabel?: string | null;
+    queuedMessages?: QueuedMessage[];
+    isRunning?: boolean;
+  }>(),
+  {
+    queuedMessages: () => [],
+    isRunning: false,
+  },
+);
 
 const activeView = defineModel<ActiveView>("activeView", { default: "chat" });
 const selectedFilePath = defineModel<string | null>("selectedFilePath", { default: null });
@@ -47,6 +55,8 @@ const emit = defineEmits<{
   (e: "toggle-sidebar"): void;
   (e: "open-search"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
+  (e: "edit-queued", id: string, text: string): void;
+  (e: "delete-queued", id: string): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -202,6 +212,7 @@ function navigateToVcs(gitRoot?: string) {
         :activeArtifactPath="activeArtifactPath"
         :isArtifactDrawerOpen="isArtifactDrawerOpen"
         :workingAgentLabel="workingAgentLabel"
+        :queuedMessages="queuedMessages"
         v-model:isDetailsOpen="isDetailsOpen"
         @open-diff="navigateToVcs"
         @open-file-view="navigateToFiles"
@@ -211,6 +222,8 @@ function navigateToVcs(gitRoot?: string) {
         @toggle-sidebar="emit('toggle-sidebar')"
         @toggle-artifact-drawer="toggleArtifactDrawer"
         @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
+        @edit-queued="(id, text) => emit('edit-queued', id, text)"
+        @delete-queued="(id) => emit('delete-queued', id)"
       />
     </div>
 
@@ -232,6 +245,9 @@ function navigateToVcs(gitRoot?: string) {
           :sessionId="sessionId"
           @send="(text, atts) => emit('send', text, atts)"
           :loading="loading"
+          :isRunning="isRunning"
+          :queuedCount="queuedMessages.length"
+          :activeAgentType="activeAgent?.type"
           v-model="chatInputText"
         />
       </template>
