@@ -7,6 +7,7 @@ export interface SessionEventsCallbacks {
   onArtifact?: (ev: SessionEvent) => void;
   onDone?: (ev: SessionEvent) => void;
   onResync?: (ev: SessionEvent) => void;
+  onQueue?: (ev: SessionEvent) => void;
   onAuthExpired?: (ev: SessionEvent) => void;
   onError?: (err: Event) => void;
   onOpen?: () => void;
@@ -55,6 +56,7 @@ export function useSessionEvents(callbacks: SessionEventsCallbacks = {}) {
     es.addEventListener("artifact", parseAndDispatch(callbacks.onArtifact));
     es.addEventListener("done", parseAndDispatch(callbacks.onDone));
     es.addEventListener("resync", parseAndDispatch(callbacks.onResync));
+    es.addEventListener("queue", parseAndDispatch(callbacks.onQueue));
     es.addEventListener("auth_expired", (e: MessageEvent) => {
       parseAndDispatch(callbacks.onAuthExpired)(e);
       if (typeof window !== "undefined") {

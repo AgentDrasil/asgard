@@ -1,6 +1,13 @@
 import { ref, computed, watch, type Ref } from "vue";
 import type { Router } from "vue-router";
-import type { ChatSession, AgentInfo, ChatMessage, SessionEvent, Attachment } from "../types";
+import type {
+  ChatSession,
+  AgentInfo,
+  ChatMessage,
+  SessionEvent,
+  Attachment,
+  QueuedMessage,
+} from "../types";
 import {
   getSession,
   getSessions,
@@ -8,6 +15,9 @@ import {
   createSession,
   triggerAgentMessage,
   uploadAttachment,
+  enqueueMessage,
+  updateQueuedMessage,
+  deleteQueuedMessage,
 } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
@@ -16,6 +26,8 @@ export interface SessionStoreOptions {
   agents?: Ref<AgentInfo[]>;
   router?: Router;
 }
+
+export const MAX_QUEUED_MESSAGES = 3;
 
 export function useSessionStore(options: SessionStoreOptions = {}) {
   const { agents = ref<AgentInfo[]>([]), router } = options;
@@ -28,6 +40,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   const rawMessages = ref<ChatMessage[]>([]);
   const messages = computed<ChatMessage[]>(() => mergeToolMessages(rawMessages.value));
   const artifacts = ref<string[]>([]);
+  const queuedMessages = ref<QueuedMessage[]>([]);
+  const canEnqueue = computed<boolean>(() => queuedMessages.value.length < MAX_QUEUED_MESSAGES);
 
   const isRunning = ref(false);
   const loading = ref(false);
@@ -170,11 +184,19 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
   };
 
+  const handleSessionQueueEvent = (ev: SessionEvent) => {
+    if (ev.chatId && ev.chatId !== activeSessionId.value) return;
+    if (Array.isArray(ev.payload?.queue)) {
+      queuedMessages.value = ev.payload.queue;
+    }
+  };
+
   const handleSessionResyncEvent = async (ev: SessionEvent) => {
     if (ev.chatId === activeSessionId.value && activeSessionId.value) {
       const session = await getSession(activeSessionId.value);
       if (session && activeSessionId.value === ev.chatId) {
         activeSession.value = session;
+        queuedMessages.value = session.queuedMessages || [];
         const snapshotMsgs = session.messages || [];
         const pendingOptimistic = rawMessages.value.filter(
           (m) =>
@@ -204,6 +226,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     onArtifact: handleSessionArtifactEvent,
     onDone: handleSessionDoneEvent,
     onResync: handleSessionResyncEvent,
+    onQueue: handleSessionQueueEvent,
   });
 
   const openSession = async (id: string) => {
@@ -216,6 +239,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       activeSession.value = null;
       rawMessages.value = [];
       artifacts.value = [];
+      queuedMessages.value = [];
       isRunning.value = false;
       loading.value = false;
       workingAgentLabel.value = null;
@@ -229,6 +253,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
     if (session) {
       activeSession.value = session;
+      queuedMessages.value = session.queuedMessages || [];
 
       const snapshotMsgs = session.messages || [];
       if (rawMessages.value.length === 0) {
@@ -280,6 +305,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       activeSession.value = null;
       rawMessages.value = [];
       artifacts.value = [];
+      queuedMessages.value = [];
       isRunning.value = false;
       loading.value = false;
       workingAgentLabel.value = null;
@@ -291,6 +317,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     activeSession.value = null;
     rawMessages.value = [];
     artifacts.value = [];
+    queuedMessages.value = [];
     isRunning.value = false;
     loading.value = false;
     workingAgentLabel.value = null;
@@ -308,6 +335,33 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     );
   };
 
+  const editQueuedMessage = async (messageId: string, newText: string): Promise<boolean> => {
+    if (!activeSessionId.value || !messageId) return false;
+    const res = await updateQueuedMessage(activeSessionId.value, messageId, newText);
+    if (res) {
+      const idx = queuedMessages.value.findIndex((m) => m.id === messageId);
+      if (idx > -1) {
+        const updated = [...queuedMessages.value];
+        updated[idx] = res;
+        queuedMessages.value = updated;
+      }
+      return true;
+    }
+    // If update returned null (e.g. 404), upcoming SSE queue event will resync silently.
+    return false;
+  };
+
+  const deleteQueuedMessageItem = async (messageId: string): Promise<boolean> => {
+    if (!activeSessionId.value || !messageId) return false;
+    const ok = await deleteQueuedMessage(activeSessionId.value, messageId);
+    if (ok) {
+      queuedMessages.value = queuedMessages.value.filter((m) => m.id !== messageId);
+      return true;
+    }
+    // If delete returned false (e.g. 404), upcoming SSE queue event will resync silently.
+    return false;
+  };
+
   const sendMessage = async (
     text: string,
     opts?: {
@@ -319,6 +373,29 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     },
   ) => {
     let currentThreadId = activeSessionId.value;
+
+    if (currentThreadId && isRunning.value) {
+      if (
+        (opts?.attachments && opts.attachments.length > 0) ||
+        (opts?.pendingFiles && opts.pendingFiles.length > 0)
+      ) {
+        pushErrorMessage("排队消息仅支持纯文本，暂不支持上传附件");
+        return;
+      }
+      if (queuedMessages.value.length >= MAX_QUEUED_MESSAGES) {
+        pushErrorMessage(`排队消息已达上限（最多 ${MAX_QUEUED_MESSAGES} 条）`);
+        return;
+      }
+      const queued = await enqueueMessage(currentThreadId, text, opts?.selectedModel);
+      if (queued) {
+        if (!queuedMessages.value.some((m) => m.id === queued.id)) {
+          queuedMessages.value = [...queuedMessages.value, queued];
+        }
+      } else {
+        pushErrorMessage("Failed to enqueue message. Please try again.");
+      }
+      return;
+    }
 
     if (currentThreadId) {
       const activeSess = sessions.value.find((s) => s.chatID === currentThreadId);
@@ -409,6 +486,12 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       loading.value = false;
       isRunning.value = false;
       pushErrorMessage("Session is already running a task. Please wait.");
+    } else if (res?.queued) {
+      // Server queued the message (local running state was stale): drop the
+      // optimistic bubble. The SSE queue snapshot owns queue display, and the
+      // persisted user message arrives via the `message` event when executed.
+      // Keep isRunning=true: the server run is active and SSE drives it from here.
+      rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
     } else if (!res) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
       loading.value = false;
@@ -488,6 +571,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     rawMessages,
     messages,
     artifacts,
+    queuedMessages,
+    canEnqueue,
     isRunning,
     loading,
     workingAgentLabel,
@@ -498,5 +583,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     archiveSessionById,
     updateMessageReply,
     sendMessage,
+    editQueuedMessage,
+    deleteQueuedMessage: deleteQueuedMessageItem,
   };
 }

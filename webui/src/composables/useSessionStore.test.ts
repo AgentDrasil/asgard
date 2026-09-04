@@ -493,6 +493,39 @@ describe("useSessionStore", () => {
     expect(store.isRunning.value).toBe(false);
   });
 
+  it("should handle 202 queued response when server queues message on stale running state", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-202-queued",
+      title: "Chat 202 Queued",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      isRunning: false,
+      messages: [],
+    };
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+    vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "queued",
+      chatId: "session-202-queued",
+      queued: true,
+      messageId: "q1",
+    });
+
+    const store = useSessionStore();
+    await store.openSession("session-202-queued");
+
+    await store.sendMessage("Queued prompt on stale state");
+
+    // Optimistic user message should be removed to prevent dual-bubble
+    expect(store.messages.value.some((m) => m.content === "Queued prompt on stale state")).toBe(
+      false,
+    );
+    // No error message pushed
+    expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
+    // Running state remains true for SSE lifecycle
+    expect(store.isRunning.value).toBe(true);
+  });
+
   it("should preserve pending optimistic user messages on resync", async () => {
     const mockSession: ChatSession = {
       chatID: "session-resync",
@@ -788,5 +821,258 @@ describe("useSessionStore", () => {
     expect(result).toBe(true);
     expect(store.sessions.value.length).toBe(0);
     expect(pushSpy).toHaveBeenCalledWith("/dashboard");
+  });
+
+  describe("queue functionality", () => {
+    it("should initialize queuedMessages on openSession", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-queue-init",
+        title: "Queue Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+        queuedMessages: [
+          {
+            id: "qmsg-1",
+            chatId: "session-queue-init",
+            prompt: "Queued item 1",
+            createdAt: "2026-09-03T10:00:00Z",
+            updatedAt: "2026-09-03T10:00:00Z",
+          },
+        ],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+      const store = useSessionStore();
+      await store.openSession("session-queue-init");
+
+      expect(store.queuedMessages.value.length).toBe(1);
+      expect(store.queuedMessages.value[0].prompt).toBe("Queued item 1");
+      expect(store.canEnqueue.value).toBe(true);
+
+      store.closeSession();
+      expect(store.queuedMessages.value).toEqual([]);
+    });
+
+    it("should update queuedMessages when receiving SSE queue event", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-sse-queue",
+        title: "SSE Queue Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+      const store = useSessionStore();
+      await store.openSession("session-sse-queue");
+      expect(store.queuedMessages.value).toEqual([]);
+
+      const es = MockEventSource.instances[0];
+      const queueEv: SessionEvent = {
+        eventId: 10,
+        chatId: "session-sse-queue",
+        type: "queue",
+        payload: {
+          queue: [
+            {
+              id: "qmsg-sse-1",
+              chatId: "session-sse-queue",
+              prompt: "SSE queued prompt",
+              createdAt: "2026-09-03T11:00:00Z",
+              updatedAt: "2026-09-03T11:00:00Z",
+            },
+          ],
+        },
+        timestamp: Date.now(),
+      };
+      es.emit("queue", queueEv);
+
+      expect(store.queuedMessages.value.length).toBe(1);
+      expect(store.queuedMessages.value[0].id).toBe("qmsg-sse-1");
+    });
+
+    it("should enqueue message when isRunning is true without adding optimistic user message", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-running-enqueue",
+        title: "Running Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        isRunning: true,
+        messages: [],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const enqueueSpy = vi.spyOn(api, "enqueueMessage").mockResolvedValue({
+        id: "qmsg-new",
+        chatId: "session-running-enqueue",
+        prompt: "Second question",
+        model: "model-x",
+        createdAt: "2026-09-03T12:00:00Z",
+        updatedAt: "2026-09-03T12:00:00Z",
+      });
+      const triggerSpy = vi.spyOn(api, "triggerAgentMessage");
+
+      const store = useSessionStore();
+      await store.openSession("session-running-enqueue");
+      expect(store.isRunning.value).toBe(true);
+
+      await store.sendMessage("Second question", { selectedModel: "model-x" });
+
+      expect(enqueueSpy).toHaveBeenCalledWith(
+        "session-running-enqueue",
+        "Second question",
+        "model-x",
+      );
+      expect(triggerSpy).not.toHaveBeenCalled();
+      // Crucial: No optimistic message in rawMessages/messages
+      expect(store.messages.value.some((m) => m.content === "Second question")).toBe(false);
+      expect(store.queuedMessages.value.length).toBe(1);
+      expect(store.queuedMessages.value[0].id).toBe("qmsg-new");
+    });
+
+    it("should reject attachments when isRunning is true with error notification", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-running-att",
+        title: "Running Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        isRunning: true,
+        messages: [],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const enqueueSpy = vi.spyOn(api, "enqueueMessage");
+
+      const store = useSessionStore();
+      await store.openSession("session-running-att");
+
+      const file = new File(["test"], "test.png", { type: "image/png" });
+      await store.sendMessage("Prompt with attachment", {
+        pendingFiles: [file],
+      });
+
+      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(store.queuedMessages.value.length).toBe(0);
+      expect(
+        store.messages.value.some(
+          (m) => m.role === "error" && m.content.includes("排队消息仅支持纯文本，暂不支持上传附件"),
+        ),
+      ).toBe(true);
+    });
+
+    it("should reject enqueue when queue limit of 3 is reached", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-queue-full",
+        title: "Queue Full Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        isRunning: true,
+        messages: [],
+        queuedMessages: [
+          { id: "q1", chatId: "session-queue-full", prompt: "P1", createdAt: "1", updatedAt: "1" },
+          { id: "q2", chatId: "session-queue-full", prompt: "P2", createdAt: "2", updatedAt: "2" },
+          { id: "q3", chatId: "session-queue-full", prompt: "P3", createdAt: "3", updatedAt: "3" },
+        ],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const enqueueSpy = vi.spyOn(api, "enqueueMessage");
+
+      const store = useSessionStore();
+      await store.openSession("session-queue-full");
+
+      expect(store.canEnqueue.value).toBe(false);
+
+      await store.sendMessage("4th prompt should fail");
+
+      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(
+        store.messages.value.some(
+          (m) => m.role === "error" && m.content.includes("排队消息已达上限（最多 3 条）"),
+        ),
+      ).toBe(true);
+    });
+
+    it("should edit queued message and silently handle 404", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-edit-queue",
+        title: "Edit Queue Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+        queuedMessages: [
+          {
+            id: "qmsg-edit-1",
+            chatId: "session-edit-queue",
+            prompt: "Old text",
+            createdAt: "1",
+            updatedAt: "1",
+          },
+        ],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const updateSpy = vi.spyOn(api, "updateQueuedMessage").mockResolvedValueOnce({
+        id: "qmsg-edit-1",
+        chatId: "session-edit-queue",
+        prompt: "Updated text",
+        createdAt: "1",
+        updatedAt: "2",
+      });
+
+      const store = useSessionStore();
+      await store.openSession("session-edit-queue");
+
+      const ok = await store.editQueuedMessage("qmsg-edit-1", "Updated text");
+      expect(ok).toBe(true);
+      expect(store.queuedMessages.value[0].prompt).toBe("Updated text");
+
+      // Now simulate 404 (returns null)
+      updateSpy.mockResolvedValueOnce(null);
+      const failOk = await store.editQueuedMessage("qmsg-edit-1", "Newer text");
+      expect(failOk).toBe(false);
+      // No error message pushed (silent healing)
+      expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
+    });
+
+    it("should delete queued message and silently handle 404", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-del-queue",
+        title: "Delete Queue Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+        queuedMessages: [
+          {
+            id: "qmsg-del-1",
+            chatId: "session-del-queue",
+            prompt: "Delete me",
+            createdAt: "1",
+            updatedAt: "1",
+          },
+        ],
+      };
+
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const deleteSpy = vi.spyOn(api, "deleteQueuedMessage").mockResolvedValueOnce(true);
+
+      const store = useSessionStore();
+      await store.openSession("session-del-queue");
+      expect(store.queuedMessages.value.length).toBe(1);
+
+      const ok = await store.deleteQueuedMessage("qmsg-del-1");
+      expect(ok).toBe(true);
+      expect(store.queuedMessages.value.length).toBe(0);
+
+      // Now simulate 404 (returns false)
+      deleteSpy.mockResolvedValueOnce(false);
+      const failOk = await store.deleteQueuedMessage("qmsg-del-1");
+      expect(failOk).toBe(false);
+      // No error message pushed (silent healing)
+      expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
+    });
   });
 });

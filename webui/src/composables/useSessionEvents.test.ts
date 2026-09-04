@@ -140,4 +140,39 @@ describe("useSessionEvents", () => {
     expect(es.closed).toBe(true);
     expect(getCurrentSessionId()).toBeNull();
   });
+
+  it("should trigger onQueue callback when queue event is received", () => {
+    const onQueue = vi.fn<(ev: SessionEvent) => void>();
+
+    const { connect, disconnect } = useSessionEvents({
+      onQueue,
+    });
+
+    connect("chat-queue-test");
+    const es = MockEventSource.instances[0];
+
+    const queueEvent: SessionEvent = {
+      eventId: 7,
+      chatId: "chat-queue-test",
+      type: "queue",
+      payload: {
+        queue: [
+          {
+            id: "qmsg-1",
+            chatId: "chat-queue-test",
+            prompt: "Queued prompt 1",
+            createdAt: "2026-09-03T20:00:00Z",
+            updatedAt: "2026-09-03T20:00:00Z",
+          },
+        ],
+      },
+      timestamp: Date.now(),
+    };
+
+    es.emit("queue", queueEvent);
+    expect(onQueue).toHaveBeenCalledWith(queueEvent);
+
+    disconnect();
+    expect(es.closed).toBe(true);
+  });
 });

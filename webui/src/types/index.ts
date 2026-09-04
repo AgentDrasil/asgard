@@ -48,6 +48,15 @@ export interface ChatMessage {
   attachments?: Attachment[];
 }
 
+export interface QueuedMessage {
+  id: string;
+  chatId: string;
+  prompt: string;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatSession {
   chatID: string;
   title: string;
@@ -61,6 +70,7 @@ export interface ChatSession {
   updatedAt?: string;
   messages?: ChatMessage[];
   artifacts?: string[];
+  queuedMessages?: QueuedMessage[];
 }
 
 export interface DirInfo {
@@ -117,7 +127,7 @@ export interface FirebaseWebpushWebConfig {
 export interface SessionEvent {
   eventId: number;
   chatId: string;
-  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "auth_expired";
+  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "auth_expired" | "queue";
   message?: ChatMessage;
   payload?: Record<string, any>;
   timestamp: number;
