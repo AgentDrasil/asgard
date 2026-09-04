@@ -19,6 +19,7 @@ const (
 	EventTypeDone        = "done"
 	EventTypeResync      = "resync"
 	EventTypeAuthExpired = "auth_expired"
+	EventTypeQueue       = "queue"
 )
 
 // SessionEvent is the unified event structure broadcasted via EventHub and SSE.

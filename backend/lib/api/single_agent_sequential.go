@@ -20,6 +20,13 @@ type seqRunResult struct {
 	err error
 }
 
+type agentRunError struct {
+	Err error
+}
+
+func (e *agentRunError) Error() string { return e.Err.Error() }
+func (e *agentRunError) Unwrap() error { return e.Err }
+
 // executeSequential runs the first available CLI target (by quota) and streams results.
 func (e *SingleAgentExecutor) executeSequential(
 	ctx context.Context,
@@ -80,7 +87,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 			select {
 			case result := <-resultCh:
 				if result.err != nil {
-					return "", fmt.Errorf("failed to run agent: %w", result.err)
+					return "", &agentRunError{Err: result.err}
 				}
 				return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
 			case <-ctx.Done():
@@ -99,7 +106,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 
 		case result := <-resultCh:
 			if result.err != nil {
-				return "", fmt.Errorf("failed to run agent: %w", result.err)
+				return "", &agentRunError{Err: result.err}
 			}
 			return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
 

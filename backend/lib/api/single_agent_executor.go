@@ -55,7 +55,7 @@ func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *d
 }
 
 // Execute handles the agent execution.
-func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRunParams) (string, error) {
+func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRunParams) (resp string, err error) {
 	chatID := params.ChatID
 	if chatID == "" {
 		chatID = uuid.NewV7().String()
@@ -219,7 +219,9 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	// finishes, regardless of success, error, client disconnect, or
 	// context cancellation. This guarantees the session's isRunning
 	// state is cleared after the agent sandbox exits.
-	defer e.markAgentCompleted(chatID)
+	defer func() {
+		e.markAgentCompleted(chatID, err)
+	}()
 	augmentedPrompt := formatPromptWithAttachments(prompt, params.Attachments)
 	return e.executeSequential(ctx, augmentedPrompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
 }
@@ -305,10 +307,16 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 	}()
 }
 
-// markAgentCompleted unconditionally sets the agent status to completed for the
-// given chat. It is intended to be deferred from Execute so the session's
-// isRunning flag is always cleared after the agent sandbox exits.
-func (e *SingleAgentExecutor) markAgentCompleted(chatID string) {
+// markAgentCompleted sets the agent status to completed and broadcasts done/isRunning=false.
+// If err == nil and there are still queued messages in repo, it skips marking completed
+// and skips broadcasting done/isRunning=false to avoid status flickering between queued tasks.
+func (e *SingleAgentExecutor) markAgentCompleted(chatID string, runErr error) {
+	if runErr == nil && e.repo != nil {
+		if queued, err := e.repo.GetQueuedMessages(chatID); err == nil && len(queued) > 0 {
+			return
+		}
+	}
+
 	if e.repo != nil {
 		if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusCompleted); err != nil {
 			log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.ID).Msg("failed to mark agent status completed after run")

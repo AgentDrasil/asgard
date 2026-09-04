@@ -15,18 +15,19 @@ import (
 
 // ChatSession represents a session response/request payload for the WebUI.
 type ChatSession struct {
-	ChatID           string             `json:"chatID"`
-	Title            string             `json:"title"`
-	CurrentAgent     string             `json:"currentAgent"`
-	RunDir           string             `json:"runDir"`
-	GitRoot          string             `json:"gitRoot,omitempty"`
-	IsRunning        bool               `json:"isRunning"`
-	IsWaitingForUser bool               `json:"isWaitingForUser,omitempty"`
-	IsArchived       bool               `json:"isArchived"`
-	CreatedAt        *time.Time         `json:"createdAt,omitempty"`
-	UpdatedAt        *time.Time         `json:"updatedAt,omitempty"`
-	Messages         dbmodels.Messages  `json:"messages,omitempty"`
-	Artifacts        dbmodels.Artifacts `json:"artifacts,omitempty"`
+	ChatID           string                   `json:"chatID"`
+	Title            string                   `json:"title"`
+	CurrentAgent     string                   `json:"currentAgent"`
+	RunDir           string                   `json:"runDir"`
+	GitRoot          string                   `json:"gitRoot,omitempty"`
+	IsRunning        bool                     `json:"isRunning"`
+	IsWaitingForUser bool                     `json:"isWaitingForUser,omitempty"`
+	IsArchived       bool                     `json:"isArchived"`
+	CreatedAt        *time.Time               `json:"createdAt,omitempty"`
+	UpdatedAt        *time.Time               `json:"updatedAt,omitempty"`
+	Messages         dbmodels.Messages        `json:"messages,omitempty"`
+	Artifacts        dbmodels.Artifacts       `json:"artifacts,omitempty"`
+	QueuedMessages   []dbmodels.QueuedMessage `json:"queuedMessages,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -126,6 +127,14 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		updatedAtPtr = &updatedPtr
 	}
 
+	queuedMsgs, err := s.repo.GetQueuedMessages(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query queued messages: " + err.Error()})
+		return
+	}
+
 	chatSession := ChatSession{
 		ChatID:           sess.ChatID,
 		Title:            sess.Title,
@@ -139,6 +148,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:        updatedAtPtr,
 		Messages:         sess.Messages,
 		Artifacts:        sess.Artifacts,
+		QueuedMessages:   queuedMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 )
 
 func setupTestServerWithConfig(t *testing.T, cfgFilePath string) *Server {
@@ -53,6 +54,7 @@ cli:
 	}
 
 	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	srv, err := New(conf, testDB, WithConfigPath(cfgFilePath))
 	require.NoError(t, err)
 	return srv

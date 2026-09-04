@@ -58,7 +58,11 @@ type Server struct {
 	geminiAPIKey     string
 	voiceAuthURL     string
 	voiceHTTPClient  *http.Client
+	runSingleAgentFn singleAgentRunner
 }
+
+// singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
+type singleAgentRunner func(ctx context.Context, agent *agentspec.Agent, chatID string, req TriggerMessageRequest) (string, string, error)
 
 // ServerOption mutates a Server during construction (functional options).
 type ServerOption func(*Server)
@@ -208,6 +212,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		voiceAuthURL:    DefaultGoogleAuthURL,
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
+	s.runSingleAgentFn = s.runSingleAgent
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -271,9 +276,45 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		s.agents = []*agentspec.Agent{}
 		s.mux = s.buildMuxLocked()
 		s.mu.Unlock()
+	} else if s.repo != nil {
+		if len(s.agents) == 0 {
+			log.Warn().Msg("s.agents empty, skip orphan queue recovery")
+		} else {
+			s.recoverOrphanQueuedSessions()
+		}
 	}
 
 	return s, nil
+}
+
+// recoverOrphanQueuedSessions recovers active execution for sessions with lingering queued messages after server startup.
+func (s *Server) recoverOrphanQueuedSessions() {
+	chatIDs, err := s.repo.GetChatIDsWithQueuedMessages()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to get chat IDs with queued messages for orphan recovery")
+		return
+	}
+
+	for _, chatID := range chatIDs {
+		sess, err := s.repo.GetSession(chatID)
+		if err != nil || sess == nil || sess.IsArchived {
+			continue
+		}
+
+		var targetAgent *agentspec.Agent
+		s.mu.RLock()
+		for _, a := range s.agents {
+			if (a.Config.ID == sess.CurrentAgent || a.Config.Name == sess.CurrentAgent) && a.Config.Type != "workflow" {
+				targetAgent = a
+				break
+			}
+		}
+		s.mu.RUnlock()
+
+		if targetAgent != nil {
+			s.startQueueConsumerIfIdle(sess.ChatID, targetAgent, sess.RunDir)
+		}
+	}
 }
 
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
@@ -323,6 +364,11 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/git/pull", s.handleGitPull)
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSessionByID)
+	mux.HandleFunc("GET /api/sessions/{id}/queue", s.handleGetQueue)
+	mux.HandleFunc("POST /api/sessions/{id}/queue", s.handleEnqueueMessage)
+	mux.HandleFunc("PATCH /api/sessions/{id}/queue/{messageId}", s.handleUpdateQueuedMessage)
+	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{messageId}", s.handleDeleteQueuedMessage)
+	mux.HandleFunc("DELETE /api/sessions/{id}/queue", s.handleClearQueue)
 	mux.HandleFunc("POST /api/sessions/{id}/archive", s.handleArchiveSession)
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
 	mux.HandleFunc("POST /api/sessions/{id}/attachments", s.handleSessionAttachmentsUpload)
