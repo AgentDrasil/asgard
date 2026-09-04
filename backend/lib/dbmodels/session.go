@@ -288,6 +288,12 @@ func (r *SessionRepository) DeleteSession(chatID string) error {
 		return err
 	}
 
+	if r.db.Migrator().HasTable(&QueuedMessage{}) {
+		if err := r.db.Delete(&QueuedMessage{}, "chat_id = ?", chatID).Error; err != nil {
+			return err
+		}
+	}
+
 	// Clean physical session directory (messages.jsonl, workflows, etc.)
 	dir := r.sessionDir(chatID)
 	if dir != "" {

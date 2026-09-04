@@ -7,7 +7,7 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&Session{}, &WorkflowRun{}); err != nil {
+	if err := db.AutoMigrate(&Session{}, &WorkflowRun{}, &QueuedMessage{}); err != nil {
 		return err
 	}
 	return backfillLegacyWorkflowRuns(db)
