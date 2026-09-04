@@ -497,8 +497,10 @@ func TestTriggerMessage_FIFOExecution(t *testing.T) {
 	assert.Empty(t, remaining)
 
 	// Guard should be released
-	_, running := server.activeExecutions.Load(chatID)
-	assert.False(t, running)
+	assert.Eventually(t, func() bool {
+		_, running := server.activeExecutions.Load(chatID)
+		return !running
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestTriggerMessage_InitialFailurePurgesQueue(t *testing.T) {

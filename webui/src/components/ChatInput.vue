@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useToast } from "../composables/useToast";
 import { useVoiceInput } from "../composables/useVoiceInput";
+import { MAX_QUEUED_MESSAGES } from "../composables/useSessionStore";
 import type { Attachment, VoiceErrorCode } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
@@ -47,7 +48,7 @@ const isQueueMode = computed(() => {
 });
 
 const isQueueFull = computed(() => {
-  return isQueueMode.value && (props.queuedCount || 0) >= 3;
+  return isQueueMode.value && (props.queuedCount || 0) >= MAX_QUEUED_MESSAGES;
 });
 
 const isInputDisabled = computed(() => {

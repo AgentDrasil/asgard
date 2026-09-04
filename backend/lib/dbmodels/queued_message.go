@@ -177,9 +177,6 @@ func (r *SessionRepository) PopNextQueuedMessage(chatID string) (*QueuedMessage,
 	var msg QueuedMessage
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("chat_id = ?", chatID).Order("created_at ASC, id ASC").First(&msg).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return gorm.ErrRecordNotFound
-			}
 			return err
 		}
 		return tx.Delete(&QueuedMessage{}, "chat_id = ? AND id = ?", chatID, msg.ID).Error
