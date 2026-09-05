@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaskSecret masks sensitive secrets for logging or safe inspection.
@@ -31,7 +32,27 @@ func MaskSecret(s string) string {
 		return prefix + "******"
 	}
 
-	return prefix + token[:4] + "****" + token[n-4:]
+	return prefix + maskHead(token, 4) + "****" + maskTail(token, 4)
+}
+
+// maskHead returns the first n bytes of s, truncated further if the cut would
+// split a multi-byte UTF-8 rune.
+func maskHead(s string, n int) string {
+	head := s[:n]
+	if r, size := utf8.DecodeLastRuneInString(head); r == utf8.RuneError && size <= 1 {
+		head = head[:len(head)-1]
+	}
+	return head
+}
+
+// maskTail returns the last n bytes of s, shifted forward if the cut would
+// split a multi-byte UTF-8 rune.
+func maskTail(s string, n int) string {
+	tail := s[len(s)-n:]
+	if r, size := utf8.DecodeRuneInString(tail); r == utf8.RuneError && size <= 1 {
+		tail = tail[1:]
+	}
+	return tail
 }
 
 // safeDumpAndRestoreBody reads the entire request body without loss,

@@ -470,6 +470,13 @@ func TestRun_ProxyOptions(t *testing.T) {
 		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-enabled", StatusScope{}, conf)
 		require.NoError(t, err)
 		assert.Contains(t, string(out), "mock bwrap execution succeeded")
+		// Assert proxy sensitive mask args actually reach the agent bwrap
+		// command line (cmd-exec sandbox env/mask args go to os.Stdout and
+		// are covered by bwrap_test.go).
+		assert.Contains(t, string(out), "--ro-bind")
+		assert.Contains(t, string(out), "/dev/null")
+		assert.Contains(t, string(out), "\n"+caKeyPath+"\n")
+		assert.Contains(t, string(out), "\n"+proxyConfigPath+"\n")
 	})
 
 	t.Run("with proxy disabled", func(t *testing.T) {
@@ -483,5 +490,8 @@ func TestRun_ProxyOptions(t *testing.T) {
 		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-disabled", StatusScope{}, conf)
 		require.NoError(t, err)
 		assert.Contains(t, string(out), "mock bwrap execution succeeded")
+		assert.NotContains(t, string(out), "\n"+proxyConfigPath+"\n")
+		assert.NotContains(t, string(out), "HTTPS_PROXY")
+		assert.NotContains(t, string(out), "http://127.0.0.1:8082")
 	})
 }

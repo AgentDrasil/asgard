@@ -15,23 +15,50 @@ import (
 
 // ProxyManager manages the MITM proxy lifecycle, rule matching, and hot-reload.
 type ProxyManager struct {
-	configPath string
-	caCertPath string
-	caKeyPath  string
-	rulesPtr   atomic.Pointer[[]Rule]
-	debugPtr   atomic.Pointer[DebugConfig]
-	handler    mitmproxy.DynamicMitmProxyHandler
-	server     *http.Server
-	running    atomic.Bool
-	mu         sync.Mutex
+	configPath   string
+	caCertPath   string
+	caKeyPath    string
+	rulesPtr     atomic.Pointer[[]Rule]
+	debugPtr     atomic.Pointer[DebugConfig]
+	handler      mitmproxy.DynamicMitmProxyHandler
+	server       *http.Server
+	running      atomic.Bool
+	stopped      atomic.Bool
+	listenAddr   atomic.Pointer[string]
+	excludeMu    sync.Mutex
+	excludeHosts []string
+	mu           sync.Mutex
 }
 
-// Addr returns the listening address of the proxy server.
+// Addr returns the actually bound listening address of the proxy server.
+// It falls back to the configured address before the listener is established.
 func (pm *ProxyManager) Addr() string {
-	if pm == nil || pm.server == nil {
+	if pm == nil {
+		return ""
+	}
+	if addr := pm.listenAddr.Load(); addr != nil {
+		return *addr
+	}
+	if pm.server == nil {
 		return ""
 	}
 	return pm.server.Addr
+}
+
+// SetExcludeHosts records exclude-hosts to be preserved across reloads.
+func (pm *ProxyManager) SetExcludeHosts(excludes []string) {
+	if pm == nil {
+		return
+	}
+	pm.excludeMu.Lock()
+	defer pm.excludeMu.Unlock()
+	pm.excludeHosts = append([]string(nil), excludes...)
+}
+
+func (pm *ProxyManager) getExcludeHosts() []string {
+	pm.excludeMu.Lock()
+	defer pm.excludeMu.Unlock()
+	return append([]string(nil), pm.excludeHosts...)
 }
 
 // CACertPath returns the CA certificate path used by the proxy manager.
@@ -48,6 +75,14 @@ func (pm *ProxyManager) ConfigPath() string {
 		return ""
 	}
 	return pm.configPath
+}
+
+// CAKeyPath returns the CA private key path used by the proxy manager.
+func (pm *ProxyManager) CAKeyPath() string {
+	if pm == nil {
+		return ""
+	}
+	return pm.caKeyPath
 }
 
 // extractHosts extracts unique hosts from a slice of rules.
@@ -78,6 +113,17 @@ func extractHosts(rules []Rule) []string {
 func NewManager(cfg *Config, configPath string, extraOpts ...mitmproxy.Option) (*ProxyManager, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	// Validation parity with Reload: programmatic callers must not bypass
+	// defaults/validation (e.g. rules with empty HeaderKey/RealSecret).
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(); err != nil {
+		// Keep the canonical fail-closed message for empty rules/hosts
+		if len(extractHosts(cfg.Rules)) == 0 {
+			return nil, fmt.Errorf("cannot initialize proxy manager: rules list or host targets must not be empty")
+		}
+		return nil, fmt.Errorf("invalid proxy config: %w", err)
 	}
 
 	caCert := cfg.ResolvedCACertPath()
@@ -136,6 +182,10 @@ func NewManager(cfg *Config, configPath string, extraOpts ...mitmproxy.Option) (
 // Start starts the proxy HTTP server.
 func (pm *ProxyManager) Start() error {
 	pm.mu.Lock()
+	if pm.stopped.Load() {
+		pm.mu.Unlock()
+		return fmt.Errorf("proxy manager has been stopped and cannot be restarted")
+	}
 	if pm.running.Load() {
 		pm.mu.Unlock()
 		return fmt.Errorf("proxy manager is already running")
@@ -143,8 +193,16 @@ func (pm *ProxyManager) Start() error {
 	pm.running.Store(true)
 	pm.mu.Unlock()
 
+	ln, err := net.Listen("tcp", pm.server.Addr)
+	if err != nil {
+		pm.running.Store(false)
+		return fmt.Errorf("proxy server listen error: %w", err)
+	}
+	bound := ln.Addr().String()
+	pm.listenAddr.Store(&bound)
+
 	log.Info().Str("addr", pm.server.Addr).Msg("proxy manager starting HTTP server")
-	err := pm.server.ListenAndServe()
+	err = pm.server.Serve(ln)
 	if err != nil && err != http.ErrServerClosed {
 		pm.running.Store(false)
 		return fmt.Errorf("proxy server ListenAndServe error: %w", err)
@@ -155,12 +213,19 @@ func (pm *ProxyManager) Start() error {
 // ServeListener starts the proxy HTTP server with a pre-configured listener.
 func (pm *ProxyManager) ServeListener(ln net.Listener) error {
 	pm.mu.Lock()
+	if pm.stopped.Load() {
+		pm.mu.Unlock()
+		return fmt.Errorf("proxy manager has been stopped and cannot be restarted")
+	}
 	if pm.running.Load() {
 		pm.mu.Unlock()
 		return fmt.Errorf("proxy manager is already running")
 	}
 	pm.running.Store(true)
 	pm.mu.Unlock()
+
+	bound := ln.Addr().String()
+	pm.listenAddr.Store(&bound)
 
 	err := pm.server.Serve(ln)
 	if err != nil && err != http.ErrServerClosed {
@@ -175,6 +240,7 @@ func (pm *ProxyManager) Shutdown(ctx context.Context) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
+	pm.stopped.Store(true)
 	if !pm.running.Load() {
 		if pm.handler != nil {
 			pm.handler.Cleanup()
@@ -215,8 +281,8 @@ func (pm *ProxyManager) Reload(newCfg *Config) error {
 	debugCopy := newCfg.Debug
 	pm.debugPtr.Store(&debugCopy)
 
-	// Dynamically update mitmproxy include hosts filters
-	pm.handler.SetHostFilters(hosts, nil)
+	// Dynamically update mitmproxy include hosts filters, preserving tracked exclude-hosts
+	pm.handler.SetHostFilters(hosts, pm.getExcludeHosts())
 
 	log.Info().Int("rules_count", len(rulesCopy)).Strs("hosts", hosts).Msg("proxy manager reloaded rules")
 	return nil
@@ -293,7 +359,7 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 			}
 
 			if strings.EqualFold(hostOnly, rHost) {
-				if r.PathPrefix == "" || strings.HasPrefix(reqPath, r.PathPrefix) {
+				if pathPrefixMatches(reqPath, r.PathPrefix) {
 					matchedRule = r
 					break
 				}
@@ -334,6 +400,11 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 
 	if debugCfg.Enable && debugCfg.DumpHeaders {
 		safeHeaders := req.Header.Clone()
+		for _, key := range defaultSensitiveHeaderDenylist {
+			if v := safeHeaders.Get(key); v != "" {
+				safeHeaders.Set(key, MaskSecret(v))
+			}
+		}
 		if rules != nil {
 			for i := range *rules {
 				r := &(*rules)[i]
@@ -350,4 +421,26 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 	}
 
 	return invoker.Invoke(req)
+}
+
+// pathPrefixMatches performs boundary-aware path prefix matching: the request
+// path must equal the prefix or the next character must be "/" so that
+// "/v1/chat" does not match a "/v1/chatfoo"-style prefix overlap.
+func pathPrefixMatches(reqPath, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	if reqPath == prefix {
+		return true
+	}
+	return strings.HasPrefix(reqPath, prefix) && reqPath[len(prefix)] == '/'
+}
+
+// defaultSensitiveHeaderDenylist lists headers always masked in header dumps,
+// independent of rule-defined header keys.
+var defaultSensitiveHeaderDenylist = []string{
+	"Authorization",
+	"Proxy-Authorization",
+	"Cookie",
+	"X-API-Key",
 }

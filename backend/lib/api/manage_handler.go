@@ -360,7 +360,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 			// If rename fails due to Docker bind-mount (EBUSY or EXDEV), fallback to direct truncate write
 			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
 				_ = os.Remove(tmpPath)
-				if writeErr := writeConfigDirect(cfgPath, req.Content); writeErr != nil {
+				if writeErr := writeConfigDirect(cfgPath, req.Content, 0644); writeErr != nil {
 					log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config via direct truncate fallback")
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
@@ -384,7 +384,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If creating temp file failed, fallback to direct truncate
-	if writeErr := writeConfigDirect(cfgPath, req.Content); writeErr != nil {
+	if writeErr := writeConfigDirect(cfgPath, req.Content, 0644); writeErr != nil {
 		log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config directly")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -395,8 +395,8 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 	writeStatusOK(w, "config saved")
 }
 
-func writeConfigDirect(path, content string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+func writeConfigDirect(path, content string, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -595,27 +595,20 @@ func (s *Server) handleSaveManageProxy(w http.ResponseWriter, r *http.Request) {
 		if writeErr == nil && syncErr == nil && closeErr == nil {
 			renameErr := osRename(tmpPath, targetPath)
 			if renameErr == nil {
-				// Hot reload proxy rules
-				if err := s.proxyManager.Reload(newCfg); err != nil {
-					log.Warn().Err(err).Msg("failed to reload proxy rules after saving")
-				}
-				writeStatusOK(w, "proxy config saved and reloaded")
+				s.finishProxySave(w, newCfg)
 				return
 			}
 
 			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
 				_ = os.Remove(tmpPath)
-				if writeErr := writeConfigDirect(targetPath, req.Content); writeErr != nil {
+				if writeErr := writeConfigDirect(targetPath, req.Content, 0600); writeErr != nil {
 					log.Error().Err(writeErr).Str("path", targetPath).Msg("failed to write proxy config via direct fallback")
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
 					_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
 					return
 				}
-				if err := s.proxyManager.Reload(newCfg); err != nil {
-					log.Warn().Err(err).Msg("failed to reload proxy rules after saving")
-				}
-				writeStatusOK(w, "proxy config saved and reloaded")
+				s.finishProxySave(w, newCfg)
 				return
 			}
 
@@ -627,11 +620,10 @@ func (s *Server) handleSaveManageProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 	}
 
-	if writeErr := writeConfigDirect(targetPath, req.Content); writeErr != nil {
+	if writeErr := writeConfigDirect(targetPath, req.Content, 0600); writeErr != nil {
 		log.Error().Err(writeErr).Str("path", targetPath).Msg("failed to write proxy config directly")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -639,10 +631,15 @@ func (s *Server) handleSaveManageProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.finishProxySave(w, newCfg)
+}
+
+// finishProxySave hot-reloads the proxy rules after a successful config save
+// and writes the success response.
+func (s *Server) finishProxySave(w http.ResponseWriter, newCfg *proxy.Config) {
 	if err := s.proxyManager.Reload(newCfg); err != nil {
 		log.Warn().Err(err).Msg("failed to reload proxy rules after saving")
 	}
-
 	writeStatusOK(w, "proxy config saved and reloaded")
 }
 

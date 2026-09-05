@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // EnsureCA checks if certPath and keyPath exist and contain valid CA certificate
@@ -113,10 +115,17 @@ func isValidCA(certPEM, keyPEM []byte) bool {
 	if keyBlock == nil {
 		return false
 	}
-	if _, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes); err != nil {
-		if _, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes); err != nil {
-			return false
-		}
+	var privKey any
+	if k, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes); err == nil {
+		privKey = k
+	} else if k, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes); err == nil {
+		privKey = k
+	} else {
+		return false
+	}
+	rsaKey, ok := privKey.(*rsa.PrivateKey)
+	if !ok || !rsaKey.PublicKey.Equal(cert.PublicKey) {
+		return false
 	}
 
 	return true
@@ -136,12 +145,15 @@ func MergeCACert(hostCertBundlePath, caCertPath, outPath string) error {
 
 	var merged []byte
 	if hostCertBundlePath != "" {
-		hostData, err := os.ReadFile(resolvePath(hostCertBundlePath))
+		resolvedHost := resolvePath(hostCertBundlePath)
+		hostData, err := os.ReadFile(resolvedHost)
 		if err == nil {
 			merged = append(merged, hostData...)
 			if len(merged) > 0 && merged[len(merged)-1] != '\n' {
 				merged = append(merged, '\n')
 			}
+		} else if !os.IsNotExist(err) {
+			log.Debug().Err(err).Str("path", resolvedHost).Msg("failed to read host CA bundle for merge")
 		}
 	}
 

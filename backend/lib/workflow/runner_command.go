@@ -76,15 +76,7 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 		var proxyCfg bwrap.ProxySandboxConfig
 		if r.conf != nil {
 			configPath = r.conf.GetConfigPath()
-			if r.conf.IsProxyEnabled() {
-				proxyCfg = bwrap.ProxySandboxConfig{
-					Enabled:         true,
-					ProxyAddr:       r.conf.ProxyHost(),
-					CACert:          r.conf.ProxyCACertPath(),
-					CAKey:           r.conf.ProxyCAKeyPath(),
-					ProxyConfigPath: r.conf.ResolvedProxyConfigPath(),
-				}
-			}
+			proxyCfg = r.conf.SandboxProxyOptions()
 		}
 		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, &stdout, &stderr)
 	} else {

@@ -112,15 +112,7 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	if conf != nil {
 		langRules = conf.LanguageRules()
 		configPath = conf.GetConfigPath()
-		if conf.IsProxyEnabled() {
-			proxyCfg = bwrap.ProxySandboxConfig{
-				Enabled:         true,
-				ProxyAddr:       conf.ProxyHost(),
-				CACert:          conf.ProxyCACertPath(),
-				CAKey:           conf.ProxyCAKeyPath(),
-				ProxyConfigPath: conf.ResolvedProxyConfigPath(),
-			}
-		}
+		proxyCfg = conf.SandboxProxyOptions()
 	}
 
 	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)

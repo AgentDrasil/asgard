@@ -842,7 +842,7 @@ cli:
 func TestWriteConfigDirect(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.yaml")
-	err := writeConfigDirect(path, "key: value\n")
+	err := writeConfigDirect(path, "key: value\n", 0644)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(path)
@@ -850,7 +850,7 @@ func TestWriteConfigDirect(t *testing.T) {
 	assert.Equal(t, "key: value\n", string(content))
 
 	// Directory path causes OpenFile error
-	err = writeConfigDirect(tmpDir, "key: value\n")
+	err = writeConfigDirect(tmpDir, "key: value\n", 0644)
 	assert.Error(t, err)
 }
 

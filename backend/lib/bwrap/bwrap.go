@@ -281,7 +281,6 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	if err != nil {
 		return nil, err
 	}
-	args = appendConfigMaskArgs(args, configPath)
 
 	// Mount roles config run_dirs as read-write
 	if cfg != nil {
@@ -466,18 +465,30 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 	if err != nil {
 		return nil, err
 	}
-	args = appendConfigMaskArgs(args, configPath)
+
+	// Bind runDir (when outside HOME) BEFORE the sensitive-mask block so that
+	// a non-HOME runDir subtree can never shadow the proxy/config masks.
+	if runDir != "" {
+		if _, err := os.Stat(runDir); err == nil {
+			// Skip the extra bind when runDir is inside HOME: HOME is already
+			// bind-mounted as a single mount, and a nested separate bind would
+			// give runDir a different st_dev, breaking hard links (pnpm would
+			// then relocate its store onto the project's "filesystem"). This
+			// requires runDir to be part of the HOME mount (not a separate
+			// container volume mounted under HOME).
+			if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
+				args = append(args, "--bind", runDir, runDir)
+			}
+			args = append(args, "--chdir", runDir)
+		} else {
+			args = append(args, "--chdir", home)
+		}
+	} else {
+		args = append(args, "--chdir", home)
+	}
 
 	// Bind HOME
 	args = append(args, "--bind", home, home)
-
-	// Mask proxy sensitive files (ca.key and proxy config) immediately after HOME bind
-	var caKey, proxyConfigPath string
-	if len(proxyOpts) > 0 {
-		caKey = proxyOpts[0].CAKey
-		proxyConfigPath = proxyOpts[0].ProxyConfigPath
-	}
-	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
 	// Ignore auth dir for all registered CLIs, and ssh dir to prevent key leak
 	for _, cli := range agentwrapper.GetRegisteredCLIs() {
@@ -492,8 +503,14 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
 
-	// Append config file masking again in case HOME bind-mount shadowed base masking
+	// Authoritative late masking of config file and proxy sensitive files
+	// (ca.key and proxy config) after all directory binds (D1/R1/N2)
 	args = appendConfigMaskArgs(args, configPath)
+	var caKey, proxyConfigPath string
+	if len(proxyOpts) > 0 {
+		caKey = proxyOpts[0].CAKey
+		proxyConfigPath = proxyOpts[0].ProxyConfigPath
+	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
@@ -528,26 +545,6 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 		}
 	}
 
-	if runDir != "" {
-		if _, err := os.Stat(runDir); err == nil {
-			// Skip the extra bind when runDir is inside HOME: HOME is already
-			// bind-mounted as a single mount, and a nested separate bind would
-			// give runDir a different st_dev, breaking hard links (pnpm would
-			// then relocate its store onto the project's "filesystem"). This
-			// requires runDir to be part of the HOME mount (not a separate
-			// container volume mounted under HOME).
-			if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
-				args = append(args, "--bind", runDir, runDir)
-			}
-			args = append(args, "--chdir", runDir)
-		} else {
-			args = append(args, "--chdir", home)
-		}
-	} else {
-		args = append(args, "--chdir", home)
-	}
-
-	// Mount the socket directory to /fakebash
 	if sockDir != "" {
 		args = append(args, "--dir", "/fakebash")
 		args = append(args, "--bind", sockDir, "/fakebash")

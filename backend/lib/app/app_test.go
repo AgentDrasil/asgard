@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -565,18 +566,11 @@ func TestApp_ProxyPortCollision_Degraded(t *testing.T) {
 	require.NotNil(t, appInstance)
 	require.NotNil(t, appInstance.ProxyManager())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	// Use App.Start() so the diagnostics of this very App instance are
+	// observable (Run creates its own inner App).
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(
-			ctx,
-			WithConfig(conf),
-			WithDB(testDB),
-			WithSkipAgentValidation(true),
-			WithSkipSSHSetup(true),
-		)
+		errCh <- appInstance.Start()
 	}()
 
 	// Wait for server to be reachable even though proxy port had collision (degraded mode)
@@ -589,16 +583,28 @@ func TestApp_ProxyPortCollision_Degraded(t *testing.T) {
 		return false
 	}, 5*time.Second, 20*time.Millisecond, "server did not bind port in time during degraded mode")
 
-	cancel()
+	// The proxy listen failure must be recorded in diagnostics (app.go:353-355)
+	require.Eventually(t, func() bool {
+		snap := appInstance.Server().Diagnostics().Snapshot()
+		if snap.Status != "degraded" {
+			return false
+		}
+		for _, e := range snap.Errors {
+			if strings.Contains(e, "proxy server listen error") {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "proxy diagnostics entry was not recorded in degraded mode")
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	_ = appInstance.Stop(stopCtx)
 
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not exit within timeout")
+		t.Fatal("Start did not exit within timeout after Stop")
 	}
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stopCancel()
-	_ = appInstance.Stop(stopCtx)
 }

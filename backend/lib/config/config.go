@@ -8,6 +8,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 )
 
@@ -150,6 +151,21 @@ func (c *Config) IsProxyEnabled() bool {
 		return false
 	}
 	return c.Proxy.Enable
+}
+
+// SandboxProxyOptions builds the bwrap proxy sandbox options for this config.
+// It returns a disabled config when the proxy is not enabled.
+func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
+	if c == nil || !c.IsProxyEnabled() {
+		return bwrap.ProxySandboxConfig{}
+	}
+	return bwrap.ProxySandboxConfig{
+		Enabled:         true,
+		ProxyAddr:       c.ProxyHost(),
+		CACert:          c.ProxyCACertPath(),
+		CAKey:           c.ProxyCAKeyPath(),
+		ProxyConfigPath: c.ResolvedProxyConfigPath(),
+	}
 }
 
 func (c *Config) ProxyHost() string {

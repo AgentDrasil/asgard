@@ -384,7 +384,7 @@ func (s *Server) handleSaveManageKeybindings(w http.ResponseWriter, r *http.Requ
 
 			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
 				_ = os.Remove(tmpPath)
-				if directErr := writeConfigDirect(filePath, string(yamlBytes)); directErr != nil {
+				if directErr := writeConfigDirect(filePath, string(yamlBytes), 0644); directErr != nil {
 					log.Error().Err(directErr).Str("path", filePath).Msg("failed to write keys.yaml via direct fallback")
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
@@ -407,7 +407,7 @@ func (s *Server) handleSaveManageKeybindings(w http.ResponseWriter, r *http.Requ
 		_ = os.Remove(tmpPath)
 	}
 
-	if directErr := writeConfigDirect(filePath, string(yamlBytes)); directErr != nil {
+	if directErr := writeConfigDirect(filePath, string(yamlBytes), 0644); directErr != nil {
 		log.Error().Err(directErr).Str("path", filePath).Msg("failed to write keys.yaml directly")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
