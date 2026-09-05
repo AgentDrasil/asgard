@@ -11,6 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/goccy/go-yaml v1.19.2
+	github.com/josexy/mitmproxy-go v1.2.1
 	github.com/libtnb/sqlite v1.2.2
 	github.com/moznion/go-optional v0.13.0
 	github.com/rcarmo/go-te v0.1.0
@@ -41,6 +42,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
+	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -60,10 +62,13 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
+	github.com/josexy/websocket v0.0.0-20260219083038-11b2ba10886b // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.29 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
