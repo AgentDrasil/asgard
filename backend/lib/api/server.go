@@ -19,6 +19,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
@@ -59,6 +60,7 @@ type Server struct {
 	voiceAuthURL     string
 	voiceHTTPClient  *http.Client
 	runSingleAgentFn singleAgentRunner
+	proxyManager     *proxy.ProxyManager
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -165,6 +167,21 @@ func WithVoiceHTTPClient(client *http.Client) ServerOption {
 	return func(s *Server) {
 		s.voiceHTTPClient = client
 	}
+}
+
+// WithProxyManager injects a ProxyManager instance into the Server.
+func WithProxyManager(pm *proxy.ProxyManager) ServerOption {
+	return func(s *Server) {
+		s.proxyManager = pm
+	}
+}
+
+// ProxyManager returns the Server's ProxyManager instance, if any.
+func (s *Server) ProxyManager() *proxy.ProxyManager {
+	if s == nil {
+		return nil
+	}
+	return s.proxyManager
 }
 
 func (s *Server) requireRepo(w http.ResponseWriter) bool {
@@ -351,6 +368,9 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
 	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)
+	mux.HandleFunc("GET /api/manage/proxy", s.handleGetManageProxy)
+	mux.HandleFunc("PUT /api/manage/proxy", s.handleSaveManageProxy)
+	mux.HandleFunc("POST /api/manage/proxy/reload", s.handleReloadManageProxy)
 	mux.HandleFunc("GET /api/keybindings", s.handleGetKeybindings)
 	mux.HandleFunc("PUT /api/manage/keybindings", s.handleSaveManageKeybindings)
 	mux.HandleFunc("POST /api/manage/restart", s.handleRestart)

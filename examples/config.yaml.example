@@ -25,3 +25,26 @@ firebase_webpush_web:
   messaging_sender_id: [FIREBASE_MESSAGING_SENDER_ID]
   app_id: [FIREBASE_APP_ID]
   vapid_key: [FIREBASE_CLOUD_MESSAGING_PUBLIC_KEY]
+
+# Credential Injection Proxy configuration (optional)
+# Specify standalone proxy config file path to allow hot-reloading via REST API:
+# proxy_config: "proxy.yaml"
+# Or inline proxy configuration:
+# proxy:
+#   enable: false
+#   server:
+#     addr: "127.0.0.1:8082"
+#     ca_cert: "~/.asgard/ca/ca.crt"
+#     ca_key: "~/.asgard/ca/ca.key"
+#   debug:
+#     enable: false
+#     dump_headers: false
+#     dump_body: false
+#     max_body_bytes: 4096
+#   rules:
+#     - host: "api.openai.com"
+#       path_prefix: "/v1"
+#       header_key: "Authorization"
+#       real_secret: "Bearer sk-real-key"
+#       dummy_secret: "Bearer dummy-token"
+

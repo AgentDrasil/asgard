@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 )
 
 type mockClient struct {
@@ -1135,4 +1136,286 @@ cli:
 	require.Len(t, respErr.Logs, 1)
 	assert.Equal(t, "error", respErr.Logs[0].Level)
 	assert.Equal(t, "config", respErr.Logs[0].Source)
+}
+
+func TestManageProxy_DisabledState(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	// 1. GET /api/manage/proxy returns enabled: false
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/proxy", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp ManageProxyResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.Enabled)
+	assert.False(t, resp.Exists)
+
+	// 2. PUT /api/manage/proxy returns 400
+	putReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(`{"content":"test"}`))
+	putW := httptest.NewRecorder()
+	srv.ServeHTTP(putW, putReq)
+	assert.Equal(t, http.StatusBadRequest, putW.Code)
+	assert.Contains(t, putW.Body.String(), "proxy service is not enabled")
+
+	// 3. POST /api/manage/proxy/reload returns 400
+	postReq := httptest.NewRequest(http.MethodPost, "/api/manage/proxy/reload", nil)
+	postW := httptest.NewRecorder()
+	srv.ServeHTTP(postW, postReq)
+	assert.Equal(t, http.StatusBadRequest, postW.Code)
+	assert.Contains(t, postW.Body.String(), "proxy service is not enabled")
+}
+
+func TestManageProxy_EnabledWithoutStandaloneFile(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	proxyCfg := &proxy.Config{
+		Enable: true,
+		Server: proxy.ServerConfig{
+			Addr:   "127.0.0.1:0",
+			CACert: filepath.Join(tmpDir, "ca.crt"),
+			CAKey:  filepath.Join(tmpDir, "ca.key"),
+		},
+		Rules: []proxy.Rule{
+			{
+				Host:        "api.openai.com",
+				PathPrefix:  "/v1",
+				HeaderKey:   "Authorization",
+				RealSecret:  "Bearer sk-real-token-1234567890",
+				DummySecret: "Bearer dummy-token",
+			},
+		},
+	}
+	proxyMgr, err := proxy.NewManager(proxyCfg, "")
+	require.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+		Proxy:    proxyCfg,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithProxyManager(proxyMgr))
+	require.NoError(t, err)
+
+	// GET returns enabled: true and masked rules
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/proxy", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp ManageProxyResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.Enabled)
+	require.Len(t, resp.Rules, 1)
+	assert.Contains(t, resp.Rules[0].RealSecret, "****")
+	assert.NotContains(t, resp.Rules[0].RealSecret, "sk-real-token-1234567890")
+
+	// PUT returns 400 because no standalone proxy_config was configured
+	putReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(`{"content":"test"}`))
+	putW := httptest.NewRecorder()
+	srv.ServeHTTP(putW, putReq)
+	assert.Equal(t, http.StatusBadRequest, putW.Code)
+	assert.Contains(t, putW.Body.String(), "no standalone proxy_config configured in config.yaml")
+
+	// POST reload returns 400
+	postReq := httptest.NewRequest(http.MethodPost, "/api/manage/proxy/reload", nil)
+	postW := httptest.NewRecorder()
+	srv.ServeHTTP(postW, postReq)
+	assert.Equal(t, http.StatusBadRequest, postW.Code)
+	assert.Contains(t, postW.Body.String(), "no standalone proxy_config configured in config.yaml")
+}
+
+func TestManageProxy_StandaloneFile_CRUDAndReload(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	proxyFilePath := filepath.Join(tmpDir, "proxy.yaml")
+	caCertPath := filepath.Join(tmpDir, "ca.crt")
+	caKeyPath := filepath.Join(tmpDir, "ca.key")
+
+	initialYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:0"
+  ca_cert: "` + caCertPath + `"
+  ca_key: "` + caKeyPath + `"
+rules:
+  - host: "api.openai.com"
+    header_key: "Authorization"
+    real_secret: "Bearer sk-initial-secret-12345"
+`
+	require.NoError(t, os.WriteFile(proxyFilePath, []byte(initialYAML), 0644))
+
+	proxyCfg, err := proxy.LoadConfigFile(proxyFilePath)
+	require.NoError(t, err)
+
+	proxyMgr, err := proxy.NewManager(proxyCfg, proxyFilePath)
+	require.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir:    tmpDir,
+		Port:        8080,
+		Proxy:       proxyCfg,
+		ProxyConfig: proxyFilePath,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithProxyManager(proxyMgr))
+	require.NoError(t, err)
+
+	// 1. GET /api/manage/proxy returns Exists=true, raw_content, and masked rules
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/proxy", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp ManageProxyResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.Enabled)
+	assert.True(t, resp.Exists)
+	assert.Contains(t, resp.RawContent, "sk-initial-secret-12345")
+	require.Len(t, resp.Rules, 1)
+	assert.Contains(t, resp.Rules[0].RealSecret, "****")
+
+	// 2. Cross-origin request rejected
+	crossReq := httptest.NewRequest(http.MethodGet, "/api/manage/proxy", nil)
+	crossReq.Host = "192.168.1.100:8080"
+	crossReq.RemoteAddr = "192.168.1.50:12345"
+	crossReq.Header.Set("Origin", "http://attacker.com")
+	crossW := httptest.NewRecorder()
+	srv.ServeHTTP(crossW, crossReq)
+	assert.Equal(t, http.StatusForbidden, crossW.Code)
+
+	// 3. PUT with invalid YAML returns 400
+	badPutReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(`{"content":"invalid: yaml: :"}`))
+	badPutW := httptest.NewRecorder()
+	srv.ServeHTTP(badPutW, badPutReq)
+	assert.Equal(t, http.StatusBadRequest, badPutW.Code)
+
+	// 4. PUT with empty rules returns 400 (fail-closed check)
+	emptyRulesYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:0"
+  ca_cert: "` + caCertPath + `"
+  ca_key: "` + caKeyPath + `"
+rules: []
+`
+	emptyBody, _ := json.Marshal(SaveManageProxyRequest{Content: emptyRulesYAML})
+	emptyPutReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(string(emptyBody)))
+	emptyPutW := httptest.NewRecorder()
+	srv.ServeHTTP(emptyPutW, emptyPutReq)
+	assert.Equal(t, http.StatusBadRequest, emptyPutW.Code)
+	assert.Contains(t, emptyPutW.Body.String(), "rules list is empty")
+
+	// 5. PUT with valid new rules updates file and triggers hot-reload
+	updatedYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:0"
+  ca_cert: "` + caCertPath + `"
+  ca_key: "` + caKeyPath + `"
+rules:
+  - host: "api.anthropic.com"
+    header_key: "x-api-key"
+    real_secret: "sk-ant-updated-secret-67890"
+`
+	updateBody, _ := json.Marshal(SaveManageProxyRequest{Content: updatedYAML})
+	updatePutReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(string(updateBody)))
+	updatePutW := httptest.NewRecorder()
+	srv.ServeHTTP(updatePutW, updatePutReq)
+	assert.Equal(t, http.StatusOK, updatePutW.Code)
+	assert.Contains(t, updatePutW.Body.String(), "proxy config saved and reloaded")
+
+	// Verify file was written
+	fileContent, readErr := os.ReadFile(proxyFilePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, updatedYAML, string(fileContent))
+
+	// Verify ProxyManager rules were hot-reloaded
+	maskedRules := proxyMgr.GetMaskedRules()
+	require.Len(t, maskedRules, 1)
+	assert.Equal(t, "api.anthropic.com", maskedRules[0].Host)
+	assert.Equal(t, "x-api-key", maskedRules[0].HeaderKey)
+
+	// 6. POST /api/manage/proxy/reload re-reads from disk
+	reloadReq := httptest.NewRequest(http.MethodPost, "/api/manage/proxy/reload", nil)
+	reloadW := httptest.NewRecorder()
+	srv.ServeHTTP(reloadW, reloadReq)
+	assert.Equal(t, http.StatusOK, reloadW.Code)
+	assert.Contains(t, reloadW.Body.String(), "proxy config reloaded")
 }

@@ -26,6 +26,30 @@ type ProxyManager struct {
 	mu         sync.Mutex
 }
 
+// Addr returns the listening address of the proxy server.
+func (pm *ProxyManager) Addr() string {
+	if pm == nil || pm.server == nil {
+		return ""
+	}
+	return pm.server.Addr
+}
+
+// CACertPath returns the CA certificate path used by the proxy manager.
+func (pm *ProxyManager) CACertPath() string {
+	if pm == nil {
+		return ""
+	}
+	return pm.caCertPath
+}
+
+// ConfigPath returns the standalone configuration path used by the proxy manager.
+func (pm *ProxyManager) ConfigPath() string {
+	if pm == nil {
+		return ""
+	}
+	return pm.configPath
+}
+
 // extractHosts extracts unique hosts from a slice of rules.
 func extractHosts(rules []Rule) []string {
 	seen := make(map[string]struct{})

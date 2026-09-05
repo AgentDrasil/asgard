@@ -19,6 +19,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 )
@@ -115,12 +116,13 @@ func WithSkipSSHSetup(skip bool) Option {
 
 // App encapsulates the Asgard runtime environment and lifecycle.
 type App struct {
-	conf      *config.Config
-	db        *gorm.DB
-	server    *api.Server
-	scheduler *cleanup.Scheduler
-	stopOnce  sync.Once
-	stopErr   error
+	conf         *config.Config
+	db           *gorm.DB
+	server       *api.Server
+	scheduler    *cleanup.Scheduler
+	proxyManager *proxy.ProxyManager
+	stopOnce     sync.Once
+	stopErr      error
 }
 
 func salvageConfig(path string) *config.Config {
@@ -257,10 +259,24 @@ func New(opts ...Option) (*App, error) {
 		}
 	}
 
-	// 7. Assemble API Server with options
+	// 7. Initialize Proxy Manager if enabled (R7 degrade philosophy)
+	var proxyMgr *proxy.ProxyManager
+	if conf != nil && conf.IsProxyEnabled() {
+		resolvedProxyConfigPath := conf.ResolvedProxyConfigPath()
+		var pErr error
+		proxyMgr, pErr = proxy.NewManager(conf.Proxy, resolvedProxyConfigPath)
+		if pErr != nil {
+			log.Warn().Err(pErr).Msg("failed to initialize proxy manager, entering degraded mode")
+			diagnostics.AddError("proxy", pErr.Error())
+			proxyMgr = nil
+		}
+	}
+
+	// 8. Assemble API Server with options
 	apiOpts := []api.ServerOption{
 		api.WithDiagnostics(diagnostics),
 		api.WithConfigPath(resolvedConfigPath),
+		api.WithProxyManager(proxyMgr),
 	}
 	if options.FunctionRegistry != nil {
 		apiOpts = append(apiOpts, api.WithFunctionRegistry(options.FunctionRegistry))
@@ -274,6 +290,9 @@ func New(opts ...Option) (*App, error) {
 
 	srv, err := api.New(conf, database, apiOpts...)
 	if err != nil {
+		if proxyMgr != nil {
+			_ = proxyMgr.Shutdown(context.Background())
+		}
 		if scheduler != nil {
 			_ = scheduler.Shutdown()
 		}
@@ -281,10 +300,11 @@ func New(opts ...Option) (*App, error) {
 	}
 
 	return &App{
-		conf:      conf,
-		db:        database,
-		server:    srv,
-		scheduler: scheduler,
+		conf:         conf,
+		db:           database,
+		server:       srv,
+		scheduler:    scheduler,
+		proxyManager: proxyMgr,
 	}, nil
 }
 
@@ -312,21 +332,46 @@ func (a *App) Server() *api.Server {
 	return a.server
 }
 
-// Start starts the underlying HTTP server and blocks until exit.
+// ProxyManager returns the underlying proxy manager of the App.
+func (a *App) ProxyManager() *proxy.ProxyManager {
+	if a == nil {
+		return nil
+	}
+	return a.proxyManager
+}
+
+// Start starts the underlying HTTP server and proxy server, and blocks until exit.
 func (a *App) Start() error {
 	if a == nil || a.server == nil {
 		return errors.New("app server is not initialized")
 	}
+
+	if a.proxyManager != nil {
+		go func() {
+			if err := a.proxyManager.Start(); err != nil {
+				log.Warn().Err(err).Msg("proxy manager server failed to start, entering degraded mode")
+				if a.server != nil && a.server.Diagnostics() != nil {
+					a.server.Diagnostics().AddError("proxy", err.Error())
+				}
+			}
+		}()
+	}
+
 	return a.server.Start()
 }
 
-// Stop performs idempotent graceful shutdown on both the server and the cleanup scheduler.
+// Stop performs idempotent graceful shutdown in strict order: proxyManager -> server -> scheduler.
 func (a *App) Stop(ctx context.Context) error {
 	if a == nil {
 		return nil
 	}
 	a.stopOnce.Do(func() {
 		var errs []error
+		if a.proxyManager != nil {
+			if err := a.proxyManager.Shutdown(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("proxy manager shutdown failed: %w", err))
+			}
+		}
 		if a.server != nil {
 			if err := a.server.Shutdown(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("server shutdown failed: %w", err))
