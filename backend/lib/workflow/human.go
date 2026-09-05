@@ -194,9 +194,14 @@ func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult 
 	if nctx.Node.OutputFile == "" {
 		return result
 	}
-	path := nctx.Node.OutputFile
+	outputFile := nctx.Interpolate(nctx.Node.OutputFile)
+	path := outputFile
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(nctx.TmpDir, path)
+		baseDir := nctx.SessionDir
+		if baseDir == "" {
+			baseDir = nctx.TmpDir
+		}
+		path = filepath.Join(baseDir, path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		log.Warn().Err(err).Str("path", path).Msg("creating human output artifact dir failed")
@@ -206,7 +211,7 @@ func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult 
 		log.Warn().Err(err).Str("path", path).Msg("writing human output artifact failed")
 		return result
 	}
-	result.Artifacts = map[string]string{nctx.Node.OutputFile: path}
+	result.Artifacts = map[string]string{outputFile: path}
 	return result
 }
 

@@ -160,6 +160,7 @@ func (m *memStore) get(runID string) *RunSnapshot {
 const humanLoopYAML = `
 name: human-loop
 tmp_dir: "tmp/${session_id}"
+session_dir: "data/${session_id}"
 nodes:
   - id: prep
     type: command
@@ -176,7 +177,7 @@ nodes:
     type: command
     depends:
       - node: plan_approval
-    command: "cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
+    command: "cat ${session_dir}/user_feedback.md > ${tmp_dir}/final.txt"
     output_file: "final.txt"
 `
 
@@ -277,11 +278,12 @@ func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {
 	require.NotNil(t, out.result)
 	assert.Equal(t, RunStatusCompleted, out.result.Status)
 
-	artifactsDir := filepath.Join(runDir, "tmp", "chat-1")
-	feedback, err := os.ReadFile(filepath.Join(artifactsDir, "user_feedback.md"))
+	// Human node output_file lands in the session dir; command node output
+	// stays in the tmp dir.
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", "chat-1", "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved", string(feedback))
-	finalOut, err := os.ReadFile(filepath.Join(artifactsDir, "final.txt"))
+	finalOut, err := os.ReadFile(filepath.Join(runDir, "tmp", "chat-1", "final.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved", strings.TrimSpace(string(finalOut)))
 
@@ -332,11 +334,10 @@ func TestHumanNodeResumeAfterRestart(t *testing.T) {
 	assert.Equal(t, workflowspec.StatusSucceeded, result.Nodes["plan_approval"].Status)
 	assert.Equal(t, "looks good, ship it", result.Nodes["plan_approval"].Output)
 
-	artifactsDir := filepath.Join(runDir, "tmp", "chat-1")
-	feedback, err := os.ReadFile(filepath.Join(artifactsDir, "user_feedback.md"))
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", "chat-1", "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "looks good, ship it", string(feedback))
-	finalOut, err := os.ReadFile(filepath.Join(artifactsDir, "final.txt"))
+	finalOut, err := os.ReadFile(filepath.Join(runDir, "tmp", "chat-1", "final.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "looks good, ship it", strings.TrimSpace(string(finalOut)))
 	assert.Equal(t, PersistStatusCompleted, store.get("runrestart").Status)

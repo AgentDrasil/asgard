@@ -25,6 +25,7 @@ import (
 const askUserReplyTestYAML = `
 name: ask-reply-loop
 tmp_dir: "tmp/${session_id}"
+session_dir: "data/${session_id}"
 nodes:
   - id: plan_approval
     type: human
@@ -34,7 +35,7 @@ nodes:
     type: command
     depends:
       - node: plan_approval
-    command: "cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
+    command: "cat ${session_dir}/user_feedback.md > ${tmp_dir}/final.txt"
 `
 
 func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
@@ -130,8 +131,8 @@ func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// The reply landed in the artifact and the ask_user message was marked.
-	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	// The reply landed in the session-dir artifact and the ask_user message was marked.
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved", string(feedback))
 
@@ -162,7 +163,7 @@ func TestAskUserReplyMismatchedMessageIDDoesNotResume(t *testing.T) {
 	require.NotNil(t, run)
 	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
 
-	_, err = os.Stat(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	_, err = os.Stat(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	assert.True(t, os.IsNotExist(err), "artifact must not be written on mismatched reply")
 }
 
@@ -541,7 +542,7 @@ func TestAskUserReply_CrossChatSessionHijackDefense(t *testing.T) {
 	assert.Equal(t, workflow.PersistStatusWaitingHuman, rA.Status)
 
 	// Check that chatB received no resume events or artifact modifications
-	_, err = os.Stat(filepath.Join(runDir, "tmp", chatA, "user_feedback.md"))
+	_, err = os.Stat(filepath.Join(runDir, "data", chatA, "user_feedback.md"))
 	assert.True(t, os.IsNotExist(err))
 
 	sessB, err := s.repo.GetSession(chatB)
@@ -574,7 +575,7 @@ func TestAskUserReply_EmptyMessageID_SingleRunFallback(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved Single", string(feedback))
 }
@@ -684,7 +685,7 @@ func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approve Live", string(feedback))
 }
@@ -912,6 +913,7 @@ func TestWorkflowPersist_RedriveResume_StatusSync(t *testing.T) {
 	slowRedriveYAML := fmt.Sprintf(`
 name: ask-reply-loop
 tmp_dir: "%s/tmp/${session_id}"
+session_dir: "%s/data/${session_id}"
 nodes:
   - id: plan_approval
     type: human
@@ -921,8 +923,8 @@ nodes:
     type: command
     depends:
       - node: plan_approval
-    command: "sleep 0.2 && cat ${tmp_dir}/user_feedback.md > ${tmp_dir}/final.txt"
-`, runDir)
+    command: "sleep 0.2 && cat ${session_dir}/user_feedback.md > ${tmp_dir}/final.txt"
+`, runDir, runDir)
 
 	require.NoError(t, store.MarkWaitingHuman(&workflow.RunSnapshot{
 		RunID:              "run-redrive",
@@ -1007,7 +1009,7 @@ nodes:
 	assert.True(t, hasRunningStatus, "Must broadcast isRunning: true status event during redrive")
 	assert.True(t, hasCompletedStatus, "Must broadcast isRunning: false status event after redrive")
 
-	feedback, err := os.ReadFile(filepath.Join(runDir, "tmp", chatID, "user_feedback.md"))
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
 	assert.Equal(t, "Approved Redrive", string(feedback))
 
