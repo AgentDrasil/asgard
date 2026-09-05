@@ -90,4 +90,20 @@ func TestMergeCACert(t *testing.T) {
 	outBytes2, err := os.ReadFile(outPath2)
 	require.NoError(t, err)
 	assert.Contains(t, string(outBytes2), "ASGARD_CA_DATA")
+
+	// Test concurrent writes to the same outPath (parallel subtasks sharing chat ID)
+	concurrentOutPath := filepath.Join(tempDir, "concurrent", "ca-certificates.crt")
+	done := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			done <- MergeCACert(hostBundlePath, caCertPath, concurrentOutPath)
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		require.NoError(t, <-done)
+	}
+	concurrentBytes, err := os.ReadFile(concurrentOutPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(concurrentBytes), "HOST_BUNDLE_DATA")
+	assert.Contains(t, string(concurrentBytes), "ASGARD_CA_DATA")
 }

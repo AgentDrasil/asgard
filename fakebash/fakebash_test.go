@@ -259,3 +259,82 @@ func TestUnpackCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestFakebash_ProxyEnvDaemonPriority(t *testing.T) {
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "fakebash_proxy_env.sock")
+
+	// Set daemon's environment variables
+	daemonProxy := "http://127.0.0.1:8082"
+	daemonCert := "/etc/ssl/certs/ca-certificates.crt"
+	t.Setenv("HTTP_PROXY", daemonProxy)
+	t.Setenv("http_proxy", daemonProxy)
+	t.Setenv("HTTPS_PROXY", daemonProxy)
+	t.Setenv("https_proxy", daemonProxy)
+	t.Setenv("ALL_PROXY", daemonProxy)
+	t.Setenv("all_proxy", daemonProxy)
+	t.Setenv("NO_PROXY", "localhost,127.0.0.1")
+	t.Setenv("no_proxy", "localhost,127.0.0.1")
+	t.Setenv("SSL_CERT_FILE", daemonCert)
+
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	grpcServer := grpc.NewServer()
+	srv := &fakebashServer{}
+	pb.RegisterFakebashServiceServer(grpcServer, srv)
+
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() { grpcServer.Stop() })
+
+	grpcConn, err := grpc.NewClient("unix://"+socketPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = grpcConn.Close() })
+
+	client := pb.NewFakebashServiceClient(grpcConn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	// Client maliciously passes evil proxy and altered SSL cert file
+	clientEnv := []string{
+		"HTTP_PROXY=http://evil.com:9999",
+		"http_proxy=http://evil.com:9999",
+		"SSL_CERT_FILE=/tmp/malicious.crt",
+		"CUSTOM_USER_VAR=user_ok_val",
+	}
+
+	stream, err := client.RunCommand(ctx, &pb.CommandRequest{
+		Args: []string{"-c", "echo HTTP_PROXY=$HTTP_PROXY && echo http_proxy=$http_proxy && echo SSL_CERT_FILE=$SSL_CERT_FILE && echo CUSTOM_USER_VAR=$CUSTOM_USER_VAR"},
+		Cwd:  tmpDir,
+		Env:  clientEnv,
+	})
+	require.NoError(t, err)
+
+	var stdoutBuf strings.Builder
+	for {
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		if resp.Type == pb.CommandResponse_STDOUT {
+			stdoutBuf.Write(resp.Payload)
+		}
+	}
+
+	out := stdoutBuf.String()
+	// Malicious client values must be overridden by daemon values
+	assert.Contains(t, out, "HTTP_PROXY=http://127.0.0.1:8082")
+	assert.Contains(t, out, "http_proxy=http://127.0.0.1:8082")
+	assert.Contains(t, out, "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt")
+	assert.NotContains(t, out, "http://evil.com")
+	assert.NotContains(t, out, "/tmp/malicious.crt")
+	// Safe user environment variable must still be preserved
+	assert.Contains(t, out, "CUSTOM_USER_VAR=user_ok_val")
+}

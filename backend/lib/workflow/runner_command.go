@@ -73,10 +73,20 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 	var err error
 	if sandbox {
 		configPath := ""
+		var proxyCfg bwrap.ProxySandboxConfig
 		if r.conf != nil {
 			configPath = r.conf.GetConfigPath()
+			if r.conf.IsProxyEnabled() {
+				proxyCfg = bwrap.ProxySandboxConfig{
+					Enabled:         true,
+					ProxyAddr:       r.conf.ProxyHost(),
+					CACert:          r.conf.ProxyCACertPath(),
+					CAKey:           r.conf.ProxyCAKeyPath(),
+					ProxyConfigPath: r.conf.ResolvedProxyConfigPath(),
+				}
+			}
 		}
-		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, &stdout, &stderr)
+		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, &stdout, &stderr)
 	} else {
 		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
 	}
@@ -159,7 +169,7 @@ func asExitError(err error, target **exec.ExitError) bool {
 // runSandboxedCommand runs the command inside a bubblewrap sandbox hosting a
 // fakebashd gRPC daemon, mirroring the dual-sandbox execution model used by
 // agent runs: the host dials the socket directory bind-mounted at /fakebash.
-func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, stdout, stderr *bytes.Buffer) (int, error) {
+func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, stdout, stderr *bytes.Buffer) (int, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return -1, fmt.Errorf("getting user home directory: %w", err)
@@ -170,7 +180,7 @@ func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPat
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath)
+	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, proxyCfg)
 	if err != nil {
 		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
 	}

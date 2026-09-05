@@ -10,6 +10,8 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -231,9 +233,44 @@ func appendConfigMaskArgs(args []string, configPath string) []string {
 	return args
 }
 
+// ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.
+type ProxySandboxConfig struct {
+	Enabled         bool
+	ProxyAddr       string // e.g. "http://127.0.0.1:8082"
+	CACert          string // Host Asgard CA cert path (absolute)
+	CAKey           string // Host Asgard CA private key path (absolute)
+	ProxyConfigPath string // Host standalone proxy config path (absolute, if any)
+}
+
+// appendProxySensitiveMaskArgs masks the proxy private key and config file with /dev/null
+// to prevent code inside the sandbox from reading sensitive credentials.
+func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) []string {
+	if caKey != "" {
+		if fi, err := os.Stat(caKey); err == nil && !fi.IsDir() {
+			args = append(args, "--ro-bind", "/dev/null", caKey)
+		}
+	} else {
+		// Defense against leftover private keys in default path when proxy is disabled
+		if home, err := os.UserHomeDir(); err == nil {
+			defaultKey := filepath.Join(home, ".asgard", "ca", "ca.key")
+			if fi, err := os.Stat(defaultKey); err == nil && !fi.IsDir() {
+				args = append(args, "--ro-bind", "/dev/null", defaultKey)
+			}
+		}
+	}
+
+	if proxyConfigPath != "" {
+		if fi, err := os.Stat(proxyConfigPath); err == nil && !fi.IsDir() {
+			args = append(args, "--ro-bind", "/dev/null", proxyConfigPath)
+		}
+	}
+
+	return args
+}
+
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
-func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string) ([]string, error) {
+func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -332,6 +369,16 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
 
+	// Append config file and proxy sensitive file masking after all directory mounts
+	// to prevent subsequent binds from shadowing /dev/null masking (D1/R1/N2)
+	args = appendConfigMaskArgs(args, configPath)
+	var caKey, proxyConfigPath string
+	if len(proxyOpts) > 0 {
+		caKey = proxyOpts[0].CAKey
+		proxyConfigPath = proxyOpts[0].ProxyConfigPath
+	}
+	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
+
 	// Build and mount the system prompt, and mount skills/ if present in agentPath.
 	// The system prompt is written to the chat tmpDir on the host so that bwrap
 	// can bind-mount it read-only at the CLI's expected configuration path.
@@ -398,8 +445,8 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 }
 
 // CommandForAgent creates an exec.Cmd initialized to run the target CLI inside bubblewrap sandbox.
-func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string) (*exec.Cmd, error) {
-	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules, configPath)
+func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+	bwrapArgs, err := buildArgsForAgent(cfg, agentPath, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +455,7 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -423,6 +470,14 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 	// Bind HOME
 	args = append(args, "--bind", home, home)
+
+	// Mask proxy sensitive files (ca.key and proxy config) immediately after HOME bind
+	var caKey, proxyConfigPath string
+	if len(proxyOpts) > 0 {
+		caKey = proxyOpts[0].CAKey
+		proxyConfigPath = proxyOpts[0].ProxyConfigPath
+	}
+	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
 	// Ignore auth dir for all registered CLIs, and ssh dir to prevent key leak
 	for _, cli := range agentwrapper.GetRegisteredCLIs() {
@@ -439,6 +494,39 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 	// Append config file masking again in case HOME bind-mount shadowed base masking
 	args = appendConfigMaskArgs(args, configPath)
+	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
+
+	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
+	if len(proxyOpts) > 0 && proxyOpts[0].Enabled {
+		proxyCfg := proxyOpts[0]
+		cID := chatID
+		if cID == "" {
+			cID = "default"
+		}
+		mergedBundlePath := filepath.Join(home, "tmp", ".asgard-ca", cID, "merged-ca-certificates.crt")
+		if err := proxy.MergeCACert("/etc/ssl/certs/ca-certificates.crt", proxyCfg.CACert, mergedBundlePath); err != nil {
+			return nil, fmt.Errorf("merging CA cert bundle: %w", err)
+		}
+
+		args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/certs/ca-certificates.crt")
+		if _, err := os.Stat("/etc/ssl/cert.pem"); err == nil {
+			args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/cert.pem")
+		}
+
+		// Inject protected proxy and CA bundle environment variables
+		for _, k := range fakebash.ProtectedProxyEnvKeys {
+			switch k {
+			case "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy":
+				if proxyCfg.ProxyAddr != "" {
+					args = append(args, "--setenv", k, proxyCfg.ProxyAddr)
+				}
+			case "NO_PROXY", "no_proxy":
+				args = append(args, "--setenv", k, "localhost,127.0.0.1")
+			case "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE":
+				args = append(args, "--setenv", k, "/etc/ssl/certs/ca-certificates.crt")
+			}
+		}
+	}
 
 	if runDir != "" {
 		if _, err := os.Stat(runDir); err == nil {

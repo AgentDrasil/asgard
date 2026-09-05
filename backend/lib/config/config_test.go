@@ -630,3 +630,80 @@ func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
 		assert.Equal(t, "simplest", cfg.Providers[0])
 	})
 }
+
+func TestConfig_Proxy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config and defaults", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Nil(t, cfg.GetProxy())
+		assert.False(t, cfg.IsProxyEnabled())
+		assert.Equal(t, "http://127.0.0.1:8082", cfg.ProxyHost())
+		assert.Equal(t, "127.0.0.1:8082", cfg.ProxyAddr())
+		assert.Equal(t, "", cfg.ProxyCACertPath())
+		assert.Equal(t, "", cfg.ProxyCAKeyPath())
+		assert.Equal(t, "", cfg.ResolvedProxyConfigPath())
+	})
+
+	t.Run("parse valid proxy with rules", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		agentDir := filepath.Join(tmpDir, "agents")
+		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+
+		yamlContent := fmt.Sprintf(`
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "test.db"
+agent_dir: %q
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+proxy_config: "proxy.yaml"
+proxy:
+  enable: true
+  rules:
+    - host: "api.openai.com"
+      path_prefix: "/v1"
+      header_key: "Authorization"
+      real_secret: "real-secret-123"
+      dummy_secret: "fake-secret-xyz"
+`, agentDir)
+
+		cfg, err := ParseAndValidate([]byte(yamlContent))
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.True(t, cfg.IsProxyEnabled())
+		assert.Equal(t, "http://127.0.0.1:8082", cfg.ProxyHost())
+		assert.Equal(t, "127.0.0.1:8082", cfg.ProxyAddr())
+		assert.NotEmpty(t, cfg.ProxyCACertPath())
+		assert.NotEmpty(t, cfg.ProxyCAKeyPath())
+
+		cfg.ConfigPath = filepath.Join(tmpDir, "config.yaml")
+		expectedProxyCfgPath := filepath.Join(tmpDir, "proxy.yaml")
+		assert.Equal(t, expectedProxyCfgPath, cfg.ResolvedProxyConfigPath())
+	})
+
+	t.Run("proxy enabled with empty rules fails validation", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		agentDir := filepath.Join(tmpDir, "agents")
+		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+
+		yamlContent := fmt.Sprintf(`
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "test.db"
+agent_dir: %q
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+proxy:
+  enable: true
+  rules: []
+`, agentDir)
+
+		_, err := ParseAndValidate([]byte(yamlContent))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "proxy is enabled but rules list is empty")
+	})
+}

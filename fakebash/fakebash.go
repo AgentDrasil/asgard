@@ -30,6 +30,13 @@ var allowlist = map[string]struct{}{
 	"ask_user":      {},
 }
 
+var ProtectedProxyEnvKeys = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+	"ALL_PROXY", "all_proxy",
+	"NO_PROXY", "no_proxy",
+	"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE",
+}
+
 func RunClient(args []string) error {
 	if len(args) > 1 {
 		var cmdArgs []string
@@ -151,7 +158,28 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		cmd.Dir = req.Cwd
 	}
 	if len(req.Env) > 0 {
-		cmd.Env = req.Env
+		cmd.Env = append([]string(nil), req.Env...)
+		// Daemon priority override (R4): ProtectedProxyEnvKeys from fakebashd daemon take precedence over req.Env
+		daemonEnvMap := make(map[string]string)
+		for _, e := range os.Environ() {
+			if k, v, ok := strings.Cut(e, "="); ok {
+				daemonEnvMap[k] = v
+			}
+		}
+
+		for _, protectedKey := range ProtectedProxyEnvKeys {
+			if daemonVal, ok := daemonEnvMap[protectedKey]; ok {
+				// Remove any existing entries of protectedKey from cmd.Env
+				filtered := make([]string, 0, len(cmd.Env))
+				prefix := protectedKey + "="
+				for _, e := range cmd.Env {
+					if !strings.HasPrefix(e, prefix) {
+						filtered = append(filtered, e)
+					}
+				}
+				cmd.Env = append(filtered, prefix+daemonVal)
+			}
+		}
 	} else {
 		cmd.Env = os.Environ()
 	}

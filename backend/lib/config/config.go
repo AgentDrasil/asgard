@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 )
 
 type FirebaseWebpushWebConfig struct {
@@ -37,6 +40,8 @@ type Config struct {
 	CommentLang             string                    `yaml:"comment_lang"`
 	UILang                  string                    `yaml:"ui_lang"`
 	Providers               []string                  `yaml:"providers" json:"providers,omitempty"`
+	Proxy                   *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
+	ProxyConfig             string                    `yaml:"proxy_config" json:"proxy_config,omitempty"`
 	ConfigPath              string                    `yaml:"-" json:"-"`
 }
 
@@ -131,6 +136,71 @@ func (c *Config) InternalAPIHost() string {
 
 func (c *Config) StatusURL() string {
 	return c.InternalAPIHost() + "/agent-status"
+}
+
+func (c *Config) GetProxy() *proxy.Config {
+	if c == nil {
+		return nil
+	}
+	return c.Proxy
+}
+
+func (c *Config) IsProxyEnabled() bool {
+	if c == nil || c.Proxy == nil {
+		return false
+	}
+	return c.Proxy.Enable
+}
+
+func (c *Config) ProxyHost() string {
+	if c == nil || c.Proxy == nil {
+		return "http://127.0.0.1:8082"
+	}
+	return c.Proxy.ProxyHost()
+}
+
+func (c *Config) ProxyAddr() string {
+	if c == nil || c.Proxy == nil || c.Proxy.Server.Addr == "" {
+		return "127.0.0.1:8082"
+	}
+	return c.Proxy.Server.Addr
+}
+
+func (c *Config) ProxyCACertPath() string {
+	if c == nil || c.Proxy == nil {
+		return ""
+	}
+	return c.Proxy.ResolvedCACertPath()
+}
+
+func (c *Config) ProxyCAKeyPath() string {
+	if c == nil || c.Proxy == nil {
+		return ""
+	}
+	return c.Proxy.ResolvedCAKeyPath()
+}
+
+func (c *Config) ResolvedProxyConfigPath() string {
+	if c == nil || c.ProxyConfig == "" {
+		return ""
+	}
+	p := c.ProxyConfig
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	if c.ConfigPath != "" {
+		return filepath.Clean(filepath.Join(filepath.Dir(c.ConfigPath), p))
+	}
+	abs, err := filepath.Abs(p)
+	if err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(p)
 }
 
 func (c *Config) validate() error {
@@ -236,6 +306,13 @@ func ParseAndValidate(data []byte) (*Config, error) {
 			}
 		}
 		cfg.Providers = deduped
+	}
+
+	if cfg.Proxy != nil {
+		cfg.Proxy.ApplyDefaults()
+		if err := cfg.Proxy.Validate(); err != nil {
+			return nil, fmt.Errorf("proxy config error: %w", err)
+		}
 	}
 
 	if err := cfg.validate(); err != nil {

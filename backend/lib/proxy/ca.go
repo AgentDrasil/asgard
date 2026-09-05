@@ -151,8 +151,31 @@ func MergeCACert(hostCertBundlePath, caCertPath, outPath string) error {
 	}
 	merged = append(merged, caData...)
 
-	if err := os.WriteFile(outPath, merged, 0644); err != nil {
+	dir := filepath.Dir(outPath)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(outPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for merged CA: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(merged); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to write merged CA bundle: %w", err)
+	}
+	if err := tmpFile.Chmod(0644); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to chmod merged CA bundle: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp merged CA bundle: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to atomically update merged CA bundle: %w", err)
 	}
 
 	return nil

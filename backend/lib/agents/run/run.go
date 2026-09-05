@@ -108,18 +108,28 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 
 	var langRules string
 	var configPath string
+	var proxyCfg bwrap.ProxySandboxConfig
 	if conf != nil {
 		langRules = conf.LanguageRules()
 		configPath = conf.GetConfigPath()
+		if conf.IsProxyEnabled() {
+			proxyCfg = bwrap.ProxySandboxConfig{
+				Enabled:         true,
+				ProxyAddr:       conf.ProxyHost(),
+				CACert:          conf.ProxyCACertPath(),
+				CAKey:           conf.ProxyCAKeyPath(),
+				ProxyConfigPath: conf.ResolvedProxyConfigPath(),
+			}
+		}
 	}
 
-	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath)
+	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

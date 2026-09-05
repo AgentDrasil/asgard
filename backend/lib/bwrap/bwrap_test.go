@@ -424,3 +424,126 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Errorf("expected suffix %q, got: %s", expectedEnd, argStr)
 	}
 }
+
+func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	caCertPath := filepath.Join(tmpDir, "ca.crt")
+	caKeyPath := filepath.Join(tmpDir, "ca.key")
+	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
+
+	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
+	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
+	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
+
+	proxyOpt := ProxySandboxConfig{
+		Enabled:         true,
+		ProxyAddr:       "http://127.0.0.1:8082",
+		CACert:          caCertPath,
+		CAKey:           caKeyPath,
+		ProxyConfigPath: proxyConfigPath,
+	}
+
+	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", proxyOpt)
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+
+	// 1. Verify masking of ca.key and proxy.yaml with /dev/null
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+proxyConfigPath)
+
+	// 2. Verify CA bundle path is in isolated host path and mounted to sandbox CA bundle path
+	expectedIsolatedBundle := filepath.Join(tmpDir, "tmp", ".asgard-ca", "chat-123", "merged-ca-certificates.crt")
+	assert.Contains(t, argStr, "--ro-bind "+expectedIsolatedBundle+" /etc/ssl/certs/ca-certificates.crt")
+	assert.NotContains(t, argStr, "--ro-bind "+caKeyPath+" /etc/ssl/certs/ca-certificates.crt")
+
+	// 3. Verify uppercase and lowercase proxy env vars injection
+	assert.Contains(t, argStr, "--setenv HTTP_PROXY http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv http_proxy http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv HTTPS_PROXY http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv https_proxy http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv ALL_PROXY http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv all_proxy http://127.0.0.1:8082")
+	assert.Contains(t, argStr, "--setenv NO_PROXY localhost,127.0.0.1")
+	assert.Contains(t, argStr, "--setenv no_proxy localhost,127.0.0.1")
+	assert.Contains(t, argStr, "--setenv SSL_CERT_FILE /etc/ssl/certs/ca-certificates.crt")
+	assert.Contains(t, argStr, "--setenv REQUESTS_CA_BUNDLE /etc/ssl/certs/ca-certificates.crt")
+	assert.Contains(t, argStr, "--setenv NODE_EXTRA_CA_CERTS /etc/ssl/certs/ca-certificates.crt")
+	assert.Contains(t, argStr, "--setenv CURL_CA_BUNDLE /etc/ssl/certs/ca-certificates.crt")
+}
+
+func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, subDir), 0755))
+	}
+
+	caCertPath := filepath.Join(tmpDir, "ca.crt")
+	caKeyPath := filepath.Join(tmpDir, "ca.key")
+	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
+
+	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
+	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
+	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
+
+	proxyOpt := ProxySandboxConfig{
+		Enabled:         true,
+		ProxyAddr:       "http://127.0.0.1:8082",
+		CACert:          caCertPath,
+		CAKey:           caKeyPath,
+		ProxyConfigPath: proxyConfigPath,
+	}
+
+	// Test with AgentConfig containing ancestor directory of proxyConfigPath
+	ancestorDir := filepath.Join(tmpDir, "ancestor_dir")
+	require.NoError(t, os.MkdirAll(ancestorDir, 0755))
+	nestedProxyConfigPath := filepath.Join(ancestorDir, "nested_proxy.yaml")
+	require.NoError(t, os.WriteFile(nestedProxyConfigPath, []byte("nested"), 0644))
+
+	proxyOpt.ProxyConfigPath = nestedProxyConfigPath
+
+	agentCfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{ancestorDir},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "some-model"}
+	cmd, err := CommandForAgent(agentCfg, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+
+	// 1. Verify masking of ca.key and proxy.yaml with /dev/null
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+nestedProxyConfigPath)
+
+	// Verify that the mask for nestedProxyConfigPath appears AFTER the ancestorDir bind
+	ancestorBindIdx := -1
+	proxyMaskIdx := -1
+	for i := 0; i < len(cmd.Args)-2; i++ {
+		if cmd.Args[i] == "--bind" && cmd.Args[i+1] == ancestorDir {
+			ancestorBindIdx = i
+		}
+		if cmd.Args[i] == "--ro-bind" && cmd.Args[i+1] == "/dev/null" && cmd.Args[i+2] == nestedProxyConfigPath {
+			proxyMaskIdx = i
+		}
+	}
+	assert.Greater(t, ancestorBindIdx, -1, "expected ancestorDir --bind in args")
+	assert.Greater(t, proxyMaskIdx, -1, "expected nestedProxyConfigPath --ro-bind in args")
+	assert.Greater(t, proxyMaskIdx, ancestorBindIdx, "proxy masking must come AFTER ancestor bind to avoid being shadowed")
+
+	// 2. Strict constraint: Agent sandbox MUST NOT have proxy env or CA overrides
+	assert.NotContains(t, argStr, "HTTP_PROXY")
+	assert.NotContains(t, argStr, "http_proxy")
+	assert.NotContains(t, argStr, "HTTPS_PROXY")
+	assert.NotContains(t, argStr, "https_proxy")
+	assert.NotContains(t, argStr, "ALL_PROXY")
+	assert.NotContains(t, argStr, "all_proxy")
+	assert.NotContains(t, argStr, "SSL_CERT_FILE")
+	assert.NotContains(t, argStr, "/etc/ssl/certs/ca-certificates.crt")
+}

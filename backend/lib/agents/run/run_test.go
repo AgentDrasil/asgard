@@ -14,6 +14,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -428,4 +429,59 @@ func TestRun_NoQuotaError_DisabledProviderMarkedInSnapshot(t *testing.T) {
 	assert.False(t, nq.Targets[0].Enabled, "agy should be marked disabled")
 	assert.Zero(t, nq.Targets[0].Remaining)
 	assert.True(t, nq.Targets[1].Enabled)
+}
+
+func TestRun_ProxyOptions(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{
+		{CLI: "agy", Model: "agy-model-high"},
+	})
+
+	caCertPath := filepath.Join(tmpDir, "ca.crt")
+	caKeyPath := filepath.Join(tmpDir, "ca.key")
+	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
+	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
+	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
+	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
+
+	t.Run("with proxy enabled", func(t *testing.T) {
+		conf := &config.Config{
+			Providers:   []string{"agy"},
+			ProxyConfig: proxyConfigPath,
+			Proxy: &proxy.Config{
+				Enable: true,
+				Server: proxy.ServerConfig{
+					Addr:   "127.0.0.1:8082",
+					CACert: caCertPath,
+					CAKey:  caKeyPath,
+				},
+				Rules: []proxy.Rule{
+					{
+						Host:        "api.openai.com",
+						PathPrefix:  "/v1",
+						HeaderKey:   "Authorization",
+						RealSecret:  "secret-123",
+						DummySecret: "fake-xyz",
+					},
+				},
+			},
+		}
+
+		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-enabled", StatusScope{}, conf)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "mock bwrap execution succeeded")
+	})
+
+	t.Run("with proxy disabled", func(t *testing.T) {
+		conf := &config.Config{
+			Providers: []string{"agy"},
+			Proxy: &proxy.Config{
+				Enable: false,
+			},
+		}
+
+		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-disabled", StatusScope{}, conf)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "mock bwrap execution succeeded")
+	})
 }
