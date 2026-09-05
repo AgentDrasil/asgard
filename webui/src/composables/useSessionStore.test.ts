@@ -317,6 +317,51 @@ describe("useSessionStore", () => {
     });
   });
 
+  it("should use activeSession currentAgent and runDir when session is not in sessions list", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-custom",
+      title: "Custom Agent Session",
+      currentAgent: "simple_code",
+      runDir: "/custom/dir",
+      messages: [],
+    };
+
+    const agents = ref<AgentInfo[]>([
+      { id: "agent_father", name: "Father", description: "", run_dirs: ["/home/user/asgard/agents"] },
+      { id: "simple_code", name: "Simple Code", description: "", run_dirs: ["/home/user/workspace"] },
+    ]);
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+    const triggerSpy = vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "accepted",
+      chatId: "session-custom",
+    });
+
+    const store = useSessionStore({ agents });
+    // Simulate opening session directly from URL (e.g. refresh on /chat/session-custom)
+    await store.openSession("session-custom");
+
+    // Clear sessions array to simulate sessions list not loaded or session not in pagination
+    store.sessions.value = [];
+
+    // User sends a follow-up message while opts (global state) points to agent_father
+    await store.sendMessage("Run my code", {
+      selectedAgentId: "agent_father",
+      selectedDir: "/home/user/asgard/agents",
+    });
+
+    expect(triggerSpy).toHaveBeenCalledWith("simple_code", {
+      prompt: "Run my code",
+      chatId: "session-custom",
+      runDir: "/custom/dir",
+      model: undefined,
+      metadata: expect.objectContaining({
+        message_id: expect.stringMatching(/^user-/),
+      }),
+      attachments: undefined,
+    });
+  });
+
   it("should create session, upload pendingFiles, and pass uploaded attachments when activeSessionId is empty", async () => {
     const mockCreatedSession: ChatSession = {
       chatID: "new-session-123",

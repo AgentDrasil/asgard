@@ -263,6 +263,12 @@ watch(
         chatInputText.value = "";
         welcomePrompt.value = "";
         await openSession(newSessionId);
+        if (activeSession.value?.currentAgent) {
+          selectedAgentId.value = activeSession.value.currentAgent;
+        }
+        if (activeSession.value?.runDir) {
+          selectedDir.value = activeSession.value.runDir;
+        }
       } else {
         closeSession();
         welcomePrompt.value = "";

@@ -300,6 +300,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       const idx = sessions.value.findIndex((s) => s.chatID === id);
       if (idx > -1) {
         sessions.value[idx] = { ...sessions.value[idx], ...session };
+      } else {
+        sessions.value = [session, ...sessions.value];
       }
     } else {
       activeSession.value = null;
@@ -460,7 +462,11 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       }
     }
 
-    const currentSession = sessions.value.find((s) => s.chatID === currentThreadId) || {
+    const foundSession =
+      (activeSession.value?.chatID === currentThreadId ? activeSession.value : null) ||
+      sessions.value.find((s) => s.chatID === currentThreadId);
+
+    const currentSession = foundSession || {
       chatID: currentThreadId || "",
       currentAgent: opts?.selectedAgentId || "",
       runDir: opts?.selectedDir || "",
