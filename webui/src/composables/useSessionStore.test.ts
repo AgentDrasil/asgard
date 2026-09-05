@@ -327,8 +327,18 @@ describe("useSessionStore", () => {
     };
 
     const agents = ref<AgentInfo[]>([
-      { id: "agent_father", name: "Father", description: "", run_dirs: ["/home/user/asgard/agents"] },
-      { id: "simple_code", name: "Simple Code", description: "", run_dirs: ["/home/user/workspace"] },
+      {
+        id: "agent_father",
+        name: "Father",
+        description: "",
+        run_dirs: ["/home/user/asgard/agents"],
+      },
+      {
+        id: "simple_code",
+        name: "Simple Code",
+        description: "",
+        run_dirs: ["/home/user/workspace"],
+      },
     ]);
 
     vi.spyOn(api, "getSession").mockResolvedValue(mockSession);

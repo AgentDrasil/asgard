@@ -314,6 +314,9 @@ export const en = {
     reloadAgents: "Reload Agents",
     reloadAgentsDesc: "Hot-reload agent configurations and workspaces without stopping the server.",
     reloading: "Reloading...",
+    reloadProxy: "Reload Proxy Config",
+    reloadProxyDesc:
+      "Re-read the standalone proxy configuration file and apply rules without restart.",
     restartServer: "Restart Server",
     restartServerDesc:
       "Gracefully terminate and restart the backend service (requires auto-restart container).",
@@ -337,6 +340,10 @@ export const en = {
     reloadSuccessMessage: "Agent configuration reloaded successfully",
     reloadErrorTitle: "Reload Error",
     reloadErrorMessage: "Failed to reload agent configuration",
+    reloadProxySuccessTitle: "Reload Success",
+    reloadProxySuccessMessage: "Proxy configuration reloaded successfully",
+    reloadProxyErrorTitle: "Reload Error",
+    reloadProxyErrorMessage: "Failed to reload proxy configuration",
   },
   config: {
     title: "Configuration Editor",

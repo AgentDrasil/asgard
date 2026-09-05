@@ -81,6 +81,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("Theme");
     expect(root.textContent).toContain("System & Server Actions");
     expect(root.textContent).toContain("Reload Agents");
+    expect(root.textContent).toContain("Reload Proxy Config");
     expect(root.textContent).toContain("Restart Server");
     expect(root.textContent).toContain("Usage & Quota");
     expect(root.textContent).toContain("Configuration & Diagnostics");
@@ -105,6 +106,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("主题");
     expect(root.textContent).toContain("系统与服务操作");
     expect(root.textContent).toContain("重载 Agent");
+    expect(root.textContent).toContain("重载代理配置");
     expect(root.textContent).toContain("重启服务器");
     expect(root.textContent).toContain("用量与配额");
     expect(root.textContent).toContain("配置与诊断");

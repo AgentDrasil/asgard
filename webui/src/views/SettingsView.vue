@@ -6,7 +6,7 @@ import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
 import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
-import { reloadAgents, getSystemLogs } from "../lib/api";
+import { reloadAgents, reloadProxyConfig, getSystemLogs } from "../lib/api";
 import { useToast } from "../composables/useToast";
 import { useRestartFlow } from "../composables/useRestartFlow";
 
@@ -24,6 +24,7 @@ const {
 } = useRestartFlow();
 
 const isReloading = ref(false);
+const isReloadingProxy = ref(false);
 const isQuotaModalOpen = ref(false);
 const backendErrorCount = ref(0);
 const backendWarnCount = ref(0);
@@ -70,6 +71,29 @@ const handleReloadAgents = async () => {
     });
   } finally {
     isReloading.value = false;
+  }
+};
+
+const handleReloadProxyConfig = async () => {
+  if (isReloadingProxy.value) return;
+  isReloadingProxy.value = true;
+  try {
+    const result = await reloadProxyConfig();
+    if (result.success) {
+      toast.success(t("settings.reloadProxySuccessMessage"), {
+        title: t("settings.reloadProxySuccessTitle"),
+      });
+    } else {
+      toast.error(result.error || t("settings.reloadProxyErrorMessage"), {
+        title: t("settings.reloadProxyErrorTitle"),
+      });
+    }
+  } catch (err: any) {
+    toast.error(err?.message || t("settings.reloadProxyErrorMessage"), {
+      title: t("settings.reloadProxyErrorTitle"),
+    });
+  } finally {
+    isReloadingProxy.value = false;
   }
 };
 
@@ -165,7 +189,7 @@ const navigateBack = () => {
         <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
           {{ t("settings.systemActions") }}
         </h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           <!-- Reload Agents Card -->
           <div
             class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex flex-col justify-between gap-3"
@@ -186,6 +210,34 @@ const navigateBack = () => {
             >
               <Icon icon="mynaui:refresh" :class="['w-4 h-4', { 'animate-spin': isReloading }]" />
               <span>{{ isReloading ? t("settings.reloading") : t("settings.reloadAgents") }}</span>
+            </button>
+          </div>
+
+          <!-- Reload Proxy Config Card -->
+          <div
+            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex flex-col justify-between gap-3"
+          >
+            <div class="space-y-1">
+              <div class="font-medium text-base-content flex items-center gap-2">
+                <Icon icon="mynaui:shield" class="w-5 h-5 text-secondary" />
+                <span>{{ t("settings.reloadProxy") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 leading-relaxed">
+                {{ t("settings.reloadProxyDesc") }}
+              </p>
+            </div>
+            <button
+              @click="handleReloadProxyConfig"
+              class="btn btn-outline btn-sm w-full gap-2 mt-2"
+              :disabled="isReloadingProxy || isRestarting"
+            >
+              <Icon
+                icon="mynaui:shield"
+                :class="['w-4 h-4', { 'animate-spin': isReloadingProxy }]"
+              />
+              <span>{{
+                isReloadingProxy ? t("settings.reloading") : t("settings.reloadProxy")
+              }}</span>
             </button>
           </div>
 
