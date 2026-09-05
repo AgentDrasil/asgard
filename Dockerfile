@@ -9,6 +9,8 @@ ARG USER_GID=1000
 # Stage 1: base
 FROM debian:${DEBIAN_VERSION} AS base
 
+ARG AGY_VERSION
+
 # Install required dependencies
 # Add sid repository for ttyd package (not yet in Debian stable/testing)
 RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list && \
