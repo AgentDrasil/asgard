@@ -387,6 +387,7 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
+	sessionDir := t.TempDir()
 
 	validFile := filepath.Join(tempDir, "output.md")
 	require.NoError(t, os.WriteFile(validFile, []byte("# Valid Output"), 0644))
@@ -394,10 +395,17 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 	emptyFile := filepath.Join(tempDir, "empty.md")
 	require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0644))
 
+	validSessionFile := filepath.Join(sessionDir, "plan.md")
+	require.NoError(t, os.WriteFile(validSessionFile, []byte("# Plan"), 0644))
+
+	emptySessionFile := filepath.Join(sessionDir, "empty-plan.md")
+	require.NoError(t, os.WriteFile(emptySessionFile, []byte(""), 0644))
+
 	nctx := &NodeContext{
-		RunDir:    tempDir,
-		TmpDir:    tempDir,
-		SessionID: "sess-123",
+		RunDir:     tempDir,
+		TmpDir:     tempDir,
+		SessionDir: sessionDir,
+		SessionID:  "sess-123",
 	}
 
 	tests := []struct {
@@ -412,23 +420,33 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 		},
 		{
 			name:            "all files exist and non-empty",
-			requiredOutputs: []string{"${tmp_dir}/output.md"},
+			requiredOutputs: []string{"${tmp_dir}/output.md", "${session_dir}/plan.md"},
 			wantMissing:     nil,
 		},
 		{
-			name:            "file does not exist",
+			name:            "file does not exist mapped to sandbox tmp path",
 			requiredOutputs: []string{"${tmp_dir}/missing.md"},
-			wantMissing:     []string{filepath.Join(tempDir, "missing.md")},
+			wantMissing:     []string{"/tmp/missing.md"},
 		},
 		{
-			name:            "file exists but is empty",
+			name:            "file exists but is empty mapped to sandbox tmp path",
 			requiredOutputs: []string{"${tmp_dir}/empty.md"},
-			wantMissing:     []string{filepath.Join(tempDir, "empty.md")},
+			wantMissing:     []string{"/tmp/empty.md"},
 		},
 		{
-			name:            "mixed existing, empty and missing files",
-			requiredOutputs: []string{"${tmp_dir}/output.md", "${tmp_dir}/empty.md", "${tmp_dir}/nonexistent.md"},
-			wantMissing:     []string{filepath.Join(tempDir, "empty.md"), filepath.Join(tempDir, "nonexistent.md")},
+			name:            "session file missing mapped to sandbox session path",
+			requiredOutputs: []string{"${session_dir}/missing-plan.md"},
+			wantMissing:     []string{"/session/missing-plan.md"},
+		},
+		{
+			name:            "session file empty mapped to sandbox session path",
+			requiredOutputs: []string{"${session_dir}/empty-plan.md"},
+			wantMissing:     []string{"/session/empty-plan.md"},
+		},
+		{
+			name:            "mixed existing, empty and missing files across tmp and session",
+			requiredOutputs: []string{"${tmp_dir}/output.md", "${tmp_dir}/empty.md", "${tmp_dir}/nonexistent.md", "${session_dir}/empty-plan.md"},
+			wantMissing:     []string{"/tmp/empty.md", "/tmp/nonexistent.md", "/session/empty-plan.md"},
 		},
 		{
 			name:            "empty or unresolved variable interpolation entry is caught as missing",

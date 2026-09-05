@@ -437,11 +437,16 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 // checkRequiredOutputs checks if all required output file paths exist and are non-empty.
 // Paths are interpolated against the node context and evaluated against the host filesystem.
 // Note: Variable paths like ${tmp_dir}, ${session_dir} and ${run_dir} correspond to directories mounted
-// into the sandbox container.
+// into the sandbox container. Missing paths are returned as sandbox-visible paths (e.g. /session/plan.md,
+// /tmp/output.md) so corrective notices sent to sandbox agents do not leak host physical paths.
 // Returns a slice of missing or empty file paths.
 func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string {
 	if len(requiredOutputs) == 0 {
 		return nil
+	}
+	sessionDir := nctx.SessionDir
+	if sessionDir == "" && nctx.SessionID != "" {
+		sessionDir = DefaultSessionDir(nctx.SessionID)
 	}
 	var missing []string
 	for _, raw := range requiredOutputs {
@@ -456,7 +461,7 @@ func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string 
 		}
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() || info.Size() == 0 {
-			missing = append(missing, interpolated)
+			missing = append(missing, ViewerArtifactPathInSession(path, nctx.TmpDir, sessionDir))
 		}
 	}
 	return missing
