@@ -167,6 +167,10 @@ type Agent struct {
 	Status   AgentStatus       `json:"status,omitempty"`
 }
 
+// caBundleDirName is the directory under ~/tmp holding per-chat merged CA bundles
+// created by bwrap when the MITM proxy is enabled.
+const caBundleDirName = ".asgard-ca"
+
 func defaultSessionDir(chatID string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, "data", chatID)
@@ -174,16 +178,25 @@ func defaultSessionDir(chatID string) string {
 	return filepath.Join(os.TempDir(), chatID)
 }
 
+func defaultCABundleDir(chatID string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, "tmp", caBundleDirName, chatID)
+	}
+	return filepath.Join(os.TempDir(), caBundleDirName, chatID)
+}
+
 type SessionRepository struct {
-	db             *gorm.DB
-	sessionDirFunc func(chatID string) string
-	sessionLocks   sync.Map // chatID string -> *sync.Mutex
+	db              *gorm.DB
+	sessionDirFunc  func(chatID string) string
+	caBundleDirFunc func(chatID string) string
+	sessionLocks    sync.Map // chatID string -> *sync.Mutex
 }
 
 func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{
-		db:             db,
-		sessionDirFunc: defaultSessionDir,
+		db:              db,
+		sessionDirFunc:  defaultSessionDir,
+		caBundleDirFunc: defaultCABundleDir,
 	}
 }
 
@@ -192,11 +205,24 @@ func (r *SessionRepository) SetSessionDirFunc(fn func(chatID string) string) {
 	r.sessionDirFunc = fn
 }
 
+// SetCABundleDirFunc overrides the per-chat merged CA bundle directory resolver
+// (used for testing isolation).
+func (r *SessionRepository) SetCABundleDirFunc(fn func(chatID string) string) {
+	r.caBundleDirFunc = fn
+}
+
 func (r *SessionRepository) sessionDir(chatID string) string {
 	if r.sessionDirFunc != nil {
 		return r.sessionDirFunc(chatID)
 	}
 	return defaultSessionDir(chatID)
+}
+
+func (r *SessionRepository) caBundleDir(chatID string) string {
+	if r.caBundleDirFunc != nil {
+		return r.caBundleDirFunc(chatID)
+	}
+	return defaultCABundleDir(chatID)
 }
 
 func (r *SessionRepository) getSessionLock(chatID string) *sync.Mutex {
@@ -298,6 +324,12 @@ func (r *SessionRepository) DeleteSession(chatID string) error {
 	dir := r.sessionDir(chatID)
 	if dir != "" {
 		_ = os.RemoveAll(dir)
+	}
+
+	// Clean per-chat merged CA bundle directory (~/tmp/.asgard-ca/<chatID>)
+	caDir := r.caBundleDir(chatID)
+	if caDir != "" {
+		_ = os.RemoveAll(caDir)
 	}
 
 	// Remove lock entry from map while holding lock to avoid leaks

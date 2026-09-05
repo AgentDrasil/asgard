@@ -18,7 +18,8 @@ type CleanExpiredSessionsOptions struct {
 }
 
 // CleanExpiredSessions deletes inactive, non-running sessions and their corresponding
-// session directories (e.g. ~/tmp/<chatID> and ~/data/<chatID>) older than cutoff.
+// session directories (e.g. ~/tmp/<chatID> and ~/data/<chatID>, plus the per-chat
+// merged CA bundle dir ~/tmp/.asgard-ca/<chatID>) older than cutoff.
 func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOptions) error {
 	var expiredSessions []Session
 	if err := r.db.Where("updated_at < ?", opts.Cutoff).Find(&expiredSessions).Error; err != nil {
@@ -88,25 +89,53 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			}
 
 			dirPath := filepath.Join(base, entry.Name())
-			latestMtime := getLatestModTime(dirPath, entry)
-			if !latestMtime.Before(opts.Cutoff) {
+
+			// The CA bundle container (~/tmp/.asgard-ca) holds one subdirectory per
+			// chat; sweep each chat bundle individually so bundles of live chats are
+			// never removed wholesale.
+			if base == tmpDir && entry.Name() == caBundleDirName {
+				caEntries, err := os.ReadDir(dirPath)
+				if err != nil {
+					continue
+				}
+				for _, caEntry := range caEntries {
+					if !caEntry.IsDir() {
+						continue
+					}
+					if err := r.removeOrphanDir(filepath.Join(dirPath, caEntry.Name()), caEntry, opts.Cutoff); err != nil {
+						errs = append(errs, err)
+					}
+				}
 				continue
 			}
 
-			name := entry.Name()
-			var count int64
-			if err := r.db.Model(&Session{}).Where("chat_id = ?", name).Count(&count).Error; err == nil && count == 0 {
-				if err := os.RemoveAll(dirPath); err != nil {
-					log.Warn().Err(err).Str("path", dirPath).Msg("Failed to remove orphan session dir")
-					errs = append(errs, fmt.Errorf("remove orphan session dir %s: %w", dirPath, err))
-				} else {
-					log.Info().Str("path", dirPath).Msg("Removed orphan session dir")
-				}
+			if err := r.removeOrphanDir(dirPath, entry, opts.Cutoff); err != nil {
+				errs = append(errs, err)
 			}
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// removeOrphanDir removes dirPath when its latest modification time is older than
+// cutoff and no session with a matching chat_id exists in the database.
+func (r *SessionRepository) removeOrphanDir(dirPath string, entry os.DirEntry, cutoff time.Time) error {
+	if !getLatestModTime(dirPath, entry).Before(cutoff) {
+		return nil
+	}
+
+	var count int64
+	if err := r.db.Model(&Session{}).Where("chat_id = ?", filepath.Base(dirPath)).Count(&count).Error; err != nil || count != 0 {
+		return nil
+	}
+
+	if err := os.RemoveAll(dirPath); err != nil {
+		log.Warn().Err(err).Str("path", dirPath).Msg("Failed to remove orphan session dir")
+		return fmt.Errorf("remove orphan session dir %s: %w", dirPath, err)
+	}
+	log.Info().Str("path", dirPath).Msg("Removed orphan session dir")
+	return nil
 }
 
 // getLatestModTime returns the latest modification time among the directory itself and any files inside it.

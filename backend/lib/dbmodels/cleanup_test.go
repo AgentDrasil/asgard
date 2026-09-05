@@ -29,6 +29,9 @@ func TestCleanExpiredSessions(t *testing.T) {
 	repo.SetSessionDirFunc(func(chatID string) string {
 		return filepath.Join(sessionBase, chatID)
 	})
+	repo.SetCABundleDirFunc(func(chatID string) string {
+		return filepath.Join(tmpBase, ".asgard-ca", chatID)
+	})
 
 	expiredID := "test-expired-session-id"
 	recentID := "test-recent-session-id"
@@ -42,12 +45,21 @@ func TestCleanExpiredSessions(t *testing.T) {
 	expiredSessionDir := filepath.Join(sessionBase, expiredID)
 	orphanSessionDir := filepath.Join(sessionBase, orphanID)
 
+	caBase := filepath.Join(tmpBase, ".asgard-ca")
+	expiredCABundleDir := filepath.Join(caBase, expiredID)
+	orphanCABundleDir := filepath.Join(caBase, orphanID)
+	recentCABundleDir := filepath.Join(caBase, recentID)
+
 	require.NoError(t, os.MkdirAll(expiredTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(recentTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(runningTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(orphanTmpDir, 0755))
 	require.NoError(t, os.MkdirAll(expiredSessionDir, 0755))
 	require.NoError(t, os.MkdirAll(orphanSessionDir, 0755))
+	for _, caDir := range []string{expiredCABundleDir, orphanCABundleDir, recentCABundleDir} {
+		require.NoError(t, os.MkdirAll(caDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(caDir, "merged-ca-certificates.crt"), []byte("cert"), 0644))
+	}
 
 	now := time.Now()
 	expiredTime := now.AddDate(0, -1, -1) // > 1 month ago
@@ -80,6 +92,13 @@ func TestCleanExpiredSessions(t *testing.T) {
 	// Set orphan directory & content modification times to expiredTime
 	require.NoError(t, os.Chtimes(orphanTmpDir, expiredTime, expiredTime))
 	require.NoError(t, os.Chtimes(orphanSessionDir, expiredTime, expiredTime))
+	// Stale CA bundles for orphan and recent chats; container mtime also stale to
+	// verify the whole .asgard-ca tree is never removed wholesale.
+	require.NoError(t, os.Chtimes(caBase, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(orphanCABundleDir, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(filepath.Join(orphanCABundleDir, "merged-ca-certificates.crt"), expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(recentCABundleDir, expiredTime, expiredTime))
+	require.NoError(t, os.Chtimes(filepath.Join(recentCABundleDir, "merged-ca-certificates.crt"), expiredTime, expiredTime))
 
 	cutoff := now.AddDate(0, -1, 0)
 	err = repo.CleanExpiredSessions(CleanExpiredSessionsOptions{
@@ -120,6 +139,20 @@ func TestCleanExpiredSessions(t *testing.T) {
 
 	_, errRunningDir := os.Stat(runningTmpDir)
 	assert.False(t, os.IsNotExist(errRunningDir))
+
+	// Verify CA bundle cleanup: expired + orphan bundles removed, recent chat's
+	// bundle kept (its session still exists in DB), container dir preserved.
+	_, errExpiredCA := os.Stat(expiredCABundleDir)
+	assert.True(t, os.IsNotExist(errExpiredCA))
+
+	_, errOrphanCA := os.Stat(orphanCABundleDir)
+	assert.True(t, os.IsNotExist(errOrphanCA))
+
+	_, errRecentCA := os.Stat(recentCABundleDir)
+	assert.False(t, os.IsNotExist(errRecentCA), "CA bundle of an existing session must not be removed")
+
+	_, errCABase := os.Stat(caBase)
+	assert.False(t, os.IsNotExist(errCABase), "CA bundle container dir must not be removed wholesale")
 }
 
 func TestCleanExpiredSessions_CleansTranscriptAndWorkflowDirs(t *testing.T) {

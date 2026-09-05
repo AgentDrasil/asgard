@@ -740,6 +740,10 @@ func TestHandleDeleteSession_RemovesFilesAndDir(t *testing.T) {
 	repo.SetSessionDirFunc(func(chatID string) string {
 		return filepath.Join(tempDir, chatID)
 	})
+	caBase := t.TempDir()
+	repo.SetCABundleDirFunc(func(chatID string) string {
+		return filepath.Join(caBase, chatID)
+	})
 	conf := &config.Config{Host: "http://localhost:8080"}
 	server := &Server{conf: conf, repo: repo}
 	server.mux = server.buildMuxLocked()
@@ -764,6 +768,11 @@ func TestHandleDeleteSession_RemovesFilesAndDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(wfDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(wfDir, "run.json"), []byte("{}"), 0644))
 
+	// Create the per-chat merged CA bundle dir alongside the session
+	caDir := filepath.Join(caBase, chatID)
+	require.NoError(t, os.MkdirAll(caDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(caDir, "merged-ca-certificates.crt"), []byte("cert"), 0644))
+
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions?chat_id="+chatID, nil)
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
@@ -777,4 +786,8 @@ func TestHandleDeleteSession_RemovesFilesAndDir(t *testing.T) {
 	// Verify physical directory is completely removed
 	_, errDir := os.Stat(sessDir)
 	assert.True(t, os.IsNotExist(errDir), "Physical session directory should be completely removed")
+
+	// Verify per-chat CA bundle dir is removed
+	_, errCADir := os.Stat(caDir)
+	assert.True(t, os.IsNotExist(errCADir), "Per-chat CA bundle directory should be removed with the session")
 }

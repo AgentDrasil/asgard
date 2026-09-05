@@ -2,6 +2,7 @@ package dbmodels
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -152,6 +153,33 @@ func TestSessionRepository(t *testing.T) {
 	sess, err = repo.GetSession(chatID)
 	assert.NoError(t, err)
 	assert.Nil(t, sess)
+}
+
+func TestDeleteSession_RemovesCABundleDir(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+
+	repo := NewSessionRepository(testDB)
+	sessionBase := t.TempDir()
+	caBase := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(sessionBase, chatID)
+	})
+	repo.SetCABundleDirFunc(func(chatID string) string {
+		return filepath.Join(caBase, chatID)
+	})
+
+	chatID := "test-ca-bundle-chat"
+	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID}))
+
+	caDir := filepath.Join(caBase, chatID)
+	require.NoError(t, os.MkdirAll(caDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(caDir, "merged-ca-certificates.crt"), []byte("cert"), 0644))
+
+	require.NoError(t, repo.DeleteSession(chatID))
+
+	_, err := os.Stat(caDir)
+	assert.True(t, os.IsNotExist(err), "Per-chat CA bundle directory should be removed on session deletion")
 }
 
 func TestSessionIsRunning(t *testing.T) {
