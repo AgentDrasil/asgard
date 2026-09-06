@@ -56,14 +56,14 @@ func TestMessageTriggerHandler(t *testing.T) {
 	engine := workflow.NewEngine(registry)
 
 	wfFile := filepath.Join(tempDir, "workflow.yaml")
-	require.NoError(t, os.WriteFile(wfFile, []byte(fmt.Sprintf(`
+	require.NoError(t, os.WriteFile(wfFile, fmt.Appendf(nil, `
 name: test-sync-wf
 tmp_dir: "%s/tmp/${session_id}"
 nodes:
   - id: step1
     type: command
     command: "echo test-sync-done"
-`, tempDir)), 0644))
+`, tempDir), 0644))
 
 	wfAgent := &agentspec.Agent{
 		Config: agentspec.AgentConfig{

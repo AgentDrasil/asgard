@@ -205,6 +205,7 @@ func MarkAskUserReplied(sessionDir string, messageID string, replyText string) (
 		}
 		return nil, false, fmt.Errorf("open transcript: %w", err)
 	}
+	defer func() { _ = f.Close() }()
 
 	var messages []ChatMessage
 	scanner := bufio.NewScanner(f)
@@ -226,6 +227,10 @@ func MarkAskUserReplied(sessionDir string, messageID string, replyText string) (
 		messages = append(messages, m)
 	}
 	_ = f.Close()
+
+	if err := scanner.Err(); err != nil {
+		return nil, false, fmt.Errorf("scan transcript: %w", err)
+	}
 
 	foundIdx := -1
 	// Priority 1 & 2

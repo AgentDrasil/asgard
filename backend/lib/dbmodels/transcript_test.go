@@ -199,6 +199,31 @@ func TestTranscript_TornLineRecovery(t *testing.T) {
 	assert.Equal(t, "m2", messages[1].ID)
 }
 
+func TestTranscript_MarkAskUserReplied_ScannerError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := TranscriptFilePath(dir)
+
+	// A line that exceeds the 10MB scanner buffer triggers bufio.ErrTooLong
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+
+	hugeLine := make([]byte, 11*1024*1024)
+	for i := range hugeLine {
+		hugeLine[i] = 'a'
+	}
+	hugeLine[len(hugeLine)-1] = '\n'
+
+	_, err = f.Write(hugeLine)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	_, _, err = MarkAskUserReplied(dir, "any-id", "reply")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "scan transcript")
+}
+
 func TestTranscript_ConcurrentAppend(t *testing.T) {
 	t.Parallel()
 
