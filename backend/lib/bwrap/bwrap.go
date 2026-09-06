@@ -242,9 +242,20 @@ type ProxySandboxConfig struct {
 	ProxyConfigPath string // Host standalone proxy config path (absolute, if any)
 }
 
-// appendProxySensitiveMaskArgs masks the proxy private key and config file with /dev/null
+// appendProxySensitiveMaskArgs masks ~/.asgard, the proxy private key, and config file
 // to prevent code inside the sandbox from reading sensitive credentials.
 func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) []string {
+	if home, err := os.UserHomeDir(); err == nil {
+		asgardDir := filepath.Join(home, ".asgard")
+		if fi, err := os.Stat(asgardDir); err == nil {
+			if fi.IsDir() {
+				args = append(args, "--tmpfs", asgardDir)
+			} else {
+				args = append(args, "--ro-bind", "/dev/null", asgardDir)
+			}
+		}
+	}
+
 	if caKey != "" {
 		if fi, err := os.Stat(caKey); err == nil && !fi.IsDir() {
 			args = append(args, "--ro-bind", "/dev/null", caKey)

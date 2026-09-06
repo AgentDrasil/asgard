@@ -640,6 +640,7 @@ func (s *Server) finishProxySave(w http.ResponseWriter, newCfg *proxy.Config) {
 	if err := s.proxyManager.Reload(newCfg); err != nil {
 		log.Warn().Err(err).Msg("failed to reload proxy rules after saving")
 	}
+	s.conf.SetProxy(newCfg)
 	writeStatusOK(w, "proxy config saved and reloaded")
 }
 
@@ -666,13 +667,15 @@ func (s *Server) handleReloadManageProxy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := s.proxyManager.ReloadFromFile(); err != nil {
+	newCfg, err := s.proxyManager.ReloadFromFile()
+	if err != nil {
 		log.Error().Err(err).Msg("failed to reload proxy rules from file")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("failed to reload proxy rules: %v", err)})
 		return
 	}
+	s.conf.SetProxy(newCfg)
 
 	writeStatusOK(w, "proxy config reloaded")
 }

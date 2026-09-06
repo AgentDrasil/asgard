@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -44,6 +46,7 @@ type Config struct {
 	Proxy                   *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
 	ProxyConfig             string                    `yaml:"proxy_config" json:"proxy_config,omitempty"`
 	ConfigPath              string                    `yaml:"-" json:"-"`
+	proxyMu                 sync.RWMutex              `yaml:"-" json:"-"`
 }
 
 var SupportedUILangs = []string{"en", "zh-CN"}
@@ -143,57 +146,74 @@ func (c *Config) GetProxy() *proxy.Config {
 	if c == nil {
 		return nil
 	}
+	c.proxyMu.RLock()
+	defer c.proxyMu.RUnlock()
 	return c.Proxy
 }
 
+func (c *Config) SetProxy(cfg *proxy.Config) {
+	if c == nil {
+		return
+	}
+	c.proxyMu.Lock()
+	c.Proxy = cfg
+	c.proxyMu.Unlock()
+}
+
 func (c *Config) IsProxyEnabled() bool {
-	if c == nil || c.Proxy == nil {
+	if c == nil {
 		return false
 	}
-	return c.Proxy.Enable
+	p := c.GetProxy()
+	return p != nil && p.Enable
 }
 
 // SandboxProxyOptions builds the bwrap proxy sandbox options for this config.
 // It returns a disabled config when the proxy is not enabled.
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
-	if c == nil || !c.IsProxyEnabled() {
+	p := c.GetProxy()
+	if p == nil || !p.Enable {
 		return bwrap.ProxySandboxConfig{}
 	}
 	return bwrap.ProxySandboxConfig{
 		Enabled:         true,
-		ProxyAddr:       c.ProxyHost(),
-		CACert:          c.ProxyCACertPath(),
-		CAKey:           c.ProxyCAKeyPath(),
+		ProxyAddr:       p.ProxyHost(),
+		CACert:          p.ResolvedCACertPath(),
+		CAKey:           p.ResolvedCAKeyPath(),
 		ProxyConfigPath: c.ResolvedProxyConfigPath(),
 	}
 }
 
 func (c *Config) ProxyHost() string {
-	if c == nil || c.Proxy == nil {
+	p := c.GetProxy()
+	if c == nil || p == nil {
 		return "http://127.0.0.1:8082"
 	}
-	return c.Proxy.ProxyHost()
+	return p.ProxyHost()
 }
 
 func (c *Config) ProxyAddr() string {
-	if c == nil || c.Proxy == nil || c.Proxy.Server.Addr == "" {
+	p := c.GetProxy()
+	if c == nil || p == nil || p.Server.Addr == "" {
 		return "127.0.0.1:8082"
 	}
-	return c.Proxy.Server.Addr
+	return p.Server.Addr
 }
 
 func (c *Config) ProxyCACertPath() string {
-	if c == nil || c.Proxy == nil {
+	p := c.GetProxy()
+	if c == nil || p == nil {
 		return ""
 	}
-	return c.Proxy.ResolvedCACertPath()
+	return p.ResolvedCACertPath()
 }
 
 func (c *Config) ProxyCAKeyPath() string {
-	if c == nil || c.Proxy == nil {
+	p := c.GetProxy()
+	if c == nil || p == nil {
 		return ""
 	}
-	return c.Proxy.ResolvedCAKeyPath()
+	return p.ResolvedCAKeyPath()
 }
 
 func (c *Config) ResolvedProxyConfigPath() string {
@@ -259,7 +279,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c Config) verifyDirs() error {
+func (c *Config) verifyDirs() error {
 	dirs := []string{
 		c.AgentDir,
 		fmt.Sprintf("%s/agents", c.AgentDir),
@@ -353,5 +373,19 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.ConfigPath = path
+
+	if cfg.Proxy == nil && cfg.ProxyConfig != "" {
+		resolvedProxyPath := cfg.ResolvedProxyConfigPath()
+		if _, statErr := os.Stat(resolvedProxyPath); statErr == nil {
+			proxyCfg, pErr := proxy.LoadConfigFile(resolvedProxyPath)
+			if pErr != nil {
+				return nil, fmt.Errorf("failed to load proxy config from %s: %w", resolvedProxyPath, pErr)
+			}
+			cfg.Proxy = proxyCfg
+		} else {
+			log.Warn().Str("path", resolvedProxyPath).Msg("proxy_config is set but the file does not exist; proxy config not loaded")
+		}
+	}
+
 	return cfg, nil
 }

@@ -15,13 +15,13 @@ func TestConfig_Validate(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		config  Config
+		config  *Config
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "valid config",
-			config: Config{
+			config: &Config{
 				Debug:                   true,
 				DB:                      "sqlite",
 				DSN:                     "test.db",
@@ -34,7 +34,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "invalid db",
-			config: Config{
+			config: &Config{
 				DB:                      "mysql",
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
@@ -47,7 +47,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing db",
-			config: Config{
+			config: &Config{
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
@@ -59,7 +59,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing dsn",
-			config: Config{
+			config: &Config{
 				DB:                      "pg",
 				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
@@ -71,7 +71,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing agent_dir",
-			config: Config{
+			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
 				Host:                    "127.0.0.1",
@@ -83,7 +83,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing host",
-			config: Config{
+			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
@@ -95,7 +95,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing gemini_api_key",
-			config: Config{
+			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
@@ -107,7 +107,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "missing gemini_model_for_chat_title",
-			config: Config{
+			config: &Config{
 				DB:           "sqlite",
 				DSN:          "test.db",
 				AgentDir:     "./agents",
@@ -119,7 +119,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "invalid ui_lang",
-			config: Config{
+			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
@@ -133,7 +133,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			name: "valid ui_lang zh-CN",
-			config: Config{
+			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
 				AgentDir:                "./agents",
@@ -705,5 +705,47 @@ proxy:
 		_, err := ParseAndValidate([]byte(yamlContent))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "proxy is enabled but rules list is empty")
+	})
+
+	t.Run("LoadConfig auto-loads proxy from proxy_config file", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		agentDir := filepath.Join(tmpDir, "agents")
+		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+
+		proxyYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:8082"
+rules:
+  - host: "api.x.ai"
+    header_key: "Authorization"
+    real_secret: "xai-real-key"
+`
+		proxyPath := filepath.Join(tmpDir, "proxy.yaml")
+		require.NoError(t, os.WriteFile(proxyPath, []byte(proxyYAML), 0600))
+
+		configYAML := fmt.Sprintf(`
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "test.db"
+agent_dir: %q
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+proxy_config: %q
+`, agentDir, proxyPath)
+
+		configPath := filepath.Join(tmpDir, "config.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0644))
+
+		cfg, err := LoadConfig(configPath)
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.True(t, cfg.IsProxyEnabled())
+		require.NotNil(t, cfg.Proxy)
+		assert.True(t, cfg.Proxy.Enable)
+		require.Len(t, cfg.Proxy.Rules, 1)
+		assert.Equal(t, "api.x.ai", cfg.Proxy.Rules[0].Host)
+		assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
 	})
 }

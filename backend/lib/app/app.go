@@ -264,7 +264,7 @@ func New(opts ...Option) (*App, error) {
 	if conf != nil && conf.IsProxyEnabled() {
 		resolvedProxyConfigPath := conf.ResolvedProxyConfigPath()
 		var pErr error
-		proxyMgr, pErr = proxy.NewManager(conf.Proxy, resolvedProxyConfigPath)
+		proxyMgr, pErr = proxy.NewManager(conf.GetProxy(), resolvedProxyConfigPath)
 		if pErr != nil {
 			log.Warn().Err(pErr).Msg("failed to initialize proxy manager, entering degraded mode")
 			diagnostics.AddError("proxy", pErr.Error())

@@ -221,7 +221,7 @@ func TestBuildArgs(t *testing.T) {
 	home := tmpDir
 
 	// Create directories that buildArgsForAgent expects to exist under HOME
-	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh", ".asgard"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(home, subDir), 0755))
 	}
 
@@ -249,6 +249,8 @@ func TestBuildArgs(t *testing.T) {
 
 	sshDir := filepath.Join(home, ".ssh")
 	assert.Contains(t, argStr, "--tmpfs "+sshDir)
+	asgardDir := filepath.Join(home, ".asgard")
+	assert.Contains(t, argStr, "--tmpfs "+asgardDir)
 
 	// Verify required bwrap components
 	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
@@ -372,6 +374,11 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
+	asgardDir := filepath.Join(tmpDir, ".asgard")
+	if err := os.MkdirAll(asgardDir, 0755); err != nil {
+		t.Fatalf("failed to create asgard dir: %v", err)
+	}
+
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte("api_key: secret"), 0644); err != nil {
 		t.Fatalf("failed to create config.yaml: %v", err)
@@ -409,6 +416,9 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
 		t.Errorf("expected ssh dir masking, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--tmpfs "+asgardDir) {
+		t.Errorf("expected asgard dir masking, got: %s", argStr)
 	}
 	// runDir is inside home, so it must NOT be bind-mounted separately (a
 	// nested bind would give it a different st_dev and break hard links).
