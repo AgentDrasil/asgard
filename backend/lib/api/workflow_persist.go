@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -479,6 +480,14 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 			})
 		}
 	}
+	// When an agent node finishes successfully, resolve any pending quota ask_user
+	// messages that were created during temporary quota suspensions for this node.
+	// This prevents stale quota warning prompts from lingering in the session transcript
+	// and obscuring subsequent interaction prompts (such as final approval).
+	if ev.Type == workflow.EventNodeFinished && ev.Status == workflowspec.StatusSucceeded {
+		s.resolvePendingQuotaMessages(sessionID, ev.NodeID)
+	}
+
 	// Persist a successful node's final response as an assistant message so
 	// node agents' conclusions survive reloads (streamed agent_response
 	// updates are intentionally not persisted to avoid step-level churn).
@@ -698,4 +707,60 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 		}
 		// When outcome == ResumeDeliveredLive or ResumeReDriven: lifecycle is fully driven by handleWorkflowEvent
 	}()
+}
+
+// resolvePendingQuotaMessages scans the session transcript for unreplied quota ask_user messages
+// belonging to the completed node, marking them as replied with "Quota recovered".
+// This cleans up any orphaned quota suspension prompts created by consecutive suspension retries.
+func (s *Server) resolvePendingQuotaMessages(sessionID, nodeID string) {
+	if s.repo == nil || sessionID == "" || nodeID == "" {
+		return
+	}
+	session, err := s.repo.GetSession(sessionID)
+	if err != nil || session == nil {
+		return
+	}
+
+	quotaTarget := nodeID + "-quota"
+	for _, m := range session.Messages {
+		if m.Role != "ask_user" || m.Replied {
+			continue
+		}
+		if matchesQuotaMessageID(m.ID, quotaTarget) {
+			updatedMsg, err := s.repo.MarkAskUserReplied(sessionID, m.ID, "Quota recovered")
+			if err != nil {
+				log.Warn().Err(err).Str("chat_id", sessionID).Str("message_id", m.ID).Msg("failed to mark pending quota message replied")
+			} else if updatedMsg != nil {
+				s.PublishSessionEvent(sessionID, SessionEvent{
+					Type:    "message",
+					Message: updatedMsg,
+				})
+			}
+		}
+	}
+}
+
+// matchesQuotaMessageID reports whether msgID is a quota suspension message ID
+// for quotaTarget (nodeID + "-quota"). Quota IDs look like
+// wf-<runID>-<nodeID>-quota with at most two numeric suffix groups (loop
+// iteration, suspension sequence), e.g. wf-r1-dev-quota-3-2. The leading "-"
+// boundary prevents matching quota messages of nodes whose IDs merely end
+// with nodeID (e.g. "xdev"), and the numeric-only tail prevents matching
+// human-node IDs that merely start with "<nodeID>-quota-" (e.g.
+// wf-r1-dev-quota-gate).
+func matchesQuotaMessageID(msgID, quotaTarget string) bool {
+	i := strings.LastIndex(msgID, "-"+quotaTarget)
+	if i < 0 {
+		return false
+	}
+	tail := msgID[i+1+len(quotaTarget):]
+	if tail == "" {
+		return true
+	}
+	for _, group := range strings.Split(strings.TrimPrefix(tail, "-"), "-") {
+		if _, err := strconv.Atoi(group); err != nil {
+			return false
+		}
+	}
+	return true
 }

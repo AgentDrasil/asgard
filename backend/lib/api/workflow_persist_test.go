@@ -1387,3 +1387,115 @@ func TestWorkflowRunPersistence_E2E(t *testing.T) {
 		}
 	}
 }
+
+func TestEventNodeFinished_ResolvesPendingQuotaMessages(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-resolve-quota"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	// Simulate first quota suspension which was replied by user
+	msg1 := dbmodels.ChatMessage{
+		ID:        "wf-run1-architect_agent-quota",
+		Role:      "ask_user",
+		Content:   "Quota exhausted, continue?",
+		Replied:   true,
+		ReplyText: "Wait for quota recovery, then continue",
+	}
+	require.NoError(t, s.repo.AppendMessage(chatID, msg1))
+
+	// Simulate second quota suspension which was orphaned (replied: false)
+	msg2 := dbmodels.ChatMessage{
+		ID:      "wf-run1-architect_agent-quota-2",
+		Role:    "ask_user",
+		Content: "Quota exhausted again, continue?",
+		Replied: false,
+	}
+	require.NoError(t, s.repo.AppendMessage(chatID, msg2))
+
+	// Simulate an unrelated ask_user from a different node (e.g. final approval)
+	msgApproval := dbmodels.ChatMessage{
+		ID:      "wf-run1-final_approval",
+		Role:    "ask_user",
+		Content: "Deliver the plan?",
+		Replied: false,
+	}
+	require.NoError(t, s.repo.AppendMessage(chatID, msgApproval))
+
+	// Verify initial state: has_ask_user_unreplied is true, msg2 is unreplied
+	sess, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.True(t, sess.HasAskUserUnreplied)
+
+	// Emit EventNodeFinished for architect_agent with StatusSucceeded
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeFinished,
+		NodeID:    "architect_agent",
+		NodeType:  workflowspec.NodeTypeAgent,
+		Status:    workflowspec.StatusSucceeded,
+		Output:    "Architecture design complete.",
+		AgentName: "Architect",
+	})
+
+	// Check that the orphaned quota message was automatically marked as replied
+	sessAfter, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.Len(t, sessAfter.Messages, 4) // msg1, msg2, msgApproval, assistant response
+
+	for _, m := range sessAfter.Messages {
+		if m.ID == "wf-run1-architect_agent-quota-2" {
+			assert.True(t, m.Replied, "orphaned quota message must be marked replied")
+			assert.Equal(t, "Quota recovered", m.ReplyText)
+		}
+		if m.ID == "wf-run1-final_approval" {
+			assert.False(t, m.Replied, "unrelated node ask_user must remain unreplied")
+		}
+	}
+	// has_ask_user_unreplied should still be true because final_approval is unreplied
+	assert.True(t, sessAfter.HasAskUserUnreplied)
+
+	// Now if final_approval also finishes, verify session's has_ask_user_unreplied updates when replied
+	_, err = s.repo.MarkAskUserReplied(chatID, "wf-run1-final_approval", "Yes, deliver")
+	require.NoError(t, err)
+
+	sessFinal, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	assert.False(t, sessFinal.HasAskUserUnreplied, "all ask_user messages are replied")
+}
+
+func TestResolvePendingQuotaMessages_IDBoundary(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-quota-boundary"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	mustAppend := func(id string) {
+		require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+			ID:      id,
+			Role:    "ask_user",
+			Content: "prompt",
+		}))
+	}
+
+	// Quota suspension messages of node "dev" across iteration/seq suffixes.
+	mustAppend("wf-run1-dev-quota")
+	mustAppend("wf-run1-dev-quota-3")
+	mustAppend("wf-run1-dev-quota-3-2")
+
+	// Colliding IDs that must NOT resolve as node "dev" quota messages:
+	// a human node whose ID merely starts with "dev-quota-", and a quota
+	// message of another node whose ID merely ends with "dev".
+	mustAppend("wf-run1-dev-quota-gate")
+	mustAppend("wf-run1-xdev-quota")
+
+	s.resolvePendingQuotaMessages(chatID, "dev")
+
+	sess, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	for _, m := range sess.Messages {
+		switch m.ID {
+		case "wf-run1-dev-quota", "wf-run1-dev-quota-3", "wf-run1-dev-quota-3-2":
+			assert.True(t, m.Replied, "%s must be auto-resolved", m.ID)
+		case "wf-run1-dev-quota-gate", "wf-run1-xdev-quota":
+			assert.False(t, m.Replied, "%s must remain unreplied", m.ID)
+		}
+	}
+}
