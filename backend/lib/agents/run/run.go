@@ -262,10 +262,17 @@ type NoQuotaError struct {
 	ExplicitModel string              `json:"explicit_model,omitempty"`
 	MinThreshold  float64             `json:"min_threshold"`
 	Targets       []QuotaTargetStatus `json:"targets"`
+	// PairingNote, when set, marks the error as a workflow model-pairing
+	// failure (the exhausted list came from a pairing table rather than the
+	// agent's own cli list) and carries a human-readable pairing context.
+	PairingNote string `json:"pairing_note,omitempty"`
 }
 
 func (e *NoQuotaError) Error() string {
 	var sb strings.Builder
+	if e.PairingNote != "" {
+		fmt.Fprintf(&sb, "model pairing unsatisfiable (%s): ", e.PairingNote)
+	}
 	if e.ExplicitModel != "" {
 		fmt.Fprintf(&sb, "model %q has no quota remaining for agent %s", e.ExplicitModel, e.AgentID)
 	} else {
@@ -281,11 +288,11 @@ func (e *NoQuotaError) Error() string {
 	return sb.String()
 }
 
-// quotaStatuses snapshots the quota state of every configured CLI target of
-// the agent. Disabled providers are recorded without a usage query.
-func quotaStatuses(agent *agentspec.Agent, conf *config.Config) []QuotaTargetStatus {
-	statuses := make([]QuotaTargetStatus, 0, len(agent.Config.CLI))
-	for _, target := range agent.Config.CLI {
+// quotaStatuses snapshots the quota state of every given CLI target.
+// Disabled providers are recorded without a usage query.
+func quotaStatuses(targets []agentspec.CLITarget, conf *config.Config) []QuotaTargetStatus {
+	statuses := make([]QuotaTargetStatus, 0, len(targets))
+	for _, target := range targets {
 		st := QuotaTargetStatus{
 			CLI:     target.CLI,
 			Model:   target.Model,
@@ -306,38 +313,53 @@ func quotaStatuses(agent *agentspec.Agent, conf *config.Config) []QuotaTargetSta
 // Quota exhaustion is reported as *NoQuotaError so callers can distinguish it
 // from execution failures and react (e.g. suspend for a user decision).
 func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
-	if len(agent.Config.CLI) == 0 {
-		return nil, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
+	out, _, err := RunWithCandidates(ctx, agent, nil, prompt, session, runDirOpt, modelOpt, chatID, statusScope, conf)
+	return out, err
+}
+
+// RunWithCandidates extends Run with an explicit ordered candidate list.
+// When candidates is non-empty it replaces agent.Config.CLI as the selection
+// list for both automatic and explicit model selection (workflow model
+// pairing); when nil the agent's own list is used unchanged. It additionally
+// reports the target that actually produced the output so callers can record
+// the actual (cli, model) per node execution.
+func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
+	targets := agent.Config.CLI
+	if len(candidates) > 0 {
+		targets = candidates
+	}
+	if len(targets) == 0 {
+		return nil, agentspec.CLITarget{}, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
 
 	var selectedTarget *agentspec.CLITarget
 	if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
 		reqModel := modelOpt.Unwrap()
-		for _, target := range agent.Config.CLI {
+		for _, target := range targets {
 			if target.Model == reqModel {
 				selectedTarget = &target
 				break
 			}
 		}
 		if selectedTarget == nil {
-			return nil, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
+			return nil, agentspec.CLITarget{}, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
 		}
 		if !conf.IsProviderEnabled(selectedTarget.CLI) {
-			return nil, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
+			return nil, agentspec.CLITarget{}, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
 		}
 		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
 		if quota <= 0 {
-			return nil, &NoQuotaError{
+			return nil, agentspec.CLITarget{}, &NoQuotaError{
 				AgentID:       agent.Config.ID,
 				ExplicitModel: reqModel,
 				MinThreshold:  MinAutoQuotaThreshold,
-				Targets:       quotaStatuses(agent, conf),
+				Targets:       quotaStatuses(targets, conf),
 			}
 		}
 	} else {
 		hasEnabledTarget := false
 		var statuses []QuotaTargetStatus
-		for _, target := range agent.Config.CLI {
+		for _, target := range targets {
 			if !conf.IsProviderEnabled(target.CLI) {
 				statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Enabled: false})
 				continue
@@ -353,9 +375,9 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 
 		if selectedTarget == nil {
 			if !hasEnabledTarget {
-				return nil, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
+				return nil, agentspec.CLITarget{}, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
 			}
-			return nil, &NoQuotaError{
+			return nil, agentspec.CLITarget{}, &NoQuotaError{
 				AgentID:      agent.Config.ID,
 				MinThreshold: MinAutoQuotaThreshold,
 				Targets:      statuses,
@@ -365,13 +387,14 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 
 	runDir, err := resolveRunDir(agent, runDirOpt)
 	if err != nil {
-		return nil, err
+		return nil, agentspec.CLITarget{}, err
 	}
 
 	// Ensure the resolved runDir exists (e.g. if it was a subdirectory under config run_dirs that was not created yet)
 	if err := os.MkdirAll(runDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating run directory %q: %w", runDir, err)
+		return nil, agentspec.CLITarget{}, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
-	return runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, conf)
+	out, err := runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, conf)
+	return out, *selectedTarget, err
 }

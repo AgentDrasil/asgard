@@ -34,6 +34,9 @@ type WorkflowDefinition struct {
 	// Schedule is an optional standard 5-field cron expression (gocron /
 	// robfig ParseStandard syntax) triggering headless runs.
 	Schedule string `yaml:"schedule"`
+	// ModelPairings declares heterogeneous model pairing groups governing
+	// reviewer-side model selection (see model_pairing.go).
+	ModelPairings []*ModelPairingSpec `yaml:"model_pairings"`
 
 	// raw is the YAML source this definition was parsed from; it is persisted
 	// as the DAG snapshot for pause/resume and crash recovery.
@@ -370,6 +373,9 @@ func (d *WorkflowDefinition) Validate() error {
 		return err
 	}
 	if err := d.validateNoHumanAndSchedule(); err != nil {
+		return err
+	}
+	if err := d.validateModelPairings(); err != nil {
 		return err
 	}
 

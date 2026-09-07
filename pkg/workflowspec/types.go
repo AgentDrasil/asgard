@@ -65,6 +65,11 @@ type NodeResult struct {
 	// AgentName names the concrete sub-agent that executed an agent node
 	// (empty for other node types); used for chat message attribution.
 	AgentName string
+	// CLI / Model record the CLI target an agent node actually used (after
+	// quota fallback / model pairing resolution). Empty for other node types
+	// and for agent nodes that never selected a target.
+	CLI   string
+	Model string
 	// LoopIterations snapshots the iteration counters of the loops this node
 	// belongs to at settle time; addressable in `when` expressions as
 	// nodes.<id>.loop_iteration.<loop_id>.

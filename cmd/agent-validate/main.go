@@ -171,6 +171,25 @@ func checkAgentIDReferences(defn *workflowspec.WorkflowDefinition, baseDir strin
 		}
 	}
 
+	if len(defn.ModelPairings) > 0 {
+		agentCLIs := make(map[string][]workflowspec.PairTarget)
+		for _, ag := range loadedAgents {
+			targets := make([]workflowspec.PairTarget, 0, len(ag.Config.CLI))
+			for _, t := range ag.Config.CLI {
+				targets = append(targets, workflowspec.PairTarget{CLI: t.CLI, Model: t.Model})
+			}
+			agentCLIs[ag.Config.ID] = targets
+		}
+		if err := defn.ValidateModelPairingsCoverage(agentCLIs); err != nil {
+			fmt.Fprintf(os.Stderr, "  Model pairing validation failed: %v\n", err)
+			os.Exit(1)
+		}
+		for _, warning := range defn.ModelPairingWarnings() {
+			fmt.Fprintf(os.Stderr, "  Warning: %s\n", warning)
+		}
+		fmt.Printf("  Checked %d model pairing group(s) against agents pool [OK]\n", len(defn.ModelPairings))
+	}
+
 	if !missing && len(knownAgents) > 0 {
 		fmt.Printf("  Checked %d agent_id references against agents pool (%s) [OK]\n", countAgentNodes(defn), agentsDir)
 	}
