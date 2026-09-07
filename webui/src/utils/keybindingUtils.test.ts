@@ -15,8 +15,8 @@ import {
 
 describe("keybindingUtils", () => {
   describe("DEFAULT_KEYBINDING_ACTIONS", () => {
-    it("defines 10 default actions with standard ASCII keys", () => {
-      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(10);
+    it("defines 11 default actions with standard ASCII keys", () => {
+      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(11);
       const ids = DEFAULT_KEYBINDING_ACTIONS.map((a) => a.id);
       expect(ids).toContain("toggle_sidebar");
       expect(ids).toContain("toggle_artifacts");
@@ -28,6 +28,7 @@ describe("keybindingUtils", () => {
       expect(ids).toContain("find");
       expect(ids).toContain("send_message");
       expect(ids).toContain("new_chat");
+      expect(ids).toContain("jump_previous_user_message");
     });
 
     it("getDefaultBindingsForOS returns normalized array values", () => {
@@ -36,6 +37,7 @@ describe("keybindingUtils", () => {
       expect(linuxBindings["command_palette"]).toEqual(["Ctrl+Shift+P", "F1"]);
       expect(linuxBindings["toggle_terminal"]).toEqual(["Ctrl+Backquote"]);
       expect(linuxBindings["toggle_sidebar"]).toEqual(["Ctrl+B"]);
+      expect(linuxBindings["jump_previous_user_message"]).toEqual(["Shift+Home"]);
 
       const macBindings = getDefaultBindingsForOS("mac");
       expect(macBindings["search_files"]).toEqual(["Cmd+P"]);
@@ -93,6 +95,21 @@ describe("keybindingUtils", () => {
       });
       expect(isKeyboardEventMatch(macEvent, "Cmd+B", "mac")).toBe(true);
       expect(isKeyboardEventMatch(macEvent, "Ctrl+B", "mac")).toBe(false);
+    });
+
+    it("matches Shift+Home for jump_previous_user_message", () => {
+      const event = new KeyboardEvent("keydown", {
+        shiftKey: true,
+        code: "Home",
+        key: "Home",
+      });
+      expect(isKeyboardEventMatch(event, "Shift+Home", "linux")).toBe(true);
+
+      const homeOnly = new KeyboardEvent("keydown", {
+        code: "Home",
+        key: "Home",
+      });
+      expect(isKeyboardEventMatch(homeOnly, "Shift+Home", "linux")).toBe(false);
     });
 
     it("returns false for empty array / empty string (Unassigned semantics)", () => {

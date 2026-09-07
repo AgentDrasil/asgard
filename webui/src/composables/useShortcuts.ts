@@ -86,6 +86,13 @@ export function useShortcuts() {
     formatShortcutDisplay(activeBindings.value["new_chat"] || [], currentOS.value),
   );
 
+  const jumpPrevUserShortcut = computed(() =>
+    formatShortcutDisplay(
+      activeBindings.value["jump_previous_user_message"] || [],
+      currentOS.value,
+    ),
+  );
+
   // Helpers
   const matchShortcut = (event: KeyboardEvent, actionId: string): boolean => {
     const keys = activeBindings.value[actionId] || [];
@@ -167,7 +174,7 @@ export function useShortcuts() {
     isLoading,
     activeBindings,
     DEFAULT_KEYBINDING_ACTIONS,
-    // 13 computed shortcuts
+    // 14 computed shortcuts
     toggleSidebarShortcut,
     toggleArtifactsShortcut,
     toggleDiffShortcut,
@@ -178,6 +185,7 @@ export function useShortcuts() {
     toggleFileViewShortcut,
     findShortcut,
     newChatShortcut,
+    jumpPrevUserShortcut,
     // methods
     matchShortcut,
     updateShortcut,

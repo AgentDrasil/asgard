@@ -242,6 +242,115 @@ describe("ChatArea.vue", () => {
     app.unmount();
   });
 
+  it("marks user messages with data-user-message attribute", async () => {
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const marked = root.querySelectorAll("[data-user-message]");
+    expect(marked.length).toBe(1);
+    expect(marked[0]?.textContent).toContain("Hello world message for search");
+
+    app.unmount();
+  });
+
+  it("scrolls to previous user message on Shift+Home but not while editing an input", async () => {
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const scrollContainer = root.querySelector(".overflow-y-auto") as HTMLDivElement;
+    expect(scrollContainer).not.toBeNull();
+    const scrollToSpy = vi.spyOn(scrollContainer, "scrollTo").mockImplementation(() => {});
+
+    // Native text selection shortcut must not be hijacked inside inputs
+    const textarea = document.createElement("textarea");
+    root.appendChild(textarea);
+    textarea.focus();
+
+    const selectionEvent = new KeyboardEvent("keydown", {
+      shiftKey: true,
+      key: "Home",
+      code: "Home",
+      bubbles: true,
+      cancelable: true,
+    });
+    const selectionPreventSpy = vi.spyOn(selectionEvent, "preventDefault");
+    textarea.dispatchEvent(selectionEvent);
+    await nextTick();
+    expect(selectionPreventSpy).not.toHaveBeenCalled();
+
+    // Global Shift+Home triggers the jump
+    const event = new KeyboardEvent("keydown", {
+      shiftKey: true,
+      key: "Home",
+      code: "Home",
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+    await nextTick();
+
+    expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+
+    app.unmount();
+  });
+
+  it("renders jump button when a user message exists above the viewport and scrolls on click", async () => {
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const jumpButton = root.querySelector(
+      '[data-testid="scroll-prev-user-button"]',
+    ) as HTMLButtonElement;
+    expect(jumpButton).not.toBeNull();
+    expect(jumpButton.getAttribute("title")).toContain("Jump to previous user message");
+
+    const scrollContainer = root.querySelector(".overflow-y-auto") as HTMLDivElement;
+    const scrollToSpy = vi.spyOn(scrollContainer, "scrollTo").mockImplementation(() => {});
+
+    jumpButton.click();
+    await nextTick();
+
+    expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+
+    app.unmount();
+  });
+
   it("renders queued messages in chat stream and emits edit-queued and delete-queued events", async () => {
     const dummyQueued: QueuedMessage[] = [
       {

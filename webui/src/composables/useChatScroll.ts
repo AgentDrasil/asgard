@@ -3,6 +3,12 @@ import type { ChatMessage } from "../types";
 
 export const BOTTOM_THRESHOLD = 120;
 
+const USER_MESSAGE_SELECTOR = "[data-user-message]";
+// Element edges within this distance of the viewport top still count as visible
+const VISIBLE_EPSILON = 1;
+// Breathing room between viewport top and the message we jump to
+const JUMP_TOP_OFFSET = 16;
+
 export interface UseChatScrollOptions {
   messages: Ref<ChatMessage[]>;
   sessionId: Ref<string | null | undefined>;
@@ -15,6 +21,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
   const scrollContainerRef = ref<HTMLDivElement | null>(null);
   const showScrollBottom = ref(false);
+  const showPrevUserMessage = ref(false);
   const hasNewMessages = ref(false);
 
   let lastAtTopState = isDetailsOpen.value ?? true;
@@ -45,6 +52,47 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (distanceFromBottom <= BOTTOM_THRESHOLD) {
       hasNewMessages.value = false;
     }
+    updatePrevUserMessageState();
+  };
+
+  const getUserMessageNodes = (): HTMLElement[] => {
+    const el = scrollContainerRef.value;
+    if (!el || typeof el.querySelectorAll !== "function") return [];
+    return Array.from(el.querySelectorAll<HTMLElement>(USER_MESSAGE_SELECTOR));
+  };
+
+  // Find the most recent user message entirely above the viewport, if any
+  const findPrevUserMessage = (): HTMLElement | null => {
+    const el = scrollContainerRef.value;
+    if (!el || typeof el.getBoundingClientRect !== "function") return null;
+    const containerTop = el.getBoundingClientRect().top;
+    const nodes = getUserMessageNodes();
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const rect = nodes[i]!.getBoundingClientRect();
+      const bottomAbs = rect.bottom - containerTop + el.scrollTop;
+      if (bottomAbs <= el.scrollTop + VISIBLE_EPSILON) {
+        return nodes[i]!;
+      }
+    }
+    return null;
+  };
+
+  const updatePrevUserMessageState = () => {
+    showPrevUserMessage.value = findPrevUserMessage() !== null;
+  };
+
+  const scrollToPrevUserMessage = () => {
+    const el = scrollContainerRef.value;
+    if (!el || typeof el.getBoundingClientRect !== "function") return;
+    const containerTop = el.getBoundingClientRect().top;
+    const target = findPrevUserMessage();
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const topAbs = rect.top - containerTop + el.scrollTop;
+    el.scrollTo({
+      top: Math.max(0, topAbs - JUMP_TOP_OFFSET),
+      behavior: "smooth",
+    });
   };
 
   const stickToBottom = () => {
@@ -152,8 +200,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
   return {
     scrollContainerRef,
     showScrollBottom,
+    showPrevUserMessage,
     hasNewMessages,
     scrollToBottom,
+    scrollToPrevUserMessage,
     checkScrollPosition,
   };
 }

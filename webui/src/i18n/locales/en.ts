@@ -235,6 +235,7 @@ export const en = {
     dragToResizePanel: "Drag to resize panel",
     scrollBottomNew: "New messages below (Click to scroll)",
     scrollBottom: "Scroll to bottom",
+    scrollPrevUser: "Jump to previous user message ({shortcut})",
     showRenderedHtml: "Show Rendered HTML",
     showRawMarkdown: "Show Raw Markdown",
     copyMessageContent: "Copy message content",
@@ -443,6 +444,10 @@ export const en = {
       new_chat: {
         title: "New Chat Session",
         description: "Create a new conversation session",
+      },
+      jump_previous_user_message: {
+        title: "Jump to Previous User Message",
+        description: "Scroll the chat to the previous user message above the current view",
       },
     },
   },

@@ -235,6 +235,7 @@ export const zhCN: MessageSchema = {
     dragToResizePanel: "拖动调整面板宽度",
     scrollBottomNew: "下方有新消息 (点击滚动到底部)",
     scrollBottom: "滚动到底部",
+    scrollPrevUser: "跳转到上一条用户消息 ({shortcut})",
     showRenderedHtml: "显示渲染 HTML",
     showRawMarkdown: "显示 Markdown 原文",
     copyMessageContent: "复制消息内容",
@@ -434,6 +435,10 @@ export const zhCN: MessageSchema = {
       new_chat: {
         title: "新建会话",
         description: "创建新的对话会话",
+      },
+      jump_previous_user_message: {
+        title: "跳转到上一条用户消息",
+        description: "将聊天视图滚动到当前可视区域上方的上一条用户消息",
       },
     },
   },

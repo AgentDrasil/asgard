@@ -112,6 +112,17 @@ export const DEFAULT_KEYBINDING_ACTIONS: KeybindingActionDef[] = [
       mac: "Cmd+Alt+N",
     },
   },
+  {
+    id: "jump_previous_user_message",
+    title: "Jump to Previous User Message",
+    description: "Scroll the chat to the previous user message above the current view",
+    category: "chat",
+    defaultKeys: {
+      linux: "Shift+Home",
+      windows: "Shift+Home",
+      mac: "Shift+Home",
+    },
+  },
 ];
 
 export function getDefaultBindingsForOS(os: SupportedOS): Record<string, string[]> {

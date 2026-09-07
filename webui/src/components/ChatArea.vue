@@ -23,6 +23,7 @@ const {
   toggleTerminalShortcut,
   toggleFileViewShortcut,
   findShortcut,
+  jumpPrevUserShortcut,
   matchShortcut,
 } = useShortcuts();
 
@@ -130,7 +131,14 @@ watch(
   { immediate: true },
 );
 
-const { scrollContainerRef, showScrollBottom, scrollToBottom, hasNewMessages } = useChatScroll({
+const {
+  scrollContainerRef,
+  showScrollBottom,
+  showPrevUserMessage,
+  scrollToBottom,
+  scrollToPrevUserMessage,
+  hasNewMessages,
+} = useChatScroll({
   messages: toRef(props, "messages"),
   sessionId: toRef(props, "sessionId"),
   isDetailsOpen: toRef(props, "isDetailsOpen"),
@@ -139,6 +147,10 @@ const { scrollContainerRef, showScrollBottom, scrollToBottom, hasNewMessages } =
 
 const scrollButtonLabel = computed(() =>
   hasNewMessages.value ? t("chat.scrollBottomNew") : t("chat.scrollBottom"),
+);
+
+const scrollPrevUserButtonLabel = computed(() =>
+  t("chat.scrollPrevUser", { shortcut: jumpPrevUserShortcut.value }),
 );
 
 const hasUnrepliedAskUser = computed(() => {
@@ -159,7 +171,19 @@ const showAgentWorking = computed(() => {
 
 const findState = useInPageFind(scrollContainerRef);
 
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable;
+};
+
 const handleGlobalKeydown = (e: KeyboardEvent) => {
+  // Shift+Home is a native text-selection shortcut; don't hijack it while editing
+  if (!isEditableTarget(e.target) && matchShortcut(e, "jump_previous_user_message")) {
+    e.preventDefault();
+    e.stopPropagation();
+    scrollToPrevUserMessage();
+  }
   if (matchShortcut(e, "find")) {
     e.preventDefault();
     e.stopPropagation();
@@ -358,7 +382,12 @@ onUnmounted(() => {
           class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-w-0 w-full"
         >
           <div class="max-w-4xl w-full mx-auto space-y-4 min-w-0">
-            <div v-for="msg in messages" :key="msg.id" class="w-full min-w-0">
+            <div
+              v-for="msg in messages"
+              :key="msg.id"
+              class="w-full min-w-0"
+              :data-user-message="msg.role === 'user' ? 'true' : undefined"
+            >
               <!-- Ask User Question Box -->
               <AskUserCard
                 v-if="msg.role === 'ask_user'"
@@ -432,40 +461,63 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Scroll to bottom button -->
-        <Transition
-          enter-active-class="transition duration-200 ease-out"
-          enter-from-class="opacity-0 translate-y-2 scale-95"
-          enter-to-class="opacity-100 translate-y-0 scale-100"
-          leave-active-class="transition duration-150 ease-in"
-          leave-from-class="opacity-100 translate-y-0 scale-100"
-          leave-to-class="opacity-0 translate-y-2 scale-95"
+        <!-- Floating scroll buttons (jump to previous user message + scroll to bottom) -->
+        <div
+          class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 flex flex-col items-center gap-2"
         >
-          <button
-            v-if="showScrollBottom"
-            @click="scrollToBottom"
-            class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-10 btn btn-circle btn-sm sm:btn-md"
-            :class="
-              hasNewMessages
-                ? 'btn-primary shadow-xl shadow-primary/40'
-                : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
-            "
-            :title="scrollButtonLabel"
-            :aria-label="scrollButtonLabel"
+          <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0 translate-y-2 scale-95"
+            enter-to-class="opacity-100 translate-y-0 scale-100"
+            leave-active-class="transition duration-150 ease-in"
+            leave-from-class="opacity-100 translate-y-0 scale-100"
+            leave-to-class="opacity-0 translate-y-2 scale-95"
           >
-            <span
-              v-if="hasNewMessages"
-              class="absolute -top-1 -right-1 flex h-3 w-3 pointer-events-none"
-              aria-hidden="true"
+            <button
+              v-if="showPrevUserMessage"
+              @click="scrollToPrevUserMessage"
+              class="btn btn-circle btn-sm sm:btn-md bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content"
+              :title="scrollPrevUserButtonLabel"
+              :aria-label="scrollPrevUserButtonLabel"
+              data-testid="scroll-prev-user-button"
+            >
+              <Icon icon="mdi:message-arrow-up-outline" class="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          </Transition>
+          <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0 translate-y-2 scale-95"
+            enter-to-class="opacity-100 translate-y-0 scale-100"
+            leave-active-class="transition duration-150 ease-in"
+            leave-from-class="opacity-100 translate-y-0 scale-100"
+            leave-to-class="opacity-0 translate-y-2 scale-95"
+          >
+            <button
+              v-if="showScrollBottom"
+              @click="scrollToBottom"
+              class="btn btn-circle btn-sm sm:btn-md"
+              :class="
+                hasNewMessages
+                  ? 'btn-primary shadow-xl shadow-primary/40'
+                  : 'bg-base-200 hover:bg-base-300 border border-base-300 shadow-lg text-base-content'
+              "
+              :title="scrollButtonLabel"
+              :aria-label="scrollButtonLabel"
             >
               <span
-                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"
-              ></span>
-              <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-            </span>
-            <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
-          </button>
-        </Transition>
+                v-if="hasNewMessages"
+                class="absolute -top-1 -right-1 flex h-3 w-3 pointer-events-none"
+                aria-hidden="true"
+              >
+                <span
+                  class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"
+                ></span>
+                <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+              </span>
+              <Icon icon="ep:arrow-down-bold" class="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          </Transition>
+        </div>
       </div>
 
       <!-- Right: Resizable Artifact Panel (Under Header) -->

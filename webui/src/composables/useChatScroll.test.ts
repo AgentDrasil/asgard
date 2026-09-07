@@ -302,4 +302,71 @@ describe("useChatScroll", () => {
     // After 150ms recheck timer, showScrollBottom is updated based on new scrollHeight
     expect(showScrollBottom.value).toBe(true);
   });
+
+  describe("scrollToPrevUserMessage", () => {
+    const makeNode = (top: number, bottom: number) => ({
+      getBoundingClientRect: () => ({ top, bottom }),
+    });
+
+    const setup = (nodes: Array<ReturnType<typeof makeNode>>, scrollTop = 1000) => {
+      const messages = ref<ChatMessage[]>([]);
+      const sessionId = ref<string | null>("sess-1");
+      const isDetailsOpen = ref<boolean | undefined>(true);
+
+      const result = useChatScroll({
+        messages,
+        sessionId,
+        isDetailsOpen,
+      });
+
+      const el = {
+        scrollTop,
+        scrollHeight: 2500,
+        clientHeight: 500,
+        scrollTo: vi.fn<(o?: ScrollToOptions) => void>(),
+        getBoundingClientRect: () => ({ top: 0 }),
+        querySelectorAll: () => nodes,
+      };
+      result.scrollContainerRef.value = el as unknown as HTMLDivElement;
+      return { ...result, el };
+    };
+
+    it("targets the last user message entirely above the viewport, skipping visible ones", () => {
+      // u1 fully visible, u2 partially visible at top, u3 entirely above
+      const nodes = [makeNode(300, 400), makeNode(-50, 50), makeNode(-300, -200)];
+      const { el, checkScrollPosition, showPrevUserMessage, scrollToPrevUserMessage } =
+        setup(nodes);
+
+      checkScrollPosition();
+      expect(showPrevUserMessage.value).toBe(true);
+
+      scrollToPrevUserMessage();
+      expect(el.scrollTo).toHaveBeenCalledWith({
+        top: 684, // (-300 + 1000) - 16 offset
+        behavior: "smooth",
+      });
+    });
+
+    it("hides and does nothing when no user message is above the viewport", () => {
+      const nodes = [makeNode(300, 400), makeNode(100, 200)];
+      const { el, checkScrollPosition, showPrevUserMessage, scrollToPrevUserMessage } =
+        setup(nodes);
+
+      checkScrollPosition();
+      expect(showPrevUserMessage.value).toBe(false);
+
+      el.scrollTo.mockClear();
+      scrollToPrevUserMessage();
+      expect(el.scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("clamps scroll target to 0 when the previous user message is near the top", () => {
+      const nodes = [makeNode(300, 400), makeNode(-995, -900)];
+      const { el, checkScrollPosition, scrollToPrevUserMessage } = setup(nodes);
+
+      checkScrollPosition();
+      scrollToPrevUserMessage();
+      expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    });
+  });
 });
