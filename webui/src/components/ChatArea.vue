@@ -481,7 +481,7 @@ onUnmounted(() => {
               :aria-label="scrollPrevUserButtonLabel"
               data-testid="scroll-prev-user-button"
             >
-              <Icon icon="mdi:message-arrow-up-outline" class="h-4 w-4 sm:h-5 sm:w-5" />
+              <Icon icon="at-icons:arrow-up-to-line" class="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
           </Transition>
           <Transition
