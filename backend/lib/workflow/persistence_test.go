@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -227,6 +229,95 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 
 func TestHumanMessageIDDeterministic(t *testing.T) {
 	assert.Equal(t, "wf-run789-plan_approval", HumanMessageID("run789", "plan_approval"))
+}
+
+// TestPersistedNodeState_CLIRoundTrip guards the model-pairing restart path:
+// the actually-used (cli, model) of an agent node must survive the
+// toPersistedStates → fromPersistedStates round trip together with the other
+// settled fields.
+func TestPersistedNodeState_CLIRoundTrip(t *testing.T) {
+	original := map[string]*workflowspec.NodeResult{
+		"coder_node": {
+			Status:         workflowspec.StatusSucceeded,
+			Output:         "coded",
+			LoopIterations: map[string]int{"fix_loop": 2},
+			CLI:            "agy",
+			Model:          "gemini",
+		},
+		"fixer_node": {
+			Status: workflowspec.StatusFailed,
+			Output: "broken",
+			Error:  errors.New("agent fixer quality gate failed: required outputs missing"),
+			CLI:    "opencode",
+			Model:  "glm",
+		},
+		"reviewer_node": {
+			Status: workflowspec.StatusSucceeded,
+			CLI:    "openrouter",
+			Model:  "claude",
+		},
+	}
+
+	states := toPersistedStates(original)
+	restored := fromPersistedStates(states)
+
+	require.Len(t, restored, len(original))
+	for id, want := range original {
+		got := restored[id]
+		require.NotNil(t, got, id)
+		assert.Equal(t, want.Status, got.Status, id)
+		assert.Equal(t, want.Output, got.Output, id)
+		assert.Equal(t, want.CLI, got.CLI, "%s: cli must round-trip", id)
+		assert.Equal(t, want.Model, got.Model, "%s: model must round-trip", id)
+		assert.Equal(t, want.LoopIterations, got.LoopIterations, id)
+		if want.Error != nil {
+			require.Error(t, got.Error, id)
+			assert.Contains(t, got.Error.Error(), "quality gate failed", id)
+		} else {
+			assert.NoError(t, got.Error, id)
+		}
+	}
+}
+
+// TestPersistedNodeState_FailedCarriesTarget pins the N1 semantics: an agent
+// node whose quality gate failed still carries the target it ran on, so a
+// suspension re-drive or restart keeps a pairing baseline for the actor.
+func TestPersistedNodeState_FailedCarriesTarget(t *testing.T) {
+	results := map[string]*workflowspec.NodeResult{
+		"coder_node": {
+			Status: workflowspec.StatusFailed,
+			Error:  errors.New("agent coder quality gate failed: required outputs missing or empty after 3 attempt(s)"),
+			CLI:    "agy",
+			Model:  "gemini",
+		},
+	}
+	states := toPersistedStates(results)
+	assert.Equal(t, "agy", states["coder_node"].CLI)
+	assert.Equal(t, "gemini", states["coder_node"].Model)
+	assert.Equal(t, string(workflowspec.StatusFailed), states["coder_node"].Status)
+	assert.NotEmpty(t, states["coder_node"].Error)
+
+	restored := fromPersistedStates(states)
+	got := restored["coder_node"]
+	require.NotNil(t, got)
+	assert.Equal(t, workflowspec.StatusFailed, got.Status)
+	assert.Equal(t, "agy", got.CLI)
+	assert.Equal(t, "gemini", got.Model)
+	require.Error(t, got.Error)
+}
+
+// TestPersistedNodeState_CLIJSONOmitEmpty: empty CLI/Model must not surface
+// as JSON keys (older snapshots stay byte-compatible).
+func TestPersistedNodeState_CLIJSONOmitEmpty(t *testing.T) {
+	data, err := json.Marshal(PersistedNodeState{Status: string(workflowspec.StatusSucceeded)})
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), `"cli"`)
+	assert.NotContains(t, string(data), `"model"`)
+
+	data, err = json.Marshal(PersistedNodeState{Status: string(workflowspec.StatusSucceeded), CLI: "agy", Model: "gemini"})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"cli":"agy"`)
+	assert.Contains(t, string(data), `"model":"gemini"`)
 }
 
 func TestHumanNodeSuspendAndResumeInProcess(t *testing.T) {

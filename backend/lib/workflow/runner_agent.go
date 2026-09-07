@@ -187,6 +187,15 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		modelOpt = optional.Some(node.Model)
 	}
 
+	// Model pairing: when this node is the reviewer of a model_pairings
+	// group, its candidate list comes from the pairing table keyed by the
+	// actually-used target of the group's latest completed actor. Explicit
+	// node-level model selection bypasses pairing entirely.
+	pairing, err := resolvePairingPlan(nctx, node)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := withNodeTimeout(ctx, node)
 	defer cancel()
 
@@ -207,11 +216,15 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 	var executionErr error
 	var qualityGateErr error
 	var nodeArtifacts []string
+	var lastTarget agentspec.CLITarget
+	var targetKnown bool
+	var userForced bool
 
 	totalAttempts := maxRetries + 1
 	for attempt := 1; attempt <= totalAttempts; attempt++ {
 		executionErr = nil
 		qualityGateErr = nil
+		userForced = false
 
 		log.Info().
 			Str("session_id", nctx.SessionID).
@@ -236,14 +249,16 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		}
 
 		type runOutcome struct {
-			out []byte
-			err error
+			out        []byte
+			target     agentspec.CLITarget
+			userForced bool
+			err        error
 		}
 		outCh := make(chan runOutcome, 1)
 
 		go func(currentPrompt string, currentSession optional.Option[string]) {
-			runOut, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless})
-			outCh <- runOutcome{out: runOut, err: runErr}
+			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, pairing)
+			outCh <- runOutcome{out: runOut, target: runTarget, userForced: runForced, err: runErr}
 		}(prompt, session)
 
 		seenArtifacts := make(map[string]bool)
@@ -321,6 +336,11 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 			case outcome := <-outCh:
 				out = outcome.out
 				executionErr = outcome.err
+				userForced = outcome.userForced
+				if outcome.target.CLI != "" || outcome.target.Model != "" {
+					lastTarget = outcome.target
+					targetKnown = true
+				}
 				if cancelListener != nil {
 					cancelListener()
 				}
@@ -339,6 +359,13 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 			currentSessionID = parsedSessionID
 			if node.SessionPolicyInherit() {
 				nctx.Values.Set(agentSessionKey(node.AgentID), currentSessionID)
+			}
+		}
+
+		if targetKnown {
+			emitModelSelection(nctx, node, effectiveAgent, lastTarget, pairing, userForced)
+			if executionErr == nil {
+				recordActualTarget(nctx, node.ID, lastTarget.CLI, lastTarget.Model)
 			}
 		}
 
@@ -362,7 +389,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 				Str("agent_id", node.AgentID).
 				Int("attempt", attempt).
 				Msgf("[AgentRunner] Agent %q for node %q COMPLETED successfully (required outputs satisfied)", node.AgentID, node.ID)
-			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name}, nil
+			return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: lastContent, Artifacts: toArtifactMap(nodeArtifacts), AgentName: effectiveAgent.Config.Name, CLI: lastTarget.CLI, Model: lastTarget.Model}, nil
 		}
 
 		log.Warn().
@@ -416,6 +443,8 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 			Artifacts: toArtifactMap(nodeArtifacts),
 			Error:     fmt.Errorf("agent %s run execution failed: %w", node.AgentID, executionErr),
 			AgentName: effectiveAgent.Config.Name,
+			CLI:       lastTarget.CLI,
+			Model:     lastTarget.Model,
 		}, nil
 	}
 
@@ -425,12 +454,17 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
 		Msgf("[AgentRunner] Agent %q for node %q quality gate FAILED: %v", node.AgentID, node.ID, qualityGateErr)
+	// The node did run on lastTarget even though the quality gate rejected
+	// its output: keep the target so suspension re-drives and restarts keep
+	// a pairing baseline for this actor.
 	return &workflowspec.NodeResult{
 		Status:    workflowspec.StatusFailed,
 		Output:    lastContent,
 		Artifacts: toArtifactMap(nodeArtifacts),
 		Error:     fmt.Errorf("agent %s quality gate failed: %w", node.AgentID, qualityGateErr),
 		AgentName: effectiveAgent.Config.Name,
+		CLI:       lastTarget.CLI,
+		Model:     lastTarget.Model,
 	}, nil
 }
 
@@ -534,8 +568,9 @@ const (
 	quotaDecisionCancel
 )
 
-// runWithQuotaDecisions invokes run.Run and, whenever no CLI target has usable
-// quota, suspends the run for a user decision instead of failing the node:
+// runWithQuotaDecisions invokes run.RunWithCandidates and, whenever no CLI
+// target has usable quota, suspends the run for a user decision instead of
+// failing the node:
 //
 //   - "Wait for quota recovery, then continue": re-check quotas and re-suspend
 //     with a fresh prompt while still exhausted (manual continue only).
@@ -546,70 +581,102 @@ const (
 //
 // Headless runs (or runs without a suspension gateway) keep the legacy
 // fail-fast behavior with the informative *run.NoQuotaError.
-func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope) ([]byte, error) {
+//
+// pairing, when non-nil, supplies the reviewer candidate list from the
+// workflow model-pairing table (replacing the agent's own cli list) and
+// annotates quota suspensions as pairing-unsatisfiable.
+//
+// The userForced return reports that the target was forced by the user
+// through a suspension option ("Use <cli> <model>"), so callers can suppress
+// fallback-style observability for that execution.
+func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope, pairing *pairingPlan) (out []byte, target agentspec.CLITarget, userForced bool, err error) {
+	var candidates []agentspec.CLITarget
+	if pairing != nil {
+		candidates = pairing.Candidates
+	}
+	effectiveTargets := agent.Config.CLI
+	if len(candidates) > 0 {
+		effectiveTargets = candidates
+	}
+
 	forcedModel := modelOpt
 	for {
-		out, runErr := run.Run(ctx, agent, prompt, session, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
+		out, target, runErr := run.RunWithCandidates(ctx, agent, candidates, prompt, session, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
 		var nq *run.NoQuotaError
-		if !errors.As(runErr, &nq) {
-			return out, runErr
-		}
-		if nctx.Headless || nctx.SuspendQuota == nil {
-			return out, runErr
-		}
+		if errors.As(runErr, &nq) {
+			if pairing != nil && nq.PairingNote == "" {
+				nq.PairingNote = fmt.Sprintf("group %q: actor %s used %s, all paired reviewer targets are exhausted", pairing.GroupID, pairing.ActorNodeID, pairing.ActorTarget)
+			}
+			if nctx.Headless || nctx.SuspendQuota == nil {
+				return out, target, false, runErr
+			}
 
-		log.Warn().
-			Err(nq).
-			Str("session_id", nctx.SessionID).
-			Str("node_id", node.ID).
-			Str("agent_id", node.AgentID).
-			Msgf("[AgentRunner] Agent %q for node %q has no CLI target with usable quota; suspending for user decision", node.AgentID, node.ID)
-
-		if nctx.EventEmitter != nil {
-			nctx.EventEmitter(WorkflowEvent{
-				Type:      EventNodeStatusUpdate,
-				NodeID:    node.ID,
-				NodeType:  workflowspec.NodeTypeAgent,
-				AgentID:   node.AgentID,
-				AgentName: agent.Config.Name,
-				Status:    workflowspec.StatusRunning,
-				Message:   "No CLI target has enough quota remaining; waiting for your decision...",
-				EntryType: "activity",
-			})
-		}
-
-		reply, suspErr := nctx.SuspendQuota(buildQuotaPrompt(nq, agent), quotaOptions(nq))
-		if suspErr != nil {
-			return out, fmt.Errorf("waiting for quota decision: %w", suspErr)
-		}
-
-		decision, targetModel := classifyQuotaReply(reply, agent.Config.CLI)
-		switch decision {
-		case quotaDecisionCancel:
-			log.Info().
+			log.Warn().
+				Err(nq).
 				Str("session_id", nctx.SessionID).
 				Str("node_id", node.ID).
 				Str("agent_id", node.AgentID).
-				Msgf("[AgentRunner] Agent %q for node %q cancelled by user while waiting for quota", node.AgentID, node.ID)
-			return nil, errQuotaCancelled
-		case quotaDecisionTarget:
-			log.Info().
-				Str("session_id", nctx.SessionID).
-				Str("node_id", node.ID).
-				Str("agent_id", node.AgentID).
-				Str("forced_model", targetModel).
-				Msgf("[AgentRunner] User forced CLI target %q for agent %q on node %q", targetModel, node.AgentID, node.ID)
-			forcedModel = optional.Some(targetModel)
-		default:
-			// Continue: keep the current selection policy and re-check quota.
+				Msgf("[AgentRunner] Agent %q for node %q has no CLI target with usable quota; suspending for user decision", node.AgentID, node.ID)
+
+			if nctx.EventEmitter != nil {
+				message := "No CLI target has enough quota remaining; waiting for your decision..."
+				if nq.PairingNote != "" {
+					message = "Model pairing cannot be satisfied (" + nq.PairingNote + "); waiting for your decision..."
+				}
+				nctx.EventEmitter(WorkflowEvent{
+					Type:      EventNodeStatusUpdate,
+					NodeID:    node.ID,
+					NodeType:  workflowspec.NodeTypeAgent,
+					AgentID:   node.AgentID,
+					AgentName: agent.Config.Name,
+					Status:    workflowspec.StatusRunning,
+					Message:   message,
+					EntryType: "activity",
+				})
+			}
+
+			reply, suspErr := nctx.SuspendQuota(buildQuotaPrompt(nq, agent), quotaOptions(nq))
+			if suspErr != nil {
+				return out, target, false, fmt.Errorf("waiting for quota decision: %w", suspErr)
+			}
+
+			decision, targetModel := classifyQuotaReply(reply, effectiveTargets)
+			switch decision {
+			case quotaDecisionCancel:
+				log.Info().
+					Str("session_id", nctx.SessionID).
+					Str("node_id", node.ID).
+					Str("agent_id", node.AgentID).
+					Msgf("[AgentRunner] Agent %q for node %q cancelled by user while waiting for quota", node.AgentID, node.ID)
+				return nil, target, false, errQuotaCancelled
+			case quotaDecisionTarget:
+				log.Info().
+					Str("session_id", nctx.SessionID).
+					Str("node_id", node.ID).
+					Str("agent_id", node.AgentID).
+					Str("forced_model", targetModel).
+					Msgf("[AgentRunner] User forced CLI target %q for agent %q on node %q", targetModel, node.AgentID, node.ID)
+				forcedModel = optional.Some(targetModel)
+				userForced = true
+			default:
+				// Continue: keep the current selection policy and re-check quota.
+			}
+			continue
 		}
+		return out, target, userForced, runErr
 	}
 }
 
 // buildQuotaPrompt renders the suspension prompt shown to the user, listing
-// every configured CLI target with its remaining quota.
+// every configured CLI target with its remaining quota. Pairing-unsatisfiable
+// suspensions lead with the pairing context (group/actor/actual target) from
+// NoQuotaError.PairingNote so the decision surface explains why the reviewer
+// is restricted to its paired candidates.
 func buildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 	var sb strings.Builder
+	if nq.PairingNote != "" {
+		fmt.Fprintf(&sb, "Model pairing cannot be satisfied (%s).\n", nq.PairingNote)
+	}
 	fmt.Fprintf(&sb, "Agent %q (%s) cannot start: no CLI target has enough quota remaining", agent.Config.Name, agent.Config.ID)
 	if nq.ExplicitModel != "" {
 		fmt.Fprintf(&sb, " (selected model %s is out of quota)", nq.ExplicitModel)

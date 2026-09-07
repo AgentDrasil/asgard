@@ -37,6 +37,10 @@ type PersistedNodeState struct {
 	SkipReason     string         `json:"skip_reason,omitempty"`
 	Error          string         `json:"error,omitempty"`
 	LoopIterations map[string]int `json:"loop_iterations,omitempty"`
+	// CLI / Model record the CLI target an agent node actually used
+	// (quota fallback / model pairing resolution survived restarts).
+	CLI   string `json:"cli,omitempty"`
+	Model string `json:"model,omitempty"`
 }
 
 // SuspendedNodeInfo describes one concurrently suspended human node. The JSON
@@ -150,6 +154,8 @@ func toPersistedStates(results map[string]*workflowspec.NodeResult) map[string]P
 			Output:         res.Output,
 			SkipReason:     string(res.SkipReason),
 			LoopIterations: copyIntMap(res.LoopIterations),
+			CLI:            res.CLI,
+			Model:          res.Model,
 		}
 		if res.Error != nil {
 			state.Error = res.Error.Error()
@@ -173,6 +179,8 @@ func fromPersistedStates(states map[string]PersistedNodeState) map[string]*workf
 			ExitCode:       state.ExitCode,
 			Output:         state.Output,
 			LoopIterations: copyIntMap(state.LoopIterations),
+			CLI:            state.CLI,
+			Model:          state.Model,
 		}
 		if state.Error != "" {
 			res.Error = errors.New(state.Error)

@@ -456,6 +456,7 @@ func TestBuildQuotaPromptAndOptions(t *testing.T) {
 	assert.Contains(t, prompt, "agy gemini-3.7-flash-low: 2% remaining")
 	assert.Contains(t, prompt, "opencode zai-coding-plan/glm-5.3-flash/high: 0% remaining")
 	assert.Contains(t, prompt, "simplest x: provider disabled")
+	assert.NotContains(t, prompt, "Model pairing cannot be satisfied", "non-pairing quota prompts must not carry the pairing prefix")
 
 	opts := quotaOptions(nq)
 	assert.Equal(t, []string{
@@ -475,6 +476,30 @@ func TestBuildQuotaPromptAndOptions(t *testing.T) {
 		Targets:       nq.Targets,
 	}
 	assert.Contains(t, buildQuotaPrompt(nqExplicit, agent), "selected model gemini-3.7-flash-low is out of quota")
+}
+
+// TestBuildQuotaPrompt_PairingNote pins the B1 fix: pairing-unsatisfiable
+// suspensions must lead the ask_user prompt (and the persisted
+// EventWorkflowSuspended.Message built from it) with the pairing context, so
+// the decision surface explains why the reviewer is restricted to its paired
+// candidates.
+func TestBuildQuotaPrompt_PairingNote(t *testing.T) {
+	agent := &agentspec.Agent{Config: agentspec.AgentConfig{ID: "review-agent", Name: "Review Agent"}}
+	note := `group "code": actor coder_node used agy/gemini, all paired reviewer targets are exhausted`
+	nq := &run.NoQuotaError{
+		AgentID:      "review-agent",
+		PairingNote:  note,
+		MinThreshold: 0.10,
+		Targets: []run.QuotaTargetStatus{
+			{CLI: "agy", Model: "gemini", Remaining: 0.0, Enabled: true},
+		},
+	}
+
+	prompt := buildQuotaPrompt(nq, agent)
+	assert.Contains(t, prompt, "Model pairing cannot be satisfied ("+note+")")
+	assert.Contains(t, prompt, `Agent "Review Agent" (review-agent) cannot start`)
+	// The pairing line leads the prompt, before the generic quota body.
+	assert.Less(t, strings.Index(prompt, "Model pairing cannot be satisfied"), strings.Index(prompt, "cannot start"))
 }
 
 func TestClassifyQuotaReply(t *testing.T) {
