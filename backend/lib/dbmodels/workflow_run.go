@@ -81,6 +81,11 @@ type NodeState struct {
 	OutputPath string `json:"output_path,omitempty"`
 	SkipReason string `json:"skip_reason,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// CLI / Model record the CLI target an agent node actually used. They
+	// must survive the DB round-trip so re-drives and crash-recovery resumes
+	// can resolve model_pairings reviewers against their actor's target.
+	CLI   string `json:"cli,omitempty"`
+	Model string `json:"model,omitempty"`
 }
 
 // SuspendedNodeInfo describes one concurrently suspended human node. The JSON

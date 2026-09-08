@@ -195,6 +195,8 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 			OutputPath: state.OutputPath,
 			SkipReason: state.SkipReason,
 			Error:      state.Error,
+			CLI:        state.CLI,
+			Model:      state.Model,
 		}
 	}
 	return snap, nil
@@ -210,6 +212,8 @@ func toDBNodeStates(states map[string]workflow.PersistedNodeState) map[string]db
 			OutputPath: state.OutputPath,
 			SkipReason: state.SkipReason,
 			Error:      state.Error,
+			CLI:        state.CLI,
+			Model:      state.Model,
 		}
 	}
 	return out

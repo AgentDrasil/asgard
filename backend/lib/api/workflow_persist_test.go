@@ -1499,3 +1499,60 @@ func TestResolvePendingQuotaMessages_IDBoundary(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkflowRunStore_NodeTargetSurvivesRoundTrip pins the persistence
+// contract that re-drive and crash-recovery depend on: the CLI/model target an
+// agent node actually used must survive the engine→dbmodels→DB→engine round
+// trip. model_pairings reviewers resolve their candidate list from this target
+// after a restart (RedriveFailed seeds SUCCEEDED actors from the snapshot), so
+// dropping the fields at the dbmodels boundary fails re-drives of pairing runs
+// with "model pairing group ... has no completed actor execution".
+func TestWorkflowRunStore_NodeTargetSurvivesRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	tempDir := t.TempDir()
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	store := newWorkflowRunStore(wfRepo)
+
+	runID := "run-target-roundtrip"
+	chatID := "chat-target-roundtrip"
+	require.NoError(t, store.StartRun(&workflow.RunSnapshot{
+		RunID:     runID,
+		SessionID: chatID,
+		DAGSpec:   askUserReplyTestYAML,
+		RunDir:    t.TempDir(),
+	}))
+
+	actorLog := filepath.Join(tempDir, chatID, "workflows", runID, "nodes", "plan_agent.log")
+	require.NoError(t, os.MkdirAll(filepath.Dir(actorLog), 0o755))
+	require.NoError(t, os.WriteFile(actorLog, []byte("plan done"), 0o644))
+
+	require.NoError(t, store.SettleRun(runID, workflow.PersistStatusFailed, map[string]workflow.PersistedNodeState{
+		"plan_agent": {
+			Status:     string(workflowspec.StatusSucceeded),
+			OutputPath: actorLog,
+			CLI:        "opencode",
+			Model:      "zai-coding-plan/glm-5.3/high",
+		},
+		"plan_review_agent": {
+			Status: string(workflowspec.StatusFailed),
+			Error:  "boom",
+		},
+	}))
+
+	snap, err := store.GetRun(runID)
+	require.NoError(t, err)
+	require.NotNil(t, snap)
+	assert.Equal(t, workflow.PersistStatusFailed, snap.Status)
+	actor, ok := snap.NodeStates["plan_agent"]
+	require.True(t, ok, "settled plan_agent state must be present after GetRun")
+	assert.Equal(t, "opencode", actor.CLI, "actor CLI target must survive the DB round trip")
+	assert.Equal(t, "zai-coding-plan/glm-5.3/high", actor.Model, "actor model target must survive the DB round trip")
+	require.Contains(t, snap.NodeStates, "plan_review_agent")
+	assert.Equal(t, string(workflowspec.StatusFailed), snap.NodeStates["plan_review_agent"].Status)
+}
