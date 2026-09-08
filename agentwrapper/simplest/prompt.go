@@ -149,12 +149,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("building session context: %w", err)
 	}
 
-	// Assemble tools
+	// Assemble tools according to the configured tool access mode
 	reg := simplest.DefaultRegistry(runDir)
-	toolList := reg.Tools()
-	toolNames := make([]string, 0, len(toolList))
-	for _, t := range toolList {
-		toolNames = append(toolNames, t.Name())
+	toolList, toolNames, err := selectTools(opts.ToolAccess, runDir, reg.Tools(), docToolOptions())
+	if err != nil {
+		return nil, err
 	}
 
 	// Build system prompt
@@ -164,10 +163,25 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 	agentCfgDir := (&Client{}).AuthDirectory(home)
 	contextFiles := simplest.LoadProjectContextFiles(runDir, agentCfgDir)
+	customPrompt, contextFiles := agentIdentityPrompt(agentCfgDir, contextFiles)
+	if customPrompt == "" && opts.ToolAccess == types.ToolAccessDocOnly {
+		customPrompt = docOnlyIdentity
+	}
+
+	toolSnippets := make(map[string]string, len(toolList))
+	toolGuidelines := make([]string, 0, len(toolList))
+	for _, t := range toolList {
+		toolSnippets[t.Name()] = t.PromptSnippet()
+		toolGuidelines = append(toolGuidelines, t.PromptGuidelines()...)
+	}
+
 	sysPrompt := simplest.BuildSystemPrompt(simplest.PromptBuildOptions{
-		SelectedTools: toolNames,
-		CWD:           runDir,
-		ContextFiles:  contextFiles,
+		CustomPrompt:     customPrompt,
+		SelectedTools:    toolNames,
+		ToolSnippets:     toolSnippets,
+		PromptGuidelines: toolGuidelines,
+		CWD:              runDir,
+		ContextFiles:     contextFiles,
 	})
 
 	req := simplest.Request{
@@ -305,8 +319,75 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}, nil
 }
 
+// docOnlyIdentity replaces the default coding-assistant identity when a
+// doc-only agent has no agent-level AGENTS.md, so the identity matches the
+// trimmed tool set.
+const docOnlyIdentity = "You are an analysis and documentation agent operating inside an agent harness. You read and search files, and you produce or revise markdown documents. You cannot run commands or modify source code."
+
+// selectTools returns the tool set for the configured access mode. Unknown
+// modes are rejected (fail closed): "" selects the full default set.
+func selectTools(toolAccess, runDir string, allTools []simplest.AgentTool, docOpts simplest.DocToolOptions) ([]simplest.AgentTool, []string, error) {
+	switch toolAccess {
+	case "", types.ToolAccessFull:
+		names := make([]string, 0, len(allTools))
+		for _, t := range allTools {
+			names = append(names, t.Name())
+		}
+		return allTools, names, nil
+	case types.ToolAccessDocOnly:
+		filtered := make([]simplest.AgentTool, 0, len(allTools))
+		var names []string
+		for _, t := range allTools {
+			switch t.Name() {
+			case "bash":
+				continue
+			case "write":
+				t = simplest.NewWriteDocTool(runDir, docOpts)
+			case "edit":
+				t = simplest.NewEditDocTool(runDir, docOpts)
+			}
+			filtered = append(filtered, t)
+			names = append(names, t.Name())
+		}
+		return filtered, names, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported tool access mode %q: must be %q or %q", toolAccess, types.ToolAccessFull, types.ToolAccessDocOnly)
+	}
+}
+
+// docToolOptions loads the doc-tool path policy from the simplest config.
+// Missing or unreadable config falls back to the default policy (any .md).
+func docToolOptions() simplest.DocToolOptions {
+	cfg, err := simplest.LoadConfig()
+	if err != nil || cfg == nil {
+		return simplest.DocToolOptions{}
+	}
+	return simplest.DocToolOptions{AllowedDirs: cfg.DocToolAllowedDirs}
+}
+
+// agentIdentityPrompt extracts the agent-level instruction file (mounted by
+// the sandbox under agentCfgDir) from the loaded context files and returns
+// its content to use as the system prompt identity, plus the remaining
+// context files.
+func agentIdentityPrompt(agentCfgDir string, files []simplest.ContextFile) (string, []simplest.ContextFile) {
+	if len(files) == 0 {
+		return "", files
+	}
+	prefix := strings.TrimSuffix(agentCfgDir, "/") + "/"
+	if !strings.HasPrefix(files[0].Path, prefix) {
+		return "", files
+	}
+	content := strings.TrimSpace(files[0].Content)
+	if content == "" {
+		return "", files
+	}
+	return content, files[1:]
+}
+
 func extractTargetFiles(toolName string, rawArgs any) []string {
-	if toolName != "write" && toolName != "edit" {
+	switch toolName {
+	case "write", "edit", "write_doc", "edit_doc":
+	default:
 		return nil
 	}
 	var argsMap map[string]any

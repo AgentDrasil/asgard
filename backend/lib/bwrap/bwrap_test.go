@@ -333,6 +333,39 @@ func TestBuildArgs(t *testing.T) {
 
 	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
 	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
+
+	// Test case 3: simplest CLITarget receives --tool-access from the agent spec
+	cfgDocOnly := &agentspec.AgentConfig{
+		ID:          "test-agent",
+		Name:        "Test Agent",
+		Description: "A test agent",
+		RunDirs:     []string{runDir},
+		CLI: []agentspec.CLITarget{{
+			CLI:   "simplest",
+			Model: "simple-model",
+		}},
+		ToolAccess: "doc-only",
+	}
+
+	targetSimplest := agentspec.CLITarget{
+		CLI:   "simplest",
+		Model: "simple-model",
+	}
+
+	argsSimplest, err := buildArgsForAgent(cfgDocOnly, agentPath, targetSimplest, "run", optional.None[string](), runDir, "test-sock-dir", "", "", "")
+	require.NoError(t, err)
+
+	argStrSimplest := strings.Join(argsSimplest, " ")
+
+	expectedSimplestDest := filepath.Join(home, ".config", "simplest", "AGENTS.md")
+	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "tmp", "default", ".asgard_system_prompt")+" "+expectedSimplestDest)
+	expectedEndSimplest := "-- aw simplest --model simple-model --tool-access doc-only --prompt run"
+	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
+
+	// doc-only must be a validated spec value; buildArgsForAgent passes it verbatim.
+	require.NoError(t, cfgDocOnly.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
+	cfgDocOnly.ToolAccess = "banana"
+	require.Error(t, cfgDocOnly.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
 }
 
 func TestTimezoneInheritance(t *testing.T) {

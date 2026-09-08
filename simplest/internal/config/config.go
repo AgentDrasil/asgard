@@ -75,6 +75,11 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type Config struct {
 	Providers map[string]ProviderConfig `yaml:"providers" json:"providers"`
 	Models    []ModelConfig             `yaml:"models" json:"models"`
+
+	// DocToolAllowedDirs restricts the doc tools (write_doc, edit_doc) to
+	// markdown files under these absolute directories. Empty means any .md
+	// path is allowed.
+	DocToolAllowedDirs []string `yaml:"docToolAllowedDirs,omitempty" json:"docToolAllowedDirs,omitempty"`
 }
 
 // DefaultConfigPath resolves the configuration file path by precedence:

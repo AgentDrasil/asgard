@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -169,8 +170,94 @@ func TestExtractTargetFiles(t *testing.T) {
 
 	assert.Equal(t, []string{"/tmp/code.go"}, extractTargetFiles("write", map[string]any{"path": "/tmp/code.go"}))
 	assert.Equal(t, []string{"/src/file.txt"}, extractTargetFiles("edit", map[string]any{"filePath": "/src/file.txt"}))
+	assert.Equal(t, []string{"/session/intend.md"}, extractTargetFiles("write_doc", map[string]any{"path": "/session/intend.md"}))
+	assert.Equal(t, []string{"/session/plan.md"}, extractTargetFiles("edit_doc", map[string]any{"path": "/session/plan.md"}))
 	assert.Nil(t, extractTargetFiles("read", map[string]any{"path": "/src/file.txt"}))
 	assert.Nil(t, extractTargetFiles("bash", map[string]any{"command": "ls"}))
+}
+
+func TestSelectTools(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	reg := simplest.DefaultRegistry(dir)
+
+	// Default ("" or full): complete tool set.
+	fullTools, fullNames, err := selectTools("", dir, reg.Tools(), simplest.DocToolOptions{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"read", "bash", "edit", "write", "find", "grep", "ls"}, fullNames)
+	for _, t2 := range fullTools {
+		if t2.Name() != "write" {
+			continue
+		}
+		// The full write tool is unrestricted: non-doc paths are allowed.
+		_, err := t2.Execute(context.Background(), "call-0", []byte(`{"path":"src/main.go","content":"x"}`), nil)
+		require.NoError(t, err)
+		content, readErr := os.ReadFile(filepath.Join(dir, "src", "main.go"))
+		require.NoError(t, readErr)
+		require.Equal(t, "x", string(content))
+	}
+
+	// doc-only: bash dropped, write/edit swapped for doc variants.
+	docTools, docNames, err := selectTools(types.ToolAccessDocOnly, dir, reg.Tools(), simplest.DocToolOptions{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"read", "write_doc", "edit_doc", "find", "grep", "ls"}, docNames)
+	assert.NotContains(t, docNames, "edit")
+	assert.NotContains(t, docNames, "bash")
+	assert.NotContains(t, docNames, "write")
+
+	var writeDocTool, editDocTool simplest.AgentTool
+	for _, t2 := range docTools {
+		switch t2.Name() {
+		case "write_doc":
+			writeDocTool = t2
+		case "edit_doc":
+			editDocTool = t2
+		}
+	}
+	require.NotNil(t, writeDocTool)
+	require.NotNil(t, editDocTool)
+
+	// write_doc must reject non-markdown output.
+	_, err = writeDocTool.Execute(context.Background(), "call-1", []byte(`{"path":"src/main.go","content":"x"}`), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only markdown files ending in .md")
+
+	// Unknown mode: fail closed.
+	_, _, err = selectTools("doc-only ", dir, reg.Tools(), simplest.DocToolOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported tool access mode "doc-only "`)
+}
+
+func TestAgentIdentityPrompt(t *testing.T) {
+	t.Parallel()
+
+	agentCfgDir := "/home/u/.config/simplest"
+
+	// First file from agentCfgDir becomes the identity and is dropped from context.
+	files := []simplest.ContextFile{
+		{Path: agentCfgDir + "/AGENTS.md", Content: "  You are the intend agent.  "},
+		{Path: "/home/u/proj/AGENTS.md", Content: "project rules"},
+	}
+	identity, rest := agentIdentityPrompt(agentCfgDir, files)
+	assert.Equal(t, "You are the intend agent.", identity)
+	assert.Len(t, rest, 1)
+	assert.Equal(t, "/home/u/proj/AGENTS.md", rest[0].Path)
+
+	// First file not from agentCfgDir: no identity extraction.
+	identity, rest = agentIdentityPrompt(agentCfgDir, files[1:])
+	assert.Empty(t, identity)
+	assert.Len(t, rest, 1)
+
+	// Empty list: no-op.
+	identity, rest = agentIdentityPrompt(agentCfgDir, nil)
+	assert.Empty(t, identity)
+	assert.Empty(t, rest)
+
+	// Empty content: stays in context.
+	identity, rest = agentIdentityPrompt(agentCfgDir, []simplest.ContextFile{{Path: agentCfgDir + "/AGENTS.md", Content: "   "}})
+	assert.Empty(t, identity)
+	assert.Len(t, rest, 1)
 }
 
 func TestPrompt_ResolverError(t *testing.T) {
@@ -663,6 +750,297 @@ func TestPrompt_SandboxSystemPromptAssembly(t *testing.T) {
 	assert.Contains(t, capturedSystemPrompt, configAgentsContent)
 	// Assert ~/.simplest/AGENTS.md was not loaded
 	assert.NotContains(t, capturedSystemPrompt, legacyAgentsContent)
+}
+
+func TestPrompt_AnalysisAgentRoleTrimming(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	configSimplestDir := filepath.Join(tempHome, ".config", "simplest")
+	require.NoError(t, os.MkdirAll(configSimplestDir, 0755))
+	configAgentsContent := "You are the intend analyst. Produce requirement documents only."
+	require.NoError(t, os.WriteFile(filepath.Join(configSimplestDir, "AGENTS.md"), []byte(configAgentsContent), 0644))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Analyzed."},
+		},
+		Usage: simplest.Usage{
+			Input:  20,
+			Output: 5,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	res, err := Prompt(context.Background(), "Start work on the parser", types.PromptOptions{
+		Dir:        testDir,
+		ToolAccess: types.ToolAccessDocOnly,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Analyzed.", res.LastContent)
+
+	require.NotEmpty(t, capturingP.capturedCtxs)
+	capturedCtx := capturingP.capturedCtxs[0]
+
+	// Tool defs: doc-only agents lose edit/bash/write and gain the doc variants.
+	var toolNames []string
+	for _, td := range capturedCtx.Tools {
+		toolNames = append(toolNames, td.Name)
+	}
+	assert.NotContains(t, toolNames, "edit")
+	assert.NotContains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "write")
+	assert.Contains(t, toolNames, "write_doc")
+	assert.Contains(t, toolNames, "edit_doc")
+	assert.Contains(t, toolNames, "read")
+
+	// System prompt: agent AGENTS.md becomes the identity, tools and
+	// guidelines are still assembled, and the default coder identity is gone.
+	sysPrompt := capturedCtx.SystemPrompt
+	assert.Contains(t, sysPrompt, configAgentsContent)
+	assert.NotContains(t, sysPrompt, "expert coding assistant")
+	assert.Contains(t, sysPrompt, "Available tools:")
+	assert.Contains(t, sysPrompt, "Guidelines:")
+	// The identity content must not be duplicated in the project context.
+	assert.Equal(t, 1, strings.Count(sysPrompt, configAgentsContent))
+	// The doc tool entries carry their self-describing snippets.
+	assert.Contains(t, sysPrompt, "- write_doc: Create or overwrite markdown documentation files")
+	assert.Contains(t, sysPrompt, "- edit_doc: Make precise edits to markdown documentation files")
+	// Tool guidelines are wired into the Guidelines section.
+	assert.Contains(t, sysPrompt, "- Use write_doc for markdown documents")
+}
+
+func TestPrompt_DocOnlyIdentityFallbackWithoutAgentsMD(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Analyzed."},
+		},
+		Usage: simplest.Usage{
+			Input:  20,
+			Output: 5,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	_, err := Prompt(context.Background(), "Analyze the repo", types.PromptOptions{
+		Dir:        testDir,
+		ToolAccess: types.ToolAccessDocOnly,
+	})
+	require.NoError(t, err)
+
+	require.NotEmpty(t, capturingP.capturedCtxs)
+	sysPrompt := capturingP.capturedCtxs[0].SystemPrompt
+
+	// Without an agent AGENTS.md, the identity must match the trimmed tools
+	// instead of claiming to be a coding assistant that executes commands.
+	assert.Contains(t, sysPrompt, "You are an analysis and documentation agent")
+	assert.NotContains(t, sysPrompt, "expert coding assistant")
+}
+
+func TestDocToolOptionsFromConfig(t *testing.T) {
+	tempHome := t.TempDir()
+	cfgPath := filepath.Join(tempHome, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("docToolAllowedDirs:\n  - /session\n  - /tmp\n"), 0644))
+	t.Setenv("SIMPLEST_CONFIG_PATH", cfgPath)
+
+	opts := docToolOptions()
+	assert.Equal(t, []string{"/session", "/tmp"}, opts.AllowedDirs)
+}
+
+func TestDocToolOptionsDefaultWhenNoConfig(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("SIMPLEST_CONFIG_PATH", filepath.Join(tempHome, "missing.yaml"))
+
+	opts := docToolOptions()
+	assert.Empty(t, opts.AllowedDirs)
+}
+
+func TestPrompt_DocOnlyAllowedDirsEnforced(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	docsDir := filepath.Join(testDir, "docs")
+	require.NoError(t, os.MkdirAll(docsDir, 0755))
+
+	// Restrict doc tools to <workspace>/docs.
+	cfgPath := filepath.Join(tempHome, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("docToolAllowedDirs:\n  - "+docsDir+"\n"), 0644))
+	t.Setenv("SIMPLEST_CONFIG_PATH", cfgPath)
+
+	turn1 := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Writing the plan."},
+			simplest.ToolCall{
+				Type: "toolCall", ID: "call-1", Name: "write_doc",
+				Arguments: []byte(`{"path":"docs/plan.md","content":"plan body"}`),
+			},
+		},
+		Usage:      simplest.Usage{Input: 20, Output: 5},
+		StopReason: simplest.StopToolUse,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+	turn2 := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Trying a bad path."},
+			simplest.ToolCall{
+				Type: "toolCall", ID: "call-2", Name: "write_doc",
+				Arguments: []byte(`{"path":"other/evil.md","content":"x"}`),
+			},
+		},
+		Usage:      simplest.Usage{Input: 20, Output: 5},
+		StopReason: simplest.StopToolUse,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+	turn3 := &simplest.AssistantMessage{
+		Content:    []simplest.AssistantContent{simplest.TextContent{Type: "text", Text: "Done."}},
+		Usage:      simplest.Usage{Input: 20, Output: 5},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	mockP := &multiTurnMockProvider{turns: []*simplest.AssistantMessage{turn1, turn2, turn3}}
+
+	testModel := &simplest.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, mockP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	var toolResults []string
+	cb := func(stepIndex int, source, entryType, content string, metadata map[string]any) {
+		if entryType == "tool_call" && metadata != nil && metadata["tool_name"] == "write_doc" {
+			toolResults = append(toolResults, content)
+		}
+	}
+
+	res, err := Prompt(context.Background(), "Write the plan", types.PromptOptions{
+		Dir:            testDir,
+		ToolAccess:     types.ToolAccessDocOnly,
+		ReportCallback: cb,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Done.", res.LastContent)
+
+	// Allowed write lands inside the configured directory.
+	got, readErr := os.ReadFile(filepath.Join(docsDir, "plan.md"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "plan body", string(got))
+
+	// Rejected write surfaces the policy error as the tool result.
+	// (Each call contributes a start event with the args and an end event
+	// with the result, so four entries in total.)
+	require.Len(t, toolResults, 4)
+	combined := strings.Join(toolResults, "\n")
+	assert.Contains(t, combined, "Successfully wrote 9 bytes to "+filepath.Join(docsDir, "plan.md"))
+	assert.Contains(t, combined, "outside the allowed directories")
+	if _, statErr := os.Stat(filepath.Join(testDir, "other")); !os.IsNotExist(statErr) {
+		t.Error("rejected path must not be created")
+	}
+}
+
+func TestPrompt_CoderAgentKeepsFullTools(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{Type: "text", Text: "Done."},
+		},
+		Usage: simplest.Usage{
+			Input:  20,
+			Output: 5,
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	capturingP := &capturingMockProvider{
+		responses: []*simplest.AssistantMessage{mockResp},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, capturingP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	_, err := Prompt(context.Background(), "Implement the parser", types.PromptOptions{
+		Dir:        testDir,
+		ToolAccess: types.ToolAccessFull,
+	})
+	require.NoError(t, err)
+
+	require.NotEmpty(t, capturingP.capturedCtxs)
+	capturedCtx := capturingP.capturedCtxs[0]
+
+	var toolNames []string
+	for _, td := range capturedCtx.Tools {
+		toolNames = append(toolNames, td.Name)
+	}
+	assert.ElementsMatch(t, []string{"read", "bash", "edit", "write", "find", "grep", "ls"}, toolNames)
 }
 
 func TestPrompt_ContextWindowFallback(t *testing.T) {

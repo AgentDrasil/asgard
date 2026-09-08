@@ -17,10 +17,10 @@ func TestBuildDefaultPrompt(t *testing.T) {
 		t.Fatalf("identity missing:\n%s", got)
 	}
 	if !strings.Contains(got, "- read: read files\n- bash: run commands") {
-		t.Fatalf("tools list wrong (only snippet-bearing tools, in selection order):\n%s", got)
+		t.Fatalf("tools list wrong (snippet-bearing tools keep their description):\n%s", got)
 	}
-	if strings.Contains(got, "grep:") {
-		t.Fatal("tools without snippets must be omitted")
+	if !strings.Contains(got, "\n- grep\n") {
+		t.Fatal("tools without snippets must still be listed by name")
 	}
 	if !strings.Contains(got, "Current working directory: /home/u/proj") {
 		t.Fatalf("cwd line missing:\n%s", got)
@@ -98,14 +98,22 @@ func TestCustomPromptPath(t *testing.T) {
 		CWD:                "/w",
 		ContextFiles:       []ContextFile{{Path: "/w/AGENTS.md", Content: "ctx"}},
 		AppendSystemPrompt: "APPEND",
+		SelectedTools:      []string{"read", "write"},
+		ToolSnippets:       map[string]string{"read": "read files"},
 	})
 	if !strings.HasPrefix(got, "You are custom.") {
-		t.Fatalf("custom prompt must replace default body:\n%s", got)
+		t.Fatalf("custom prompt must replace the default identity:\n%s", got)
 	}
-	if strings.Contains(got, "Available tools:") {
-		t.Fatal("custom prompt must not include default body sections")
+	if strings.Contains(got, "expert coding assistant") {
+		t.Fatal("default identity must not leak into custom prompt path")
 	}
-	wantOrder := []string{"APPEND", "<project_context>", "Current working directory: /w"}
+	if !strings.Contains(got, "Available tools:\n- read: read files\n- write") {
+		t.Fatalf("custom prompt must still list available tools:\n%s", got)
+	}
+	if !strings.Contains(got, "Guidelines:\n- Be concise in your responses") {
+		t.Fatalf("custom prompt must still include guidelines:\n%s", got)
+	}
+	wantOrder := []string{"You are custom.", "Available tools:", "Guidelines:", "APPEND", "<project_context>", "Current working directory: /w"}
 	last := -1
 	for _, w := range wantOrder {
 		i := strings.Index(got, w)
@@ -113,6 +121,17 @@ func TestCustomPromptPath(t *testing.T) {
 			t.Fatalf("ordering broken around %q:\n%s", w, got)
 		}
 		last = i
+	}
+}
+
+func TestCustomPromptBlankFallsBackToIdentity(t *testing.T) {
+	got := BuildSystemPrompt(Options{
+		CustomPrompt:  "   \n\t",
+		CWD:           "/w",
+		SelectedTools: []string{"read"},
+	})
+	if !strings.HasPrefix(got, "You are an expert coding assistant") {
+		t.Fatalf("blank custom prompt must fall back to default identity:\n%s", got)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
 var idRegex = regexp.MustCompile("^[a-z0-9-_]+$")
@@ -52,6 +53,12 @@ type AgentConfig struct {
 	// "resume" (default): reuse the previous session ID stored in DB.
 	// "fresh": always start a new session; do not persist the returned session ID.
 	SessionMode string `yaml:"session_mode"`
+
+	// ToolAccess controls the tool set exposed to the agent. "full" (default):
+	// all built-in tools. "doc-only": read/search tools plus markdown-only
+	// write_doc/edit_doc, for analysis and review agents that must not modify
+	// source code. Currently honored by the simplest CLI only.
+	ToolAccess string `yaml:"tool_access"`
 }
 
 // IsMainAgent returns true if MainAgent is true or nil (default).
@@ -165,6 +172,13 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 		// valid
 	default:
 		return fmt.Errorf("session_mode must be \"resume\" or \"fresh\", got %q", cfg.SessionMode)
+	}
+
+	switch cfg.ToolAccess {
+	case "", types.ToolAccessFull, types.ToolAccessDocOnly:
+		// valid
+	default:
+		return fmt.Errorf("tool_access must be %q or %q, got %q", types.ToolAccessFull, types.ToolAccessDocOnly, cfg.ToolAccess)
 	}
 
 	return nil

@@ -93,13 +93,13 @@ func LoadProjectContextFiles(cwd, agentDir string) []ContextFile {
 
 // Options configures BuildSystemPrompt.
 type Options struct {
-	// CustomPrompt replaces the entire default body (context files, cwd line,
-	// and append text are still applied around it).
+	// CustomPrompt replaces the default identity paragraph; the tools list,
+	// guidelines, context files, and cwd line are still assembled around it.
 	CustomPrompt string
 	// SelectedTools lists the active tool names. Defaults to read/bash/edit/write.
 	SelectedTools []string
 	// ToolSnippets maps tool name to its one-line "Available tools" entry;
-	// tools without a snippet are omitted from the list.
+	// tools without a snippet are listed by name only.
 	ToolSnippets map[string]string
 	// PromptGuidelines are extra guideline bullets (deduplicated).
 	PromptGuidelines []string
@@ -144,18 +144,17 @@ func BuildSystemPrompt(opts Options) string {
 
 	var b strings.Builder
 
-	if opts.CustomPrompt != "" {
-		b.WriteString(opts.CustomPrompt)
-		b.WriteString(appendSection)
-		b.WriteString(projectContextSection(contextFiles))
-		b.WriteString("\nCurrent working directory: " + promptCwd + "\n")
-		return b.String()
+	identity := baseIdentity
+	if custom := strings.TrimSpace(opts.CustomPrompt); custom != "" {
+		identity = custom
 	}
 
 	visibleTools := make([]string, 0, len(tools))
 	for _, name := range tools {
 		if snippet := opts.ToolSnippets[name]; snippet != "" {
 			visibleTools = append(visibleTools, "- "+name+": "+snippet)
+		} else {
+			visibleTools = append(visibleTools, "- "+name)
 		}
 	}
 	toolsList := "(none)"
@@ -192,15 +191,7 @@ func BuildSystemPrompt(opts Options) string {
 		guidelines[i] = "- " + g
 	}
 
-	b.WriteString(baseIdentity + `
-
-Available tools:
-` + toolsList + `
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
-Guidelines:
-` + strings.Join(guidelines, "\n") + ``)
+	b.WriteString(identity + "\n\nAvailable tools:\n" + toolsList + "\n\nGuidelines:\n" + strings.Join(guidelines, "\n"))
 
 	b.WriteString(appendSection)
 	b.WriteString(projectContextSection(contextFiles))

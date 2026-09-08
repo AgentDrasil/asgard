@@ -19,6 +19,7 @@ var (
 	simplestSession     string
 	simplestUsage       bool
 	simplestModel       string
+	simplestToolAccess  string
 	simplestAddTmpToDir bool
 )
 
@@ -80,10 +81,17 @@ var simplestCmd = &cobra.Command{
 			}
 		}
 
+		switch simplestToolAccess {
+		case "", types.ToolAccessFull, types.ToolAccessDocOnly:
+		default:
+			return fmt.Errorf("invalid --tool-access %q: must be %q or %q", simplestToolAccess, types.ToolAccessFull, types.ToolAccessDocOnly)
+		}
+
 		result, err := simplest.Prompt(ctx, prompt, types.PromptOptions{
 			Dir:            dir,
 			SessionID:      simplestSession,
 			Model:          simplestModel,
+			ToolAccess:     simplestToolAccess,
 			AddTmpToDir:    simplestAddTmpToDir,
 			ReportCallback: buildHTTPReporter(),
 		})
@@ -107,6 +115,7 @@ func init() {
 	simplestCmd.Flags().StringVarP(&simplestSession, "session", "s", "", "Session ID to resume")
 	simplestCmd.Flags().BoolVar(&simplestUsage, "usage", false, "Print token usage information")
 	simplestCmd.Flags().StringVarP(&simplestModel, "model", "m", "", "Model to select for the session")
+	simplestCmd.Flags().StringVar(&simplestToolAccess, "tool-access", "", fmt.Sprintf("Tool set exposed to the agent: %q or %q (default %q)", types.ToolAccessFull, types.ToolAccessDocOnly, types.ToolAccessFull))
 	simplestCmd.Flags().BoolVar(&simplestAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent (no-op for simplest)")
 
 	simplestCmd.AddCommand(simplestModelsCmd)

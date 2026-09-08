@@ -29,6 +29,16 @@ type SandboxSpec interface {
 	ExtraArgs() []string
 }
 
+// Tool access modes controlling which tools an agent may use.
+const (
+	// ToolAccessFull exposes the complete built-in tool set (default).
+	ToolAccessFull = "full"
+	// ToolAccessDocOnly exposes read/search tools plus the markdown-only
+	// write_doc/edit_doc tools; command execution and source-code editing
+	// are unavailable.
+	ToolAccessDocOnly = "doc-only"
+)
+
 // CLIClient defines the interface that all CLI agents must implement.
 type CLIClient interface {
 	Usage(ctx context.Context, opts UsageOptions) ([]ModelUsage, error)
@@ -109,6 +119,11 @@ type PromptOptions struct {
 
 	// Model is the name of the model to select.
 	Model string
+
+	// ToolAccess selects the tool set exposed to the agent. Valid values are
+	// ToolAccessFull (default) and ToolAccessDocOnly. Unsupported values must
+	// be rejected by the CLI (fail closed).
+	ToolAccess string
 
 	// AddTmpToDir adds /tmp as an additional allowed directory for the agent.
 	AddTmpToDir bool

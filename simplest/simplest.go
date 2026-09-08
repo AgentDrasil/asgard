@@ -90,12 +90,16 @@ type (
 	Registry = tools.Registry
 	// Func adapts a plain Go function into an agent tool.
 	Func = tools.Func
+	// DocToolOptions configures the markdown-only doc tools.
+	DocToolOptions = tools.DocToolOptions
 )
 
 var (
 	DefaultRegistry = tools.DefaultRegistry
 	NewRegistry     = tools.NewRegistry
 	AllToolNames    = tools.AllToolNames
+	NewWriteDocTool = tools.NewWriteDocTool
+	NewEditDocTool  = tools.NewEditDocTool
 )
 
 // ---- sessions ----
