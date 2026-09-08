@@ -154,3 +154,34 @@ func TestPrepareAgent_RestoresPreexistingAmbient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "# my own instructions", string(data))
 }
+
+// TestPrepareAgent_ReadOnlyAmbient reproduces the host-environment failure
+// where the user's read-only ~/.config/opencode/AGENTS.md made the run die
+// with "neutralizing ambient file: permission denied": the takeover must
+// chmod the file writable for the run and restore content and mode after.
+func TestPrepareAgent_ReadOnlyAmbient(t *testing.T) {
+	home := withSandboxHome(t)
+	writeContract(t, home, &common.Contract{AgentID: "intend", Body: "x"})
+
+	opencodeDir := filepath.Join(home, ".config", "opencode")
+	require.NoError(t, os.MkdirAll(opencodeDir, 0755))
+	ambient := filepath.Join(opencodeDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(ambient, []byte("# my own instructions"), 0444))
+
+	_, cleanup, err := PrepareAgent(types.PromptOptions{})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(ambient)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "managed by aw")
+
+	cleanup()
+
+	data, err = os.ReadFile(ambient)
+	require.NoError(t, err)
+	assert.Equal(t, "# my own instructions", string(data))
+
+	st, err := os.Stat(ambient)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0444), st.Mode().Perm())
+}

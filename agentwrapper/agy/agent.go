@@ -20,6 +20,10 @@ const globalInstructionsFile = "GEMINI.md"
 // cleanup function that restores the previous state. It returns a no-op
 // cleanup when no contract is mounted (plain `aw agy` usage outside the
 // Asgard sandbox).
+//
+// A pre-existing read-only GEMINI.md (host users sometimes chmod it to keep
+// the CLI from editing it) is chmod'ed writable for the duration of the run
+// and restored — content and permission bits — by the cleanup function.
 func InstallContract() (func(), error) {
 	noop := func() {}
 
@@ -38,13 +42,9 @@ func InstallContract() (func(), error) {
 	}
 
 	target := filepath.Join(geminiDir, globalInstructionsFile)
-	var previous []byte
-	existed := false
-	if data, readErr := os.ReadFile(target); readErr == nil {
-		previous = data
-		existed = true
-	} else if !os.IsNotExist(readErr) {
-		return noop, fmt.Errorf("reading %q: %w", target, readErr)
+	takeover, err := common.BeginFileTakeover(target)
+	if err != nil {
+		return noop, err
 	}
 
 	composed := common.ComposePrompt(
@@ -55,21 +55,9 @@ func InstallContract() (func(), error) {
 	)
 	content := common.ManagedMarker + "\n\n" + strings.TrimSpace(composed) + "\n"
 	if err := os.WriteFile(target, []byte(content), 0644); err != nil {
+		takeover.Restore()
 		return noop, fmt.Errorf("writing %q: %w", target, err)
 	}
 
-	cleanup := func() {
-		if !existed {
-			data, err := os.ReadFile(target)
-			if err != nil {
-				return
-			}
-			if strings.HasPrefix(string(data), common.ManagedMarker) {
-				_ = os.Remove(target)
-			}
-			return
-		}
-		_ = os.WriteFile(target, previous, 0644)
-	}
-	return cleanup, nil
+	return takeover.Restore, nil
 }

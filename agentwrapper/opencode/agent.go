@@ -78,53 +78,26 @@ func PrepareAgent(opts types.PromptOptions) (string, func(), error) {
 
 	// Transiently neutralize the global ambient AGENTS.md (usually the host
 	// user's own file bound rw into the sandbox) so it cannot compete with
-	// or duplicate the generated primary agent. Restored by cleanup.
+	// or duplicate the generated primary agent. Restored by cleanup; a
+	// read-only ambient file is chmod'ed writable for the run and its
+	// permission bits are restored afterwards.
 	ambientPath := filepath.Join(opencodeDir, globalAgentsMD)
-	ambientBackup, ambientExisted, err := neutralizeAmbient(ambientPath)
+	takeover, err := common.BeginFileTakeover(ambientPath)
 	if err != nil {
 		_ = os.Remove(agentFile)
 		return "", noop, err
 	}
+	if err := os.WriteFile(ambientPath, []byte(common.ManagedMarker+"\n"), 0644); err != nil {
+		takeover.Restore()
+		_ = os.Remove(agentFile)
+		return "", noop, fmt.Errorf("neutralizing ambient file %q: %w", ambientPath, err)
+	}
 
 	cleanup := func() {
 		_ = os.Remove(agentFile)
-		restoreAmbient(ambientPath, ambientBackup, ambientExisted)
+		takeover.Restore()
 	}
 	return agentName, cleanup, nil
-}
-
-// neutralizeAmbient replaces path with an empty file and returns its previous
-// content and whether it existed, for later restoration.
-func neutralizeAmbient(path string) (backup []byte, existed bool, err error) {
-	if data, readErr := os.ReadFile(path); readErr == nil {
-		backup = data
-		existed = true
-	} else if !os.IsNotExist(readErr) {
-		return nil, false, fmt.Errorf("reading ambient file %q: %w", path, readErr)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return nil, false, fmt.Errorf("creating config directory for %q: %w", path, err)
-	}
-	if err := os.WriteFile(path, []byte(common.ManagedMarker+"\n"), 0644); err != nil {
-		return nil, false, fmt.Errorf("neutralizing ambient file %q: %w", path, err)
-	}
-	return backup, existed, nil
-}
-
-// restoreAmbient puts back the content neutralizeAmbient replaced, or removes
-// the file when it did not exist before.
-func restoreAmbient(path string, backup []byte, existed bool) {
-	if !existed {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return
-		}
-		if strings.HasPrefix(string(data), common.ManagedMarker) {
-			_ = os.Remove(path)
-		}
-		return
-	}
-	_ = os.WriteFile(path, backup, 0644)
 }
 
 // renderAgentFile builds the full content of the opencode agent markdown

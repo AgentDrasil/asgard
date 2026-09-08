@@ -80,3 +80,57 @@ func TestInstallContract_RestoresUserContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "# my gemini rules", string(data))
 }
+
+// TestInstallContract_ReadOnlyUserFile reproduces the workflow failure where
+// a host user's read-only GEMINI.md (bound rw into the sandbox) made the
+// contract install die with "open GEMINI.md: permission denied": the
+// takeover must chmod the file writable for the run and restore the original
+// content and mode afterwards.
+func TestInstallContract_ReadOnlyUserFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestContract(t, &common.Contract{AgentID: "x", Body: "x"})
+
+	geminiDir := filepath.Join(home, ".gemini")
+	require.NoError(t, os.MkdirAll(geminiDir, 0755))
+	target := filepath.Join(geminiDir, "GEMINI.md")
+	require.NoError(t, os.WriteFile(target, []byte("# my locked gemini rules"), 0444))
+
+	cleanup, err := InstallContract()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "managed by aw")
+
+	cleanup()
+
+	data, err = os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "# my locked gemini rules", string(data))
+
+	st, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0444), st.Mode().Perm())
+}
+
+// TestInstallContract_CrashLeftoverNotPreserved ensures a GEMINI.md left
+// behind by a previous crashed run (still carrying the managed marker) is
+// removed instead of being restored as if it were user content.
+func TestInstallContract_CrashLeftoverNotPreserved(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestContract(t, &common.Contract{AgentID: "x", Body: "x"})
+
+	geminiDir := filepath.Join(home, ".gemini")
+	require.NoError(t, os.MkdirAll(geminiDir, 0755))
+	target := filepath.Join(geminiDir, "GEMINI.md")
+	require.NoError(t, os.WriteFile(target, []byte(common.ManagedMarker+"\nstale"), 0644))
+
+	cleanup, err := InstallContract()
+	require.NoError(t, err)
+	cleanup()
+
+	_, err = os.Stat(target)
+	assert.True(t, os.IsNotExist(err))
+}
