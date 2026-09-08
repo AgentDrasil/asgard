@@ -3,6 +3,7 @@ package agy
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -67,6 +68,7 @@ type streamResult struct {
 	ConversationID  string       `json:"conversation_id"`
 	Status          string       `json:"status"`
 	Response        string       `json:"response"`
+	Error           string       `json:"error,omitempty"`
 	DurationSeconds float64      `json:"duration_seconds"`
 	NumTurns        int          `json:"num_turns"`
 	Usage           *streamUsage `json:"usage,omitempty"`
@@ -76,15 +78,16 @@ type streamResult struct {
 
 // parseStream reads NDJSON lines from r, processes each stream-json event,
 // fires cb for tool and agent_response steps, and returns the final session ID,
-// last content (= result.response), and token usage.
+// last content (= result.response), token usage, and a run error when the
+// final result event reports status ERROR (e.g. authentication failure).
 //
 // Event handling:
 //   - "init"        → captures conversation_id as sessionID
 //   - "step_update" (tool ACTIVE)          → cb("TOOL", "tool_call",   "name({...params...})")
 //   - "step_update" (tool DONE/ERROR)      → cb("TOOL", "tool_result", "name → output")
 //   - "step_update" (agent_response DONE)  → cb("MODEL","agent_response", accumulated text_delta)
-//   - "result"      → captures response + usage
-func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, lastContent string, inputTokens, outMaxTokens int) {
+//   - "result"      → captures response + usage; status ERROR → runErr
+func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, lastContent string, inputTokens, outMaxTokens int, runErr error) {
 	outMaxTokens = maxTokens
 	if outMaxTokens <= 0 {
 		outMaxTokens = types.DefaultContextWindow
@@ -189,6 +192,13 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, la
 				sessionID = res.ConversationID
 			}
 			lastContent = res.Response
+			if res.Status == "ERROR" {
+				msg := res.Error
+				if msg == "" {
+					msg = "agy run finished with status ERROR"
+				}
+				runErr = fmt.Errorf("agy run failed: %s", msg)
+			}
 			if res.Usage != nil && res.Usage.InputTokens > 0 {
 				// Only fallback to result usage if no step_update usage was observed,
 				// avoiding cumulative billing tokens (e.g. 10534+109+4555=15198) overriding single-step context usage (4555).

@@ -14,15 +14,30 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
+// agyEfforts is the set of --effort values agy actually accepts. Hyphen or
+// slash suffixes outside this set are part of the model name itself (e.g.
+// "claude-opus-4-6-thinking" is a distinct agy model, not an effort).
+var agyEfforts = map[string]bool{
+	"low":    true,
+	"medium": true,
+	"high":   true,
+}
+
 // SplitModelVariant parses a model string that may contain a variant/effort suffix
 // (e.g. "gemini-3.7-flash-low" -> "gemini-3.7-flash", "low" or "gemini-3.7-flash/low" -> "gemini-3.7-flash", "low").
+// Only a trailing segment that is a valid agy effort is treated as a variant;
+// name-like suffixes such as "-thinking" stay part of the model name.
 func SplitModelVariant(model string) (string, string) {
-	if base, variant := types.SplitModelVariant(model); variant != "" {
-		return base, variant
+	parts := strings.Split(model, "/")
+	if len(parts) > 1 {
+		last := strings.ToLower(parts[len(parts)-1])
+		if agyEfforts[last] {
+			return strings.Join(parts[:len(parts)-1], "/"), last
+		}
 	}
 	if idx := strings.LastIndex(model, "-"); idx > 0 {
 		suffix := strings.ToLower(model[idx+1:])
-		if types.KnownVariants[suffix] {
+		if agyEfforts[suffix] {
 			return model[:idx], suffix
 		}
 	}
@@ -101,12 +116,21 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 
 	maxTokens := types.GetModelContextWindow(opts.Model)
-	sessionID, lastContent, inputTokens, outMaxTokens := parseStream(stdout, opts.ReportCallback, maxTokens)
+	sessionID, lastContent, inputTokens, outMaxTokens, runErr := parseStream(stdout, opts.ReportCallback, maxTokens)
 
 	// Wait for the subprocess. A non-zero exit after successful output is
-	// non-fatal — log and continue.
-	if err := cmd.Wait(); err != nil {
-		log.Warn().Err(err).Msg("agy/prompt: agy exited with error")
+	// non-fatal — log and continue. A non-zero exit with no output at all
+	// (e.g. the CLI died before producing a result event) is fatal:
+	// swallowing it would report an empty-but-successful run.
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if runErr == nil && lastContent == "" && sessionID == "" {
+			return nil, fmt.Errorf("waiting for agy: %w", waitErr)
+		}
+		log.Warn().Err(waitErr).Msg("agy/prompt: agy exited with error")
+	}
+	if runErr != nil {
+		return nil, runErr
 	}
 
 	return &types.PromptResult{

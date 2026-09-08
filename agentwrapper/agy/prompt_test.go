@@ -78,6 +78,10 @@ func TestSplitModelVariant(t *testing.T) {
 		{"gemini-3.7-flash/low", "gemini-3.7-flash", "low"},
 		{"gemini-3.7-flash", "gemini-3.7-flash", ""},
 		{"claude-3-7-sonnet-high", "claude-3-7-sonnet", "high"},
+		// "-thinking" is a distinct agy model-name suffix, not an effort:
+		// splitting it off produced `--effort thinking`, which agy rejects.
+		{"claude-opus-4-6-thinking", "claude-opus-4-6-thinking", ""},
+		{"claude-opus-4-6-thinking/high", "claude-opus-4-6-thinking", "high"},
 	}
 
 	for _, tt := range tests {
