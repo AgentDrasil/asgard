@@ -42,7 +42,6 @@ func TestClient_SandboxSpecPaths(t *testing.T) {
 	client := NewClient()
 	home := "/home/testuser"
 
-	assert.Equal(t, "/home/testuser/.config/simplest/AGENTS.md", client.SystemPromptConfigPath(home))
 	assert.Equal(t, "/home/testuser/.config/simplest/skills", client.SkillsMountPath(home))
 	assert.Equal(t, "/home/testuser/.config/simplest", client.AuthDirectory(home))
 	assert.Equal(t, []string{"/home/testuser/.simplest", "/home/testuser/.config/simplest"}, client.MountDirectories(home))

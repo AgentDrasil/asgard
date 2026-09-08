@@ -19,10 +19,14 @@ import (
 type ReportFunc func(stepIndex int, source, entryType, content string, metadata map[string]any)
 
 // SandboxSpec defines the agent-specific configurations needed when setting up a bubblewrap sandbox.
+//
+// Agent identity is delivered exclusively through the AW_AGENTS.md contract
+// (mounted at /session/AW_AGENTS.md, see agentwrapper/common); the aw
+// dispatcher inside the sandbox translates it for each CLI. The sandbox
+// layer therefore never mounts CLI-specific prompt configuration files.
 type SandboxSpec interface {
 	SystemPromptHeader() string
 	SystemPromptPeerHeader() string
-	SystemPromptConfigPath(home string) string
 	SkillsMountPath(home string) string
 	MountDirectories(home string) []string
 	AuthDirectory(home string) string
@@ -119,6 +123,12 @@ type PromptOptions struct {
 
 	// Model is the name of the model to select.
 	Model string
+
+	// AgentID identifies the Asgard agent being run (agentspec.AgentConfig.ID).
+	// The sandbox-side adapter uses it to materialize CLI-native agent
+	// definitions (e.g. an opencode agents/<id>.md file). When empty, the
+	// adapter falls back to the agent_id in the AW_AGENTS.md contract.
+	AgentID string
 
 	// ToolAccess selects the tool set exposed to the agent. Valid values are
 	// ToolAccessFull (default) and ToolAccessDocOnly. Unsupported values must

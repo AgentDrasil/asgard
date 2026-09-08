@@ -20,11 +20,11 @@ Here is the breakdown of responsibilities across Asgard:
    - Validates user setup/authentication files (`validate.go`).
 
 2. **Outside `agentwrapper` (Where else logic resides)**:
-   - **`lib/bwrap/`**: Consumes `types.SandboxSpec` via `agentwrapper.GetSandboxSpec(cliName)` to configure Bubblewrap sandbox bind-mounts, authentication directories, and system prompt generation (`SystemPromptConfigPath`, `SystemPromptHeader`).
-   - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
-   - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods.
-   - **`lib/agents/run/`**: Handles runtime agent execution within Bubblewrap sandboxes and performs quota checks using `agentwrapper.CheckQuota(cli, model)`.
-   - **`lib/api/`**: Serves HTTP endpoints (e.g., `/api/quota`) by delegating quota queries to `agentwrapper.GetQuota(ctx)`.
+    - **`lib/bwrap/`**: Renders the `AW_AGENTS.md` contract (agent identity metadata + prompt body) and bind-mounts it at the canonical `/session/AW_AGENTS.md` path; consumes `types.SandboxSpec` via `agentwrapper.GetSandboxSpec(cliName)` for skills mounts, directory binds, authentication directories, and extra args.
+    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
+    - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods. Inside the sandbox, `aw` loads the `AW_AGENTS.md` contract (`agentwrapper/common`) and translates it into CLI-native agent definitions (opencode `agents/<id>.md`, simplest custom prompt, agy `GEMINI.md`).
+    - **`lib/agents/run/`**: Handles runtime agent execution within Bubblewrap sandboxes and performs quota checks using `agentwrapper.CheckQuota(cli, model)`.
+    - **`lib/api/`**: Serves HTTP endpoints (e.g., `/api/quota`) by delegating quota queries to `agentwrapper.GetQuota(ctx)`.
 
 ---
 
@@ -46,13 +46,36 @@ type CLIClient interface {
 type SandboxSpec interface {
     SystemPromptHeader() string
     SystemPromptPeerHeader() string
-    SystemPromptConfigPath(home string) string
     SkillsMountPath(home string) string
     MountDirectories(home string) []string
     AuthDirectory(home string) string
     ExtraArgs() []string
 }
 ```
+
+Agent identity is NOT delivered through `SandboxSpec`. Instead, the host
+renders the `AW_AGENTS.md` contract (agent id/name/team/tool-access metadata
+in YAML frontmatter plus the prompt body) and bind-mounts it at the canonical
+`/session/AW_AGENTS.md` path (`$AW_AGENTS_PATH`). The `aw` subcommand running
+inside the sandbox loads the contract via `agentwrapper/common` and
+translates it into CLI-native form:
+
+- **opencode**: writes `~/.config/opencode/agents/<agent-id>.md` (frontmatter
+  with `mode: primary` and `permission` rules derived from the contract, e.g.
+  doc-only agents lose `bash` while editing stays available) and runs
+  `opencode run --agent <agent-id>`, so the contract identity replaces
+  opencode's built-in `build` persona instead of arriving as weak ambient
+  instructions.
+- **simplest**: composes the in-process system prompt from the CLI protocol
+  headers plus the contract body, and selects/crops the tool set from the
+  contract's `tool_access`.
+- **agy**: installs the composed prompt into `~/.gemini/GEMINI.md` for the
+  duration of the run and restores the previous content afterwards.
+
+To support a new CLI, the adapter only needs a translation step inside `aw`;
+no sandbox mount code changes are required. Pass the agent identity on the
+`aw <cli>` command line with `--agent <agent-id>` (mapped to
+`types.PromptOptions.AgentID`), which complements the contract metadata.
 
 ---
 
@@ -100,10 +123,6 @@ func (c *Client) SystemPromptHeader() string {
 
 func (c *Client) SystemPromptPeerHeader() string {
     return "## Peer Collaboration Instructions\n..."
-}
-
-func (c *Client) SystemPromptConfigPath(home string) string {
-    return home + "/.myagent/SYSTEM.md"
 }
 
 func (c *Client) SkillsMountPath(home string) string {

@@ -76,6 +76,14 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		}
 	}
 
+	// When the AW_AGENTS.md contract is mounted (Asgard sandbox runs),
+	// install it as agy's global instructions for the duration of the run.
+	restoreContract, err := InstallContract()
+	if err != nil {
+		return nil, err
+	}
+	defer restoreContract()
+
 	argv := buildPromptArgv(runDir, prompt, opts)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/simplest"
 )
@@ -149,9 +150,16 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("building session context: %w", err)
 	}
 
-	// Assemble tools according to the configured tool access mode
+	// Assemble tools according to the configured tool access mode.
+	// The --tool-access flag wins when set; otherwise the AW_AGENTS.md
+	// contract metadata (when mounted) provides it.
+	toolAccess := opts.ToolAccess
+	contract, hasContract := common.Load()
+	if toolAccess == "" && hasContract {
+		toolAccess = contract.ToolAccess
+	}
 	reg := simplest.DefaultRegistry(runDir)
-	toolList, toolNames, err := selectTools(opts.ToolAccess, runDir, reg.Tools(), docToolOptions())
+	toolList, toolNames, err := selectTools(toolAccess, runDir, reg.Tools(), docToolOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +171,24 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 	agentCfgDir := (&Client{}).AuthDirectory(home)
 	contextFiles := simplest.LoadProjectContextFiles(runDir, agentCfgDir)
-	customPrompt, contextFiles := agentIdentityPrompt(agentCfgDir, contextFiles)
-	if customPrompt == "" && opts.ToolAccess == types.ToolAccessDocOnly {
+	var customPrompt string
+	if hasContract {
+		// The AW_AGENTS.md contract is the authoritative agent identity in
+		// sandbox runs: compose the CLI protocol headers with its body. Any
+		// lingering instruction files under the agent config directory (e.g.
+		// the host user's own AGENTS.md bound into the sandbox) are dropped
+		// so they cannot compete with the contract.
+		customPrompt = common.ComposePrompt(
+			(&Client{}).SystemPromptHeader(),
+			(&Client{}).SystemPromptPeerHeader(),
+			contract.Team,
+			contract.Body,
+		)
+		contextFiles = filterAgentCfgFiles(agentCfgDir, contextFiles)
+	} else {
+		customPrompt, contextFiles = agentIdentityPrompt(agentCfgDir, contextFiles)
+	}
+	if customPrompt == "" && toolAccess == types.ToolAccessDocOnly {
 		customPrompt = docOnlyIdentity
 	}
 
@@ -363,6 +387,22 @@ func docToolOptions() simplest.DocToolOptions {
 		return simplest.DocToolOptions{}
 	}
 	return simplest.DocToolOptions{AllowedDirs: cfg.DocToolAllowedDirs}
+}
+
+// filterAgentCfgFiles drops loaded instruction files that live under the
+// agent config directory (the host user's own files bound into the sandbox).
+// Used when the AW_AGENTS.md contract provides the agent identity, so ambient
+// host-user files cannot compete with the contract. It returns a new slice
+// and never mutates the input.
+func filterAgentCfgFiles(agentCfgDir string, files []simplest.ContextFile) []simplest.ContextFile {
+	prefix := strings.TrimSuffix(agentCfgDir, "/") + "/"
+	kept := make([]simplest.ContextFile, 0, len(files))
+	for _, f := range files {
+		if !strings.HasPrefix(f.Path, prefix) {
+			kept = append(kept, f)
+		}
+	}
+	return kept
 }
 
 // agentIdentityPrompt extracts the agent-level instruction file (mounted by

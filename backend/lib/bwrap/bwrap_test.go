@@ -13,7 +13,7 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
-func TestBuildSystemPrompt(t *testing.T) {
+func TestBuildContractBody(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -22,154 +22,51 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		cli            string
 		agentsMDPath   string
-		hasTeam        bool
 		langRules      string
 		wantContains   []string
 		wantNotContain []string
 	}{
 		{
-			name:         "agy with AGENTS.md, team and langRules",
-			cli:          "agy",
+			name:         "AGENTS.md with langRules",
 			agentsMDPath: agentsMDPath,
-			hasTeam:      true,
 			langRules:    "## Language Preferences\n\n- Responses/Conversations: Chinese (Simplified)",
 			wantContains: []string{
 				"## Language Preferences",
 				"Responses/Conversations: Chinese (Simplified)",
-				"/bin/ask-user <question>",
-				"call-peer",
 				"# Custom Instructions",
 				"Do stuff.",
 			},
-		},
-		{
-			name:         "agy with AGENTS.md and team",
-			cli:          "agy",
-			agentsMDPath: agentsMDPath,
-			hasTeam:      true,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"call-peer",
-				"# Custom Instructions",
-				"Do stuff.",
-			},
-		},
-		{
-			name:         "agy with AGENTS.md and no team",
-			cli:          "agy",
-			agentsMDPath: agentsMDPath,
-			hasTeam:      false,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"# Custom Instructions",
-				"Do stuff.",
-			},
+			// CLI-specific protocol headers are composed sandbox-side, never in the contract body.
 			wantNotContain: []string{
+				"/bin/ask-user",
 				"call-peer",
 			},
 		},
 		{
-			name:         "agy without AGENTS.md with team",
-			cli:          "agy",
-			agentsMDPath: "",
-			hasTeam:      true,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"call-peer",
-			},
-		},
-		{
-			name:         "agy without AGENTS.md without team",
-			cli:          "agy",
-			agentsMDPath: "",
-			hasTeam:      false,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-			},
-			wantNotContain: []string{
-				"call-peer",
-			},
-		},
-		{
-			name:         "opencode with AGENTS.md with team and langRules",
-			cli:          "opencode",
+			name:         "AGENTS.md without langRules",
 			agentsMDPath: agentsMDPath,
-			hasTeam:      true,
-			langRules:    "## Language Preferences\n\n- Responses/Conversations: English (US)",
+			langRules:    "",
 			wantContains: []string{
-				"## Language Preferences",
-				"Responses/Conversations: English (US)",
-				"/bin/ask-user <question>",
-				"call-peer",
 				"# Custom Instructions",
 				"Do stuff.",
 			},
 		},
 		{
-			name:         "opencode with AGENTS.md with team",
-			cli:          "opencode",
-			agentsMDPath: agentsMDPath,
-			hasTeam:      true,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"call-peer",
-				"# Custom Instructions",
-				"Do stuff.",
-			},
-		},
-		{
-			name:         "opencode with AGENTS.md without team",
-			cli:          "opencode",
-			agentsMDPath: agentsMDPath,
-			hasTeam:      false,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-				"# Custom Instructions",
-				"Do stuff.",
-			},
-			wantNotContain: []string{
-				"call-peer",
-			},
-		},
-		{
-			name:         "opencode without AGENTS.md without team",
-			cli:          "opencode",
+			name:         "langRules only",
 			agentsMDPath: "",
-			hasTeam:      false,
-			langRules:    "",
-			wantContains: []string{
-				"/bin/ask-user <question>",
-			},
-			wantNotContain: []string{
-				"call-peer",
-			},
-		},
-		{
-			name:         "unknown CLI without AGENTS.md returns empty",
-			cli:          "unknown",
-			agentsMDPath: "",
-			hasTeam:      true,
-			langRules:    "",
-			wantContains: nil,
-		},
-		{
-			name:         "unknown CLI with langRules returns langRules",
-			cli:          "unknown",
-			agentsMDPath: "",
-			hasTeam:      true,
 			langRules:    "## Language Preferences\n\n- Responses/Conversations: English (US)",
 			wantContains: []string{
 				"## Language Preferences",
 				"Responses/Conversations: English (US)",
 			},
+		},
+		{
+			name:           "missing AGENTS.md is tolerated",
+			agentsMDPath:   filepath.Join(tmpDir, "absent.md"),
+			langRules:      "",
+			wantContains:   nil,
+			wantNotContain: nil,
 		},
 	}
 
@@ -177,7 +74,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := buildSystemPrompt(tt.cli, tt.agentsMDPath, tt.hasTeam, tt.langRules)
+			got, err := buildContractBody(tt.agentsMDPath, tt.langRules)
 			require.NoError(t, err)
 
 			for _, want := range tt.wantContains {
@@ -191,6 +88,40 @@ func TestBuildSystemPrompt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteContractFile(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentsMDPath := filepath.Join(tmpDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(agentsMDPath, []byte("agents instructions"), 0644))
+
+	cfg := &agentspec.AgentConfig{
+		ID:         "test-agent",
+		Name:       "Test Agent",
+		Team:       "test-team",
+		ToolAccess: "doc-only",
+	}
+
+	path, err := writeContractFile(tmpDir, cfg, agentsMDPath, "## Language Preferences")
+	require.NoError(t, err)
+	require.NotEmpty(t, path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "agent_id: test-agent")
+	assert.Contains(t, content, "agent_name: Test Agent")
+	assert.Contains(t, content, "tool_access: doc-only")
+	assert.Contains(t, content, "team: test-team")
+	assert.Contains(t, content, "## Language Preferences")
+	assert.Contains(t, content, "agents instructions")
+
+	// Empty contract renders nothing.
+	empty, err := writeContractFile(tmpDir, nil, "", "")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
 
 func TestBuildArgs(t *testing.T) {
@@ -267,23 +198,26 @@ func TestBuildArgs(t *testing.T) {
 	geminiDir := filepath.Join(home, ".gemini")
 	assert.Contains(t, argStr, "--bind "+geminiDir+" "+geminiDir)
 
-	// Verify agy system prompt: a generated file is mounted at GEMINI.md (not the raw AGENTS.md)
-	expectedAgyDest := filepath.Join(home, ".gemini", "GEMINI.md")
+	// Verify the unified AW_AGENTS.md contract mount: one canonical sandbox
+	// path for every CLI, plus the env pointer.
 	expectedAgySkills := filepath.Join(home, ".gemini", "antigravity-cli", "skills")
-	assert.Contains(t, argStr, "--ro-bind "+expectedTmpDir+"/.asgard_system_prompt "+expectedAgyDest)
+	assert.Contains(t, argStr, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
+	assert.Contains(t, argStr, "--ro-bind "+expectedTmpDir+"/.aw_agents.md /session/AW_AGENTS.md")
 	assert.Contains(t, argStr, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedAgySkills)
 
-	// Verify the generated prompt file contains language rules, tool instructions and the AGENTS.md content
-	promptContent, readErr := os.ReadFile(filepath.Join(expectedTmpDir, ".asgard_system_prompt"))
+	// Verify the rendered contract carries metadata frontmatter plus the raw
+	// body (CLI protocol headers are composed sandbox-side, never here).
+	promptContent, readErr := os.ReadFile(filepath.Join(expectedTmpDir, ".aw_agents.md"))
 	require.NoError(t, readErr)
+	assert.Contains(t, string(promptContent), "agent_id: test-agent")
+	assert.Contains(t, string(promptContent), "team: test-team")
 	assert.Contains(t, string(promptContent), "## Language Preferences")
 	assert.Contains(t, string(promptContent), "Chinese (Simplified)")
-	assert.Contains(t, string(promptContent), "/bin/ask-user <question>")
-	assert.Contains(t, string(promptContent), "/bin/call-peer <agent-id> <message>")
+	assert.NotContains(t, string(promptContent), "/bin/ask-user")
 	assert.Contains(t, string(promptContent), "agents instructions")
 
-	// Verify ending command structure with --session and --prompt
-	expectedEnd := "-- aw agy --model some-model --add-tmp-to-dir --session my-session-id --prompt some prompt"
+	// Verify ending command structure with --agent, --session and --prompt
+	expectedEnd := "-- aw agy --agent test-agent --model some-model --add-tmp-to-dir --session my-session-id --prompt some prompt"
 	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
 	// Test case 2: opencode CLITarget without team
@@ -318,20 +252,23 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStrOpencode, "--bind "+localDir+" "+localDir)
 	assert.Contains(t, argStrOpencode, "--chdir "+runDir)
 
-	// Verify opencode system prompt: a generated file is mounted at AGENTS.md (not the raw AGENTS.md)
-	expectedOpencodeDest := filepath.Join(home, ".config", "opencode", "AGENTS.md")
+	// Verify opencode contract mount lands at the canonical path (no more
+	// CLI-specific AGENTS.md mount) and skills mounting is unchanged.
 	expectedOpencodeSkills := filepath.Join(home, ".config", "opencode", "skills")
-	assert.Contains(t, argStrOpencode, "--ro-bind "+expectedDefaultTmpDir+"/.asgard_system_prompt "+expectedOpencodeDest)
+	assert.Contains(t, argStrOpencode, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
+	assert.Contains(t, argStrOpencode, "--ro-bind "+expectedDefaultTmpDir+"/.aw_agents.md /session/AW_AGENTS.md")
 	assert.Contains(t, argStrOpencode, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedOpencodeSkills)
 
-	// Verify the generated prompt file contains ask-user instructions but NOT call-peer
-	opencodePromptContent, readErr := os.ReadFile(filepath.Join(expectedDefaultTmpDir, ".asgard_system_prompt"))
+	// Verify the generated contract carries the agent metadata frontmatter
+	// plus the body, without CLI protocol headers.
+	opencodePromptContent, readErr := os.ReadFile(filepath.Join(expectedDefaultTmpDir, ".aw_agents.md"))
 	require.NoError(t, readErr)
-	assert.Contains(t, string(opencodePromptContent), "/bin/ask-user <question>")
+	assert.Contains(t, string(opencodePromptContent), "agent_id: test-agent-no-team")
+	assert.NotContains(t, string(opencodePromptContent), "/bin/ask-user")
 	assert.NotContains(t, string(opencodePromptContent), "call-peer")
 	assert.Contains(t, string(opencodePromptContent), "agents instructions")
 
-	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
+	expectedEndOpencode := "-- aw opencode --agent test-agent-no-team --model another-model --prompt run"
 	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 
 	// Test case 3: simplest CLITarget receives --tool-access from the agent spec
@@ -357,9 +294,11 @@ func TestBuildArgs(t *testing.T) {
 
 	argStrSimplest := strings.Join(argsSimplest, " ")
 
-	expectedSimplestDest := filepath.Join(home, ".config", "simplest", "AGENTS.md")
-	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "tmp", "default", ".asgard_system_prompt")+" "+expectedSimplestDest)
-	expectedEndSimplest := "-- aw simplest --model simple-model --tool-access doc-only --prompt run"
+	expectedSimplestSkills := filepath.Join(home, ".config", "simplest", "skills")
+	assert.Contains(t, argStrSimplest, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
+	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
+	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedSimplestSkills)
+	expectedEndSimplest := "-- aw simplest --agent test-agent --model simple-model --tool-access doc-only --prompt run"
 	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
 
 	// doc-only must be a validated spec value; buildArgsForAgent passes it verbatim.

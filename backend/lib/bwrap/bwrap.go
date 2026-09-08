@@ -10,37 +10,22 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
-// buildSystemPrompt constructs the full system prompt for the given CLI.
-// It starts with the global language rules (if non-empty), followed by CLI-specific instructions
-// from its SandboxSpec (including SystemPromptPeerHeader if hasTeam is true)
-// and appends the content of agentsMDPath if the file exists.
-func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool, langRules string) (string, error) {
+// buildContractBody assembles the CLI-agnostic prompt body for the AW_AGENTS.md
+// contract: the global language rules (if non-empty) followed by the agent's
+// own AGENTS.md content (when the file exists). The CLI-specific protocol
+// headers (ask-user / peer delegation) are composed later by the aw dispatcher
+// inside the sandbox via common.ComposePrompt.
+func buildContractBody(agentsMDPath string, langRules string) (string, error) {
 	var sb strings.Builder
 
 	if trimmed := strings.TrimSpace(langRules); trimmed != "" {
 		sb.WriteString(trimmed)
-	}
-
-	if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
-		if header := spec.SystemPromptHeader(); header != "" {
-			if sb.Len() > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(header)
-		}
-		if hasTeam {
-			if peerHeader := spec.SystemPromptPeerHeader(); peerHeader != "" {
-				if sb.Len() > 0 {
-					sb.WriteString("\n\n")
-				}
-				sb.WriteString(peerHeader)
-			}
-		}
 	}
 
 	if agentsMDPath != "" {
@@ -58,19 +43,29 @@ func buildSystemPrompt(cli string, agentsMDPath string, hasTeam bool, langRules 
 	return sb.String(), nil
 }
 
-// writeSystemPromptFile writes the combined system prompt for the given CLI to
-// a file named ".asgard_system_prompt" inside dir, and returns the host path.
-func writeSystemPromptFile(dir string, cli string, agentsMDPath string, hasTeam bool, langRules string) (string, error) {
-	content, err := buildSystemPrompt(cli, agentsMDPath, hasTeam, langRules)
+// writeContractFile renders the AW_AGENTS.md contract (identity metadata in a
+// frontmatter block plus the prompt body) to a file named ".aw_agents.md"
+// inside dir, and returns the host path. It returns "" when the contract
+// would be empty.
+func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath string, langRules string) (string, error) {
+	body, err := buildContractBody(agentsMDPath, langRules)
 	if err != nil {
 		return "", err
 	}
+	contract := &common.Contract{Body: body}
+	if cfg != nil {
+		contract.AgentID = strings.TrimSpace(cfg.ID)
+		contract.AgentName = strings.TrimSpace(cfg.Name)
+		contract.ToolAccess = strings.TrimSpace(cfg.ToolAccess)
+		contract.Team = strings.TrimSpace(cfg.Team)
+	}
+	content := common.Render(contract)
 	if content == "" {
 		return "", nil
 	}
-	destPath := filepath.Join(dir, ".asgard_system_prompt")
+	destPath := filepath.Join(dir, ".aw_agents.md")
 	if err := os.WriteFile(destPath, []byte(content), 0644); err != nil {
-		return "", fmt.Errorf("writing system prompt file: %w", err)
+		return "", fmt.Errorf("writing AW_AGENTS.md contract file: %w", err)
 	}
 	return destPath, nil
 }
@@ -389,9 +384,13 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
-	// Build and mount the system prompt, and mount skills/ if present in agentPath.
-	// The system prompt is written to the chat tmpDir on the host so that bwrap
-	// can bind-mount it read-only at the CLI's expected configuration path.
+	// Build and mount the AW_AGENTS.md contract, and mount skills/ if present
+	// in agentPath. The contract is written to the chat tmpDir on the host and
+	// bind-mounted read-only at the single canonical sandbox path
+	// /session/AW_AGENTS.md (also exported as $AW_AGENTS_PATH) regardless of
+	// the target CLI. The aw dispatcher inside the sandbox translates the
+	// contract for each CLI, so this layer never addresses CLI-specific
+	// configuration paths.
 	{
 		var agentsMDPath string
 		var skillsPath string
@@ -406,27 +405,23 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 			}
 		}
 
-		// Determine the host dir where we can write the prompt file (already mounted as /tmp).
+		// Determine the host dir where we can write the contract file (already mounted as /tmp).
 		promptHostDir, err := setupTmpDir(home, chatID)
 		if err != nil {
 			return nil, err
 		}
 
-		if spec != nil {
-			hasTeam := cfg != nil && strings.TrimSpace(cfg.Team) != ""
-			promptFile, err := writeSystemPromptFile(promptHostDir, target.CLI, agentsMDPath, hasTeam, langRules)
-			if err != nil {
-				return nil, err
-			}
-			if promptFile != "" {
-				if dest := spec.SystemPromptConfigPath(home); dest != "" {
-					args = append(args, "--ro-bind", promptFile, dest)
-				}
-			}
-			if skillsPath != "" {
-				if dest := spec.SkillsMountPath(home); dest != "" {
-					args = append(args, "--ro-bind", skillsPath, dest)
-				}
+		contractFile, err := writeContractFile(promptHostDir, cfg, agentsMDPath, langRules)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--setenv", common.EnvVar, common.DefaultPath)
+		if contractFile != "" {
+			args = append(args, "--ro-bind", contractFile, common.DefaultPath)
+		}
+		if spec != nil && skillsPath != "" {
+			if dest := spec.SkillsMountPath(home); dest != "" {
+				args = append(args, "--ro-bind", skillsPath, dest)
 			}
 		}
 	}
@@ -437,6 +432,11 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// Target executable and its arguments
 	args = append(args, "aw")
 	args = append(args, target.CLI)
+	// Agent identity: the sandbox-side adapter uses it to materialize
+	// CLI-native agent definitions from the AW_AGENTS.md contract.
+	if cfg != nil && strings.TrimSpace(cfg.ID) != "" {
+		args = append(args, "--agent", cfg.ID)
+	}
 	args = append(args, "--model", target.Model)
 	if spec != nil {
 		args = append(args, spec.ExtraArgs()...)

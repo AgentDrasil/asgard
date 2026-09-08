@@ -55,9 +55,11 @@ type AgentConfig struct {
 	SessionMode string `yaml:"session_mode"`
 
 	// ToolAccess controls the tool set exposed to the agent. "full" (default):
-	// all built-in tools. "doc-only": read/search tools plus markdown-only
-	// write_doc/edit_doc, for analysis and review agents that must not modify
-	// source code. Currently honored by the simplest CLI only.
+	// all built-in tools. "doc-only": read/search tools plus restricted
+	// writes, for analysis and review agents that must not run shell
+	// commands. Honored by the simplest CLI (tool cropping: markdown-only
+	// writes, no shell) and the opencode CLI (permission frontmatter on the
+	// generated agent file: no shell, editing stays available).
 	ToolAccess string `yaml:"tool_access"`
 }
 

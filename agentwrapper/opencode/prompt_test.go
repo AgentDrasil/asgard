@@ -224,10 +224,17 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			argv := buildPromptArgv(tt.prompt, tt.opts)
+			argv := buildPromptArgv(tt.prompt, tt.opts, "")
 			assert.Equal(t, tt.wantArgv, argv)
 		})
 	}
+}
+
+func TestBuildPromptArgv_WithAgent(t *testing.T) {
+	t.Parallel()
+
+	argv := buildPromptArgv("do it", types.PromptOptions{Model: "m"}, "intend")
+	assert.Equal(t, []string{"run", "--format", "json", "--auto", "--agent", "intend", "--model", "m", "--", "do it"}, argv)
 }
 
 func TestPrompt_DynamicMaxTokens(t *testing.T) {

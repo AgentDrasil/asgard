@@ -226,7 +226,7 @@ func TestRun(t *testing.T) {
 	if !strings.Contains(string(out), "mock bwrap execution succeeded") {
 		t.Errorf("expected mock output, got: %q", string(out))
 	}
-	langPromptPath := filepath.Join(tmpDir, "tmp", "test-chat-lang", ".asgard_system_prompt")
+	langPromptPath := filepath.Join(tmpDir, "tmp", "test-chat-lang", ".aw_agents.md")
 	langPromptContent, err := os.ReadFile(langPromptPath)
 	if err != nil {
 		t.Fatalf("failed to read generated prompt file: %v", err)

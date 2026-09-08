@@ -14,7 +14,6 @@ type FakeClient struct {
 
 	SystemPromptHeaderFunc     func() string
 	SystemPromptPeerHeaderFunc func() string
-	SystemPromptConfigPathFunc func(home string) string
 	SkillsMountPathFunc        func(home string) string
 	MountDirectoriesFunc       func(home string) []string
 	AuthDirectoryFunc          func(home string) string
@@ -62,13 +61,6 @@ func (c *FakeClient) SystemPromptPeerHeader() string {
 		return c.SystemPromptPeerHeaderFunc()
 	}
 	return ""
-}
-
-func (c *FakeClient) SystemPromptConfigPath(home string) string {
-	if c.SystemPromptConfigPathFunc != nil {
-		return c.SystemPromptConfigPathFunc(home)
-	}
-	return home + "/.gemini/GEMINI.md"
 }
 
 func (c *FakeClient) SkillsMountPath(home string) string {

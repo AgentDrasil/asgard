@@ -40,10 +40,6 @@ func (c *Client) SystemPromptPeerHeader() string {
 	return strings.TrimSpace(systemPromptPeerHeader)
 }
 
-func (c *Client) SystemPromptConfigPath(home string) string {
-	return home + "/.gemini/GEMINI.md"
-}
-
 func (c *Client) SkillsMountPath(home string) string {
 	return home + "/.gemini/antigravity-cli/skills"
 }

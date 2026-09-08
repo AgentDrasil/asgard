@@ -40,10 +40,6 @@ func (c *Client) SystemPromptPeerHeader() string {
 	return strings.TrimSpace(systemPromptPeerHeader)
 }
 
-func (c *Client) SystemPromptConfigPath(home string) string {
-	return home + "/.config/opencode/AGENTS.md"
-}
-
 func (c *Client) SkillsMountPath(home string) string {
 	return home + "/.config/opencode/skills"
 }

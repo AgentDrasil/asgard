@@ -63,8 +63,14 @@ func SplitModelVariant(model string) (string, string) {
 }
 
 // buildPromptArgv constructs the CLI arguments for running an opencode prompt.
-func buildPromptArgv(prompt string, opts types.PromptOptions) []string {
+// agentName is the sandbox-side agent definition prepared by PrepareAgent,
+// selected via --agent; empty means opencode runs with its native default
+// agent.
+func buildPromptArgv(prompt string, opts types.PromptOptions, agentName string) []string {
 	argv := []string{"run", "--format", "json", "--auto"}
+	if agentName != "" {
+		argv = append(argv, "--agent", agentName)
+	}
 	if opts.SessionID != "" {
 		argv = append(argv, "--session", opts.SessionID)
 	}
@@ -81,8 +87,19 @@ func buildPromptArgv(prompt string, opts types.PromptOptions) []string {
 
 // Prompt sends a prompt to opencode and parses its JSONL output in real-time.
 // If opts.ReportCallback is set, it is called for each meaningful output line.
+//
+// When the AW_AGENTS.md contract is mounted (Asgard sandbox runs), the
+// contract is first materialized into a CLI-native primary agent definition
+// (see PrepareAgent) so the agent identity and tool permissions are enforced
+// by opencode itself instead of arriving as weak ambient instructions.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
-	argv := buildPromptArgv(prompt, opts)
+	agentName, cleanupAgent, err := PrepareAgent(opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupAgent()
+
+	argv := buildPromptArgv(prompt, opts, agentName)
 
 	cmd := exec.CommandContext(ctx, "opencode", argv...)
 	if opts.Dir != "" {

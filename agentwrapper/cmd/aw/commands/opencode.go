@@ -20,6 +20,7 @@ var (
 	opencodeSession string
 	opencodeUsage   bool
 	opencodeModel   string
+	opencodeAgent   string
 )
 
 var opencodeCmd = &cobra.Command{
@@ -88,6 +89,7 @@ var opencodeCmd = &cobra.Command{
 			Dir:            dir,
 			SessionID:      opencodeSession,
 			Model:          opencodeModel,
+			AgentID:        opencodeAgent,
 			ReportCallback: buildHTTPReporter(),
 		})
 		if err != nil {
@@ -110,6 +112,7 @@ func init() {
 	opencodeCmd.Flags().StringVarP(&opencodeSession, "session", "s", "", "Session ID to resume")
 	opencodeCmd.Flags().BoolVar(&opencodeUsage, "usage", false, "Print token usage information")
 	opencodeCmd.Flags().StringVarP(&opencodeModel, "model", "m", "", "Model to select for the session")
+	opencodeCmd.Flags().StringVar(&opencodeAgent, "agent", "", "Asgard agent ID (drives CLI-native agent adaptation from the AW_AGENTS.md contract)")
 
 	opencodeCmd.AddCommand(opencodeModelsCmd)
 }
