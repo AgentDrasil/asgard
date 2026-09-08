@@ -28,8 +28,12 @@ func withNodeTimeout(ctx context.Context, node *workflowspec.NodeSpec) (context.
 	return context.WithCancel(ctx)
 }
 
-// agentSessionKey is the RunValues key under which the CLI session ID of an
-// agent is inherited between nodes using the same agent_id.
+// agentSessionKey is the RunValues key under which the per-CLI session IDs of
+// an agent (map[cli]sessionID) are inherited between nodes using the same
+// agent_id. Session IDs are only resumable by the CLI that created them, so
+// they are tracked per CLI: when a later node switches CLI (quota fallback,
+// model pairing), it resumes its own CLI's session instead of receiving a
+// foreign session ID.
 func agentSessionKey(agentID string) string {
 	return "agent_session:" + agentID
 }
@@ -154,13 +158,14 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 	prompt := strings.TrimSpace(nctx.Interpolate(node.Prompt))
 
 	// Session policy: `fresh` always starts a clean CLI session; `inherit`
-	// (default) resumes the session a previous node opened for this agent.
-	session := optional.None[string]()
+	// (default) resumes the per-CLI sessions a previous node opened for this
+	// agent.
+	sessions := run.SessionMap{}
 	resuming := false
 	if node.SessionPolicyInherit() {
 		if v, ok := nctx.Values.Get(agentSessionKey(node.AgentID)); ok {
-			if sid, ok := v.(string); ok && sid != "" {
-				session = optional.Some(sid)
+			if m, ok := v.(run.SessionMap); ok && len(m) > 0 {
+				sessions = m.Clone()
 				resuming = true
 			}
 		}
@@ -259,10 +264,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		}
 		outCh := make(chan runOutcome, 1)
 
-		go func(currentPrompt string, currentSession optional.Option[string]) {
-			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSession, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, pairing)
+		go func(currentPrompt string, currentSessions run.SessionMap) {
+			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSessions, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, pairing)
 			outCh <- runOutcome{out: runOut, target: runTarget, userForced: runForced, err: runErr}
-		}(prompt, session)
+		}(prompt, sessions)
 
 		seenArtifacts := make(map[string]bool)
 		for _, a := range nodeArtifacts {
@@ -360,8 +365,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		lastContent = parsedContent
 		if parsedSessionID != "" {
 			currentSessionID = parsedSessionID
-			if node.SessionPolicyInherit() {
-				nctx.Values.Set(agentSessionKey(node.AgentID), currentSessionID)
+			if node.SessionPolicyInherit() && targetKnown && lastTarget.CLI != "" {
+				// Record the session under the CLI that opened it so later
+				// nodes (possibly on a different CLI) resume correctly.
+				nctx.Values.Set(agentSessionKey(node.AgentID), sessions.With(lastTarget.CLI, currentSessionID))
 			}
 		}
 
@@ -405,12 +412,14 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		if attempt < totalAttempts {
 			correctiveNotice := fmt.Sprintf("System Notice: Required output file(s) %s are missing or empty. You must write and complete these files now before concluding your turn.", strings.Join(missing, ", "))
 
-			if currentSessionID != "" {
-				session = optional.Some(currentSessionID)
+			if currentSessionID != "" && targetKnown && lastTarget.CLI != "" {
+				// Retry in the session this attempt's target opened; if quota
+				// fallback picks a different CLI, run.Run resolves its own
+				// session from the map (fresh if none).
+				sessions = sessions.With(lastTarget.CLI, currentSessionID)
 				prompt = correctiveNotice
 			} else {
 				// When no CLI session was returned to resume, keep initial prompt context with the corrective notice appended.
-				session = optional.None[string]()
 				prompt = initialPrompt + "\n\n" + correctiveNotice
 			}
 
@@ -593,7 +602,7 @@ const (
 // The userForced return reports that the target was forced by the user
 // through a suspension option ("Use <cli> <model>"), so callers can suppress
 // fallback-style observability for that execution.
-func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope, pairing *pairingPlan) (out []byte, target agentspec.CLITarget, userForced bool, err error) {
+func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, sessions run.SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope, pairing *pairingPlan) (out []byte, target agentspec.CLITarget, userForced bool, err error) {
 	var candidates []agentspec.CLITarget
 	if pairing != nil {
 		candidates = pairing.Candidates
@@ -605,7 +614,7 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 
 	forcedModel := modelOpt
 	for {
-		out, target, runErr := run.RunWithCandidates(ctx, agent, candidates, prompt, session, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
+		out, target, runErr := run.RunWithCandidates(ctx, agent, candidates, prompt, sessions, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
 		var nq *run.NoQuotaError
 		if errors.As(runErr, &nq) {
 			if pairing != nil && nq.PairingNote == "" {

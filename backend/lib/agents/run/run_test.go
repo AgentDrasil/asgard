@@ -99,7 +99,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("failed to create run dir: %v", err)
 	}
 
-	out, err := Run(context.Background(), agent, "hello agent", optional.Some("my-session"), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
+	out, target, err := Run(context.Background(), agent, "hello agent", SessionMap{"agy": "my-session"}, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error running agent: %v", err)
 	}
@@ -111,6 +111,13 @@ func TestRun(t *testing.T) {
 	// Verify that agy-model-low (15% > 10%) was chosen
 	if !strings.Contains(outStr, "agy-model-low") {
 		t.Errorf("expected chosen model to be agy-model-low, output was: %q", outStr)
+	}
+	if target.CLI != "agy" || target.Model != "agy-model-low" {
+		t.Errorf("expected target agy/agy-model-low, got %s/%s", target.CLI, target.Model)
+	}
+	// The agy session from the SessionMap must reach the executing CLI...
+	if !strings.Contains(outStr, "--session") || !strings.Contains(outStr, "my-session") {
+		t.Errorf("expected agy session my-session to be resumed, output was: %q", outStr)
 	}
 
 	// 2. Test case: no targets have more than 10% quota
@@ -126,7 +133,7 @@ func TestRun(t *testing.T) {
 		},
 	}
 
-	_, err = Run(context.Background(), insufficientQuotaAgent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), insufficientQuotaAgent, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err == nil {
 		t.Error("expected error due to insufficient quota, but got nil")
 	} else if !strings.Contains(err.Error(), "no CLI target with more than 10% quota") {
@@ -134,7 +141,7 @@ func TestRun(t *testing.T) {
 	}
 
 	// 3. Test case: runDir is not allowed
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(filepath.Join(tmpDir, "disallowed")), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), agent, "hello", nil, optional.Some(filepath.Join(tmpDir, "disallowed")), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err == nil {
 		t.Error("expected error due to disallowed run directory, but got nil")
 	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
@@ -143,7 +150,7 @@ func TestRun(t *testing.T) {
 
 	// 4. Test case: runDir is a valid subdirectory
 	validSubDir := filepath.Join(tmpDir, "some-allowed-dir", "subdir1")
-	_, err = Run(context.Background(), agent, "hello", optional.None[string](), optional.Some(validSubDir), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), agent, "hello", nil, optional.Some(validSubDir), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error with valid subdirectory: %v", err)
 	}
@@ -162,7 +169,7 @@ func TestRun(t *testing.T) {
 			},
 		},
 	}
-	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), agentWithoutRunDirs, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}
@@ -178,7 +185,7 @@ func TestRun(t *testing.T) {
 
 	// 5b. Test case: agent without run_dirs receiving runDirOpt is rejected by strict allowlist
 	unallowedDir := filepath.Join(tmpDir, "some-arbitrary-dir")
-	_, err = Run(context.Background(), agentWithoutRunDirs, "hello", optional.None[string](), optional.Some(unallowedDir), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), agentWithoutRunDirs, "hello", nil, optional.Some(unallowedDir), optional.None[string](), "test-chat", StatusScope{}, nil)
 	if err == nil {
 		t.Error("expected error due to unallowed run directory on agent with no RunDirs, but got nil")
 	} else if !strings.Contains(err.Error(), "is not allowed by agent configuration") {
@@ -186,7 +193,7 @@ func TestRun(t *testing.T) {
 	}
 
 	// 6. Test case: explicitly selecting model with available quota
-	out, err = Run(context.Background(), agent, "hello agent", optional.None[string](), optional.None[string](), optional.Some("opencode-model-high"), "test-chat", StatusScope{}, nil)
+	out, _, err = Run(context.Background(), agent, "hello agent", nil, optional.None[string](), optional.Some("opencode-model-high"), "test-chat", StatusScope{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error running explicitly selected model: %v", err)
 	}
@@ -206,7 +213,7 @@ func TestRun(t *testing.T) {
 			RunDirs: []string{filepath.Join(tmpDir, "some-allowed-dir")},
 		},
 	}
-	_, err = Run(context.Background(), agentWithZeroQuota, "hello agent", optional.None[string](), optional.None[string](), optional.Some("agy-model-zero"), "test-chat", StatusScope{}, nil)
+	_, _, err = Run(context.Background(), agentWithZeroQuota, "hello agent", nil, optional.None[string](), optional.Some("agy-model-zero"), "test-chat", StatusScope{}, nil)
 	if err == nil {
 		t.Error("expected error for model with zero quota when explicitly selected, but got nil")
 	} else if !strings.Contains(err.Error(), "has no quota remaining") {
@@ -219,7 +226,7 @@ func TestRun(t *testing.T) {
 		DocLang:     "Japanese",
 		CommentLang: "English",
 	}
-	out, err = Run(context.Background(), agent, "hello agent", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat-lang", StatusScope{}, confWithLangs)
+	out, _, err = Run(context.Background(), agent, "hello agent", nil, optional.None[string](), optional.None[string](), "test-chat-lang", StatusScope{}, confWithLangs)
 	if err != nil {
 		t.Fatalf("unexpected error running agent with custom language config: %v", err)
 	}
@@ -328,7 +335,7 @@ func TestRun_ExplicitModel_ProviderDisabled(t *testing.T) {
 		Providers: []string{"simplest"},
 	}
 
-	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.Some("opencode-model-high"), "test-chat", StatusScope{}, conf)
+	_, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.Some("opencode-model-high"), "test-chat", StatusScope{}, conf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `provider "opencode" for model "opencode-model-high" is disabled in configuration`)
 }
@@ -344,7 +351,7 @@ func TestRun_AutoSelection_FallbackSkipDisabledProvider(t *testing.T) {
 		Providers: []string{"opencode"},
 	}
 
-	out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	out, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "opencode-model-high")
 }
@@ -360,7 +367,7 @@ func TestRun_AutoSelection_AllProvidersDisabled(t *testing.T) {
 		Providers: []string{"simplest"},
 	}
 
-	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	_, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enabled CLI targets available for agent test-agent")
 }
@@ -371,7 +378,7 @@ func TestRun_NoQuotaError_AutoSelection_TypedSnapshot(t *testing.T) {
 		{CLI: "agy", Model: "agy-model-zero"}, // 0% quota
 	})
 
-	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
+	_, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, nil)
 	require.Error(t, err)
 
 	var nq *NoQuotaError
@@ -394,7 +401,7 @@ func TestRun_NoQuotaError_ExplicitModel_TypedSnapshot(t *testing.T) {
 		{CLI: "agy", Model: "agy-model-high"}, // 50% quota
 	})
 
-	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.Some("agy-model-zero"), "test-chat", StatusScope{}, nil)
+	_, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.Some("agy-model-zero"), "test-chat", StatusScope{}, nil)
 	require.Error(t, err)
 
 	var nq *NoQuotaError
@@ -420,7 +427,7 @@ func TestRun_NoQuotaError_DisabledProviderMarkedInSnapshot(t *testing.T) {
 
 	conf := &config.Config{Providers: []string{"opencode"}}
 
-	_, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
+	_, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "test-chat", StatusScope{}, conf)
 	require.Error(t, err)
 
 	var nq *NoQuotaError
@@ -467,7 +474,7 @@ func TestRun_ProxyOptions(t *testing.T) {
 			},
 		}
 
-		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-enabled", StatusScope{}, conf)
+		out, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "chat-proxy-enabled", StatusScope{}, conf)
 		require.NoError(t, err)
 		assert.Contains(t, string(out), "mock bwrap execution succeeded")
 		// Assert proxy sensitive mask args actually reach the agent bwrap
@@ -487,7 +494,7 @@ func TestRun_ProxyOptions(t *testing.T) {
 			},
 		}
 
-		out, err := Run(context.Background(), agent, "hello", optional.None[string](), optional.None[string](), optional.None[string](), "chat-proxy-disabled", StatusScope{}, conf)
+		out, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "chat-proxy-disabled", StatusScope{}, conf)
 		require.NoError(t, err)
 		assert.Contains(t, string(out), "mock bwrap execution succeeded")
 		assert.NotContains(t, string(out), "\n"+proxyConfigPath+"\n")

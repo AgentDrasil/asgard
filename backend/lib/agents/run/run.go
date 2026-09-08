@@ -306,15 +306,39 @@ func quotaStatuses(targets []agentspec.CLITarget, conf *config.Config) []QuotaTa
 	return statuses
 }
 
+// SessionMap maps a CLI name to the session ID that CLI previously opened
+// (e.g. {"simplest": "<uuid>"}). Session IDs are only resumable by the CLI
+// that created them, so the selected target only resumes the session stored
+// under its own CLI name; a target switch (quota fallback, user override)
+// intentionally starts a fresh session instead of leaking a foreign session
+// ID into an unrelated CLI (which fails with "Session not found").
+type SessionMap map[string]string
+
+// Clone returns a copy of m (nil-safe), so callers can mutate the copy
+// without aliasing the original.
+func (m SessionMap) Clone() SessionMap {
+	out := make(SessionMap, len(m))
+	for cli, sid := range m {
+		out[cli] = sid
+	}
+	return out
+}
+
+// With returns a clone of m in which sessions[cli] = sid.
+func (m SessionMap) With(cli, sid string) SessionMap {
+	out := m.Clone()
+	out[cli] = sid
+	return out
+}
+
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
 // If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
 // If selected model has <= 0 quota, it returns an error immediately with NO fallback.
 // Quota exhaustion is reported as *NoQuotaError so callers can distinguish it
 // from execution failures and react (e.g. suspend for a user decision).
-func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
-	out, _, err := RunWithCandidates(ctx, agent, nil, prompt, session, runDirOpt, modelOpt, chatID, statusScope, conf)
-	return out, err
+func Run(ctx context.Context, agent *agentspec.Agent, prompt string, sessions SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
+	return RunWithCandidates(ctx, agent, nil, prompt, sessions, runDirOpt, modelOpt, chatID, statusScope, conf)
 }
 
 // RunWithCandidates extends Run with an explicit ordered candidate list.
@@ -324,7 +348,10 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 // reports the selected target (also returned when execution itself fails, so
 // callers can attribute failed runs) for callers to record the actual
 // (cli, model) per node execution.
-func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
+//
+// sessions carries per-CLI session IDs (see SessionMap); only the entry
+// matching the selected target's CLI is resumed.
+func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, sessions SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
 	targets := agent.Config.CLI
 	if len(candidates) > 0 {
 		targets = candidates
@@ -394,6 +421,11 @@ func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates [
 	// Ensure the resolved runDir exists (e.g. if it was a subdirectory under config run_dirs that was not created yet)
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return nil, agentspec.CLITarget{}, fmt.Errorf("creating run directory %q: %w", runDir, err)
+	}
+
+	session := optional.None[string]()
+	if sid := sessions[selectedTarget.CLI]; sid != "" {
+		session = optional.Some(sid)
 	}
 
 	out, err := runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, conf)

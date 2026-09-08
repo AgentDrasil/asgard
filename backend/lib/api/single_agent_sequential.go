@@ -12,12 +12,14 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // seqRunResult carries the output of a sequential run.Run call.
 type seqRunResult struct {
-	out []byte
-	err error
+	out    []byte
+	target agentspec.CLITarget
+	err    error
 }
 
 type agentRunError struct {
@@ -38,17 +40,18 @@ func (e *SingleAgentExecutor) executeSequential(
 	session *dbmodels.Session,
 	statusCh <-chan AgentStatusUpdate,
 ) (string, error) {
-	// Resolve which session ID to resume (if any).
-	agentSessionID := optional.None[string]()
+	// Collect the per-CLI session IDs previously opened by this agent.
+	// Automatic target selection may switch CLIs between messages (quota
+	// recovery), and a session ID is only resumable by the CLI that created
+	// it, so run.Run resolves the session after the target is chosen.
+	sessions := run.SessionMap{}
 	if sessionMode != "fresh" && e.repo != nil && session != nil {
 		for _, dbAgent := range session.Agents {
 			if dbAgent.Name == e.agent.Config.Name || dbAgent.Name == e.agent.Config.ID {
-				// For sequential mode, pick the first session from the map (if any).
-				for _, sid := range dbAgent.Sessions {
+				for cliKey, sid := range dbAgent.Sessions {
 					if sid != "" {
-						agentSessionID = optional.Some(sid)
+						sessions[cliKey] = sid
 					}
-					break
 				}
 				break
 			}
@@ -59,8 +62,8 @@ func (e *SingleAgentExecutor) executeSequential(
 	runToken := uuid.NewV7().String()
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
-		out, err := run.Run(ctx, e.agent, prompt, agentSessionID, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken}, e.conf)
-		resultCh <- seqRunResult{out, err}
+		out, target, err := run.Run(ctx, e.agent, prompt, sessions, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken}, e.conf)
+		resultCh <- seqRunResult{out: out, target: target, err: err}
 	}()
 
 	return e.streamAndFinish(ctx, chatID, runDirOpt, modelOpt, sessionMode, statusCh, resultCh)
@@ -89,7 +92,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 				if result.err != nil {
 					return "", &agentRunError{Err: result.err}
 				}
-				return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
+				return e.handleFinalResult(result.out, result.target, chatID, runDirOpt, modelOpt, sessionMode)
 			case <-ctx.Done():
 				return "", ctx.Err()
 			}
@@ -108,7 +111,7 @@ func (e *SingleAgentExecutor) streamAndFinish(
 			if result.err != nil {
 				return "", &agentRunError{Err: result.err}
 			}
-			return e.handleFinalResult(result.out, chatID, runDirOpt, modelOpt, sessionMode)
+			return e.handleFinalResult(result.out, result.target, chatID, runDirOpt, modelOpt, sessionMode)
 
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -118,8 +121,11 @@ func (e *SingleAgentExecutor) streamAndFinish(
 
 // handleFinalResult parses the agent output and records final message to DB.
 // sessionMode controls whether the returned session ID is persisted to DB.
+// The session is stored under the CLI that actually executed, so a later CLI
+// switch (quota fallback) resumes only that CLI's own session.
 func (e *SingleAgentExecutor) handleFinalResult(
 	out []byte,
+	target agentspec.CLITarget,
 	chatID string,
 	runDirOpt optional.Option[string],
 	modelOpt optional.Option[string],
@@ -129,12 +135,14 @@ func (e *SingleAgentExecutor) handleFinalResult(
 
 	if maxTokens <= 0 {
 		modelName := ""
-		cliName := ""
-		if len(e.agent.Config.CLI) > 0 {
+		cliName := target.CLI
+		if cliName == "" && len(e.agent.Config.CLI) > 0 {
 			cliName = e.agent.Config.CLI[0].CLI
 		}
 		if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
 			modelName = modelOpt.Unwrap()
+		} else if target.Model != "" {
+			modelName = target.Model
 		} else if len(e.agent.Config.CLI) > 0 && e.agent.Config.CLI[0].Model != "" {
 			modelName = e.agent.Config.CLI[0].Model
 		}
@@ -144,11 +152,13 @@ func (e *SingleAgentExecutor) handleFinalResult(
 	}
 
 	if e.repo != nil {
-		// Always update runDir; only persist sessionID in resume mode.
+		// Always update runDir; only persist sessionID in resume mode, keyed
+		// by the executing CLI so later runs on a different CLI never receive
+		// a session ID they cannot resume.
 		cliKey := ""
 		persistSessionID := ""
-		if sessionMode != "fresh" && sessionID != "" {
-			cliKey = "sequential"
+		if sessionMode != "fresh" && sessionID != "" && target.CLI != "" {
+			cliKey = target.CLI
 			persistSessionID = sessionID
 		}
 		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, cliKey, persistSessionID, runDirOpt); err != nil {

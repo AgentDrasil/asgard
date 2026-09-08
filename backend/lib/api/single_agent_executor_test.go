@@ -65,13 +65,20 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		resp, err := executor.handleFinalResult(resultJSON, chatID, optional.None[string](), optional.None[string](), "resume")
+		resp, err := executor.handleFinalResult(resultJSON, agentspec.CLITarget{CLI: "agy", Model: "gemini-3.7-flash-high"}, chatID, optional.None[string](), optional.None[string](), "resume")
 		require.NoError(t, err)
 		assert.Equal(t, "Execution response", resp)
 
-		// Check persisted message in repo
+		// The returned session ID must be persisted under the executing CLI
+		// (not a CLI-agnostic key), so a later CLI switch cannot resume a
+		// session ID the new CLI does not own.
 		session, err := repo.GetSession(chatID)
 		require.NoError(t, err)
+		require.Len(t, session.Agents, 1)
+		require.Equal(t, "sess-123", session.Agents[0].Sessions["agy"])
+		require.NotContains(t, session.Agents[0].Sessions, "sequential")
+
+		// Check persisted message in repo
 		require.NotEmpty(t, session.Messages)
 
 		lastMsg := session.Messages[len(session.Messages)-1]
@@ -114,7 +121,7 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 		// Non-JSON raw string output where maxTokens will parse as 0
 		rawOutput := []byte("Plain text non-json output")
 
-		resp, err := executor.handleFinalResult(rawOutput, chatID, optional.None[string](), optional.Some("claude-sonnet-4-6"), "resume")
+		resp, err := executor.handleFinalResult(rawOutput, agentspec.CLITarget{CLI: "opencode", Model: "opencode/big-pickle"}, chatID, optional.None[string](), optional.Some("claude-sonnet-4-6"), "resume")
 		require.NoError(t, err)
 		assert.Equal(t, "Plain text non-json output", resp)
 
@@ -150,7 +157,7 @@ func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
 
 		rawOutput := []byte("Raw output with default CLI model")
 
-		resp, err := executor.handleFinalResult(rawOutput, chatID, optional.None[string](), optional.None[string](), "resume")
+		resp, err := executor.handleFinalResult(rawOutput, agentspec.CLITarget{CLI: "opencode", Model: "opencode/big-pickle"}, chatID, optional.None[string](), optional.None[string](), "resume")
 		require.NoError(t, err)
 		assert.Equal(t, "Raw output with default CLI model", resp)
 
