@@ -216,8 +216,8 @@ func TestSuspendedEventReasksRepliedBubble(t *testing.T) {
 
 	// The original ask bubble exists and was already replied.
 	require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
-		ID:     "wf-run4-plan_approval-2",
-		Role:   "ask_user",
+		ID:      "wf-run4-plan_approval-2",
+		Role:    "ask_user",
 		Content: "Please review Plan. Options: Approve / Request Changes",
 	}))
 	updated, err := s.repo.MarkAskUserReplied(chatID, "wf-run4-plan_approval-2", "old reply")

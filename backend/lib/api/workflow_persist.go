@@ -745,7 +745,7 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 					}
 					_ = s.repo.UpdateAgentStatus(chatID, agentName, status)
 					s.PublishSessionEvent(chatID, SessionEvent{
-						Type:   "status",
+						Type:    "status",
 						Payload: map[string]any{"agent": agentName, "isRunning": false},
 					})
 				}

@@ -112,7 +112,8 @@ func TestWriteContractFile(t *testing.T) {
 	require.NoError(t, err)
 	content := string(data)
 	assert.Contains(t, content, "agent_id: test-agent")
-	assert.Contains(t, content, "agent_name: Test Agent")
+	// YAML quotes scalar values containing spaces.
+	assert.Contains(t, content, `agent_name: "Test Agent"`)
 	assert.Contains(t, content, "tool_access: doc-only")
 	assert.Contains(t, content, "team: test-team")
 	assert.Contains(t, content, "## Language Preferences")
