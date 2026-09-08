@@ -13,11 +13,24 @@ interface QuotaLimit {
   refresh_date?: number;
 }
 
+interface BalanceInfo {
+  currency: string;
+  total_balance: string;
+  granted_balance: string;
+  topped_up_balance: string;
+}
+
+interface AccountBalance {
+  is_available: boolean;
+  balance_infos?: BalanceInfo[];
+}
+
 interface ModelUsage {
   model: string;
   remaining: number;
   refresh_date?: number;
   limits?: QuotaLimit[];
+  balance?: AccountBalance;
 }
 
 const props = defineProps<{
@@ -161,12 +174,70 @@ defineExpose({
                             : 'bg-success/10 text-success',
                       ]"
                     >
-                      {{ t("quota.remaining", { pct: Math.round(m.remaining * 100) }) }}
+                      <template v-if="m.balance">
+                        {{
+                          !m.balance.is_available
+                            ? t("quota.balanceUnavailable")
+                            : m.remaining <= 0.2
+                              ? t("quota.balanceLow", { pct: Math.round(m.remaining * 100) })
+                              : t("quota.balanceAvailable")
+                        }}
+                      </template>
+                      <template v-else>
+                        {{ t("quota.remaining", { pct: Math.round(m.remaining * 100) }) }}
+                      </template>
                     </span>
                   </div>
 
+                  <!-- Prepaid account balance (e.g. DeepSeek) replaces the progress bar -->
+                  <div v-if="m.balance" class="space-y-2">
+                    <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
+                      {{ t("quota.balance") }}
+                    </h5>
+                    <div
+                      v-for="b in m.balance.balance_infos || []"
+                      :key="b.currency"
+                      class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 space-y-1.5"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs font-bold text-base-content/80">{{ b.currency }}</span>
+                        <span class="text-sm font-semibold text-base-content">{{
+                          b.total_balance
+                        }}</span>
+                      </div>
+                      <div
+                        class="flex items-center justify-between gap-2 text-[11px] text-base-content/50"
+                      >
+                        <span>
+                          {{ t("quota.balanceGranted") }}:
+                          <b class="font-semibold text-base-content/80">{{ b.granted_balance }}</b>
+                        </span>
+                        <span>
+                          {{ t("quota.balanceToppedUp") }}:
+                          <b class="font-semibold text-base-content/80">{{
+                            b.topped_up_balance
+                          }}</b>
+                        </span>
+                      </div>
+                    </div>
+                    <div
+                      v-if="!m.balance.is_available"
+                      class="alert alert-error text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+                    >
+                      <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0" />
+                      <span>{{ t("quota.balanceUnavailableHint") }}</span>
+                    </div>
+                    <div
+                      v-else-if="m.remaining <= 0.2"
+                      class="alert alert-warning text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+                    >
+                      <Icon icon="mynaui:warning" class="h-4 w-4 shrink-0" />
+                      <span>{{ t("quota.balanceLowHint") }}</span>
+                    </div>
+                  </div>
+
                   <!-- Single Progress Bar (when no multi-tier breakdown limits exist) -->
-                  <div v-if="!m.limits || m.limits.length === 0" class="space-y-1">
+                  <div v-else-if="!m.limits || m.limits.length === 0" class="space-y-1">
                     <progress
                       class="progress w-full"
                       :class="getProgressClass(m.remaining)"
