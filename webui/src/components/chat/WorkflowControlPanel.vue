@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { computeWorkflowPanelState } from "../../utils/workflowPanelState";
 import { formatPath } from "../../utils/agentUtils";
-import { sendAskUserReply } from "../../lib/api";
+import { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
 
@@ -154,6 +155,63 @@ const getOptionButtonClass = (opt: string): string => {
     return "btn-warning text-warning-content";
   }
   return "btn-outline text-base-content";
+};
+
+// ── Failed-run re-drive ────────────────────────────────────────────────────
+// The panel stage is inferred from chat messages; the run identity comes from
+// the backend run list. When the stage turns failed we look up the latest
+// FAILED run of the session and offer a one-click re-drive.
+const { t } = useI18n();
+const failedRunId = ref<string | null>(null);
+const isRedriving = ref(false);
+const redriveError = ref<string | null>(null);
+
+watch(
+  () => [state.value.stage, props.sessionId] as const,
+  ([stage, sessionId]) => {
+    if (stage !== "failed" || !sessionId) {
+      // Panel left the failed stage (re-drive accepted, new run started, or
+      // session switched): drop the transient redrive state entirely. The
+      // stage transition is driven by the store over SSE, mirroring how
+      // ask-user submissions keep isSubmitting until the stage moves on.
+      failedRunId.value = null;
+      isRedriving.value = false;
+      redriveError.value = null;
+      return;
+    }
+    // A fresh failed view: resolve the latest FAILED run of this session to
+    // offer the one-click re-drive.
+    isRedriving.value = false;
+    redriveError.value = null;
+    let cancelled = false;
+    getSessionWorkflows(sessionId).then((runs) => {
+      if (cancelled) return;
+      failedRunId.value = runs.find((run) => run.status === "FAILED")?.runId || null;
+    });
+    return () => {
+      cancelled = true;
+    };
+  },
+  { immediate: true },
+);
+
+const handleRedrive = async () => {
+  const runId = failedRunId.value;
+  if (!runId || isRedriving.value) return;
+  isRedriving.value = true;
+  redriveError.value = null;
+  const ok = await redriveWorkflowRun(runId);
+  if (!ok) {
+    // Backend rejected or could not start the re-drive: reset the spinner so
+    // the user can inspect the error and retry.
+    isRedriving.value = false;
+    redriveError.value = t("chat.workflow.redriveFailed");
+    return;
+  }
+  // Accepted: keep the spinner (and the run id) until the stage watcher sees
+  // the transition away from "failed", which the backend drives by streaming
+  // lifecycle status/message events. If the re-drive itself fails again the
+  // panel simply returns to a fresh failed state with the same run id.
 };
 </script>
 
@@ -313,17 +371,30 @@ const getOptionButtonClass = (opt: string): string => {
       </div>
 
       <!-- Stage: Failed -->
-      <div
-        v-else-if="state.stage === 'failed'"
-        class="flex items-center justify-between gap-2 py-1"
-      >
-        <div class="flex items-center gap-2 text-sm font-medium text-error min-w-0">
-          <Icon icon="fluent:dismiss-circle-24-filled" class="h-5 w-5 shrink-0" />
-          <span class="truncate">{{ state.statusText }}</span>
+      <div v-else-if="state.stage === 'failed'" class="space-y-1.5 py-1">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 text-sm font-medium text-error min-w-0">
+            <Icon icon="fluent:dismiss-circle-24-filled" class="h-5 w-5 shrink-0" />
+            <span class="truncate">{{ state.statusText }}</span>
+          </div>
+          <span class="badge badge-error badge-sm font-semibold uppercase shrink-0">
+            {{ $t("chat.workflow.failedBadge") }}
+          </span>
         </div>
-        <span class="badge badge-error badge-sm font-semibold uppercase shrink-0">
-          {{ $t("chat.workflow.failedBadge") }}
-        </span>
+        <div v-if="failedRunId" class="flex items-center gap-2">
+          <button
+            type="button"
+            @click="handleRedrive"
+            class="btn btn-sm btn-warning gap-1.5 text-xs font-semibold"
+            :disabled="isRedriving"
+            data-testid="workflow-redrive-button"
+          >
+            <span v-if="isRedriving" class="loading loading-spinner loading-xs"></span>
+            <Icon v-else icon="fluent:arrow-counterclockwise-24-filled" class="h-4 w-4" />
+            {{ $t("chat.workflow.redrive") }}
+          </button>
+          <span v-if="redriveError" class="text-xs text-error">{{ redriveError }}</span>
+        </div>
       </div>
 
       <!-- Stage: Completed -->

@@ -274,6 +274,8 @@ export const zhCN: MessageSchema = {
       completed: "工作流已完成",
       completedBadge: "已完成",
       failedBadge: "执行失败",
+      redrive: "重新执行",
+      redriveFailed: "重新执行请求失败，请稍后重试",
       notStarted: "{agent} 尚未启动",
       idleBadge: "空闲",
       waitingForInputStatus: "{agent} 正在等待人工输入",

@@ -73,6 +73,13 @@ export interface ChatSession {
   queuedMessages?: QueuedMessage[];
 }
 
+export interface WorkflowRunSummary {
+  runId: string;
+  status: "RUNNING" | "WAITING_HUMAN" | "COMPLETED" | "FAILED" | "CANCELLED";
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface DirInfo {
   subdirs: string[];
   gitRoot?: string;

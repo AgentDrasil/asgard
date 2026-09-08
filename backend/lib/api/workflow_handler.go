@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
+
 	"uuid"
 
 	"github.com/rs/zerolog/log"
@@ -255,4 +258,128 @@ func (s *Server) emitWorkflowPreExecutionCleanup(chatID, agentID string) {
 			Payload: map[string]any{"agent": agentID},
 		})
 	}
+}
+
+// handleWorkflowRedrive re-drives a FAILED workflow run from its persisted
+// snapshot: SUCCEEDED nodes are seeded as settled history while the failed
+// node and everything downstream execute again. The long-running re-drive
+// happens in the background; lifecycle events flow into the chat via the
+// normal workflow event pipeline.
+func (s *Server) handleWorkflowRedrive(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("runID")
+	engine := s.workflowEngine
+	if engine == nil || s.workflowRunRepo == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "workflow engine not available")
+		return
+	}
+
+	row, err := s.workflowRunRepo.GetRunRow(runID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to query workflow run: "+err.Error())
+		return
+	}
+	if row == nil {
+		writeJSONError(w, http.StatusNotFound, "workflow run not found")
+		return
+	}
+	if row.Status != workflow.PersistStatusFailed {
+		writeJSONError(w, http.StatusConflict, fmt.Sprintf("workflow run status is %s; only FAILED runs can be re-driven", row.Status))
+		return
+	}
+	if engine.IsSessionExecuting(row.SessionID) {
+		writeJSONError(w, http.StatusConflict, "session is already executing a workflow run")
+		return
+	}
+
+	chatID := row.SessionID
+	agentKey := s.resolveWorkflowAgentKey(chatID, "")
+	s.activeExecutions.Store(chatID, struct{}{})
+	if agentKey != "" && s.repo != nil {
+		_ = s.repo.UpdateAgentStatus(chatID, agentKey, dbmodels.AgentStatusRunning)
+		s.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": agentKey, "isRunning": true},
+		})
+	}
+
+	go func() {
+		emit := func(ev workflow.WorkflowEvent) {
+			sid := ev.SessionID
+			if sid == "" {
+				sid = chatID
+			}
+			s.handleWorkflowEvent(sid, ev)
+		}
+		if _, err := engine.RedriveFailed(context.Background(), runID, emit); err != nil {
+			log.Warn().Err(err).Str("run_id", runID).Msg("re-driving failed workflow run failed")
+			s.activeExecutions.Delete(chatID)
+			if agentKey != "" && s.repo != nil {
+				_ = s.repo.UpdateAgentStatus(chatID, agentKey, dbmodels.AgentStatusCompleted)
+			}
+			errMsg := dbmodels.ChatMessage{
+				ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
+				Role:      "error",
+				Content:   fmt.Sprintf("重新执行工作流失败：%v", err),
+				Timestamp: time.Now().UnixMilli(),
+			}
+			_ = s.repo.AppendMessage(chatID, errMsg)
+			s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
+			s.PublishSessionEvent(chatID, SessionEvent{Type: "status", Payload: map[string]any{"agent": agentKey, "isRunning": false}})
+			return
+		}
+		// Terminal lifecycle (finished/failed/suspended) is driven by
+		// handleWorkflowEvent, including the activeExecutions cleanup.
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "accepted",
+		"runId":  runID,
+		"chatId": chatID,
+	})
+}
+
+// workflowRunSummary is the client-facing projection of one workflow run of a
+// session. It deliberately carries no node states or DAG spec — the UI only
+// needs run identity, lifecycle status and timestamps.
+type workflowRunSummary struct {
+	RunID     string `json:"runId"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// handleSessionWorkflowRuns lists the workflow runs of a session, most
+// recently updated first. GET /api/sessions/{id}/workflows
+func (s *Server) handleSessionWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if !IsValidChatID(sessionID) {
+		writeJSONError(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
+	if s.workflowRunRepo == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "workflow runs are not available")
+		return
+	}
+
+	runs, err := s.workflowRunRepo.ListRunsBySession(sessionID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to list workflow runs: "+err.Error())
+		return
+	}
+
+	out := make([]workflowRunSummary, 0, len(runs))
+	for _, run := range runs {
+		sum := workflowRunSummary{
+			RunID:     run.RunID,
+			Status:    run.Status,
+			CreatedAt: run.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: run.UpdatedAt.Format(time.RFC3339),
+		}
+		out = append(out, sum)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"runs": out})
 }

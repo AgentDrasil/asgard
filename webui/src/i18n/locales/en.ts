@@ -275,6 +275,8 @@ export const en = {
       completed: "Workflow completed",
       completedBadge: "Completed",
       failedBadge: "Failed",
+      redrive: "Re-run",
+      redriveFailed: "Re-run request failed, please retry",
       notStarted: "{agent} not started",
       idleBadge: "Idle",
       waitingForInputStatus: "{agent} is waiting for human input",

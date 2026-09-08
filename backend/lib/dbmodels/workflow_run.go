@@ -438,6 +438,20 @@ func (r *WorkflowRunRepository) GetRunRow(runID string) (*WorkflowRun, error) {
 	return &run, nil
 }
 
+// ListRunsBySession returns every workflow run of a session (not hydrated),
+// most recently updated first.
+func (r *WorkflowRunRepository) ListRunsBySession(sessionID string) ([]*WorkflowRun, error) {
+	var runs []*WorkflowRun
+	err := r.db.
+		Where("session_id = ?", sessionID).
+		Order("updated_at desc").
+		Find(&runs).Error
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
 // GetRun retrieves a workflow run by run ID and hydrates offloaded fields.
 // Returns (nil, nil) when not found.
 func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {

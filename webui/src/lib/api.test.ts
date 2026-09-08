@@ -19,6 +19,8 @@ import {
   triggerAgentMessage,
   getSessions,
   archiveSession,
+  getSessionWorkflows,
+  redriveWorkflowRun,
 } from "./api";
 
 describe("API Library", () => {
@@ -689,6 +691,87 @@ describe("API Library", () => {
       const res = await getSessions();
       expect(res).toEqual([]);
       expect(consoleErrorSpy).toHaveBeenCalledWith("getSessions error:", expect.any(Error));
+    });
+  });
+
+  describe("getSessionWorkflows", () => {
+    it("returns workflow run summaries on 200 OK", async () => {
+      const mockRuns = [
+        { runId: "run-1", status: "FAILED", createdAt: "2026-09-01T00:00:00Z" },
+        { runId: "run-2", status: "COMPLETED" },
+      ];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ runs: mockRuns }),
+      } as Response);
+
+      const res = await getSessionWorkflows("chat-123");
+      expect(res).toEqual(mockRuns);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions/chat-123/workflows", undefined);
+    });
+
+    it("returns empty array when response has no runs payload", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      } as Response);
+
+      const res = await getSessionWorkflows("chat-123");
+      expect(res).toEqual([]);
+    });
+
+    it("returns empty array on non-ok response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 500,
+      } as Response);
+
+      const res = await getSessionWorkflows("chat-123");
+      expect(res).toEqual([]);
+    });
+
+    it("returns empty array on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
+
+      const res = await getSessionWorkflows("chat-123");
+      expect(res).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith("getSessionWorkflows error:", expect.any(Error));
+    });
+  });
+
+  describe("redriveWorkflowRun", () => {
+    it("posts to the redrive endpoint and returns true on accepted", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: async () => ({ status: "accepted", runId: "run-1", chatId: "chat-123" }),
+      } as Response);
+
+      const ok = await redriveWorkflowRun("run-1");
+      expect(ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/workflows/run-1/redrive", {
+        method: "POST",
+      });
+    });
+
+    it("returns false when the backend rejects the redrive", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 409,
+      } as Response);
+
+      const ok = await redriveWorkflowRun("run-1");
+      expect(ok).toBe(false);
+    });
+
+    it("returns false on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
+
+      const ok = await redriveWorkflowRun("run-1");
+      expect(ok).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalledWith("redriveWorkflowRun error:", expect.any(Error));
     });
   });
 

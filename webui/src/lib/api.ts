@@ -20,6 +20,7 @@ import type {
   SystemStatusResponse,
   TriggerAgentMessageParams,
   VoiceTokenResponse,
+  WorkflowRunSummary,
   WorkspaceFileContent,
 } from "../types";
 
@@ -409,6 +410,30 @@ export async function sendAskUserReply(
     return res.ok;
   } catch (err) {
     console.error("sendAskUserReply error:", err);
+    return false;
+  }
+}
+
+export async function getSessionWorkflows(sessionId: string): Promise<WorkflowRunSummary[]> {
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/workflows`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.runs) ? (data.runs as WorkflowRunSummary[]) : [];
+  } catch (err) {
+    console.error("getSessionWorkflows error:", err);
+    return [];
+  }
+}
+
+export async function redriveWorkflowRun(runId: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(`/api/workflows/${encodeURIComponent(runId)}/redrive`, {
+      method: "POST",
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("redriveWorkflowRun error:", err);
     return false;
   }
 }
