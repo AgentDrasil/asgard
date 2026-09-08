@@ -216,6 +216,7 @@ var exactModelContextTable = map[string]int{
 	"opencode/ling-3.0-flash-fin-free":         262144,
 	"opencode/mimo-v2.5-free":                  1048576,
 	"opencode/muse-spark-1.2-contributor-free": 1048576,
+	"opencode/muse-spark-1.3-contributor-free": 1048576,
 	"opencode/nemotron-3-ultra-free":           262144,
 	"opencode/nemotron-3.5-lightning-free":     262144,
 	"zai-coding-plan/glm-5.3":                  1048576,

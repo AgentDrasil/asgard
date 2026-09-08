@@ -158,7 +158,10 @@ func (s *Server) validateModelContextWindows(agents []*agentspec.Agent) {
 			}
 			seenModels[modelKey] = true
 
-			if _, known := agentwrapper.LookupContextWindow(target.Model); !known {
+			// CLI-aware lookup: handles variant suffixes (e.g. agy
+			// "gemini-3.7-flash-low", simplest "deepseek/deepseek-v4-pro/high")
+			// and simplest user-config models.
+			if !agentwrapper.IsKnownModel(target.CLI, target.Model) {
 				log.Error().
 					Str("agent", a.Config.ID).
 					Str("cli", target.CLI).
