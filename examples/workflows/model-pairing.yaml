@@ -1,0 +1,62 @@
+name: model-pairing-workflow
+
+# Heterogeneous model pairing: the reviewer's model is chosen per iteration
+# from the target its group's actor actually used (quota fallback included),
+# so a review never silently runs on a same-source model.
+model_pairings:
+  - id: code
+    actors: [coding_agent, fix_agent]
+    reviewer: code_review_agent
+    pairs:
+      # Actor ran on agy -> review with an opencode model, PPR tail as
+      # unlimited-quota fallback so the list always terminates.
+      - actor: {cli: agy, model: gemini-3.8-flash-low}
+        reviewer:
+          - {cli: opencode, model: zai-coding-plan/glm-5.3/high}
+          - {cli: openrouter, model: anthropic/claude-sonnet-5}
+      # Actor fell back to opencode -> review with an agy model.
+      - actor: {cli: opencode, model: zai-coding-plan/glm-5.3-flash/high}
+        reviewer:
+          - {cli: agy, model: gemini-3.1-pro-low}
+          - {cli: openrouter, model: anthropic/claude-sonnet-5}
+
+loops:
+  - id: fix_loop
+    nodes: [code_review_agent, check_verdict, fix_agent]
+    max_iterations: 5
+
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: coder
+    session_policy: fresh
+    entry: true
+
+  - id: code_review_agent
+    type: agent
+    depends:
+      - node: coding_agent
+      - node: fix_agent
+    join: always
+    agent_id: code-reviewer
+    session_policy: fresh
+
+  - id: check_verdict
+    type: command
+    sandbox: false
+    depends:
+      - node: code_review_agent
+    command: >
+      if grep -qx 'FIX' ${session_dir}/review_verdict.txt; then exit 0;
+      elif grep -qx 'PASS' ${session_dir}/review_verdict.txt; then exit 1;
+      else exit 2; fi
+    allowed_exit_codes: [0, 1]  # 0: FIX, 1: PASS, 2: verdict missing/corrupt (fail-closed)
+
+  - id: fix_agent
+    type: agent
+    depends:
+      - node: check_verdict
+        when: "nodes.check_verdict.exit_code == 0"
+        counts_loop: fix_loop
+    agent_id: fix-agent
+    session_policy: fresh

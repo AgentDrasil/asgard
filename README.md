@@ -121,11 +121,29 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
   ```
   The real exit code is always preserved in the node result (success or failure), so downstream `when` edges route on the precise value; codes outside the whitelist settle the node `FAILED`. Only `type: command` nodes may declare the whitelist.
 - **Sandbox-Friendly Workspaces**: Isolates intermediate step files under `tmp_dir` (defaults to `/tmp/${session_id}`).
+- **Heterogeneous Model Pairing (`model_pairings`)**: Guarantees that a review node never reviews same-source model output silently. Each group maps every CLI target an actor agent may resolve to (its `cli:` list, quota fallback included) to an ordered reviewer fallback list; when the reviewer executes, the engine resolves the group's most recently completed actor's actually-used target and picks the first paired reviewer target with more than 10% quota remaining — per iteration, so mid-loop model drift re-pairs automatically. Every actor `cli:`-list target must be covered by a `pairs` key — the engine enforces this before executing any node (and `agent-validate` reports coverage gaps statically). A reviewer list should end with a pay-per-request target (the quota layer treats PPR as unlimited) so the fallback always terminates. If all paired reviewer targets are exhausted the run suspends (`WAITING_HUMAN`, options: wait / force a target / cancel) instead of silently reviewing with a same-source model; an unresolvable pairing key fails the node closed (`pairing key not found: <cli>/<model>`). A node-level `model:` override bypasses pairing entirely. See [examples/workflows/model-pairing.yaml](examples/workflows/model-pairing.yaml):
+  ```yaml
+  model_pairings:
+    - id: code
+      actors: [coding_agent, fix_agent]     # node ids whose output is reviewed
+      reviewer: code_review_agent           # governed node (ignores its own cli: list in-workflow)
+      pairs:
+        - actor: {cli: agy, model: gemini-3.8-flash-low}
+          reviewer:
+            - {cli: opencode, model: zai-coding-plan/glm-5.3/high}
+            - {cli: openrouter, model: anthropic/claude-sonnet-5}  # PPR tail
+        - actor: {cli: opencode, model: zai-coding-plan/glm-5.3-flash/high}
+          reviewer:
+            - {cli: agy, model: gemini-3.1-pro-low}
+            - {cli: openrouter, model: anthropic/claude-sonnet-5}
+  ```
+  Actual per-node `(cli, model)` selections (including fallbacks and pairing skips) are surfaced via node status events and persisted node states.
 
 ### Example Workflows (`examples/workflows/`)
 Ready-to-use workflow definitions are located in [`examples/workflows/`](examples/workflows/):
 - **[build-and-fix.yaml](examples/workflows/build-and-fix.yaml)**: Runs code generation, executes build checks, and conditionally triggers a fix agent if the build fails.
 - **[human-in-the-loop.yaml](examples/workflows/human-in-the-loop.yaml)**: Generates a plan, pauses for human approval, uses a lightweight LLM classifier to parse natural language feedback, and conditionally proceeds with code execution.
+- **[model-pairing.yaml](examples/workflows/model-pairing.yaml)**: Codes, reviews, and fixes with heterogeneous model pairing — the reviewer's model is dictated per iteration by the target the actor actually used.
 - **[parallel-review.yaml](examples/workflows/parallel-review.yaml)**: Concurrently runs security and performance review agents and consolidates their reports.
 
 ### Validating Workflow & Agent Definitions (`agent-validate`)
