@@ -136,6 +136,9 @@ func (r *agentRunner) lookup(agentID string) (*agentspec.Agent, error) {
 	return agent, nil
 }
 
+// Lookup resolves an agent by ID (lazily loading the agent directory).
+func (r *agentRunner) Lookup(agentID string) (*agentspec.Agent, error) { return r.lookup(agentID) }
+
 func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 

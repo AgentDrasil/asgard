@@ -161,6 +161,57 @@ func (e *Engine) SetAgents(agentList []*agentspec.Agent) {
 	}
 }
 
+// agentCoverageLookup is the optional capability of the agent runner that the
+// model pairing coverage gate relies on to resolve actor agents by ID.
+type agentCoverageLookup interface {
+	Lookup(agentID string) (*agentspec.Agent, error)
+}
+
+// validateModelPairingCoverage enforces, before any node executes, that every
+// pairing group covers each CLI target its actor nodes' agents may resolve
+// to. Agents are resolved through the registered agent runner's Lookup; a
+// missing runner, a runner without lookup capability, or an unresolvable
+// agent fails the run closed instead of silently skipping the check.
+func (e *Engine) validateModelPairingCoverage(defn *workflowspec.WorkflowDefinition) error {
+	runner, ok := e.registry.Get(workflowspec.NodeTypeAgent)
+	if !ok {
+		return fmt.Errorf("workflow %q declares model_pairings but no agent runner is registered", defn.Name)
+	}
+	lookup, ok := runner.(agentCoverageLookup)
+	if !ok {
+		return fmt.Errorf("workflow %q declares model_pairings but the registered agent runner does not support agent lookup", defn.Name)
+	}
+
+	nodeByID := make(map[string]*workflowspec.NodeSpec, len(defn.Nodes))
+	for _, node := range defn.Nodes {
+		nodeByID[node.ID] = node
+	}
+
+	agentCLIs := make(map[string][]workflowspec.PairTarget)
+	for _, group := range defn.ModelPairings {
+		for _, actorID := range group.Actors {
+			node := nodeByID[actorID]
+			if node == nil || node.AgentID == "" {
+				continue
+			}
+			if _, resolved := agentCLIs[node.AgentID]; resolved {
+				continue
+			}
+			agent, err := lookup.Lookup(node.AgentID)
+			if err != nil {
+				return fmt.Errorf("model pairing coverage check failed for group %q actor node %q: %w", group.ID, actorID, err)
+			}
+			targets := make([]workflowspec.PairTarget, 0, len(agent.Config.CLI))
+			for _, t := range agent.Config.CLI {
+				targets = append(targets, workflowspec.PairTarget{CLI: t.CLI, Model: t.Model})
+			}
+			agentCLIs[node.AgentID] = targets
+		}
+	}
+
+	return defn.ValidateModelPairingsCoverage(agentCLIs)
+}
+
 // IsSessionExecuting reports whether any workflow run belonging to the given
 // session is currently actively executing (not suspended waiting for human input).
 func (e *Engine) IsSessionExecuting(sessionID string) bool {
@@ -254,6 +305,19 @@ func EvaluateNodeReadiness(node *workflowspec.NodeSpec, upstreams map[string]*wo
 func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinition, rc RunContext) (*WorkflowRunResult, error) {
 	if err := defn.Validate(); err != nil {
 		return nil, err
+	}
+
+	// Model pairing coverage gate: a workflow declaring model_pairings must
+	// cover every CLI target its actor agents may resolve to, checked before
+	// any node runs (covers top-level runs, nested sub-workflows, and runs
+	// re-triggered after agent reloads).
+	if len(defn.ModelPairings) > 0 {
+		if err := e.validateModelPairingCoverage(defn); err != nil {
+			return nil, err
+		}
+		for _, warning := range defn.ModelPairingWarnings() {
+			log.Warn().Str("workflow", defn.Name).Msg(warning)
+		}
 	}
 
 	if rc.SessionID == "" {

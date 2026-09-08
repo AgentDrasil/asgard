@@ -146,6 +146,9 @@ func validateWorkflowFile(workflowPath string) {
 func checkAgentIDReferences(defn *workflowspec.WorkflowDefinition, baseDir string) {
 	agentsDir := findAgentsDir(baseDir)
 	if agentsDir == "" {
+		if len(defn.ModelPairings) > 0 {
+			fmt.Fprintln(os.Stderr, "  Warning: model pairing coverage was NOT verified (agents directory not found)")
+		}
 		return
 	}
 
@@ -153,6 +156,9 @@ func checkAgentIDReferences(defn *workflowspec.WorkflowDefinition, baseDir strin
 	loadedAgents, err := loader.LoadAll()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  Notice: could not load agents from %q to verify agent_id references: %v\n", agentsDir, err)
+		if len(defn.ModelPairings) > 0 {
+			fmt.Fprintln(os.Stderr, "  Warning: model pairing coverage was NOT verified (agents pool failed to load)")
+		}
 		return
 	}
 
