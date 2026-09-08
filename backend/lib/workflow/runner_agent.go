@@ -365,11 +365,9 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 			}
 		}
 
-		if targetKnown {
+		if targetKnown && executionErr == nil {
 			emitModelSelection(nctx, node, effectiveAgent, lastTarget, pairing, userForced)
-			if executionErr == nil {
-				recordActualTarget(nctx, node.ID, lastTarget.CLI, lastTarget.Model)
-			}
+			recordActualTarget(nctx, node.ID, lastTarget.CLI, lastTarget.Model)
 		}
 
 		if executionErr != nil {
@@ -457,9 +455,12 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		Str("node_id", node.ID).
 		Str("agent_id", node.AgentID).
 		Msgf("[AgentRunner] Agent %q for node %q quality gate FAILED: %v", node.AgentID, node.ID, qualityGateErr)
-	// The node did run on lastTarget even though the quality gate rejected
-	// its output: keep the target so suspension re-drives and restarts keep
-	// a pairing baseline for this actor.
+	// The node did run on lastTarget even though it settled FAILED. The
+	// recorded target is informational here (surfaced via node results and
+	// persistence for attribution): pairing baselines come from the live
+	// RunValues records within a run, and the restart fallback in
+	// latestActorTarget only reads succeeded upstream results — a FAILED
+	// node's CLI/Model never re-drives a pairing decision.
 	return &workflowspec.NodeResult{
 		Status:    workflowspec.StatusFailed,
 		Output:    lastContent,

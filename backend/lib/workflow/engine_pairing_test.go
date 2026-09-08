@@ -173,8 +173,9 @@ func TestExecute_ModelPairingCoverageCompletePassesGate(t *testing.T) {
 		Headless:  true,
 	})
 
-	// The gate passed and the DAG ran (nodes fail here only because no CLI
-	// client is registered in this test environment).
+	// The gate passed and the DAG ran; node errors (whatever their
+	// environment-dependent cause) are asserted below to be free of
+	// pairing-related messages only.
 	require.NoError(t, err)
 	require.NotNil(t, run)
 	assert.Contains(t, run.Nodes, "coder_node")

@@ -191,6 +191,10 @@ func (e *Engine) validateModelPairingCoverage(defn *workflowspec.WorkflowDefinit
 	for _, group := range defn.ModelPairings {
 		for _, actorID := range group.Actors {
 			node := nodeByID[actorID]
+			// This skip mirrors the internal skip in
+			// ValidateModelPairingsCoverage: pairing actor nodes without a
+			// static agent ID (dynamic/unresolved agents) cannot be
+			// coverage-checked. Keep the two conditions in sync.
 			if node == nil || node.AgentID == "" {
 				continue
 			}

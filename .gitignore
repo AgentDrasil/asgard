@@ -1,3 +1,4 @@
 config.yaml
 tmp
 build
+cmd/agent-validate/agent-validate

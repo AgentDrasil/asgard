@@ -126,12 +126,16 @@ func emitModelSelection(nctx *NodeContext, node *workflowspec.NodeSpec, agent *a
 			node.ID, target.CLI, target.Model, first.CLI, first.Model)
 	}
 
+	agentName := ""
+	if agent != nil {
+		agentName = agent.Config.Name
+	}
 	nctx.EventEmitter(WorkflowEvent{
 		Type:      EventNodeStatusUpdate,
 		NodeID:    node.ID,
 		NodeType:  workflowspec.NodeTypeAgent,
 		AgentID:   node.AgentID,
-		AgentName: agent.Config.Name,
+		AgentName: agentName,
 		Status:    workflowspec.StatusRunning,
 		Message:   message,
 		EntryType: "activity",

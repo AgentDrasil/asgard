@@ -321,8 +321,9 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, session opt
 // When candidates is non-empty it replaces agent.Config.CLI as the selection
 // list for both automatic and explicit model selection (workflow model
 // pairing); when nil the agent's own list is used unchanged. It additionally
-// reports the target that actually produced the output so callers can record
-// the actual (cli, model) per node execution.
+// reports the selected target (also returned when execution itself fails, so
+// callers can attribute failed runs) for callers to record the actual
+// (cli, model) per node execution.
 func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, session optional.Option[string], runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
 	targets := agent.Config.CLI
 	if len(candidates) > 0 {

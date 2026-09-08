@@ -186,6 +186,9 @@ func (d *WorkflowDefinition) ModelPairingWarnings() []string {
 // to the agent's ordered cli list (typically loaded via agentspec). A missing
 // actor target key would leave the reviewer without a candidate list at run
 // time, so coverage gaps are load-time errors rather than runtime guesses.
+// Actor nodes with an empty AgentID (dynamic/unresolved agents) are silently
+// skipped: their cli list cannot be known statically, so there is nothing to
+// coverage-check for them.
 func (d *WorkflowDefinition) ValidateModelPairingsCoverage(agentCLIs map[string][]PairTarget) error {
 	nodeByID := make(map[string]*NodeSpec, len(d.Nodes))
 	for _, node := range d.Nodes {

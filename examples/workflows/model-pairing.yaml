@@ -43,7 +43,7 @@ nodes:
 
   - id: check_verdict
     type: command
-    sandbox: false
+    sandbox: false  # host-side grep: the default session_dir is a host temp path outside the bwrap command-sandbox mount set
     depends:
       - node: code_review_agent
     command: >

@@ -127,15 +127,11 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
     - id: code
       actors: [coding_agent, fix_agent]     # node ids whose output is reviewed
       reviewer: code_review_agent           # governed node (ignores its own cli: list in-workflow)
-      pairs:
+      pairs:                                # one entry shown; see the example for the full table
         - actor: {cli: agy, model: gemini-3.8-flash-low}
           reviewer:
             - {cli: opencode, model: zai-coding-plan/glm-5.3/high}
             - {cli: openrouter, model: anthropic/claude-sonnet-5}  # PPR tail
-        - actor: {cli: opencode, model: zai-coding-plan/glm-5.3-flash/high}
-          reviewer:
-            - {cli: agy, model: gemini-3.1-pro-low}
-            - {cli: openrouter, model: anthropic/claude-sonnet-5}
   ```
   Actual per-node `(cli, model)` selections (including fallbacks and pairing skips) are surfaced via node status events and persisted node states.
 
