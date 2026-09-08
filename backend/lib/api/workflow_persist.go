@@ -315,6 +315,25 @@ func (s *Server) resolveWorkflowAgentKey(sessionID, agentName string) string {
 	return agentName
 }
 
+// findAskUserMessage returns the transcript message with the given ID, or nil
+// when it does not exist. Used to detect ask bubbles that were already replied
+// before deciding whether a re-suspension can reuse their message ID.
+func findAskUserMessage(repo *dbmodels.SessionRepository, chatID, msgID string) *dbmodels.ChatMessage {
+	if repo == nil || chatID == "" || msgID == "" {
+		return nil
+	}
+	sess, err := repo.GetSession(chatID)
+	if err != nil || sess == nil {
+		return nil
+	}
+	for i := range sess.Messages {
+		if sess.Messages[i].ID == msgID {
+			return &sess.Messages[i]
+		}
+	}
+	return nil
+}
+
 // handleWorkflowEvent persists side effects of workflow node events. Node
 // artifacts (e.g. command output_file results) are registered on the session
 // so the frontend artifact viewer can list and open them. Node and workflow
@@ -365,7 +384,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		s.activeExecutions.Delete(sessionID)
 		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
 		if agentKey != "" {
-			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusCompleted)
+			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusWaitingHuman)
 		}
 		s.PublishSessionEvent(sessionID, SessionEvent{
 			Type: "status",
@@ -389,6 +408,15 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 			msgID := ev.MessageID
 			if msgID == "" {
 				msgID = fmt.Sprintf("wf-suspended-%s-%d", ev.NodeID, time.Now().UnixMilli())
+			}
+			// A re-suspension may reuse a MessageID whose ask bubble was
+			// already replied (e.g. re-drive after restart). AppendMessage
+			// replaces in place and inherits Replied=true, so the ask would
+			// stay invisible with nothing for the user to click. Append under
+			// a fresh ID instead: the reply routes back through
+			// tryResumeWorkflow's unique-waiting-run fallback.
+			if existing := findAskUserMessage(s.repo, sessionID, msgID); existing != nil && existing.Replied {
+				msgID = fmt.Sprintf("%s-reask-%d", msgID, time.Now().UnixMilli())
 			}
 			msg := dbmodels.ChatMessage{
 				ID:            msgID,
@@ -572,8 +600,10 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 
 // tryResumeWorkflow routes an ask-user reply to a suspended workflow run.
 // When messageID is provided, it uses ResumeByMessageID with session ownership validation (m9).
-// When messageID is empty, it counts totalWaiting across all suspended runs in the chat;
-// if totalWaiting == 1, it gracefully falls back to resuming that interaction; otherwise it Warns/no-ops.
+// When messageID is empty (or matches no waiting interaction — e.g. a reply to
+// a stale ask bubble left over from an earlier suspension), it counts
+// totalWaiting across all suspended runs in the chat; if totalWaiting == 1, it
+// gracefully falls back to resuming that interaction; otherwise it Warns/no-ops.
 func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText string) {
 	engine := s.workflowEngine
 	if engine == nil {
@@ -624,17 +654,22 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 					break
 				}
 			}
-			if !matched {
+			if matched {
+				targetMessageID = messageID
+			} else {
+				// The reply targets a bubble no waiting run owns (stale or
+				// missing ask). Fall through to the unique-waiting fallback
+				// instead of silently dropping the user's reply.
 				log.Warn().
 					Str("chat_id", chatID).
 					Str("message_id", messageID).
-					Msg("ask-user reply does not match any suspended workflow interaction in session; skipping resume")
-				return
+					Msg("ask-user reply does not match any suspended workflow interaction; trying unique waiting interaction fallback")
 			}
-			targetMessageID = messageID
 		}
-	} else {
-		// Branch 2: Fallback mode (messageID == "")
+	}
+
+	if targetMessageID == "" {
+		// Branch 2: Fallback mode (messageID == "" or unmatched)
 		runs, err := engine.FindWaitingRuns(chatID)
 		if err != nil {
 			log.Error().Err(err).Str("chat_id", chatID).Msg("looking up waiting workflow runs failed")
@@ -701,9 +736,16 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			} else {
 				s.activeExecutions.Delete(chatID)
 				if agentName != "" && s.repo != nil {
-					_ = s.repo.UpdateAgentStatus(chatID, agentName, dbmodels.AgentStatusCompleted)
+					// The run may still be WAITING_HUMAN (e.g. the engine held
+					// a live waiter): keep the waiting status instead of
+					// flipping to completed.
+					status := dbmodels.AgentStatusCompleted
+					if runs, rerr := engine.FindWaitingRuns(chatID); rerr == nil && len(runs) > 0 {
+						status = dbmodels.AgentStatusWaitingHuman
+					}
+					_ = s.repo.UpdateAgentStatus(chatID, agentName, status)
 					s.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "status",
+						Type:   "status",
 						Payload: map[string]any{"agent": agentName, "isRunning": false},
 					})
 				}

@@ -156,6 +156,10 @@ const (
 	AgentStatusUnknown AgentStatus = iota
 	AgentStatusRunning
 	AgentStatusCompleted
+	// AgentStatusWaitingHuman marks an agent parked on a human node of a
+	// suspended workflow run. It must stay distinguishable from Completed so
+	// hosts and UIs can tell "waiting for the user" from "done".
+	AgentStatusWaitingHuman
 )
 
 type Agent struct {

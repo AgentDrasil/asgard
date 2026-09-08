@@ -146,25 +146,34 @@ func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 	assert.Contains(t, session.Messages[1].Content, "COMPLETED")
 }
 
-func TestAskUserReplyMismatchedMessageIDDoesNotResume(t *testing.T) {
+func TestAskUserReplyMismatchedMessageIDFallsBackToUniqueWaitingRun(t *testing.T) {
 	s, store, runDir := newAskReplyTestServer(t)
 	chatID := "chat-wf-mismatch"
 
 	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
 	seedWaitingRun(t, store, chatID, "run2", runDir)
 
+	// A reply targeting a stale/unknown ask bubble must still land on the
+	// session's only waiting interaction instead of being dropped silently.
 	rec := postAskUserReply(t, s, chatID, "ask-some-other-message", "Approved")
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	time.Sleep(200 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err := store.GetRun("run2")
+		require.NoError(t, err)
+		if run != nil && run.Status == workflow.PersistStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workflow run did not complete via fallback; status=%v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	run, err := store.GetRun("run2")
+	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
-	require.NotNil(t, run)
-	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
-
-	_, err = os.Stat(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
-	assert.True(t, os.IsNotExist(err), "artifact must not be written on mismatched reply")
+	assert.Equal(t, "Approved", string(feedback))
 }
 
 func TestSuspendWorkflowHumanRegistersArtifacts(t *testing.T) {
@@ -194,6 +203,60 @@ func TestSuspendWorkflowHumanRegistersArtifacts(t *testing.T) {
 	assert.Equal(t, "ask_user", msg.Role)
 	assert.Equal(t, "wf-run3-plan_approval", msg.ID)
 	assert.Equal(t, []string{"/tmp/plan/plan.md", "/tmp/plan/review_feedback.md"}, msg.ArtifactFiles)
+}
+
+// TestSuspendedEventReasksRepliedBubble verifies that a re-suspension whose
+// reused MessageID maps to an already-replied ask bubble appends a fresh
+// unreplied ask under a derived ID (so the user always has something to click)
+// and marks the agent WAITING_HUMAN instead of completed.
+func TestSuspendedEventReasksRepliedBubble(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-wf-reask"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	// The original ask bubble exists and was already replied.
+	require.NoError(t, s.repo.AppendMessage(chatID, dbmodels.ChatMessage{
+		ID:     "wf-run4-plan_approval-2",
+		Role:   "ask_user",
+		Content: "Please review Plan. Options: Approve / Request Changes",
+	}))
+	updated, err := s.repo.MarkAskUserReplied(chatID, "wf-run4-plan_approval-2", "old reply")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.True(t, updated.Replied)
+
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventWorkflowSuspended,
+		NodeID:    "plan_approval",
+		NodeType:  workflowspec.NodeTypeHuman,
+		Status:    workflowspec.NodeStatus(workflow.RunStatusWaitingHuman),
+		Message:   "Please review Plan. Options: Approve / Request Changes",
+		MessageID: "wf-run4-plan_approval-2",
+	})
+
+	session, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.Len(t, session.Messages, 2)
+
+	// The original bubble keeps its replied state.
+	assert.Equal(t, "wf-run4-plan_approval-2", session.Messages[0].ID)
+	assert.True(t, session.Messages[0].Replied)
+
+	// A fresh unreplied ask was appended under a derived ID.
+	reask := session.Messages[1]
+	assert.Equal(t, "ask_user", reask.Role)
+	assert.Contains(t, reask.ID, "wf-run4-plan_approval-2-reask-")
+	assert.False(t, reask.Replied)
+
+	// The workflow agent is parked as waiting for a human, not completed.
+	found := false
+	for _, a := range session.Agents {
+		if a.Name == "wf-agent" {
+			found = true
+			assert.Equal(t, dbmodels.AgentStatusWaitingHuman, a.Status)
+		}
+	}
+	assert.True(t, found, "wf-agent status entry must exist")
 }
 
 func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
@@ -635,22 +698,19 @@ func TestAskUserReply_EmptyMessageID_MultipleRuns_GracefulNoop(t *testing.T) {
 	assert.Equal(t, workflow.PersistStatusWaitingHuman, rb.Status)
 }
 
-func TestAskUserReply_UnknownMessageID_SafeNoop(t *testing.T) {
+func TestAskUserReply_UnknownMessageID_NoWaitingRun_Noops(t *testing.T) {
 	s, store, runDir := newAskReplyTestServer(t)
 	chatID := "chat-unknown-msg"
 
 	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID}))
-	seedWaitingRun(t, store, chatID, "run-active", runDir)
 
-	// Send reply with non-existent message_id
+	// No waiting run exists: an unknown message_id reply is a safe no-op.
 	rec := postAskUserReply(t, s, chatID, "wf-nonexistent-message", "Should Safe Noop")
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	time.Sleep(200 * time.Millisecond)
-
-	run, err := store.GetRun("run-active")
-	require.NoError(t, err)
-	assert.Equal(t, workflow.PersistStatusWaitingHuman, run.Status)
+	_ = store
+	_ = runDir
 }
 
 func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
