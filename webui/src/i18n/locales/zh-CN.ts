@@ -87,7 +87,7 @@ export const zhCN: MessageSchema = {
     balanceUnavailable: "无可用余额",
     balanceUnavailableHint: "请充值后恢复 API 调用。",
     balanceLow: "余额不足 ({pct}%)",
-    balanceLowHint: "余额即将耗尽（人民币少于 20 或美元少于 5），请及时充值。",
+    balanceLowHint: "所有币种余额均低于最低值（人民币少于 20 且美元少于 5），请及时充值。",
     balanceGranted: "赠送",
     balanceToppedUp: "充值",
     noQuotaInfo: "CLI 未返回配额信息。",

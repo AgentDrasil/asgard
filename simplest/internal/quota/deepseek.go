@@ -29,28 +29,31 @@ var lowBalanceThresholds = map[string]float64{
 	"USD": 5,
 }
 
-// isBalanceLow reports whether any currency entry of the balance fell below
-// its recharge reminder threshold. Currencies with no balance at all (0 or
-// negative, i.e. the account simply does not use that currency) are ignored,
-// as are unknown currencies and unparsable amounts.
+// isBalanceLow reports whether the balance can no longer fund comfortable
+// usage in any currency: as long as ONE currency's total balance is at or
+// above its recharge reminder threshold, no warning is raised. It only warns
+// when every tracked currency is below its threshold (a fully zero balance
+// counts as below). Unknown currencies and unparsable amounts are ignored.
 func isBalanceLow(balance *llms.AccountBalance) bool {
 	if balance == nil {
 		return false
 	}
+	checked := 0
 	for _, info := range balance.BalanceInfos {
 		threshold, ok := lowBalanceThresholds[strings.ToUpper(strings.TrimSpace(info.Currency))]
 		if !ok {
 			continue
 		}
 		total, err := strconv.ParseFloat(strings.TrimSpace(info.TotalBalance), 64)
-		if err != nil || total <= 0 {
+		if err != nil {
 			continue
 		}
-		if total < threshold {
-			return true
+		checked++
+		if total >= threshold {
+			return false
 		}
 	}
-	return false
+	return checked > 0
 }
 
 // deepSeekBalanceEndpoint is the DeepSeek API path that reports the account

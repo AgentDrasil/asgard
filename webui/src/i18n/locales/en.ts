@@ -85,7 +85,7 @@ export const en = {
     balanceUnavailable: "No usable balance",
     balanceUnavailableHint: "Top up the account to resume API calls.",
     balanceLow: "Balance low ({pct}%)",
-    balanceLowHint: "Balance is running low (CNY < 20 or USD < 5). Please top up soon.",
+    balanceLowHint: "All currency balances are low (CNY < 20 and USD < 5). Please top up soon.",
     balanceGranted: "Granted",
     balanceToppedUp: "Topped up",
     noQuotaInfo: "No quota information returned from CLI.",

@@ -136,18 +136,34 @@ func TestIsBalanceLow(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "low CNY below 20",
+			name: "one currency funded below threshold, other healthy: no warn",
 			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
 				{Currency: "CNY", TotalBalance: "19.99"},
 				{Currency: "USD", TotalBalance: "50.00"},
 			}},
+			want: false,
+		},
+		{
+			name: "all tracked currencies below their thresholds",
+			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
+				{Currency: "CNY", TotalBalance: "19.99"},
+				{Currency: "USD", TotalBalance: "4.99"},
+			}},
 			want: true,
 		},
 		{
-			name: "low nonzero USD below 5",
+			name: "only nonzero currency below threshold",
 			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
 				{Currency: "CNY", TotalBalance: "0.00"},
 				{Currency: "USD", TotalBalance: "4.99"},
+			}},
+			want: true,
+		},
+		{
+			name: "all balances zero",
+			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
+				{Currency: "CNY", TotalBalance: "0.00"},
+				{Currency: "USD", TotalBalance: "0.00"},
 			}},
 			want: true,
 		},
@@ -234,9 +250,8 @@ func TestGetModelUsages_WithDeepSeekBalance(t *testing.T) {
 }
 
 func TestGetModelUsages_WithDeepSeekLowBalance(t *testing.T) {
-	// A nonzero CNY balance below the 20 recharge-reminder threshold must
-	// surface the low-balance warning fraction. The unused USD entry (0.00)
-	// must be ignored.
+	// A CNY balance below the 20 threshold with no other currency above its
+	// threshold must surface the low-balance warning fraction.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
