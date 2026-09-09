@@ -30,8 +30,9 @@ var lowBalanceThresholds = map[string]float64{
 }
 
 // isBalanceLow reports whether any currency entry of the balance fell below
-// its recharge reminder threshold. Unknown currencies and unparsable amounts
-// are ignored.
+// its recharge reminder threshold. Currencies with no balance at all (0 or
+// negative, i.e. the account simply does not use that currency) are ignored,
+// as are unknown currencies and unparsable amounts.
 func isBalanceLow(balance *llms.AccountBalance) bool {
 	if balance == nil {
 		return false
@@ -42,7 +43,7 @@ func isBalanceLow(balance *llms.AccountBalance) bool {
 			continue
 		}
 		total, err := strconv.ParseFloat(strings.TrimSpace(info.TotalBalance), 64)
-		if err != nil {
+		if err != nil || total <= 0 {
 			continue
 		}
 		if total < threshold {

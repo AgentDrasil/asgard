@@ -128,6 +128,14 @@ func TestIsBalanceLow(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "healthy CNY with unused USD (zero) must not warn",
+			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
+				{Currency: "CNY", TotalBalance: "109.53"},
+				{Currency: "USD", TotalBalance: "0.00"},
+			}},
+			want: false,
+		},
+		{
 			name: "low CNY below 20",
 			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
 				{Currency: "CNY", TotalBalance: "19.99"},
@@ -136,10 +144,10 @@ func TestIsBalanceLow(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "low USD below 5",
+			name: "low nonzero USD below 5",
 			balance: &llms.AccountBalance{IsAvailable: true, BalanceInfos: []llms.BalanceInfo{
-				{Currency: "CNY", TotalBalance: "100.00"},
-				{Currency: "USD", TotalBalance: "0.00"},
+				{Currency: "CNY", TotalBalance: "0.00"},
+				{Currency: "USD", TotalBalance: "4.99"},
 			}},
 			want: true,
 		},
@@ -226,15 +234,15 @@ func TestGetModelUsages_WithDeepSeekBalance(t *testing.T) {
 }
 
 func TestGetModelUsages_WithDeepSeekLowBalance(t *testing.T) {
-	// Mirrors a real-world response: CNY still healthy but USD empty. The
-	// USD total is below the recharge reminder threshold, so Remaining must
-	// surface the low-balance warning fraction.
+	// A nonzero CNY balance below the 20 recharge-reminder threshold must
+	// surface the low-balance warning fraction. The unused USD entry (0.00)
+	// must be ignored.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"is_available": true,
 			"balance_infos": [
-				{"currency": "CNY", "total_balance": "114.74", "granted_balance": "0.00", "topped_up_balance": "114.74"},
+				{"currency": "CNY", "total_balance": "15.00", "granted_balance": "0.00", "topped_up_balance": "15.00"},
 				{"currency": "USD", "total_balance": "0.00", "granted_balance": "0.00", "topped_up_balance": "0.00"}
 			]
 		}`))
