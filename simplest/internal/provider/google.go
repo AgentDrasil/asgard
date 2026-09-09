@@ -129,7 +129,7 @@ func googleThinkingConfig(level types.ThinkingLevel, modelID string) *genai.Thin
 
 func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*genai.Content, error) {
 	var contents []*genai.Content
-	withToolCallID := requiresToolCallID(model.ID)
+	withToolCallID := requiresToolCallID(model.WireID())
 
 	addParts := func(role string, parts ...*genai.Part) {
 		contents = append(contents, &genai.Content{Role: role, Parts: parts})
@@ -227,7 +227,7 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 				for _, im := range images {
 					imgParts = append(imgParts, &genai.Part{InlineData: &genai.Blob{MIMEType: im.MimeType, Data: []byte(im.Data)}})
 				}
-				if gemini3Family(model.ID) != "" {
+				if gemini3Family(model.WireID()) != "" {
 					last := len(contents) - 1
 					contents[last].Parts = append(contents[last].Parts, imgParts...)
 				} else {
@@ -289,8 +289,8 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			em.fail(ctx, fmt.Errorf("gemini: no API key configured"))
 			return
 		}
-		if !supportedModel(model.ID) {
-			em.fail(ctx, fmt.Errorf("gemini: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.ID))
+		if !supportedModel(model.WireID()) {
+			em.fail(ctx, fmt.Errorf("gemini: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.WireID()))
 			return
 		}
 		contents, config, err := p.buildRequest(model, cx, opts)
@@ -316,7 +316,7 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 		toolCallCounter := 0
 		finishReason := genai.FinishReasonUnspecified
 
-		for resp, err := range client.Models.GenerateContentStream(ctx, model.ID, contents, config) {
+		for resp, err := range client.Models.GenerateContentStream(ctx, model.WireID(), contents, config) {
 			if err != nil {
 				em.fail(ctx, err)
 				return
@@ -446,7 +446,7 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 			if len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(string(level)) {
 				return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
 			}
-			config.ThinkingConfig = googleThinkingConfig(level, model.ID)
+			config.ThinkingConfig = googleThinkingConfig(level, model.WireID())
 		}
 	} else if model.Reasoning {
 		config.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}

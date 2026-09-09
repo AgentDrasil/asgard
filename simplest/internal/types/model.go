@@ -22,7 +22,15 @@ type ModelCostRates struct {
 
 // Model describes one callable model endpoint. Configured programmatically.
 type Model struct {
-	ID              string            `json:"id"`
+	// ID is the stable identifier used for config matching, sessions, and
+	// events. It is what the caller refers to when selecting a model.
+	ID string `json:"id"`
+	// Model, when non-empty, is the model identifier actually sent to the
+	// provider API; it decouples a stable alias from an upstream name that may
+	// carry expiry or preview suffixes (e.g. ID "ds-v4.1-flash" maps to wire
+	// model "deepseek-v4.1-flash-expires-on-0910"). Empty means ID is sent
+	// as-is.
+	Model           string            `json:"model,omitempty"`
 	Name            string            `json:"name"`
 	API             string            `json:"api"` // APIOpenAICompat or APIGemini
 	Provider        string            `json:"provider"`
@@ -34,6 +42,18 @@ type Model struct {
 	ContextWindow   int64             `json:"contextWindow"`
 	MaxTokens       int64             `json:"maxTokens"`
 	Headers         map[string]string `json:"headers,omitempty"`
+}
+
+// WireID returns the model identifier placed in the API request: Model when
+// set, otherwise ID.
+func (m *Model) WireID() string {
+	if m == nil {
+		return ""
+	}
+	if m.Model != "" {
+		return m.Model
+	}
+	return m.ID
 }
 
 // SupportsReasoningEffort reports whether the given effort is allowed for this model.

@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -145,6 +148,60 @@ func TestGoogleThinkingConfigIncludeThoughts(t *testing.T) {
 }
 
 // --- stream behavior ---
+
+func TestGeminiSendsWireModel(t *testing.T) {
+	// A non-gemini alias must still be accepted and routed to the remote model:
+	// supportedModel/requiresToolCallID/family heuristics all follow WireID.
+	var path string
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
+		f := w.(http.Flusher)
+		f.Flush()
+	}))
+	defer srv.Close()
+
+	cx := &types.Context{
+		Messages: []types.Message{
+			&types.UserMessage{Content: types.TextOnly("go"), Timestamp: 1},
+			&types.AssistantMessage{
+				Content: []types.AssistantContent{
+					types.ToolCall{Type: "toolCall", ID: "tc1", Name: "read", Arguments: json.RawMessage(`{}`)},
+				},
+				Provider: "gemini", API: types.APIGemini, Model: "my-gemini-alias",
+			},
+			&types.ToolResultMessage{ToolCallID: "tc1", ToolName: "read",
+				Content: json.RawMessage(`[{"type":"text","text":"data"}]`)},
+		},
+	}
+	p := NewGemini("g-key")
+	m := gModel(srv.URL)
+	m.ID = "my-gemini-alias"
+	m.Model = "gemini-3-flash"
+
+	_, done, errEv := drain(p.Stream(context.Background(), m, cx, nil))
+	if errEv != nil {
+		t.Fatalf("alias model rejected: %+v", errEv.Message.ErrorMessage)
+	}
+	if !strings.Contains(path, "/models/gemini-3-flash:") {
+		t.Fatalf("request path = %q, want remote model in path", path)
+	}
+	// Events keep the stable alias.
+	if done.Message.Model != "my-gemini-alias" {
+		t.Fatalf("event model = %q, want alias", done.Message.Model)
+	}
+	// gemini-3 families echo tool call ids; the decision must use the remote id.
+	contents := captured["contents"].([]any)
+	modelEntry := contents[1].(map[string]any)
+	part := modelEntry["parts"].([]any)[0].(map[string]any)
+	fc := part["functionCall"].(map[string]any)
+	if fc["id"] != "tc1" {
+		t.Fatalf("tool call id not echoed for remote gemini-3 model: %v", fc)
+	}
+}
 
 func TestGeminiUnsupportedModelFails(t *testing.T) {
 	p := NewGemini("k")

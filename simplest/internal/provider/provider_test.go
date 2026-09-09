@@ -243,6 +243,36 @@ func TestOpenAISystemPromptAndRoles(t *testing.T) {
 	}
 }
 
+func TestOpenAISendsWireModel(t *testing.T) {
+	var captured map[string]any
+	srv := sseServer(t, []string{
+		`{"id":"chatcmpl-1","model":"deepseek-v4.1-flash-expires-on-0910","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+		"[DONE]",
+	}, &captured, nil, "/chat/completions")
+	defer srv.Close()
+
+	p := NewOpenAICompat("k")
+	m := oaModel(srv.URL)
+	m.ID = "ds-v4.1-flash" // stable alias used everywhere but the wire
+	m.Model = "deepseek-v4.1-flash-expires-on-0910"
+
+	_, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+	if errEv != nil {
+		t.Fatalf("unexpected error: %+v", errEv.Message.ErrorMessage)
+	}
+	if got := captured["model"]; got != "deepseek-v4.1-flash-expires-on-0910" {
+		t.Fatalf("wire model = %v, want remote id", got)
+	}
+	// Events keep the stable alias; the echoed upstream name lands in ResponseModel.
+	if done.Message.Model != "ds-v4.1-flash" {
+		t.Fatalf("event model = %q, want alias", done.Message.Model)
+	}
+	if done.Message.ResponseModel != "deepseek-v4.1-flash-expires-on-0910" {
+		t.Fatalf("response model = %q, want echoed upstream name", done.Message.ResponseModel)
+	}
+}
 func TestOpenAIHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

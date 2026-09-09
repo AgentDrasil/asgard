@@ -40,6 +40,7 @@ models:
   - id: custom-model-1
     name: "Custom Model 1"
     provider: custom-openai
+    model: custom-model-1-expires-on-2026-12-31
     contextWindow: 65536
     maxTokens: 4096
     headers:
@@ -72,12 +73,15 @@ models:
 	require.Len(t, cfg.Models, 2)
 	m := cfg.Models[0]
 	assert.Equal(t, "custom-model-1", m.ID)
+	assert.Equal(t, "custom-model-1-expires-on-2026-12-31", m.Model)
 	assert.Equal(t, int64(65536), m.ContextWindow)
 
 	// Verify GetAvailableModels
 	available := cfg.GetAvailableModels()
 	require.Len(t, available, 2)
 	assert.Equal(t, "custom-model-1", available[0].ID)
+	assert.Equal(t, "custom-model-1-expires-on-2026-12-31", available[0].Model)
+	assert.Equal(t, "custom-model-1-expires-on-2026-12-31", available[0].WireID())
 	assert.Equal(t, "openai-compat", available[0].API)
 	assert.Equal(t, "https://api.openai.com/v1", available[0].BaseURL)
 	assert.Equal(t, "provider-val", available[0].Headers["X-Custom-Header"])
@@ -85,6 +89,7 @@ models:
 
 	assert.Equal(t, "gemini-3.7-flash", available[1].ID)
 	assert.Equal(t, "gemini", available[1].API)
+	assert.Equal(t, "gemini-3.7-flash", available[1].WireID()) // no model override: falls back to ID
 }
 
 func TestLoad_FailClosed_CorruptedYAML(t *testing.T) {
@@ -221,6 +226,36 @@ func TestResolveModelAndProvider(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, mErr)
 	assert.Nil(t, pErr)
+}
+
+func TestResolveModelAndProvider_MissingProviderAPI(t *testing.T) {
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{
+			"broken": {APIKey: "key", BaseURL: "https://example.com/v1"}, // no api declared
+		},
+		Models: []ModelConfig{
+			{ID: "m1", Name: "M1", Provider: "broken", ContextWindow: 128000},
+		},
+	}
+	m, p, err := cfg.ResolveModelAndProvider("m1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no api configured")
+	assert.Nil(t, m)
+	assert.Nil(t, p)
+}
+
+func TestResolveModelAndProvider_MissingProviderEntry(t *testing.T) {
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{},
+		Models: []ModelConfig{
+			{ID: "m1", Name: "M1", Provider: "ghost", ContextWindow: 128000},
+		},
+	}
+	m, p, err := cfg.ResolveModelAndProvider("m1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no api configured")
+	assert.Nil(t, m)
+	assert.Nil(t, p)
 }
 
 func TestLoad_ReasoningEffort(t *testing.T) {

@@ -574,7 +574,7 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 		return nil, err
 	}
 	req := oaRequest{
-		Model:    model.ID,
+		Model:    model.WireID(),
 		Messages: msgs,
 		Stream:   true,
 	}

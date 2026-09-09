@@ -126,6 +126,37 @@ ctx := &types.Context{SystemPrompt: "...", Messages: msgs}
 for ev := range p.Stream(context.Background(), model, ctx, opts) { ... }
 ```
 
+### Decoupling the config ID from the wire model ID
+
+`Model.ID` is the stable identifier you match against, log, and store in
+sessions. When the upstream API expects a different name — provider-specific
+or expiring suffixes — set `Model.Model` (yaml `model:`); it is what actually
+gets sent in the request, and `Model.WireID()` falls back to `ID` when unset:
+
+```go
+model := &types.Model{
+	ID:       "ds-v4.1-flash",                       // stable alias
+	Model:    "deepseek-v4.1-flash-expires-on-0910", // sent to the API
+	API:      types.APIOpenAICompat,
+	Provider: "deepseek",
+}
+```
+
+```yaml
+providers:
+  deepseek:
+    api: openai-compat
+    apiKey: ${DEEPSEEK_API_KEY}
+models:
+  - id: ds-v4.1-flash
+    provider: deepseek
+    model: deepseek-v4.1-flash-expires-on-0910   # sent to the API
+```
+
+Provider protocol heuristics (e.g. Gemini 3 tool-call-id echoing) follow
+`WireID`, since they depend on the actual model the API sees. Event/session
+attribution keeps `ID`.
+
 Both providers parse SSE streams into the same protocol: `start`, block
 deltas (`text_*`, `thinking_*`, `toolcall_*`), then `done` or `error`.
 Usage and cost accounting is filled automatically from the model's rates.

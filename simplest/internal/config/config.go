@@ -36,12 +36,12 @@ type ProviderConfig struct {
 }
 
 // ModelConfig defines configuration for a specific model endpoint.
-// The API protocol is inherited from the corresponding ProviderConfig if omitted.
+// The API wire protocol is defined once on the referenced ProviderConfig.
 type ModelConfig struct {
 	ID              string               `yaml:"id" json:"id"`
+	Model           string               `yaml:"model,omitempty" json:"model,omitempty"`
 	Name            string               `yaml:"name,omitempty" json:"name,omitempty"`
 	Provider        string               `yaml:"provider" json:"provider"`
-	API             string               `yaml:"api,omitempty" json:"api,omitempty"`
 	BaseURL         string               `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
 	ContextWindow   int64                `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
 	MaxTokens       int64                `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
@@ -222,8 +222,8 @@ func (c *Config) GetAvailableModels() []*types.Model {
 	for _, mc := range c.Models {
 
 		provCfg, hasProv := c.Providers[mc.Provider]
-		api := mc.API
-		if api == "" && hasProv {
+		api := ""
+		if hasProv {
 			api = provCfg.API
 		}
 		baseURL := mc.BaseURL
@@ -250,6 +250,7 @@ func (c *Config) GetAvailableModels() []*types.Model {
 
 		m := &types.Model{
 			ID:              mc.ID,
+			Model:           mc.Model,
 			Name:            mc.Name,
 			API:             api,
 			Provider:        mc.Provider,
@@ -330,6 +331,9 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 	apiKey := ""
 	if hasProv {
 		apiKey = provCfg.APIKey
+	}
+	if matched.API == "" {
+		return nil, nil, fmt.Errorf("provider %q for model %q has no api configured", matched.Provider, matched.ID)
 	}
 
 	var p types.Provider
