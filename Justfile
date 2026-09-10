@@ -50,7 +50,7 @@ test:
 
 # Run e2e tests
 e2e-test:
-    E2E_TEST=true go test -v ./agentwrapper/...
+    E2E_TEST=true go test -count=1 -v ./agentwrapper/...
 
 # Install aw binary
 install-aw:
