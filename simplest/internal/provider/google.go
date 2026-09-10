@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -148,7 +149,11 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 				case types.TextContent:
 					parts = append(parts, &genai.Part{Text: b.Text})
 				case types.ImageContent:
-					parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: b.MimeType, Data: []byte(b.Data)}})
+					data, err := base64.StdEncoding.DecodeString(b.Data)
+					if err != nil {
+						data = []byte(b.Data)
+					}
+					parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: b.MimeType, Data: data}})
 				}
 			}
 			if len(parts) > 0 {
@@ -225,7 +230,11 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 			if len(images) > 0 && imageSupported(model) {
 				imgParts := []*genai.Part{{Text: "Tool result image:"}}
 				for _, im := range images {
-					imgParts = append(imgParts, &genai.Part{InlineData: &genai.Blob{MIMEType: im.MimeType, Data: []byte(im.Data)}})
+					data, err := base64.StdEncoding.DecodeString(im.Data)
+					if err != nil {
+						data = []byte(im.Data)
+					}
+					imgParts = append(imgParts, &genai.Part{InlineData: &genai.Blob{MIMEType: im.MimeType, Data: data}})
 				}
 				if gemini3Family(model.WireID()) != "" {
 					last := len(contents) - 1

@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -323,5 +325,77 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	part := contents[0].Parts[0]
 	if part.FunctionCall == nil || string(part.ThoughtSignature) != "ABCD" {
 		t.Fatalf("signature not echoed on functionCall part: %+v", part)
+	}
+}
+
+func TestGeminiConvertMessagesImageBase64Decoded(t *testing.T) {
+	p := NewGemini("g-key")
+	model := gModel("http://unused")
+	rawBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	b64Data := base64.StdEncoding.EncodeToString(rawBytes)
+
+	// Test UserMessage ImageContent
+	userContentJSON, err := json.Marshal([]types.ImageContent{{
+		Type:     types.TypeImage,
+		Data:     b64Data,
+		MimeType: "image/png",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test ToolResultMessage ImageContent
+	toolResultJSON, err := json.Marshal([]types.AssistantContent{
+		types.TextContent{Type: types.TypeText, Text: "Read image file [image/png]"},
+		types.ImageContent{Type: types.TypeImage, Data: b64Data, MimeType: "image/png"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cx := &types.Context{
+		Messages: []types.Message{
+			&types.UserMessage{Content: userContentJSON},
+			&types.AssistantMessage{
+				Content: []types.AssistantContent{
+					types.ToolCall{Type: "toolCall", ID: "tc1", Name: "read", Arguments: json.RawMessage(`{"path":"test.png"}`)},
+				},
+				Provider: model.Provider, API: model.API, Model: model.ID,
+			},
+			&types.ToolResultMessage{ToolCallID: "tc1", ToolName: "read", Content: toolResultJSON},
+		},
+	}
+
+	contents, err := p.ConvertMessages(model, cx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check User message inline data
+	if len(contents) < 2 {
+		t.Fatalf("expected at least 2 contents, got %d", len(contents))
+	}
+	userBlob := contents[0].Parts[0].InlineData
+	if userBlob == nil {
+		t.Fatalf("expected InlineData in user content part")
+	}
+	if !bytes.Equal(userBlob.Data, rawBytes) {
+		t.Fatalf("user inline blob data was not base64-decoded: got %v, want %v", userBlob.Data, rawBytes)
+	}
+
+	// Check Tool result inline data
+	lastContent := contents[len(contents)-1]
+	var foundToolBlob *genai.Blob
+	for _, p := range lastContent.Parts {
+		if p.InlineData != nil {
+			foundToolBlob = p.InlineData
+			break
+		}
+	}
+	if foundToolBlob == nil {
+		t.Fatalf("expected InlineData in tool result content")
+	}
+	if !bytes.Equal(foundToolBlob.Data, rawBytes) {
+		t.Fatalf("tool result inline blob data was not base64-decoded: got %v, want %v", foundToolBlob.Data, rawBytes)
 	}
 }
