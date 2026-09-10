@@ -193,7 +193,8 @@ const openSessionSearch = () => {
 };
 
 // 1. Agents Composable
-const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
+const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents, resetSelectedDir } =
+  useAgents();
 
 // 2. Session Store (Single Source of Truth)
 const store = useSessionStore({ agents, router });
@@ -271,6 +272,7 @@ watch(
         }
       } else {
         closeSession();
+        resetSelectedDir();
         welcomePrompt.value = "";
         chatInputText.value = "";
       }

@@ -135,17 +135,6 @@ func (u *oaUsage) toUsage(m *types.Model) types.Usage {
 	return usage
 }
 
-// message conversion.
-
-func imageSupported(m *types.Model) bool {
-	for _, in := range m.Input {
-		if in == "image" {
-			return true
-		}
-	}
-	return false
-}
-
 const imageOmittedPlaceholder = "(image omitted: model does not support images)"
 
 // ConvertMessages renders a Context into OpenAI chat-completions messages.
@@ -161,7 +150,7 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 			if err != nil {
 				return nil, fmt.Errorf("user content: %w", err)
 			}
-			parts, hasImage := userParts(blocks, imageSupported(model))
+			parts, hasImage := userParts(blocks, model.SupportsImage())
 			if len(parts) == 0 && !hasImage {
 				continue
 			}
@@ -239,7 +228,7 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 				Role: "tool", Content: content,
 				ToolCallID: msg.ToolCallID,
 			})
-			if len(images) > 0 && imageSupported(model) {
+			if len(images) > 0 && model.SupportsImage() {
 				parts := []oaPart{{Type: "text", Text: "Attached image(s) from tool result:"}}
 				parts = append(parts, images...)
 				msgs = append(msgs, oaMessage{Role: "user", Content: parts})

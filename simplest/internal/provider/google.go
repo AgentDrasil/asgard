@@ -227,7 +227,7 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 			} else {
 				addParts("user", &genai.Part{FunctionResponse: fr})
 			}
-			if len(images) > 0 && imageSupported(model) {
+			if len(images) > 0 && model.SupportsImage() {
 				imgParts := []*genai.Part{{Text: "Tool result image:"}}
 				for _, im := range images {
 					data, err := base64.StdEncoding.DecodeString(im.Data)

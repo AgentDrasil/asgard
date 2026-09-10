@@ -84,3 +84,20 @@ func TestUnmarshalUnknownRole(t *testing.T) {
 		t.Fatalf("MessageHead decode failed: %+v %v", head, err)
 	}
 }
+
+func TestModelSupportsImage(t *testing.T) {
+	var nilModel *Model
+	if nilModel.SupportsImage() {
+		t.Error("nil model must not support image")
+	}
+
+	mNoImage := &Model{ID: "text-only", Input: []string{"text"}}
+	if mNoImage.SupportsImage() {
+		t.Error("model without image in Input must not support image")
+	}
+
+	mWithImage := &Model{ID: "vision-model", Input: []string{"text", "image"}}
+	if !mWithImage.SupportsImage() {
+		t.Error("model with image in Input must support image")
+	}
+}

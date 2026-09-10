@@ -243,6 +243,88 @@ func TestOpenAISystemPromptAndRoles(t *testing.T) {
 	}
 }
 
+func TestOpenAIConvertMessagesImageSupport(t *testing.T) {
+	p := NewOpenAICompat("k")
+	b64Data := "ZmFrZS1wbmctZGF0YQ=="
+
+	userContentJSON, err := json.Marshal([]types.ImageContent{{
+		Type:     types.TypeImage,
+		Data:     b64Data,
+		MimeType: "image/png",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	toolResultJSON, err := json.Marshal([]types.AssistantContent{
+		types.TextContent{Type: types.TypeText, Text: "Read image file [image/png]"},
+		types.ImageContent{Type: types.TypeImage, Data: b64Data, MimeType: "image/png"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cx := &types.Context{
+		Messages: []types.Message{
+			&types.UserMessage{Content: userContentJSON},
+			&types.AssistantMessage{
+				Content: []types.AssistantContent{
+					types.ToolCall{Type: "toolCall", ID: "tc1", Name: "read", Arguments: json.RawMessage(`{"path":"a.png"}`)},
+				},
+			},
+			&types.ToolResultMessage{ToolCallID: "tc1", ToolName: "read", Content: toolResultJSON},
+		},
+	}
+
+	// Case 1: Model supports images
+	mWithImage := oaModel("http://unused")
+	mWithImage.Input = []string{"text", "image"}
+	msgsWithImg, err := p.ConvertMessages(mWithImage, cx)
+	if err != nil {
+		t.Fatalf("ConvertMessages failed: %v", err)
+	}
+	// user, assistant, tool, user(attached image from tool result)
+	if len(msgsWithImg) != 4 {
+		t.Fatalf("want 4 messages, got %d: %+v", len(msgsWithImg), msgsWithImg)
+	}
+	// Verify user message has image
+	userParts, ok := msgsWithImg[0].Content.([]oaPart)
+	if !ok || len(userParts) != 1 || userParts[0].Type != "image_url" {
+		t.Fatalf("expected user message to have image_url part: %+v", msgsWithImg[0].Content)
+	}
+	if userParts[0].ImageURL.URL != "data:image/png;base64,"+b64Data {
+		t.Fatalf("unexpected image_url: %v", userParts[0].ImageURL)
+	}
+	// Verify tool result generated an attached image user message
+	if msgsWithImg[2].Role != "tool" {
+		t.Fatalf("want tool message at index 2: %+v", msgsWithImg[2])
+	}
+	if msgsWithImg[3].Role != "user" {
+		t.Fatalf("want user message with attached image at index 3: %+v", msgsWithImg[3])
+	}
+	toolImgParts, ok := msgsWithImg[3].Content.([]oaPart)
+	if !ok || len(toolImgParts) != 2 || toolImgParts[1].Type != "image_url" {
+		t.Fatalf("expected attached image parts in msg[3]: %+v", msgsWithImg[3].Content)
+	}
+
+	// Case 2: Model does NOT support images
+	mNoImage := oaModel("http://unused")
+	mNoImage.Input = []string{"text"}
+	msgsNoImg, err := p.ConvertMessages(mNoImage, cx)
+	if err != nil {
+		t.Fatalf("ConvertMessages failed: %v", err)
+	}
+	// user, assistant, tool (no extra user message with image)
+	if len(msgsNoImg) != 3 {
+		t.Fatalf("want 3 messages without image support, got %d: %+v", len(msgsNoImg), msgsNoImg)
+	}
+	// Verify placeholder used for user message
+	noImgParts, ok := msgsNoImg[0].Content.([]oaPart)
+	if !ok || len(noImgParts) != 1 || noImgParts[0].Text != imageOmittedPlaceholder {
+		t.Fatalf("expected image placeholder in user parts, got %v", msgsNoImg[0].Content)
+	}
+}
+
 func TestOpenAISendsWireModel(t *testing.T) {
 	var captured map[string]any
 	srv := sseServer(t, []string{

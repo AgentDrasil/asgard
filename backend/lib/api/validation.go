@@ -69,14 +69,8 @@ func NormalizeSessionRunDir(runDir string, chatID string) string {
 		return clean
 	}
 
-	isTmp, sub := isSessionTmpPath(clean, chatID)
-	if isTmp {
-		baseTmp := GetSessionTmpBaseDir(chatID)
-		sub = filepath.Clean(sub)
-		if sub == "" || sub == "." {
-			return baseTmp
-		}
-		return filepath.Join(baseTmp, sub)
+	if isTmp, sub := isSessionTmpPath(clean, chatID); isTmp {
+		return joinScopedBase("tmp", chatID, sub)
 	}
 
 	if isSess, sub := isExplicitScopedPath(clean, chatID, "session"); isSess {
@@ -86,7 +80,42 @@ func NormalizeSessionRunDir(runDir string, chatID string) string {
 		return joinScopedBase("session", chatID, sub)
 	}
 
+	// If clean is an absolute host path under a session-scoped base directory
+	// (e.g. $HOME/tmp/<otherChatID> or $HOME/data/<otherChatID>), re-anchor it to this chatID
+	// so a new session never inherits another session's temporary or session directory.
+	for _, ns := range []string{"tmp", "session"} {
+		if reanchored, ok := reanchorScopedHostPath(clean, ns, chatID); ok {
+			return reanchored
+		}
+	}
+
 	return clean
+}
+
+func reanchorScopedHostPath(clean string, ns string, chatID string) (string, bool) {
+	hostDir := scopedNsHostDir(ns)
+	var parent string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		parent = filepath.Join(home, hostDir)
+	} else {
+		parent = filepath.Clean(os.TempDir())
+	}
+
+	rel, err := filepath.Rel(parent, clean)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	// rel is "<targetChatID>" or "<targetChatID>/<subpath>"
+	parts := strings.SplitN(rel, string(os.PathSeparator), 2)
+	targetChatID := parts[0]
+	if !IsValidChatID(targetChatID) && targetChatID != "session-id" && targetChatID != "${session_id}" {
+		return "", false
+	}
+	sub := ""
+	if len(parts) == 2 {
+		sub = parts[1]
+	}
+	return joinScopedBase(ns, chatID, sub), true
 }
 
 func joinScopedBase(ns string, chatID string, sub string) string {

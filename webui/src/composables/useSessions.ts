@@ -24,14 +24,20 @@ export function useSessions(
   };
 
   const handleNewChat = (onNewChat?: () => void, agentId?: string, runDir?: string) => {
+    let effectiveAgent = agents.value.find(
+      (a) => a.id === selectedAgentId.value || a.name === selectedAgentId.value,
+    );
     if (agentId) {
       const foundAgent = agents.value.find((a) => a.id === agentId || a.name === agentId);
       if (foundAgent) {
         selectedAgentId.value = foundAgent.id;
+        effectiveAgent = foundAgent;
       }
     }
     if (runDir) {
       selectedDir.value = runDir;
+    } else {
+      selectedDir.value = effectiveAgent?.run_dirs?.[0] || "";
     }
     if (route.path !== "/newchat") {
       router.push("/newchat");

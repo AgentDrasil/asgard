@@ -68,8 +68,21 @@ func TestNormalizeSessionRunDir(t *testing.T) {
 	customPath := filepath.Join(tempHome, "src", "my-project")
 	assert.Equal(t, customPath, NormalizeSessionRunDir(customPath, chatID))
 
+	// Cross-session path re-anchoring:
+	// A path from an old session under ~/tmp/<oldChatID> or ~/data/<oldChatID> must be re-anchored to chatID
+	oldChatID := "session-old-456"
+	oldSessionTmp := filepath.Join(tempHome, "tmp", oldChatID)
+	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir(oldSessionTmp, chatID))
+	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir(filepath.Join(oldSessionTmp, "sub"), chatID))
+
+	expectedSessionData := filepath.Join(tempHome, "data", chatID)
+	oldSessionData := filepath.Join(tempHome, "data", oldChatID)
+	assert.Equal(t, expectedSessionData, NormalizeSessionRunDir(oldSessionData, chatID))
+	assert.Equal(t, filepath.Join(expectedSessionData, "nested"), NormalizeSessionRunDir(filepath.Join(oldSessionData, "nested"), chatID))
+
 	// Pure function check: directory should not have been created by NormalizeSessionRunDir
 	assert.NoDirExists(t, expectedSessionTmp)
+	assert.NoDirExists(t, expectedSessionData)
 }
 
 func TestResolveSessionTmpPath(t *testing.T) {

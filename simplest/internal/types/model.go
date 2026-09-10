@@ -70,6 +70,19 @@ func (m *Model) SupportsReasoningEffort(effort string) bool {
 	return false
 }
 
+// SupportsImage reports whether the model supports image input.
+func (m *Model) SupportsImage() bool {
+	if m == nil {
+		return false
+	}
+	for _, in := range m.Input {
+		if in == "image" {
+			return true
+		}
+	}
+	return false
+}
+
 // ToolDef is the provider-facing description of a tool sent to the LLM API.
 type ToolDef struct {
 	Name        string          `json:"name"`
