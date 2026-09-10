@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
@@ -561,14 +562,26 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // runWorkflowCronTrigger executes a scheduled workflow on behalf of WorkflowCronManager,
-// participating in the activeExecutions mutual-exclusion guard.
+// participating in the activeExecutions mutual-exclusion guard. The run dir is
+// resolved from the agent's configured run_dirs (first entry) so scheduled runs
+// record a meaningful working directory instead of the backend process cwd.
 func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agentspec.Agent, chatID, prompt string, headless bool) error {
 	if _, running := s.activeExecutions.LoadOrStore(chatID, struct{}{}); running {
 		log.Warn().Str("chatId", chatID).Msg("skip cron cycle: execution already in flight")
 		return nil
 	}
 	defer s.activeExecutions.Delete(chatID)
-	_, _, err := s.runWorkflow(ctx, agent, chatID, TriggerMessageRequest{Prompt: prompt, Headless: headless})
+
+	req := TriggerMessageRequest{Prompt: prompt, Headless: headless}
+	if len(agent.Config.RunDirs) > 0 {
+		req.RunDir = agent.Config.RunDirs[0]
+		if s.repo != nil {
+			if err := s.repo.UpdateAgentSession(chatID, agent.Config.ID, "", "", optional.Some(req.RunDir)); err != nil {
+				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update cron session run dir")
+			}
+		}
+	}
+	_, _, err := s.runWorkflow(ctx, agent, chatID, req)
 	return err
 }
 
