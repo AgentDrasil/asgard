@@ -152,6 +152,11 @@ type WorkflowEvent struct {
 	Output string
 	// AgentName names the workflow agent for chat routing.
 	AgentName string
+	// CLI / Model record the CLI target an agent node actually used (after
+	// quota fallback / model pairing resolution); used for chat message
+	// attribution. Empty for non-agent nodes.
+	CLI       string
+	Model     string
 	Timestamp time.Time
 }
 

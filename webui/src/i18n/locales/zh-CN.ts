@@ -235,6 +235,7 @@ export const zhCN: MessageSchema = {
     toggleArtifactsSidebar: "切换产物侧边栏 ({shortcut})",
     agentWorking: "Agent ({agent}) 正在工作中...",
     agent: "Agent",
+    model: "模型",
     you: "你",
     downloadAttachment: "下载 {name}",
     removeAttachment: "移除附件",

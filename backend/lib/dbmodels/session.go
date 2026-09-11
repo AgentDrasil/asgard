@@ -62,6 +62,7 @@ type ChatMessage struct {
 	StepIndex     int          `json:"stepIndex,omitempty"`
 	InputTokens   int          `json:"inputTokens,omitempty"`
 	MaxTokens     int          `json:"maxTokens,omitempty"`
+	Model         string       `json:"model,omitempty"`
 	Replied       bool         `json:"replied,omitempty"`
 	ReplyText     string       `json:"replyText,omitempty"`
 	TargetFiles   []string     `json:"targetFiles,omitempty"`

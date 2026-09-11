@@ -275,6 +275,7 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 		Metadata: map[string]any{
 			"step_index":   1,
 			"target_files": []string{"/tmp/intend.md"},
+			"model":        "gemini-2.5-pro",
 		},
 		Artifacts: []string{"/tmp/intend.md"},
 	})
@@ -291,6 +292,7 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 	assert.Equal(t, 1, msg.StepIndex)
 	assert.Equal(t, []string{"/tmp/intend.md"}, msg.ArtifactFiles)
 	assert.Equal(t, "Writing requirements to /tmp/intend.md", msg.Content)
+	assert.Equal(t, "gemini-2.5-pro", msg.Model)
 
 	// Second step update with different step_index should append a new message, not overwrite
 	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
@@ -314,6 +316,29 @@ func TestHandleWorkflowEventNodeStatusUpdate(t *testing.T) {
 	assert.Equal(t, "tool_result", session.Messages[1].Role)
 	assert.Equal(t, 2, session.Messages[1].StepIndex)
 	assert.Equal(t, "Requirements written successfully", session.Messages[1].Content)
+}
+
+func TestHandleWorkflowEventNodeFinishedRecordsModel(t *testing.T) {
+	s, _, _ := newAskReplyTestServer(t)
+	chatID := "chat-wf-node-model"
+	require.NoError(t, s.repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "wf-agent"}))
+
+	s.handleWorkflowEvent(chatID, workflow.WorkflowEvent{
+		Type:      workflow.EventNodeFinished,
+		NodeID:    "architect_agent",
+		NodeType:  workflowspec.NodeTypeAgent,
+		AgentName: "Architect",
+		Status:    workflowspec.StatusSucceeded,
+		Output:    "Architecture design complete.",
+		CLI:       "agy",
+		Model:     "claude-sonnet-4-20250514",
+	})
+
+	session, err := s.repo.GetSession(chatID)
+	require.NoError(t, err)
+	require.Len(t, session.Messages, 1)
+	assert.Equal(t, "assistant", session.Messages[0].Role)
+	assert.Equal(t, "claude-sonnet-4-20250514", session.Messages[0].Model)
 }
 
 func TestHandleWorkflowEventWorkflowSuspended(t *testing.T) {

@@ -23,6 +23,7 @@ type AskUserRequest struct {
 	Question  string `json:"question"`
 	AgentID   string `json:"agent_id,omitempty"`
 	AgentName string `json:"agent_name,omitempty"`
+	Model     string `json:"model,omitempty"`
 }
 
 type AskUserResponse struct {
@@ -90,6 +91,7 @@ func main() {
 
 	agentID := os.Getenv("ASGARD_AGENT_ID")
 	agentName := os.Getenv("ASGARD_AGENT_NAME")
+	model := os.Getenv("ASGARD_MODEL")
 
 	internalHost := os.Getenv("ASGARD_INTERNAL_API_HOST")
 	if internalHost == "" {
@@ -116,6 +118,7 @@ func main() {
 		Question:  questionText,
 		AgentID:   agentID,
 		AgentName: agentName,
+		Model:     model,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Error encoding ask-user request")

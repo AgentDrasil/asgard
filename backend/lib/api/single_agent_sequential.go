@@ -175,6 +175,7 @@ func (e *SingleAgentExecutor) handleFinalResult(
 				Timestamp:   time.Now().UnixMilli(),
 				InputTokens: inputTokens,
 				MaxTokens:   maxTokens,
+				Model:       target.Model,
 			}
 			if err := e.repo.AppendMessage(chatID, finalMsg); err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append final assistant response to repo")

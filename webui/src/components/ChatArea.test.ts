@@ -126,6 +126,47 @@ describe("ChatArea.vue", () => {
     app.unmount();
   });
 
+  it("renders the model id in agent message headers", async () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "msg-model-assistant",
+        role: "assistant",
+        content: "answer with model",
+        agentName: "Coding Agent",
+        model: "gemini-2.5-pro",
+        timestamp: 1725120001000,
+      },
+      {
+        id: "msg-model-activity",
+        role: "activity",
+        activityType: "TOOL",
+        content: "tool output",
+        agentName: "Coding Agent",
+        model: "gemini-2.5-pro",
+        timestamp: 1725120002000,
+      },
+    ];
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    expect(root.textContent).toContain("answer with model");
+    expect(root.textContent).toContain("gemini-2.5-pro");
+
+    app.unmount();
+  });
+
   it("opens find bar on Ctrl+F even when an input or textarea is focused", async () => {
     const app = createApp({
       render() {

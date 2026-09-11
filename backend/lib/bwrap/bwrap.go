@@ -359,6 +359,12 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	if chatID != "" {
 		args = append(args, "--setenv", "ASGARD_CHAT_ID", chatID)
 	}
+	// ASGARD_MODEL identifies the selected CLI target's model inside the
+	// sandbox so aw status reports and ask-user questions can be attributed
+	// to it by the host.
+	if target.Model != "" {
+		args = append(args, "--setenv", "ASGARD_MODEL", target.Model)
+	}
 
 	spec := agentwrapper.GetSandboxSpec(target.CLI)
 

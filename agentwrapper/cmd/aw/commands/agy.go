@@ -189,9 +189,20 @@ func buildHTTPReporter() types.ReportFunc {
 	// them unset and the fields are omitted.
 	nodeID := os.Getenv("ASGARD_NODE_ID")
 	runToken := os.Getenv("ASGARD_RUN_TOKEN")
+	// ASGARD_MODEL is set by the host to the model of the selected CLI target;
+	// it is stamped onto every update so the host can attribute messages to it.
+	model := os.Getenv("ASGARD_MODEL")
 	client := &http.Client{}
 
 	return func(stepIndex int, source, entryType, content string, metadata map[string]any) {
+		if model != "" {
+			if metadata == nil {
+				metadata = make(map[string]any)
+			}
+			if _, ok := metadata["model"]; !ok {
+				metadata["model"] = model
+			}
+		}
 		payload := agentStatusPayload{
 			ChatID:    chatID,
 			NodeID:    nodeID,

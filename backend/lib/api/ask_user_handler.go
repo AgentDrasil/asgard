@@ -29,6 +29,7 @@ type AskUserRequest struct {
 	AgentName string `json:"agent_name"`
 	Question  string `json:"question"`
 	MessageID string `json:"message_id"`
+	Model     string `json:"model,omitempty"`
 }
 
 type AskUserResponse struct {
@@ -74,6 +75,7 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 			Content:   req.Question,
 			AgentName: agentName,
 			Timestamp: time.Now().UnixMilli(),
+			Model:     req.Model,
 		}
 		if err := s.repo.AppendMessage(req.ChatID, msg); err == nil {
 			s.PublishSessionEvent(req.ChatID, SessionEvent{

@@ -458,6 +458,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				stepIdx = idx
 			}
 			targetFiles := toStringSlice(ev.Metadata["target_files"])
+			model, _ := ev.Metadata["model"].(string)
 
 			// Derived message ID: concurrent fan-out sub-items share the same
 			// parent NodeID and step_index, so their bubbled status updates
@@ -480,6 +481,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 				StepIndex:     stepIdx,
 				TargetFiles:   targetFiles,
 				ArtifactFiles: ev.Artifacts,
+				Model:         model,
 			}
 			// High-frequency fan-out progress events are broadcast via SSE
 			// only; persisting them would flood the session transcript. Only
@@ -530,6 +532,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 			Content:   ev.Output,
 			AgentName: ev.AgentName,
 			Timestamp: time.Now().UnixMilli(),
+			Model:     ev.Model,
 		}
 		if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow node response to repo")
@@ -595,6 +598,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		Content:   ev.Message,
 		AgentName: ev.AgentName,
 		Timestamp: time.Now().UnixMilli(),
+		Model:     ev.Model,
 	}
 	if err := s.repo.AppendMessage(sessionID, msg); err != nil {
 		log.Warn().Err(err).Str("chat_id", sessionID).Str("node_id", ev.NodeID).Msg("failed to append workflow error message to repo")

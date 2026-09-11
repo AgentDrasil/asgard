@@ -41,6 +41,7 @@ export interface ChatMessage {
   stepIndex?: number;
   inputTokens?: number;
   maxTokens?: number;
+  model?: string;
   replied?: boolean;
   replyText?: string;
   targetFiles?: string[];

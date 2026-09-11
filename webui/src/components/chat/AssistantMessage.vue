@@ -60,6 +60,13 @@ const formatRawMarkdown = (content: string) => {
       <span class="text-xs font-bold text-base-content/70">
         {{ message.agentName || activeAgent?.name || $t("chat.agent") }}
       </span>
+      <span
+        v-if="message.model"
+        class="text-[10px] font-mono text-base-content/50 px-1.5 py-0.5 rounded bg-base-200/70 max-w-[200px] truncate"
+        :title="$t('chat.model')"
+      >
+        {{ message.model }}
+      </span>
       <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
         {{ formatTimestamp(message.timestamp) }}
       </span>

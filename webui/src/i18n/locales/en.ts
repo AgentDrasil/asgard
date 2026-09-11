@@ -235,6 +235,7 @@ export const en = {
     toggleArtifactsSidebar: "Toggle Artifacts Sidebar ({shortcut})",
     agentWorking: "Agent ({agent}) is working...",
     agent: "Agent",
+    model: "Model",
     you: "You",
     downloadAttachment: "Download {name}",
     removeAttachment: "Remove attachment",

@@ -447,6 +447,7 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 	} else if update.NodeID != "" {
 		stepID = fmt.Sprintf("step-%s-%s-%d", chatID, update.NodeID, update.StepIndex)
 	}
+	model, _ := update.Metadata["model"].(string)
 	msg := dbmodels.ChatMessage{
 		ID:            stepID,
 		Role:          role,
@@ -457,6 +458,7 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 		StepIndex:     update.StepIndex,
 		TargetFiles:   targetFiles,
 		ArtifactFiles: artifactFiles,
+		Model:         model,
 	}
 	if err := repo.AppendMessage(chatID, msg); err != nil {
 		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append step status message to repo")
