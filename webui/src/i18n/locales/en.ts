@@ -261,7 +261,7 @@ export const en = {
     openArtifactTitle: "Open artifact: {file}",
     isAsking: "{agent} is asking:",
     filesToReview: "Files to review",
-    typeReplyPlaceholder: "Type your reply to agent...",
+    typeReplyPlaceholder: "Type your reply to agent... ({shortcut} to send)",
     reply: "Reply",
     replied: "Replied: {text}",
     queuedBadge: "Queued #{index}",
@@ -282,7 +282,8 @@ export const en = {
       waitingHumanBadge: "Waiting Human",
       prevDecision: "Previous decision",
       nextDecision: "Next decision",
-      customFeedbackPlaceholder: "Enter custom feedback or additional instructions...",
+      customFeedbackPlaceholder:
+        "Enter custom feedback or additional instructions... ({shortcut} to resume)",
       resume: "Resume",
       isRunning: "{agent} is running...",
       completed: "Workflow completed",

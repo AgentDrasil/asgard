@@ -7,6 +7,9 @@ import { getAgentIcon, formatPath } from "../../utils/agentUtils";
 import { formatTimestamp } from "../../lib/format";
 import { sendAskUserReply } from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
+import { useShortcuts } from "../../composables/useShortcuts";
+
+const { matchShortcut, sendShortcut } = useShortcuts();
 
 const props = withDefaults(
   defineProps<{
@@ -49,6 +52,15 @@ const submitReply = async (textToSubmit?: string) => {
 const selectOptionAndReply = (option: string) => {
   inlineInput.value = option;
   submitReply(option);
+};
+
+// Match the chat input convention: only the configured shortcut (Ctrl/Cmd+Enter)
+// submits the reply, so plain Enter no longer fires by accident.
+const handleInputKeyDown = (e: KeyboardEvent) => {
+  if (matchShortcut(e, "send_message")) {
+    e.preventDefault();
+    submitReply();
+  }
 };
 </script>
 
@@ -130,9 +142,9 @@ const selectOptionAndReply = (option: string) => {
       >
         <input
           v-model="inlineInput"
-          @keydown.enter="submitReply()"
+          @keydown="handleInputKeyDown"
           type="text"
-          :placeholder="$t('chat.typeReplyPlaceholder')"
+          :placeholder="$t('chat.typeReplyPlaceholder', { shortcut: sendShortcut })"
           class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
           :disabled="isSubmitting"
         />

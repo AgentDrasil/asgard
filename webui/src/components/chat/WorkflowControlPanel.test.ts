@@ -83,6 +83,52 @@ describe("WorkflowControlPanel.vue", () => {
     return app;
   };
 
+  it("requires the send shortcut instead of plain Enter to submit custom feedback", async () => {
+    const app = await mountPanel([
+      { id: "user-1", role: "user", content: "review the change", timestamp: 1 },
+      {
+        id: "ask-1",
+        role: "ask_user",
+        agentName: "Code Review Workflow",
+        content: "How should I proceed?",
+        timestamp: 2,
+      },
+    ]);
+
+    const input = root.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(input).not.toBeNull();
+    input!.value = "looks good";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    await nextTick();
+
+    // Plain Enter must not submit the reply
+    input!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flushPromises();
+    expect(sendAskUserReply).not.toHaveBeenCalled();
+
+    // Ctrl+Enter submits
+    input!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flushPromises();
+    expect(sendAskUserReply).toHaveBeenCalledWith("chat-123", "ask-1", "looks good");
+
+    app.unmount();
+  });
+
   it("shows a redrive button when the panel stage is failed and a FAILED run exists", async () => {
     getSessionWorkflows.mockResolvedValue([
       { runId: "run-failed-1", status: "FAILED", updatedAt: "2026-09-01T00:00:00Z" },

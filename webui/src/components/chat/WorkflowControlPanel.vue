@@ -8,6 +8,9 @@ import { formatPath } from "../../utils/agentUtils";
 import { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
+import { useShortcuts } from "../../composables/useShortcuts";
+
+const { matchShortcut, sendShortcut } = useShortcuts();
 
 const props = defineProps<{
   activeAgent: AgentInfo | null;
@@ -149,6 +152,15 @@ const handleStop = () => {
 onBeforeUnmount(() => {
   if (stopTimer) clearTimeout(stopTimer);
 });
+
+// Match the chat input convention: only the configured shortcut (Ctrl/Cmd+Enter)
+// submits the reply, so plain Enter no longer fires by accident.
+const handleInputKeyDown = (e: KeyboardEvent) => {
+  if (matchShortcut(e, "send_message")) {
+    e.preventDefault();
+    handleReply(customInput.value);
+  }
+};
 
 const handleReply = async (text: string) => {
   const replyContent = text.trim();
@@ -380,9 +392,9 @@ const handleRedrive = async () => {
         <div class="flex items-center gap-2 pt-2 border-t border-warning/20">
           <input
             v-model="customInput"
-            @keydown.enter="handleReply(customInput)"
+            @keydown="handleInputKeyDown"
             type="text"
-            :placeholder="$t('chat.workflow.customFeedbackPlaceholder')"
+            :placeholder="$t('chat.workflow.customFeedbackPlaceholder', { shortcut: sendShortcut })"
             class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
             :disabled="isSubmitting"
           />
