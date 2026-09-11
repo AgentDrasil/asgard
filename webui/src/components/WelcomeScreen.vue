@@ -155,7 +155,7 @@ const mainAgents = computed(() => {
 
 const agentDisplayName = (agent: AgentInfo): string => {
   const prefix = agent.type === "workflow" ? "[Workflow] " : "";
-  return `${prefix}${agent.name} (${agent.id})`;
+  return `${prefix}${agent.name}`;
 };
 
 const currentAgent = computed(() => {
