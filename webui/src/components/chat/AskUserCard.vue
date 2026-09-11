@@ -67,26 +67,31 @@ const handleInputKeyDown = (e: KeyboardEvent) => {
 <template>
   <div class="w-full pl-2 pr-2 my-3 min-w-0">
     <div class="card bg-warning/10 border border-warning/30 shadow-sm p-4 rounded-xl space-y-3">
-      <div class="flex items-center gap-2 select-none">
-        <Icon
-          :icon="getAgentIcon(message.agentName, agents, activeAgent)"
-          class="h-5 w-5 shrink-0 text-warning"
-        />
-        <span class="text-xs font-bold text-base-content">
-          {{
-            $t("chat.isAsking", {
-              agent: message.agentName || activeAgent?.name || $t("chat.agent"),
-            })
-          }}
-        </span>
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 select-none min-w-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <Icon
+            :icon="getAgentIcon(message.agentName, agents, activeAgent)"
+            class="h-5 w-5 shrink-0 text-warning"
+          />
+          <span class="text-xs font-bold text-base-content truncate">
+            {{
+              $t("chat.isAsking", {
+                agent: message.agentName || activeAgent?.name || $t("chat.agent"),
+              })
+            }}
+          </span>
+          <span
+            v-if="message.model"
+            class="text-[10px] font-mono text-base-content/50 px-1.5 py-0.5 rounded bg-base-200/70 max-w-[200px] truncate shrink-0"
+            :title="$t('chat.model')"
+          >
+            {{ message.model }}
+          </span>
+        </div>
         <span
-          v-if="message.model"
-          class="text-[10px] font-mono text-base-content/50 px-1.5 py-0.5 rounded bg-base-200/70 max-w-[200px] truncate"
-          :title="$t('chat.model')"
+          v-if="message.timestamp"
+          class="text-[10px] font-mono text-base-content/40 w-full sm:w-auto pl-7 sm:pl-0"
         >
-          {{ message.model }}
-        </span>
-        <span v-if="message.timestamp" class="text-[10px] font-mono text-base-content/40">
           {{ formatTimestamp(message.timestamp) }}
         </span>
       </div>
