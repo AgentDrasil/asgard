@@ -390,6 +390,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("PATCH /api/sessions/{id}/queue/{messageId}", s.handleUpdateQueuedMessage)
 	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{messageId}", s.handleDeleteQueuedMessage)
 	mux.HandleFunc("DELETE /api/sessions/{id}/queue", s.handleClearQueue)
+	mux.HandleFunc("POST /api/sessions/{id}/stop", s.handleStopSession)
+	mux.HandleFunc("POST /api/workflows/{runID}/stop", s.handleStopWorkflowRun)
 	mux.HandleFunc("POST /api/sessions/{id}/archive", s.handleArchiveSession)
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
 	mux.HandleFunc("POST /api/sessions/{id}/attachments", s.handleSessionAttachmentsUpload)
@@ -566,11 +568,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // resolved from the agent's configured run_dirs (first entry) so scheduled runs
 // record a meaningful working directory instead of the backend process cwd.
 func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agentspec.Agent, chatID, prompt string, headless bool) error {
-	if _, running := s.activeExecutions.LoadOrStore(chatID, struct{}{}); running {
+	agentID := ""
+	if agent != nil {
+		agentID = agent.Config.ID
+	}
+	execCtx, handle, running := s.beginExecution(chatID, agentID, true)
+	if running {
 		log.Warn().Str("chatId", chatID).Msg("skip cron cycle: execution already in flight")
 		return nil
 	}
-	defer s.activeExecutions.Delete(chatID)
+	defer s.releaseExecution(chatID)
+	defer handle.cancel()
 
 	req := TriggerMessageRequest{Prompt: prompt, Headless: headless}
 	if len(agent.Config.RunDirs) > 0 {
@@ -581,7 +589,7 @@ func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agentspec.Ag
 			}
 		}
 	}
-	_, _, err := s.runWorkflow(ctx, agent, chatID, req)
+	_, _, err := s.runWorkflow(execCtx, agent, chatID, req)
 	return err
 }
 

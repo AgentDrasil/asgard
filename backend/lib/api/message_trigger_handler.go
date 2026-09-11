@@ -159,9 +159,10 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 	wait := req.Wait || r.URL.Query().Get("wait") == "true"
 
-	// 1. Workflow 分支：完全遵循既有路径，获取 guard 失败返回 409，成功则执行 runWorkflow 并保留 defer Delete
+	// 1. Workflow 分支：完全遵循既有路径，获取 guard 失败返回 409，成功则执行 runWorkflow 并保留 guard 释放
 	if targetAgent.Config.Type == "workflow" {
-		if _, loaded := s.activeExecutions.LoadOrStore(chatID, struct{}{}); loaded {
+		execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, true)
+		if loaded {
 			http.Error(w, `{"error":"session is already running a task"}`, http.StatusConflict)
 			return
 		}
@@ -177,8 +178,9 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if wait {
-			defer s.activeExecutions.Delete(chatID)
-			status, output, err := s.runWorkflow(s.Context(), targetAgent, chatID, req)
+			defer s.releaseExecution(chatID)
+			defer handle.cancel()
+			status, output, err := s.runWorkflow(execCtx, targetAgent, chatID, req)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
@@ -201,8 +203,9 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 		// Async workflow
 		go func() {
-			defer s.activeExecutions.Delete(chatID)
-			_, _, err := s.runWorkflow(s.Context(), targetAgent, chatID, req)
+			defer s.releaseExecution(chatID)
+			defer handle.cancel()
+			_, _, err := s.runWorkflow(execCtx, targetAgent, chatID, req)
 			if err != nil {
 				log.Error().Err(err).Str("chat_id", chatID).Str("agent", targetAgent.Config.ID).Msg("async workflow execution error")
 			}
@@ -218,7 +221,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 尝试获取 guard
-	_, loaded := s.activeExecutions.LoadOrStore(chatID, struct{}{})
+	execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, false)
 
 	// 2. 同步 Wait 运行中分支：维持既有契约返回 409 Conflict
 	if wait && loaded {
@@ -226,9 +229,10 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 同步 Wait 空闲分支：维持既有同步执行路径并保留 defer Delete
+	// 3. 同步 Wait 空闲分支：维持既有同步执行路径并保留 guard 释放
 	if wait && !loaded {
-		defer s.activeExecutions.Delete(chatID)
+		defer s.releaseExecution(chatID)
+		defer handle.cancel()
 		runDirOpt := optional.None[string]()
 		if req.RunDir != "" {
 			runDirOpt = optional.Some(req.RunDir)
@@ -238,7 +242,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
-		status, output, err := s.runSingleAgent(s.Context(), targetAgent, chatID, req)
+		status, output, err := s.runSingleAgent(execCtx, targetAgent, chatID, req)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -343,7 +347,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	go s.runSingleAgentWithQueue(s.Context(), targetAgent, chatID, req)
+	go s.runSingleAgentWithQueue(execCtx, targetAgent, chatID, req)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -355,10 +359,14 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 // startQueueConsumerIfIdle attempts to atomically acquire the guard and start consumer loop
 func (s *Server) startQueueConsumerIfIdle(chatID string, targetAgent *agentspec.Agent, runDir string) bool {
-	if _, loaded := s.activeExecutions.LoadOrStore(chatID, struct{}{}); loaded {
+	execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, false)
+	if loaded {
 		return false
 	}
-	go s.runQueueConsumerLoop(s.Context(), targetAgent, chatID, runDir)
+	go func() {
+		defer handle.cancel()
+		s.runQueueConsumerLoop(execCtx, targetAgent, chatID, runDir)
+	}()
 	return true
 }
 
@@ -405,6 +413,10 @@ func (s *Server) handleQueuedTaskError(chatID string, targetAgent *agentspec.Age
 }
 
 func (s *Server) runSingleAgentWithQueue(ctx context.Context, targetAgent *agentspec.Agent, chatID string, req TriggerMessageRequest) {
+	if handle := executionHandleFromContext(ctx); handle != nil {
+		defer handle.cancel()
+	}
+
 	// 第一阶段：执行首发任务
 	_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, req)
 	if qErr != nil {
@@ -461,7 +473,7 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 			if head == nil {
 				break // 队列确已清空，安全退出
 			}
-			if _, loaded := s.activeExecutions.LoadOrStore(chatID, struct{}{}); loaded {
+			if _, loaded := s.activeExecutions.LoadOrStore(chatID, executionGuardValue(ctx)); loaded {
 				break // 并发入队者已抢先获取 guard 并启动新消费协程；head 未被物理删除，由其承接，零消息丢失
 			}
 			// 成功重持 guard，此时执行破坏性 Pop 安全可靠

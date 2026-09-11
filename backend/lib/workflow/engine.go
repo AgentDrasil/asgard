@@ -119,6 +119,13 @@ type Engine struct {
 	executing     map[string]bool                    // key: runID -> true (active execution)
 	sessionRuns   map[string]map[string]bool         // key: sessionID -> runID -> true
 	replayPending map[string]bool                    // key: runID -> true (replay initializing)
+
+	// cancelMu guards runCancels, the per-run cancel funcs that let a host
+	// abort in-flight workflow execution (workflow DAGs intentionally run
+	// decoupled from the request context, so cancelling the caller's context
+	// is not enough).
+	cancelMu   sync.Mutex
+	runCancels map[string]map[string]context.CancelFunc // key: sessionID -> runID -> cancel
 }
 
 // NewEngine creates an engine backed by the given runner registry.
@@ -130,7 +137,63 @@ func NewEngine(registry *NodeRunnerRegistry) *Engine {
 		executing:     make(map[string]bool),
 		sessionRuns:   make(map[string]map[string]bool),
 		replayPending: make(map[string]bool),
+		runCancels:    make(map[string]map[string]context.CancelFunc),
 	}
+}
+
+// registerRunCancel records the cancel func of an in-flight run so the host can
+// abort it via CancelSession.
+func (e *Engine) registerRunCancel(sessionID, runID string, cancel context.CancelFunc) {
+	e.cancelMu.Lock()
+	defer e.cancelMu.Unlock()
+	if e.runCancels == nil {
+		e.runCancels = make(map[string]map[string]context.CancelFunc)
+	}
+	runs := e.runCancels[sessionID]
+	if runs == nil {
+		runs = make(map[string]context.CancelFunc)
+		e.runCancels[sessionID] = runs
+	}
+	runs[runID] = cancel
+}
+
+// unregisterRunCancel forgets a run's cancel func once it has settled.
+func (e *Engine) unregisterRunCancel(sessionID, runID string) {
+	e.cancelMu.Lock()
+	defer e.cancelMu.Unlock()
+	runs := e.runCancels[sessionID]
+	if runs == nil {
+		return
+	}
+	delete(runs, runID)
+	if len(runs) == 0 {
+		delete(e.runCancels, sessionID)
+	}
+}
+
+// CancelSession cancels every actively executing run belonging to the session
+// and returns how many runs were signalled. Runs suspended waiting for human
+// input are deliberately left untouched: they own no execution to abort and
+// must stay resumable.
+func (e *Engine) CancelSession(sessionID string) int {
+	if e == nil || sessionID == "" {
+		return 0
+	}
+	e.cancelMu.Lock()
+	var cancels []context.CancelFunc
+	for runID, cancel := range e.runCancels[sessionID] {
+		e.waitMu.Lock()
+		active := e.executing[runID] && len(e.waitingByRun[runID]) == 0
+		e.waitMu.Unlock()
+		if active {
+			cancels = append(cancels, cancel)
+		}
+	}
+	e.cancelMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	return len(cancels)
 }
 
 // SetRunStore wires the engine-level persistence store used by Resume and by
@@ -337,6 +400,14 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 		}
 		rc.RunDir = wd
 	}
+
+	// Make the run independently cancellable so the host can abort it even
+	// though callers may wrap the request context with WithoutCancel.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	e.registerRunCancel(rc.SessionID, rc.RunID, cancelRun)
+	defer e.unregisterRunCancel(rc.SessionID, rc.RunID)
+	ctx = runCtx
 
 	store := rc.Store
 	if store == nil {

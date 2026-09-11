@@ -346,8 +346,8 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Type == workflow.EventWorkflowStarted || ev.Type == workflow.EventWorkflowResumed {
-		s.activeExecutions.Store(sessionID, struct{}{})
 		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
+		s.ensureExecutionGuard(sessionID, agentKey, true)
 		if agentKey != "" {
 			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusRunning)
 		}
@@ -381,7 +381,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Type == workflow.EventWorkflowSuspended {
-		s.activeExecutions.Delete(sessionID)
+		s.releaseExecution(sessionID)
 		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
 		if agentKey != "" {
 			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusWaitingHuman)
@@ -542,7 +542,7 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Type == workflow.EventWorkflowFinished {
-		s.activeExecutions.Delete(sessionID)
+		s.releaseExecution(sessionID)
 		agentKey := s.resolveWorkflowAgentKey(sessionID, ev.AgentName)
 		if agentKey != "" {
 			_ = s.repo.UpdateAgentStatus(sessionID, agentKey, dbmodels.AgentStatusCompleted)
@@ -575,6 +575,12 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 		return
 	}
 	if ev.Status != workflowspec.StatusFailed {
+		return
+	}
+	// A user stop cancels every in-flight node; their "context canceled"
+	// failures are not user-facing errors. The cancellation activity message
+	// persisted by stopSessionExecution already explains the outcome.
+	if strings.Contains(ev.Message, context.Canceled.Error()) || strings.Contains(ev.Message, context.DeadlineExceeded.Error()) {
 		return
 	}
 	nodeRef := ev.NodeID
@@ -706,7 +712,7 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 	}
 
 	go func() {
-		s.activeExecutions.Store(chatID, struct{}{})
+		s.ensureExecutionGuard(chatID, "", true)
 
 		agentName := s.resolveWorkflowAgentKey(chatID, "")
 		if agentName != "" && s.repo != nil {
@@ -734,7 +740,7 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			if s.workflowEngine != nil && s.workflowEngine.IsSessionExecuting(chatID) {
 				log.Warn().Str("chat_id", chatID).Msg("resume ignored or errored but engine is still executing session; skipping rollback")
 			} else {
-				s.activeExecutions.Delete(chatID)
+				s.releaseExecution(chatID)
 				if agentName != "" && s.repo != nil {
 					// The run may still be WAITING_HUMAN (e.g. the engine held
 					// a live waiter): keep the waiting status instead of

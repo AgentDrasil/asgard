@@ -293,7 +293,11 @@ func (s *Server) handleWorkflowRedrive(w http.ResponseWriter, r *http.Request) {
 
 	chatID := row.SessionID
 	agentKey := s.resolveWorkflowAgentKey(chatID, "")
-	s.activeExecutions.Store(chatID, struct{}{})
+	s.activeExecutions.Store(chatID, &executionHandle{
+		agentID:    agentKey,
+		isWorkflow: true,
+		startTime:  time.Now(),
+	})
 	if agentKey != "" && s.repo != nil {
 		_ = s.repo.UpdateAgentStatus(chatID, agentKey, dbmodels.AgentStatusRunning)
 		s.PublishSessionEvent(chatID, SessionEvent{
@@ -312,7 +316,7 @@ func (s *Server) handleWorkflowRedrive(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := engine.RedriveFailed(context.Background(), runID, emit); err != nil {
 			log.Warn().Err(err).Str("run_id", runID).Msg("re-driving failed workflow run failed")
-			s.activeExecutions.Delete(chatID)
+			s.releaseExecution(chatID)
 			if agentKey != "" && s.repo != nil {
 				_ = s.repo.UpdateAgentStatus(chatID, agentKey, dbmodels.AgentStatusCompleted)
 			}
