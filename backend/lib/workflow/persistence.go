@@ -160,10 +160,6 @@ func toPersistedStates(results map[string]*workflowspec.NodeResult) map[string]P
 		if res.Error != nil {
 			state.Error = res.Error.Error()
 		}
-		for _, path := range res.Artifacts {
-			state.OutputPath = path
-			break
-		}
 		states[id] = state
 	}
 	return states

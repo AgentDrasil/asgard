@@ -242,6 +242,15 @@ func CleanOrphanTmpFiles(rootDir string) error {
 	})
 }
 
+// isWithinDir reports whether path is dir itself or lies inside dir.
+func isWithinDir(dir, path string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
 // WriteOffloadedFiles offloads DAGSpec, Input, and node outputs to the filesystem under sessionDir/workflows/runID/.
 // It writes files atomically (.tmp + Sync + Rename) and returns the paths and pruned NodeStates (Output cleared).
 func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states map[string]NodeState) (dagPath, inPath string, offloadedStates map[string]NodeState, err error) {
@@ -334,20 +343,35 @@ func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
 		if err != nil {
 			return fmt.Errorf("decode node states during hydrate: %w", err)
 		}
+		// Offloaded node logs always live next to the offloaded DAG spec
+		// (<runDir>/nodes/<nodeID>.log). Legacy snapshots may carry an artifact
+		// path in output_path; that is not a managed log file and must not fail
+		// the whole run load.
+		nodesDir := ""
+		if run.DAGSpecPath != "" {
+			nodesDir = filepath.Join(filepath.Dir(run.DAGSpecPath), "nodes")
+		}
 		updated := false
 		for nodeID, state := range states {
-			if state.OutputPath != "" {
-				data, err := os.ReadFile(state.OutputPath)
-				if err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						return fmt.Errorf("%w: node %s: %s", ErrOffloadedFileMissing, nodeID, state.OutputPath)
-					}
-					return fmt.Errorf("read offloaded node output %s: %w", nodeID, err)
-				}
-				state.Output = string(data)
+			if state.OutputPath == "" {
+				continue
+			}
+			if nodesDir != "" && !isWithinDir(nodesDir, state.OutputPath) {
+				state.OutputPath = ""
 				states[nodeID] = state
 				updated = true
+				continue
 			}
+			data, err := os.ReadFile(state.OutputPath)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("%w: node %s: %s", ErrOffloadedFileMissing, nodeID, state.OutputPath)
+				}
+				return fmt.Errorf("read offloaded node output %s: %w", nodeID, err)
+			}
+			state.Output = string(data)
+			states[nodeID] = state
+			updated = true
 		}
 		if updated {
 			encoded, err := EncodeNodeStates(states)

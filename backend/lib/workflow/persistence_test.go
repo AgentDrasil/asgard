@@ -306,6 +306,23 @@ func TestPersistedNodeState_FailedCarriesTarget(t *testing.T) {
 	require.Error(t, got.Error)
 }
 
+// TestPersistedNodeState_ArtifactsNotStoredAsOutputPath guards the hydration
+// contract: OutputPath is reserved for the offloaded node log written by
+// dbmodels.WriteOffloadedFiles. Artifact viewer paths (e.g. /session/...)
+// must never leak into it, otherwise a restart/re-drive tries to read them as
+// files and fails with ErrOffloadedFileMissing.
+func TestPersistedNodeState_ArtifactsNotStoredAsOutputPath(t *testing.T) {
+	results := map[string]*workflowspec.NodeResult{
+		"coding_agent": {
+			Status:    workflowspec.StatusFailed,
+			Error:     errors.New("quota exhausted"),
+			Artifacts: map[string]string{"/session/plan/todo.yaml": "/session/plan/todo.yaml"},
+		},
+	}
+	states := toPersistedStates(results)
+	assert.Empty(t, states["coding_agent"].OutputPath, "artifact paths must not be persisted as OutputPath")
+}
+
 // TestPersistedNodeState_CLIJSONOmitEmpty: empty CLI/Model must not surface
 // as JSON keys (older snapshots stay byte-compatible).
 func TestPersistedNodeState_CLIJSONOmitEmpty(t *testing.T) {

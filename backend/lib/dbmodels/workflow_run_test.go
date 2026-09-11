@@ -628,6 +628,46 @@ func TestWorkflowRun_HydrateMissingFileError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrOffloadedFileMissing), "Must return ErrOffloadedFileMissing when node log is missing")
 }
 
+// TestWorkflowRun_HydrateIgnoresNonOffloadedOutputPath reproduces a legacy
+// snapshot where an artifact viewer path (e.g. /session/plan/todo.yaml) was
+// written into output_path instead of an offloaded node log. GetRun must skip
+// and clear it rather than fail the whole run load with ErrOffloadedFileMissing.
+func TestWorkflowRun_HydrateIgnoresNonOffloadedOutputPath(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&WorkflowRun{}))
+
+	repo := NewWorkflowRunRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(sessionID string) string {
+		return filepath.Join(tempDir, sessionID)
+	})
+
+	states, err := EncodeNodeStates(map[string]NodeState{
+		"coding_agent": {Status: "FAILED", OutputPath: "/session/plan/todo.yaml"},
+	})
+	require.NoError(t, err)
+
+	run := &WorkflowRun{
+		RunID:      "run-legacy-artifact-path",
+		SessionID:  "chat-legacy-artifact-path",
+		Status:     WorkflowStatusFailed,
+		DAGSpec:    "name: legacy\n",
+		NodeStates: states,
+	}
+	require.NoError(t, repo.SaveRun(run))
+
+	hydrated, err := repo.GetRun("run-legacy-artifact-path")
+	require.NoError(t, err)
+	require.NotNil(t, hydrated)
+
+	decoded, err := DecodeNodeStates(hydrated.NodeStates)
+	require.NoError(t, err)
+	assert.Empty(t, decoded["coding_agent"].OutputPath, "stale artifact path must be cleared on hydration")
+	assert.Empty(t, decoded["coding_agent"].Output, "no output must be fabricated from the artifact path")
+}
+
 func TestWorkflowRun_RefreshSuspension_Offload(t *testing.T) {
 	t.Parallel()
 
