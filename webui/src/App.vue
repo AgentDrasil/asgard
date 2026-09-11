@@ -193,8 +193,7 @@ const openSessionSearch = () => {
 };
 
 // 1. Agents Composable
-const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents, resetSelectedDir } =
-  useAgents();
+const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
 // 2. Session Store (Single Source of Truth)
 const store = useSessionStore({ agents, router });
@@ -272,8 +271,12 @@ watch(
           selectedDir.value = activeSession.value.runDir;
         }
       } else {
+        // Do NOT reset the agent/workspace selection here. `handleNewChat`
+        // already sets the correct agent and run dir (explicit from the sidebar
+        // or the agent default), and this watcher runs after it when navigating
+        // from a chat to /newchat. Resetting here clobbered those values on the
+        // first click, requiring a second click to apply them.
         closeSession();
-        resetSelectedDir();
         welcomePrompt.value = "";
         chatInputText.value = "";
       }

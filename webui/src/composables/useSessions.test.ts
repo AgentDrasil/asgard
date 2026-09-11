@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ref } from "vue";
 import { useSessions } from "./useSessions";
-import { useAgents } from "./useAgents";
 import type { AgentInfo } from "../types";
 
 describe("useSessions handleNewChat", () => {
@@ -102,24 +101,5 @@ describe("useSessions handleNewChat", () => {
 
     expect(selectedAgentId.value).toBe("agent-2");
     expect(selectedDir.value).toBe("/home/user/project2");
-  });
-});
-
-describe("useAgents resetSelectedDir", () => {
-  it("resets selectedDir to current agent default runDir", () => {
-    const { agents, selectedAgentId, selectedDir, resetSelectedDir } = useAgents();
-    agents.value = [
-      {
-        id: "agent-a",
-        name: "Agent A",
-        run_dirs: ["/workspace/default"],
-      } as AgentInfo,
-    ];
-    selectedAgentId.value = "agent-a";
-    selectedDir.value = "/home/user/tmp/stale-session-id";
-
-    resetSelectedDir();
-
-    expect(selectedDir.value).toBe("/workspace/default");
   });
 });

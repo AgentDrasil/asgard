@@ -41,22 +41,11 @@ export function useAgents() {
     { flush: "sync" },
   );
 
-  const resetSelectedDir = (agentId?: string) => {
-    const targetId = agentId || selectedAgentId.value;
-    const currentAgent = agents.value.find((a) => a.id === targetId || a.name === targetId);
-    if (currentAgent && currentAgent.run_dirs.length > 0) {
-      selectedDir.value = currentAgent.run_dirs[0];
-    } else {
-      selectedDir.value = "";
-    }
-  };
-
   return {
     agents,
     selectedAgentId,
     selectedDir,
     selectedModel,
     loadAgents,
-    resetSelectedDir,
   };
 }
