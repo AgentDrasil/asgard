@@ -57,6 +57,7 @@ const emit = defineEmits<{
   (e: "ask-replied", msgId?: string, text?: string): void;
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
+  (e: "stop"): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -239,11 +240,13 @@ function navigateToVcs(gitRoot?: string) {
           :sessionId="sessionId"
           @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
           @open-artifact="(file) => handleOpenArtifact(file)"
+          @stop="emit('stop')"
         />
         <ChatInput
           v-else
           :sessionId="sessionId"
           @send="(text, atts) => emit('send', text, atts)"
+          @stop="emit('stop')"
           :loading="loading"
           :isRunning="isRunning"
           :queuedCount="queuedMessages.length"

@@ -61,6 +61,9 @@ func TestStopSession_NotRunning(t *testing.T) {
 }
 
 func TestStopSession_SingleAgentRunning(t *testing.T) {
+	// Isolate HOME so session-namespace persistence lands in a test-owned dir
+	t.Setenv("HOME", t.TempDir())
+
 	server, repo, hub := setupQueueTestServer(t)
 
 	chatID := "018f3a5b-0000-7000-8000-0000000000a2"
@@ -124,7 +127,7 @@ func TestStopSession_SingleAgentRunning(t *testing.T) {
 	for _, m := range sess.Messages {
 		if m.ActivityType == "CANCELLED" {
 			found = true
-			assert.Equal(t, "执行已由用户终止", m.Content)
+			assert.Equal(t, "execution stopped by user", m.Content)
 		}
 	}
 	assert.True(t, found, "expected a CANCELLED activity message")
@@ -155,6 +158,8 @@ func TestStopSession_SingleAgentRunning(t *testing.T) {
 }
 
 func TestStopSession_ClearsQueuedMessages(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	server, repo, _ := setupQueueTestServer(t)
 
 	chatID := "018f3a5b-0000-7000-8000-0000000000a4"
@@ -311,6 +316,8 @@ func TestStopWorkflowRun_NotFound(t *testing.T) {
 }
 
 func TestStopWorkflowRun_Valid(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	repo := dbmodels.NewSessionRepository(testDB)

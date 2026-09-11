@@ -165,7 +165,7 @@ describe("workflowPanelState", () => {
           id: "3",
           role: "activity",
           activityType: "CANCELLED",
-          content: "执行已由用户终止",
+          content: "execution stopped by user",
         },
       ];
       const state = computeWorkflowPanelState({

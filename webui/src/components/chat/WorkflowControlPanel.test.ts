@@ -14,20 +14,17 @@ vi.mock("@iconify/vue", () => ({
   },
 }));
 
-const { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun, stopSessionExecution } =
-  vi.hoisted(() => ({
-    sendAskUserReply:
-      vi.fn<(sessionId: string, messageId: string, text: string) => Promise<boolean>>(),
-    getSessionWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunSummary[]>>(),
-    redriveWorkflowRun: vi.fn<(runId: string) => Promise<boolean>>(),
-    stopSessionExecution: vi.fn<(sessionId: string) => Promise<boolean>>(),
-  }));
+const { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } = vi.hoisted(() => ({
+  sendAskUserReply:
+    vi.fn<(sessionId: string, messageId: string, text: string) => Promise<boolean>>(),
+  getSessionWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunSummary[]>>(),
+  redriveWorkflowRun: vi.fn<(runId: string) => Promise<boolean>>(),
+}));
 
 vi.mock("../../lib/api", () => ({
   sendAskUserReply,
   getSessionWorkflows,
   redriveWorkflowRun,
-  stopSessionExecution,
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -66,7 +63,6 @@ describe("WorkflowControlPanel.vue", () => {
     sendAskUserReply.mockResolvedValue(true);
     getSessionWorkflows.mockResolvedValue([]);
     redriveWorkflowRun.mockResolvedValue(true);
-    stopSessionExecution.mockResolvedValue(true);
   });
 
   const mountPanel = async (messages: ChatMessage[]) => {
@@ -163,7 +159,9 @@ describe("WorkflowControlPanel.vue", () => {
     app.unmount();
   });
 
-  it("shows a stop button while running and calls the stop API on click", async () => {
+  it("shows a stop button while running and emits stop on click", async () => {
+    let stopEvents = 0;
+
     const app = createApp({
       render() {
         return h(WorkflowControlPanel, {
@@ -171,6 +169,9 @@ describe("WorkflowControlPanel.vue", () => {
           loading: true,
           messages: [{ id: "user-1", role: "user", content: "go", timestamp: 1 }],
           sessionId: "chat-123",
+          onStop: () => {
+            stopEvents++;
+          },
         });
       },
     });
@@ -186,7 +187,10 @@ describe("WorkflowControlPanel.vue", () => {
     btn?.click();
     await flushPromises();
     await nextTick();
-    expect(stopSessionExecution).toHaveBeenCalledWith("chat-123");
+    expect(stopEvents).toBe(1);
+    // Emit-only: the parent routes the event through the session store; the
+    // button stays disabled until the stage transitions or the timeout fires.
+    expect(btn?.disabled).toBe(true);
 
     app.unmount();
   });
@@ -198,7 +202,7 @@ describe("WorkflowControlPanel.vue", () => {
         id: "cancelled-1",
         role: "activity",
         activityType: "CANCELLED",
-        content: "执行已由用户终止",
+        content: "execution stopped by user",
         timestamp: 2,
       },
     ]);

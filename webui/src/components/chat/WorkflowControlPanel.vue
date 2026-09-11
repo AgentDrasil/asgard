@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { computeWorkflowPanelState } from "../../utils/workflowPanelState";
 import { formatPath } from "../../utils/agentUtils";
-import {
-  sendAskUserReply,
-  getSessionWorkflows,
-  redriveWorkflowRun,
-  stopSessionExecution,
-} from "../../lib/api";
+import { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
 
@@ -25,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "ask-replied", msgId: string, text: string): void;
   (e: "open-artifact", file: string): void;
+  (e: "stop"): void;
 }>();
 
 const isSubmitting = ref(false);
@@ -93,6 +89,7 @@ watch(
   () => props.sessionId,
   () => {
     isSubmitting.value = false;
+    isStopping.value = false;
     drafts.value = {};
     selectedIndex.value = 0;
   },
@@ -121,20 +118,37 @@ watch(
 
 // Stop control for the running stage (initial run or human-resume run).
 const isStopping = ref(false);
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => state.value.stage,
   (stage) => {
-    if (stage !== "running") isStopping.value = false;
+    if (stage !== "running") {
+      isStopping.value = false;
+      if (stopTimer) {
+        clearTimeout(stopTimer);
+        stopTimer = null;
+      }
+    }
   },
 );
 
-const handleStop = async () => {
+// The stop request goes through the store via the parent; a timeout re-enables
+// the button in case the SSE transition away from running never arrives.
+const handleStop = () => {
   if (isStopping.value || !props.sessionId) return;
   isStopping.value = true;
-  const ok = await stopSessionExecution(props.sessionId);
-  if (!ok) isStopping.value = false;
+  emit("stop");
+  if (stopTimer) clearTimeout(stopTimer);
+  stopTimer = setTimeout(() => {
+    isStopping.value = false;
+    stopTimer = null;
+  }, 15000);
 };
+
+onBeforeUnmount(() => {
+  if (stopTimer) clearTimeout(stopTimer);
+});
 
 const handleReply = async (text: string) => {
   const replyContent = text.trim();

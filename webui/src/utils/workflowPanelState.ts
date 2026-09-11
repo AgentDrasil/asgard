@@ -82,7 +82,7 @@ export function computeWorkflowPanelState(
   let cancelled = false;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.role === "cancelled" || msg.activityType === "CANCELLED") {
+    if (msg.activityType === "CANCELLED") {
       cancelled = true;
       break;
     }

@@ -323,7 +323,7 @@ func (s *Server) handleWorkflowRedrive(w http.ResponseWriter, r *http.Request) {
 			errMsg := dbmodels.ChatMessage{
 				ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
 				Role:      "error",
-				Content:   fmt.Sprintf("重新执行工作流失败：%v", err),
+				Content:   fmt.Sprintf("re-driving workflow failed: %v", err),
 				Timestamp: time.Now().UnixMilli(),
 			}
 			_ = s.repo.AppendMessage(chatID, errMsg)

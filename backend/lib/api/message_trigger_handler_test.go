@@ -545,7 +545,7 @@ func TestTriggerMessage_InitialFailurePurgesQueue(t *testing.T) {
 		case ev := <-subCh:
 			if ev.Type == EventTypeMessage && ev.Message != nil && ev.Message.Role == "error" {
 				receivedErrorMsg = true
-				assert.Contains(t, ev.Message.Content, "已自动清空该会话所有排队消息")
+				assert.Contains(t, ev.Message.Content, "all queued messages for this session have been cleared")
 			}
 			if ev.Type == EventTypeQueue {
 				receivedEmptyQueue = true
@@ -656,7 +656,7 @@ func TestTriggerMessage_PurgeOnlyOnAgentFailure(t *testing.T) {
 		assert.Equal(t, EventTypeMessage, ev.Type)
 		require.NotNil(t, ev.Message)
 		assert.Equal(t, "error", ev.Message.Role)
-		assert.Contains(t, ev.Message.Content, "任务调度失败（该消息未执行）")
+		assert.Contains(t, ev.Message.Content, "task scheduling failed (this message was not executed)")
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for non-sandbox error message")
 	}
@@ -701,7 +701,7 @@ func TestTriggerMessage_PurgeOnlyOnAgentFailure(t *testing.T) {
 		case ev := <-subCh:
 			if ev.Type == EventTypeMessage && ev.Message != nil && ev.Message.Role == "error" {
 				receivedPurgeError = true
-				assert.Contains(t, ev.Message.Content, "已自动清空该会话所有排队消息")
+				assert.Contains(t, ev.Message.Content, "all queued messages for this session have been cleared")
 			}
 			if ev.Type == EventTypeQueue {
 				receivedPurgeQueue = true

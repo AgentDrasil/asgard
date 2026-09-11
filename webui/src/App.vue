@@ -214,6 +214,7 @@ const {
   loadSessions,
   archiveSessionById,
   sendMessage,
+  stopExecution,
   updateMessageReply,
   editQueuedMessage,
   deleteQueuedMessage,
@@ -357,6 +358,10 @@ const handleSendMessage = (text: string, attachments?: Attachment[]) => {
     selectedModel: selectedModel.value,
     attachments,
   });
+};
+
+const handleStopExecution = () => {
+  void stopExecution();
 };
 
 const handleAskReplied = (msgId?: string, text?: string) => {
@@ -610,6 +615,7 @@ const commandList = computed<CommandItem[]>(() => [
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
           @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
+          @stop="handleStopExecution"
           @archive-session="handleArchiveSession"
           @open-diff="
             (gitRoot: string) => {

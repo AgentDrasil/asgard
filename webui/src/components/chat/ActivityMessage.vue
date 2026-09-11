@@ -69,10 +69,7 @@ const emit = defineEmits<{
   </div>
 
   <!-- Cancellation Card -->
-  <div
-    v-else-if="message.role === 'cancelled' || message.activityType === 'CANCELLED'"
-    class="w-full pl-2 pr-2 my-2 min-w-0"
-  >
+  <div v-else-if="message.activityType === 'CANCELLED'" class="w-full pl-2 pr-2 my-2 min-w-0">
     <div
       class="flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 min-w-0"
     >
@@ -81,7 +78,7 @@ const emit = defineEmits<{
         {{ $t("chat.cancelled") }}
       </span>
       <span class="text-xs font-mono text-base-content/70 truncate min-w-0">
-        {{ message.content }}
+        {{ $t("chat.cancelledByUser") }}
       </span>
       <span
         v-if="message.timestamp"

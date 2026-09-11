@@ -48,20 +48,24 @@ type Server struct {
 	diagnostics      *SystemDiagnostics
 	ctx              context.Context
 	cancel           context.CancelFunc
-	activeExecutions sync.Map // chatID -> struct{}
-	funcRegistry     *workflow.FunctionRegistry
-	customRunners    []workflow.NodeRunner
-	publicSrv        *http.Server
-	internalSrv      *http.Server
-	keybindingsMu    sync.Mutex
-	shutdownStarted  chan struct{}
-	shutdownOnce     sync.Once
-	shutdownErr      error
-	geminiAPIKey     string
-	voiceAuthURL     string
-	voiceHTTPClient  *http.Client
-	runSingleAgentFn singleAgentRunner
-	proxyManager     *proxy.ProxyManager
+	activeExecutions sync.Map // chatID -> *executionHandle (or legacy struct{} placeholder)
+	// cancelledExecutions records chatIDs whose execution was aborted via the
+	// stop API (chatID -> cancel time). It lets event handlers distinguish
+	// cancellation-induced node failures from genuine errors.
+	cancelledExecutions sync.Map
+	funcRegistry        *workflow.FunctionRegistry
+	customRunners       []workflow.NodeRunner
+	publicSrv           *http.Server
+	internalSrv         *http.Server
+	keybindingsMu       sync.Mutex
+	shutdownStarted     chan struct{}
+	shutdownOnce        sync.Once
+	shutdownErr         error
+	geminiAPIKey        string
+	voiceAuthURL        string
+	voiceHTTPClient     *http.Client
+	runSingleAgentFn    singleAgentRunner
+	proxyManager        *proxy.ProxyManager
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.

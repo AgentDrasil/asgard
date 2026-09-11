@@ -20,6 +20,8 @@ type executionHandle struct {
 	agentID    string
 	isWorkflow bool
 	startTime  time.Time
+	// stopRequested is set when the stop API targeted this execution.
+	stopRequested bool
 }
 
 // executionHandleKey carries the active *executionHandle through the execution
@@ -58,6 +60,8 @@ func (s *Server) beginExecution(chatID, agentID string, isWorkflow bool) (contex
 // ensureExecutionGuard registers a guard for an execution that is already
 // running (e.g. a workflow started outside the request path). It never clobbers
 // an existing handle, so cancellation stays wired to the original execution.
+// The created handle carries no cancel func: workflow guards rely on
+// Engine.CancelSession, single-agent ones on the owner goroutine's context.
 func (s *Server) ensureExecutionGuard(chatID, agentID string, isWorkflow bool) {
 	if chatID == "" {
 		return
@@ -72,9 +76,11 @@ func (s *Server) ensureExecutionGuard(chatID, agentID string, isWorkflow bool) {
 // releaseExecution removes the session guard. It intentionally does not cancel
 // the execution context: the owning goroutine cancels its own context exactly
 // once when it truly finishes (the queue consumer releases and re-acquires the
-// guard during its drain-boundary handshake).
+// guard during its drain-boundary handshake). A pending stop marker is also
+// consumed so later failures of this session are not misclassified.
 func (s *Server) releaseExecution(chatID string) {
 	s.activeExecutions.Delete(chatID)
+	s.consumeSessionStop(chatID)
 }
 
 // executionGuardValue returns the value to store when a running loop re-acquires
@@ -84,6 +90,33 @@ func executionGuardValue(ctx context.Context) any {
 		return handle
 	}
 	return struct{}{}
+}
+
+// sessionStopInProgress reports whether the session's execution was aborted
+// via the stop API and the stop marker has not been consumed yet. It lets
+// event handlers classify cancellation-induced failures precisely instead of
+// pattern-matching error strings.
+func (s *Server) sessionStopInProgress(chatID string) bool {
+	if s == nil || chatID == "" {
+		return false
+	}
+	if _, stopped := s.cancelledExecutions.Load(chatID); stopped {
+		return true
+	}
+	if handle, ok := func() (*executionHandle, bool) {
+		v, running := s.activeExecutions.Load(chatID)
+		h, ok := v.(*executionHandle)
+		return h, running && ok
+	}(); ok && handle != nil && handle.stopRequested {
+		return true
+	}
+	return false
+}
+
+// consumeSessionStop clears the stop marker once the aborted execution has
+// fully settled, so later runs of the same session are not misclassified.
+func (s *Server) consumeSessionStop(chatID string) {
+	s.cancelledExecutions.Delete(chatID)
 }
 
 // stopSessionExecution cancels the in-flight execution of a session, clears any
@@ -107,7 +140,9 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 		if handle.cancel != nil {
 			handle.cancel()
 		}
+		handle.stopRequested = true
 	}
+	s.cancelledExecutions.Store(sessionID, time.Now())
 
 	if s.repo != nil {
 		if _, err := s.repo.ClearQueuedMessages(sessionID); err != nil {
@@ -122,7 +157,7 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 			ID:           fmt.Sprintf("cancelled-%s-%s", sessionID, uuid.NewV7().String()),
 			Role:         "activity",
 			ActivityType: "CANCELLED",
-			Content:      "执行已由用户终止",
+			Content:      "execution stopped by user",
 			Timestamp:    time.Now().UnixMilli(),
 		}
 		if err := s.repo.AppendMessage(sessionID, msg); err != nil {
@@ -133,8 +168,16 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 	}
 
 	statusPayload := map[string]any{"isRunning": false}
-	if handle, ok := value.(*executionHandle); ok && handle.agentID != "" {
+	if handle, ok := value.(*executionHandle); ok {
 		statusPayload["agent"] = handle.agentID
+	}
+	// Guards registered without a cancel func (workflow resume/redrive paths)
+	// may carry no agentID; fall back to the session's current agent so the
+	// frontend can still attribute the status change.
+	if statusPayload["agent"] == "" && s.repo != nil {
+		if sess, err := s.repo.GetSession(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
+			statusPayload["agent"] = sess.CurrentAgent
+		}
 	}
 	s.PublishSessionEvent(sessionID, SessionEvent{Type: EventTypeStatus, Payload: statusPayload})
 	s.PublishSessionEvent(sessionID, SessionEvent{Type: EventTypeDone, Payload: map[string]any{}})
@@ -178,6 +221,13 @@ func (s *Server) handleStopWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if row == nil {
 		writeJSONError(w, http.StatusNotFound, "workflow run not found")
+		return
+	}
+	// The execution guard is per-session, not per-run: a run that just settled
+	// must not drag an unrelated follow-up execution of the same session into
+	// cancellation. Only an unfinished run may stop its session.
+	if row.Status != dbmodels.WorkflowStatusRunning && row.Status != dbmodels.WorkflowStatusWaitingHuman {
+		writeJSONError(w, http.StatusConflict, fmt.Sprintf("workflow run status is %s; only unfinished runs can be stopped", row.Status))
 		return
 	}
 

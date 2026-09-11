@@ -124,6 +124,10 @@ type Engine struct {
 	// abort in-flight workflow execution (workflow DAGs intentionally run
 	// decoupled from the request context, so cancelling the caller's context
 	// is not enough).
+	//
+	// Lock ordering: code under cancelMu may acquire waitMu (see CancelSession)
+	// but never the reverse. Any new code must preserve this order to avoid
+	// deadlock.
 	cancelMu   sync.Mutex
 	runCancels map[string]map[string]context.CancelFunc // key: sessionID -> runID -> cancel
 }
@@ -175,6 +179,10 @@ func (e *Engine) unregisterRunCancel(sessionID, runID string) {
 // and returns how many runs were signalled. Runs suspended waiting for human
 // input are deliberately left untouched: they own no execution to abort and
 // must stay resumable.
+//
+// Lock ordering: takes cancelMu first, then waitMu (briefly, per run) while
+// collecting cancellable runs; the cancels themselves fire after cancelMu is
+// released. Do not call this while holding waitMu.
 func (e *Engine) CancelSession(sessionID string) int {
 	if e == nil || sessionID == "" {
 		return 0

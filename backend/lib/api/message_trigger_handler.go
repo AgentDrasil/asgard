@@ -159,7 +159,8 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 	wait := req.Wait || r.URL.Query().Get("wait") == "true"
 
-	// 1. Workflow 分支：完全遵循既有路径，获取 guard 失败返回 409，成功则执行 runWorkflow 并保留 guard 释放
+	// 1. Workflow branch: acquire the guard; on conflict return 409, otherwise run
+	// runWorkflow and keep the guard release
 	if targetAgent.Config.Type == "workflow" {
 		execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, true)
 		if loaded {
@@ -220,16 +221,16 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 尝试获取 guard
+	// Try to acquire the guard
 	execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, false)
 
-	// 2. 同步 Wait 运行中分支：维持既有契约返回 409 Conflict
+	// 2. Synchronous wait branch while running: keep the existing 409 contract
 	if wait && loaded {
 		http.Error(w, `{"error":"session is already running a task"}`, http.StatusConflict)
 		return
 	}
 
-	// 3. 同步 Wait 空闲分支：维持既有同步执行路径并保留 guard 释放
+	// 3. Synchronous wait branch while idle: keep the existing sync path with guard release
 	if wait && !loaded {
 		defer s.releaseExecution(chatID)
 		defer handle.cancel()
@@ -264,7 +265,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. 异步单 Agent 运行中入队分支：!wait && loaded
+	// 4. Async single-agent enqueue branch: !wait && loaded
 	if loaded {
 		if len(req.Attachments) > 0 {
 			w.Header().Set("Content-Type", "application/json")
@@ -311,7 +312,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 				Payload: map[string]any{"queue": updatedQueue},
 			})
 
-			// 尝试启动共享消费（如果前序刚好完成）
+			// Try to start the shared consumer (in case the previous one just finished)
 			session, _ := s.repo.GetSession(chatID)
 			runDir := req.RunDir
 			if session != nil && session.RunDir != "" {
@@ -335,8 +336,8 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. 异步单 Agent 空闲首发分支：!wait && !loaded
-	// 注意：移除原有的 defer Delete，将 guard 生命周期完全移交给 runSingleAgentWithQueue 管理
+	// 5. Async single-agent initial dispatch branch: !wait && !loaded
+	// The guard lifecycle is fully handed over to runSingleAgentWithQueue (no defer here)
 	runDirOpt := optional.None[string]()
 	if req.RunDir != "" {
 		runDirOpt = optional.Some(req.RunDir)
@@ -386,12 +387,12 @@ func (s *Server) handleQueuedTaskError(chatID string, targetAgent *agentspec.Age
 	}
 	var runErr *agentRunError
 	if errors.As(qErr, &runErr) {
-		// 核心沙箱失败：清空后续队列并追加错误通知
+		// Core sandbox failure: clear the remaining queue and append an error notice
 		_, _ = s.repo.ClearQueuedMessages(chatID)
 		errMsg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
 			Role:      "error",
-			Content:   fmt.Sprintf("任务执行失败：%v。已自动清空该会话所有排队消息。", qErr),
+			Content:   fmt.Sprintf("task execution failed: %v. all queued messages for this session have been cleared.", qErr),
 			AgentName: targetAgent.Config.Name,
 			Timestamp: time.Now().UnixMilli(),
 		}
@@ -399,11 +400,12 @@ func (s *Server) handleQueuedTaskError(chatID string, targetAgent *agentspec.Age
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeQueue, Payload: map[string]any{"queue": []dbmodels.QueuedMessage{}}})
 	} else if !errors.Is(qErr, context.Canceled) && !errors.Is(qErr, context.DeadlineExceeded) {
-		// N10: 非沙箱类前置失败且非优雅停机：追加可见错误提示告知用户该消息未执行，保留剩余队列
+		// Non-sandbox pre-execution failure that is not a graceful shutdown:
+		// append a visible error telling the user the message never ran; keep the queue
 		errMsg := dbmodels.ChatMessage{
 			ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
 			Role:      "error",
-			Content:   fmt.Sprintf("任务调度失败（该消息未执行）：%v", qErr),
+			Content:   fmt.Sprintf("task scheduling failed (this message was not executed): %v", qErr),
 			AgentName: targetAgent.Config.Name,
 			Timestamp: time.Now().UnixMilli(),
 		}
@@ -417,52 +419,54 @@ func (s *Server) runSingleAgentWithQueue(ctx context.Context, targetAgent *agent
 		defer handle.cancel()
 	}
 
-	// 第一阶段：执行首发任务
+	// Phase 1: execute the initial task
 	_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, req)
 	if qErr != nil {
 		s.handleQueuedTaskError(chatID, targetAgent, qErr)
-		s.activeExecutions.Delete(chatID)
+		s.releaseExecution(chatID)
 		return
 	}
 
-	// 第二阶段：首发成功，进入单一消费循环执行后续排队任务
+	// Phase 2: initial task succeeded, enter the single consumer loop for queued tasks
 	s.runQueueConsumerLoop(ctx, targetAgent, chatID, req.RunDir)
 }
 
 func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspec.Agent, chatID string, runDir string) {
 	for {
 		if s.repo == nil {
-			s.activeExecutions.Delete(chatID)
+			s.releaseExecution(chatID)
 			break
 		}
 
-		// 关键不变式：循环顶的 Pop 恒处于持 guard 临界区内
+		// Key invariant: the Pop at the top of the loop always runs inside the
+		// guard critical section
 		nextMsg, popErr := s.repo.PopNextQueuedMessage(chatID)
 		if popErr != nil {
 			log.Error().Err(popErr).Msg("failed to pop next queued message")
-			// N6: 追加可见错误消息但保留剩余队列，释放 guard 退出
+			// Append a visible error but keep the remaining queue; release the
+			// guard and exit
 			errMsg := dbmodels.ChatMessage{
 				ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
 				Role:      "error",
-				Content:   fmt.Sprintf("获取排队消息失败：%v，会话已暂停。排队消息已保留，可重试或重启后继续。", popErr),
+				Content:   fmt.Sprintf("failed to fetch queued message: %v. the session is paused; queued messages are preserved and can be retried after restart.", popErr),
 				AgentName: targetAgent.Config.Name,
 				Timestamp: time.Now().UnixMilli(),
 			}
 			_ = s.repo.AppendMessage(chatID, errMsg)
 			s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
-			s.activeExecutions.Delete(chatID)
+			s.releaseExecution(chatID)
 			break
 		}
 		if nextMsg == nil {
-			// N1/N7: 释放 guard 并进行非破坏性 Peek 复检
-			s.activeExecutions.Delete(chatID)
+			// Release the guard and re-check non-destructively via Peek
+			s.releaseExecution(chatID)
 			head, perr := s.repo.PeekNextQueuedMessage(chatID)
 			if perr != nil {
 				log.Error().Err(perr).Msg("failed to peek next queued message")
 				errMsg := dbmodels.ChatMessage{
 					ID:        fmt.Sprintf("error-%s-%s", chatID, uuid.NewV7().String()),
 					Role:      "error",
-					Content:   fmt.Sprintf("获取排队消息失败：%v，会话已暂停。排队消息已保留，可重试或重启后继续。", perr),
+					Content:   fmt.Sprintf("failed to fetch queued message: %v. the session is paused; queued messages are preserved and can be retried after restart.", perr),
 					AgentName: targetAgent.Config.Name,
 					Timestamp: time.Now().UnixMilli(),
 				}
@@ -471,32 +475,36 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 				break
 			}
 			if head == nil {
-				break // 队列确已清空，安全退出
+				break // queue is truly drained; safe to exit
 			}
 			if _, loaded := s.activeExecutions.LoadOrStore(chatID, executionGuardValue(ctx)); loaded {
-				break // 并发入队者已抢先获取 guard 并启动新消费协程；head 未被物理删除，由其承接，零消息丢失
+				break // a concurrent enqueuer already acquired the guard and started a new
+				// consumer goroutine; head was not physically deleted and is picked up by
+				// that goroutine — zero message loss
 			}
-			// 成功重持 guard，此时执行破坏性 Pop 安全可靠
+			// Guard re-acquired: the destructive Pop is now safe
 			nextMsg, _ = s.repo.PopNextQueuedMessage(chatID)
 			if nextMsg == nil {
-				// N9 修复：队头恰被用户撤回。本协程仍持有 guard，严禁在此 Delete！
-				// 直接 continue 回到循环顶，保持“循环顶 Pop 恒持 guard”不变式，杜绝并发双跑与误删他人 guard
+				// The queue head was just withdrawn by the user. This goroutine still
+				// owns the guard — do NOT release it here! continue back to the loop top,
+				// keeping the "Pop always runs under the guard" invariant and preventing
+				// concurrent double-runs or deleting someone else's guard
 				continue
 			}
 		}
 
-		// 广播出队后的最新队列快照
+		// Broadcast the latest queue snapshot after dequeue
 		remaining, _ := s.repo.GetQueuedMessages(chatID)
 		if remaining == nil {
 			remaining = []dbmodels.QueuedMessage{}
 		}
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeQueue, Payload: map[string]any{"queue": remaining}})
 
-		// 执行排队任务
+		// Execute the queued task
 		_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, TriggerMessageRequest{Prompt: nextMsg.Prompt, Model: nextMsg.Model, RunDir: runDir})
 		if qErr != nil {
 			s.handleQueuedTaskError(chatID, targetAgent, qErr)
-			s.activeExecutions.Delete(chatID)
+			s.releaseExecution(chatID)
 			break
 		}
 	}

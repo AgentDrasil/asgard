@@ -6,7 +6,7 @@ import { useToast } from "../composables/useToast";
 import { useVoiceInput } from "../composables/useVoiceInput";
 import { MAX_QUEUED_MESSAGES } from "../composables/useSessionStore";
 import type { Attachment, VoiceErrorCode } from "../types";
-import { uploadAttachment, stopSessionExecution } from "../lib/api";
+import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
 import { t } from "../i18n";
@@ -84,24 +84,33 @@ const canSend = computed(() => {
 // It stays disabled (spinner) until the backend confirms the stop over SSE and
 // flips isRunning back to false.
 const isStoppingExecution = ref(false);
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => props.isRunning,
   (running) => {
-    if (!running) isStoppingExecution.value = false;
+    if (!running) {
+      isStoppingExecution.value = false;
+      if (stopTimer) {
+        clearTimeout(stopTimer);
+        stopTimer = null;
+      }
+    }
   },
 );
 
-const handleStop = async () => {
+// The parent owns the stop flow (it calls the session store); the component
+// only reports the intent. A timeout re-enables the button in case the SSE
+// stream that should flip isRunning never arrives.
+const handleStop = () => {
   if (isStoppingExecution.value || !props.isRunning) return;
   isStoppingExecution.value = true;
   emit("stop");
-  if (!props.sessionId) {
+  if (stopTimer) clearTimeout(stopTimer);
+  stopTimer = setTimeout(() => {
     isStoppingExecution.value = false;
-    return;
-  }
-  const ok = await stopSessionExecution(props.sessionId);
-  if (!ok) isStoppingExecution.value = false;
+    stopTimer = null;
+  }, 15000);
 };
 
 // Sync when parent pushes a new value (e.g. appending diff comments)
@@ -184,6 +193,7 @@ const handleVoiceToggle = () => {
 };
 
 onBeforeUnmount(() => {
+  if (stopTimer) clearTimeout(stopTimer);
   cancelRecording();
 });
 

@@ -579,8 +579,10 @@ func (s *Server) handleWorkflowEvent(sessionID string, ev workflow.WorkflowEvent
 	}
 	// A user stop cancels every in-flight node; their "context canceled"
 	// failures are not user-facing errors. The cancellation activity message
-	// persisted by stopSessionExecution already explains the outcome.
-	if strings.Contains(ev.Message, context.Canceled.Error()) || strings.Contains(ev.Message, context.DeadlineExceeded.Error()) {
+	// persisted by stopSessionExecution already explains the outcome. The
+	// stop marker makes this precise (a genuine node error whose message
+	// happens to embed "context canceled" is still persisted).
+	if s.sessionStopInProgress(sessionID) {
 		return
 	}
 	nodeRef := ev.NodeID

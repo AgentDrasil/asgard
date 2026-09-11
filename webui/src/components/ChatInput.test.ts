@@ -938,8 +938,7 @@ describe("ChatInput.vue", () => {
   describe("Stop Execution", () => {
     const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-    it("renders a stop button while running and calls the stop API on click", async () => {
-      const stopSpy = vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
+    it("renders a stop button while running and emits stop on click", async () => {
       let stopEvents = 0;
 
       const app = createApp({
@@ -967,13 +966,14 @@ describe("ChatInput.vue", () => {
       await flushPromises();
 
       expect(stopEvents).toBe(1);
-      expect(stopSpy).toHaveBeenCalledWith("sess-1");
+      // Emit-only: the parent routes the event through the session store, so
+      // the component just disables repeat clicks until the run state flips.
+      expect(stopBtn.disabled).toBe(true);
 
       app.unmount();
     });
 
     it("restores the send button once isRunning becomes false", async () => {
-      vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
       const running = ref(true);
 
       const app = createApp({
@@ -1004,8 +1004,8 @@ describe("ChatInput.vue", () => {
       app.unmount();
     });
 
-    it("re-enables the stop button when the stop request fails", async () => {
-      vi.spyOn(api, "stopSessionExecution").mockResolvedValue(false);
+    it("re-enables the stop button on timeout when isRunning never flips", async () => {
+      vi.useFakeTimers();
 
       const app = createApp({
         render() {
@@ -1022,9 +1022,13 @@ describe("ChatInput.vue", () => {
 
       const stopBtn = root.querySelector('[data-testid="stop-agent-button"]') as HTMLButtonElement;
       stopBtn.click();
-      await flushPromises();
+      await nextTick();
+      expect(stopBtn.disabled).toBe(true);
 
+      vi.advanceTimersByTime(16000);
+      await nextTick();
       expect(stopBtn.disabled).toBe(false);
+      vi.useRealTimers();
 
       app.unmount();
     });
