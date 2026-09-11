@@ -649,6 +649,67 @@ describe("useSessionStore", () => {
     expect(store.messages.value[0].replyText).toBe("main.go");
   });
 
+  it("should resume running state after replying to an ask_user", async () => {
+    const mockSession: ChatSession = {
+      chatID: "session-reply-resume",
+      title: "Reply Resume",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      isRunning: true,
+      messages: [{ id: "ask-1", role: "ask_user", content: "Which file?", timestamp: 1000 }],
+    };
+
+    vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+    const store = useSessionStore();
+    await store.openSession("session-reply-resume");
+
+    const es = MockEventSource.instances[0];
+
+    // Pending ask_user suspends the run.
+    es.emit("message", {
+      eventId: 1,
+      chatId: "session-reply-resume",
+      type: "message",
+      message: { id: "ask-2", role: "ask_user", content: "Continue?", timestamp: 1100 },
+      timestamp: 1100,
+    });
+    expect(store.isRunning.value).toBe(false);
+
+    // The replied broadcast marks the run as resumed over SSE.
+    es.emit("message", {
+      eventId: 2,
+      chatId: "session-reply-resume",
+      type: "message",
+      message: {
+        id: "ask-2",
+        role: "ask_user",
+        content: "Continue?",
+        replied: true,
+        replyText: "yes",
+        timestamp: 1100,
+      },
+      timestamp: 1200,
+    });
+    expect(store.isRunning.value).toBe(true);
+    expect(store.loading.value).toBe(true);
+
+    // A new pending ask_user suspends again.
+    es.emit("message", {
+      eventId: 3,
+      chatId: "session-reply-resume",
+      type: "message",
+      message: { id: "ask-3", role: "ask_user", content: "Again?", timestamp: 1300 },
+      timestamp: 1300,
+    });
+    expect(store.isRunning.value).toBe(false);
+
+    // The optimistic local reply also resumes the run immediately.
+    store.updateMessageReply("ask-3", "sure");
+    expect(store.isRunning.value).toBe(true);
+    expect(store.loading.value).toBe(true);
+  });
+
   it("should update workingAgentLabel from activity messages and clear on ask_user", async () => {
     const mockSession: ChatSession = {
       chatID: "session-wf",

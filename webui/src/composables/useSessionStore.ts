@@ -96,15 +96,23 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
 
     if (incoming.role === "ask_user") {
-      isRunning.value = false;
-      loading.value = false;
-      workingAgentLabel.value = null;
+      // An ask_user pauses the run until the user replies. Once replied, the
+      // suspended agent resumes in-place and the backend keeps the session
+      // running (it is still in activeExecutions), yet no fresh isRunning=true
+      // status event is emitted. Mirror that here so the composer returns to
+      // queue mode as soon as the reply is broadcast.
+      const resuming = !!incoming.replied;
+      isRunning.value = resuming;
+      loading.value = resuming;
+      workingAgentLabel.value = resuming
+        ? incoming.agentName || activeAgent.value?.name || null
+        : null;
       if (activeSession.value) {
-        activeSession.value.isRunning = false;
+        activeSession.value.isRunning = resuming;
       }
       const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
       if (sIdx > -1) {
-        sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: false };
+        sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: resuming };
       }
     } else if (incoming.agentName && incoming.role !== "user" && isRunning.value) {
       const matched = agents.value.find(
@@ -336,6 +344,20 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     rawMessages.value = rawMessages.value.map((m) =>
       m.id === msgId ? { ...m, replied: true, replyText } : m,
     );
+    // Answering an ask_user resumes the suspended run without a new status
+    // event, so optimistically flip the session back to running. The done
+    // event still clears it when the run actually finishes.
+    if (!isRunning.value) {
+      isRunning.value = true;
+      loading.value = true;
+      if (activeSession.value) {
+        activeSession.value.isRunning = true;
+      }
+      const idx = sessions.value.findIndex((s) => s.chatID === activeSessionId.value);
+      if (idx > -1) {
+        sessions.value[idx] = { ...sessions.value[idx], isRunning: true };
+      }
+    }
   };
 
   const editQueuedMessage = async (messageId: string, newText: string): Promise<boolean> => {
