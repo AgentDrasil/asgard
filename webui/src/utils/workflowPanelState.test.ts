@@ -157,6 +157,51 @@ describe("workflowPanelState", () => {
       expect(state.statusText).toBe("Workflow completed");
     });
 
+    it("determines stage as cancelled when a CANCELLED activity message is the latest event", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "user", content: "Run task" },
+        { id: "2", role: "activity", content: "Node started" },
+        {
+          id: "3",
+          role: "activity",
+          activityType: "CANCELLED",
+          content: "执行已由用户终止",
+        },
+      ];
+      const state = computeWorkflowPanelState({
+        running: false,
+        messages,
+      });
+      expect(state.stage).toBe("cancelled");
+      expect(state.statusText).toBe("Workflow cancelled");
+    });
+
+    it("keeps running stage precedence over a prior cancellation message", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "user", content: "Run task" },
+        { id: "2", role: "activity", activityType: "CANCELLED", content: "cancelled" },
+      ];
+      const state = computeWorkflowPanelState({
+        running: true,
+        messages,
+        workingAgentLabel: "Coder",
+      });
+      expect(state.stage).toBe("running");
+    });
+
+    it("determines stage as idle when a user message follows a cancellation", () => {
+      const messages: ChatMessage[] = [
+        { id: "1", role: "activity", activityType: "CANCELLED", content: "cancelled" },
+        { id: "2", role: "user", content: "New run" },
+      ];
+      const state = computeWorkflowPanelState({
+        running: false,
+        messages,
+        activeAgentName: "Test Workflow",
+      });
+      expect(state.stage).toBe("idle");
+    });
+
     it("determines stage as idle when only user messages exist and running is false", () => {
       const messages: ChatMessage[] = [
         { id: "1", role: "user", content: "Run task" },

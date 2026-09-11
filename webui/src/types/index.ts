@@ -33,6 +33,7 @@ export interface ChatMessage {
     | "tool_call"
     | "tool_result"
     | "ask_user"
+    | "cancelled"
     | "error";
   content: string;
   agentName?: string;

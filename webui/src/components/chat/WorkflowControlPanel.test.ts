@@ -14,17 +14,20 @@ vi.mock("@iconify/vue", () => ({
   },
 }));
 
-const { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } = vi.hoisted(() => ({
-  sendAskUserReply:
-    vi.fn<(sessionId: string, messageId: string, text: string) => Promise<boolean>>(),
-  getSessionWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunSummary[]>>(),
-  redriveWorkflowRun: vi.fn<(runId: string) => Promise<boolean>>(),
-}));
+const { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun, stopSessionExecution } =
+  vi.hoisted(() => ({
+    sendAskUserReply:
+      vi.fn<(sessionId: string, messageId: string, text: string) => Promise<boolean>>(),
+    getSessionWorkflows: vi.fn<(sessionId: string) => Promise<WorkflowRunSummary[]>>(),
+    redriveWorkflowRun: vi.fn<(runId: string) => Promise<boolean>>(),
+    stopSessionExecution: vi.fn<(sessionId: string) => Promise<boolean>>(),
+  }));
 
 vi.mock("../../lib/api", () => ({
   sendAskUserReply,
   getSessionWorkflows,
   redriveWorkflowRun,
+  stopSessionExecution,
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,6 +66,7 @@ describe("WorkflowControlPanel.vue", () => {
     sendAskUserReply.mockResolvedValue(true);
     getSessionWorkflows.mockResolvedValue([]);
     redriveWorkflowRun.mockResolvedValue(true);
+    stopSessionExecution.mockResolvedValue(true);
   });
 
   const mountPanel = async (messages: ChatMessage[]) => {
@@ -155,6 +159,53 @@ describe("WorkflowControlPanel.vue", () => {
 
     expect(root.querySelector('[data-testid="workflow-redrive-button"]')).toBeNull();
     expect(getSessionWorkflows).not.toHaveBeenCalledWith("chat-123");
+
+    app.unmount();
+  });
+
+  it("shows a stop button while running and calls the stop API on click", async () => {
+    const app = createApp({
+      render() {
+        return h(WorkflowControlPanel, {
+          activeAgent: workflowAgent,
+          loading: true,
+          messages: [{ id: "user-1", role: "user", content: "go", timestamp: 1 }],
+          sessionId: "chat-123",
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flushPromises();
+    await nextTick();
+
+    const btn = root.querySelector<HTMLButtonElement>('[data-testid="workflow-stop-button"]');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toContain("Stop");
+
+    btn?.click();
+    await flushPromises();
+    await nextTick();
+    expect(stopSessionExecution).toHaveBeenCalledWith("chat-123");
+
+    app.unmount();
+  });
+
+  it("shows the cancelled stage when a cancellation message is present", async () => {
+    const app = await mountPanel([
+      { id: "user-1", role: "user", content: "review the change", timestamp: 1 },
+      {
+        id: "cancelled-1",
+        role: "activity",
+        activityType: "CANCELLED",
+        content: "执行已由用户终止",
+        timestamp: 2,
+      },
+    ]);
+
+    expect(root.textContent).toContain("Workflow cancelled");
+    expect(root.textContent).toContain("Cancelled");
+    expect(root.querySelector('[data-testid="workflow-stop-button"]')).toBeNull();
 
     app.unmount();
   });

@@ -5,7 +5,12 @@ import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { computeWorkflowPanelState } from "../../utils/workflowPanelState";
 import { formatPath } from "../../utils/agentUtils";
-import { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } from "../../lib/api";
+import {
+  sendAskUserReply,
+  getSessionWorkflows,
+  redriveWorkflowRun,
+  stopSessionExecution,
+} from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
 
@@ -100,7 +105,12 @@ watch(
 watch(
   () => [state.value.stage, currentPending.value?.id] as const,
   ([newStage, newMsgId], [, oldMsgId]) => {
-    if (newStage === "running" || newStage === "completed" || newStage === "failed") {
+    if (
+      newStage === "running" ||
+      newStage === "completed" ||
+      newStage === "failed" ||
+      newStage === "cancelled"
+    ) {
       isSubmitting.value = false;
     }
     if (newStage === "waiting_human" && newMsgId !== oldMsgId) {
@@ -108,6 +118,23 @@ watch(
     }
   },
 );
+
+// Stop control for the running stage (initial run or human-resume run).
+const isStopping = ref(false);
+
+watch(
+  () => state.value.stage,
+  (stage) => {
+    if (stage !== "running") isStopping.value = false;
+  },
+);
+
+const handleStop = async () => {
+  if (isStopping.value || !props.sessionId) return;
+  isStopping.value = true;
+  const ok = await stopSessionExecution(props.sessionId);
+  if (!ok) isStopping.value = false;
+};
 
 const handleReply = async (text: string) => {
   const replyContent = text.trim();
@@ -228,7 +255,9 @@ const handleRedrive = async () => {
               ? 'bg-error/10 border-error/30 p-3'
               : state.stage === 'completed'
                 ? 'bg-success/10 border-success/30 p-3'
-                : 'bg-base-200/50 border-base-300 p-3',
+                : state.stage === 'cancelled'
+                  ? 'bg-warning/10 border-warning/40 p-3'
+                  : 'bg-base-200/50 border-base-300 p-3',
       ]"
     >
       <!-- Submitting / Transient Resuming State -->
@@ -358,16 +387,30 @@ const handleRedrive = async () => {
       <!-- Stage: Running -->
       <div
         v-else-if="state.stage === 'running'"
-        class="flex items-center gap-3 py-1 text-sm font-medium text-base-content"
+        class="flex items-center justify-between gap-3 py-1 text-sm font-medium text-base-content"
       >
-        <span class="loading loading-spinner loading-sm text-primary"></span>
-        <span>
-          {{
-            $t("chat.workflow.isRunning", {
-              agent: workingAgentLabel || activeAgent?.name || $t("chat.agent"),
-            })
-          }}
-        </span>
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="loading loading-spinner loading-sm text-primary shrink-0"></span>
+          <span class="truncate">
+            {{
+              $t("chat.workflow.isRunning", {
+                agent: workingAgentLabel || activeAgent?.name || $t("chat.agent"),
+              })
+            }}
+          </span>
+        </div>
+        <button
+          type="button"
+          @click="handleStop"
+          :disabled="isStopping"
+          class="btn btn-sm btn-error btn-outline gap-1.5 shrink-0 font-semibold"
+          :title="$t('chat.stopExecution')"
+          data-testid="workflow-stop-button"
+        >
+          <span v-if="isStopping" class="loading loading-spinner loading-xs"></span>
+          <Icon v-else icon="material-symbols:stop-rounded" class="h-4 w-4" />
+          {{ $t("chat.stop") }}
+        </button>
       </div>
 
       <!-- Stage: Failed -->
@@ -408,6 +451,20 @@ const handleRedrive = async () => {
         </div>
         <span class="badge badge-success badge-sm font-semibold uppercase">
           {{ $t("chat.workflow.completedBadge") }}
+        </span>
+      </div>
+
+      <!-- Stage: Cancelled -->
+      <div
+        v-else-if="state.stage === 'cancelled'"
+        class="flex items-center justify-between gap-2 py-1"
+      >
+        <div class="flex items-center gap-2 text-sm font-medium text-warning">
+          <Icon icon="fluent:stop-circle-24-filled" class="h-5 w-5 shrink-0" />
+          <span>{{ $t("chat.workflow.cancelled") }}</span>
+        </div>
+        <span class="badge badge-warning badge-sm font-semibold uppercase">
+          {{ $t("chat.workflow.cancelledBadge") }}
         </span>
       </div>
 

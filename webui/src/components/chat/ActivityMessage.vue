@@ -68,6 +68,30 @@ const emit = defineEmits<{
     </div>
   </div>
 
+  <!-- Cancellation Card -->
+  <div
+    v-else-if="message.role === 'cancelled' || message.activityType === 'CANCELLED'"
+    class="w-full pl-2 pr-2 my-2 min-w-0"
+  >
+    <div
+      class="flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 min-w-0"
+    >
+      <Icon icon="material-symbols:stop-circle-rounded" class="h-4 w-4 text-warning shrink-0" />
+      <span class="text-xs font-bold text-warning uppercase tracking-wider shrink-0">
+        {{ $t("chat.cancelled") }}
+      </span>
+      <span class="text-xs font-mono text-base-content/70 truncate min-w-0">
+        {{ message.content }}
+      </span>
+      <span
+        v-if="message.timestamp"
+        class="text-[10px] font-mono text-base-content/40 ml-auto shrink-0"
+      >
+        {{ formatTimestamp(message.timestamp) }}
+      </span>
+    </div>
+  </div>
+
   <!-- Activity / Step / Tool Call Collapsible Box -->
   <div
     v-else-if="

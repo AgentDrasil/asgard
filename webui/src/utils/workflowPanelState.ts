@@ -3,7 +3,13 @@ import { parseOptions } from "./askUserOptions";
 import { getMessageArtifactFiles } from "./messageUtils";
 import { t } from "../i18n";
 
-export type WorkflowStage = "running" | "waiting_human" | "completed" | "failed" | "idle";
+export type WorkflowStage =
+  | "running"
+  | "waiting_human"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "idle";
 
 export interface WorkflowPanelState {
   stage: WorkflowStage;
@@ -69,14 +75,33 @@ export function computeWorkflowPanelState(
     };
   }
 
-  // 3. Scan backwards skipping intermediate process messages
+  // 3. Scan backwards skipping intermediate process messages. A user-issued
+  // cancellation is itself carried by an "activity" message, so it must be
+  // recognized before the ignored-role filter discards it.
   let lastBusinessMsg: ChatMessage | null = null;
+  let cancelled = false;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
+    if (msg.role === "cancelled" || msg.activityType === "CANCELLED") {
+      cancelled = true;
+      break;
+    }
     if (!IGNORED_ROLES.has(msg.role)) {
       lastBusinessMsg = msg;
       break;
     }
+  }
+
+  if (cancelled) {
+    return {
+      stage: "cancelled",
+      pendingMessage: null,
+      pendingMessages: [],
+      options: [],
+      statusText: t("chat.workflow.cancelled"),
+      targetFiles: [],
+      artifactFiles: [],
+    };
   }
 
   if (lastBusinessMsg) {

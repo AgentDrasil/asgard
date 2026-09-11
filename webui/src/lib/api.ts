@@ -438,6 +438,30 @@ export async function redriveWorkflowRun(runId: string): Promise<boolean> {
   }
 }
 
+export async function stopSessionExecution(sessionId: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: "POST",
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("stopSessionExecution error:", err);
+    return false;
+  }
+}
+
+export async function stopWorkflowRun(runId: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(`/api/workflows/${encodeURIComponent(runId)}/stop`, {
+      method: "POST",
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("stopWorkflowRun error:", err);
+    return false;
+  }
+}
+
 export async function registerPushToken(token: string): Promise<boolean> {
   try {
     const res = await apiFetch("/api/push/tokens", {

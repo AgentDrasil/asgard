@@ -21,6 +21,8 @@ import {
   archiveSession,
   getSessionWorkflows,
   redriveWorkflowRun,
+  stopSessionExecution,
+  stopWorkflowRun,
 } from "./api";
 
 describe("API Library", () => {
@@ -772,6 +774,64 @@ describe("API Library", () => {
       const ok = await redriveWorkflowRun("run-1");
       expect(ok).toBe(false);
       expect(consoleErrorSpy).toHaveBeenCalledWith("redriveWorkflowRun error:", expect.any(Error));
+    });
+  });
+
+  describe("stopSessionExecution", () => {
+    it("posts to the session stop endpoint and returns true on success", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "stopped", chatId: "chat-123" }),
+      } as Response);
+
+      const ok = await stopSessionExecution("chat-123");
+      expect(ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions/chat-123/stop", {
+        method: "POST",
+      });
+    });
+
+    it("returns false when the session is not running", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false, status: 409 } as Response);
+
+      const ok = await stopSessionExecution("chat-123");
+      expect(ok).toBe(false);
+    });
+
+    it("returns false on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
+
+      const ok = await stopSessionExecution("chat-123");
+      expect(ok).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "stopSessionExecution error:",
+        expect.any(Error),
+      );
+    });
+  });
+
+  describe("stopWorkflowRun", () => {
+    it("posts to the workflow stop endpoint and returns true on success", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "stopped", runId: "run-1" }),
+      } as Response);
+
+      const ok = await stopWorkflowRun("run-1");
+      expect(ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/workflows/run-1/stop", {
+        method: "POST",
+      });
+    });
+
+    it("returns false on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failed"));
+
+      const ok = await stopWorkflowRun("run-1");
+      expect(ok).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalledWith("stopWorkflowRun error:", expect.any(Error));
     });
   });
 

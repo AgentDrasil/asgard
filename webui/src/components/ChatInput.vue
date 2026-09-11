@@ -6,7 +6,7 @@ import { useToast } from "../composables/useToast";
 import { useVoiceInput } from "../composables/useVoiceInput";
 import { MAX_QUEUED_MESSAGES } from "../composables/useSessionStore";
 import type { Attachment, VoiceErrorCode } from "../types";
-import { uploadAttachment } from "../lib/api";
+import { uploadAttachment, stopSessionExecution } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
 import { t } from "../i18n";
@@ -33,6 +33,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "send", text: string, attachments?: Attachment[]): void;
   (e: "update:modelValue", value: string): void;
+  (e: "stop"): void;
 }>();
 
 const text = ref(props.modelValue ?? "");
@@ -78,6 +79,30 @@ const canSend = computed(() => {
   if (isInputDisabled.value || isUploading.value) return false;
   return text.value.trim().length > 0;
 });
+
+// Stop control shown in place of the send button while the agent is running.
+// It stays disabled (spinner) until the backend confirms the stop over SSE and
+// flips isRunning back to false.
+const isStoppingExecution = ref(false);
+
+watch(
+  () => props.isRunning,
+  (running) => {
+    if (!running) isStoppingExecution.value = false;
+  },
+);
+
+const handleStop = async () => {
+  if (isStoppingExecution.value || !props.isRunning) return;
+  isStoppingExecution.value = true;
+  emit("stop");
+  if (!props.sessionId) {
+    isStoppingExecution.value = false;
+    return;
+  }
+  const ok = await stopSessionExecution(props.sessionId);
+  if (!ok) isStoppingExecution.value = false;
+};
 
 // Sync when parent pushes a new value (e.g. appending diff comments)
 watch(
@@ -396,8 +421,20 @@ const handleDrop = (e: DragEvent) => {
           :class="sessionId ? 'pl-28 sm:pl-30 pr-11 sm:pr-12' : 'pl-20 sm:pl-22 pr-11 sm:pr-12'"
         ></textarea>
 
-        <!-- Send Button (Right) -->
+        <!-- Stop Button (Right, running) / Send Button (Right) -->
         <button
+          v-if="isRunning"
+          @click="handleStop"
+          :disabled="isStoppingExecution"
+          class="btn btn-circle btn-error btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"
+          :title="$t('chat.stopExecution')"
+          data-testid="stop-agent-button"
+        >
+          <span v-if="isStoppingExecution" class="loading loading-spinner loading-xs"></span>
+          <Icon v-else icon="material-symbols:stop-rounded" class="h-4 w-4 fill-current" />
+        </button>
+        <button
+          v-else
           @click="handleSend"
           :disabled="!canSend"
           class="btn btn-circle btn-primary btn-sm absolute right-2.5 sm:right-3 hover:scale-105 active:scale-95 transition-transform"

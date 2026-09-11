@@ -18,6 +18,7 @@ import {
   enqueueMessage,
   updateQueuedMessage,
   deleteQueuedMessage,
+  stopSessionExecution,
 } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
@@ -364,6 +365,29 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     return false;
   };
 
+  // stopExecution aborts the in-flight task of a session (defaults to the
+  // active session). The backend broadcasts queue/status/done over SSE; the
+  // local state is reset optimistically so the input unlocks immediately.
+  const stopExecution = async (sessionId?: string): Promise<boolean> => {
+    const targetId = sessionId || activeSessionId.value;
+    if (!targetId) return false;
+    const ok = await stopSessionExecution(targetId);
+    if (ok) {
+      queuedMessages.value = [];
+      isRunning.value = false;
+      loading.value = false;
+      workingAgentLabel.value = null;
+      if (activeSession.value) {
+        activeSession.value.isRunning = false;
+      }
+      const idx = sessions.value.findIndex((s) => s.chatID === targetId);
+      if (idx > -1) {
+        sessions.value[idx] = { ...sessions.value[idx], isRunning: false };
+      }
+    }
+    return ok;
+  };
+
   const sendMessage = async (
     text: string,
     opts?: {
@@ -589,6 +613,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     archiveSessionById,
     updateMessageReply,
     sendMessage,
+    stopExecution,
     editQueuedMessage,
     deleteQueuedMessage: deleteQueuedMessageItem,
   };

@@ -761,7 +761,7 @@ describe("ChatInput.vue", () => {
   });
 
   describe("Queue Mode and Limits", () => {
-    it("keeps input enabled and updates button title to Enqueue when isRunning is true and queue is not full", async () => {
+    it("keeps input enabled and swaps send for a stop button when isRunning is true", async () => {
       let sentText = "";
       const app = createApp({
         render() {
@@ -769,6 +769,7 @@ describe("ChatInput.vue", () => {
             loading: false,
             isRunning: true,
             queuedCount: 1,
+            sessionId: "sess-1",
             modelValue: "Queued message 2",
             onSend: (text: string) => {
               sentText = text;
@@ -784,13 +785,19 @@ describe("ChatInput.vue", () => {
       expect(textarea.disabled).toBe(false);
       expect(textarea.placeholder).toContain("Enqueue");
 
-      const sendBtn = root.querySelector(
-        '[data-testid="send-message-button"]',
-      ) as HTMLButtonElement;
-      expect(sendBtn.disabled).toBe(false);
-      expect(sendBtn.title).toContain("Enqueue");
+      // The send button is replaced by the stop control while running.
+      expect(root.querySelector('[data-testid="send-message-button"]')).toBeNull();
+      expect(root.querySelector('[data-testid="stop-agent-button"]')).not.toBeNull();
 
-      sendBtn.click();
+      // Keyboard send still enqueues the message.
+      const enterEvent = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(enterEvent);
       await nextTick();
       expect(sentText).toBe("Queued message 2");
 
@@ -820,10 +827,12 @@ describe("ChatInput.vue", () => {
       expect(textarea.disabled).toBe(true);
       expect(textarea.placeholder).toContain("Queue limit reached");
 
-      const sendBtn = root.querySelector(
-        '[data-testid="send-message-button"]',
-      ) as HTMLButtonElement;
-      expect(sendBtn.disabled).toBe(true);
+      // While running the send button is replaced by the stop control, which
+      // must remain usable even when the queue is full.
+      expect(root.querySelector('[data-testid="send-message-button"]')).toBeNull();
+      const stopBtn = root.querySelector('[data-testid="stop-agent-button"]') as HTMLButtonElement;
+      expect(stopBtn).not.toBeNull();
+      expect(stopBtn.disabled).toBe(false);
 
       app.unmount();
     });
@@ -892,6 +901,7 @@ describe("ChatInput.vue", () => {
             loading: true, // App.vue passes loading=isInputBusy, which is true when isRunning=true
             isRunning: true,
             queuedCount: 1,
+            sessionId: "sess-1",
             modelValue: "Queue message under integrated wiring",
             onSend: (text: string) => {
               sentText = text;
@@ -907,15 +917,114 @@ describe("ChatInput.vue", () => {
       expect(textarea.disabled).toBe(false);
       expect(textarea.placeholder).toContain("Enqueue");
 
+      expect(root.querySelector('[data-testid="send-message-button"]')).toBeNull();
+      expect(root.querySelector('[data-testid="stop-agent-button"]')).not.toBeNull();
+
+      const enterEvent = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(enterEvent);
+      await nextTick();
+      expect(sentText).toBe("Queue message under integrated wiring");
+
+      app.unmount();
+    });
+  });
+
+  describe("Stop Execution", () => {
+    const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it("renders a stop button while running and calls the stop API on click", async () => {
+      const stopSpy = vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
+      let stopEvents = 0;
+
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: true,
+            isRunning: true,
+            sessionId: "sess-1",
+            modelValue: "hello",
+            onStop: () => {
+              stopEvents++;
+            },
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      expect(root.querySelector('[data-testid="send-message-button"]')).toBeNull();
+      const stopBtn = root.querySelector('[data-testid="stop-agent-button"]') as HTMLButtonElement;
+      expect(stopBtn).not.toBeNull();
+
+      stopBtn.click();
+      await flushPromises();
+
+      expect(stopEvents).toBe(1);
+      expect(stopSpy).toHaveBeenCalledWith("sess-1");
+
+      app.unmount();
+    });
+
+    it("restores the send button once isRunning becomes false", async () => {
+      vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
+      const running = ref(true);
+
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: running.value,
+            isRunning: running.value,
+            sessionId: "sess-1",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      (root.querySelector('[data-testid="stop-agent-button"]') as HTMLButtonElement).click();
+      await flushPromises();
+
+      running.value = false;
+      await nextTick();
+
+      expect(root.querySelector('[data-testid="stop-agent-button"]')).toBeNull();
       const sendBtn = root.querySelector(
         '[data-testid="send-message-button"]',
       ) as HTMLButtonElement;
-      expect(sendBtn.disabled).toBe(false);
-      expect(sendBtn.title).toContain("Enqueue");
+      expect(sendBtn).not.toBeNull();
 
-      sendBtn.click();
+      app.unmount();
+    });
+
+    it("re-enables the stop button when the stop request fails", async () => {
+      vi.spyOn(api, "stopSessionExecution").mockResolvedValue(false);
+
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: true,
+            isRunning: true,
+            sessionId: "sess-1",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
       await nextTick();
-      expect(sentText).toBe("Queue message under integrated wiring");
+
+      const stopBtn = root.querySelector('[data-testid="stop-agent-button"]') as HTMLButtonElement;
+      stopBtn.click();
+      await flushPromises();
+
+      expect(stopBtn.disabled).toBe(false);
 
       app.unmount();
     });
