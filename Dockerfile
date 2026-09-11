@@ -27,8 +27,7 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     openssh-client \
     python3 \
     sqlite3 \
-    less \
-    && rm -rf /var/lib/apt/lists/*
+    less
 
 # Install agy
 COPY docker-scripts/install-agy.sh /tmp/install-agy.sh
@@ -59,11 +58,18 @@ RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/bin ${GOL
 
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
-    apt-get update && apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get update && apt-get install -y --no-install-recommends nodejs
 
 # Install pnpm (version pinned to match webui/package.json packageManager)
 RUN npm install -g pnpm@11.3.0 && pnpm --version
+
+# Install Playwright and the Chromium browser (with its OS dependencies).
+# PLAYWRIGHT_BROWSERS_PATH is set to a shared location so the non-root runtime
+# user can find the browsers installed here as root.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright@1.63.0 && \
+    npx playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
