@@ -22,7 +22,11 @@ type WorkflowRunParams struct {
 	// Headless marks no-interaction execution; human nodes fail fast
 	// instead of suspending (cron / scheduled runs).
 	Headless bool
-	Metadata map[string]any
+	// AllowCrossSession mirrors the session's cross-session access flag
+	// into every node sandbox (host ~/tmp, ~/data and database files stay
+	// visible instead of being masked).
+	AllowCrossSession bool
+	Metadata          map[string]any
 }
 
 // WorkflowExecutor adapts the workflow engine to handle execution and persistence.
@@ -73,6 +77,7 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 		WorkflowRunDirs:   e.WorkflowRunDirs,
 		WorkflowMountDirs: e.WorkflowMountDirs,
 		Headless:          params.Headless,
+		AllowCrossSession: params.AllowCrossSession,
 	}
 	if rc.RunDir == "" && params.RunDir != "" {
 

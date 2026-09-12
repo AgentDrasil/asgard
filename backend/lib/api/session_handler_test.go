@@ -791,3 +791,59 @@ func TestHandleDeleteSession_RemovesFilesAndDir(t *testing.T) {
 	_, errCADir := os.Stat(caDir)
 	assert.True(t, os.IsNotExist(errCADir), "Per-chat CA bundle directory should be removed with the session")
 }
+
+func TestSessionHandler_AllowCrossSession(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	err := dbmodels.AutoMigrate(testDB)
+	require.NoError(t, err)
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	conf := &config.Config{
+		Host: "http://localhost:8080",
+	}
+
+	server := &Server{
+		conf: conf,
+		repo: repo,
+	}
+	server.mux = server.buildMuxLocked()
+
+	// 1. Create session with allowCrossSession = true
+	postReq := httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(`{"currentAgent":"agent-alpha","runDir":"/tmp","allowCrossSession":true}`))
+	postReq.Header.Set("Content-Type", "application/json")
+	rrPost := httptest.NewRecorder()
+	server.ServeHTTP(rrPost, postReq)
+	assert.Equal(t, http.StatusCreated, rrPost.Code)
+
+	var createdSession ChatSession
+	err = json.Unmarshal(rrPost.Body.Bytes(), &createdSession)
+	require.NoError(t, err)
+	assert.True(t, createdSession.AllowCrossSession)
+
+	// 2. Fetch by ID
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+createdSession.ChatID, nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var fetchedSession ChatSession
+	err = json.Unmarshal(rr.Body.Bytes(), &fetchedSession)
+	require.NoError(t, err)
+	assert.True(t, fetchedSession.AllowCrossSession)
+
+	// 3. List sessions
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	rrList := httptest.NewRecorder()
+	server.ServeHTTP(rrList, listReq)
+	assert.Equal(t, http.StatusOK, rrList.Code)
+
+	var listSessions []ChatSession
+	err = json.Unmarshal(rrList.Body.Bytes(), &listSessions)
+	require.NoError(t, err)
+	require.Len(t, listSessions, 1)
+	assert.True(t, listSessions[0].AllowCrossSession)
+}

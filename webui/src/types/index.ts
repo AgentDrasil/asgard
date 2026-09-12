@@ -64,6 +64,7 @@ export interface ChatSession {
   currentAgent: string;
   runDir: string;
   gitRoot?: string;
+  allowCrossSession?: boolean;
   isRunning?: boolean;
   isWaitingForUser?: boolean;
   isArchived?: boolean;
@@ -148,6 +149,7 @@ export interface TriggerAgentMessageParams {
   model?: string;
   metadata?: Record<string, any>;
   attachments?: Attachment[];
+  allowCrossSession?: boolean;
 }
 
 export interface FileTreeEntry {

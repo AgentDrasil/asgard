@@ -15,24 +15,26 @@ import (
 
 // ChatSession represents a session response/request payload for the WebUI.
 type ChatSession struct {
-	ChatID           string                   `json:"chatID"`
-	Title            string                   `json:"title"`
-	CurrentAgent     string                   `json:"currentAgent"`
-	RunDir           string                   `json:"runDir"`
-	GitRoot          string                   `json:"gitRoot,omitempty"`
-	IsRunning        bool                     `json:"isRunning"`
-	IsWaitingForUser bool                     `json:"isWaitingForUser,omitempty"`
-	IsArchived       bool                     `json:"isArchived"`
-	CreatedAt        *time.Time               `json:"createdAt,omitempty"`
-	UpdatedAt        *time.Time               `json:"updatedAt,omitempty"`
-	Messages         dbmodels.Messages        `json:"messages,omitempty"`
-	Artifacts        dbmodels.Artifacts       `json:"artifacts,omitempty"`
-	QueuedMessages   []dbmodels.QueuedMessage `json:"queuedMessages,omitempty"`
+	ChatID            string                   `json:"chatID"`
+	Title             string                   `json:"title"`
+	CurrentAgent      string                   `json:"currentAgent"`
+	RunDir            string                   `json:"runDir"`
+	GitRoot           string                   `json:"gitRoot,omitempty"`
+	AllowCrossSession bool                     `json:"allowCrossSession"`
+	IsRunning         bool                     `json:"isRunning"`
+	IsWaitingForUser  bool                     `json:"isWaitingForUser,omitempty"`
+	IsArchived        bool                     `json:"isArchived"`
+	CreatedAt         *time.Time               `json:"createdAt,omitempty"`
+	UpdatedAt         *time.Time               `json:"updatedAt,omitempty"`
+	Messages          dbmodels.Messages        `json:"messages,omitempty"`
+	Artifacts         dbmodels.Artifacts       `json:"artifacts,omitempty"`
+	QueuedMessages    []dbmodels.QueuedMessage `json:"queuedMessages,omitempty"`
 }
 
 type CreateSessionRequest struct {
-	CurrentAgent string `json:"currentAgent"`
-	RunDir       string `json:"runDir"`
+	CurrentAgent      string `json:"currentAgent"`
+	RunDir            string `json:"runDir"`
+	AllowCrossSession bool   `json:"allowCrossSession"`
 }
 
 // handleSessions handles GET, POST, and DELETE requests to /api/sessions.
@@ -67,7 +69,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
-	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt); err != nil {
+	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt, optional.Some(req.AllowCrossSession)); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create session: " + err.Error()})
@@ -77,10 +79,11 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(ChatSession{
-		ChatID:       chatID,
-		CurrentAgent: req.CurrentAgent,
-		RunDir:       normalizedRunDir,
-		GitRoot:      findGitRoot(normalizedRunDir),
+		ChatID:            chatID,
+		CurrentAgent:      req.CurrentAgent,
+		RunDir:            normalizedRunDir,
+		GitRoot:           findGitRoot(normalizedRunDir),
+		AllowCrossSession: req.AllowCrossSession,
 	})
 }
 
@@ -136,19 +139,20 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatSession := ChatSession{
-		ChatID:           sess.ChatID,
-		Title:            sess.Title,
-		CurrentAgent:     sess.CurrentAgent,
-		RunDir:           sess.RunDir,
-		GitRoot:          findGitRoot(sess.RunDir),
-		IsRunning:        s.isSessionRunning(sess),
-		IsWaitingForUser: sess.HasUnrepliedAskUser(),
-		IsArchived:       sess.IsArchived,
-		CreatedAt:        createdAtPtr,
-		UpdatedAt:        updatedAtPtr,
-		Messages:         sess.Messages,
-		Artifacts:        sess.Artifacts,
-		QueuedMessages:   queuedMsgs,
+		ChatID:            sess.ChatID,
+		Title:             sess.Title,
+		CurrentAgent:      sess.CurrentAgent,
+		RunDir:            sess.RunDir,
+		GitRoot:           findGitRoot(sess.RunDir),
+		AllowCrossSession: sess.AllowCrossSession,
+		IsRunning:         s.isSessionRunning(sess),
+		IsWaitingForUser:  sess.HasUnrepliedAskUser(),
+		IsArchived:        sess.IsArchived,
+		CreatedAt:         createdAtPtr,
+		UpdatedAt:         updatedAtPtr,
+		Messages:          sess.Messages,
+		Artifacts:         sess.Artifacts,
+		QueuedMessages:    queuedMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -199,17 +203,18 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		sessions = append(sessions, ChatSession{
-			ChatID:           sess.ChatID,
-			Title:            sess.Title,
-			CurrentAgent:     sess.CurrentAgent,
-			RunDir:           sess.RunDir,
-			GitRoot:          findGitRoot(sess.RunDir),
-			IsRunning:        s.isSessionRunning(&sessCopy),
-			IsWaitingForUser: sess.HasUnrepliedAskUser(),
-			IsArchived:       sess.IsArchived,
-			CreatedAt:        createdAtPtr,
-			UpdatedAt:        updatedAtPtr,
-			Artifacts:        sess.Artifacts,
+			ChatID:            sess.ChatID,
+			Title:             sess.Title,
+			CurrentAgent:      sess.CurrentAgent,
+			RunDir:            sess.RunDir,
+			GitRoot:           findGitRoot(sess.RunDir),
+			AllowCrossSession: sess.AllowCrossSession,
+			IsRunning:         s.isSessionRunning(&sessCopy),
+			IsWaitingForUser:  sess.HasUnrepliedAskUser(),
+			IsArchived:        sess.IsArchived,
+			CreatedAt:         createdAtPtr,
+			UpdatedAt:         updatedAtPtr,
+			Artifacts:         sess.Artifacts,
 		})
 	}
 

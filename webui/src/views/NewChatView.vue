@@ -10,6 +10,7 @@ defineProps<{
 const selectedAgentId = defineModel<string>("selectedAgentId", { required: true });
 const selectedDir = defineModel<string>("selectedDir", { required: true });
 const selectedModel = defineModel<string>("selectedModel");
+const allowCrossSession = defineModel<boolean>("allowCrossSession");
 const prompt = defineModel<string>("prompt", { required: true });
 
 defineEmits<{
@@ -24,6 +25,7 @@ defineEmits<{
     v-model:selectedAgentId="selectedAgentId"
     v-model:selectedDir="selectedDir"
     v-model:selectedModel="selectedModel"
+    v-model:allowCrossSession="allowCrossSession"
     v-model:prompt="prompt"
     @submit="(files) => $emit('submit', files)"
     @toggle-sidebar="$emit('toggle-sidebar')"

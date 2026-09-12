@@ -127,6 +127,19 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 		ReadOnly:  agent.Config.MountDirs.ReadOnly,
 		ReadWrite: agent.Config.MountDirs.ReadWrite,
 	}
+
+	// Mirror the session's cross-session access policy into every node
+	// sandbox of the run (agent and command nodes share the same masking
+	// rules as plain single-agent chats).
+	allowCrossSession := false
+	if s.repo != nil {
+		if session, serr := s.repo.GetSession(chatID); serr != nil {
+			log.Warn().Err(serr).Str("chat_id", chatID).Msg("failed to load session for cross-session access policy")
+		} else if session != nil {
+			allowCrossSession = session.AllowCrossSession
+		}
+	}
+
 	suspendCh := make(chan struct{}, 1)
 	executor.OnEvent = func(sessionID string, ev workflow.WorkflowEvent) {
 		s.handleWorkflowEvent(sessionID, ev)
@@ -146,11 +159,12 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 	augmentedPrompt := formatPromptWithAttachments(req.Prompt, req.Attachments)
 	go func() {
 		res, err := executor.Execute(ctx, workflow.WorkflowRunParams{
-			SessionID: chatID,
-			Prompt:    augmentedPrompt,
-			RunDir:    req.RunDir,
-			Headless:  req.Headless,
-			Metadata:  req.Metadata,
+			SessionID:         chatID,
+			Prompt:            augmentedPrompt,
+			RunDir:            req.RunDir,
+			Headless:          req.Headless,
+			AllowCrossSession: allowCrossSession,
+			Metadata:          req.Metadata,
 		})
 		resultCh <- runResult{result: res, err: err}
 	}()

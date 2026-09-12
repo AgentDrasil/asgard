@@ -273,12 +273,13 @@ export async function searchSessions(query: string, signal?: AbortSignal): Promi
 export async function createSession(
   currentAgent?: string,
   runDir?: string,
+  allowCrossSession?: boolean,
 ): Promise<ChatSession | null> {
   try {
     const res = await apiFetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentAgent, runDir }),
+      body: JSON.stringify({ currentAgent, runDir, allowCrossSession }),
     });
     if (res.ok) return await res.json();
   } catch (err) {
@@ -535,6 +536,7 @@ export async function triggerAgentMessage(
         model: params.model,
         metadata: params.metadata,
         attachments: params.attachments,
+        allowCrossSession: params.allowCrossSession,
       }),
     });
     if (res.status === 409) {

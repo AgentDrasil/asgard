@@ -74,11 +74,13 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 	if sandbox {
 		configPath := ""
 		var proxyCfg bwrap.ProxySandboxConfig
+		var dbFiles []string
 		if r.conf != nil {
 			configPath = r.conf.GetConfigPath()
 			proxyCfg = r.conf.SandboxProxyOptions()
+			dbFiles = r.conf.SQLiteDBFiles()
 		}
-		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, &stdout, &stderr)
+		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, dbFiles, nctx.AllowCrossSession, &stdout, &stderr)
 	} else {
 		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
 	}
@@ -161,7 +163,7 @@ func asExitError(err error, target **exec.ExitError) bool {
 // runSandboxedCommand runs the command inside a bubblewrap sandbox hosting a
 // fakebashd gRPC daemon, mirroring the dual-sandbox execution model used by
 // agent runs: the host dials the socket directory bind-mounted at /fakebash.
-func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, stdout, stderr *bytes.Buffer) (int, error) {
+func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, dbFiles []string, allowCrossSession bool, stdout, stderr *bytes.Buffer) (int, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return -1, fmt.Errorf("getting user home directory: %w", err)
@@ -172,7 +174,7 @@ func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPat
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, proxyCfg)
+	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, allowCrossSession, dbFiles, proxyCfg)
 	if err != nil {
 		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
 	}

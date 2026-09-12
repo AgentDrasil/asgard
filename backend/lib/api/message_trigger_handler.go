@@ -20,12 +20,13 @@ import (
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.
 type TriggerMessageRequest struct {
-	Prompt   string `json:"prompt"`
-	ChatID   string `json:"chatId,omitempty"`
-	RunDir   string `json:"runDir,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Wait     bool   `json:"wait,omitempty"`
-	Headless bool   `json:"-"`
+	Prompt            string `json:"prompt"`
+	ChatID            string `json:"chatId,omitempty"`
+	RunDir            string `json:"runDir,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Wait              bool   `json:"wait,omitempty"`
+	Headless          bool   `json:"-"`
+	AllowCrossSession *bool  `json:"allowCrossSession,omitempty"`
 
 	Metadata map[string]any `json:"metadata,omitempty"`
 
@@ -172,8 +173,12 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		if req.RunDir != "" {
 			runDirOpt = optional.Some(req.RunDir)
 		}
+		allowOpt := optional.None[bool]()
+		if req.AllowCrossSession != nil {
+			allowOpt = optional.Some(*req.AllowCrossSession)
+		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -238,8 +243,12 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		if req.RunDir != "" {
 			runDirOpt = optional.Some(req.RunDir)
 		}
+		allowOpt := optional.None[bool]()
+		if req.AllowCrossSession != nil {
+			allowOpt = optional.Some(*req.AllowCrossSession)
+		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -342,8 +351,12 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	if req.RunDir != "" {
 		runDirOpt = optional.Some(req.RunDir)
 	}
+	allowOpt := optional.None[bool]()
+	if req.AllowCrossSession != nil {
+		allowOpt = optional.Some(*req.AllowCrossSession)
+	}
 	if s.repo != nil {
-		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt); err != nil {
+		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 		}
 	}

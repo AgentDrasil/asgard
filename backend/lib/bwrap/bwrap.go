@@ -274,6 +274,26 @@ func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) 
 	return args
 }
 
+// appendCrossSessionMaskArgs masks host ~/tmp, ~/data, and database files when allowCrossSession is false.
+func appendCrossSessionMaskArgs(args []string, home string, dbFiles []string) []string {
+	// Mask host ~/tmp
+	hostTmp := filepath.Join(home, "tmp")
+	args = append(args, "--tmpfs", hostTmp)
+
+	// Mask host ~/data
+	hostData := filepath.Join(home, "data")
+	args = append(args, "--tmpfs", hostData)
+
+	// Mask SQLite database files
+	for _, dbFile := range dbFiles {
+		if fi, err := os.Stat(dbFile); err == nil && !fi.IsDir() {
+			args = append(args, "--ro-bind", "/dev/null", dbFile)
+		}
+	}
+
+	return args
+}
+
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
 func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
@@ -477,7 +497,7 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, allowCrossSession bool, dbFiles []string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -535,6 +555,11 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 		proxyConfigPath = proxyOpts[0].ProxyConfigPath
 	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
+
+	// Filter out host ~/tmp, ~/data, and database files unless cross-session debugging is allowed
+	if !allowCrossSession {
+		args = appendCrossSessionMaskArgs(args, home, dbFiles)
+	}
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
 	if len(proxyOpts) > 0 && proxyOpts[0].Enabled {

@@ -1641,3 +1641,36 @@ func TestWorkflowRunStore_NodeTargetSurvivesRoundTrip(t *testing.T) {
 	require.Contains(t, snap.NodeStates, "plan_review_agent")
 	assert.Equal(t, string(workflowspec.StatusFailed), snap.NodeStates["plan_review_agent"].Status)
 }
+
+// TestWorkflowRunStore_AllowCrossSessionSurvivesRoundTrip pins the persistence
+// contract resumed and re-driven executions depend on: the session's
+// AllowCrossSession flag captured at run start must survive the
+// engine→dbmodels→DB→engine round trip so node sandboxes rebuild with the same
+// cross-session masking policy after an ask-user reply or a restart.
+func TestWorkflowRunStore_AllowCrossSessionSurvivesRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	tempDir := t.TempDir()
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+	store := newWorkflowRunStore(wfRepo)
+
+	runID := "run-cross-roundtrip"
+	chatID := "chat-cross-roundtrip"
+	require.NoError(t, store.StartRun(&workflow.RunSnapshot{
+		RunID:             runID,
+		SessionID:         chatID,
+		DAGSpec:           askUserReplyTestYAML,
+		RunDir:            t.TempDir(),
+		AllowCrossSession: true,
+	}))
+
+	snap, err := store.GetRun(runID)
+	require.NoError(t, err)
+	require.NotNil(t, snap)
+	assert.True(t, snap.AllowCrossSession, "AllowCrossSession must survive the DB round trip")
+}

@@ -121,6 +121,7 @@ func (e *Engine) runQuotaSuspension(
 			DAGSpec:            dagSpec,
 			RunDir:             rc.RunDir,
 			Input:              rc.Input,
+			AllowCrossSession:  rc.AllowCrossSession,
 			NodeStates:         captured.nodeStates,
 			LoopIterations:     captured.loopIterations,
 			ExecutionCounts:    captured.executionCounts,

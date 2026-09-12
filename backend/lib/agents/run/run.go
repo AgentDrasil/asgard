@@ -89,9 +89,10 @@ type RunResult struct {
 // update to the right node when parallel nodes share a chat ID. The zero value
 // (plain single-agent chats) injects nothing.
 type StatusScope struct {
-	NodeID   string
-	RunToken string
-	Headless bool
+	NodeID            string
+	RunToken          string
+	Headless          bool
+	AllowCrossSession bool
 }
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
@@ -109,10 +110,12 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	var langRules string
 	var configPath string
 	var proxyCfg bwrap.ProxySandboxConfig
+	var dbFiles []string
 	if conf != nil {
 		langRules = conf.LanguageRules()
 		configPath = conf.GetConfigPath()
 		proxyCfg = conf.SandboxProxyOptions()
+		dbFiles = conf.SQLiteDBFiles()
 	}
 
 	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)
@@ -121,7 +124,7 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, proxyCfg)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, statusScope.AllowCrossSession, dbFiles, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

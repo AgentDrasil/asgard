@@ -71,6 +71,10 @@ type RunContext struct {
 	Inline bool
 	// Headless marks no-interaction execution; human nodes cannot suspend.
 	Headless bool
+	// AllowCrossSession mirrors the session's cross-session access flag
+	// into every node sandbox (host ~/tmp, ~/data and database files stay
+	// visible instead of being masked).
+	AllowCrossSession bool
 	// TmpDir explicitly inherits the parent run's temp directory when
 	// non-empty (skips derivation and MkdirAll).
 	TmpDir string
@@ -493,13 +497,14 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 
 	if store != nil && !rc.Inline && !rc.Resume {
 		if err := store.StartRun(&RunSnapshot{
-			RunID:      rc.RunID,
-			SessionID:  rc.SessionID,
-			Status:     PersistStatusRunning,
-			DAGSpec:    dagSpec,
-			RunDir:     rc.RunDir,
-			Input:      rc.Input,
-			NodeStates: map[string]PersistedNodeState{},
+			RunID:             rc.RunID,
+			SessionID:         rc.SessionID,
+			Status:            PersistStatusRunning,
+			DAGSpec:           dagSpec,
+			RunDir:            rc.RunDir,
+			Input:             rc.Input,
+			AllowCrossSession: rc.AllowCrossSession,
+			NodeStates:        map[string]PersistedNodeState{},
 		}); err != nil {
 			log.Warn().Err(err).Str("run_id", rc.RunID).Msg("persisting workflow run start failed")
 		}
@@ -1050,6 +1055,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 					WorkflowRunDirs:   wfRunDirs,
 					WorkflowMountDirs: wfMountDirs,
 					Headless:          rc.Headless || defn.NoHuman,
+					AllowCrossSession: rc.AllowCrossSession,
 				}
 
 				// Quota suspension gateway: lets the agent runner park this

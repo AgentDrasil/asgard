@@ -239,6 +239,59 @@ func (c *Config) ResolvedProxyConfigPath() string {
 	return filepath.Clean(p)
 }
 
+// SQLiteDBFiles returns the paths of the SQLite DB file and its auxiliary WAL and SHM files
+// if the configured DB is SQLite. Returns empty slice for other DB types or in-memory databases.
+func (c *Config) SQLiteDBFiles() []string {
+	if c == nil || c.DB != "sqlite" || c.DSN == "" {
+		return nil
+	}
+
+	dsn := c.DSN
+	// In-memory sqlite databases do not have host filesystem files to mask.
+	// mode=memory only ever appears in the query string (e.g. file:foo?mode=memory),
+	// so this must be checked before query parameters are stripped below.
+	if strings.Contains(dsn, "mode=memory") {
+		return nil
+	}
+
+	// Strip query parameters
+	if idx := strings.Index(dsn, "?"); idx != -1 {
+		dsn = dsn[:idx]
+	}
+
+	// Trim file: prefix if URI format
+	dsn = strings.TrimPrefix(dsn, "file:")
+
+	if dsn == ":memory:" {
+		return nil
+	}
+
+	path := dsn
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+		}
+	}
+
+	if !filepath.IsAbs(path) {
+		if c.ConfigPath != "" {
+			path = filepath.Join(filepath.Dir(c.ConfigPath), path)
+		} else {
+			abs, err := filepath.Abs(path)
+			if err == nil {
+				path = abs
+			}
+		}
+	}
+	cleanPath := filepath.Clean(path)
+
+	return []string{
+		cleanPath,
+		cleanPath + "-wal",
+		cleanPath + "-shm",
+	}
+}
+
 func (c *Config) validate() error {
 	if c.Host == "" {
 		return fmt.Errorf("missing host")

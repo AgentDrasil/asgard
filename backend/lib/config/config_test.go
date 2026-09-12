@@ -749,3 +749,90 @@ proxy_config: %q
 		assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
 	})
 }
+
+func TestConfig_SQLiteDBFiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		cfg      *Config
+		wantNone bool
+		wantBase string
+	}{
+		{
+			name:     "nil config",
+			cfg:      nil,
+			wantNone: true,
+		},
+		{
+			name: "postgres db",
+			cfg: &Config{
+				DB:  "pg",
+				DSN: "postgres://user:pass@localhost/db",
+			},
+			wantNone: true,
+		},
+		{
+			name: "in memory sqlite",
+			cfg: &Config{
+				DB:  "sqlite",
+				DSN: ":memory:",
+			},
+			wantNone: true,
+		},
+		{
+			name: "in memory sqlite via mode=memory query param",
+			cfg: &Config{
+				DB:  "sqlite",
+				DSN: "file:foo?mode=memory&cache=shared",
+			},
+			wantNone: true,
+		},
+		{
+			name: "in memory sqlite via bare mode=memory query param",
+			cfg: &Config{
+				DB:  "sqlite",
+				DSN: "foo?mode=memory",
+			},
+			wantNone: true,
+		},
+		{
+			name: "sqlite with query params",
+			cfg: &Config{
+				DB:         "sqlite",
+				DSN:        "data.db?cache=shared&mode=rwc",
+				ConfigPath: filepath.Join(tmpDir, "config.yaml"),
+			},
+			wantNone: false,
+			wantBase: filepath.Join(tmpDir, "data.db"),
+		},
+		{
+			name: "sqlite with tilde path",
+			cfg: &Config{
+				DB:  "sqlite",
+				DSN: "~/data.db",
+			},
+			wantNone: false,
+			wantBase: filepath.Join(home, "data.db"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			files := tt.cfg.SQLiteDBFiles()
+			if tt.wantNone {
+				assert.Empty(t, files)
+			} else {
+				require.Len(t, files, 3)
+				assert.Equal(t, tt.wantBase, files[0])
+				assert.Equal(t, tt.wantBase+"-wal", files[1])
+				assert.Equal(t, tt.wantBase+"-shm", files[2])
+			}
+		})
+	}
+}

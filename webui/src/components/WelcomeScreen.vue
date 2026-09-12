@@ -18,6 +18,7 @@ const props = defineProps<{
   selectedAgentId: string;
   selectedDir: string;
   selectedModel?: string;
+  allowCrossSession?: boolean;
   prompt: string;
   loading: boolean;
 }>();
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   (e: "update:selectedAgentId", val: string): void;
   (e: "update:selectedDir", val: string): void;
   (e: "update:selectedModel", val: string): void;
+  (e: "update:allowCrossSession", val: boolean): void;
   (e: "update:prompt", val: string): void;
   (e: "submit", files?: File[]): void;
   (e: "toggle-sidebar"): void;
@@ -141,6 +143,11 @@ const localModel = computed({
 const localAgentId = computed({
   get: () => props.selectedAgentId,
   set: (val) => emit("update:selectedAgentId", val),
+});
+
+const localAllowCrossSession = computed({
+  get: () => props.allowCrossSession ?? false,
+  set: (val: boolean) => emit("update:allowCrossSession", val),
 });
 
 const baseDir = ref("");
@@ -594,6 +601,25 @@ const handleSubmit = () => {
               </template>
             </div>
           </div>
+        </div>
+
+        <!-- Cross-Session Access Checkbox -->
+        <div class="form-control w-full">
+          <label class="label cursor-pointer justify-start gap-3 py-1">
+            <input
+              type="checkbox"
+              v-model="localAllowCrossSession"
+              class="checkbox checkbox-primary checkbox-sm rounded"
+            />
+            <div class="flex flex-col">
+              <span class="label-text text-sm font-semibold text-base-content">
+                {{ $t("chat.allowCrossSession") }}
+              </span>
+              <span class="text-xs text-base-content/60 leading-normal">
+                {{ $t("chat.allowCrossSessionDesc") }}
+              </span>
+            </div>
+          </label>
         </div>
 
         <!-- Prompt Textarea & Attachments -->

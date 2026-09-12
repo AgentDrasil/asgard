@@ -357,7 +357,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create config.yaml: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath)
+	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath, true, nil)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
@@ -408,6 +408,48 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 }
 
+func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dbFile := filepath.Join(tmpDir, "data.db")
+	require.NoError(t, os.WriteFile(dbFile, []byte("sqlite-header"), 0644))
+	walFile := dbFile + "-wal"
+	require.NoError(t, os.WriteFile(walFile, []byte("wal-data"), 0644))
+	shmFile := dbFile + "-shm" // don't create shm file to verify nonexistent file is not masked
+
+	dbFiles := []string{dbFile, walFile, shmFile}
+
+	// 1. allowCrossSession = false (default)
+	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, dbFiles)
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+
+	hostTmp := filepath.Join(tmpDir, "tmp")
+	hostData := filepath.Join(tmpDir, "data")
+
+	// Must mask host ~/tmp and ~/data
+	assert.Contains(t, argStr, "--tmpfs "+hostTmp)
+	assert.Contains(t, argStr, "--tmpfs "+hostData)
+
+	// Must mask existing db files with /dev/null
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+dbFile)
+	assert.Contains(t, argStr, "--ro-bind /dev/null "+walFile)
+	assert.NotContains(t, argStr, "--ro-bind /dev/null "+shmFile)
+
+	// 2. allowCrossSession = true
+	cmdAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true, dbFiles)
+	require.NoError(t, err)
+
+	argStrAllow := strings.Join(cmdAllow.Args, " ")
+
+	assert.NotContains(t, argStrAllow, "--tmpfs "+hostTmp)
+	assert.NotContains(t, argStrAllow, "--tmpfs "+hostData)
+	assert.NotContains(t, argStrAllow, "--ro-bind /dev/null "+dbFile)
+	assert.NotContains(t, argStrAllow, "--ro-bind /dev/null "+walFile)
+}
+
 func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -428,7 +470,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 		ProxyConfigPath: proxyConfigPath,
 	}
 
-	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", proxyOpt)
+	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, nil, proxyOpt)
 	require.NoError(t, err)
 
 	argStr := strings.Join(cmd.Args, " ")

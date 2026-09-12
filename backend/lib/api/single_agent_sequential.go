@@ -60,9 +60,13 @@ func (e *SingleAgentExecutor) executeSequential(
 
 	// ── Run the agent in a goroutine, collect result on resultCh ──────────
 	runToken := uuid.NewV7().String()
+	allowCrossSession := false
+	if session != nil {
+		allowCrossSession = session.AllowCrossSession
+	}
 	resultCh := make(chan seqRunResult, 1)
 	go func() {
-		out, target, err := run.Run(ctx, e.agent, prompt, sessions, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken}, e.conf)
+		out, target, err := run.Run(ctx, e.agent, prompt, sessions, runDirOpt, modelOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
 		resultCh <- seqRunResult{out: out, target: target, err: err}
 	}()
 

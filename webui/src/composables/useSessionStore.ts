@@ -418,6 +418,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       selectedModel?: string;
       attachments?: Attachment[];
       pendingFiles?: File[];
+      allowCrossSession?: boolean;
     },
   ) => {
     let currentThreadId = activeSessionId.value;
@@ -469,7 +470,10 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     if (!currentThreadId) {
       const targetAgent = opts?.selectedAgentId || "";
       const targetDir = opts?.selectedDir || "";
-      const created = await createSession(targetAgent, targetDir);
+      const created =
+        opts?.allowCrossSession !== undefined
+          ? await createSession(targetAgent, targetDir, opts.allowCrossSession)
+          : await createSession(targetAgent, targetDir);
       if (created && created.chatID) {
         currentThreadId = created.chatID;
         activeSessionId.value = currentThreadId;
@@ -524,14 +528,19 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     );
     const targetAgentId = matchedAgent ? matchedAgent.id : currentSession.currentAgent;
 
-    const res = await triggerAgentMessage(targetAgentId, {
+    const effectiveAllowCrossSession = opts?.allowCrossSession ?? currentSession.allowCrossSession;
+    const triggerParams: any = {
       prompt: text,
       chatId: currentThreadId,
       runDir: currentSession.runDir || opts?.selectedDir,
       model: opts?.selectedModel,
       metadata: { message_id: userMsgId },
       attachments: userMsg.attachments,
-    });
+    };
+    if (effectiveAllowCrossSession !== undefined) {
+      triggerParams.allowCrossSession = effectiveAllowCrossSession;
+    }
+    const res = await triggerAgentMessage(targetAgentId, triggerParams);
 
     if (res?.conflict) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);

@@ -64,6 +64,10 @@ type WorkflowRun struct {
 	ParentRunID string `gorm:"column:parent_run_id;size:64;index"`
 	// RunDir preserves the original working directory context for resume.
 	RunDir string `gorm:"column:run_dir"`
+	// AllowCrossSession persisted from the owning session so resumed and
+	// re-driven executions rebuild node sandboxes with the same
+	// cross-session access policy.
+	AllowCrossSession bool `gorm:"column:allow_cross_session;default:false"`
 	// Input preserves the original run input prompt (in-memory, offloaded to file).
 	Input string `gorm:"-" json:"input,omitempty"`
 	// InputPath is the absolute path to the offloaded input file.

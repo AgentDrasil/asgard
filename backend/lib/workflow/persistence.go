@@ -76,8 +76,12 @@ type RunSnapshot struct {
 	SuspendedNodes map[string]SuspendedNodeInfo `json:"suspended_nodes,omitempty"`
 	// ParentRunID links a sub-workflow (inline) run to its parent run.
 	ParentRunID string `json:"parent_run_id,omitempty"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// AllowCrossSession persisted from the owning session so resumed and
+	// re-driven executions rebuild node sandboxes with the same
+	// cross-session access policy.
+	AllowCrossSession bool `json:"allow_cross_session,omitempty"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // snapshotCapture bundles the state MarkWaitingHuman persists: settled node

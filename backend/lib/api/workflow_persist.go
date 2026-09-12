@@ -28,14 +28,15 @@ func newWorkflowRunStore(repo *dbmodels.WorkflowRunRepository) *workflowRunStore
 
 func (s *workflowRunStore) StartRun(run *workflow.RunSnapshot) error {
 	return s.repo.SaveRun(&dbmodels.WorkflowRun{
-		RunID:       run.RunID,
-		SessionID:   run.SessionID,
-		Status:      dbmodels.WorkflowStatusRunning,
-		DAGSpec:     run.DAGSpec,
-		NodeStates:  "{}",
-		RunDir:      run.RunDir,
-		Input:       run.Input,
-		ParentRunID: run.ParentRunID,
+		RunID:             run.RunID,
+		SessionID:         run.SessionID,
+		Status:            dbmodels.WorkflowStatusRunning,
+		DAGSpec:           run.DAGSpec,
+		NodeStates:        "{}",
+		RunDir:            run.RunDir,
+		Input:             run.Input,
+		ParentRunID:       run.ParentRunID,
+		AllowCrossSession: run.AllowCrossSession,
 	})
 }
 
@@ -70,6 +71,7 @@ func (s *workflowRunStore) MarkWaitingHuman(run *workflow.RunSnapshot) error {
 		ParentRunID:        run.ParentRunID,
 		RunDir:             run.RunDir,
 		Input:              run.Input,
+		AllowCrossSession:  run.AllowCrossSession,
 	})
 }
 
@@ -177,6 +179,7 @@ func dbRunToSnapshot(run *dbmodels.WorkflowRun) (*workflow.RunSnapshot, error) {
 		DAGSpec:            run.DAGSpec,
 		RunDir:             run.RunDir,
 		Input:              run.Input,
+		AllowCrossSession:  run.AllowCrossSession,
 		LoopIterations:     loopIterations,
 		ExecutionCounts:    executionCounts,
 		SuspendedNodeID:    run.SuspendedNodeID,

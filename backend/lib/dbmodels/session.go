@@ -121,6 +121,9 @@ type Session struct {
 	// Artifacts generated in session
 	Artifacts Artifacts `gorm:"type:text"`
 
+	// AllowCrossSession allows accessing host ~/tmp, ~/data, and database files inside sandbox
+	AllowCrossSession bool `gorm:"column:allow_cross_session;default:false" json:"allowCrossSession"`
+
 	IsArchived bool `gorm:"default:false"`
 
 	CreatedAt time.Time
@@ -448,9 +451,9 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, sta
 }
 
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
-// optionally updates the run directory. cliKey has the format "<cli>/<model>".
+// optionally updates the run directory and allow_cross_session. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
-func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string]) error {
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string], allowCrossSessionOpt ...optional.Option[bool]) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
@@ -466,6 +469,10 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 				ChatID:       chatID,
 				CurrentAgent: agentID,
 			}
+		}
+
+		if len(allowCrossSessionOpt) > 0 && allowCrossSessionOpt[0].IsSome() {
+			sessPtr.AllowCrossSession = allowCrossSessionOpt[0].Unwrap()
 		}
 
 		if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {

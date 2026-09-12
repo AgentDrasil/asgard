@@ -265,7 +265,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		outCh := make(chan runOutcome, 1)
 
 		go func(currentPrompt string, currentSessions run.SessionMap) {
-			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSessions, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless}, pairing)
+			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSessions, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless, AllowCrossSession: nctx.AllowCrossSession}, pairing)
 			outCh <- runOutcome{out: runOut, target: runTarget, userForced: runForced, err: runErr}
 		}(prompt, sessions)
 

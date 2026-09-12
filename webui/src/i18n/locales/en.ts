@@ -197,6 +197,9 @@ export const en = {
     reset: "Reset",
     stopHere: "-- Stop here --",
     endOfFolders: "End of folders",
+    allowCrossSession: "Allow cross-session access",
+    allowCrossSessionDesc:
+      "Allow access to host ~/tmp, ~/data, and database files in sandbox (only useful for cross-session debugging)",
     promptLabel: "What would you like to do?",
     attachFiles: "Attach files",
     attachFile: "Attach file",

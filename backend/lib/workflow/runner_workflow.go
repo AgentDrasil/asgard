@@ -126,6 +126,7 @@ func (r *SubWorkflowRunner) runSingle(ctx context.Context, nctx *NodeContext, no
 		WorkflowMountDirs: nctx.WorkflowMountDirs,
 		Inline:            true,
 		Headless:          nctx.Headless,
+		AllowCrossSession: nctx.AllowCrossSession,
 		ParentRunID:       nctx.RunID,
 		EmitEvent: func(ev WorkflowEvent) {
 			if nctx.EventEmitter == nil {
@@ -309,6 +310,7 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				WorkflowMountDirs: nctx.WorkflowMountDirs,
 				Inline:            true,
 				Headless:          nctx.Headless,
+				AllowCrossSession: nctx.AllowCrossSession,
 				ParentRunID:       nctx.RunID,
 				EmitEvent: func(ev WorkflowEvent) {
 					if nctx.EventEmitter == nil {
