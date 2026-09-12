@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // chatIDRegex enforces alphanumeric characters, hyphens, and underscores up to 64 characters long.
@@ -21,27 +23,24 @@ func GetSessionTmpBaseDir(chatID string) string {
 }
 
 // GetSessionScopedBaseDir returns the host base directory for the given session
-// namespace ("tmp" or "session") without creating it (e.g. $HOME/tmp/<chatID>
-// or $HOME/data/<chatID>; the "session" namespace is backed by the ~/data host
-// directory that the sandbox binds as /session, see bwrap.setupSessionDir).
+// namespace ("tmp" or "session") without creating it (e.g.
+// ~/asgard/data/tmp/<chatID> or ~/asgard/data/sessions/<chatID>; the "session"
+// namespace is backed by the directory the sandbox binds as /session, see
+// bwrap.setupSessionDir).
 func GetSessionScopedBaseDir(ns string, chatID string) string {
 	if chatID == "" {
 		chatID = "default"
 	}
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
-		return filepath.Join(home, scopedNsHostDir(ns), chatID)
-	}
-	return filepath.Join(os.TempDir(), chatID)
+	return filepath.Join(scopedNsHostRoot(ns), chatID)
 }
 
-// scopedNsHostDir maps a sandbox namespace to its host directory name under
-// $HOME: "tmp" → tmp, "session" → data.
-func scopedNsHostDir(ns string) string {
+// scopedNsHostRoot maps a sandbox namespace to its host root directory:
+// "tmp" → ~/asgard/data/tmp, "session" → ~/asgard/data/sessions.
+func scopedNsHostRoot(ns string) string {
 	if ns == "session" {
-		return "data"
+		return paths.SessionsDir()
 	}
-	return ns
+	return paths.TmpDir()
 }
 
 // NormalizeSessionRunDir normalizes the given run directory for a session.
@@ -93,13 +92,7 @@ func NormalizeSessionRunDir(runDir string, chatID string) string {
 }
 
 func reanchorScopedHostPath(clean string, ns string, chatID string) (string, bool) {
-	hostDir := scopedNsHostDir(ns)
-	var parent string
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		parent = filepath.Join(home, hostDir)
-	} else {
-		parent = filepath.Clean(os.TempDir())
-	}
+	parent := scopedNsHostRoot(ns)
 
 	rel, err := filepath.Rel(parent, clean)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {

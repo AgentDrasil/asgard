@@ -6,6 +6,7 @@ require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/fakebash v0.0.0
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/creack/pty v1.1.24
@@ -31,6 +32,7 @@ replace (
 	github.com/AgentDrasil/asgard/llms => ../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
+	github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
 	github.com/AgentDrasil/asgard/simplest => ../simplest

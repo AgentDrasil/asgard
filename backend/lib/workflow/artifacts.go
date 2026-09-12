@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // scopedDirRefRe matches `${tmp_dir}/...` and `${session_dir}/...` references
@@ -17,26 +19,17 @@ var scopedDirRefRe = regexp.MustCompile(`\$\{(tmp_dir|session_dir)\}(/[^\s"'` + 
 var absPathRe = regexp.MustCompile(`/(?:[A-Za-z0-9._~@+-]+/)*[A-Za-z0-9._~@+-]+`)
 
 // DefaultTmpDir returns the per-run temporary directory for a session:
-// <home>/tmp/<sessionID>, the same host directory the sandbox binds as /tmp
-// (see bwrap.setupTmpDir). This keeps workflow tmp files, sandbox agent
-// output and session cleanup (dbmodels.CleanExpiredSessions) consistent.
-// Falls back to os.TempDir()/<sessionID> when no home dir is resolvable.
+// ~/asgard/data/tmp/<sessionID>, the same host directory the sandbox binds as
+// /tmp (see bwrap.setupTmpDir).
 func DefaultTmpDir(sessionID string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "tmp", sessionID)
-	}
-	return filepath.Join(os.TempDir(), sessionID)
+	return paths.SessionTmpDir(sessionID)
 }
 
 // DefaultSessionDir returns the per-run session directory for a session:
-// <home>/data/<sessionID>, the same host directory the sandbox binds as /session
-// (see bwrap.setupSessionDir). Falls back to os.TempDir()/<sessionID> when no
-// home dir is resolvable.
+// ~/asgard/data/sessions/<sessionID>, the same host directory the sandbox binds
+// as /session (see bwrap.setupSessionDir).
 func DefaultSessionDir(sessionID string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "data", sessionID)
-	}
-	return filepath.Join(os.TempDir(), sessionID)
+	return paths.SessionDir(sessionID)
 }
 
 // ExtractArtifactPaths collects artifact file paths referenced by a human

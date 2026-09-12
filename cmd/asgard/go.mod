@@ -16,9 +16,11 @@ require (
 	github.com/AgentDrasil/asgard/fakebash v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
+	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
@@ -39,11 +41,15 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
+	github.com/josexy/mitmproxy-go v1.2.1 // indirect
+	github.com/josexy/websocket v0.0.0-20260219083038-11b2ba10886b // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/libtnb/sqlite v1.2.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/moznion/go-optional v0.13.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/stretchr/testify v1.12.1 // indirect
@@ -79,6 +85,7 @@ replace (
 	github.com/AgentDrasil/asgard/llms => ../../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../../pkg/logger
+	github.com/AgentDrasil/asgard/pkg/paths => ../../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../../pkg/pluginsdk
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../../pkg/workflowspec
 	github.com/AgentDrasil/asgard/plugins/notebook => ../../plugins/notebook

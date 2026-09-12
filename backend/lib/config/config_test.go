@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -25,7 +27,6 @@ func TestConfig_Validate(t *testing.T) {
 				Debug:                   true,
 				DB:                      "sqlite",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -37,7 +38,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				DB:                      "mysql",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -49,7 +49,6 @@ func TestConfig_Validate(t *testing.T) {
 			name: "missing db",
 			config: &Config{
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -61,7 +60,6 @@ func TestConfig_Validate(t *testing.T) {
 			name: "missing dsn",
 			config: &Config{
 				DB:                      "pg",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -70,23 +68,10 @@ func TestConfig_Validate(t *testing.T) {
 			errMsg:  "missing dsn",
 		},
 		{
-			name: "missing agent_dir",
-			config: &Config{
-				DB:                      "sqlite",
-				DSN:                     "test.db",
-				Host:                    "127.0.0.1",
-				GeminiAPIKey:            "test-key",
-				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
-			},
-			wantErr: true,
-			errMsg:  "missing agent_dir",
-		},
-		{
 			name: "missing host",
 			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
 			},
@@ -98,7 +83,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
 			},
@@ -110,7 +94,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				DB:           "sqlite",
 				DSN:          "test.db",
-				AgentDir:     "./agents",
 				Host:         "127.0.0.1",
 				GeminiAPIKey: "test-key",
 			},
@@ -122,7 +105,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -136,7 +118,6 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				DB:                      "sqlite",
 				DSN:                     "test.db",
-				AgentDir:                "./agents",
 				Host:                    "127.0.0.1",
 				GeminiAPIKey:            "test-key",
 				GeminiModelForChatTitle: "gemini-3.1-flash-lite",
@@ -157,57 +138,8 @@ func TestConfig_Validate(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.True(t, filepath.IsAbs(tt.config.AgentDir))
 		})
 	}
-}
-
-func TestConfig_VerifyDirs(t *testing.T) {
-	t.Parallel()
-
-	t.Run("root dir missing", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		agentDir := filepath.Join(tempDir, "non_existent")
-		cfg := Config{DB: "sqlite", AgentDir: agentDir}
-		err := cfg.verifyDirs()
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "directory verification failed")
-	})
-
-	t.Run("subdirs missing", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		agentDir := filepath.Join(tempDir, "agent_root")
-		require.NoError(t, os.MkdirAll(agentDir, 0755))
-
-		cfg := Config{DB: "sqlite", AgentDir: agentDir}
-		err := cfg.verifyDirs()
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "directory verification failed")
-	})
-
-	t.Run("required dirs exist", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		agentDir := filepath.Join(tempDir, "agent_root")
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
-
-		cfg := Config{DB: "sqlite", AgentDir: agentDir}
-		require.NoError(t, cfg.verifyDirs())
-	})
-
-	t.Run("path is a file not a directory", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		filePath := filepath.Join(tempDir, "not_a_dir")
-		require.NoError(t, os.WriteFile(filePath, []byte("test"), 0644))
-
-		cfg := Config{DB: "sqlite", AgentDir: filePath}
-		err := cfg.verifyDirs()
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "not a directory")
-	})
 }
 
 func TestLoadConfig_Languages(t *testing.T) {
@@ -680,8 +612,7 @@ proxy:
 		assert.NotEmpty(t, cfg.ProxyCAKeyPath())
 
 		cfg.ConfigPath = filepath.Join(tmpDir, "config.yaml")
-		expectedProxyCfgPath := filepath.Join(tmpDir, "proxy.yaml")
-		assert.Equal(t, expectedProxyCfgPath, cfg.ResolvedProxyConfigPath())
+		assert.Equal(t, paths.ProxyConfigFile(), cfg.ResolvedProxyConfigPath())
 	})
 
 	t.Run("proxy enabled with empty rules fails validation", func(t *testing.T) {
@@ -707,13 +638,13 @@ proxy:
 		assert.Contains(t, err.Error(), "proxy is enabled but rules list is empty")
 	})
 
-	t.Run("LoadConfig auto-loads proxy from proxy_config file", func(t *testing.T) {
-		t.Parallel()
-		tmpDir := t.TempDir()
-		agentDir := filepath.Join(tmpDir, "agents")
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+}
 
-		proxyYAML := `
+func TestLoadConfig_AutoLoadsProxyFromFixedPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	proxyYAML := `
 enable: true
 server:
   addr: "127.0.0.1:8082"
@@ -722,117 +653,25 @@ rules:
     header_key: "Authorization"
     real_secret: "xai-real-key"
 `
-		proxyPath := filepath.Join(tmpDir, "proxy.yaml")
-		require.NoError(t, os.WriteFile(proxyPath, []byte(proxyYAML), 0600))
+	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
+	require.NoError(t, os.WriteFile(paths.ProxyConfigFile(), []byte(proxyYAML), 0600))
 
-		configYAML := fmt.Sprintf(`
+	configYAML := `
 host: "127.0.0.1"
 db: "sqlite"
-dsn: "test.db"
-agent_dir: %q
 gemini_api_key: "test-key"
 gemini_model_for_chat_title: "gemini-3.1-flash-lite"
-proxy_config: %q
-`, agentDir, proxyPath)
+`
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0644))
 
-		configPath := filepath.Join(tmpDir, "config.yaml")
-		require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0644))
-
-		cfg, err := LoadConfig(configPath)
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		assert.True(t, cfg.IsProxyEnabled())
-		require.NotNil(t, cfg.Proxy)
-		assert.True(t, cfg.Proxy.Enable)
-		require.Len(t, cfg.Proxy.Rules, 1)
-		assert.Equal(t, "api.x.ai", cfg.Proxy.Rules[0].Host)
-		assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
-	})
-}
-
-func TestConfig_SQLiteDBFiles(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	home, err := os.UserHomeDir()
+	cfg, err := LoadConfig(configPath)
 	require.NoError(t, err)
-
-	tests := []struct {
-		name     string
-		cfg      *Config
-		wantNone bool
-		wantBase string
-	}{
-		{
-			name:     "nil config",
-			cfg:      nil,
-			wantNone: true,
-		},
-		{
-			name: "postgres db",
-			cfg: &Config{
-				DB:  "pg",
-				DSN: "postgres://user:pass@localhost/db",
-			},
-			wantNone: true,
-		},
-		{
-			name: "in memory sqlite",
-			cfg: &Config{
-				DB:  "sqlite",
-				DSN: ":memory:",
-			},
-			wantNone: true,
-		},
-		{
-			name: "in memory sqlite via mode=memory query param",
-			cfg: &Config{
-				DB:  "sqlite",
-				DSN: "file:foo?mode=memory&cache=shared",
-			},
-			wantNone: true,
-		},
-		{
-			name: "in memory sqlite via bare mode=memory query param",
-			cfg: &Config{
-				DB:  "sqlite",
-				DSN: "foo?mode=memory",
-			},
-			wantNone: true,
-		},
-		{
-			name: "sqlite with query params",
-			cfg: &Config{
-				DB:         "sqlite",
-				DSN:        "data.db?cache=shared&mode=rwc",
-				ConfigPath: filepath.Join(tmpDir, "config.yaml"),
-			},
-			wantNone: false,
-			wantBase: filepath.Join(tmpDir, "data.db"),
-		},
-		{
-			name: "sqlite with tilde path",
-			cfg: &Config{
-				DB:  "sqlite",
-				DSN: "~/data.db",
-			},
-			wantNone: false,
-			wantBase: filepath.Join(home, "data.db"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			files := tt.cfg.SQLiteDBFiles()
-			if tt.wantNone {
-				assert.Empty(t, files)
-			} else {
-				require.Len(t, files, 3)
-				assert.Equal(t, tt.wantBase, files[0])
-				assert.Equal(t, tt.wantBase+"-wal", files[1])
-				assert.Equal(t, tt.wantBase+"-shm", files[2])
-			}
-		})
-	}
+	require.NotNil(t, cfg)
+	assert.True(t, cfg.IsProxyEnabled())
+	require.NotNil(t, cfg.Proxy)
+	assert.True(t, cfg.Proxy.Enable)
+	require.Len(t, cfg.Proxy.Rules, 1)
+	assert.Equal(t, "api.x.ai", cfg.Proxy.Rules[0].Host)
+	assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
 }

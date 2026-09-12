@@ -4,7 +4,8 @@ services:
     container_name: asgard-prod
     hostname: asgard-host
     volumes:
-      - ./home:/home/user
+      # All Asgard state (config, agents, logs, data, SQLite db) lives here.
+      - ./asgard:/home/user/asgard
       - ~/src:/home/user/src
       - ./ssh:/home/user/.ssh:ro
     privileged: true

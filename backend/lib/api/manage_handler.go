@@ -19,6 +19,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 const agentFatherID = "agent_father"
@@ -31,8 +32,8 @@ port: 8080
 internal_port: 8081
 host: "127.0.0.1"
 db: "sqlite"
-dsn: "asgard.db"
-agent_dir: "./agents"
+# dsn is only used when db is "pg" (PostgreSQL connection string).
+# SQLite always lives at ~/asgard/data/data.db.
 gemini_api_key: "<your-gemini-api-key>"
 gemini_model_for_chat_title: "gemini-2.5-flash"
 chat_lang: "English (US)"
@@ -42,14 +43,12 @@ providers:
   - agy
   - opencode
   - simplest
-# Credential Injection Proxy (Optional)
-# proxy_config: "proxy.yaml" # Path to standalone proxy configuration file
+# Credential Injection Proxy (Optional). The standalone proxy config, CA cert
+# and key live under ~/asgard/config/ and are not path-configurable.
 # proxy:
 #   enable: false
 #   server:
 #     addr: "127.0.0.1:8082"
-#     ca_cert: "~/.asgard/ca/ca.crt"
-#     ca_key: "~/.asgard/ca/ca.key"
 #   debug:
 #     enable: false
 #     dump_headers: false
@@ -228,7 +227,7 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.proxyManager != nil && s.conf != nil && s.conf.ProxyConfig != "" {
+	if s.proxyManager != nil {
 		if _, err := s.proxyManager.ReloadFromFile(); err != nil {
 			log.Warn().Err(err).Msg("failed to cascade reload proxy config")
 		}
@@ -265,7 +264,7 @@ func (s *Server) handleGetConfigRaw(w http.ResponseWriter, r *http.Request) {
 
 	cfgPath := s.configPath
 	if cfgPath == "" {
-		cfgPath = "config.yaml"
+		cfgPath = paths.ConfigFile()
 	}
 
 	data, err := os.ReadFile(cfgPath)
@@ -332,7 +331,7 @@ func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
 
 	cfgPath := s.configPath
 	if cfgPath == "" {
-		cfgPath = "config.yaml"
+		cfgPath = paths.ConfigFile()
 	}
 
 	dir := filepath.Dir(cfgPath)
@@ -543,10 +542,10 @@ func (s *Server) handleSaveManageProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.conf == nil || s.conf.ProxyConfig == "" {
+	if s.conf == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no standalone proxy_config configured in config.yaml"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no configuration loaded"})
 		return
 	}
 
@@ -663,10 +662,10 @@ func (s *Server) handleReloadManageProxy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if s.conf == nil || s.conf.ProxyConfig == "" {
+	if s.conf == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no standalone proxy_config configured in config.yaml"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no configuration loaded"})
 		return
 	}
 

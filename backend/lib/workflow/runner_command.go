@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/fakebash/pb"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -74,13 +75,11 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 	if sandbox {
 		configPath := ""
 		var proxyCfg bwrap.ProxySandboxConfig
-		var dbFiles []string
 		if r.conf != nil {
 			configPath = r.conf.GetConfigPath()
 			proxyCfg = r.conf.SandboxProxyOptions()
-			dbFiles = r.conf.SQLiteDBFiles()
 		}
-		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, dbFiles, nctx.AllowCrossSession, &stdout, &stderr)
+		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, nctx.AllowCrossSession, &stdout, &stderr)
 	} else {
 		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
 	}
@@ -163,18 +162,14 @@ func asExitError(err error, target **exec.ExitError) bool {
 // runSandboxedCommand runs the command inside a bubblewrap sandbox hosting a
 // fakebashd gRPC daemon, mirroring the dual-sandbox execution model used by
 // agent runs: the host dials the socket directory bind-mounted at /fakebash.
-func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, dbFiles []string, allowCrossSession bool, stdout, stderr *bytes.Buffer) (int, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return -1, fmt.Errorf("getting user home directory: %w", err)
-	}
-	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewV7().String())
+func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, allowCrossSession bool, stdout, stderr *bytes.Buffer) (int, error) {
+	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0o755); err != nil {
 		return -1, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, allowCrossSession, dbFiles, proxyCfg)
+	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, allowCrossSession, proxyCfg)
 	if err != nil {
 		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
 	}

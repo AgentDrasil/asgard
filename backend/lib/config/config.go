@@ -3,15 +3,13 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
-	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 type FirebaseWebpushWebConfig struct {
@@ -27,10 +25,12 @@ type FirebaseWebpushWebConfig struct {
 const DefaultLanguage = "English (US)"
 
 type Config struct {
-	Debug                   bool                      `yaml:"debug"`
-	DB                      string                    `yaml:"db"`
-	DSN                     string                    `yaml:"dsn"`
-	AgentDir                string                    `yaml:"agent_dir"`
+	Debug bool   `yaml:"debug"`
+	DB    string `yaml:"db"`
+	DSN   string `yaml:"dsn"`
+	// AgentDir is the fixed agent definitions root (~/asgard). It is not
+	// configurable; the field is exported so tests can inject a temp root.
+	AgentDir                string                    `yaml:"-" json:"-"`
 	Port                    int                       `yaml:"port"`
 	InternalPort            int                       `yaml:"internal_port"`
 	Host                    string                    `yaml:"host"`
@@ -44,7 +44,6 @@ type Config struct {
 	UILang                  string                    `yaml:"ui_lang"`
 	Providers               []string                  `yaml:"providers" json:"providers,omitempty"`
 	Proxy                   *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
-	ProxyConfig             string                    `yaml:"proxy_config" json:"proxy_config,omitempty"`
 	ConfigPath              string                    `yaml:"-" json:"-"`
 	proxyMu                 sync.RWMutex              `yaml:"-" json:"-"`
 }
@@ -216,80 +215,13 @@ func (c *Config) ProxyCAKeyPath() string {
 	return p.ResolvedCAKeyPath()
 }
 
+// ResolvedProxyConfigPath returns the fixed standalone proxy config path
+// (~/asgard/config/proxy.yaml).
 func (c *Config) ResolvedProxyConfigPath() string {
-	if c == nil || c.ProxyConfig == "" {
+	if c == nil {
 		return ""
 	}
-	p := c.ProxyConfig
-	if strings.HasPrefix(p, "~/") || p == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
-		}
-	}
-	if filepath.IsAbs(p) {
-		return filepath.Clean(p)
-	}
-	if c.ConfigPath != "" {
-		return filepath.Clean(filepath.Join(filepath.Dir(c.ConfigPath), p))
-	}
-	abs, err := filepath.Abs(p)
-	if err == nil {
-		return filepath.Clean(abs)
-	}
-	return filepath.Clean(p)
-}
-
-// SQLiteDBFiles returns the paths of the SQLite DB file and its auxiliary WAL and SHM files
-// if the configured DB is SQLite. Returns empty slice for other DB types or in-memory databases.
-func (c *Config) SQLiteDBFiles() []string {
-	if c == nil || c.DB != "sqlite" || c.DSN == "" {
-		return nil
-	}
-
-	dsn := c.DSN
-	// In-memory sqlite databases do not have host filesystem files to mask.
-	// mode=memory only ever appears in the query string (e.g. file:foo?mode=memory),
-	// so this must be checked before query parameters are stripped below.
-	if strings.Contains(dsn, "mode=memory") {
-		return nil
-	}
-
-	// Strip query parameters
-	if idx := strings.Index(dsn, "?"); idx != -1 {
-		dsn = dsn[:idx]
-	}
-
-	// Trim file: prefix if URI format
-	dsn = strings.TrimPrefix(dsn, "file:")
-
-	if dsn == ":memory:" {
-		return nil
-	}
-
-	path := dsn
-	if strings.HasPrefix(path, "~/") || path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-		}
-	}
-
-	if !filepath.IsAbs(path) {
-		if c.ConfigPath != "" {
-			path = filepath.Join(filepath.Dir(c.ConfigPath), path)
-		} else {
-			abs, err := filepath.Abs(path)
-			if err == nil {
-				path = abs
-			}
-		}
-	}
-	cleanPath := filepath.Clean(path)
-
-	return []string{
-		cleanPath,
-		cleanPath + "-wal",
-		cleanPath + "-shm",
-	}
+	return paths.ProxyConfigFile()
 }
 
 func (c *Config) validate() error {
@@ -299,18 +231,9 @@ func (c *Config) validate() error {
 	if c.DB != "pg" && c.DB != "sqlite" {
 		return fmt.Errorf("invalid db: %s, must be 'pg' or 'sqlite'", c.DB)
 	}
-	if c.DSN == "" {
+	if c.DB == "pg" && c.DSN == "" {
 		return fmt.Errorf("missing dsn")
 	}
-	if c.AgentDir == "" {
-		return fmt.Errorf("missing agent_dir")
-	}
-
-	absDir, err := filepath.Abs(c.AgentDir)
-	if err != nil {
-		return fmt.Errorf("failed to make agent_dir absolute: %w", err)
-	}
-	c.AgentDir = absDir
 
 	if c.GeminiAPIKey == "" {
 		return fmt.Errorf("missing gemini_api_key")
@@ -332,26 +255,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) verifyDirs() error {
-	dirs := []string{
-		c.AgentDir,
-		fmt.Sprintf("%s/agents", c.AgentDir),
-	}
-
-	for _, d := range dirs {
-		info, err := os.Stat(d)
-		if err != nil {
-			return fmt.Errorf("directory verification failed: %w", err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("%s is not a directory", d)
-		}
-	}
-
-	return nil
-}
-
-// ParseAndValidate unmarshals configuration YAML data, applies defaults, and validates contents and directories.
+// ParseAndValidate unmarshals configuration YAML data, applies defaults, and validates contents.
 func ParseAndValidate(data []byte) (*Config, error) {
 	cfg := &Config{}
 	err := yaml.Unmarshal(data, cfg)
@@ -383,6 +287,10 @@ func ParseAndValidate(data []byte) (*Config, error) {
 		cfg.UILang = "en"
 	}
 
+	if cfg.AgentDir == "" {
+		cfg.AgentDir = paths.AgentsRoot()
+	}
+
 	if len(cfg.Providers) == 0 {
 		cfg.Providers = append([]string(nil), SupportedProviders...)
 	} else {
@@ -408,10 +316,6 @@ func ParseAndValidate(data []byte) (*Config, error) {
 		return nil, err
 	}
 
-	if err := cfg.verifyDirs(); err != nil {
-		return nil, err
-	}
-
 	return cfg, nil
 }
 
@@ -427,16 +331,14 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	cfg.ConfigPath = path
 
-	if cfg.Proxy == nil && cfg.ProxyConfig != "" {
-		resolvedProxyPath := cfg.ResolvedProxyConfigPath()
+	if cfg.Proxy == nil {
+		resolvedProxyPath := paths.ProxyConfigFile()
 		if _, statErr := os.Stat(resolvedProxyPath); statErr == nil {
 			proxyCfg, pErr := proxy.LoadConfigFile(resolvedProxyPath)
 			if pErr != nil {
 				return nil, fmt.Errorf("failed to load proxy config from %s: %w", resolvedProxyPath, pErr)
 			}
 			cfg.Proxy = proxyCfg
-		} else {
-			log.Warn().Str("path", resolvedProxyPath).Msg("proxy_config is set but the file does not exist; proxy config not loaded")
 		}
 	}
 

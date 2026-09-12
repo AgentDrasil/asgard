@@ -14,6 +14,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // buildContractBody assembles the CLI-agnostic prompt body for the AW_AGENTS.md
@@ -70,24 +71,26 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 	return destPath, nil
 }
 
-// setupTmpDir determines the host directory for sandbox /tmp (e.g. /home/user/tmp/<chatID>) and ensures it exists.
-func setupTmpDir(home string, chatID string) (string, error) {
+// setupTmpDir determines the host directory for sandbox /tmp
+// (~/asgard/data/tmp/<chatID>) and ensures it exists.
+func setupTmpDir(chatID string) (string, error) {
 	if chatID == "" {
 		chatID = "default"
 	}
-	tmpDir := filepath.Join(home, "tmp", chatID)
+	tmpDir := paths.SessionTmpDir(chatID)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
 	return tmpDir, nil
 }
 
-// setupSessionDir determines the host directory for sandbox /session (e.g. /home/user/data/<chatID>) and ensures it exists.
-func setupSessionDir(home string, chatID string) (string, error) {
+// setupSessionDir determines the host directory for sandbox /session
+// (~/asgard/data/sessions/<chatID>) and ensures it exists.
+func setupSessionDir(chatID string) (string, error) {
 	if chatID == "" {
 		chatID = "default"
 	}
-	sessionDir := filepath.Join(home, "data", chatID)
+	sessionDir := paths.SessionDir(chatID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return "", fmt.Errorf("creating session directory %q: %w", sessionDir, err)
 	}
@@ -104,14 +107,14 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 	args = append(args, "--unshare-cgroup")
 
 	// Mount chatID tmp directory to /tmp
-	tmpDir, err := setupTmpDir(home, chatID)
+	tmpDir, err := setupTmpDir(chatID)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, "--bind", tmpDir, "/tmp")
 
 	// Mount chatID session directory to /session
-	sessionDir, err := setupSessionDir(home, chatID)
+	sessionDir, err := setupSessionDir(chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,18 +240,13 @@ type ProxySandboxConfig struct {
 	ProxyConfigPath string // Host standalone proxy config path (absolute, if any)
 }
 
-// appendProxySensitiveMaskArgs masks ~/.asgard, the proxy private key, and config file
-// to prevent code inside the sandbox from reading sensitive credentials.
+// appendProxySensitiveMaskArgs masks the Asgard config directory (which holds
+// config.yaml, proxy.yaml and the CA private key) to prevent code inside the
+// sandbox from reading sensitive credentials.
 func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) []string {
-	if home, err := os.UserHomeDir(); err == nil {
-		asgardDir := filepath.Join(home, ".asgard")
-		if fi, err := os.Stat(asgardDir); err == nil {
-			if fi.IsDir() {
-				args = append(args, "--tmpfs", asgardDir)
-			} else {
-				args = append(args, "--ro-bind", "/dev/null", asgardDir)
-			}
-		}
+	configDir := paths.ConfigDir()
+	if fi, err := os.Stat(configDir); err == nil && fi.IsDir() {
+		args = append(args, "--tmpfs", configDir)
 	}
 
 	if caKey != "" {
@@ -256,12 +254,10 @@ func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) 
 			args = append(args, "--ro-bind", "/dev/null", caKey)
 		}
 	} else {
-		// Defense against leftover private keys in default path when proxy is disabled
-		if home, err := os.UserHomeDir(); err == nil {
-			defaultKey := filepath.Join(home, ".asgard", "ca", "ca.key")
-			if fi, err := os.Stat(defaultKey); err == nil && !fi.IsDir() {
-				args = append(args, "--ro-bind", "/dev/null", defaultKey)
-			}
+		// Defense against leftover private keys in the default path when proxy is disabled
+		defaultKey := paths.CAKeyFile()
+		if fi, err := os.Stat(defaultKey); err == nil && !fi.IsDir() {
+			args = append(args, "--ro-bind", "/dev/null", defaultKey)
 		}
 	}
 
@@ -274,23 +270,12 @@ func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) 
 	return args
 }
 
-// appendCrossSessionMaskArgs masks host ~/tmp, ~/data, and database files when allowCrossSession is false.
-func appendCrossSessionMaskArgs(args []string, home string, dbFiles []string) []string {
-	// Mask host ~/tmp
-	hostTmp := filepath.Join(home, "tmp")
-	args = append(args, "--tmpfs", hostTmp)
-
-	// Mask host ~/data
-	hostData := filepath.Join(home, "data")
-	args = append(args, "--tmpfs", hostData)
-
-	// Mask SQLite database files
-	for _, dbFile := range dbFiles {
-		if fi, err := os.Stat(dbFile); err == nil && !fi.IsDir() {
-			args = append(args, "--ro-bind", "/dev/null", dbFile)
-		}
-	}
-
+// appendCrossSessionMaskArgs masks the host runtime-data root (~/asgard/data),
+// which contains every session's tmp/session directories and the SQLite
+// database, when allowCrossSession is false. The current session's /tmp and
+// /session are separate bind mounts and stay visible.
+func appendCrossSessionMaskArgs(args []string) []string {
+	args = append(args, "--tmpfs", paths.DataDir())
 	return args
 }
 
@@ -359,7 +344,7 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	}
 
 	// Bind logs directory
-	logDir := filepath.Join(home, "logs")
+	logDir := paths.LogsDir()
 	if err := os.MkdirAll(logDir, 0755); err == nil {
 		args = append(args, "--bind", logDir, logDir)
 	}
@@ -432,7 +417,7 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 		}
 
 		// Determine the host dir where we can write the contract file (already mounted as /tmp).
-		promptHostDir, err := setupTmpDir(home, chatID)
+		promptHostDir, err := setupTmpDir(chatID)
 		if err != nil {
 			return nil, err
 		}
@@ -497,7 +482,7 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
-func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, allowCrossSession bool, dbFiles []string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, allowCrossSession bool, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -556,9 +541,9 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
-	// Filter out host ~/tmp, ~/data, and database files unless cross-session debugging is allowed
+	// Filter out the host runtime-data root (~/asgard/data) unless cross-session debugging is allowed
 	if !allowCrossSession {
-		args = appendCrossSessionMaskArgs(args, home, dbFiles)
+		args = appendCrossSessionMaskArgs(args)
 	}
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
@@ -568,7 +553,7 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 		if cID == "" {
 			cID = "default"
 		}
-		mergedBundlePath := filepath.Join(home, "tmp", ".asgard-ca", cID, "merged-ca-certificates.crt")
+		mergedBundlePath := filepath.Join(paths.CABundleDir(cID), "merged-ca-certificates.crt")
 		if err := proxy.MergeCACert("/etc/ssl/certs/ca-certificates.crt", proxyCfg.CACert, mergedBundlePath); err != nil {
 			return nil, fmt.Errorf("merging CA cert bundle: %w", err)
 		}

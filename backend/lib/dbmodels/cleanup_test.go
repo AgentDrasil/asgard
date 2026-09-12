@@ -102,8 +102,9 @@ func TestCleanExpiredSessions(t *testing.T) {
 
 	cutoff := now.AddDate(0, -1, 0)
 	err = repo.CleanExpiredSessions(CleanExpiredSessionsOptions{
-		Cutoff:  cutoff,
-		TmpBase: tmpBase,
+		Cutoff:      cutoff,
+		TmpBase:     tmpBase,
+		SessionBase: sessionBase,
 	})
 	require.NoError(t, err)
 
@@ -209,8 +210,9 @@ func TestCleanExpiredSessions_CleansTranscriptAndWorkflowDirs(t *testing.T) {
 
 	cutoff := now.AddDate(0, -1, 0)
 	err := repo.CleanExpiredSessions(CleanExpiredSessionsOptions{
-		Cutoff:  cutoff,
-		TmpBase: tmpBase,
+		Cutoff:      cutoff,
+		TmpBase:     tmpBase,
+		SessionBase: sessionBase,
 	})
 	require.NoError(t, err)
 

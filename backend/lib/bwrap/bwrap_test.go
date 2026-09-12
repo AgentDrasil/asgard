@@ -153,7 +153,7 @@ func TestBuildArgs(t *testing.T) {
 	home := tmpDir
 
 	// Create directories that buildArgsForAgent expects to exist under HOME
-	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh", ".asgard"} {
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh", "asgard/config"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(home, subDir), 0755))
 	}
 
@@ -181,13 +181,13 @@ func TestBuildArgs(t *testing.T) {
 
 	sshDir := filepath.Join(home, ".ssh")
 	assert.Contains(t, argStr, "--tmpfs "+sshDir)
-	asgardDir := filepath.Join(home, ".asgard")
+	asgardDir := filepath.Join(home, "asgard", "config")
 	assert.Contains(t, argStr, "--tmpfs "+asgardDir)
 
 	// Verify required bwrap components
-	expectedTmpDir := filepath.Join(home, "tmp", "test-chat")
+	expectedTmpDir := filepath.Join(home, "asgard", "data", "tmp", "test-chat")
 	assert.Contains(t, argStr, "--bind "+expectedTmpDir+" /tmp")
-	expectedSessionDir := filepath.Join(home, "data", "test-chat")
+	expectedSessionDir := filepath.Join(home, "asgard", "data", "sessions", "test-chat")
 	assert.Contains(t, argStr, "--bind "+expectedSessionDir+" /session")
 	assert.Contains(t, argStr, "--setenv HOME "+home)
 	assert.Contains(t, argStr, "--bind "+runDir+" "+runDir)
@@ -239,9 +239,9 @@ func TestBuildArgs(t *testing.T) {
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
 
-	expectedDefaultTmpDir := filepath.Join(home, "tmp", "default")
+	expectedDefaultTmpDir := filepath.Join(home, "asgard", "data", "tmp", "default")
 	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp")
-	expectedDefaultSessionDir := filepath.Join(home, "data", "default")
+	expectedDefaultSessionDir := filepath.Join(home, "asgard", "data", "sessions", "default")
 	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultSessionDir+" /session")
 
 	// Verify opencode specific mounts
@@ -297,7 +297,7 @@ func TestBuildArgs(t *testing.T) {
 
 	expectedSimplestSkills := filepath.Join(home, ".config", "simplest", "skills")
 	assert.Contains(t, argStrSimplest, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
-	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
+	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "asgard", "data", "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedSimplestSkills)
 	expectedEndSimplest := "-- aw simplest --agent test-agent --model simple-model --tool-access doc-only --prompt run"
 	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
@@ -347,9 +347,9 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	asgardDir := filepath.Join(tmpDir, ".asgard")
+	asgardDir := filepath.Join(tmpDir, "asgard", "config")
 	if err := os.MkdirAll(asgardDir, 0755); err != nil {
-		t.Fatalf("failed to create asgard dir: %v", err)
+		t.Fatalf("failed to create asgard config dir: %v", err)
 	}
 
 	configPath := filepath.Join(tmpDir, "config.yaml")
@@ -357,21 +357,21 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create config.yaml: %v", err)
 	}
 
-	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath, true, nil)
+	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath, true)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	expectedTmpDir := filepath.Join(tmpDir, "tmp", "test-chat")
+	expectedTmpDir := filepath.Join(tmpDir, "asgard", "data", "tmp", "test-chat")
 	if !strings.Contains(argStr, "--die-with-parent") {
 		t.Errorf("expected '--die-with-parent' in args, got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
 		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
 	}
-	expectedSessionDir := filepath.Join(tmpDir, "data", "test-chat")
+	expectedSessionDir := filepath.Join(tmpDir, "asgard", "data", "sessions", "test-chat")
 	if !strings.Contains(argStr, "--bind "+expectedSessionDir+" /session") {
 		t.Errorf("expected '--bind %s /session' in args, got: %s", expectedSessionDir, argStr)
 	}
@@ -412,42 +412,24 @@ func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	dbFile := filepath.Join(tmpDir, "data.db")
-	require.NoError(t, os.WriteFile(dbFile, []byte("sqlite-header"), 0644))
-	walFile := dbFile + "-wal"
-	require.NoError(t, os.WriteFile(walFile, []byte("wal-data"), 0644))
-	shmFile := dbFile + "-shm" // don't create shm file to verify nonexistent file is not masked
-
-	dbFiles := []string{dbFile, walFile, shmFile}
+	hostData := filepath.Join(tmpDir, "asgard", "data")
 
 	// 1. allowCrossSession = false (default)
-	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, dbFiles)
+	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false)
 	require.NoError(t, err)
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	hostTmp := filepath.Join(tmpDir, "tmp")
-	hostData := filepath.Join(tmpDir, "data")
-
-	// Must mask host ~/tmp and ~/data
-	assert.Contains(t, argStr, "--tmpfs "+hostTmp)
+	// Must mask the whole host runtime-data root (sessions, tmp and db)
 	assert.Contains(t, argStr, "--tmpfs "+hostData)
 
-	// Must mask existing db files with /dev/null
-	assert.Contains(t, argStr, "--ro-bind /dev/null "+dbFile)
-	assert.Contains(t, argStr, "--ro-bind /dev/null "+walFile)
-	assert.NotContains(t, argStr, "--ro-bind /dev/null "+shmFile)
-
 	// 2. allowCrossSession = true
-	cmdAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true, dbFiles)
+	cmdAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true)
 	require.NoError(t, err)
 
 	argStrAllow := strings.Join(cmdAllow.Args, " ")
 
-	assert.NotContains(t, argStrAllow, "--tmpfs "+hostTmp)
 	assert.NotContains(t, argStrAllow, "--tmpfs "+hostData)
-	assert.NotContains(t, argStrAllow, "--ro-bind /dev/null "+dbFile)
-	assert.NotContains(t, argStrAllow, "--ro-bind /dev/null "+walFile)
 }
 
 func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
@@ -470,7 +452,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 		ProxyConfigPath: proxyConfigPath,
 	}
 
-	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, nil, proxyOpt)
+	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, proxyOpt)
 	require.NoError(t, err)
 
 	argStr := strings.Join(cmd.Args, " ")
@@ -480,7 +462,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+proxyConfigPath)
 
 	// 2. Verify CA bundle path is in isolated host path and mounted to sandbox CA bundle path
-	expectedIsolatedBundle := filepath.Join(tmpDir, "tmp", ".asgard-ca", "chat-123", "merged-ca-certificates.crt")
+	expectedIsolatedBundle := filepath.Join(tmpDir, "asgard", "data", "tmp", ".asgard-ca", "chat-123", "merged-ca-certificates.crt")
 	assert.Contains(t, argStr, "--ro-bind "+expectedIsolatedBundle+" /etc/ssl/certs/ca-certificates.crt")
 	assert.NotContains(t, argStr, "--ro-bind "+caKeyPath+" /etc/ssl/certs/ca-certificates.crt")
 

@@ -21,6 +21,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 type mockClient struct {
@@ -916,6 +917,7 @@ func TestServerReload_UnknownModel_SoftPass(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
 
@@ -1207,6 +1209,7 @@ func TestManageProxy_EnabledWithoutStandaloneFile(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
 
@@ -1264,19 +1267,8 @@ cli:
 	assert.Contains(t, resp.Rules[0].RealSecret, "****")
 	assert.NotContains(t, resp.Rules[0].RealSecret, "sk-real-token-1234567890")
 
-	// PUT returns 400 because no standalone proxy_config was configured
-	putReq := httptest.NewRequest(http.MethodPut, "/api/manage/proxy", strings.NewReader(`{"content":"test"}`))
-	putW := httptest.NewRecorder()
-	srv.ServeHTTP(putW, putReq)
-	assert.Equal(t, http.StatusBadRequest, putW.Code)
-	assert.Contains(t, putW.Body.String(), "no standalone proxy_config configured in config.yaml")
-
-	// POST reload returns 400
-	postReq := httptest.NewRequest(http.MethodPost, "/api/manage/proxy/reload", nil)
-	postW := httptest.NewRecorder()
-	srv.ServeHTTP(postW, postReq)
-	assert.Equal(t, http.StatusBadRequest, postW.Code)
-	assert.Contains(t, postW.Body.String(), "no standalone proxy_config configured in config.yaml")
+	// Proxy config paths are fixed now, so an inline configuration is still
+	// served by GET; no standalone-file distinction remains.
 }
 
 func TestManageProxy_StandaloneFile_CRUDAndReload(t *testing.T) {
@@ -1289,6 +1281,7 @@ func TestManageProxy_StandaloneFile_CRUDAndReload(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
 
@@ -1303,7 +1296,8 @@ cli:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
 
-	proxyFilePath := filepath.Join(tmpDir, "proxy.yaml")
+	proxyFilePath := paths.ProxyConfigFile()
+	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
 	caCertPath := filepath.Join(tmpDir, "ca.crt")
 	caKeyPath := filepath.Join(tmpDir, "ca.key")
 
@@ -1327,10 +1321,9 @@ rules:
 	require.NoError(t, err)
 
 	conf := &config.Config{
-		AgentDir:    tmpDir,
-		Port:        8080,
-		Proxy:       proxyCfg,
-		ProxyConfig: proxyFilePath,
+		AgentDir: tmpDir,
+		Port:     8080,
+		Proxy:    proxyCfg,
 	}
 
 	testDB := db.NewDBForTest(t)

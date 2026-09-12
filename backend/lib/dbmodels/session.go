@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"github.com/moznion/go-optional"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 var sqlLikeReplacer = strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")
@@ -175,22 +176,14 @@ type Agent struct {
 	Status   AgentStatus       `json:"status,omitempty"`
 }
 
-// caBundleDirName is the directory under ~/tmp holding per-chat merged CA bundles
-// created by bwrap when the MITM proxy is enabled.
 const caBundleDirName = ".asgard-ca"
 
 func defaultSessionDir(chatID string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "data", chatID)
-	}
-	return filepath.Join(os.TempDir(), chatID)
+	return paths.SessionDir(chatID)
 }
 
 func defaultCABundleDir(chatID string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "tmp", caBundleDirName, chatID)
-	}
-	return filepath.Join(os.TempDir(), caBundleDirName, chatID)
+	return paths.CABundleDir(chatID)
 }
 
 type SessionRepository struct {

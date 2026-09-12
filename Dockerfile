@@ -108,6 +108,7 @@ COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
 COPY llms/go.mod llms/go.sum* ./llms/
 COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
+COPY pkg/paths/go.mod ./pkg/paths/
 COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
 COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
 COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
@@ -126,6 +127,7 @@ RUN (cd backend && go mod download) && \
     (cd llms && go mod download) && \
     (cd pkg/agentspec && go mod download) && \
     (cd pkg/logger && go mod download) && \
+    (cd pkg/paths && go mod download) && \
     (cd pkg/pluginsdk && go mod download) && \
     (cd pkg/workflowspec && go mod download) && \
     (cd plugins/notebook && go mod download) && \

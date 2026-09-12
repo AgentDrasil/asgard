@@ -9,17 +9,25 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // CleanExpiredSessionsOptions contains configuration for session cleanup.
 type CleanExpiredSessionsOptions struct {
-	Cutoff  time.Time
-	TmpBase string // Base directory for session temporary files, defaults to ~/tmp
+	Cutoff time.Time
+	// TmpBase overrides the session temporary root; defaults to paths.TmpDir().
+	// It exists only to isolate tests.
+	TmpBase string
+	// SessionBase overrides the persistent session root; defaults to paths.SessionsDir().
+	// It exists only to isolate tests.
+	SessionBase string
 }
 
 // CleanExpiredSessions deletes inactive, non-running sessions and their corresponding
-// session directories (e.g. ~/tmp/<chatID> and ~/data/<chatID>, plus the per-chat
-// merged CA bundle dir ~/tmp/.asgard-ca/<chatID>) older than cutoff.
+// session directories (~/asgard/data/tmp/<chatID> and
+// ~/asgard/data/sessions/<chatID>, plus the per-chat merged CA bundle dir
+// ~/asgard/data/tmp/.asgard-ca/<chatID>) older than cutoff.
 func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOptions) error {
 	var expiredSessions []Session
 	if err := r.db.Where("updated_at < ?", opts.Cutoff).Find(&expiredSessions).Error; err != nil {
@@ -28,18 +36,11 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 
 	tmpDir := opts.TmpBase
 	if tmpDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			log.Warn().Err(err).Msg("CleanExpiredSessions: could not determine user home directory")
-		} else {
-			tmpDir = filepath.Join(homeDir, "tmp")
-		}
+		tmpDir = paths.TmpDir()
 	}
-
-	// Session dirs (sandbox /session) live as a sibling of the tmp base (~/data when tmp defaults to ~/tmp)
-	sessionDir := ""
-	if tmpDir != "" {
-		sessionDir = filepath.Join(filepath.Dir(tmpDir), "data")
+	sessionDir := opts.SessionBase
+	if sessionDir == "" {
+		sessionDir = paths.SessionsDir()
 	}
 
 	cleanupBases := make([]string, 0, 2)

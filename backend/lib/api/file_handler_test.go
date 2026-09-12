@@ -118,7 +118,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -164,7 +164,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -322,7 +322,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -352,7 +352,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -428,7 +428,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -482,7 +482,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "tmp", chatID)
+		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -529,7 +529,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		sessionNsDir := filepath.Join(home, "data", chatID)
+		sessionNsDir := filepath.Join(home, "asgard", "data", "sessions", chatID)
 		require.NoError(t, os.MkdirAll(sessionNsDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(sessionNsDir, "report.md"), []byte("session ns report"), 0644))
 

@@ -22,12 +22,11 @@ import (
 // and self-signed CA root certificate with 10 years validity.
 // Public cert is written with 0644, and private key with 0600.
 func EnsureCA(certPath, keyPath string) error {
-	certPath = resolvePath(certPath)
-	keyPath = resolvePath(keyPath)
-
 	if certPath == "" || keyPath == "" {
 		return errors.New("ca certPath and keyPath must not be empty")
 	}
+	certPath = filepath.Clean(certPath)
+	keyPath = filepath.Clean(keyPath)
 
 	// Check if both files exist and are valid
 	if certPEM, err := os.ReadFile(certPath); err == nil {
@@ -134,10 +133,10 @@ func isValidCA(certPEM, keyPEM []byte) bool {
 // MergeCACert reads the host CA certificate bundle (falling back gracefully if missing),
 // appends the Asgard root CA cert, and writes the combined bundle to outPath with 0644.
 func MergeCACert(hostCertBundlePath, caCertPath, outPath string) error {
-	outPath = resolvePath(outPath)
 	if outPath == "" {
 		return errors.New("outPath must not be empty")
 	}
+	outPath = filepath.Clean(outPath)
 
 	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
 		return fmt.Errorf("failed to create output directory for merged CA: %w", err)
@@ -145,19 +144,18 @@ func MergeCACert(hostCertBundlePath, caCertPath, outPath string) error {
 
 	var merged []byte
 	if hostCertBundlePath != "" {
-		resolvedHost := resolvePath(hostCertBundlePath)
-		hostData, err := os.ReadFile(resolvedHost)
+		hostData, err := os.ReadFile(hostCertBundlePath)
 		if err == nil {
 			merged = append(merged, hostData...)
 			if len(merged) > 0 && merged[len(merged)-1] != '\n' {
 				merged = append(merged, '\n')
 			}
 		} else if !os.IsNotExist(err) {
-			log.Debug().Err(err).Str("path", resolvedHost).Msg("failed to read host CA bundle for merge")
+			log.Debug().Err(err).Str("path", hostCertBundlePath).Msg("failed to read host CA bundle for merge")
 		}
 	}
 
-	caData, err := os.ReadFile(resolvePath(caCertPath))
+	caData, err := os.ReadFile(caCertPath)
 	if err != nil {
 		return fmt.Errorf("failed to read CA cert file: %w", err)
 	}

@@ -3,17 +3,21 @@ package proxy
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
-// ServerConfig holds the proxy server network and CA configuration.
+// ServerConfig holds the proxy server network and CA configuration. The CA
+// paths are internal fixed defaults (~/asgard/config/ca) and are not settable
+// from proxy.yaml; the fields exist so the proxy manager can be constructed
+// with explicit paths in tests.
 type ServerConfig struct {
 	Addr   string `yaml:"addr" json:"addr"`
-	CACert string `yaml:"ca_cert" json:"ca_cert"`
-	CAKey  string `yaml:"ca_key" json:"ca_key"`
+	CACert string `yaml:"-" json:"ca_cert"`
+	CAKey  string `yaml:"-" json:"ca_key"`
 }
 
 // DebugConfig controls proxy debugging and request dumping options.
@@ -47,8 +51,8 @@ func DefaultConfig() *Config {
 		Enable: false,
 		Server: ServerConfig{
 			Addr:   "127.0.0.1:8082",
-			CACert: "~/.asgard/ca/ca.crt",
-			CAKey:  "~/.asgard/ca/ca.key",
+			CACert: paths.CACertFile(),
+			CAKey:  paths.CAKeyFile(),
 		},
 		Debug: DebugConfig{
 			Enable:       false,
@@ -77,28 +81,11 @@ func ParseConfig(data []byte) (*Config, error) {
 
 // LoadConfigFile reads a YAML file and parses it as Config.
 func LoadConfigFile(filePath string) (*Config, error) {
-	resolved := resolvePath(filePath)
-	data, err := os.ReadFile(resolved)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read proxy config file %s: %w", filePath, err)
 	}
 	return ParseConfig(data)
-}
-
-// resolvePath expands a leading ~ with the user's home directory and returns an absolute path.
-func resolvePath(p string) string {
-	if p == "" {
-		return ""
-	}
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
-		}
-	}
-	if abs, err := filepath.Abs(p); err == nil {
-		return filepath.Clean(abs)
-	}
-	return filepath.Clean(p)
 }
 
 // ApplyDefaults populates default server address, CA paths, and debug limits.
@@ -110,13 +97,11 @@ func (c *Config) ApplyDefaults() {
 		c.Server.Addr = "127.0.0.1:8082"
 	}
 	if c.Server.CACert == "" {
-		c.Server.CACert = "~/.asgard/ca/ca.crt"
+		c.Server.CACert = paths.CACertFile()
 	}
 	if c.Server.CAKey == "" {
-		c.Server.CAKey = "~/.asgard/ca/ca.key"
+		c.Server.CAKey = paths.CAKeyFile()
 	}
-	c.Server.CACert = resolvePath(c.Server.CACert)
-	c.Server.CAKey = resolvePath(c.Server.CAKey)
 
 	if c.Debug.MaxBodyBytes <= 0 {
 		c.Debug.MaxBodyBytes = 4096
@@ -163,18 +148,18 @@ func (c *Config) ProxyHost() string {
 	return addr
 }
 
-// ResolvedCACertPath returns the expanded absolute path of CACert.
+// ResolvedCACertPath returns the CA certificate path.
 func (c *Config) ResolvedCACertPath() string {
 	if c == nil {
 		return ""
 	}
-	return resolvePath(c.Server.CACert)
+	return c.Server.CACert
 }
 
-// ResolvedCAKeyPath returns the expanded absolute path of CAKey.
+// ResolvedCAKeyPath returns the CA private key path.
 func (c *Config) ResolvedCAKeyPath() string {
 	if c == nil {
 		return ""
 	}
-	return resolvePath(c.Server.CAKey)
+	return c.Server.CAKey
 }

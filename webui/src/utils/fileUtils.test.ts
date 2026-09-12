@@ -285,18 +285,19 @@ describe("fileUtils", () => {
     });
 
     it("returns true for host absolute tmp paths with exact segment matching", () => {
-      expect(isSessionTmpDir("/home/user/tmp/sess-123", "sess-123")).toBe(true);
-      expect(isSessionTmpDir("/home/user/tmp/sess-123/sub", "sess-123")).toBe(true);
-      expect(isSessionTmpDir("/home/alice/tmp/sess-123", "sess-123")).toBe(true);
-      expect(isSessionTmpDir("/root/tmp/sess-123", "sess-123")).toBe(true);
-      expect(isSessionTmpDir("/root/tmp/sess-123/sub", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/home/user/asgard/data/tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/home/user/asgard/data/tmp/sess-123/sub", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/home/alice/asgard/data/tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/root/asgard/data/tmp/sess-123", "sess-123")).toBe(true);
+      expect(isSessionTmpDir("/root/asgard/data/tmp/sess-123/sub", "sess-123")).toBe(true);
     });
 
     it("returns false for regular project directories and arbitrary nested paths", () => {
       expect(isSessionTmpDir("/home/user/project")).toBe(false);
       expect(isSessionTmpDir("src/my-project")).toBe(false);
       expect(isSessionTmpDir("/var/www/html")).toBe(false);
-      expect(isSessionTmpDir("/home/user/other/tmp/sess-123", "sess-123")).toBe(false);
+      expect(isSessionTmpDir("/home/user/other/asgard/data/tmp/sess-123", "sess-123")).toBe(false);
+      expect(isSessionTmpDir("/home/user/tmp/sess-123", "sess-123")).toBe(false);
       expect(isSessionTmpDir("/tmp/other-project", "sess-123")).toBe(false);
       expect(isSessionTmpDir("tmpother")).toBe(false);
       expect(isSessionTmpDir("tmpother/file.txt")).toBe(false);

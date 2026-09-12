@@ -297,7 +297,7 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 
 	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, nil, nil)
 
-	sessionTmpDir := filepath.Join(tempHome, "tmp", chatID)
+	sessionTmpDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
 	assert.NoDirExists(t, sessionTmpDir)
 
 	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat

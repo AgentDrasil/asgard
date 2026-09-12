@@ -27,7 +27,7 @@ func TestSchedulerCleanExpiredSessions(t *testing.T) {
 		return filepath.Join(sessionBase, chatID)
 	})
 
-	scheduler, err := NewScheduler(repo, WithTmpBase(tmpBase))
+	scheduler, err := NewScheduler(repo, WithTmpBase(tmpBase), WithSessionBase(sessionBase))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = scheduler.Shutdown()

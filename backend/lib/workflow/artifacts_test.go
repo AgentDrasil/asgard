@@ -152,7 +152,7 @@ func TestDefaultTmpDirUnderHomeTmp(t *testing.T) {
 func TestDefaultSessionDirUnderHomeData(t *testing.T) {
 	dir := DefaultSessionDir("sess-1")
 	require.True(t, filepath.IsAbs(dir))
-	assert.Contains(t, dir, filepath.Join("data", "sess-1"))
+	assert.Contains(t, dir, filepath.Join("data", "sessions", "sess-1"))
 }
 
 func TestViewerArtifactPathInSession(t *testing.T) {

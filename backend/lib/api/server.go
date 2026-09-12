@@ -25,6 +25,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // ErrServerShutdownBeforeStart is returned by Start when Shutdown was called before or during Start.
@@ -243,10 +244,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	}
 
 	if s.configPath == "" {
-		s.configPath = os.Getenv("CONFIG_PATH")
-		if s.configPath == "" {
-			s.configPath = "config.yaml"
-		}
+		s.configPath = paths.ConfigFile()
 	}
 	if s.conf != nil && s.conf.ConfigPath == "" {
 		s.conf.ConfigPath = s.configPath

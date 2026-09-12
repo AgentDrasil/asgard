@@ -18,9 +18,10 @@ const (
 
 // Scheduler manages scheduled background tasks.
 type Scheduler struct {
-	scheduler gocron.Scheduler
-	repo      *dbmodels.SessionRepository
-	tmpBase   string
+	scheduler   gocron.Scheduler
+	repo        *dbmodels.SessionRepository
+	tmpBase     string
+	sessionBase string
 }
 
 // SchedulerOption configures a Scheduler.
@@ -30,6 +31,14 @@ type SchedulerOption func(*Scheduler)
 func WithTmpBase(path string) SchedulerOption {
 	return func(s *Scheduler) {
 		s.tmpBase = path
+	}
+}
+
+// WithSessionBase configures a custom persistent session base directory for
+// session cleanup.
+func WithSessionBase(path string) SchedulerOption {
+	return func(s *Scheduler) {
+		s.sessionBase = path
 	}
 }
 
@@ -81,8 +90,9 @@ func (cs *Scheduler) CleanExpiredSessions() {
 	cutoff := time.Now().AddDate(0, -1, 0)
 	log.Info().Time("cutoff", cutoff).Msg("Starting scheduled session cleanup for sessions inactive since 1 month ago")
 	if err := cs.repo.CleanExpiredSessions(dbmodels.CleanExpiredSessionsOptions{
-		Cutoff:  cutoff,
-		TmpBase: cs.tmpBase,
+		Cutoff:      cutoff,
+		TmpBase:     cs.tmpBase,
+		SessionBase: cs.sessionBase,
 	}); err != nil {
 		log.Error().Err(err).Msg("Scheduled session cleanup encountered errors")
 	} else {

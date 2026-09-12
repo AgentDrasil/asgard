@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/logger"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func main() {
@@ -36,17 +37,8 @@ func main() {
 
 	host := os.Getenv("ASGARD_API_HOST")
 	if host == "" {
-		configPath := os.Getenv("CONFIG_PATH")
-		if configPath == "" {
-			if _, err := os.Stat("/home/user/config.yaml"); err == nil {
-				configPath = "/home/user/config.yaml"
-			} else {
-				configPath = "config.yaml"
-			}
-		}
-
 		port := 8080
-		if data, err := os.ReadFile(configPath); err == nil {
+		if data, err := os.ReadFile(paths.ConfigFile()); err == nil {
 			var cfg struct {
 				Port int `yaml:"port"`
 			}

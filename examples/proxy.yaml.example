@@ -2,8 +2,6 @@ enable: true
 
 server:
   addr: "127.0.0.1:8082"
-  ca_cert: "~/.asgard/ca/ca.crt"
-  ca_key: "~/.asgard/ca/ca.key"
 
 debug:
   enable: false

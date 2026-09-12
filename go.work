@@ -14,6 +14,7 @@ use (
 	./llms
 	./pkg/agentspec
 	./pkg/logger
+	./pkg/paths
 	./pkg/pluginsdk
 	./pkg/workflowspec
 	./plugins/notebook

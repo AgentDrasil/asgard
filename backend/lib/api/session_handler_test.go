@@ -65,7 +65,7 @@ func TestSessionHandler(t *testing.T) {
 	require.NoError(t, err)
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	expectedSessionTmp := filepath.Join(home, "tmp", createdSession.ChatID)
+	expectedSessionTmp := filepath.Join(home, "asgard", "data", "tmp", createdSession.ChatID)
 
 	assert.NotEmpty(t, createdSession.ChatID)
 	assert.Equal(t, "agent-alpha", createdSession.CurrentAgent)

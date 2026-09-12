@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
@@ -15,3 +16,5 @@ require (
 )
 
 replace github.com/AgentDrasil/asgard/pkg/logger => ../../pkg/logger
+
+replace github.com/AgentDrasil/asgard/pkg/paths => ../../pkg/paths

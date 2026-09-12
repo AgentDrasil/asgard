@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -228,18 +229,10 @@ func findAgentsDir(baseDir string) string {
 		curr = filepath.Dir(curr)
 	}
 
-	// Check common environment locations
-	home, err := os.UserHomeDir()
-	if err == nil {
-		commonPaths := []string{
-			filepath.Join(home, "asgard", "home", "asgard"),
-			filepath.Join(home, ".asgard"),
-		}
-		for _, p := range commonPaths {
-			if fileExists(filepath.Join(p, "agents")) && fileExists(filepath.Join(p, "teams.yaml")) {
-				return p
-			}
-		}
+	// Check the fixed Asgard agents root
+	p := paths.AgentsRoot()
+	if fileExists(filepath.Join(p, "agents")) && fileExists(filepath.Join(p, "teams.yaml")) {
+		return p
 	}
 
 	return ""

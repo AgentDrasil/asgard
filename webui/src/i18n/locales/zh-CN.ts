@@ -199,7 +199,7 @@ export const zhCN: MessageSchema = {
     endOfFolders: "已至最深层目录",
     allowCrossSession: "允许跨会话访问",
     allowCrossSessionDesc:
-      "允许在沙箱内访问宿主机的 ~/tmp、~/data 及数据库文件（仅用于跨会话调试）",
+      "允许在沙箱内访问宿主机的 ~/asgard/data/tmp、~/asgard/data/sessions 及数据库文件（仅用于跨会话调试）",
     promptLabel: "您想做些什么？",
     attachFiles: "添加附件",
     attachFile: "添加附件",

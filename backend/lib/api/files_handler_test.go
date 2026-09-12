@@ -522,7 +522,7 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "data", chatID)
+		return filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -538,7 +538,7 @@ func TestFilesHandler_TmpResolution(t *testing.T) {
 	sess.RunDir = "/tmp/session-id"
 	require.NoError(t, repo.SaveSession(sess))
 
-	sessionTmp := filepath.Join(tempHome, "tmp", chatID)
+	sessionTmp := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
 	require.NoError(t, os.MkdirAll(sessionTmp, 0755))
 
 	testFile := filepath.Join(sessionTmp, "test.txt")
@@ -822,7 +822,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "data", chatID)
+		return filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -839,7 +839,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 	sess.RunDir = wsDir
 	require.NoError(t, repo.SaveSession(sess))
 
-	sessionDir := filepath.Join(tempHome, "data", chatID)
+	sessionDir := filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
 	require.NoError(t, os.MkdirAll(sessionDir, 0755))
 
 	testFile := filepath.Join(sessionDir, "notes.md")
@@ -933,7 +933,7 @@ func TestFilesHandler_SessionResolution(t *testing.T) {
 		sessRunDirSess.RunDir = "session/session-id"
 		require.NoError(t, repo.SaveSession(sessRunDirSess))
 
-		sessRunDirPath := filepath.Join(tempHome, "data", sessRunDirChat)
+		sessRunDirPath := filepath.Join(tempHome, "asgard", "data", "sessions", sessRunDirChat)
 		require.NoError(t, os.MkdirAll(sessRunDirPath, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(sessRunDirPath, "rd.txt"), []byte("rd"), 0644))
 
@@ -959,7 +959,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 
 	repo := dbmodels.NewSessionRepository(testDB)
 	repo.SetSessionDirFunc(func(chatID string) string {
-		return filepath.Join(tempHome, "data", chatID)
+		return filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
 	})
 	server := &Server{
 		conf: &config.Config{Host: "http://localhost:8080"},
@@ -977,7 +977,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 	sess.RunDir = wsDir
 	require.NoError(t, repo.SaveSession(sess))
 
-	sessionTmp := filepath.Join(tempHome, "tmp", chatID)
+	sessionTmp := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
 
 	t.Run("Joint search in workspace and session tmp with scope and prefix", func(t *testing.T) {
 		require.NoError(t, os.MkdirAll(sessionTmp, 0755))
@@ -1023,7 +1023,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		starveSess.RunDir = starveWsDir
 		require.NoError(t, repo.SaveSession(starveSess))
 
-		starveTmp := filepath.Join(tempHome, "tmp", starveChatID)
+		starveTmp := filepath.Join(tempHome, "asgard", "data", "tmp", starveChatID)
 		require.NoError(t, os.MkdirAll(starveTmp, 0755))
 
 		// Create 20 matching files in workspace
@@ -1071,7 +1071,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		overlapSess.RunDir = "/tmp/session-id"
 		require.NoError(t, repo.SaveSession(overlapSess))
 
-		overlapTmp := filepath.Join(tempHome, "tmp", overlapChatID)
+		overlapTmp := filepath.Join(tempHome, "asgard", "data", "tmp", overlapChatID)
 		require.NoError(t, os.MkdirAll(overlapTmp, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(overlapTmp, "overlap_test.go"), []byte("package main"), 0644))
 
@@ -1097,7 +1097,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		symSess.RunDir = symWsDir
 		require.NoError(t, repo.SaveSession(symSess))
 
-		symTmp := filepath.Join(tempHome, "tmp", symChatID)
+		symTmp := filepath.Join(tempHome, "asgard", "data", "tmp", symChatID)
 		require.NoError(t, os.MkdirAll(symTmp, 0755))
 
 		// 1. Real file in tmp
@@ -1154,7 +1154,7 @@ func TestFilesSearchHandler_TmpIntegration(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(noTmpWs, "lonely.txt"), []byte("lonely"), 0644))
 
 		// Ensure tmp directory does not exist
-		_ = os.RemoveAll(filepath.Join(tempHome, "tmp", noTmpChatID))
+		_ = os.RemoveAll(filepath.Join(tempHome, "asgard", "data", "tmp", noTmpChatID))
 
 		req := httptest.NewRequest(http.MethodGet, "/api/files/search?session_id="+noTmpChatID+"&query=lonely", nil)
 		rec := httptest.NewRecorder()
@@ -1217,7 +1217,7 @@ func TestSearchDirectory_ExcludesSessionTranscriptAndWorkflows(t *testing.T) {
 
 	tempHome := t.TempDir()
 	sessionID := uuid.NewV7().String()
-	sessBase := filepath.Join(tempHome, "data", sessionID)
+	sessBase := filepath.Join(tempHome, "asgard", "data", "sessions", sessionID)
 	require.NoError(t, os.MkdirAll(sessBase, 0755))
 
 	// Create user-visible session file

@@ -208,18 +208,15 @@ exit 0
 		return string(data)
 	}
 
-	hostTmp := filepath.Join(home, "tmp")
-	hostData := filepath.Join(home, "data")
+	hostData := filepath.Join(home, "asgard", "data")
 
 	t.Run("masked when flag is false", func(t *testing.T) {
 		args := runNode(t, false)
-		assert.Contains(t, args, "--tmpfs\n"+hostTmp)
 		assert.Contains(t, args, "--tmpfs\n"+hostData)
 	})
 
 	t.Run("unmasked when flag is true", func(t *testing.T) {
 		args := runNode(t, true)
-		assert.NotContains(t, args, "--tmpfs\n"+hostTmp)
 		assert.NotContains(t, args, "--tmpfs\n"+hostData)
 	})
 }

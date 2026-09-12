@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/rs/zerolog v1.35.1
 )
@@ -15,3 +16,5 @@ require (
 )
 
 replace github.com/AgentDrasil/asgard/pkg/logger => ../../pkg/logger
+
+replace github.com/AgentDrasil/asgard/pkg/paths => ../../pkg/paths

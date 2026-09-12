@@ -16,11 +16,11 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func IsAllowedDir(path string, allowedDirs []string) bool {
 	path = filepath.Clean(path)
-	home, _ := os.UserHomeDir()
 	for _, dir := range allowedDirs {
 		dir = filepath.Clean(dir)
 		if path == dir {
@@ -30,19 +30,18 @@ func IsAllowedDir(path string, allowedDirs []string) bool {
 		if strings.HasPrefix(path, dir+string(filepath.Separator)) {
 			return true
 		}
-		// If allowedDirs contains "/tmp" or "tmp", also allow subdirectories under $HOME/tmp (sandbox session dirs);
-		// likewise "/session"/"session" allows subdirectories under $HOME/data
-		if home != "" {
-			var nsUserBase string
-			switch dir {
-			case "/tmp", "tmp":
-				nsUserBase = filepath.Join(home, "tmp")
-			case "/session", "session":
-				nsUserBase = filepath.Join(home, "data")
-			}
-			if nsUserBase != "" && (path == nsUserBase || strings.HasPrefix(path, nsUserBase+string(filepath.Separator))) {
-				return true
-			}
+		// If allowedDirs contains "/tmp" or "tmp", also allow subdirectories under the host
+		// session tmp root (~/asgard/data/tmp); likewise "/session"/"session" allows
+		// subdirectories under the host sessions root (~/asgard/data/sessions).
+		var nsUserBase string
+		switch dir {
+		case "/tmp", "tmp":
+			nsUserBase = paths.TmpDir()
+		case "/session", "session":
+			nsUserBase = paths.SessionsDir()
+		}
+		if nsUserBase != "" && (path == nsUserBase || strings.HasPrefix(path, nsUserBase+string(filepath.Separator))) {
+			return true
 		}
 	}
 	return false
@@ -60,11 +59,7 @@ func resolveRunDir(agent *agentspec.Agent, runDirOpt optional.Option[string]) (s
 	if len(agent.Config.RunDirs) > 0 && agent.Config.RunDirs[0] != "" {
 		return agent.Config.RunDirs[0], nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting user home directory: %w", err)
-	}
-	tmpDir := filepath.Join(home, "tmp")
+	tmpDir := paths.TmpDir()
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
@@ -97,11 +92,7 @@ type StatusScope struct {
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
 func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("getting user home directory: %w", err)
-	}
-	sockDir := filepath.Join(home, "tmp", "fakebash-sock-"+uuid.NewV7().String())
+	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}
@@ -110,12 +101,10 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	var langRules string
 	var configPath string
 	var proxyCfg bwrap.ProxySandboxConfig
-	var dbFiles []string
 	if conf != nil {
 		langRules = conf.LanguageRules()
 		configPath = conf.GetConfigPath()
 		proxyCfg = conf.SandboxProxyOptions()
-		dbFiles = conf.SQLiteDBFiles()
 	}
 
 	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)
@@ -124,7 +113,7 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, statusScope.AllowCrossSession, dbFiles, proxyCfg)
+	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, statusScope.AllowCrossSession, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

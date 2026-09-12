@@ -2,9 +2,9 @@ debug: true
 host: https://example.com
 port: 7000
 internal_port: 8081
-agent_dir: /home/user/asgard
 db: sqlite
-dsn: /home/user/data.db
+# dsn is only used when db is "pg" (PostgreSQL connection string).
+# SQLite always lives at ~/asgard/data/data.db.
 gemini_api_key: [GCP_API_KEY]
 gemini_model_for_chat_title: gemini-3.1-flash-lite
 # Language preferences for agents (default: English (US))
@@ -26,16 +26,14 @@ firebase_webpush_web:
   app_id: [FIREBASE_APP_ID]
   vapid_key: [FIREBASE_CLOUD_MESSAGING_PUBLIC_KEY]
 
-# Credential Injection Proxy configuration (optional)
-# Specify standalone proxy config file path to allow hot-reloading via REST API:
-# proxy_config: "proxy.yaml"
-# Or inline proxy configuration:
+# Credential Injection Proxy configuration (optional).
+# The standalone proxy config (~/asgard/config/proxy.yaml), CA cert
+# (~/asgard/config/ca/ca.crt) and key (~/asgard/config/ca/ca.key) are fixed
+# and need not be set. An inline proxy configuration is also supported:
 # proxy:
 #   enable: false
 #   server:
 #     addr: "127.0.0.1:8082"
-#     ca_cert: "~/.asgard/ca/ca.crt"
-#     ca_key: "~/.asgard/ca/ca.key"
 #   debug:
 #     enable: false
 #     dump_headers: false

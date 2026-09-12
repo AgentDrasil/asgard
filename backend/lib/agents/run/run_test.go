@@ -16,6 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func TestRun(t *testing.T) {
@@ -174,7 +175,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}
 	// Verify that the run directory was created inside $HOME/tmp (which is tmpDir/tmp in our test env)
-	tmpPath := filepath.Join(tmpDir, "tmp")
+	tmpPath := filepath.Join(tmpDir, "asgard", "data", "tmp")
 	files, err := os.ReadDir(tmpPath)
 	if err != nil {
 		t.Fatalf("failed to read tmp dir: %v", err)
@@ -233,7 +234,7 @@ func TestRun(t *testing.T) {
 	if !strings.Contains(string(out), "mock bwrap execution succeeded") {
 		t.Errorf("expected mock output, got: %q", string(out))
 	}
-	langPromptPath := filepath.Join(tmpDir, "tmp", "test-chat-lang", ".aw_agents.md")
+	langPromptPath := filepath.Join(tmpDir, "asgard", "data", "tmp", "test-chat-lang", ".aw_agents.md")
 	langPromptContent, err := os.ReadFile(langPromptPath)
 	if err != nil {
 		t.Fatalf("failed to read generated prompt file: %v", err)
@@ -446,15 +447,15 @@ func TestRun_ProxyOptions(t *testing.T) {
 
 	caCertPath := filepath.Join(tmpDir, "ca.crt")
 	caKeyPath := filepath.Join(tmpDir, "ca.key")
-	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
+	proxyConfigPath := paths.ProxyConfigFile()
+	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
 	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
 	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
 	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
 
 	t.Run("with proxy enabled", func(t *testing.T) {
 		conf := &config.Config{
-			Providers:   []string{"agy"},
-			ProxyConfig: proxyConfigPath,
+			Providers: []string{"agy"},
 			Proxy: &proxy.Config{
 				Enable: true,
 				Server: proxy.ServerConfig{

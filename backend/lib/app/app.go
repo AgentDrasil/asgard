@@ -22,6 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // Option mutates the Options during App initialization.
@@ -129,6 +130,7 @@ func salvageConfig(path string) *config.Config {
 	cfg := &config.Config{
 		Port:         8080,
 		InternalPort: 8081,
+		AgentDir:     paths.AgentsRoot(),
 	}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -171,13 +173,10 @@ func New(opts ...Option) (*App, error) {
 
 	// 1. Resolve configuration
 	conf := options.Config
-	resolvedConfigPath := options.ConfigPath
 	configLoaded := conf != nil
+	resolvedConfigPath := options.ConfigPath
 	if resolvedConfigPath == "" {
-		resolvedConfigPath = os.Getenv("CONFIG_PATH")
-		if resolvedConfigPath == "" {
-			resolvedConfigPath = "config.yaml"
-		}
+		resolvedConfigPath = paths.ConfigFile()
 	}
 	if conf == nil {
 		var err error

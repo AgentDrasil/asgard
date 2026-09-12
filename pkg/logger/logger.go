@@ -9,18 +9,12 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func IsDebugEnabled() bool {
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		if _, err := os.Stat("/home/user/config.yaml"); err == nil {
-			configPath = "/home/user/config.yaml"
-		} else {
-			configPath = "config.yaml"
-		}
-	}
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(paths.ConfigFile())
 	if err != nil {
 		return false
 	}
@@ -34,11 +28,9 @@ func IsDebugEnabled() bool {
 }
 
 func SetupLogger(appName string) {
-	home, err := os.UserHomeDir()
+	logDir := paths.LogsDir()
 	var logDest io.Writer = os.Stderr
-	if err == nil {
-		logDir := filepath.Join(home, "logs")
-		_ = os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err == nil {
 		logFile, err := os.OpenFile(filepath.Join(logDir, appName+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			logDest = logFile

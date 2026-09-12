@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/goccy/go-yaml v1.19.2
 )
@@ -48,6 +49,7 @@ replace (
 	github.com/AgentDrasil/asgard/agentwrapper => ../../agentwrapper
 	github.com/AgentDrasil/asgard/llms => ../../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../../pkg/agentspec
+	github.com/AgentDrasil/asgard/pkg/paths => ../../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../../pkg/workflowspec
 	github.com/AgentDrasil/asgard/simplest => ../../simplest
 )

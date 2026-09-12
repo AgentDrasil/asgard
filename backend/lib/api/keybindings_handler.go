@@ -13,6 +13,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // Supported OS names.
@@ -46,7 +48,7 @@ type SaveKeybindingsRequest struct {
 func (s *Server) keysFilePath() string {
 	cfgPath := s.configPath
 	if cfgPath == "" {
-		cfgPath = "config.yaml"
+		cfgPath = paths.ConfigFile()
 	}
 	return filepath.Join(filepath.Dir(cfgPath), "keys.yaml")
 }

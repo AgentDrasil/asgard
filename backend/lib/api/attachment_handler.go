@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 const (
@@ -100,13 +101,7 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to resolve storage directory")
-		return
-	}
-
-	storageDir := filepath.Join(home, "tmp", sessionID, "attachments")
+	storageDir := paths.AttachmentsDir(sessionID)
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to create storage directory: "+err.Error())
 		return
@@ -230,13 +225,7 @@ func (s *Server) handleSessionAttachmentDownload(w http.ResponseWriter, r *http.
 		return
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to resolve storage directory")
-		return
-	}
-
-	filePath := filepath.Join(home, "tmp", sessionID, "attachments", filename)
+	filePath := filepath.Join(paths.AttachmentsDir(sessionID), filename)
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {

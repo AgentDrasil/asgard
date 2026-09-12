@@ -405,7 +405,7 @@ export function isSessionScopePath(path?: string | null): boolean {
 }
 
 /**
- * Checks whether a given runDir corresponds to the session temporary directory (/tmp, tmp, /tmp/session-id, tmp/session-id, /home/<user>/tmp/<sessionId>, etc.).
+ * Checks whether a given runDir corresponds to the session temporary directory (/tmp, tmp, /tmp/session-id, tmp/session-id, /home/<user>/asgard/data/tmp/<sessionId>, etc.).
  */
 export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {
   if (!runDir || runDir === "." || runDir === "") return true;
@@ -444,15 +444,31 @@ export function isSessionTmpDir(runDir?: string | null, sessionId?: string | nul
       return true;
     }
 
-    // 3. Host absolute path segments matching: /home/<user>/tmp/<sessionId> or /root/tmp/<sessionId> (and subpaths)
-    // Structure must strictly be /home/<user>/tmp/<sessionId>[/...] or /root/tmp/<sessionId>[/...]
+    // 3. Host absolute path segments matching:
+    //    /home/<user>/asgard/data/tmp/<sessionId> or /root/asgard/data/tmp/<sessionId> (and subpaths)
     const parts = normalized.split("/").filter(Boolean);
-    // For /home/<user>/tmp/<sessionId>, parts: ["home", "<user>", "tmp", sessionId, ...] (length >= 4)
-    if (parts.length >= 4 && parts[0] === "home" && parts[2] === "tmp" && parts[3] === sessionId) {
+    // For /home/<user>/asgard/data/tmp/<sessionId>, parts:
+    //   ["home", "<user>", "asgard", "data", "tmp", sessionId, ...] (length >= 6)
+    if (
+      parts.length >= 6 &&
+      parts[0] === "home" &&
+      parts[2] === "asgard" &&
+      parts[3] === "data" &&
+      parts[4] === "tmp" &&
+      parts[5] === sessionId
+    ) {
       return true;
     }
-    // For /root/tmp/<sessionId>, parts: ["root", "tmp", sessionId, ...] (length >= 3)
-    if (parts.length >= 3 && parts[0] === "root" && parts[1] === "tmp" && parts[2] === sessionId) {
+    // For /root/asgard/data/tmp/<sessionId>, parts:
+    //   ["root", "asgard", "data", "tmp", sessionId, ...] (length >= 5)
+    if (
+      parts.length >= 5 &&
+      parts[0] === "root" &&
+      parts[1] === "asgard" &&
+      parts[2] === "data" &&
+      parts[3] === "tmp" &&
+      parts[4] === sessionId
+    ) {
       return true;
     }
   }
