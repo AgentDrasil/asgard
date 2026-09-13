@@ -27,7 +27,7 @@ var (
 	agyModel            string
 	agyAgent            string
 	agyAddTmpToDir      bool
-	supportedAgyVersion = "1.2.1"
+	supportedAgyVersion = "1.2.2"
 )
 
 var agyCmd = &cobra.Command{
