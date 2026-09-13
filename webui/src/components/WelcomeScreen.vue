@@ -604,23 +604,21 @@ const handleSubmit = () => {
         </div>
 
         <!-- Cross-Session Access Checkbox -->
-        <div class="form-control w-full">
-          <label class="label cursor-pointer justify-start gap-3 py-1">
-            <input
-              type="checkbox"
-              v-model="localAllowCrossSession"
-              class="checkbox checkbox-primary checkbox-sm rounded"
-            />
-            <div class="flex flex-col">
-              <span class="label-text text-sm font-semibold text-base-content">
-                {{ $t("chat.allowCrossSession") }}
-              </span>
-              <span class="text-xs text-base-content/60 leading-normal">
-                {{ $t("chat.allowCrossSessionDesc") }}
-              </span>
-            </div>
-          </label>
-        </div>
+        <label class="flex items-start gap-3 py-1 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            v-model="localAllowCrossSession"
+            class="checkbox checkbox-primary checkbox-sm rounded shrink-0 mt-0.5"
+          />
+          <div class="flex flex-col min-w-0 flex-1">
+            <span class="text-sm font-semibold text-base-content whitespace-normal break-words">
+              {{ $t("chat.allowCrossSession") }}
+            </span>
+            <span class="text-xs text-base-content/60 leading-normal whitespace-normal break-words">
+              {{ $t("chat.allowCrossSessionDesc") }}
+            </span>
+          </div>
+        </label>
 
         <!-- Prompt Textarea & Attachments -->
         <div class="form-control w-full space-y-2">
