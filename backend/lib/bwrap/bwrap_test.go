@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func TestBuildContractBody(t *testing.T) {
@@ -462,7 +463,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+proxyConfigPath)
 
 	// 2. Verify CA bundle path is in isolated host path and mounted to sandbox CA bundle path
-	expectedIsolatedBundle := filepath.Join(tmpDir, "asgard", "data", "tmp", ".asgard-ca", "chat-123", "merged-ca-certificates.crt")
+	expectedIsolatedBundle := filepath.Join(paths.CABundleDir("chat-123"), "merged-ca-certificates.crt")
 	assert.Contains(t, argStr, "--ro-bind "+expectedIsolatedBundle+" /etc/ssl/certs/ca-certificates.crt")
 	assert.NotContains(t, argStr, "--ro-bind "+caKeyPath+" /etc/ssl/certs/ca-certificates.crt")
 

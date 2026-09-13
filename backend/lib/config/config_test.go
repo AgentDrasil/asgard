@@ -369,6 +369,41 @@ func TestConfig_LanguageRules(t *testing.T) {
 	})
 }
 
+func TestConfig_GetAgentDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config returns paths.AgentsRoot()", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Equal(t, paths.AgentsRoot(), cfg.GetAgentDir())
+	})
+
+	t.Run("empty config returns paths.AgentsRoot()", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{}
+		assert.Equal(t, paths.AgentsRoot(), cfg.GetAgentDir())
+	})
+
+	t.Run("explicit agent dir returned", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{AgentDir: "/custom/agent/dir"}
+		assert.Equal(t, "/custom/agent/dir", cfg.GetAgentDir())
+	})
+
+	t.Run("validate fills AgentDir if empty", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{
+			DB:                      "sqlite",
+			DSN:                     "test.db",
+			Host:                    "127.0.0.1",
+			GeminiAPIKey:            "test-key",
+			GeminiModelForChatTitle: "gemini-3.1-flash-lite",
+		}
+		require.NoError(t, cfg.validate())
+		assert.Equal(t, paths.AgentsRoot(), cfg.AgentDir)
+	})
+}
+
 func TestConfig_Providers(t *testing.T) {
 	t.Parallel()
 

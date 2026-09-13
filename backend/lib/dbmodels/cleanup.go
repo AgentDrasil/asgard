@@ -94,7 +94,7 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			// The CA bundle container (~/tmp/.asgard-ca) holds one subdirectory per
 			// chat; sweep each chat bundle individually so bundles of live chats are
 			// never removed wholesale.
-			if base == tmpDir && entry.Name() == caBundleDirName {
+			if base == tmpDir && entry.Name() == paths.CABundleDirName {
 				caEntries, err := os.ReadDir(dirPath)
 				if err != nil {
 					continue

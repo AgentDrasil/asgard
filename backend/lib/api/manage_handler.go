@@ -100,7 +100,8 @@ func checkManageOrigin(r *http.Request) error {
 
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
-	loader := agentspec.NewLoader(s.conf.AgentDir)
+	agentDir := s.conf.GetAgentDir()
+	loader := agentspec.NewLoader(agentDir)
 	agents, err := loader.LoadAll()
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func (s *Server) reload() error {
 	}
 
 	if !hasAgentFather {
-		return fmt.Errorf("agent_father is required as the initial root agent, but was not found in the agents directory (%s). You can clone the default agents via: git clone https://github.com/AgentDrasil/asgard-agents.git %s", s.conf.AgentDir, s.conf.AgentDir)
+		return fmt.Errorf("agent_father is required as the initial root agent, but was not found in the agents directory (%s). You can clone the default agents via: git clone https://github.com/AgentDrasil/asgard-agents.git %s", agentDir, agentDir)
 	}
 
 	s.mu.Lock()

@@ -176,8 +176,6 @@ type Agent struct {
 	Status   AgentStatus       `json:"status,omitempty"`
 }
 
-const caBundleDirName = ".asgard-ca"
-
 func defaultSessionDir(chatID string) string {
 	return paths.SessionDir(chatID)
 }

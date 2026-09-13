@@ -29,7 +29,7 @@ func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusL
 	registry.Register(workflow.NewCommandRunnerWithConfig(true, conf))
 	registry.Register(workflow.NewFunctionRunner(funcRegistry))
 	if conf != nil {
-		registry.Register(workflow.NewAgentRunnerWithListener(agentspec.NewLoader(conf.AgentDir), conf, statusListener))
+		registry.Register(workflow.NewAgentRunnerWithListener(agentspec.NewLoader(conf.GetAgentDir()), conf, statusListener))
 		if conf.GeminiAPIKey != "" {
 			client, err := llm.NewClient(context.Background(), conf.GeminiAPIKey)
 			if err != nil {

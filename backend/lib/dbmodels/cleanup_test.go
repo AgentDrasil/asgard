@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/db"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func TestCleanExpiredSessions(t *testing.T) {
@@ -30,7 +31,7 @@ func TestCleanExpiredSessions(t *testing.T) {
 		return filepath.Join(sessionBase, chatID)
 	})
 	repo.SetCABundleDirFunc(func(chatID string) string {
-		return filepath.Join(tmpBase, ".asgard-ca", chatID)
+		return filepath.Join(tmpBase, paths.CABundleDirName, chatID)
 	})
 
 	expiredID := "test-expired-session-id"
@@ -45,7 +46,7 @@ func TestCleanExpiredSessions(t *testing.T) {
 	expiredSessionDir := filepath.Join(sessionBase, expiredID)
 	orphanSessionDir := filepath.Join(sessionBase, orphanID)
 
-	caBase := filepath.Join(tmpBase, ".asgard-ca")
+	caBase := filepath.Join(tmpBase, paths.CABundleDirName)
 	expiredCABundleDir := filepath.Join(caBase, expiredID)
 	orphanCABundleDir := filepath.Join(caBase, orphanID)
 	recentCABundleDir := filepath.Join(caBase, recentID)

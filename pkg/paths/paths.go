@@ -73,10 +73,19 @@ func TmpDir() string { return filepath.Join(DataDir(), "tmp") }
 // (~/asgard/data/tmp/<chatID>), bound as /tmp in the sandbox.
 func SessionTmpDir(chatID string) string { return filepath.Join(TmpDir(), chatID) }
 
+// CABundleDirName is the directory name under TmpDir() holding per-chat CA bundles.
+const CABundleDirName = ".asgard-ca"
+
+// CABundleBaseDir is the directory containing all per-session CA bundles
+// (~/asgard/data/tmp/.asgard-ca).
+func CABundleBaseDir() string {
+	return filepath.Join(TmpDir(), CABundleDirName)
+}
+
 // CABundleDir is the per-session merged CA bundle directory
 // (~/asgard/data/tmp/.asgard-ca/<chatID>).
 func CABundleDir(chatID string) string {
-	return filepath.Join(TmpDir(), ".asgard-ca", chatID)
+	return filepath.Join(CABundleBaseDir(), chatID)
 }
 
 // SockDir is a named directory under the temporary root

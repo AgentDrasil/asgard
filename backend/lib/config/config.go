@@ -87,6 +87,13 @@ func (c *Config) GetConfigPath() string {
 	return c.ConfigPath
 }
 
+func (c *Config) GetAgentDir() string {
+	if c == nil || c.AgentDir == "" {
+		return paths.AgentsRoot()
+	}
+	return c.AgentDir
+}
+
 func (c *Config) GetChatLang() string {
 	if c == nil || c.ChatLang == "" {
 		return DefaultLanguage
@@ -244,6 +251,10 @@ func (c *Config) validate() error {
 
 	if c.UILang != "" && c.UILang != "en" && c.UILang != "zh-CN" {
 		return fmt.Errorf("invalid ui_lang %q, must be 'en' or 'zh-CN'", c.UILang)
+	}
+
+	if c.AgentDir == "" {
+		c.AgentDir = paths.AgentsRoot()
 	}
 
 	for _, p := range c.Providers {
