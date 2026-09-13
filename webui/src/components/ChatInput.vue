@@ -441,7 +441,7 @@ const handleDrop = (e: DragEvent) => {
           data-testid="stop-agent-button"
         >
           <span v-if="isStoppingExecution" class="loading loading-spinner loading-xs"></span>
-          <Icon v-else icon="material-symbols:stop-rounded" class="h-4 w-4 fill-current" />
+          <Icon v-else icon="akar-icons:square-fill" class="h-4 w-4 fill-current" />
         </button>
         <button
           v-else
