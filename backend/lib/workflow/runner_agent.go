@@ -572,13 +572,13 @@ func toArtifactMap(paths []string) map[string]string {
 // while it was suspended waiting for a CLI quota decision.
 var errQuotaCancelled = errors.New("run cancelled by user while waiting for CLI quota")
 
-// quotaDecision classifies a user reply to a quota suspension prompt.
-type quotaDecision int
+// QuotaDecision classifies a user reply to a quota suspension prompt.
+type QuotaDecision int
 
 const (
-	quotaDecisionContinue quotaDecision = iota
-	quotaDecisionTarget
-	quotaDecisionCancel
+	QuotaDecisionContinue QuotaDecision = iota
+	QuotaDecisionTarget
+	QuotaDecisionCancel
 )
 
 // runWithQuotaDecisions invokes run.RunWithCandidates and, whenever no CLI
@@ -648,21 +648,21 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 				})
 			}
 
-			reply, suspErr := nctx.SuspendQuota(buildQuotaPrompt(nq, agent), quotaOptions(nq))
+			reply, suspErr := nctx.SuspendQuota(BuildQuotaPrompt(nq, agent), QuotaOptions(nq))
 			if suspErr != nil {
 				return out, target, false, fmt.Errorf("waiting for quota decision: %w", suspErr)
 			}
 
-			decision, targetModel := classifyQuotaReply(reply, effectiveTargets)
+			decision, targetModel := ClassifyQuotaReply(reply, effectiveTargets)
 			switch decision {
-			case quotaDecisionCancel:
+			case QuotaDecisionCancel:
 				log.Info().
 					Str("session_id", nctx.SessionID).
 					Str("node_id", node.ID).
 					Str("agent_id", node.AgentID).
 					Msgf("[AgentRunner] Agent %q for node %q cancelled by user while waiting for quota", node.AgentID, node.ID)
 				return nil, target, false, errQuotaCancelled
-			case quotaDecisionTarget:
+			case QuotaDecisionTarget:
 				log.Info().
 					Str("session_id", nctx.SessionID).
 					Str("node_id", node.ID).
@@ -680,12 +680,12 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 	}
 }
 
-// buildQuotaPrompt renders the suspension prompt shown to the user, listing
+// BuildQuotaPrompt renders the suspension prompt shown to the user, listing
 // every configured CLI target with its remaining quota. Pairing-unsatisfiable
 // suspensions lead with the pairing context (group/actor/actual target) from
 // NoQuotaError.PairingNote so the decision surface explains why the reviewer
 // is restricted to its paired candidates.
-func buildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
+func BuildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 	var sb strings.Builder
 	if nq.PairingNote != "" {
 		fmt.Fprintf(&sb, "Model pairing cannot be satisfied (%s).\n", nq.PairingNote)
@@ -706,10 +706,10 @@ func buildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 	return sb.String()
 }
 
-// quotaOptions builds the option buttons offered on the quota suspension
+// QuotaOptions builds the option buttons offered on the quota suspension
 // prompt. Labels never contain " / " so the frontend option parser keeps each
 // label a single button even though model IDs contain "/".
-func quotaOptions(nq *run.NoQuotaError) []string {
+func QuotaOptions(nq *run.NoQuotaError) []string {
 	opts := []string{"Wait for quota recovery, then continue"}
 	for _, t := range nq.Targets {
 		if t.Enabled && t.Remaining > 0 {
@@ -719,24 +719,24 @@ func quotaOptions(nq *run.NoQuotaError) []string {
 	return append(opts, "Cancel run")
 }
 
-// classifyQuotaReply maps a user reply to a quota decision. Replies match the
-// exact option labels produced by quotaOptions, but free-text replies are
+// ClassifyQuotaReply maps a user reply to a quota decision. Replies match the
+// exact option labels produced by QuotaOptions, but free-text replies are
 // interpreted leniently: any reply naming a configured cli+model forces that
 // target, replies containing "cancel" cancel, everything else continues.
-func classifyQuotaReply(reply string, targets []agentspec.CLITarget) (quotaDecision, string) {
+func ClassifyQuotaReply(reply string, targets []agentspec.CLITarget) (QuotaDecision, string) {
 	lower := strings.ToLower(strings.TrimSpace(reply))
 	if lower == "" {
-		return quotaDecisionContinue, ""
+		return QuotaDecisionContinue, ""
 	}
 	if strings.Contains(lower, "cancel") || strings.Contains(lower, "abort") {
-		return quotaDecisionCancel, ""
+		return QuotaDecisionCancel, ""
 	}
 	for _, t := range targets {
 		if strings.Contains(lower, strings.ToLower(t.CLI)) && strings.Contains(lower, strings.ToLower(t.Model)) {
-			return quotaDecisionTarget, t.Model
+			return QuotaDecisionTarget, t.Model
 		}
 	}
-	return quotaDecisionContinue, ""
+	return QuotaDecisionContinue, ""
 }
 
 func resolveAgentPrompt(nctx *NodeContext, node *workflowspec.NodeSpec, resuming bool) (string, error) {

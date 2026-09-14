@@ -566,6 +566,55 @@ func (r *SessionRepository) ResetAllRunningAgents() error {
 	})
 }
 
+// QuotaAskMessagePrefix marks ask_user messages raised by the single-agent
+// quota-decision loop. Unlike workflow suspensions (which are backed by a
+// persisted run snapshot and re-driven), these are served by an in-memory
+// waiter, so a crash can orphan them; startup recovery keys off this prefix.
+const QuotaAskMessagePrefix = "ask-quota-"
+
+// ResetOrphanedQuotaSuspensions clears single-agent quota suspensions left
+// behind by a crash. Unreplied quota ask_user messages are marked replied with
+// the given note (so the UI stops showing a pending decision whose waiter no
+// longer exists) and the owning agent's WaitingHuman status is reset to
+// Completed.
+func (r *SessionRepository) ResetOrphanedQuotaSuspensions(note string) error {
+	var sessions []Session
+	if err := r.db.Find(&sessions).Error; err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		dir := r.sessionDir(sess.ChatID)
+		msgs, err := ReadMessages(dir)
+		if err != nil {
+			continue
+		}
+		orphaned := false
+		for _, m := range msgs {
+			if m.Role == "ask_user" && !m.Replied && strings.HasPrefix(m.ID, QuotaAskMessagePrefix) {
+				if _, _, err := MarkAskUserReplied(dir, m.ID, note); err == nil {
+					orphaned = true
+				}
+			}
+		}
+		if !orphaned {
+			continue
+		}
+		modified := false
+		for i, a := range sess.Agents {
+			if a.Status == AgentStatusWaitingHuman {
+				sess.Agents[i].Status = AgentStatusCompleted
+				modified = true
+			}
+		}
+		if modified {
+			if err := r.db.Save(&sess).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // GetAgentSessions returns the sessions map for a specific agent in a chat.
 func (r *SessionRepository) GetAgentSessions(chatID string, agentID string) (map[string]string, error) {
 	session, err := r.GetSession(chatID)

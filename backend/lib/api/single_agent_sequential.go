@@ -14,6 +14,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -31,9 +32,21 @@ type agentRunError struct {
 func (e *agentRunError) Error() string { return e.Err.Error() }
 func (e *agentRunError) Unwrap() error { return e.Err }
 
+// quotaAskMessageID derives the ask_user MessageID for a single-agent quota
+// suspension. The sequence suffix keeps re-suspensions (after a "wait" reply
+// that found quota still exhausted) distinct from the first prompt.
+func quotaAskMessageID(chatID, agentID string, seq int) string {
+	id := fmt.Sprintf("%s%s-%s", dbmodels.QuotaAskMessagePrefix, chatID, agentID)
+	if seq > 1 {
+		return fmt.Sprintf("%s-%d", id, seq)
+	}
+	return id
+}
+
 // executeSequential runs the first available CLI target (by quota) and streams results.
-// If the selected target runs out of quota, it asks the user via ask_user whether to
-// wait for quota recovery or match downwards starting from the current target.
+// When no target has usable quota it asks the user for a decision (reusing the
+// workflow quota decision surface: wait for recovery, force a specific target,
+// or cancel) and retries accordingly.
 func (e *SingleAgentExecutor) executeSequential(
 	ctx context.Context,
 	prompt string,
@@ -67,16 +80,25 @@ func (e *SingleAgentExecutor) executeSequential(
 		allowCrossSession = session.AllowCrossSession
 	}
 
-	var candidates []agentspec.CLITarget
-	currModelOpt := modelOpt
+	// forcedModel pins the target across retries: modelOpt by default, or the
+	// model the user explicitly picked after a quota suspension.
+	forcedModel := modelOpt
+	suspended := false
+	quotaSeq := 0
 
 	for {
+		// Reset back to Running only when returning from a suspension so the
+		// initial Running status written by Execute is not churned.
+		if suspended {
+			e.setAgentRunning(chatID)
+		}
+
 		runToken := uuid.NewV7().String()
 		resultCh := make(chan seqRunResult, 1)
-		go func(cands []agentspec.CLITarget, mOpt optional.Option[string]) {
-			out, target, err := run.RunWithCandidates(ctx, e.agent, cands, prompt, sessions, runDirOpt, mOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
+		go func(mOpt optional.Option[string]) {
+			out, target, err := run.RunWithCandidates(ctx, e.agent, nil, prompt, sessions, runDirOpt, mOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
 			resultCh <- seqRunResult{out: out, target: target, err: err}
-		}(candidates, currModelOpt)
+		}(forcedModel)
 
 		result, err := e.drainUntilResult(ctx, chatID, runDirOpt, statusCh, resultCh)
 		if err != nil {
@@ -84,7 +106,7 @@ func (e *SingleAgentExecutor) executeSequential(
 		}
 
 		if result.err == nil {
-			return e.handleFinalResult(result.out, result.target, chatID, runDirOpt, currModelOpt, sessionMode)
+			return e.handleFinalResult(result.out, result.target, chatID, runDirOpt, forcedModel, sessionMode)
 		}
 
 		var nq *run.NoQuotaError
@@ -92,122 +114,133 @@ func (e *SingleAgentExecutor) executeSequential(
 			return "", &agentRunError{Err: result.err}
 		}
 
-		// Quota exhausted. Determine which target ran out of quota.
-		targetModel := ""
-		if currModelOpt.IsSome() {
-			targetModel = currModelOpt.Unwrap()
-		} else if nq.ExplicitModel != "" {
-			targetModel = nq.ExplicitModel
-		} else if result.target.Model != "" {
-			targetModel = result.target.Model
+		// Quota exhausted. Without any way to reach the user, fail fast with
+		// the informative NoQuotaError instead of blocking forever.
+		if e.suspendQuota == nil && e.server == nil {
+			return "", &agentRunError{Err: nq}
 		}
 
-		targetIdx := -1
-		for i, t := range e.agent.Config.CLI {
-			if targetModel != "" && t.Model == targetModel {
-				targetIdx = i
-				break
-			}
+		quotaSeq++
+		reply, suspErr := e.requestQuotaDecision(
+			ctx, chatID,
+			workflow.BuildQuotaPrompt(nq, e.agent),
+			workflow.QuotaOptions(nq),
+			quotaSeq,
+		)
+		if suspErr != nil {
+			return "", suspErr
 		}
 
-		var downwardsCandidates []agentspec.CLITarget
-		if targetIdx >= 0 && targetIdx+1 < len(e.agent.Config.CLI) {
-			downwardsCandidates = e.agent.Config.CLI[targetIdx+1:]
-		}
-		hasDownwards := len(downwardsCandidates) > 0
-
-		var promptText string
-		if targetModel != "" {
-			promptText = fmt.Sprintf("模型 %s 配额不足，无法继续执行。", targetModel)
-		} else {
-			promptText = "当前模型配额不足，无法继续执行。"
-		}
-
-		if hasDownwards {
-			promptText += "\n\n您可以等待配额恢复后重试，或从当前模型开始往下匹配其他可用模型，也可以取消执行。\n\nOptions: 等待配额恢复后重试 / 从当前模型往下匹配 / 取消执行"
-		} else {
-			promptText += "\n\n后续已无更多可用模型。您可以等待配额恢复后重试，或取消执行。\n\nOptions: 等待配额恢复后重试 / 取消执行"
-		}
-
-		if e.repo != nil {
-			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusWaitingHuman)
-		}
-		if e.server != nil {
-			e.server.PublishSessionEvent(chatID, SessionEvent{
-				Type:    "status",
-				Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": false},
-			})
-		}
-
-		msgID := fmt.Sprintf("ask-%s", uuid.NewV7().String())
-		askMsg := dbmodels.ChatMessage{
-			ID:        msgID,
-			Role:      "ask_user",
-			Content:   promptText,
-			AgentName: e.agent.Config.Name,
-			Timestamp: time.Now().UnixMilli(),
-			Model:     targetModel,
-		}
-		if e.repo != nil {
-			if appendErr := e.repo.AppendMessage(chatID, askMsg); appendErr != nil {
-				log.Error().Err(appendErr).Str("chat_id", chatID).Msg("failed to append ask_user message")
-			}
-		}
-		if e.server != nil {
-			e.server.PublishSessionEvent(chatID, SessionEvent{
-				Type:    "message",
-				Message: &askMsg,
-			})
-			e.server.SendPushNotification(chatID, promptText, e.agent.Config.Name)
-		}
-
-		replyCh, unregister := RegisterAskWaiter(chatID, msgID)
-		var userReply string
-		select {
-		case reply := <-replyCh:
-			userReply = reply
-			unregister()
-		case <-ctx.Done():
-			unregister()
-			return "", ctx.Err()
-		}
-
-		cleanReply := strings.TrimSpace(userReply)
-		lowerReply := strings.ToLower(cleanReply)
-
-		if strings.Contains(cleanReply, "取消") || strings.Contains(lowerReply, "cancel") || strings.Contains(lowerReply, "abort") {
-			if e.repo != nil {
-				cancelMsg := dbmodels.ChatMessage{
-					ID:           fmt.Sprintf("cancelled-%s-%s", chatID, uuid.NewV7().String()),
-					Role:         "activity",
-					ActivityType: "CANCELLED",
-					Content:      "execution cancelled due to quota exhaustion",
-					Timestamp:    time.Now().UnixMilli(),
-				}
-				if appendErr := e.repo.AppendMessage(chatID, cancelMsg); appendErr == nil && e.server != nil {
-					e.server.PublishSessionEvent(chatID, SessionEvent{
-						Type:    "message",
-						Message: &cancelMsg,
-					})
-				}
-			}
+		decision, targetModel := workflow.ClassifyQuotaReply(reply, e.agent.Config.CLI)
+		switch decision {
+		case workflow.QuotaDecisionCancel:
+			e.recordQuotaCancellation(chatID)
 			return "", fmt.Errorf("execution cancelled by user")
+		case workflow.QuotaDecisionTarget:
+			forcedModel = optional.Some(targetModel)
+		default:
+			// Wait/continue: re-check quota with the original selection policy.
+			forcedModel = modelOpt
 		}
+		suspended = true
+	}
+}
 
-		if hasDownwards && (strings.Contains(cleanReply, "往下") || strings.Contains(cleanReply, "匹配") || strings.Contains(lowerReply, "down") || strings.Contains(lowerReply, "next")) {
-			candidates = downwardsCandidates
-			currModelOpt = optional.None[string]()
-		}
+// requestQuotaDecision obtains the user's quota decision. A test- or
+// host-injected suspendQuota wins; otherwise the chat-session transport is
+// used.
+func (e *SingleAgentExecutor) requestQuotaDecision(ctx context.Context, chatID, prompt string, options []string, seq int) (string, error) {
+	if e.suspendQuota != nil {
+		return e.suspendQuota(ctx, chatID, e.agent.Config.Name, prompt, options)
+	}
+	return e.askUserQuota(ctx, chatID, prompt, options, seq)
+}
 
-		if e.repo != nil {
-			_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning)
+// askUserQuota delivers a quota-decision prompt through the chat session and
+// blocks until the user replies or ctx is cancelled. The prompt is appended
+// with the same "Options: a / b" convention the workflow quota surface uses,
+// so the WebUI renders option buttons automatically.
+func (e *SingleAgentExecutor) askUserQuota(ctx context.Context, chatID, prompt string, options []string, seq int) (string, error) {
+	text := prompt
+	if len(options) > 0 {
+		text = text + "\n\nOptions: " + strings.Join(options, " / ")
+	}
+
+	e.setAgentWaitingHuman(chatID)
+
+	msgID := quotaAskMessageID(chatID, e.agent.Config.ID, seq)
+	askMsg := dbmodels.ChatMessage{
+		ID:        msgID,
+		Role:      "ask_user",
+		Content:   text,
+		AgentName: e.agent.Config.Name,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	if e.repo != nil {
+		if appendErr := e.repo.AppendMessage(chatID, askMsg); appendErr != nil {
+			log.Error().Err(appendErr).Str("chat_id", chatID).Msg("failed to append quota ask_user message")
 		}
-		if e.server != nil {
-			e.server.PublishSessionEvent(chatID, SessionEvent{
-				Type:    "status",
-				Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": true},
-			})
-		}
+	}
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{Type: "message", Message: &askMsg})
+		e.server.SendPushNotification(chatID, text, e.agent.Config.Name)
+	}
+
+	replyCh, unregister := RegisterAskWaiter(chatID, msgID)
+	defer unregister()
+
+	select {
+	case reply := <-replyCh:
+		return reply, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// setAgentRunning marks the agent running and broadcasts the status transition.
+func (e *SingleAgentExecutor) setAgentRunning(chatID string) {
+	if e.repo != nil {
+		_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning)
+	}
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": true},
+		})
+	}
+}
+
+// setAgentWaitingHuman marks the agent as parked on a quota decision.
+func (e *SingleAgentExecutor) setAgentWaitingHuman(chatID string) {
+	if e.repo != nil {
+		_ = e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusWaitingHuman)
+	}
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{
+			Type:    "status",
+			Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": false},
+		})
+	}
+}
+
+// recordQuotaCancellation appends and broadcasts a CANCELLED activity marker.
+func (e *SingleAgentExecutor) recordQuotaCancellation(chatID string) {
+	if e.repo == nil {
+		return
+	}
+	cancelMsg := dbmodels.ChatMessage{
+		ID:           fmt.Sprintf("cancelled-%s-%s", chatID, uuid.NewV7().String()),
+		Role:         "activity",
+		ActivityType: "CANCELLED",
+		Content:      "execution cancelled due to quota exhaustion",
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	if err := e.repo.AppendMessage(chatID, cancelMsg); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append quota cancellation activity")
+		return
+	}
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{Type: "message", Message: &cancelMsg})
 	}
 }
 

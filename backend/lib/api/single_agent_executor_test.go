@@ -231,12 +231,13 @@ func TestSingleAgentExecutor_Attachments(t *testing.T) {
 	}
 
 	// When Execute runs, it persists the userMsg with prompt and params.Attachments
-	// Since run.Run will try to run CLI without mock backend, we can test the pre-run persistence and parameters
-	// Or we can invoke Execute and let it finish or fail, then verify the DB state
-	// NoQuotaError without a mock backend would block on the ask-user waiter, so cancel promptly.
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	_, _ = executor.Execute(ctx, SingleAgentRunParams{
+	// Since run.Run will try to run CLI without mock backend, we can test the pre-run persistence and parameters.
+	// Without quota the run would suspend on a user decision, so inject a
+	// deterministic cancel to keep Execute non-blocking.
+	executor.suspendQuota = func(context.Context, string, string, string, []string) (string, error) {
+		return "Cancel run", nil
+	}
+	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
 		ChatID:      chatID,
 		Prompt:      "Analyze user files",
 		Attachments: attachments,
@@ -304,11 +305,9 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 	sessionTmpDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
 	assert.NoDirExists(t, sessionTmpDir)
 
-	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat
-	// NoQuotaError without a mock backend would block on the ask-user waiter, so cancel promptly.
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	_, _ = executor.Execute(ctx, SingleAgentRunParams{
+	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat.
+	// With no server and no injected suspension, the quota path fails fast rather than blocking.
+	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
 		ChatID: chatID,
 		Prompt: "Test tmp run_dir creation",
 		RunDir: "tmp",

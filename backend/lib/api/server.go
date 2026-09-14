@@ -272,6 +272,11 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		if err := repo.ResetAllRunningAgents(); err != nil {
 			log.Warn().Err(err).Msg("failed to reset stale running agents on startup")
 		}
+		// Single-agent quota suspensions are served by an in-memory waiter; a
+		// crash orphans them, so retire any pending decision left in the DB.
+		if err := repo.ResetOrphanedQuotaSuspensions("Server restarted while waiting for a quota decision; this request was cancelled. Please send your message again."); err != nil {
+			log.Warn().Err(err).Msg("failed to reset orphaned quota suspensions on startup")
+		}
 		wfRepo := dbmodels.NewWorkflowRunRepository(dbConn)
 		s.workflowRunRepo = wfRepo
 		if err := wfRepo.ResetAllRunningWorkflows(); err != nil {

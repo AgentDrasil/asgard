@@ -39,6 +39,12 @@ type SingleAgentExecutor struct {
 	repo      *dbmodels.SessionRepository
 	server    *Server
 	llmClient llm.Client
+
+	// suspendQuota requests a quota decision from the user and blocks until a
+	// reply arrives or ctx is cancelled. It returns the raw reply text. When
+	// nil, requestQuotaDecision falls back to the chat-session ask-user
+	// transport. Tests inject a stub so quota decisions are deterministic.
+	suspendQuota func(ctx context.Context, chatID, agentName, prompt string, options []string) (string, error)
 }
 
 // NewSingleAgentExecutor creates a SingleAgentExecutor for the given agent.
@@ -98,34 +104,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
-	modelOpt := optional.None[string]()
-	if params.Model != "" {
-		modelOpt = optional.Some(params.Model)
-	} else if params.Metadata != nil {
-		if m, ok := params.Metadata["model"].(string); ok && m != "" {
-			modelOpt = optional.Some(m)
-		}
-	}
-
-	if modelOpt.IsNone() && session != nil {
-		for _, dbAgent := range session.Agents {
-			if dbAgent.Name == e.agent.Config.Name || dbAgent.Name == e.agent.Config.ID {
-				if dbAgent.Model != "" {
-					modelOpt = optional.Some(dbAgent.Model)
-					break
-				}
-			}
-		}
-		if modelOpt.IsNone() && len(session.Messages) > 0 {
-			for i := len(session.Messages) - 1; i >= 0; i-- {
-				m := session.Messages[i]
-				if m.Role == "assistant" && m.Model != "" {
-					modelOpt = optional.Some(m.Model)
-					break
-				}
-			}
-		}
-	}
+	modelOpt := resolveModel(params, session, e.agent.Config)
 
 	// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
 	if runDirOpt.IsSome() {
@@ -155,11 +134,6 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	if e.repo != nil {
 		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
 			return "", fmt.Errorf("failed to pre-update agent session: %w", err)
-		}
-		if modelOpt.IsSome() {
-			if err := e.repo.UpdateAgentModel(chatID, e.agent.Config.ID, modelOpt.Unwrap()); err != nil {
-				return "", fmt.Errorf("failed to pre-update agent model: %w", err)
-			}
 		}
 		// Save incoming message to session in DB
 		if prompt != "" {
@@ -563,4 +537,50 @@ func generateSessionTitle(ctx context.Context, client llm.Client, model string, 
 	title = strings.TrimSpace(title)
 	title = strings.Trim(title, "\"`")
 	return title, nil
+}
+
+// storedAgentModel returns the model persisted for the given agent config in a
+// session, matched by the agent's name or ID.
+func storedAgentModel(session *dbmodels.Session, cfg agentspec.AgentConfig) string {
+	for _, a := range session.Agents {
+		if a.Name == cfg.Name || a.Name == cfg.ID {
+			return a.Model
+		}
+	}
+	return ""
+}
+
+// configuredModel reports whether model is one of the agent's configured CLI
+// targets.
+func configuredModel(cfg agentspec.AgentConfig, model string) bool {
+	for _, t := range cfg.CLI {
+		if t.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveModel determines the model to run. An explicit request (the run
+// parameter, then metadata) wins; otherwise it falls back to the model this
+// agent last used in the session. The stored model is only honoured while it
+// is still configured: a model removed or renamed in config must not pin the
+// session to a target run.RunWithCandidates would reject as unknown (a hard
+// error the quota-decision loop cannot recover from). Other agents' stored
+// models and assistant-message models are never inherited.
+func resolveModel(params SingleAgentRunParams, session *dbmodels.Session, cfg agentspec.AgentConfig) optional.Option[string] {
+	if params.Model != "" {
+		return optional.Some(params.Model)
+	}
+	if params.Metadata != nil {
+		if m, ok := params.Metadata["model"].(string); ok && m != "" {
+			return optional.Some(m)
+		}
+	}
+	if session != nil {
+		if m := storedAgentModel(session, cfg); m != "" && configuredModel(cfg, m) {
+			return optional.Some(m)
+		}
+	}
+	return optional.None[string]()
 }

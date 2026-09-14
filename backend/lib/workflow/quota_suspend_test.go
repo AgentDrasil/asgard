@@ -61,10 +61,10 @@ func (r *quotaAgentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflo
 		if err != nil {
 			return nil, err
 		}
-		switch decision, model := classifyQuotaReply(reply, r.targets); decision {
-		case quotaDecisionCancel:
+		switch decision, model := ClassifyQuotaReply(reply, r.targets); decision {
+		case QuotaDecisionCancel:
 			return nil, errQuotaCancelled
-		case quotaDecisionTarget:
+		case QuotaDecisionTarget:
 			_ = model // forced target would be applied to the next run.Run call
 		}
 		// continue: re-check quota
@@ -451,14 +451,14 @@ func TestBuildQuotaPromptAndOptions(t *testing.T) {
 		},
 	}
 
-	prompt := buildQuotaPrompt(nq, agent)
+	prompt := BuildQuotaPrompt(nq, agent)
 	assert.Contains(t, prompt, `Agent "Commit Agent" (commit-agent) cannot start`)
 	assert.Contains(t, prompt, "agy gemini-3.7-flash-low: 2% remaining")
 	assert.Contains(t, prompt, "opencode zai-coding-plan/glm-5.3-flash/high: 0% remaining")
 	assert.Contains(t, prompt, "simplest x: provider disabled")
 	assert.NotContains(t, prompt, "Model pairing cannot be satisfied", "non-pairing quota prompts must not carry the pairing prefix")
 
-	opts := quotaOptions(nq)
+	opts := QuotaOptions(nq)
 	assert.Equal(t, []string{
 		"Wait for quota recovery, then continue",
 		"Use agy gemini-3.7-flash-low",
@@ -475,7 +475,7 @@ func TestBuildQuotaPromptAndOptions(t *testing.T) {
 		MinThreshold:  0.10,
 		Targets:       nq.Targets,
 	}
-	assert.Contains(t, buildQuotaPrompt(nqExplicit, agent), "selected model gemini-3.7-flash-low is out of quota")
+	assert.Contains(t, BuildQuotaPrompt(nqExplicit, agent), "selected model gemini-3.7-flash-low is out of quota")
 }
 
 // TestBuildQuotaPrompt_PairingNote pins the B1 fix: pairing-unsatisfiable
@@ -495,7 +495,7 @@ func TestBuildQuotaPrompt_PairingNote(t *testing.T) {
 		},
 	}
 
-	prompt := buildQuotaPrompt(nq, agent)
+	prompt := BuildQuotaPrompt(nq, agent)
 	assert.Contains(t, prompt, "Model pairing cannot be satisfied ("+note+")")
 	assert.Contains(t, prompt, `Agent "Review Agent" (review-agent) cannot start`)
 	// The pairing line leads the prompt, before the generic quota body.
@@ -511,24 +511,24 @@ func TestClassifyQuotaReply(t *testing.T) {
 	tests := []struct {
 		name         string
 		reply        string
-		wantDecision quotaDecision
+		wantDecision QuotaDecision
 		wantModel    string
 	}{
-		{name: "exact wait label continues", reply: "Wait for quota recovery, then continue", wantDecision: quotaDecisionContinue},
-		{name: "exact cancel label cancels", reply: "Cancel run", wantDecision: quotaDecisionCancel},
-		{name: "free text cancel cancels", reply: "please cancel this", wantDecision: quotaDecisionCancel},
-		{name: "abort cancels", reply: "abort", wantDecision: quotaDecisionCancel},
-		{name: "exact target label forces model", reply: "Use agy gemini-3.7-flash-low", wantDecision: quotaDecisionTarget, wantModel: "gemini-3.7-flash-low"},
-		{name: "target label with slashes forces model", reply: "Use opencode zai-coding-plan/glm-5.3-flash/high", wantDecision: quotaDecisionTarget, wantModel: "zai-coding-plan/glm-5.3-flash/high"},
-		{name: "free text naming cli and model forces model", reply: "just use opencode with zai-coding-plan/glm-5.3-flash/high please", wantDecision: quotaDecisionTarget, wantModel: "zai-coding-plan/glm-5.3-flash/high"},
-		{name: "unrecognized free text continues", reply: "whatever, go on", wantDecision: quotaDecisionContinue},
-		{name: "empty reply continues", reply: "   ", wantDecision: quotaDecisionContinue},
-		{name: "cli name alone does not force", reply: "use agy maybe", wantDecision: quotaDecisionContinue},
+		{name: "exact wait label continues", reply: "Wait for quota recovery, then continue", wantDecision: QuotaDecisionContinue},
+		{name: "exact cancel label cancels", reply: "Cancel run", wantDecision: QuotaDecisionCancel},
+		{name: "free text cancel cancels", reply: "please cancel this", wantDecision: QuotaDecisionCancel},
+		{name: "abort cancels", reply: "abort", wantDecision: QuotaDecisionCancel},
+		{name: "exact target label forces model", reply: "Use agy gemini-3.7-flash-low", wantDecision: QuotaDecisionTarget, wantModel: "gemini-3.7-flash-low"},
+		{name: "target label with slashes forces model", reply: "Use opencode zai-coding-plan/glm-5.3-flash/high", wantDecision: QuotaDecisionTarget, wantModel: "zai-coding-plan/glm-5.3-flash/high"},
+		{name: "free text naming cli and model forces model", reply: "just use opencode with zai-coding-plan/glm-5.3-flash/high please", wantDecision: QuotaDecisionTarget, wantModel: "zai-coding-plan/glm-5.3-flash/high"},
+		{name: "unrecognized free text continues", reply: "whatever, go on", wantDecision: QuotaDecisionContinue},
+		{name: "empty reply continues", reply: "   ", wantDecision: QuotaDecisionContinue},
+		{name: "cli name alone does not force", reply: "use agy maybe", wantDecision: QuotaDecisionContinue},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, model := classifyQuotaReply(tt.reply, targets)
+			decision, model := ClassifyQuotaReply(tt.reply, targets)
 			assert.Equal(t, tt.wantDecision, decision)
 			assert.Equal(t, tt.wantModel, model)
 		})

@@ -867,3 +867,41 @@ func TestSession_SaveSession_FullFlushAtomicAndCountResync(t *testing.T) {
 	require.NotNil(t, finalSess)
 	assert.NotEmpty(t, finalSess.Messages)
 }
+
+func TestResetOrphanedQuotaSuspensions(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string { return filepath.Join(tempDir, chatID) })
+
+	chatID := "test-chat-orphaned-quota"
+	agentID := "quota-agent"
+	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID, CurrentAgent: agentID}))
+
+	quotaMsgID := QuotaAskMessagePrefix + chatID + "-" + agentID
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: quotaMsgID, Role: "ask_user", Content: "no quota"}))
+	// A normal ask_user message must be left untouched.
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: "ask-regular", Role: "ask_user", Content: "regular"}))
+	require.NoError(t, repo.UpdateAgentStatus(chatID, agentID, AgentStatusWaitingHuman))
+
+	require.NoError(t, repo.ResetOrphanedQuotaSuspensions("cancelled on restart"))
+
+	sess, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+
+	byID := map[string]ChatMessage{}
+	for _, m := range sess.Messages {
+		byID[m.ID] = m
+	}
+	assert.True(t, byID[quotaMsgID].Replied, "orphaned quota message should be marked replied")
+	assert.Equal(t, "cancelled on restart", byID[quotaMsgID].ReplyText)
+	assert.False(t, byID["ask-regular"].Replied, "non-quota ask_user messages must not be touched")
+
+	for _, a := range sess.Agents {
+		if a.Name == agentID {
+			assert.Equal(t, AgentStatusCompleted, a.Status)
+		}
+	}
+}
