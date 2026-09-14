@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -232,7 +233,10 @@ func TestSingleAgentExecutor_Attachments(t *testing.T) {
 	// When Execute runs, it persists the userMsg with prompt and params.Attachments
 	// Since run.Run will try to run CLI without mock backend, we can test the pre-run persistence and parameters
 	// Or we can invoke Execute and let it finish or fail, then verify the DB state
-	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
+	// NoQuotaError without a mock backend would block on the ask-user waiter, so cancel promptly.
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	_, _ = executor.Execute(ctx, SingleAgentRunParams{
 		ChatID:      chatID,
 		Prompt:      "Analyze user files",
 		Attachments: attachments,
@@ -301,7 +305,10 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 	assert.NoDirExists(t, sessionTmpDir)
 
 	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat
-	_, _ = executor.Execute(t.Context(), SingleAgentRunParams{
+	// NoQuotaError without a mock backend would block on the ask-user waiter, so cancel promptly.
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	_, _ = executor.Execute(ctx, SingleAgentRunParams{
 		ChatID: chatID,
 		Prompt: "Test tmp run_dir creation",
 		RunDir: "tmp",

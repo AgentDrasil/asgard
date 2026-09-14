@@ -43,6 +43,25 @@ type AskUserReplyRequest struct {
 	ReplyText string `json:"reply_text"`
 }
 
+// RegisterAskWaiter registers a waiter channel for a messageID in a chatID.
+// It returns the receive-only channel and a cleanup function that must be deferred or called when done.
+func RegisterAskWaiter(chatID, messageID string) (<-chan string, func()) {
+	askWaitersMu.Lock()
+	defer askWaitersMu.Unlock()
+	replyCh := make(chan string, 1)
+	waiter := &askUserWaiter{
+		chatID:    chatID,
+		messageID: messageID,
+		replyCh:   replyCh,
+	}
+	askWaiters[messageID] = waiter
+	return replyCh, func() {
+		askWaitersMu.Lock()
+		delete(askWaiters, messageID)
+		askWaitersMu.Unlock()
+	}
+}
+
 func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	var req AskUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -89,23 +108,8 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.SendPushNotification(req.ChatID, req.Question, req.AgentName)
 	}
-
-	replyCh := make(chan string, 1)
-	waiter := &askUserWaiter{
-		chatID:    req.ChatID,
-		messageID: req.MessageID,
-		replyCh:   replyCh,
-	}
-
-	askWaitersMu.Lock()
-	askWaiters[req.MessageID] = waiter
-	askWaitersMu.Unlock()
-
-	defer func() {
-		askWaitersMu.Lock()
-		delete(askWaiters, req.MessageID)
-		askWaitersMu.Unlock()
-	}()
+	replyCh, unregister := RegisterAskWaiter(req.ChatID, req.MessageID)
+	defer unregister()
 
 	select {
 	case reply := <-replyCh:

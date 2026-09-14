@@ -107,6 +107,26 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		}
 	}
 
+	if modelOpt.IsNone() && session != nil {
+		for _, dbAgent := range session.Agents {
+			if dbAgent.Name == e.agent.Config.Name || dbAgent.Name == e.agent.Config.ID {
+				if dbAgent.Model != "" {
+					modelOpt = optional.Some(dbAgent.Model)
+					break
+				}
+			}
+		}
+		if modelOpt.IsNone() && len(session.Messages) > 0 {
+			for i := len(session.Messages) - 1; i >= 0; i-- {
+				m := session.Messages[i]
+				if m.Role == "assistant" && m.Model != "" {
+					modelOpt = optional.Some(m.Model)
+					break
+				}
+			}
+		}
+	}
+
 	// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
 	if runDirOpt.IsSome() {
 		rd := runDirOpt.Unwrap()
@@ -135,6 +155,11 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	if e.repo != nil {
 		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
 			return "", fmt.Errorf("failed to pre-update agent session: %w", err)
+		}
+		if modelOpt.IsSome() {
+			if err := e.repo.UpdateAgentModel(chatID, e.agent.Config.ID, modelOpt.Unwrap()); err != nil {
+				return "", fmt.Errorf("failed to pre-update agent model: %w", err)
+			}
 		}
 		// Save incoming message to session in DB
 		if prompt != "" {

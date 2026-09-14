@@ -174,6 +174,7 @@ type Agent struct {
 	// For fresh-mode agents this map is not written.
 	Sessions map[string]string `json:"sessions,omitempty"`
 	Status   AgentStatus       `json:"status,omitempty"`
+	Model    string            `json:"model,omitempty"`
 }
 
 func defaultSessionDir(chatID string) string {
@@ -491,6 +492,47 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 			}
 			if sessionID != "" && cliKey != "" {
 				newAgent.Sessions = map[string]string{cliKey: sessionID}
+			}
+			sessPtr.Agents = append(sessPtr.Agents, newAgent)
+		}
+
+		return tx.Save(sessPtr).Error
+	})
+}
+
+// UpdateAgentModel updates the active model for a specific agent in a chat.
+func (r *SessionRepository) UpdateAgentModel(chatID string, agentID string, model string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
+		}
+
+		var sessPtr *Session
+		if err == nil {
+			sessPtr = &session
+		} else {
+			sessPtr = &Session{
+				ChatID:       chatID,
+				CurrentAgent: agentID,
+			}
+		}
+
+		found := false
+		for i, a := range sessPtr.Agents {
+			if a.Name == agentID {
+				sessPtr.Agents[i].Model = model
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			newAgent := Agent{
+				Name:   agentID,
+				Status: AgentStatusCompleted,
+				Model:  model,
 			}
 			sessPtr.Agents = append(sessPtr.Agents, newAgent)
 		}
