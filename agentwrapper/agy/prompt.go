@@ -1,6 +1,7 @@
 package agy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -44,9 +45,38 @@ func SplitModelVariant(model string) (string, string) {
 	return model, ""
 }
 
+type streamUserInput struct {
+	Event   string            `json:"event"`
+	Message streamUserMessage `json:"message"`
+}
+
+type streamUserMessage struct {
+	Content string `json:"content"`
+}
+
+func formatPromptInput(prompt string) ([]byte, error) {
+	msg := streamUserInput{
+		Event: "user",
+		Message: streamUserMessage{
+			Content: prompt,
+		},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling prompt input: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
 // buildPromptArgv constructs the command-line arguments for running agy.
-func buildPromptArgv(runDir string, prompt string, opts types.PromptOptions) []string {
-	argv := []string{"agy", "--dangerously-skip-permissions", "--output-format", "stream-json", "--add-dir", runDir}
+func buildPromptArgv(runDir string, opts types.PromptOptions) []string {
+	argv := []string{
+		"agy",
+		"--dangerously-skip-permissions",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--add-dir", runDir,
+	}
 	if opts.AddTmpToDir {
 		argv = append(argv, "--add-dir", "/tmp")
 	}
@@ -60,12 +90,12 @@ func buildPromptArgv(runDir string, prompt string, opts types.PromptOptions) []s
 			argv = append(argv, "--effort", effort)
 		}
 	}
-	argv = append(argv, "--print", prompt)
 	return argv
 }
 
-// Prompt runs `agy --dangerously-skip-permissions --output-format stream-json
-// --add-dir <dir> [-p|--print] <prompt>` and streams NDJSON events until the process exits.
+// Prompt runs `agy --dangerously-skip-permissions --input-format stream-json --output-format stream-json
+// --add-dir <dir>` with the prompt piped via stdin as a stream-json NDJSON message,
+// and streams NDJSON events until the process exits.
 //
 // Compared to the old PTY-based approach, this requires no terminal emulation,
 // no statusline polling, and no transcript file tailing. The agy process
@@ -99,12 +129,18 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 	defer restoreContract()
 
-	argv := buildPromptArgv(runDir, prompt, opts)
+	inputBytes, err := formatPromptInput(prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	argv := buildPromptArgv(runDir, opts)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = runDir
+	cmd.Stdin = bytes.NewReader(inputBytes)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
