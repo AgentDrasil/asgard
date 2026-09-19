@@ -457,6 +457,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 type ConfigResponse struct {
 	FirebaseWebpushWeb *config.FirebaseWebpushWebConfig `json:"firebase_webpush_web,omitempty"`
 	DefaultUILang      string                           `json:"default_ui_lang,omitempty"`
+	ProxyEnvs          []string                         `json:"proxy_envs,omitempty"`
 }
 
 // handleConfig handles GET /api/config.
@@ -464,6 +465,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	resp := ConfigResponse{
 		FirebaseWebpushWeb: s.conf.FirebaseWebpushWeb,
 		DefaultUILang:      s.conf.GetUILang(),
+		ProxyEnvs:          s.conf.ProxyEnvNames(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

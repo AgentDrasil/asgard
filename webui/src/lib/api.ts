@@ -480,6 +480,7 @@ export async function registerPushToken(token: string): Promise<boolean> {
 export async function getBackendConfig(): Promise<{
   firebase_webpush_web?: FirebaseWebpushWebConfig;
   default_ui_lang?: string;
+  proxy_envs?: string[];
 }> {
   try {
     const res = await apiFetch("/api/config");

@@ -1412,3 +1412,34 @@ rules:
 	assert.Equal(t, http.StatusOK, reloadW.Code)
 	assert.Contains(t, reloadW.Body.String(), "proxy config reloaded")
 }
+
+func TestHandleConfig_ProxyEnvs(t *testing.T) {
+	t.Parallel()
+
+	conf := &config.Config{
+		UILang: "zh-CN",
+		Proxy: &proxy.Config{
+			Enable: true,
+			Rules: []proxy.Rule{
+				{Host: "api.openai.com", HeaderKey: "Authorization", RealSecret: "s1", Env: "OPENAI_API_KEY"},
+				{Host: "generativelanguage.googleapis.com", HeaderKey: "x-goog-api-key", RealSecret: "s2", Env: "GEMINI_API_KEY"},
+				{Host: "other.com", HeaderKey: "Authorization", RealSecret: "s3", Env: "OPENAI_API_KEY"},
+				{Host: "noenv.com", HeaderKey: "Authorization", RealSecret: "s4", Env: ""},
+			},
+		},
+	}
+
+	srv := &Server{conf: conf}
+	srv.mux = srv.buildMuxLocked()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp ConfigResponse
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "zh-CN", resp.DefaultUILang)
+	assert.Equal(t, []string{"GEMINI_API_KEY", "OPENAI_API_KEY"}, resp.ProxyEnvs)
+}

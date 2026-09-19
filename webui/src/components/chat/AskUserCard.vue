@@ -8,6 +8,7 @@ import { formatTimestamp } from "../../lib/format";
 import { sendAskUserReply } from "../../lib/api";
 import { parseOptions } from "../../utils/askUserOptions";
 import { useShortcuts } from "../../composables/useShortcuts";
+import SlashCommandMenu from "./SlashCommandMenu.vue";
 
 const { matchShortcut, sendShortcut } = useShortcuts();
 
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 }>();
 
 const inlineInput = ref("");
+const inputRef = ref<HTMLInputElement | null>(null);
 const isSubmitting = ref(false);
 const isSubmitted = ref(false);
 const submittedText = ref("");
@@ -146,6 +148,7 @@ const handleInputKeyDown = (e: KeyboardEvent) => {
         class="flex items-center gap-2 pt-2 border-t border-warning/20"
       >
         <input
+          ref="inputRef"
           v-model="inlineInput"
           @keydown="handleInputKeyDown"
           type="text"
@@ -153,6 +156,7 @@ const handleInputKeyDown = (e: KeyboardEvent) => {
           class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
           :disabled="isSubmitting"
         />
+        <SlashCommandMenu :target-element="inputRef" v-model="inlineInput" />
         <button
           @click="submitReply()"
           class="btn btn-sm btn-warning gap-1 text-xs"

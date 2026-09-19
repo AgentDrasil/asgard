@@ -226,4 +226,26 @@ func TestAskUserHandler_MultipleWaiters_NoArbitraryFallback(t *testing.T) {
 	default:
 		// Expected
 	}
+
+	// 4. Reply with /env:KEY -> should convert to env `KEY`
+	envReqBody, err := json.Marshal(AskUserReplyRequest{
+		ChatID:    chatID,
+		MessageID: "msg-2",
+		ReplyText: "Use /env:GEMINI_API_KEY now",
+	})
+	require.NoError(t, err)
+
+	envReq := httptest.NewRequest(http.MethodPost, "/api/ask-user/reply", bytes.NewReader(envReqBody))
+	envReq.Header.Set("Content-Type", "application/json")
+	envRR := httptest.NewRecorder()
+	server.ServeHTTP(envRR, envReq)
+
+	assert.Equal(t, http.StatusOK, envRR.Code)
+
+	select {
+	case msg := <-ch2:
+		assert.Equal(t, "Use env `GEMINI_API_KEY` now", msg)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for delivery to waiter 2")
+	}
 }

@@ -133,6 +133,8 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.ReplyText = convertEnvCommands(req.ReplyText)
+
 	if s.repo != nil {
 		updatedMsg, err := s.repo.MarkAskUserReplied(req.ChatID, req.MessageID, req.ReplyText)
 		if err != nil {

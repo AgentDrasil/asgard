@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -182,4 +183,24 @@ func (c *Config) EnvVars() map[string]string {
 		return nil
 	}
 	return envs
+}
+
+// EnvNames returns a sorted, deduplicated slice of environment variable names configured in rules.
+func (c *Config) EnvNames() []string {
+	if c == nil || len(c.Rules) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var names []string
+	for _, r := range c.Rules {
+		envKey := strings.TrimSpace(r.Env)
+		if envKey != "" {
+			if _, exists := seen[envKey]; !exists {
+				seen[envKey] = struct{}{}
+				names = append(names, envKey)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }

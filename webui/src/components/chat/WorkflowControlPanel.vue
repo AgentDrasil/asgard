@@ -9,6 +9,7 @@ import { sendAskUserReply, getSessionWorkflows, redriveWorkflowRun } from "../..
 import { parseOptions } from "../../utils/askUserOptions";
 import { getMessageArtifactFiles } from "../../utils/messageUtils";
 import { useShortcuts } from "../../composables/useShortcuts";
+import SlashCommandMenu from "./SlashCommandMenu.vue";
 
 const { matchShortcut, sendShortcut } = useShortcuts();
 
@@ -28,6 +29,7 @@ const emit = defineEmits<{
 
 const isSubmitting = ref(false);
 const selectedIndex = ref(0);
+const customInputRef = ref<HTMLInputElement | null>(null);
 
 // Per-message input drafts to preserve uncommitted text when paginating between questions
 const drafts = ref<Record<string, string>>({});
@@ -391,6 +393,7 @@ const handleRedrive = async () => {
         <!-- Custom Feedback / Resume Input Box -->
         <div class="flex items-center gap-2 pt-2 border-t border-warning/20">
           <input
+            ref="customInputRef"
             v-model="customInput"
             @keydown="handleInputKeyDown"
             type="text"
@@ -398,6 +401,7 @@ const handleRedrive = async () => {
             class="input input-sm input-bordered flex-1 bg-base-100 text-xs text-base-content focus:outline-none focus:border-warning"
             :disabled="isSubmitting"
           />
+          <SlashCommandMenu :target-element="customInputRef" v-model="customInput" />
           <button
             type="button"
             @click="handleReply(customInput)"

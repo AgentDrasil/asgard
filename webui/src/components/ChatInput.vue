@@ -9,6 +9,7 @@ import type { Attachment, VoiceErrorCode } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
+import SlashCommandMenu from "./chat/SlashCommandMenu.vue";
 import { t } from "../i18n";
 
 const { modKey, sendShortcut, matchShortcut } = useShortcuts();
@@ -43,6 +44,8 @@ const isUploading = ref(false);
 const isDragging = ref(false);
 let dragEnterCounter = 0;
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const mainTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const modalTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 const isQueueMode = computed(() => {
   return (props.isRunning || (props.queuedCount || 0) > 0) && props.activeAgentType !== "workflow";
@@ -421,6 +424,7 @@ const handleDrop = (e: DragEvent) => {
         </div>
 
         <textarea
+          ref="mainTextareaRef"
           v-model="text"
           @keydown="handleKeyDown"
           @paste="handlePaste"
@@ -430,6 +434,8 @@ const handleDrop = (e: DragEvent) => {
           class="textarea textarea-bordered bg-base-200 text-base-content w-full rounded-2xl resize-none min-h-[48px] max-h-48 leading-relaxed focus:outline-none focus:border-primary text-base sm:text-sm font-sans placeholder:text-base-content/60"
           :class="sessionId ? 'pl-28 sm:pl-30 pr-11 sm:pr-12' : 'pl-20 sm:pl-22 pr-11 sm:pr-12'"
         ></textarea>
+
+        <SlashCommandMenu v-if="!isModalOpen" :target-element="mainTextareaRef" v-model="text" />
 
         <!-- Stop Button (Right, running) / Send Button (Right) -->
         <button
@@ -505,6 +511,7 @@ const handleDrop = (e: DragEvent) => {
 
         <div class="flex-1 min-h-[250px] flex flex-col mb-4">
           <textarea
+            ref="modalTextareaRef"
             v-model="text"
             @keydown="handleKeyDown"
             @paste="handlePaste"
@@ -518,6 +525,8 @@ const handleDrop = (e: DragEvent) => {
             :disabled="isInputDisabled"
             class="textarea textarea-bordered bg-base-200 text-base-content w-full flex-1 p-4 rounded-xl leading-relaxed focus:outline-none focus:border-primary text-sm font-mono resize-none"
           ></textarea>
+
+          <SlashCommandMenu v-if="isModalOpen" :target-element="modalTextareaRef" v-model="text" />
         </div>
 
         <div class="flex items-center justify-between gap-2 pt-2 border-t border-base-300">

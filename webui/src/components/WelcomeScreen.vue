@@ -8,6 +8,7 @@ import { useToast } from "../composables/useToast";
 import { useVoiceInput } from "../composables/useVoiceInput";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
+import SlashCommandMenu from "./chat/SlashCommandMenu.vue";
 import { t } from "../i18n";
 
 const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 const welcomeFiles = ref<File[]>([]);
 const isDragging = ref(false);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
 let dragEnterCounter = 0;
 
 const MAX_ATTACHMENTS = 20;
@@ -665,6 +667,7 @@ const handleSubmit = () => {
           <AttachmentChips :attachments="welcomeFiles" @remove="removeFile" />
 
           <textarea
+            ref="promptTextareaRef"
             v-model="localPrompt"
             class="textarea textarea-bordered h-32 bg-base-100 border-base-300 text-base-content w-full focus:outline-none font-mono text-sm leading-relaxed"
             :placeholder="$t('chat.promptPlaceholder', { shortcut: sendShortcut })"
@@ -672,6 +675,8 @@ const handleSubmit = () => {
             @keydown.meta.enter.prevent="handleSubmit"
             @paste="handlePaste"
           ></textarea>
+
+          <SlashCommandMenu :target-element="promptTextareaRef" v-model="localPrompt" />
         </div>
 
         <!-- Start Button -->

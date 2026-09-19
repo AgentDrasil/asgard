@@ -338,6 +338,12 @@ func TestFormatPromptWithAttachments(t *testing.T) {
 		assert.NotContains(t, res, tooLongName)
 		assert.NotContains(t, res, "bad")
 	})
+
+	t.Run("converts slash env annotations in prompt", func(t *testing.T) {
+		t.Parallel()
+		res := formatPromptWithAttachments("Please use /env:GEMINI_API_KEY and /env:OPENAI_API_KEY to test", nil)
+		assert.Equal(t, "Please use env `GEMINI_API_KEY` and env `OPENAI_API_KEY` to test", res)
+	})
 }
 
 func TestTriggerMessage_QueueWhenRunning(t *testing.T) {

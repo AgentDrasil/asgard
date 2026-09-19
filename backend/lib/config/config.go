@@ -176,6 +176,19 @@ func (c *Config) IsProxyEnabled() bool {
 	return p != nil && p.Enable
 }
 
+// ProxyEnvNames returns a sorted, deduplicated slice of environment variable names
+// configured in proxy rules if proxy is enabled.
+func (c *Config) ProxyEnvNames() []string {
+	if c == nil {
+		return nil
+	}
+	p := c.GetProxy()
+	if p == nil || !p.Enable {
+		return nil
+	}
+	return p.EnvNames()
+}
+
 // SandboxProxyOptions builds the bwrap proxy sandbox options for this config.
 // It returns a disabled config when the proxy is not enabled.
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {

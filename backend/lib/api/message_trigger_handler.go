@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"uuid"
@@ -17,6 +18,16 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
+
+var envCommandRegex = regexp.MustCompile(`/env:([A-Za-z0-9_]+)`)
+
+// convertEnvCommands replaces slash env annotations like /env:VAR_NAME with env `VAR_NAME`.
+func convertEnvCommands(prompt string) string {
+	if prompt == "" || !strings.Contains(prompt, "/env:") {
+		return prompt
+	}
+	return envCommandRegex.ReplaceAllString(prompt, "env `$1`")
+}
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.
 type TriggerMessageRequest struct {
@@ -40,6 +51,7 @@ type TriggerMessageRequest struct {
 // 3. Sanitizes Name via filepath.Base, length <= 255, and control character filtering.
 // 4. Generates sandbox path strictly as /tmp/attachments/<safeName>.
 func formatPromptWithAttachments(prompt string, attachments []dbmodels.Attachment) string {
+	prompt = convertEnvCommands(prompt)
 	if len(attachments) == 0 {
 		return prompt
 	}
