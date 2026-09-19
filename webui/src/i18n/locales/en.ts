@@ -261,6 +261,7 @@ export const en = {
     copyMessageContent: "Copy message content",
     copied: "Copied!",
     thinkingProcess: "Thinking Process",
+    collapse: "Collapse",
     error: "Error",
     tool: "TOOL",
     targetFiles: "Target Files:",

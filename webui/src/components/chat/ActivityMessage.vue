@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { TOOL_ITEM_DELIMITER, getMessageArtifactFiles } from "../../utils/messageUtils";
@@ -14,6 +15,12 @@ defineProps<{
 const emit = defineEmits<{
   (e: "open-artifact", file: string): void;
 }>();
+
+const toolDetails = ref<HTMLDetailsElement | null>(null);
+
+function collapseToolOutput() {
+  if (toolDetails.value) toolDetails.value.open = false;
+}
 </script>
 
 <template>
@@ -128,6 +135,7 @@ const emit = defineEmits<{
       </span>
     </div>
     <details
+      ref="toolDetails"
       class="collapse collapse-arrow bg-base-200/40 border border-base-300 rounded-lg text-xs w-full min-w-0"
     >
       <summary
@@ -184,6 +192,16 @@ const emit = defineEmits<{
             class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"
           ><code class="whitespace-pre-wrap break-words [word-break:break-word]">{{ item.trim() }}</code></pre>
         </template>
+        <div class="flex justify-end pt-1">
+          <button
+            type="button"
+            @click="collapseToolOutput"
+            class="btn btn-xs btn-ghost gap-1 text-base-content/60 normal-case"
+          >
+            <Icon icon="material-symbols:keyboard-arrow-up-rounded" class="h-4 w-4" />
+            {{ $t("chat.collapse") }}
+          </button>
+        </div>
       </div>
     </details>
   </div>

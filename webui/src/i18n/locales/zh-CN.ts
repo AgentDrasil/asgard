@@ -261,6 +261,7 @@ export const zhCN: MessageSchema = {
     copyMessageContent: "复制消息内容",
     copied: "已复制！",
     thinkingProcess: "思考过程",
+    collapse: "收起",
     error: "错误",
     tool: "TOOL",
     targetFiles: "目标产物文件:",
