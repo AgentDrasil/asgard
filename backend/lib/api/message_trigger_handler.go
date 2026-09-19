@@ -19,14 +19,15 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
-var envCommandRegex = regexp.MustCompile(`/env:([A-Za-z0-9_]+)`)
+var envCommandRegex = regexp.MustCompile(`(^|\s)/env:([A-Za-z0-9_]+)`)
 
 // convertEnvCommands replaces slash env annotations like /env:VAR_NAME with env `VAR_NAME`.
+// It requires /env: to be preceded by start-of-string or whitespace so URLs like https://x.com/env:KEY are preserved.
 func convertEnvCommands(prompt string) string {
 	if prompt == "" || !strings.Contains(prompt, "/env:") {
 		return prompt
 	}
-	return envCommandRegex.ReplaceAllString(prompt, "env `$1`")
+	return envCommandRegex.ReplaceAllString(prompt, "${1}env `$2`")
 }
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.

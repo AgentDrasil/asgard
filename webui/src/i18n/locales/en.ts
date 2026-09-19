@@ -214,6 +214,7 @@ export const en = {
     slashCommands: "Commands",
     slashEnvDesc: "Inject configured proxy environment variable",
     slashNoEnvs: "No proxy environment variables configured",
+    slashNoMatch: "No matching commands or environment variables",
     done: "Done",
     send: "Send",
     sendMessageShortcut: "Send message ({shortcut})",

@@ -21,6 +21,7 @@ const isOpen = ref(false);
 const activeView = ref<"root" | "env">("root");
 const selectedIndex = ref(0);
 const slashIndex = ref<number>(-1);
+const filterQuery = ref<string>("");
 const popupStyle = ref<{ top: string; left: string }>({ top: "0px", left: "0px" });
 const popupRef = ref<HTMLDivElement | null>(null);
 
@@ -32,24 +33,33 @@ interface MenuItem {
   action: () => void;
 }
 
-const rootItems = computed<MenuItem[]>(() => [
-  {
-    id: "env",
-    label: "env",
-    desc: "chat.slashEnvDesc",
-    icon: "material-symbols:key-outline",
-    action: () => {
-      activeView.value = "env";
-      selectedIndex.value = 0;
+const rootItems = computed<MenuItem[]>(() => {
+  const query = filterQuery.value.trim().toLowerCase();
+  const all: MenuItem[] = [
+    {
+      id: "env",
+      label: "env",
+      desc: "chat.slashEnvDesc",
+      icon: "material-symbols:key-outline",
+      action: () => {
+        activeView.value = "env";
+        filterQuery.value = "";
+        selectedIndex.value = 0;
+      },
     },
-  },
-]);
+  ];
+
+  if (!query) return all;
+  return all.filter(
+    (item) =>
+      item.label.toLowerCase().includes(query) ||
+      (item.id && item.id.toLowerCase().includes(query)),
+  );
+});
 
 const envItems = computed<MenuItem[]>(() => {
-  if (proxyEnvs.value.length === 0) {
-    return [];
-  }
-  return proxyEnvs.value.map((envName) => ({
+  const query = filterQuery.value.trim().toLowerCase();
+  const all = proxyEnvs.value.map((envName) => ({
     id: `env-${envName}`,
     label: envName,
     icon: "material-symbols:vpn-key-rounded",
@@ -57,6 +67,9 @@ const envItems = computed<MenuItem[]>(() => {
       insertCommand(`/env:${envName} `);
     },
   }));
+
+  if (!query) return all;
+  return all.filter((item) => item.label.toLowerCase().includes(query));
 });
 
 const currentItems = computed<MenuItem[]>(() => {
@@ -71,8 +84,7 @@ const updatePosition = () => {
   const coords = getCaretCoordinates(el, pos);
   const rect = el.getBoundingClientRect();
 
-  // Position relative to viewport or nearest scroll container
-  // We place it floating above or below the caret
+  // Position relative to viewport
   const viewportHeight = window.innerHeight;
   const caretAbsoluteTop = rect.top + coords.top;
   const caretAbsoluteLeft = Math.min(rect.left + coords.left, window.innerWidth - 260);
@@ -92,17 +104,23 @@ const updatePosition = () => {
 };
 
 const openMenu = async () => {
-  await loadProxyEnvs();
   activeView.value = "root";
+  filterQuery.value = "";
   selectedIndex.value = 0;
   isOpen.value = true;
+
+  // Render popup immediately so opening is never blocked by network latency
   await nextTick();
   updatePosition();
+
+  // Background refresh; load is TTL-cached and swallows its own errors
+  await loadProxyEnvs();
 };
 
 const closeMenu = () => {
   isOpen.value = false;
   activeView.value = "root";
+  filterQuery.value = "";
   selectedIndex.value = 0;
   slashIndex.value = -1;
 };
@@ -131,41 +149,55 @@ const insertCommand = (inserted: string) => {
 };
 
 const handleTargetKeyDown = (e: KeyboardEvent) => {
+  // Ignore during IME composition (Chinese / Japanese / Korean input methods)
+  if (e.isComposing) {
+    return;
+  }
+
   if (!isOpen.value) {
     if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      // Check if typing /
       const el = props.targetElement;
       if (!el) return;
       const cursor = el.selectionStart ?? el.value.length;
+      // Trigger slash menu ONLY at the start of input or immediately preceded by whitespace
+      if (cursor > 0) {
+        const prevChar = el.value.charAt(cursor - 1);
+        if (!/\s/.test(prevChar)) {
+          return;
+        }
+      }
       slashIndex.value = cursor;
-      // Open on next tick after character / is input
-      setTimeout(() => {
-        openMenu();
-      }, 10);
+      void openMenu();
     }
     return;
   }
 
-  // When open:
+  // When menu is open, intercept navigation and confirmation keys
   if (e.key === "ArrowDown") {
     e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     if (currentItems.value.length > 0) {
       selectedIndex.value = (selectedIndex.value + 1) % currentItems.value.length;
     }
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     if (currentItems.value.length > 0) {
       selectedIndex.value =
         (selectedIndex.value - 1 + currentItems.value.length) % currentItems.value.length;
     }
   } else if (e.key === "Enter" || e.key === "Tab") {
+    // Intercept Enter/Tab in capture phase to prevent parent submission
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     if (
       currentItems.value.length > 0 &&
       selectedIndex.value >= 0 &&
       selectedIndex.value < currentItems.value.length
     ) {
-      e.preventDefault();
-      e.stopPropagation();
       currentItems.value[selectedIndex.value].action();
     } else {
       closeMenu();
@@ -173,8 +205,10 @@ const handleTargetKeyDown = (e: KeyboardEvent) => {
   } else if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     if (activeView.value === "env") {
       activeView.value = "root";
+      filterQuery.value = "";
       selectedIndex.value = 0;
     } else {
       closeMenu();
@@ -184,6 +218,54 @@ const handleTargetKeyDown = (e: KeyboardEvent) => {
     if (el && (el.selectionStart ?? 0) <= slashIndex.value) {
       closeMenu();
     }
+  }
+};
+
+const handleTargetInput = () => {
+  const el = props.targetElement;
+  if (!el) return;
+
+  const currentPos = el.selectionStart ?? el.value.length;
+
+  // If slash was just typed and index recorded (even if openMenu is still in setTimeout), handle input
+  if (slashIndex.value >= 0) {
+    if (currentPos <= slashIndex.value) {
+      closeMenu();
+      return;
+    }
+
+    const typed = el.value.substring(slashIndex.value, currentPos);
+    if (!typed.startsWith("/")) {
+      closeMenu();
+      return;
+    }
+
+    const query = typed.slice(1);
+    if (/\s/.test(query)) {
+      closeMenu();
+      return;
+    }
+
+    // Ensure menu is opened if it was awaiting setTimeout
+    if (!isOpen.value) {
+      isOpen.value = true;
+      activeView.value = "root";
+      void loadProxyEnvs();
+    }
+
+    if (query.startsWith("env:")) {
+      activeView.value = "env";
+      filterQuery.value = query.slice(4);
+    } else {
+      filterQuery.value = query;
+    }
+    selectedIndex.value = 0;
+    updatePosition();
+    return;
+  }
+
+  if (isOpen.value) {
+    closeMenu();
   }
 };
 
@@ -208,10 +290,13 @@ watch(
   () => props.targetElement,
   (newEl, oldEl) => {
     if (oldEl) {
-      oldEl.removeEventListener("keydown", handleTargetKeyDown as EventListener);
+      oldEl.removeEventListener("keydown", handleTargetKeyDown as EventListener, true);
+      oldEl.removeEventListener("input", handleTargetInput as EventListener);
     }
     if (newEl) {
-      newEl.addEventListener("keydown", handleTargetKeyDown as EventListener);
+      // Use capture: true so keydown is handled before parent components' bubble listeners
+      newEl.addEventListener("keydown", handleTargetKeyDown as EventListener, true);
+      newEl.addEventListener("input", handleTargetInput as EventListener);
     }
   },
   { immediate: true },
@@ -225,7 +310,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (props.targetElement) {
-    props.targetElement.removeEventListener("keydown", handleTargetKeyDown as EventListener);
+    props.targetElement.removeEventListener("keydown", handleTargetKeyDown as EventListener, true);
+    props.targetElement.removeEventListener("input", handleTargetInput as EventListener);
   }
   window.removeEventListener("click", handleWindowClick, true);
   window.removeEventListener("resize", handleWindowScrollOrResize);
@@ -234,6 +320,7 @@ onBeforeUnmount(() => {
 
 defineExpose({
   isOpen,
+  slashIndex,
   closeMenu,
   openMenu,
 });
@@ -257,13 +344,20 @@ defineExpose({
           <span
             v-if="activeView === 'env'"
             class="cursor-pointer hover:text-primary flex items-center gap-0.5"
-            @click="activeView = 'root'"
+            @click="
+              activeView = 'root';
+              filterQuery = '';
+              selectedIndex = 0;
+            "
           >
             <Icon icon="material-symbols:chevron-left" class="w-3.5 h-3.5" />
             <span>/</span>
           </span>
           <span v-else>/</span>
           <span v-if="activeView === 'env'">env</span>
+          <span v-if="filterQuery" class="text-primary font-mono text-[10px]">
+            :{{ filterQuery }}
+          </span>
         </div>
         <span class="text-[10px] font-normal text-base-content/40">Esc</span>
       </div>
@@ -271,6 +365,12 @@ defineExpose({
       <!-- List of options -->
       <div class="max-h-48 overflow-y-auto space-y-0.5 custom-scrollbar">
         <template v-if="activeView === 'root'">
+          <div
+            v-if="rootItems.length === 0"
+            class="px-3 py-3 text-center text-xs text-base-content/50 italic"
+          >
+            {{ $t("chat.slashNoMatch") || "No match" }}
+          </div>
           <div
             v-for="(item, idx) in rootItems"
             :key="item.id"

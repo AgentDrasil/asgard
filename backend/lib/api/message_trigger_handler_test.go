@@ -344,6 +344,12 @@ func TestFormatPromptWithAttachments(t *testing.T) {
 		res := formatPromptWithAttachments("Please use /env:GEMINI_API_KEY and /env:OPENAI_API_KEY to test", nil)
 		assert.Equal(t, "Please use env `GEMINI_API_KEY` and env `OPENAI_API_KEY` to test", res)
 	})
+
+	t.Run("preserves URLs containing slash env patterns", func(t *testing.T) {
+		t.Parallel()
+		res := formatPromptWithAttachments("Check https://example.com/env:TEST and /env:REAL_KEY", nil)
+		assert.Equal(t, "Check https://example.com/env:TEST and env `REAL_KEY`", res)
+	})
 }
 
 func TestTriggerMessage_QueueWhenRunning(t *testing.T) {

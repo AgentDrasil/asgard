@@ -214,6 +214,7 @@ export const zhCN: MessageSchema = {
     slashCommands: "指令",
     slashEnvDesc: "注入配置的代理环境变量",
     slashNoEnvs: "未配置代理环境变量",
+    slashNoMatch: "无匹配的指令或环境变量",
     done: "完成",
     send: "发送",
     stop: "终止",
