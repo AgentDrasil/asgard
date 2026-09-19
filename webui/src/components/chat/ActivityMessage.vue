@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo } from "../../types";
 import { TOOL_ITEM_DELIMITER, getMessageArtifactFiles } from "../../utils/messageUtils";
 import { getAgentIcon, formatPath } from "../../utils/agentUtils";
 import { formatTimestamp } from "../../lib/format";
+import CollapsibleBox from "./CollapsibleBox.vue";
 
 defineProps<{
   message: ChatMessage;
@@ -15,24 +15,18 @@ defineProps<{
 const emit = defineEmits<{
   (e: "open-artifact", file: string): void;
 }>();
-
-const toolDetails = ref<HTMLDetailsElement | null>(null);
-
-function collapseToolOutput() {
-  if (toolDetails.value) toolDetails.value.open = false;
-}
 </script>
 
 <template>
   <!-- Reasoning / Thinking Balloon -->
   <div v-if="message.role === 'reasoning'" class="w-full sm:pl-2 sm:pr-12 my-2 min-w-0">
-    <details
+    <CollapsibleBox
       open
-      class="collapse collapse-arrow bg-base-200/50 border border-dashed border-base-300 rounded-lg min-w-0"
+      container-class="bg-base-200/50 border border-dashed border-base-300"
+      title-class="text-xs font-semibold text-base-content/65"
+      content-class="text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed break-words [word-break:break-word]"
     >
-      <summary
-        class="collapse-title text-xs font-semibold text-base-content/65 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
-      >
+      <template #title>
         <span>💭</span> {{ $t("chat.thinkingProcess") }}
         <span
           v-if="message.timestamp"
@@ -40,13 +34,9 @@ function collapseToolOutput() {
         >
           {{ formatTimestamp(message.timestamp) }}
         </span>
-      </summary>
-      <div
-        class="collapse-content text-xs font-mono text-base-content/50 whitespace-pre-wrap leading-relaxed break-words [word-break:break-word]"
-      >
-        {{ message.content }}
-      </div>
-    </details>
+      </template>
+      {{ message.content }}
+    </CollapsibleBox>
   </div>
 
   <!-- Error Message Card -->
@@ -134,13 +124,12 @@ function collapseToolOutput() {
         {{ formatTimestamp(message.timestamp) }}
       </span>
     </div>
-    <details
-      ref="toolDetails"
-      class="collapse collapse-arrow bg-base-200/40 border border-base-300 rounded-lg text-xs w-full min-w-0"
+    <CollapsibleBox
+      container-class="bg-base-200/40 border border-base-300"
+      title-class="font-mono font-medium text-base-content/70"
+      content-class="border-t border-base-300/40 pt-3 space-y-2"
     >
-      <summary
-        class="collapse-title font-mono font-medium text-base-content/70 cursor-pointer py-2 min-h-0 flex items-center gap-2 select-none"
-      >
+      <template #title>
         <span class="text-primary">⚙️</span>
         <span
           class="badge badge-sm badge-ghost text-[10px] uppercase tracking-wider font-semibold font-sans"
@@ -153,56 +142,44 @@ function collapseToolOutput() {
               : message.activityType || message.role
           }}
         </span>
-      </summary>
-      <div class="collapse-content border-t border-base-300/40 pt-3 space-y-2 min-w-0">
-        <!-- TargetFiles Artifact Card (click a file to open it in the artifact viewer) -->
-        <div
-          v-if="getMessageArtifactFiles(message).length > 0"
-          class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2 space-y-1.5"
-        >
-          <div class="text-emerald-400 font-bold text-xs select-none">
-            📄
-            {{
-              getMessageArtifactFiles(message).length > 1
-                ? $t("chat.targetFiles")
-                : $t("chat.targetFileSingle")
-            }}
-          </div>
-          <div class="flex flex-wrap gap-1.5">
-            <button
-              v-for="file in getMessageArtifactFiles(message)"
-              :key="file"
-              @click="emit('open-artifact', file)"
-              class="btn btn-xs gap-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white border-none font-mono normal-case h-6 min-h-0 px-2 max-w-full"
-              :title="$t('chat.openArtifactTitle', { file })"
-            >
-              <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0" />
-              <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
-            </button>
-          </div>
+      </template>
+      <!-- TargetFiles Artifact Card (click a file to open it in the artifact viewer) -->
+      <div
+        v-if="getMessageArtifactFiles(message).length > 0"
+        class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 mb-2 space-y-1.5"
+      >
+        <div class="text-emerald-400 font-bold text-xs select-none">
+          📄
+          {{
+            getMessageArtifactFiles(message).length > 1
+              ? $t("chat.targetFiles")
+              : $t("chat.targetFileSingle")
+          }}
         </div>
-        <template
-          v-for="(item, idx) in message.content.includes(TOOL_ITEM_DELIMITER)
-            ? message.content.split(TOOL_ITEM_DELIMITER)
-            : message.content.split('\n\n')"
-          :key="idx"
-        >
-          <pre
-            v-if="item.trim()"
-            class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"
-          ><code class="whitespace-pre-wrap break-words [word-break:break-word]">{{ item.trim() }}</code></pre>
-        </template>
-        <div class="flex justify-end pt-1">
+        <div class="flex flex-wrap gap-1.5">
           <button
-            type="button"
-            @click="collapseToolOutput"
-            class="btn btn-xs btn-ghost gap-1 text-base-content/60 normal-case"
+            v-for="file in getMessageArtifactFiles(message)"
+            :key="file"
+            @click="emit('open-artifact', file)"
+            class="btn btn-xs gap-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white border-none font-mono normal-case h-6 min-h-0 px-2 max-w-full"
+            :title="$t('chat.openArtifactTitle', { file })"
           >
-            <Icon icon="material-symbols:keyboard-arrow-up-rounded" class="h-4 w-4" />
-            {{ $t("chat.collapse") }}
+            <Icon icon="octicon:file-code-24" class="h-3.5 w-3.5 shrink-0" />
+            <span class="truncate max-w-[280px]">{{ formatPath(file) }}</span>
           </button>
         </div>
       </div>
-    </details>
+      <template
+        v-for="(item, idx) in message.content.includes(TOOL_ITEM_DELIMITER)
+          ? message.content.split(TOOL_ITEM_DELIMITER)
+          : message.content.split('\n\n')"
+        :key="idx"
+      >
+        <pre
+          v-if="item.trim()"
+          class="bg-base-200/80 p-3 rounded-lg border border-base-300 overflow-x-auto max-w-full min-w-0 text-xs font-mono text-base-content/80"
+        ><code class="whitespace-pre-wrap break-words [word-break:break-word]">{{ item.trim() }}</code></pre>
+      </template>
+    </CollapsibleBox>
   </div>
 </template>
