@@ -35,6 +35,7 @@ type Rule struct {
 	HeaderKey   string `yaml:"header_key" json:"header_key"`
 	RealSecret  string `yaml:"real_secret" json:"real_secret"`
 	DummySecret string `yaml:"dummy_secret" json:"dummy_secret"`
+	Env         string `yaml:"env" json:"env"`
 }
 
 // Config represents the full proxy configuration.
@@ -162,4 +163,23 @@ func (c *Config) ResolvedCAKeyPath() string {
 		return ""
 	}
 	return c.Server.CAKey
+}
+
+// EnvVars returns a map of environment variable names to dummy secrets configured in rules.
+// If multiple rules define the same env var, the later rule's dummy secret takes precedence.
+func (c *Config) EnvVars() map[string]string {
+	if c == nil || len(c.Rules) == 0 {
+		return nil
+	}
+	envs := make(map[string]string)
+	for _, r := range c.Rules {
+		envKey := strings.TrimSpace(r.Env)
+		if envKey != "" {
+			envs[envKey] = r.DummySecret
+		}
+	}
+	if len(envs) == 0 {
+		return nil
+	}
+	return envs
 }

@@ -60,6 +60,7 @@ providers:
 #       header_key: "Authorization"
 #       real_secret: "Bearer sk-real-key"
 #       dummy_secret: "Bearer dummy-token"
+#       env: "OPENAI_API_KEY"
 `
 
 func checkManageOrigin(r *http.Request) error {

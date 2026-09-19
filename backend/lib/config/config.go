@@ -1,11 +1,13 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/goccy/go-yaml"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -187,6 +189,7 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 		CACert:          p.ResolvedCACertPath(),
 		CAKey:           p.ResolvedCAKeyPath(),
 		ProxyConfigPath: c.ResolvedProxyConfigPath(),
+		EnvVars:         p.EnvVars(),
 	}
 }
 
@@ -347,9 +350,14 @@ func LoadConfig(path string) (*Config, error) {
 		if _, statErr := os.Stat(resolvedProxyPath); statErr == nil {
 			proxyCfg, pErr := proxy.LoadConfigFile(resolvedProxyPath)
 			if pErr != nil {
-				return nil, fmt.Errorf("failed to load proxy config from %s: %w", resolvedProxyPath, pErr)
+				if os.IsPermission(pErr) || errors.Is(pErr, os.ErrPermission) {
+					log.Warn().Err(pErr).Str("path", resolvedProxyPath).Msg("proxy config exists but is not accessible due to permission error; proxy disabled")
+				} else {
+					return nil, fmt.Errorf("failed to load proxy config from %s: %w", resolvedProxyPath, pErr)
+				}
+			} else if proxyCfg != nil {
+				cfg.Proxy = proxyCfg
 			}
-			cfg.Proxy = proxyCfg
 		}
 	}
 

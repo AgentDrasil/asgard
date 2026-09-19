@@ -635,6 +635,7 @@ proxy:
       header_key: "Authorization"
       real_secret: "real-secret-123"
       dummy_secret: "fake-secret-xyz"
+      env: "OPENAI_API_KEY"
 `, agentDir)
 
 		cfg, err := ParseAndValidate([]byte(yamlContent))
@@ -645,6 +646,7 @@ proxy:
 		assert.Equal(t, "127.0.0.1:8082", cfg.ProxyAddr())
 		assert.NotEmpty(t, cfg.ProxyCACertPath())
 		assert.NotEmpty(t, cfg.ProxyCAKeyPath())
+		assert.Equal(t, map[string]string{"OPENAI_API_KEY": "fake-secret-xyz"}, cfg.SandboxProxyOptions().EnvVars)
 
 		cfg.ConfigPath = filepath.Join(tmpDir, "config.yaml")
 		assert.Equal(t, paths.ProxyConfigFile(), cfg.ResolvedProxyConfigPath())

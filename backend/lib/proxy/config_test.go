@@ -132,3 +132,63 @@ func TestConfig_DefaultAndResolvedPaths(t *testing.T) {
 	assert.NotContains(t, cfg.ResolvedCACertPath(), "~")
 	assert.NotContains(t, cfg.ResolvedCAKeyPath(), "~")
 }
+
+func TestConfig_EnvVars(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Nil(t, cfg.EnvVars())
+	})
+
+	t.Run("empty rules", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{Rules: []Rule{}}
+		assert.Nil(t, cfg.EnvVars())
+	})
+
+	t.Run("rules without env", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{
+			Rules: []Rule{
+				{Host: "api.openai.com", HeaderKey: "Authorization", RealSecret: "sk-real", DummySecret: "dummy"},
+			},
+		}
+		assert.Nil(t, cfg.EnvVars())
+	})
+
+	t.Run("rules with env and dummy secrets", func(t *testing.T) {
+		t.Parallel()
+		cfg := &Config{
+			Rules: []Rule{
+				{
+					Host:        "api.openai.com",
+					HeaderKey:   "Authorization",
+					RealSecret:  "sk-real-openai",
+					DummySecret: "dummy-openai-key",
+					Env:         "OPENAI_API_KEY",
+				},
+				{
+					Host:        "api.anthropic.com",
+					HeaderKey:   "x-api-key",
+					RealSecret:  "sk-real-anthropic",
+					DummySecret: "dummy-anthropic-key",
+					Env:         "ANTHROPIC_API_KEY",
+				},
+				{
+					Host:        "api.noenv.com",
+					HeaderKey:   "Authorization",
+					RealSecret:  "sk-noenv",
+					DummySecret: "dummy-noenv",
+				},
+			},
+		}
+		envVars := cfg.EnvVars()
+		require.NotNil(t, envVars)
+		assert.Equal(t, map[string]string{
+			"OPENAI_API_KEY":    "dummy-openai-key",
+			"ANTHROPIC_API_KEY": "dummy-anthropic-key",
+		}, envVars)
+	})
+}

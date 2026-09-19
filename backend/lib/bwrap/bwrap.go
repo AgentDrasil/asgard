@@ -234,10 +234,11 @@ func appendConfigMaskArgs(args []string, configPath string) []string {
 // ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.
 type ProxySandboxConfig struct {
 	Enabled         bool
-	ProxyAddr       string // e.g. "http://127.0.0.1:8082"
-	CACert          string // Host Asgard CA cert path (absolute)
-	CAKey           string // Host Asgard CA private key path (absolute)
-	ProxyConfigPath string // Host standalone proxy config path (absolute, if any)
+	ProxyAddr       string            // e.g. "http://127.0.0.1:8082"
+	CACert          string            // Host Asgard CA cert path (absolute)
+	CAKey           string            // Host Asgard CA private key path (absolute)
+	ProxyConfigPath string            // Host standalone proxy config path (absolute, if any)
+	EnvVars         map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
 }
 
 // appendProxySensitiveMaskArgs masks the Asgard config directory (which holds
@@ -574,6 +575,13 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 				args = append(args, "--setenv", k, "localhost,127.0.0.1")
 			case "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE":
 				args = append(args, "--setenv", k, "/etc/ssl/certs/ca-certificates.crt")
+			}
+		}
+
+		// Inject custom proxy env vars (dummy secrets exposed to command sandbox)
+		for envKey, dummyVal := range proxyCfg.EnvVars {
+			if strings.TrimSpace(envKey) != "" {
+				args = append(args, "--setenv", envKey, dummyVal)
 			}
 		}
 	}

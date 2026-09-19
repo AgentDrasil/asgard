@@ -451,6 +451,9 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 		CACert:          caCertPath,
 		CAKey:           caKeyPath,
 		ProxyConfigPath: proxyConfigPath,
+		EnvVars: map[string]string{
+			"OPENAI_API_KEY": "dummy-openai-key",
+		},
 	}
 
 	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, proxyOpt)
@@ -480,6 +483,9 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	assert.Contains(t, argStr, "--setenv REQUESTS_CA_BUNDLE /etc/ssl/certs/ca-certificates.crt")
 	assert.Contains(t, argStr, "--setenv NODE_EXTRA_CA_CERTS /etc/ssl/certs/ca-certificates.crt")
 	assert.Contains(t, argStr, "--setenv CURL_CA_BUNDLE /etc/ssl/certs/ca-certificates.crt")
+
+	// 4. Verify custom proxy env vars (dummy secret) injection
+	assert.Contains(t, argStr, "--setenv OPENAI_API_KEY dummy-openai-key")
 }
 
 func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
