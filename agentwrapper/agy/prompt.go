@@ -46,7 +46,7 @@ func SplitModelVariant(model string) (string, string) {
 
 // buildPromptArgv constructs the command-line arguments for running agy.
 func buildPromptArgv(runDir string, prompt string, opts types.PromptOptions) []string {
-	argv := []string{"agy", "--dangerously-skip-permissions", "--print-timeout", "60m", "--output-format", "stream-json", "--add-dir", runDir}
+	argv := []string{"agy", "--dangerously-skip-permissions", "--output-format", "stream-json", "--add-dir", runDir}
 	if opts.AddTmpToDir {
 		argv = append(argv, "--add-dir", "/tmp")
 	}

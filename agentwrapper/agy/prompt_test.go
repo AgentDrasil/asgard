@@ -112,7 +112,7 @@ func TestBuildPromptArgv(t *testing.T) {
 				Model:     "gemini-3.7-flash",
 			},
 			wantArgv: []string{
-				"agy", "--dangerously-skip-permissions", "--print-timeout", "60m", "--output-format", "stream-json",
+				"agy", "--dangerously-skip-permissions", "--output-format", "stream-json",
 				"--add-dir", "/workspace",
 				"--conversation=sess-123",
 				"--model", "gemini-3.7-flash",
@@ -129,7 +129,7 @@ func TestBuildPromptArgv(t *testing.T) {
 				AddTmpToDir: true,
 			},
 			wantArgv: []string{
-				"agy", "--dangerously-skip-permissions", "--print-timeout", "60m", "--output-format", "stream-json",
+				"agy", "--dangerously-skip-permissions", "--output-format", "stream-json",
 				"--add-dir", "/workspace",
 				"--add-dir", "/tmp",
 				"--conversation=sess-123",
