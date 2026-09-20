@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
@@ -711,4 +712,52 @@ gemini_model_for_chat_title: "gemini-3.1-flash-lite"
 	require.Len(t, cfg.Proxy.Rules, 1)
 	assert.Equal(t, "api.x.ai", cfg.Proxy.Rules[0].Host)
 	assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
+}
+
+func TestSandboxProxyOptions_DynamicRefresh(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{}
+	// Initially proxy is nil / disabled
+	optsInitial := cfg.SandboxProxyOptions()
+	assert.False(t, optsInitial.Enabled)
+	assert.Empty(t, optsInitial.EnvVars)
+
+	// Update proxy via SetProxy
+	proxyCfg1 := &proxy.Config{
+		Enable: true,
+		Server: proxy.ServerConfig{Addr: "127.0.0.1:9090"},
+		Rules: []proxy.Rule{
+			{Host: "api.openai.com", HeaderKey: "Authorization", RealSecret: "real-1", DummySecret: "dummy-1", Env: "KEY_ONE"},
+		},
+	}
+	cfg.SetProxy(proxyCfg1)
+
+	opts1 := cfg.SandboxProxyOptions()
+	assert.True(t, opts1.Enabled)
+	assert.Equal(t, "http://127.0.0.1:9090", opts1.ProxyAddr)
+	assert.Equal(t, map[string]string{"KEY_ONE": "dummy-1"}, opts1.EnvVars)
+
+	// Dynamically update proxy to a new config
+	proxyCfg2 := &proxy.Config{
+		Enable: true,
+		Server: proxy.ServerConfig{Addr: "127.0.0.1:9091"},
+		Rules: []proxy.Rule{
+			{Host: "api.anthropic.com", HeaderKey: "x-api-key", RealSecret: "real-2", DummySecret: "dummy-2", Env: "KEY_TWO"},
+		},
+	}
+	cfg.SetProxy(proxyCfg2)
+
+	opts2 := cfg.SandboxProxyOptions()
+	assert.True(t, opts2.Enabled)
+	assert.Equal(t, "http://127.0.0.1:9091", opts2.ProxyAddr)
+	assert.Equal(t, map[string]string{"KEY_TWO": "dummy-2"}, opts2.EnvVars)
+	assert.NotContains(t, opts2.EnvVars, "KEY_ONE")
+
+	// Disable proxy
+	proxyCfg2.Enable = false
+	cfg.SetProxy(proxyCfg2)
+	optsDisabled := cfg.SandboxProxyOptions()
+	assert.False(t, optsDisabled.Enabled)
+	assert.Empty(t, optsDisabled.EnvVars)
 }

@@ -1571,3 +1571,94 @@ model_pairings:
 	assert.Equal(t, "ok", snap2.Status)
 	assert.Empty(t, snap2.Errors)
 }
+
+func TestHandleReload_CascadesProxyConfigToServerConfig(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.7-flash-high"}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.7-flash-high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	proxyFilePath := paths.ProxyConfigFile()
+	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
+	caCertPath := filepath.Join(tmpDir, "ca.crt")
+	caKeyPath := filepath.Join(tmpDir, "ca.key")
+
+	initialYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:0"
+  ca_cert: "` + caCertPath + `"
+  ca_key: "` + caKeyPath + `"
+rules:
+  - host: "api.openai.com"
+    header_key: "Authorization"
+    real_secret: "sk-real-secret-a"
+    dummy_secret: "dummy-token-a"
+    env: "ENV_A"
+`
+	require.NoError(t, os.WriteFile(proxyFilePath, []byte(initialYAML), 0644))
+
+	proxyCfg, err := proxy.LoadConfigFile(proxyFilePath)
+	require.NoError(t, err)
+
+	proxyMgr, err := proxy.NewManager(proxyCfg, proxyFilePath)
+	require.NoError(t, err)
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+		Proxy:    proxyCfg,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB, WithProxyManager(proxyMgr))
+	require.NoError(t, err)
+
+	// Verify initial state
+	require.Equal(t, []string{"ENV_A"}, conf.GetProxy().EnvNames())
+	require.Equal(t, "dummy-token-a", conf.SandboxProxyOptions().EnvVars["ENV_A"])
+
+	// Update proxy.yaml on disk with Rule B
+	updatedYAML := `
+enable: true
+server:
+  addr: "127.0.0.1:0"
+  ca_cert: "` + caCertPath + `"
+  ca_key: "` + caKeyPath + `"
+rules:
+  - host: "api.anthropic.com"
+    header_key: "x-api-key"
+    real_secret: "sk-real-secret-b"
+    dummy_secret: "dummy-token-b"
+    env: "ENV_B"
+`
+	require.NoError(t, os.WriteFile(proxyFilePath, []byte(updatedYAML), 0644))
+
+	// Send POST /api/manage/reload
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, conf.GetProxy().EnvNames(), "ENV_B")
+	assert.Equal(t, "dummy-token-b", conf.SandboxProxyOptions().EnvVars["ENV_B"])
+}

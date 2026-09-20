@@ -194,9 +194,10 @@ func (c *Config) ProxyEnvNames() []string {
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 	p := c.GetProxy()
 	if p == nil || !p.Enable {
+		log.Debug().Msg("sandbox proxy options: proxy is disabled or nil")
 		return bwrap.ProxySandboxConfig{}
 	}
-	return bwrap.ProxySandboxConfig{
+	opts := bwrap.ProxySandboxConfig{
 		Enabled:         true,
 		ProxyAddr:       p.ProxyHost(),
 		CACert:          p.ResolvedCACertPath(),
@@ -204,6 +205,12 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 		ProxyConfigPath: c.ResolvedProxyConfigPath(),
 		EnvVars:         p.EnvVars(),
 	}
+	log.Debug().
+		Bool("enabled", opts.Enabled).
+		Str("proxy_addr", opts.ProxyAddr).
+		Strs("env_names", p.EnvNames()).
+		Msg("sandbox proxy options built")
+	return opts
 }
 
 func (c *Config) ProxyHost() string {
@@ -370,6 +377,11 @@ func LoadConfig(path string) (*Config, error) {
 				}
 			} else if proxyCfg != nil {
 				cfg.Proxy = proxyCfg
+				log.Info().
+					Str("path", resolvedProxyPath).
+					Bool("enable", proxyCfg.Enable).
+					Int("rules_count", len(proxyCfg.Rules)).
+					Msg("loaded proxy config")
 			}
 		}
 	}

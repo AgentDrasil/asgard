@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
@@ -581,6 +582,7 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 		// Inject custom proxy env vars (dummy secrets exposed to command sandbox)
 		for envKey, dummyVal := range proxyCfg.EnvVars {
 			if strings.TrimSpace(envKey) != "" {
+				log.Debug().Str("env_key", envKey).Str("masked_value", proxy.MaskSecret(dummyVal)).Msg("injecting proxy env into command sandbox")
 				args = append(args, "--setenv", envKey, dummyVal)
 			}
 		}

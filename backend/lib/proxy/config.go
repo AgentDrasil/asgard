@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
@@ -125,12 +126,15 @@ func (c *Config) Validate() error {
 
 	for i, r := range c.Rules {
 		if strings.TrimSpace(r.Host) == "" {
+			log.Error().Int("rule_index", i).Str("missing_field", "host").Msg("proxy rule validation failed: missing host")
 			return fmt.Errorf("rule [%d]: missing host", i)
 		}
 		if strings.TrimSpace(r.HeaderKey) == "" {
+			log.Error().Int("rule_index", i).Str("missing_field", "header_key").Msg("proxy rule validation failed: missing header_key")
 			return fmt.Errorf("rule [%d]: missing header_key", i)
 		}
 		if strings.TrimSpace(r.RealSecret) == "" {
+			log.Error().Int("rule_index", i).Str("missing_field", "real_secret").Msg("proxy rule validation failed: missing real_secret")
 			return fmt.Errorf("rule [%d]: missing real_secret", i)
 		}
 	}

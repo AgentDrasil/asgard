@@ -47,7 +47,7 @@ providers:
 # Credential Injection Proxy (Optional). The standalone proxy config, CA cert
 # and key live under ~/asgard/config/ and are not path-configurable.
 # proxy:
-#   enable: false
+#   enable: true
 #   server:
 #     addr: "127.0.0.1:8082"
 #   debug:
@@ -259,9 +259,25 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.proxyManager != nil {
-		if _, err := s.proxyManager.ReloadFromFile(); err != nil {
+		reloadedCfg, err := s.proxyManager.ReloadFromFile()
+		if err != nil {
 			log.Warn().Err(err).Msg("failed to cascade reload proxy config")
+			if s.diagnostics != nil {
+				s.diagnostics.AddError("proxy", err.Error())
+			}
+		} else if reloadedCfg != nil && s.conf != nil {
+			if s.diagnostics != nil {
+				s.diagnostics.ResetSource("proxy")
+			}
+			s.conf.SetProxy(reloadedCfg)
+			log.Info().
+				Bool("enable", reloadedCfg.Enable).
+				Int("rules_count", len(reloadedCfg.Rules)).
+				Strs("env_vars", reloadedCfg.EnvNames()).
+				Msg("cascaded proxy config reload to server config")
 		}
+	} else {
+		log.Debug().Msg("proxy manager not initialized at startup, skipping proxy reload cascade")
 	}
 
 	if s.diagnostics != nil {
