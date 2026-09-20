@@ -726,3 +726,149 @@ func TestProxyManager_NonRuleHostPassthrough(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "passthrough ok: client-original-header", string(respBytes))
 }
+
+func TestProxyManager_Interceptor_BearerBidirectionalCompatibility(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		rule          Rule
+		reqHeaderKey  string
+		reqHeaderVal  string
+		wantHeaderVal string
+	}{
+		{
+			name: "Case 1: both have Bearer -> keep as-is",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "Bearer dummy-token",
+				RealSecret:  "Bearer real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "Bearer dummy-token",
+			wantHeaderVal: "Bearer real-token",
+		},
+		{
+			name: "Case 2: only dummy has Bearer, real has no prefix -> auto prefix Bearer",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "Bearer dummy-token",
+				RealSecret:  "real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "Bearer dummy-token",
+			wantHeaderVal: "Bearer real-token",
+		},
+		{
+			name: "Case 3: SDK scenario, rule has no prefix, client sends Bearer -> auto prefix Bearer",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "dummy-token",
+				RealSecret:  "real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "Bearer dummy-token",
+			wantHeaderVal: "Bearer real-token",
+		},
+		{
+			name: "Case 4: curl scenario, client omits Bearer, real has Bearer -> keep real-token prefix as-is",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "Bearer dummy-token",
+				RealSecret:  "Bearer real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "dummy-token",
+			wantHeaderVal: "Bearer real-token",
+		},
+		{
+			name: "Case 5: custom non-Authorization header -> exact match and raw replace",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "X-API-Key",
+				DummySecret: "dummy-token",
+				RealSecret:  "real-token",
+			},
+			reqHeaderKey:  "X-API-Key",
+			reqHeaderVal:  "dummy-token",
+			wantHeaderVal: "real-token",
+		},
+		{
+			name: "Case 6: client has no Bearer, dummy has Bearer, real has no Bearer -> replace without Bearer",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "Bearer d-token",
+				RealSecret:  "r-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "d-token",
+			wantHeaderVal: "r-token",
+		},
+		{
+			name: "Case 7: Fail-Closed regression, wrong dummy token -> no replacement",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "Bearer valid-dummy",
+				RealSecret:  "valid-real",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "Bearer wrong-token",
+			wantHeaderVal: "Bearer wrong-token",
+		},
+		{
+			name: "Case 8: DummySecret empty regression -> replace with Bearer prefix",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "",
+				RealSecret:  "real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "Bearer any-token",
+			wantHeaderVal: "Bearer real-token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			certPath := filepath.Join(tmpDir, "ca.crt")
+			keyPath := filepath.Join(tmpDir, "ca.key")
+
+			cfg := &Config{
+				Enable: true,
+				Server: ServerConfig{
+					Addr:   "127.0.0.1:0",
+					CACert: certPath,
+					CAKey:  keyPath,
+				},
+				Rules: []Rule{tt.rule},
+			}
+
+			pm, err := NewManager(cfg, "")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_ = pm.Shutdown(context.Background())
+			})
+
+			req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/test", nil)
+			require.NoError(t, err)
+			req.Host = "api.example.com"
+			req.Header.Set(tt.reqHeaderKey, tt.reqHeaderVal)
+
+			invoker := &fakeInvoker{}
+			resp, err := pm.Interceptor(context.Background(), req, invoker)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, tt.wantHeaderVal, req.Header.Get(tt.reqHeaderKey))
+		})
+	}
+}

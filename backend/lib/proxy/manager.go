@@ -369,16 +369,31 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 
 	if matchedRule != nil {
 		prevVal := req.Header.Get(matchedRule.HeaderKey)
-		// If dummy_secret is empty OR matches prevVal, substitute with real_secret
-		if matchedRule.DummySecret == "" || prevVal == matchedRule.DummySecret {
-			req.Header.Set(matchedRule.HeaderKey, matchedRule.RealSecret)
+		shouldReplace := false
+
+		if matchedRule.DummySecret == "" {
+			shouldReplace = true
+		} else if prevVal == matchedRule.DummySecret {
+			shouldReplace = true
+		} else if strings.EqualFold(matchedRule.HeaderKey, "Authorization") || hasBearerPrefix(prevVal) || hasBearerPrefix(matchedRule.DummySecret) {
+			if stripBearerPrefix(prevVal) == stripBearerPrefix(matchedRule.DummySecret) {
+				shouldReplace = true
+			}
+		}
+
+		if shouldReplace {
+			newSecret := matchedRule.RealSecret
+			if hasBearerPrefix(prevVal) && !hasBearerPrefix(matchedRule.RealSecret) {
+				newSecret = "Bearer " + strings.TrimSpace(matchedRule.RealSecret)
+			}
+			req.Header.Set(matchedRule.HeaderKey, newSecret)
 			if debugCfg.Enable {
 				log.Debug().
 					Str("host", hostOnly).
 					Str("path", reqPath).
 					Str("header", matchedRule.HeaderKey).
 					Str("dummy", MaskSecret(prevVal)).
-					Str("real", MaskSecret(matchedRule.RealSecret)).
+					Str("real", MaskSecret(newSecret)).
 					Msg("proxy substituted secret header")
 			}
 		}

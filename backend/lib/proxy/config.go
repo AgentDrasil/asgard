@@ -170,7 +170,23 @@ func (c *Config) ResolvedCAKeyPath() string {
 	return c.Server.CAKey
 }
 
+// hasBearerPrefix reports whether s has a case-insensitive "Bearer " prefix (ignoring leading/trailing whitespace).
+func hasBearerPrefix(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	return len(trimmed) >= 7 && strings.EqualFold(trimmed[:7], "bearer ")
+}
+
+// stripBearerPrefix removes a case-insensitive "Bearer " prefix and trims surrounding whitespace.
+func stripBearerPrefix(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) >= 7 && strings.EqualFold(trimmed[:7], "bearer ") {
+		return strings.TrimSpace(trimmed[7:])
+	}
+	return trimmed
+}
+
 // EnvVars returns a map of environment variable names to dummy secrets configured in rules.
+// If the dummy secret contains a Bearer prefix, it is stripped before being injected.
 // If multiple rules define the same env var, the later rule's dummy secret takes precedence.
 func (c *Config) EnvVars() map[string]string {
 	if c == nil || len(c.Rules) == 0 {
@@ -180,7 +196,7 @@ func (c *Config) EnvVars() map[string]string {
 	for _, r := range c.Rules {
 		envKey := strings.TrimSpace(r.Env)
 		if envKey != "" {
-			envs[envKey] = r.DummySecret
+			envs[envKey] = stripBearerPrefix(r.DummySecret)
 		}
 	}
 	if len(envs) == 0 {

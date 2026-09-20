@@ -192,3 +192,58 @@ func TestConfig_EnvVars(t *testing.T) {
 		}, envVars)
 	})
 }
+
+func TestConfig_EnvVars_StripBearerPrefix(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Host:        "api.openai.com",
+				HeaderKey:   "Authorization",
+				RealSecret:  "sk-real-1",
+				DummySecret: "Bearer token123",
+				Env:         "OPENAI_API_KEY",
+			},
+			{
+				Host:        "api.anthropic.com",
+				HeaderKey:   "Authorization",
+				RealSecret:  "sk-real-2",
+				DummySecret: "bearer token456",
+				Env:         "ANTHROPIC_API_KEY",
+			},
+			{
+				Host:        "api.groq.com",
+				HeaderKey:   "Authorization",
+				RealSecret:  "sk-real-3",
+				DummySecret: "  BEARER token789  ",
+				Env:         "GROQ_API_KEY",
+			},
+			{
+				Host:        "api.plain.com",
+				HeaderKey:   "Authorization",
+				RealSecret:  "sk-real-4",
+				DummySecret: "plain-secret-abc",
+				Env:         "PLAIN_API_KEY",
+			},
+		},
+	}
+
+	envVars := cfg.EnvVars()
+	require.NotNil(t, envVars)
+	assert.Equal(t, map[string]string{
+		"OPENAI_API_KEY":    "token123",
+		"ANTHROPIC_API_KEY": "token456",
+		"GROQ_API_KEY":      "token789",
+		"PLAIN_API_KEY":     "plain-secret-abc",
+	}, envVars)
+
+	// Ensure DummySecret in original rules and EnvNames are unaffected
+	assert.Equal(t, "Bearer token123", cfg.Rules[0].DummySecret)
+	assert.Equal(t, "bearer token456", cfg.Rules[1].DummySecret)
+	assert.Equal(t, "  BEARER token789  ", cfg.Rules[2].DummySecret)
+	assert.Equal(t, "plain-secret-abc", cfg.Rules[3].DummySecret)
+
+	expectedNames := []string{"ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "PLAIN_API_KEY"}
+	assert.Equal(t, expectedNames, cfg.EnvNames())
+}
