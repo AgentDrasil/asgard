@@ -18,12 +18,23 @@ const { proxyEnvs, load: loadProxyEnvs } = useProxyEnvs();
 
 // State
 const isOpen = ref(false);
+const isComposing = ref(false);
+const envSourceReady = ref(false);
 const activeView = ref<"root" | "env">("root");
 const selectedIndex = ref(0);
 const slashIndex = ref<number>(-1);
 const filterQuery = ref<string>("");
 const popupStyle = ref<{ top: string; left: string }>({ top: "0px", left: "0px" });
 const popupRef = ref<HTMLDivElement | null>(null);
+
+const fetchEnvs = async () => {
+  envSourceReady.value = false;
+  try {
+    await loadProxyEnvs();
+  } finally {
+    envSourceReady.value = true;
+  }
+};
 
 interface MenuItem {
   id: string;
@@ -114,11 +125,12 @@ const openMenu = async () => {
   updatePosition();
 
   // Background refresh; load is TTL-cached and swallows its own errors
-  await loadProxyEnvs();
+  await fetchEnvs();
 };
 
 const closeMenu = () => {
   isOpen.value = false;
+  envSourceReady.value = false;
   activeView.value = "root";
   filterQuery.value = "";
   selectedIndex.value = 0;
@@ -148,9 +160,38 @@ const insertCommand = (inserted: string) => {
   });
 };
 
+const isSlashBoundary = (el: HTMLTextAreaElement | HTMLInputElement, cursor: number): boolean => {
+  if (cursor === 0) return true;
+  const prevChar = el.value.charAt(cursor - 1);
+  return /\s/.test(prevChar);
+};
+
+const maybeOpenFromCaret = () => {
+  const el = props.targetElement;
+  if (!el || isOpen.value || isComposing.value) return;
+
+  const currentPos = el.selectionStart ?? el.value.length;
+  if (currentPos > 0 && el.value.charAt(currentPos - 1) === "/") {
+    if (isSlashBoundary(el, currentPos - 1)) {
+      slashIndex.value = currentPos - 1;
+      void openMenu();
+    }
+  }
+};
+
+const handleCompositionStart = () => {
+  isComposing.value = true;
+};
+
+const handleCompositionEnd = () => {
+  isComposing.value = false;
+  maybeOpenFromCaret();
+  handleTargetInput();
+};
+
 const handleTargetKeyDown = (e: KeyboardEvent) => {
   // Ignore during IME composition (Chinese / Japanese / Korean input methods)
-  if (e.isComposing) {
+  if (e.isComposing || isComposing.value) {
     return;
   }
 
@@ -160,11 +201,8 @@ const handleTargetKeyDown = (e: KeyboardEvent) => {
       if (!el) return;
       const cursor = el.selectionStart ?? el.value.length;
       // Trigger slash menu ONLY at the start of input or immediately preceded by whitespace
-      if (cursor > 0) {
-        const prevChar = el.value.charAt(cursor - 1);
-        if (!/\s/.test(prevChar)) {
-          return;
-        }
+      if (!isSlashBoundary(el, cursor)) {
+        return;
       }
       slashIndex.value = cursor;
       void openMenu();
@@ -225,9 +263,18 @@ const handleTargetInput = () => {
   const el = props.targetElement;
   if (!el) return;
 
+  if (isComposing.value) {
+    return;
+  }
+
   const currentPos = el.selectionStart ?? el.value.length;
 
-  // If slash was just typed and index recorded (even if openMenu is still in setTimeout), handle input
+  // When menu is not open and not composing, detect slash input or backspace edit back to slash
+  if (!isOpen.value) {
+    maybeOpenFromCaret();
+  }
+
+  // If slash was just typed and index recorded, handle input
   if (slashIndex.value >= 0) {
     if (currentPos <= slashIndex.value) {
       closeMenu();
@@ -246,11 +293,11 @@ const handleTargetInput = () => {
       return;
     }
 
-    // Ensure menu is opened if it was awaiting setTimeout
+    // Ensure menu is opened if it was awaiting openMenu / async
     if (!isOpen.value) {
       isOpen.value = true;
       activeView.value = "root";
-      void loadProxyEnvs();
+      void fetchEnvs();
     }
 
     if (query.startsWith("env:")) {
@@ -260,6 +307,14 @@ const handleTargetInput = () => {
       filterQuery.value = query;
     }
     selectedIndex.value = 0;
+
+    // Auto-close only when the item source is resolved and still yields no match
+    const envResolved = activeView.value !== "env" || envSourceReady.value;
+    if (filterQuery.value.trim().length > 0 && currentItems.value.length === 0 && envResolved) {
+      closeMenu();
+      return;
+    }
+
     updatePosition();
     return;
   }
@@ -292,11 +347,15 @@ watch(
     if (oldEl) {
       oldEl.removeEventListener("keydown", handleTargetKeyDown as EventListener, true);
       oldEl.removeEventListener("input", handleTargetInput as EventListener);
+      oldEl.removeEventListener("compositionstart", handleCompositionStart as EventListener);
+      oldEl.removeEventListener("compositionend", handleCompositionEnd as EventListener);
     }
     if (newEl) {
       // Use capture: true so keydown is handled before parent components' bubble listeners
       newEl.addEventListener("keydown", handleTargetKeyDown as EventListener, true);
       newEl.addEventListener("input", handleTargetInput as EventListener);
+      newEl.addEventListener("compositionstart", handleCompositionStart as EventListener);
+      newEl.addEventListener("compositionend", handleCompositionEnd as EventListener);
     }
   },
   { immediate: true },
@@ -312,6 +371,14 @@ onBeforeUnmount(() => {
   if (props.targetElement) {
     props.targetElement.removeEventListener("keydown", handleTargetKeyDown as EventListener, true);
     props.targetElement.removeEventListener("input", handleTargetInput as EventListener);
+    props.targetElement.removeEventListener(
+      "compositionstart",
+      handleCompositionStart as EventListener,
+    );
+    props.targetElement.removeEventListener(
+      "compositionend",
+      handleCompositionEnd as EventListener,
+    );
   }
   window.removeEventListener("click", handleWindowClick, true);
   window.removeEventListener("resize", handleWindowScrollOrResize);
