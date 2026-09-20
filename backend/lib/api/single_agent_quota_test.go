@@ -233,3 +233,49 @@ func TestSingleAgentExecutor_NoCrossCLIFallback(t *testing.T) {
 	assert.Contains(t, suspendedPrompt, "agy agy-model-two")
 	assert.NotContains(t, suspendedPrompt, "opencode")
 }
+
+func TestSingleAgentExecutor_ForcedCrossCLITargetRebindsCandidates(t *testing.T) {
+	repo := newQuotaTestRepo(t)
+	server := newQuotaTestServer(t, repo)
+
+	chatID := "test-chat-forced-cross-cli"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "quota-agent"}))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "quota-agent",
+			Name: "Quota Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "agy-model-one"},
+				{CLI: "opencode", Model: "opencode-model"},
+			},
+		},
+	}
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, server, nil)
+
+	// Both CLIs report no quota in the test environment, so after the user
+	// forces the cross-CLI opencode target the run re-suspends. The second
+	// prompt must now be anchored to opencode candidates only.
+	prompts := []string{
+		"Use opencode opencode-model",
+		"Cancel run",
+	}
+	var got []string
+	executor.suspendQuota = func(_ context.Context, _, _, prompt string, _ []string) (string, error) {
+		got = append(got, prompt)
+		reply := prompts[len(got)-1]
+		return reply, nil
+	}
+
+	_, err := executor.Execute(t.Context(), SingleAgentRunParams{ChatID: chatID, Prompt: "hello"})
+	require.Error(t, err)
+	require.Len(t, got, 2, "expected re-suspension after the forced cross-CLI pick")
+
+	// First prompt: restricted to agy (same-CLI fallback only).
+	assert.Contains(t, got[0], "agy agy-model-one")
+	assert.NotContains(t, got[0], "opencode opencode-model")
+
+	// Second prompt: re-anchored to opencode (deliberate user choice).
+	assert.Contains(t, got[1], "opencode opencode-model")
+	assert.NotContains(t, got[1], "agy agy-model-one")
+}

@@ -173,17 +173,19 @@ const showAgentWorking = computed(() => {
 });
 
 const lastErrorMessageId = computed(() => {
-  for (let i = props.messages.length - 1; i >= 0; i--) {
-    const m = props.messages[i];
-    if (m.role === "error" || (m.role === "activity" && m.activityType === "ERROR")) {
-      return m.id;
-    }
+  // Only the trailing message can be retried: a later message (user reply,
+  // new prompt) supersedes the failure, and queued messages mean the next
+  // run is already lined up without a retry.
+  const last = props.messages[props.messages.length - 1];
+  if (!last) return null;
+  if (last.role === "error" || (last.role === "activity" && last.activityType === "ERROR")) {
+    return last.id;
   }
   return null;
 });
 
 const canRetryMessage = (msg: ChatMessage): boolean => {
-  if (props.isRunning || props.loading) {
+  if (props.isRunning || props.loading || props.queuedMessages.length > 0) {
     return false;
   }
   return msg.id === lastErrorMessageId.value;

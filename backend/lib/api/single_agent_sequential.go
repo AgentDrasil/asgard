@@ -43,6 +43,35 @@ func quotaAskMessageID(chatID, agentID string, seq int) string {
 	return id
 }
 
+// cliForModel returns the CLI of the configured target carrying model, or ""
+// when model is empty or not configured for the agent.
+func cliForModel(cfg agentspec.AgentConfig, model string) string {
+	if model == "" {
+		return ""
+	}
+	for _, t := range cfg.CLI {
+		if t.Model == model {
+			return t.CLI
+		}
+	}
+	return ""
+}
+
+// targetsForCLI filters the configured CLI targets down to those running on
+// cli. An empty cli yields nil so the agent's full list stays in use.
+func targetsForCLI(cfg agentspec.AgentConfig, cli string) []agentspec.CLITarget {
+	if cli == "" {
+		return nil
+	}
+	var out []agentspec.CLITarget
+	for _, t := range cfg.CLI {
+		if t.CLI == cli {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // executeSequential runs the first available CLI target (by quota) and streams results.
 // When no target has usable quota it asks the user for a decision (reusing the
 // workflow quota decision surface: wait for recovery, force a specific target,
@@ -88,38 +117,14 @@ func (e *SingleAgentExecutor) executeSequential(
 
 	// Determine the target CLI to prevent cross-CLI fallback.
 	// Memory/sessions are not portable across different CLIs (e.g. AGY -> Simplest).
-	targetCLI := ""
-	if forcedModel.IsSome() && forcedModel.Unwrap() != "" {
-		m := forcedModel.Unwrap()
-		for _, t := range e.agent.Config.CLI {
-			if t.Model == m {
-				targetCLI = t.CLI
-				break
-			}
-		}
-	}
+	targetCLI := cliForModel(e.agent.Config, forcedModel.TakeOr(""))
 	if targetCLI == "" && session != nil {
-		if m := storedAgentModel(session, e.agent.Config); m != "" {
-			for _, t := range e.agent.Config.CLI {
-				if t.Model == m {
-					targetCLI = t.CLI
-					break
-				}
-			}
-		}
+		targetCLI = cliForModel(e.agent.Config, storedAgentModel(session, e.agent.Config))
 	}
 	if targetCLI == "" && len(e.agent.Config.CLI) > 0 {
 		targetCLI = e.agent.Config.CLI[0].CLI
 	}
-
-	var cliCandidates []agentspec.CLITarget
-	if targetCLI != "" {
-		for _, t := range e.agent.Config.CLI {
-			if t.CLI == targetCLI {
-				cliCandidates = append(cliCandidates, t)
-			}
-		}
-	}
+	cliCandidates := targetsForCLI(e.agent.Config, targetCLI)
 
 	for {
 		// Reset back to Running only when returning from a suspension so the
@@ -173,19 +178,11 @@ func (e *SingleAgentExecutor) executeSequential(
 			return "", fmt.Errorf("execution cancelled by user")
 		case workflow.QuotaDecisionTarget:
 			forcedModel = optional.Some(targetModel)
-			for _, t := range e.agent.Config.CLI {
-				if t.Model == targetModel {
-					if t.CLI != targetCLI {
-						targetCLI = t.CLI
-						cliCandidates = nil
-						for _, cand := range e.agent.Config.CLI {
-							if cand.CLI == targetCLI {
-								cliCandidates = append(cliCandidates, cand)
-							}
-						}
-					}
-					break
-				}
+			// A forced cross-CLI pick re-anchors the candidate list to the
+			// chosen CLI: deliberate user intent, unlike automatic fallback.
+			if cli := cliForModel(e.agent.Config, targetModel); cli != "" && cli != targetCLI {
+				targetCLI = cli
+				cliCandidates = targetsForCLI(e.agent.Config, targetCLI)
 			}
 		default:
 			// Wait/continue: re-check quota with the original selection policy.

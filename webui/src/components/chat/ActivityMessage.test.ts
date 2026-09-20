@@ -20,7 +20,6 @@ describe("ActivityMessage.vue", () => {
   beforeEach(() => {
     root = document.createElement("div");
     document.body.appendChild(root);
-    vi.restoreAllMocks();
   });
 
   it("renders error message and shows retry button when canRetry is true", async () => {

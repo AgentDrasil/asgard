@@ -480,4 +480,79 @@ describe("ChatArea.vue", () => {
 
     app.unmount();
   });
+
+  it("shows retry only on the trailing error message and hides it while queued or running", async () => {
+    const mountArea = (opts: {
+      messages: ChatMessage[];
+      queuedMessages?: QueuedMessage[];
+      isRunning?: boolean;
+    }) => {
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const app = createApp({
+        render() {
+          return h(ChatArea, {
+            messages: opts.messages,
+            loading: false,
+            activeAgent: dummyAgent,
+            runDir: "/home/user/project",
+            sessionId: "sess-123",
+            queuedMessages: opts.queuedMessages,
+            isRunning: opts.isRunning,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      return { root, unmount: () => app.unmount() };
+    };
+
+    const retryButtons = (root: HTMLElement) =>
+      Array.from(root.querySelectorAll("button")).filter(
+        (b) => b.textContent?.includes("Retry") || b.textContent?.includes("重试"),
+      );
+
+    const errorMessages: ChatMessage[] = [
+      { id: "user-1", role: "user", content: "run the task", timestamp: 1725120000000 },
+      { id: "err-1", role: "error", content: "boom", timestamp: 1725120001000 },
+    ];
+
+    // Trailing error shows exactly one retry button.
+    {
+      const { root, unmount } = mountArea({ messages: errorMessages });
+      expect(retryButtons(root).length).toBe(1);
+      unmount();
+    }
+
+    // A newer message after the error hides the button (stale failure).
+    {
+      const { root, unmount } = mountArea({
+        messages: [
+          ...errorMessages,
+          { id: "user-2", role: "user", content: "new prompt", timestamp: 1725120002000 },
+        ],
+      });
+      expect(retryButtons(root).length).toBe(0);
+      unmount();
+    }
+
+    // Queued messages line up the next run without a retry.
+    {
+      const { root, unmount } = mountArea({
+        messages: errorMessages,
+        queuedMessages: [
+          { id: "q-1", chatId: "sess-123", prompt: "next", createdAt: "", updatedAt: "" },
+        ],
+      });
+      expect(retryButtons(root).length).toBe(0);
+      unmount();
+    }
+
+    // Running state hides the button.
+    {
+      const { root, unmount } = mountArea({ messages: errorMessages, isRunning: true });
+      expect(retryButtons(root).length).toBe(0);
+      unmount();
+    }
+  });
 });
