@@ -376,6 +376,8 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 		} else if prevVal == matchedRule.DummySecret {
 			shouldReplace = true
 		} else if strings.EqualFold(matchedRule.HeaderKey, "Authorization") || hasBearerPrefix(prevVal) || hasBearerPrefix(matchedRule.DummySecret) {
+			// Bearer normalization is intentionally scoped to Authorization headers and Bearer-carrying values;
+			// other headers preserve strict exact-match semantics.
 			if stripBearerPrefix(prevVal) == stripBearerPrefix(matchedRule.DummySecret) {
 				shouldReplace = true
 			}

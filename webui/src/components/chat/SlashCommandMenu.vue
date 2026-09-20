@@ -91,6 +91,12 @@ const currentItems = computed<MenuItem[]>(() => {
   return envItems.value;
 });
 
+// Positioning constants
+const ESTIMATED_POPUP_HEIGHT = 240;
+const POPUP_RIGHT_MARGIN = 260;
+const CARET_GAP = 6;
+const MIN_VIEWPORT_PADDING = 10;
+
 const updatePosition = () => {
   if (!props.targetElement) return;
   const el = props.targetElement;
@@ -102,20 +108,23 @@ const updatePosition = () => {
   const viewportHeight = window.innerHeight;
   const caretAbsoluteTop = rect.top + coords.top;
   const caretAbsoluteLeft = Math.max(
-    10,
-    Math.min(rect.left + coords.left, window.innerWidth - 260),
+    MIN_VIEWPORT_PADDING,
+    Math.min(rect.left + coords.left, window.innerWidth - POPUP_RIGHT_MARGIN),
   );
 
   // If near bottom, place above
-  if (caretAbsoluteTop + 240 > viewportHeight && caretAbsoluteTop > 240) {
+  if (
+    caretAbsoluteTop + ESTIMATED_POPUP_HEIGHT > viewportHeight &&
+    caretAbsoluteTop > ESTIMATED_POPUP_HEIGHT
+  ) {
     popupStyle.value = {
       top: "auto",
-      bottom: `${Math.max(10, viewportHeight - caretAbsoluteTop + 6)}px`,
+      bottom: `${Math.max(MIN_VIEWPORT_PADDING, viewportHeight - caretAbsoluteTop + CARET_GAP)}px`,
       left: `${caretAbsoluteLeft}px`,
     };
   } else {
     popupStyle.value = {
-      top: `${caretAbsoluteTop + coords.height + 6}px`,
+      top: `${caretAbsoluteTop + coords.height + CARET_GAP}px`,
       bottom: "auto",
       left: `${caretAbsoluteLeft}px`,
     };
@@ -193,7 +202,6 @@ const handleCompositionStart = () => {
 
 const handleCompositionEnd = () => {
   isComposing.value = false;
-  maybeOpenFromCaret();
   handleTargetInput();
 };
 
@@ -396,6 +404,7 @@ onBeforeUnmount(() => {
 defineExpose({
   isOpen,
   slashIndex,
+  // Exposed for unit test assertions
   popupStyle,
   updatePosition,
   closeMenu,

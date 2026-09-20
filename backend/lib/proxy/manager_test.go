@@ -833,6 +833,18 @@ func TestProxyManager_Interceptor_BearerBidirectionalCompatibility(t *testing.T)
 			reqHeaderVal:  "Bearer any-token",
 			wantHeaderVal: "Bearer real-token",
 		},
+		{
+			name: "Case 8b: DummySecret empty regression (bare client token) -> replace without Bearer prefix",
+			rule: Rule{
+				Host:        "api.example.com",
+				HeaderKey:   "Authorization",
+				DummySecret: "",
+				RealSecret:  "real-token",
+			},
+			reqHeaderKey:  "Authorization",
+			reqHeaderVal:  "any-token",
+			wantHeaderVal: "real-token",
+		},
 	}
 
 	for _, tt := range tests {
