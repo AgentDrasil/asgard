@@ -749,3 +749,55 @@ func mapKeys(m map[string]bool) []string {
 	}
 	return keys
 }
+
+// AgentCLITarget describes a CLI target (CLI name and model) of an agent.
+type AgentCLITarget struct {
+	CLI   string
+	Model string
+}
+
+// AgentInfo provides agent metadata necessary to validate a workflow definition
+// against an agent repository pool.
+type AgentInfo struct {
+	ID   string
+	CLIs []AgentCLITarget
+}
+
+// ValidateWithAgents validates the workflow definition against a list of known agents,
+// verifying that referenced agent_id nodes exist and that declared model_pairings
+// cover all CLI targets of their actor agents.
+func (d *WorkflowDefinition) ValidateWithAgents(agents []*AgentInfo) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+
+	knownAgents := make(map[string]bool, len(agents))
+	agentCLIs := make(map[string][]PairTarget, len(agents))
+	for _, ag := range agents {
+		if ag == nil || ag.ID == "" {
+			continue
+		}
+		knownAgents[ag.ID] = true
+		targets := make([]PairTarget, 0, len(ag.CLIs))
+		for _, t := range ag.CLIs {
+			targets = append(targets, PairTarget(t))
+		}
+		agentCLIs[ag.ID] = targets
+	}
+
+	for _, node := range d.Nodes {
+		if node.Type == NodeTypeAgent && node.AgentID != "" {
+			if !knownAgents[node.AgentID] {
+				return fmt.Errorf("node %q references agent_id %q which is not registered in agents pool", node.ID, node.AgentID)
+			}
+		}
+	}
+
+	if len(d.ModelPairings) > 0 {
+		if err := d.ValidateModelPairingsCoverage(agentCLIs); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

@@ -46,6 +46,26 @@ func validateDir(dirPath string) {
 	hasWorkflow := fileExists(workflowPath)
 
 	if !hasConfig && !hasWorkflow {
+		// Check if this directory is the parent agents/ directory containing sub-agent directories
+		entries, err := os.ReadDir(dirPath)
+		if err == nil {
+			var subAgents []string
+			for _, e := range entries {
+				if e.IsDir() {
+					subPath := filepath.Join(dirPath, e.Name())
+					if fileExists(filepath.Join(subPath, "config.yaml")) || fileExists(filepath.Join(subPath, "workflow.yaml")) {
+						subAgents = append(subAgents, subPath)
+					}
+				}
+			}
+			if len(subAgents) > 0 {
+				for _, subPath := range subAgents {
+					validateDir(subPath)
+				}
+				return
+			}
+		}
+
 		fmt.Fprintf(os.Stderr, "Error: directory %q contains neither config.yaml nor workflow.yaml\n", dirPath)
 		os.Exit(1)
 	}
@@ -163,43 +183,19 @@ func checkAgentIDReferences(defn *workflowspec.WorkflowDefinition, baseDir strin
 		return
 	}
 
-	knownAgents := make(map[string]bool)
-	for _, ag := range loadedAgents {
-		knownAgents[ag.Config.ID] = true
+	infos := agentspec.AgentsToWorkflowAgentInfos(loadedAgents)
+	if err := defn.ValidateWithAgents(infos); err != nil {
+		fmt.Fprintf(os.Stderr, "  Workflow validation against agents failed: %v\n", err)
+		os.Exit(1)
 	}
 
-	missing := false
-	for _, node := range defn.Nodes {
-		if node.Type == workflowspec.NodeTypeAgent && node.AgentID != "" {
-			if !knownAgents[node.AgentID] {
-				fmt.Fprintf(os.Stderr, "  Warning: node %q references agent_id %q which is not registered in agents pool (%s)\n", node.ID, node.AgentID, agentsDir)
-				missing = true
-			}
-		}
+	for _, warning := range defn.ModelPairingWarnings() {
+		fmt.Fprintf(os.Stderr, "  Warning: %s\n", warning)
 	}
-
 	if len(defn.ModelPairings) > 0 {
-		agentCLIs := make(map[string][]workflowspec.PairTarget)
-		for _, ag := range loadedAgents {
-			targets := make([]workflowspec.PairTarget, 0, len(ag.Config.CLI))
-			for _, t := range ag.Config.CLI {
-				targets = append(targets, workflowspec.PairTarget{CLI: t.CLI, Model: t.Model})
-			}
-			agentCLIs[ag.Config.ID] = targets
-		}
-		if err := defn.ValidateModelPairingsCoverage(agentCLIs); err != nil {
-			fmt.Fprintf(os.Stderr, "  Model pairing validation failed: %v\n", err)
-			os.Exit(1)
-		}
-		for _, warning := range defn.ModelPairingWarnings() {
-			fmt.Fprintf(os.Stderr, "  Warning: %s\n", warning)
-		}
 		fmt.Printf("  Checked %d model pairing group(s) against agents pool [OK]\n", len(defn.ModelPairings))
 	}
-
-	if !missing && len(knownAgents) > 0 {
-		fmt.Printf("  Checked %d agent_id references against agents pool (%s) [OK]\n", countAgentNodes(defn), agentsDir)
-	}
+	fmt.Printf("  Checked %d agent_id references against agents pool (%s) [OK]\n", countAgentNodes(defn), agentsDir)
 }
 
 func countAgentNodes(defn *workflowspec.WorkflowDefinition) int {

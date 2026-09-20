@@ -1443,3 +1443,131 @@ func TestHandleConfig_ProxyEnvs(t *testing.T) {
 	assert.Equal(t, "zh-CN", resp.DefaultUILang)
 	assert.Equal(t, []string{"GEMINI_API_KEY", "OPENAI_API_KEY"}, resp.ProxyEnvs)
 }
+
+func TestServerReload_WorkflowValidation(t *testing.T) {
+	mockClients := map[string]types.CLIClient{
+		"agy": &mockClient{models: []string{"gemini-3.8-flash-low"}},
+		"simplest": &mockClient{models: []string{
+			"zai-coding-plan/glm-5.3-flash/high",
+			"zai-coding-plan/glm-5.3/high",
+			"deepseek/dsv4-pro",
+		}},
+	}
+	agentwrapper.SetClients(mockClients)
+	t.Cleanup(func() {
+		agentwrapper.SetClients(nil)
+	})
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "agent_father"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "coder"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "agents", "test-wf"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "teams.yaml"), []byte("teams:\n  - my-team\n"), 0644))
+
+	fatherYaml := `
+id: "agent_father"
+name: "Agent Father"
+description: "Root agent"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.8-flash-low"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "agent_father", "config.yaml"), []byte(fatherYaml), 0644))
+
+	coderYaml := `
+id: "coder"
+name: "Coder Agent"
+description: "Coder"
+run_dirs: ["/tmp"]
+cli:
+  - cli: "agy"
+    model: "gemini-3.8-flash-low"
+  - cli: "simplest"
+    model: "zai-coding-plan/glm-5.3-flash/high"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "coder", "config.yaml"), []byte(coderYaml), 0644))
+
+	wfConfigYaml := `
+id: "test-wf"
+name: "Test Workflow"
+description: "Workflow with pairing"
+type: "workflow"
+run_dirs: ["/tmp"]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "test-wf", "config.yaml"), []byte(wfConfigYaml), 0644))
+
+	// Incomplete pairings: missing simplest/zai-coding-plan/glm-5.3-flash/high
+	wfDefYamlIncomplete := `
+name: test-wf
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: coder
+    entry: true
+  - id: reviewer_agent
+    type: agent
+    agent_id: agent_father
+    depends:
+      - node: coding_agent
+model_pairings:
+  - id: code
+    actors: [coding_agent]
+    reviewer: reviewer_agent
+    pairs:
+      - actor: {cli: agy, model: gemini-3.8-flash-low}
+        reviewer:
+          - {cli: simplest, model: zai-coding-plan/glm-5.3/high}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "test-wf", "workflow.yaml"), []byte(wfDefYamlIncomplete), 0644))
+
+	conf := &config.Config{
+		AgentDir: tmpDir,
+		Port:     8080,
+	}
+
+	testDB := db.NewDBForTest(t)
+	srv, err := New(conf, testDB)
+	require.NoError(t, err)
+
+	snap1 := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "degraded", snap1.Status)
+	require.NotEmpty(t, snap1.Errors)
+	assert.Contains(t, snap1.Errors[0], "model_pairings: group \"code\" does not cover actor node \"coding_agent\" target simplest/zai-coding-plan/glm-5.3-flash/high")
+
+	// Fix the workflow pairing coverage and reload
+	wfDefYamlComplete := `
+name: test-wf
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: coder
+    entry: true
+  - id: reviewer_agent
+    type: agent
+    agent_id: agent_father
+    depends:
+      - node: coding_agent
+model_pairings:
+  - id: code
+    actors: [coding_agent]
+    reviewer: reviewer_agent
+    pairs:
+      - actor: {cli: agy, model: gemini-3.8-flash-low}
+        reviewer:
+          - {cli: simplest, model: zai-coding-plan/glm-5.3/high}
+      - actor: {cli: simplest, model: zai-coding-plan/glm-5.3-flash/high}
+        reviewer:
+          - {cli: agy, model: gemini-3.8-flash-low}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "agents", "test-wf", "workflow.yaml"), []byte(wfDefYamlComplete), 0644))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/manage/reload", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	snap2 := srv.Diagnostics().Snapshot()
+	assert.Equal(t, "ok", snap2.Status)
+	assert.Empty(t, snap2.Errors)
+}

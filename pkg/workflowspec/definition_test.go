@@ -1474,3 +1474,94 @@ nodes:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schedule expression will never fire")
 }
+
+func TestValidateWithAgents(t *testing.T) {
+	t.Parallel()
+
+	agents := []*AgentInfo{
+		{
+			ID: "coder",
+			CLIs: []AgentCLITarget{
+				{CLI: "agy", Model: "gemini-3.8-flash-low"},
+				{CLI: "simplest", Model: "zai-coding-plan/glm-5.3-flash/high"},
+			},
+		},
+		{
+			ID: "reviewer",
+			CLIs: []AgentCLITarget{
+				{CLI: "agy", Model: "claude-opus-4-6-thinking"},
+			},
+		},
+	}
+
+	validSpec := `
+name: test-wf
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: coder
+    entry: true
+  - id: review_agent
+    type: agent
+    agent_id: reviewer
+    depends:
+      - node: coding_agent
+model_pairings:
+  - id: code
+    actors: [coding_agent]
+    reviewer: review_agent
+    pairs:
+      - actor: {cli: agy, model: gemini-3.8-flash-low}
+        reviewer:
+          - {cli: agy, model: claude-opus-4-6-thinking}
+      - actor: {cli: simplest, model: zai-coding-plan/glm-5.3-flash/high}
+        reviewer:
+          - {cli: agy, model: claude-opus-4-6-thinking}
+`
+	defn, err := ParseDefinition([]byte(validSpec))
+	require.NoError(t, err)
+	require.NoError(t, defn.ValidateWithAgents(agents))
+
+	// Test missing agent
+	missingAgentSpec := `
+name: test-wf-missing
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: non_existent_agent
+    entry: true
+`
+	defnMissing, err := ParseDefinition([]byte(missingAgentSpec))
+	require.NoError(t, err)
+	err = defnMissing.ValidateWithAgents(agents)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "references agent_id \"non_existent_agent\" which is not registered in agents pool")
+
+	// Test missing pairing coverage
+	uncoveredPairingSpec := `
+name: test-wf-uncovered
+nodes:
+  - id: coding_agent
+    type: agent
+    agent_id: coder
+    entry: true
+  - id: review_agent
+    type: agent
+    agent_id: reviewer
+    depends:
+      - node: coding_agent
+model_pairings:
+  - id: code
+    actors: [coding_agent]
+    reviewer: review_agent
+    pairs:
+      - actor: {cli: agy, model: gemini-3.8-flash-low}
+        reviewer:
+          - {cli: agy, model: claude-opus-4-6-thinking}
+`
+	defnUncovered, err := ParseDefinition([]byte(uncoveredPairingSpec))
+	require.NoError(t, err)
+	err = defnUncovered.ValidateWithAgents(agents)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model_pairings: group \"code\" does not cover actor node \"coding_agent\" target simplest/zai-coding-plan/glm-5.3-flash/high")
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 const agentFatherID = "agent_father"
@@ -130,6 +131,7 @@ func (s *Server) reload() error {
 
 	if s.diagnostics != nil {
 		s.validateModelContextWindows(agents)
+		s.validateWorkflows(agents)
 	}
 
 	if s.cronManager != nil {
@@ -137,6 +139,33 @@ func (s *Server) reload() error {
 	}
 
 	return nil
+}
+
+// validateWorkflows validates workflow definitions and checks model pairing coverage,
+// recording any errors or warnings in diagnostics.
+func (s *Server) validateWorkflows(agents []*agentspec.Agent) {
+	s.diagnostics.ResetSource("workflow_validation")
+	wfAgents := agentspec.AgentsToWorkflowAgentInfos(agents)
+
+	for _, a := range agents {
+		if a == nil || a.Config.Type != "workflow" || a.WorkflowPath == "" {
+			continue
+		}
+		defn, err := workflowspec.LoadDefinition(a.WorkflowPath)
+		if err != nil {
+			log.Error().Err(err).Str("agent", a.Config.ID).Msg("Failed to load workflow definition during validation")
+			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q definition error: %v", a.Config.ID, err))
+			continue
+		}
+
+		if err := defn.ValidateWithAgents(wfAgents); err != nil {
+			log.Error().Err(err).Str("agent", a.Config.ID).Msg("Workflow validation failed")
+			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q: %v", a.Config.ID, err))
+		}
+		for _, warning := range defn.ModelPairingWarnings() {
+			s.diagnostics.AddWarning("workflow_validation", fmt.Sprintf("Workflow %q: %s", a.Config.ID, warning))
+		}
+	}
 }
 
 // validateModelContextWindows checks configured models against the context window registry,
