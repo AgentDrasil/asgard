@@ -571,4 +571,80 @@ describe("WelcomeScreen.vue", () => {
       expect(mockVoiceState.cancelRecording).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe("Slash Command Menu Integration in WelcomeScreen", () => {
+    it("opens slash menu on typing slash, selects env command and submits prompt", async () => {
+      const { __resetProxyEnvsCacheForTest } = await import("../composables/useProxyEnvs");
+      __resetProxyEnvsCacheForTest();
+
+      vi.spyOn(api, "getBackendConfig").mockResolvedValue({
+        proxy_envs: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+      });
+
+      let submittedPrompt = "";
+      const currentPrompt = (await import("vue")).ref("");
+
+      const app = createApp({
+        setup() {
+          return () =>
+            h(WelcomeScreen, {
+              agents: mockAgents,
+              selectedAgentId: "agent-1",
+              selectedDir: "/workspace/project",
+              prompt: currentPrompt.value,
+              "onUpdate:prompt": (val: string) => {
+                currentPrompt.value = val;
+              },
+              loading: false,
+              onSubmit: () => {
+                submittedPrompt = currentPrompt.value;
+              },
+            });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea).not.toBeNull();
+
+      // Type "/" to trigger slash menu
+      textarea.value = "/";
+      textarea.setSelectionRange(1, 1);
+      textarea.dispatchEvent(new InputEvent("input", { inputType: "insertText", bubbles: true }));
+      await nextTick();
+      // Allow async fetchEnvs() inside openMenu to resolve
+      await new Promise((r) => setTimeout(r, 10));
+      await nextTick();
+
+      const menuEl = document.querySelector('[data-testid="slash-command-menu"]');
+      expect(menuEl).not.toBeNull();
+      expect(menuEl?.textContent).toContain("env");
+
+      // Press Enter to drill into env view
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await nextTick();
+
+      expect(menuEl?.textContent).toContain("GEMINI_API_KEY");
+
+      // Press Enter to select GEMINI_API_KEY
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await nextTick();
+
+      // Check that prompt was updated to include /env:GEMINI_API_KEY
+      expect(currentPrompt.value).toContain("/env:GEMINI_API_KEY ");
+      expect(document.querySelector('[data-testid="slash-command-menu"]')).toBeNull();
+
+      // Submit the form
+      const submitBtn = root.querySelector("button.btn-primary") as HTMLButtonElement;
+      expect(submitBtn.disabled).toBe(false);
+      submitBtn.click();
+      await nextTick();
+
+      expect(submittedPrompt).toBe("/env:GEMINI_API_KEY ");
+
+      app.unmount();
+    });
+  });
 });

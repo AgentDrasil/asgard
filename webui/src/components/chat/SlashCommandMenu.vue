@@ -24,7 +24,10 @@ const activeView = ref<"root" | "env">("root");
 const selectedIndex = ref(0);
 const slashIndex = ref<number>(-1);
 const filterQuery = ref<string>("");
-const popupStyle = ref<{ top: string; left: string }>({ top: "0px", left: "0px" });
+const popupStyle = ref<{ top: string; left: string; bottom?: string }>({
+  top: "0px",
+  left: "0px",
+});
 const popupRef = ref<HTMLDivElement | null>(null);
 
 const fetchEnvs = async () => {
@@ -98,18 +101,23 @@ const updatePosition = () => {
   // Position relative to viewport
   const viewportHeight = window.innerHeight;
   const caretAbsoluteTop = rect.top + coords.top;
-  const caretAbsoluteLeft = Math.min(rect.left + coords.left, window.innerWidth - 260);
+  const caretAbsoluteLeft = Math.max(
+    10,
+    Math.min(rect.left + coords.left, window.innerWidth - 260),
+  );
 
   // If near bottom, place above
-  if (caretAbsoluteTop + 220 > viewportHeight && caretAbsoluteTop > 240) {
+  if (caretAbsoluteTop + 240 > viewportHeight && caretAbsoluteTop > 240) {
     popupStyle.value = {
-      top: `${Math.max(10, caretAbsoluteTop - 210)}px`,
-      left: `${Math.max(10, caretAbsoluteLeft)}px`,
+      top: "auto",
+      bottom: `${Math.max(10, viewportHeight - caretAbsoluteTop + 6)}px`,
+      left: `${caretAbsoluteLeft}px`,
     };
   } else {
     popupStyle.value = {
       top: `${caretAbsoluteTop + coords.height + 6}px`,
-      left: `${Math.max(10, caretAbsoluteLeft)}px`,
+      bottom: "auto",
+      left: `${caretAbsoluteLeft}px`,
     };
   }
 };
@@ -388,6 +396,8 @@ onBeforeUnmount(() => {
 defineExpose({
   isOpen,
   slashIndex,
+  popupStyle,
+  updatePosition,
   closeMenu,
   openMenu,
 });

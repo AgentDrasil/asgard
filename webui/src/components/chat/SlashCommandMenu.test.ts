@@ -694,4 +694,167 @@ describe("SlashCommandMenu.vue", () => {
 
     app.unmount();
   });
+
+  describe("Dynamic positioning near viewport edges", () => {
+    it("dynamically positions popup anchored to bottom when near bottom of viewport", async () => {
+      vi.spyOn(api, "getBackendConfig").mockResolvedValue({
+        proxy_envs: ["GEMINI_API_KEY"],
+      });
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const textarea = document.createElement("textarea");
+      document.body.appendChild(textarea);
+
+      // Simulate viewport height = 800px, width = 1024px
+      vi.stubGlobal("innerHeight", 800);
+      vi.stubGlobal("innerWidth", 1024);
+
+      // Mock textarea bounding rect
+      vi.spyOn(textarea, "getBoundingClientRect").mockReturnValue({
+        top: 700,
+        left: 100,
+        bottom: 780,
+        right: 600,
+        width: 500,
+        height: 80,
+        x: 100,
+        y: 700,
+        toJSON: () => {},
+      });
+
+      // Mock caret position: top = 50, left = 20, height = 20
+      // caretAbsoluteTop = rect.top + coords.top = 700 + 50 = 750px
+      // 750 + 240 > 800 and 750 > 240 -> upward popup
+      const caretMod = await import("../../utils/caretCoordinates");
+      vi.spyOn(caretMod, "getCaretCoordinates").mockReturnValue({
+        top: 50,
+        left: 20,
+        height: 20,
+      });
+
+      const textModel = ref("");
+      let menuRef: any = null;
+
+      const app = createApp({
+        setup() {
+          return () =>
+            h(SlashCommandMenu, {
+              ref: (el: any) => {
+                menuRef = el;
+              },
+              targetElement: textarea,
+              modelValue: textModel.value,
+              "onUpdate:modelValue": (val: string) => {
+                textModel.value = val;
+              },
+            });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      await nextTick();
+
+      await menuRef?.openMenu();
+      await nextTick();
+
+      expect(menuRef?.isOpen).toBe(true);
+      // Assert upward positioning: top === 'auto', bottom === 800 - 750 + 6 = 56px
+      expect(menuRef.popupStyle.top).toBe("auto");
+      expect(menuRef.popupStyle.bottom).toBe("56px");
+      // left: Math.max(10, Math.min(100 + 20, 1024 - 260)) = 120px
+      expect(menuRef.popupStyle.left).toBe("120px");
+
+      // Verify DOM element inline style
+      const menuEl = document.querySelector('[data-testid="slash-command-menu"]') as HTMLElement;
+      expect(menuEl).not.toBeNull();
+      expect(menuEl.style.top).toBe("auto");
+      expect(menuEl.style.bottom).toBe("56px");
+      expect(menuEl.style.left).toBe("120px");
+
+      app.unmount();
+      vi.unstubAllGlobals();
+    });
+
+    it("positions popup downward when plenty of space below", async () => {
+      vi.spyOn(api, "getBackendConfig").mockResolvedValue({
+        proxy_envs: ["GEMINI_API_KEY"],
+      });
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const textarea = document.createElement("textarea");
+      document.body.appendChild(textarea);
+
+      // Simulate viewport height = 800px, width = 1024px
+      vi.stubGlobal("innerHeight", 800);
+      vi.stubGlobal("innerWidth", 1024);
+
+      // Mock textarea bounding rect near top
+      vi.spyOn(textarea, "getBoundingClientRect").mockReturnValue({
+        top: 100,
+        left: 100,
+        bottom: 200,
+        right: 600,
+        width: 500,
+        height: 100,
+        x: 100,
+        y: 100,
+        toJSON: () => {},
+      });
+
+      // Mock caret position: top = 10, left = 30, height = 20
+      // caretAbsoluteTop = 100 + 10 = 110px (< 800 - 240)
+      const caretMod = await import("../../utils/caretCoordinates");
+      vi.spyOn(caretMod, "getCaretCoordinates").mockReturnValue({
+        top: 10,
+        left: 30,
+        height: 20,
+      });
+
+      const textModel = ref("");
+      let menuRef: any = null;
+
+      const app = createApp({
+        setup() {
+          return () =>
+            h(SlashCommandMenu, {
+              ref: (el: any) => {
+                menuRef = el;
+              },
+              targetElement: textarea,
+              modelValue: textModel.value,
+              "onUpdate:modelValue": (val: string) => {
+                textModel.value = val;
+              },
+            });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      await nextTick();
+
+      await menuRef?.openMenu();
+      await nextTick();
+
+      expect(menuRef?.isOpen).toBe(true);
+      // Downward: top === 110 + 20 + 6 = 136px, bottom === 'auto'
+      expect(menuRef.popupStyle.top).toBe("136px");
+      expect(menuRef.popupStyle.bottom).toBe("auto");
+      expect(menuRef.popupStyle.left).toBe("130px");
+
+      const menuEl = document.querySelector('[data-testid="slash-command-menu"]') as HTMLElement;
+      expect(menuEl).not.toBeNull();
+      expect(menuEl.style.top).toBe("136px");
+      expect(menuEl.style.bottom).toBe("auto");
+      expect(menuEl.style.left).toBe("130px");
+
+      app.unmount();
+      vi.unstubAllGlobals();
+    });
+  });
 });
