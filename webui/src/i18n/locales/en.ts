@@ -263,6 +263,7 @@ export const en = {
     thinkingProcess: "Thinking Process",
     collapse: "Collapse",
     error: "Error",
+    retry: "Retry",
     tool: "TOOL",
     targetFiles: "Target Files:",
     targetFileSingle: "Target File:",

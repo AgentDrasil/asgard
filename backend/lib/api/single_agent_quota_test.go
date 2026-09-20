@@ -195,3 +195,41 @@ func TestSingleAgentExecutor_UpdateAgentModel(t *testing.T) {
 	require.Len(t, session.Agents, 1)
 	assert.Equal(t, "model-two", session.Agents[0].Model)
 }
+
+func TestSingleAgentExecutor_NoCrossCLIFallback(t *testing.T) {
+	repo := newQuotaTestRepo(t)
+	server := newQuotaTestServer(t, repo)
+
+	chatID := "test-chat-no-cross-cli"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "quota-agent"}))
+
+	// Config with agy first and opencode second.
+	// When agy has no quota, it must not automatically fall back to opencode,
+	// but suspend and wait for quota decision.
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "quota-agent",
+			Name: "Quota Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "agy-model-one"},
+				{CLI: "agy", Model: "agy-model-two"},
+				{CLI: "opencode", Model: "opencode-model"},
+			},
+		},
+	}
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, server, nil)
+
+	var suspendedPrompt string
+	executor.suspendQuota = func(_ context.Context, gotChatID, agentName, prompt string, options []string) (string, error) {
+		suspendedPrompt = prompt
+		return "Cancel run", nil
+	}
+
+	_, err := executor.Execute(t.Context(), SingleAgentRunParams{ChatID: chatID, Prompt: "hello"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "execution cancelled by user")
+	// Verify suspension prompt only contains candidates for agy, not opencode
+	assert.Contains(t, suspendedPrompt, "agy agy-model-one")
+	assert.Contains(t, suspendedPrompt, "agy agy-model-two")
+	assert.NotContains(t, suspendedPrompt, "opencode")
+}

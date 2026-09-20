@@ -366,6 +366,21 @@ const handleSendMessage = (text: string, attachments?: Attachment[]) => {
   });
 };
 
+const handleRetryLastUserMessage = () => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i];
+    if (m.role === "user") {
+      sendMessage(m.content, {
+        selectedAgentId: selectedAgentId.value,
+        selectedDir: selectedDir.value,
+        selectedModel: selectedModel.value,
+        attachments: m.attachments,
+      });
+      break;
+    }
+  }
+};
+
 const handleStopExecution = () => {
   void stopExecution();
 };
@@ -636,6 +651,7 @@ const commandList = computed<CommandItem[]>(() => [
           @ask-replied="handleAskReplied"
           @edit-queued="handleEditQueued"
           @delete-queued="handleDeleteQueued"
+          @retry="handleRetryLastUserMessage"
         />
       </router-view>
     </main>

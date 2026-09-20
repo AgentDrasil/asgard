@@ -58,6 +58,7 @@ const emit = defineEmits<{
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
   (e: "stop"): void;
+  (e: "retry"): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -214,6 +215,7 @@ function navigateToVcs(gitRoot?: string) {
         :isArtifactDrawerOpen="isArtifactDrawerOpen"
         :workingAgentLabel="workingAgentLabel"
         :queuedMessages="queuedMessages"
+        :isRunning="isRunning"
         v-model:isDetailsOpen="isDetailsOpen"
         @open-diff="navigateToVcs"
         @open-file-view="navigateToFiles"
@@ -225,6 +227,7 @@ function navigateToVcs(gitRoot?: string) {
         @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
         @edit-queued="(id, text) => emit('edit-queued', id, text)"
         @delete-queued="(id) => emit('delete-queued', id)"
+        @retry="emit('retry')"
       />
     </div>
 

@@ -263,6 +263,7 @@ export const zhCN: MessageSchema = {
     thinkingProcess: "思考过程",
     collapse: "收起",
     error: "错误",
+    retry: "重试",
     tool: "TOOL",
     targetFiles: "目标产物文件:",
     targetFileSingle: "目标产物文件:",

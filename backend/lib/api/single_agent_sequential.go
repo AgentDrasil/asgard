@@ -86,6 +86,41 @@ func (e *SingleAgentExecutor) executeSequential(
 	suspended := false
 	quotaSeq := 0
 
+	// Determine the target CLI to prevent cross-CLI fallback.
+	// Memory/sessions are not portable across different CLIs (e.g. AGY -> Simplest).
+	targetCLI := ""
+	if forcedModel.IsSome() && forcedModel.Unwrap() != "" {
+		m := forcedModel.Unwrap()
+		for _, t := range e.agent.Config.CLI {
+			if t.Model == m {
+				targetCLI = t.CLI
+				break
+			}
+		}
+	}
+	if targetCLI == "" && session != nil {
+		if m := storedAgentModel(session, e.agent.Config); m != "" {
+			for _, t := range e.agent.Config.CLI {
+				if t.Model == m {
+					targetCLI = t.CLI
+					break
+				}
+			}
+		}
+	}
+	if targetCLI == "" && len(e.agent.Config.CLI) > 0 {
+		targetCLI = e.agent.Config.CLI[0].CLI
+	}
+
+	var cliCandidates []agentspec.CLITarget
+	if targetCLI != "" {
+		for _, t := range e.agent.Config.CLI {
+			if t.CLI == targetCLI {
+				cliCandidates = append(cliCandidates, t)
+			}
+		}
+	}
+
 	for {
 		// Reset back to Running only when returning from a suspension so the
 		// initial Running status written by Execute is not churned.
@@ -96,7 +131,7 @@ func (e *SingleAgentExecutor) executeSequential(
 		runToken := uuid.NewV7().String()
 		resultCh := make(chan seqRunResult, 1)
 		go func(mOpt optional.Option[string]) {
-			out, target, err := run.RunWithCandidates(ctx, e.agent, nil, prompt, sessions, runDirOpt, mOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
+			out, target, err := run.RunWithCandidates(ctx, e.agent, cliCandidates, prompt, sessions, runDirOpt, mOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
 			resultCh <- seqRunResult{out: out, target: target, err: err}
 		}(forcedModel)
 
@@ -138,6 +173,20 @@ func (e *SingleAgentExecutor) executeSequential(
 			return "", fmt.Errorf("execution cancelled by user")
 		case workflow.QuotaDecisionTarget:
 			forcedModel = optional.Some(targetModel)
+			for _, t := range e.agent.Config.CLI {
+				if t.Model == targetModel {
+					if t.CLI != targetCLI {
+						targetCLI = t.CLI
+						cliCandidates = nil
+						for _, cand := range e.agent.Config.CLI {
+							if cand.CLI == targetCLI {
+								cliCandidates = append(cliCandidates, cand)
+							}
+						}
+					}
+					break
+				}
+			}
 		default:
 			// Wait/continue: re-check quota with the original selection policy.
 			forcedModel = modelOpt

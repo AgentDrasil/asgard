@@ -10,10 +10,12 @@ defineProps<{
   message: ChatMessage;
   activeAgent: AgentInfo | null;
   agents?: AgentInfo[];
+  canRetry?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "open-artifact", file: string): void;
+  (e: "retry"): void;
 }>();
 </script>
 
@@ -69,6 +71,12 @@ const emit = defineEmits<{
       <pre
         class="text-xs font-mono text-error/90 whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
         >{{ message.content }}</pre>
+      <div v-if="canRetry" class="pt-1 flex items-center justify-end">
+        <button type="button" class="btn btn-xs btn-error btn-outline gap-1" @click="emit('retry')">
+          <Icon icon="material-symbols:refresh-rounded" class="h-3.5 w-3.5" />
+          <span>{{ $t("chat.retry") }}</span>
+        </button>
+      </div>
     </div>
   </div>
 

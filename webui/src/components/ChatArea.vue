@@ -42,6 +42,7 @@ const props = withDefaults(
     isArtifactDrawerOpen?: boolean;
     workingAgentLabel?: string | null;
     queuedMessages?: QueuedMessage[];
+    isRunning?: boolean;
   }>(),
   {
     isDetailsOpen: true,
@@ -51,6 +52,7 @@ const props = withDefaults(
     isArtifactDrawerOpen: false,
     workingAgentLabel: null,
     queuedMessages: () => [],
+    isRunning: false,
   },
 );
 
@@ -66,6 +68,7 @@ const emit = defineEmits<{
   (e: "ask-replied", msgId?: string, text?: string): void;
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
+  (e: "retry"): void;
 }>();
 
 // Resizable artifact panel width logic
@@ -168,6 +171,23 @@ const showAgentWorking = computed(() => {
   }
   return props.loading;
 });
+
+const lastErrorMessageId = computed(() => {
+  for (let i = props.messages.length - 1; i >= 0; i--) {
+    const m = props.messages[i];
+    if (m.role === "error" || (m.role === "activity" && m.activityType === "ERROR")) {
+      return m.id;
+    }
+  }
+  return null;
+});
+
+const canRetryMessage = (msg: ChatMessage): boolean => {
+  if (props.isRunning || props.loading) {
+    return false;
+  }
+  return msg.id === lastErrorMessageId.value;
+};
 
 const findState = useInPageFind(scrollContainerRef);
 
@@ -415,7 +435,9 @@ onUnmounted(() => {
                 :message="msg"
                 :active-agent="activeAgent"
                 :agents="agents"
+                :can-retry="canRetryMessage(msg)"
                 @open-artifact="emit('open-artifact', $event)"
+                @retry="emit('retry')"
               />
 
               <!-- Assistant Message -->
