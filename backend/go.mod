@@ -18,11 +18,11 @@ require (
 	github.com/rcarmo/go-te v0.1.0
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/oauth2 v0.37.0
+	golang.org/x/sync v0.23.0
 	google.golang.org/genai v1.71.0
-	google.golang.org/grpc v1.83.2
-	gorm.io/driver/postgres v1.6.2
+	google.golang.org/grpc v1.84.0
+	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 )
 
