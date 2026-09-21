@@ -32,22 +32,24 @@ type Config struct {
 	DSN   string `yaml:"dsn"`
 	// AgentDir is the fixed agent definitions root (~/asgard). It is not
 	// configurable; the field is exported so tests can inject a temp root.
-	AgentDir                string                    `yaml:"-" json:"-"`
-	Port                    int                       `yaml:"port"`
-	InternalPort            int                       `yaml:"internal_port"`
-	Host                    string                    `yaml:"host"`
-	WebUIPath               string                    `yaml:"webui_path"`
-	GeminiAPIKey            string                    `yaml:"gemini_api_key"`
-	GeminiModelForChatTitle string                    `yaml:"gemini_model_for_chat_title"`
-	FirebaseWebpushWeb      *FirebaseWebpushWebConfig `yaml:"firebase_webpush_web"`
-	ChatLang                string                    `yaml:"chat_lang"`
-	DocLang                 string                    `yaml:"doc_lang"`
-	CommentLang             string                    `yaml:"comment_lang"`
-	UILang                  string                    `yaml:"ui_lang"`
-	Providers               []string                  `yaml:"providers" json:"providers,omitempty"`
-	Proxy                   *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
-	ConfigPath              string                    `yaml:"-" json:"-"`
-	proxyMu                 sync.RWMutex              `yaml:"-" json:"-"`
+	AgentDir                           string                    `yaml:"-" json:"-"`
+	Port                               int                       `yaml:"port"`
+	InternalPort                       int                       `yaml:"internal_port"`
+	Host                               string                    `yaml:"host"`
+	WebUIPath                          string                    `yaml:"webui_path"`
+	GeminiAPIKey                       string                    `yaml:"gemini_api_key"`
+	GeminiModelForChatTitle            string                    `yaml:"gemini_model_for_chat_title"`
+	GeminiModelForCommandResultCompass string                    `yaml:"gemini_model_for_command_result_compass"`
+	TypesafeAPIKey                     string                    `yaml:"typesafe_api_key"`
+	FirebaseWebpushWeb                 *FirebaseWebpushWebConfig `yaml:"firebase_webpush_web"`
+	ChatLang                           string                    `yaml:"chat_lang"`
+	DocLang                            string                    `yaml:"doc_lang"`
+	CommentLang                        string                    `yaml:"comment_lang"`
+	UILang                             string                    `yaml:"ui_lang"`
+	Providers                          []string                  `yaml:"providers" json:"providers,omitempty"`
+	Proxy                              *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
+	ConfigPath                         string                    `yaml:"-" json:"-"`
+	proxyMu                            sync.RWMutex              `yaml:"-" json:"-"`
 }
 
 var SupportedUILangs = []string{"en", "zh-CN"}
@@ -124,6 +126,20 @@ func (c *Config) GetUILang() string {
 	return c.UILang
 }
 
+func (c *Config) GetGeminiModelForCommandResultCompass() string {
+	if c == nil || c.GeminiModelForCommandResultCompass == "" {
+		return "gemini-2.5-flash-lite"
+	}
+	return c.GeminiModelForCommandResultCompass
+}
+
+func (c *Config) GetTypesafeAPIKey() string {
+	if c != nil && c.TypesafeAPIKey != "" {
+		return c.TypesafeAPIKey
+	}
+	return os.Getenv("TYPESAFE_API_KEY")
+}
+
 func (c *Config) LanguageRules() string {
 	return fmt.Sprintf(`## Language Preferences
 
@@ -192,10 +208,20 @@ func (c *Config) ProxyEnvNames() []string {
 // SandboxProxyOptions builds the bwrap proxy sandbox options for this config.
 // It returns a disabled config when the proxy is not enabled.
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
+	var typesafeKey string
+	var compassModel string
+	if c != nil {
+		typesafeKey = c.GetTypesafeAPIKey()
+		compassModel = c.GetGeminiModelForCommandResultCompass()
+	}
+
 	p := c.GetProxy()
 	if p == nil || !p.Enable {
 		log.Debug().Msg("sandbox proxy options: proxy is disabled or nil")
-		return bwrap.ProxySandboxConfig{}
+		return bwrap.ProxySandboxConfig{
+			TypesafeAPIKey: typesafeKey,
+			CompassModel:   compassModel,
+		}
 	}
 	opts := bwrap.ProxySandboxConfig{
 		Enabled:         true,
@@ -204,6 +230,8 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 		CAKey:           p.ResolvedCAKeyPath(),
 		ProxyConfigPath: c.ResolvedProxyConfigPath(),
 		EnvVars:         p.EnvVars(),
+		TypesafeAPIKey:  typesafeKey,
+		CompassModel:    compassModel,
 	}
 	log.Debug().
 		Bool("enabled", opts.Enabled).

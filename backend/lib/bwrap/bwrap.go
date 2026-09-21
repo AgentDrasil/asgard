@@ -240,6 +240,8 @@ type ProxySandboxConfig struct {
 	CAKey           string            // Host Asgard CA private key path (absolute)
 	ProxyConfigPath string            // Host standalone proxy config path (absolute, if any)
 	EnvVars         map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
+	TypesafeAPIKey  string            // TypeSafe API key for Jev System One evaluation
+	CompassModel    string            // Gemini model for command result compass
 }
 
 // appendProxySensitiveMaskArgs masks the Asgard config directory (which holds
@@ -371,6 +373,24 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// to it by the host.
 	if target.Model != "" {
 		args = append(args, "--setenv", "ASGARD_MODEL", target.Model)
+	}
+
+	// Inject TypeSafe Jev API key and compass model if available
+	typesafeKey := os.Getenv("TYPESAFE_API_KEY")
+	compassModel := os.Getenv("GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS")
+	if len(proxyOpts) > 0 {
+		if proxyOpts[0].TypesafeAPIKey != "" {
+			typesafeKey = proxyOpts[0].TypesafeAPIKey
+		}
+		if proxyOpts[0].CompassModel != "" {
+			compassModel = proxyOpts[0].CompassModel
+		}
+	}
+	if typesafeKey != "" {
+		args = append(args, "--setenv", "TYPESAFE_API_KEY", typesafeKey)
+	}
+	if compassModel != "" {
+		args = append(args, "--setenv", "GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS", compassModel)
 	}
 
 	spec := agentwrapper.GetSandboxSpec(target.CLI)

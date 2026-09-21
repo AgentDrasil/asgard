@@ -761,3 +761,54 @@ func TestSandboxProxyOptions_DynamicRefresh(t *testing.T) {
 	assert.False(t, optsDisabled.Enabled)
 	assert.Empty(t, optsDisabled.EnvVars)
 }
+
+func TestConfig_CommandResultCompassFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default values when omitted", func(t *testing.T) {
+		t.Parallel()
+		yamlContent := `
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "test.db"
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+`
+		cfg, err := ParseAndValidate([]byte(yamlContent))
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+
+		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
+		assert.Equal(t, os.Getenv("TYPESAFE_API_KEY"), cfg.GetTypesafeAPIKey())
+	})
+
+	t.Run("custom values parsed correctly", func(t *testing.T) {
+		t.Parallel()
+		yamlContent := `
+host: "127.0.0.1"
+db: "sqlite"
+dsn: "test.db"
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+gemini_model_for_command_result_compass: "gemini-2.5-pro"
+typesafe_api_key: "test-typesafe-key-123"
+`
+		cfg, err := ParseAndValidate([]byte(yamlContent))
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+
+		assert.Equal(t, "gemini-2.5-pro", cfg.GetGeminiModelForCommandResultCompass())
+		assert.Equal(t, "test-typesafe-key-123", cfg.GetTypesafeAPIKey())
+
+		sandboxOpts := cfg.SandboxProxyOptions()
+		assert.Equal(t, "test-typesafe-key-123", sandboxOpts.TypesafeAPIKey)
+		assert.Equal(t, "gemini-2.5-pro", sandboxOpts.CompassModel)
+	})
+
+	t.Run("nil config safety", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
+		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
+	})
+}

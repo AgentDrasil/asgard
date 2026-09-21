@@ -10,6 +10,8 @@ require (
 	google.golang.org/protobuf v1.36.12
 )
 
+replace github.com/AgentDrasil/asgard/pkg/jev => ../pkg/jev
+
 replace github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
 
 replace github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
