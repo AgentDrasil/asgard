@@ -408,10 +408,10 @@ const handleSubmit = () => {
     </header>
 
     <div
-      class="flex-1 flex flex-col justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
+      class="flex-1 flex flex-col justify-start md:justify-center items-center p-3 sm:p-8 bg-base-100 overflow-y-auto"
     >
       <div
-        class="max-w-2xl w-full space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300 transition-all"
+        class="max-w-2xl w-full my-auto space-y-6 sm:space-y-8 bg-base-200 p-4 sm:p-8 rounded-2xl shadow-xl border border-base-300 transition-all"
         @dragenter="handleDragEnter"
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
