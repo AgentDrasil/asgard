@@ -187,46 +187,34 @@ func runStream(ctx context.Context, client pb.FakebashServiceClient, args []stri
 			flushBuffers(stdout, stderr, p, storageFile, cmdID, &stdoutBuf, &stderrBuf)
 		}
 
+		processStreamChunk := func(w io.Writer, buf *bytes.Buffer) {
+			totalBytes += int64(len(resp.Payload))
+			for _, b := range resp.Payload {
+				if b == '\n' {
+					lineCount++
+				}
+			}
+			if storageFile != nil {
+				_ = storageFile.Append(resp.Payload)
+			}
+			if isPassthrough {
+				_, _ = w.Write(resp.Payload)
+			} else {
+				if stdoutBuf.Len()+stderrBuf.Len()+len(resp.Payload) > maxMemoryBufferLimit {
+					log.Info().Msg("fakebash: in-memory buffer exceeded limit; stopping memory buffering to bound memory usage")
+				} else {
+					buf.Write(resp.Payload)
+				}
+			}
+		}
+
 		switch resp.Type {
 		case pb.CommandResponse_STDOUT:
-			totalBytes += int64(len(resp.Payload))
-			for _, b := range resp.Payload {
-				if b == '\n' {
-					lineCount++
-				}
-			}
-			if storageFile != nil {
-				_ = storageFile.Append(resp.Payload)
-			}
-			if isPassthrough {
-				_, _ = stdout.Write(resp.Payload)
-			} else {
-				if stdoutBuf.Len()+stderrBuf.Len()+len(resp.Payload) > maxMemoryBufferLimit {
-					log.Info().Msg("fakebash: in-memory buffer exceeded limit; stopping memory buffering to bound memory usage")
-				} else {
-					stdoutBuf.Write(resp.Payload)
-				}
-			}
+			processStreamChunk(stdout, &stdoutBuf)
 		case pb.CommandResponse_STDERR:
-			totalBytes += int64(len(resp.Payload))
-			for _, b := range resp.Payload {
-				if b == '\n' {
-					lineCount++
-				}
-			}
-			if storageFile != nil {
-				_ = storageFile.Append(resp.Payload)
-			}
-			if isPassthrough {
-				_, _ = stderr.Write(resp.Payload)
-			} else {
-				if stdoutBuf.Len()+stderrBuf.Len()+len(resp.Payload) > maxMemoryBufferLimit {
-					log.Info().Msg("fakebash: in-memory buffer exceeded limit; stopping memory buffering to bound memory usage")
-				} else {
-					stderrBuf.Write(resp.Payload)
-				}
-			}
+			processStreamChunk(stderr, &stderrBuf)
 		case pb.CommandResponse_EXIT:
+
 			// Path 1: Normal EXIT frame
 			if timer != nil {
 				timer.Stop()

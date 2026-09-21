@@ -108,6 +108,8 @@ The host process initializes a temporary host directory and bind-mounts it to `/
       show-output --grep=FAIL  # Filter lines matching regular expression
       show-output --path       # Print absolute path to the raw log file
       ```
+      *(Note: `show-output` shares the output directory `/tmp/fakebash-outputs`, filename convention `c-<unix-ms>-<pid>-<rand>.log`, and symlink `latest.log` with `fakebash/storage.go` as a standalone utility with no shared internal package dependencies.)*
+
 
 ## Workflow Orchestration Engine
 

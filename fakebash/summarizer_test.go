@@ -92,9 +92,13 @@ func TestSummarizer_SmallLog_DirectExtract(t *testing.T) {
 	res, err := summarizer.Summarize(context.Background(), "go test ./...", 1, StrategyExtractFailure, sf.ID(), int64(len(content)))
 	require.NoError(t, err)
 
+	mu.Lock()
+	body := receivedBody
+	mu.Unlock()
+
 	assert.Contains(t, res, "Failed test: TestUserAuth at auth_test.go:42")
-	assert.Contains(t, receivedBody, "Inspector Mode: false")
-	assert.Contains(t, receivedBody, "auth_test.go:42: passwords do not match")
+	assert.Contains(t, body, "Inspector Mode: false")
+	assert.Contains(t, body, "auth_test.go:42: passwords do not match")
 }
 
 func TestSummarizer_LargeLog_InspectorRetrieval(t *testing.T) {
@@ -190,12 +194,16 @@ func TestSummarizer_LargeLog_InspectorRetrieval(t *testing.T) {
 			res, err := summarizer.Summarize(context.Background(), "go test ./...", 2, StrategyExtractFailure, sf.ID(), int64(len(content)))
 			require.NoError(t, err)
 
+			mu.Lock()
+			prompt := receivedPrompt
+			mu.Unlock()
+
 			assert.Contains(t, res, "Panic in main.processWork at /app/server/worker.go:188")
 			// Verify that Inspector mode was activated and prompt did not send the full 50KB/500KB content
-			assert.Contains(t, receivedPrompt, "Inspector Mode: true")
-			assert.Contains(t, receivedPrompt, "Inspector truncated noisy lines")
-			assert.Contains(t, receivedPrompt, "/app/server/worker.go:188")
-			assert.Less(t, len(receivedPrompt), len(content))
+			assert.Contains(t, prompt, "Inspector Mode: true")
+			assert.Contains(t, prompt, "Inspector truncated noisy lines")
+			assert.Contains(t, prompt, "/app/server/worker.go:188")
+			assert.Less(t, len(prompt), len(content))
 		})
 	}
 }
