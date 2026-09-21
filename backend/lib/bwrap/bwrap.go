@@ -241,6 +241,7 @@ type ProxySandboxConfig struct {
 	ProxyConfigPath string            // Host standalone proxy config path (absolute, if any)
 	EnvVars         map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
 	TypesafeAPIKey  string            // TypeSafe API key for Jev System One evaluation
+	GeminiAPIKey    string            // Gemini API key for Level 2 GenAI summarizer
 	CompassModel    string            // Gemini model for command result compass
 }
 
@@ -375,12 +376,16 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 		args = append(args, "--setenv", "ASGARD_MODEL", target.Model)
 	}
 
-	// Inject TypeSafe Jev API key and compass model if available
+	// Inject TypeSafe Jev API key, Gemini API key, and compass model if available
 	typesafeKey := os.Getenv("TYPESAFE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 	compassModel := os.Getenv("GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS")
 	if len(proxyOpts) > 0 {
 		if proxyOpts[0].TypesafeAPIKey != "" {
 			typesafeKey = proxyOpts[0].TypesafeAPIKey
+		}
+		if proxyOpts[0].GeminiAPIKey != "" {
+			geminiKey = proxyOpts[0].GeminiAPIKey
 		}
 		if proxyOpts[0].CompassModel != "" {
 			compassModel = proxyOpts[0].CompassModel
@@ -388,6 +393,9 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	}
 	if typesafeKey != "" {
 		args = append(args, "--setenv", "TYPESAFE_API_KEY", typesafeKey)
+	}
+	if geminiKey != "" {
+		args = append(args, "--setenv", "GEMINI_API_KEY", geminiKey)
 	}
 	if compassModel != "" {
 		args = append(args, "--setenv", "GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS", compassModel)

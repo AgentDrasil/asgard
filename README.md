@@ -89,9 +89,25 @@ The `/session` mount stores the per-session message transcript stream (`messages
 The host process initializes a temporary host directory and bind-mounts it to `/fakebash` inside both sandboxes.
 
 1.  **Command Interception**: When the agent attempts to run a shell command, it calls `/bin/bash`, invoking the `fakebash` client.
-2.  **Allowlist Filtering**: The `fakebash` client checks if the command is in the allowlist (e.g., `agystatusline`). If allowlisted, it runs directly in the Agent Sandbox.
+2.  **Allowlist Filtering**: The `fakebash` client checks if the command is in the allowlist (e.g., `agystatusline`, `show-output`). If allowlisted, it runs directly in the Agent Sandbox.
 3.  **gRPC Forwarding**: Otherwise, `fakebash` establishes a gRPC connection over the Unix socket file at `/fakebash/fakebash.sock` to the `fakebashd` daemon running in the Command Execution Sandbox.
-4.  **Execution in PTY**: `fakebashd` runs a persistent `bash` shell inside a PTY and executes the forwarded command in the specified working directory, forwarding stdout/stderr stream packages and the exit code back to the client.
+4.  **Execution & Streaming Persistence**: `fakebashd` executes the command and streams stdout/stderr chunks and exit codes back to `fakebash`. `fakebash` streams output directly to disk under `/tmp/fakebash-outputs/c-<unix-ms>-<pid>-<rand>.log` (atomic symlink at `latest.log`) with $O(1)$ memory usage.
+5.  **Adaptive Compression & Escape Hatch (`show-output`)**:
+    - **Fast-path Short Circuit**: Commands with output $< 256$ bytes and $\le 5$ lines immediately pass through untouched without evaluation latency.
+    - **Level 1 Classifier**: Quick classification using TypeSafe Jev System One (`keep_raw`, `drop_on_success`, `extract_failure`, `summarize`).
+    - **Level 2 Summarizer (10KB Threshold)**: Failed or verbose outputs $< 10$KB are summarized by Gemini Flash Lite directly; outputs $\ge 10$KB trigger the Inspector heuristic range extraction mode to prevent token overflow.
+    - **Control Flags**:
+      - Set `ASGARD_BASH_COMPACT=0` or `ASGARD_BASH_COMPACT_RAW=1` to completely disable output compression and pass raw output directly.
+      - Configure `ASGARD_BASH_WATCHDOG_TIMEOUT` (default: 30s) for long-running command auto-passthrough.
+      - Configure `ASGARD_GEMINI_TIMEOUT_MS` and `ASGARD_JEV_TIMEOUT_MS` for evaluation timeouts.
+    - **show-output CLI**: The agent or developer can view raw, uncompressed outputs at any time via `show-output`:
+      ```bash
+      show-output              # Inspect output of latest executed command
+      show-output <cmd-id>     # Inspect output of a specific command ID
+      show-output --tail=50    # View the last 50 lines
+      show-output --grep=FAIL  # Filter lines matching regular expression
+      show-output --path       # Print absolute path to the raw log file
+      ```
 
 ## Workflow Orchestration Engine
 

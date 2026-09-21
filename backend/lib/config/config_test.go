@@ -780,6 +780,7 @@ gemini_model_for_chat_title: "gemini-3.1-flash-lite"
 
 		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, os.Getenv("TYPESAFE_API_KEY"), cfg.GetTypesafeAPIKey())
+		assert.Equal(t, "test-key", cfg.GetGeminiAPIKey())
 	})
 
 	t.Run("custom values parsed correctly", func(t *testing.T) {
@@ -799,9 +800,11 @@ typesafe_api_key: "test-typesafe-key-123"
 
 		assert.Equal(t, "gemini-2.5-pro", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "test-typesafe-key-123", cfg.GetTypesafeAPIKey())
+		assert.Equal(t, "test-key", cfg.GetGeminiAPIKey())
 
 		sandboxOpts := cfg.SandboxProxyOptions()
 		assert.Equal(t, "test-typesafe-key-123", sandboxOpts.TypesafeAPIKey)
+		assert.Equal(t, "test-key", sandboxOpts.GeminiAPIKey)
 		assert.Equal(t, "gemini-2.5-pro", sandboxOpts.CompassModel)
 	})
 
@@ -810,5 +813,6 @@ typesafe_api_key: "test-typesafe-key-123"
 		var cfg *Config
 		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
+		assert.Equal(t, "", cfg.GetGeminiAPIKey())
 	})
 }

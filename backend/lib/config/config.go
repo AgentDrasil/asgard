@@ -133,6 +133,13 @@ func (c *Config) GetGeminiModelForCommandResultCompass() string {
 	return c.GeminiModelForCommandResultCompass
 }
 
+func (c *Config) GetGeminiAPIKey() string {
+	if c != nil && c.GeminiAPIKey != "" {
+		return c.GeminiAPIKey
+	}
+	return os.Getenv("GEMINI_API_KEY")
+}
+
 func (c *Config) GetTypesafeAPIKey() string {
 	if c != nil && c.TypesafeAPIKey != "" {
 		return c.TypesafeAPIKey
@@ -209,9 +216,11 @@ func (c *Config) ProxyEnvNames() []string {
 // It returns a disabled config when the proxy is not enabled.
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 	var typesafeKey string
+	var geminiKey string
 	var compassModel string
 	if c != nil {
 		typesafeKey = c.GetTypesafeAPIKey()
+		geminiKey = c.GetGeminiAPIKey()
 		compassModel = c.GetGeminiModelForCommandResultCompass()
 	}
 
@@ -220,6 +229,7 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 		log.Debug().Msg("sandbox proxy options: proxy is disabled or nil")
 		return bwrap.ProxySandboxConfig{
 			TypesafeAPIKey: typesafeKey,
+			GeminiAPIKey:   geminiKey,
 			CompassModel:   compassModel,
 		}
 	}
@@ -231,6 +241,7 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 		ProxyConfigPath: c.ResolvedProxyConfigPath(),
 		EnvVars:         p.EnvVars(),
 		TypesafeAPIKey:  typesafeKey,
+		GeminiAPIKey:    geminiKey,
 		CompassModel:    compassModel,
 	}
 	log.Debug().

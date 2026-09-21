@@ -46,10 +46,22 @@ func TestStorage_StreamAppendAndRead(t *testing.T) {
 	assert.Contains(t, strContent, "chunk 2: processing...\n")
 	assert.Contains(t, strContent, "# EXIT: 0")
 
+	// ReadPayload should strip the header and footer
+	payload, err := storage.ReadPayload(sf.ID())
+	require.NoError(t, err)
+	expectedPayload := "chunk 1: starting...\nchunk 2: processing...\n"
+	assert.Equal(t, expectedPayload, string(payload))
+	assert.NotContains(t, string(payload), "# CMD:")
+	assert.NotContains(t, string(payload), "# EXIT:")
+
 	// Read via "latest"
 	latestContent, err := storage.Read("latest")
 	require.NoError(t, err)
 	assert.Equal(t, content, latestContent)
+
+	latestPayload, err := storage.ReadPayload("latest")
+	require.NoError(t, err)
+	assert.Equal(t, expectedPayload, string(latestPayload))
 
 	// Read Range
 	subRange, err := storage.ReadRange(sf.ID(), 0, 10)

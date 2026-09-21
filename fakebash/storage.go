@@ -1,6 +1,7 @@
 package fakebash
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -34,6 +35,7 @@ type Storage interface {
 	CreateFile(cmd string) (StorageFile, error)
 	GetPath(cmdID string) (string, error)
 	Read(cmdID string) ([]byte, error)
+	ReadPayload(cmdID string) ([]byte, error)
 	ReadRange(cmdID string, offset, limit int64) ([]byte, error)
 	GetHeadAndTail(cmdID string, headBytes, tailBytes int) (head, tail []byte, total int64, lines int, err error)
 }
@@ -202,6 +204,31 @@ func (s *diskStorage) Read(cmdID string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(filePath)
+}
+
+// ReadPayload reads the log file and strips the leading header ("# CMD: ...\n")
+// and trailing footer ("\n# EXIT: ...\n"), returning only the pure command payload.
+func (s *diskStorage) ReadPayload(cmdID string) ([]byte, error) {
+	data, err := s.Read(cmdID)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := data
+
+	// Strip header if present
+	if bytes.HasPrefix(payload, []byte("# CMD: ")) {
+		if idx := bytes.IndexByte(payload, '\n'); idx != -1 {
+			payload = payload[idx+1:]
+		}
+	}
+
+	// Strip footer if present
+	if idx := bytes.LastIndex(payload, []byte("\n# EXIT: ")); idx != -1 {
+		payload = payload[:idx]
+	}
+
+	return payload, nil
 }
 
 func (s *diskStorage) ReadRange(cmdID string, offset, limit int64) ([]byte, error) {

@@ -561,3 +561,27 @@ func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
 	assert.NotContains(t, argStr, "SSL_CERT_FILE")
 	assert.NotContains(t, argStr, "/etc/ssl/certs/ca-certificates.crt")
 }
+
+func TestCommandForAgent_APIKeyInjection(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, subDir), 0755))
+	}
+
+	proxyOpt := ProxySandboxConfig{
+		TypesafeAPIKey: "my-typesafe-key",
+		GeminiAPIKey:   "my-gemini-key",
+		CompassModel:   "my-compass-model",
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "some-model"}
+	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+	assert.Contains(t, argStr, "--setenv TYPESAFE_API_KEY my-typesafe-key")
+	assert.Contains(t, argStr, "--setenv GEMINI_API_KEY my-gemini-key")
+	assert.Contains(t, argStr, "--setenv GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS my-compass-model")
+}

@@ -1,6 +1,7 @@
 package fakebash
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -36,6 +38,231 @@ var ProtectedProxyEnvKeys = []string{
 	"ALL_PROXY", "all_proxy",
 	"NO_PROXY", "no_proxy",
 	"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE",
+}
+
+// secretEnvDenylist contains sensitive API keys that must not be forwarded from the agent
+// environment to the command execution sandbox.
+var secretEnvDenylist = []string{
+	"GEMINI_API_KEY",
+	"TYPESAFE_API_KEY",
+}
+
+// stripSecretEnv removes sensitive credential keys from the environment slice.
+func stripSecretEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		stripped := false
+		for _, secretKey := range secretEnvDenylist {
+			if strings.HasPrefix(e, secretKey+"=") {
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
+// maxMemoryBufferLimit defines the upper bound (1MB) for in-memory buffers in non-passthrough mode.
+// When output exceeds this limit, fakebash immediately transitions to realtime passthrough to
+// maintain O(1) memory overhead.
+const maxMemoryBufferLimit = 1024 * 1024
+
+// flushBuffers flushes raw output to stdout and stderr, checking storage first and falling
+// back to in-memory buffers if storage or pipeline is unavailable or reading failed.
+func flushBuffers(stdout, stderr io.Writer, p *Pipeline, storageFile StorageFile, cmdID string, stdoutBuf, stderrBuf *bytes.Buffer) {
+	if storageFile != nil && p != nil && p.storage != nil {
+		raw, rErr := p.storage.ReadPayload(cmdID)
+		if rErr == nil {
+			_, _ = stdout.Write(raw)
+			return
+		}
+	}
+	if stdoutBuf.Len() > 0 {
+		_, _ = stdout.Write(stdoutBuf.Bytes())
+		stdoutBuf.Reset()
+	}
+	if stderrBuf.Len() > 0 {
+		_, _ = stderr.Write(stderrBuf.Bytes())
+		stderrBuf.Reset()
+	}
+}
+
+// runStream executes the gRPC command stream against fakebashd, coordinates
+// streaming log persistence, watchdog fallback, and pipeline summarization.
+func runStream(ctx context.Context, client pb.FakebashServiceClient, args []string, cwd string, env []string, stdout, stderr io.Writer, p *Pipeline) (int, error) {
+	cmdStr := strings.Join(args, " ")
+	log.Info().Interface("args", args).Str("cwd", cwd).Msg("fakebash: forwarding command to fakebashd via gRPC")
+	startTime := time.Now()
+
+	var storageFile StorageFile
+	var cmdID string
+	var err error
+
+	if p != nil && p.storage != nil {
+		storageFile, err = p.storage.CreateFile(cmdStr)
+		if err != nil {
+			log.Debug().Err(err).Msg("fakebash: failed to create storage file, continuing without persistence")
+		} else {
+			cmdID = storageFile.ID()
+		}
+	}
+
+	stream, err := client.RunCommand(ctx, &pb.CommandRequest{
+		Args: args,
+		Cwd:  cwd,
+		Env:  stripSecretEnv(env),
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("fakebash: RunCommand RPC failed")
+		return 1, fmt.Errorf("run command stream error: %w", err)
+	}
+
+	// Watchdog duration: default 30s, customizable via ASGARD_BASH_WATCHDOG_TIMEOUT (ms or duration)
+	watchdogDuration := 30 * time.Second
+	if envTimeout := os.Getenv("ASGARD_BASH_WATCHDOG_TIMEOUT"); envTimeout != "" {
+		if d, parseErr := time.ParseDuration(envTimeout); parseErr == nil && d > 0 {
+			watchdogDuration = d
+		} else if ms, parseErr := strconv.Atoi(envTimeout); parseErr == nil && ms > 0 {
+			watchdogDuration = time.Duration(ms) * time.Millisecond
+		}
+	}
+
+	var timer *time.Timer
+	var passthrough atomic.Bool
+	var totalBytes int64
+	var lineCount int
+
+	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
+	replayed := false
+
+	startWatchdogOnce := sync.Once{}
+
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				// Path 3: EOF without EXIT frame
+				log.Warn().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream ended without EXIT frame, flushing raw output")
+				if storageFile != nil {
+					_ = storageFile.Finish(0)
+				}
+				if !replayed {
+					flushBuffers(stdout, stderr, p, storageFile, cmdID, &stdoutBuf, &stderrBuf)
+				}
+				return 0, nil
+			}
+
+			// Path 2: recv non-EOF error
+			log.Error().Err(err).Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream recv error from fakebashd, flushing raw output")
+			if storageFile != nil {
+				_ = storageFile.Finish(1)
+			}
+			if !replayed {
+				flushBuffers(stdout, stderr, p, storageFile, cmdID, &stdoutBuf, &stderrBuf)
+			}
+			return 1, fmt.Errorf("stream recv error: %w", err)
+		}
+
+		// Start watchdog timer upon receiving the first frame
+		startWatchdogOnce.Do(func() {
+			timer = time.AfterFunc(watchdogDuration, func() {
+				log.Warn().Dur("watchdogDuration", watchdogDuration).Msg("fakebash: watchdog timeout triggered; switching to realtime passthrough")
+				passthrough.Store(true)
+			})
+		})
+
+		isPassthrough := passthrough.Load()
+		if isPassthrough && !replayed {
+			replayed = true
+			flushBuffers(stdout, stderr, p, storageFile, cmdID, &stdoutBuf, &stderrBuf)
+		}
+
+		switch resp.Type {
+		case pb.CommandResponse_STDOUT:
+			totalBytes += int64(len(resp.Payload))
+			for _, b := range resp.Payload {
+				if b == '\n' {
+					lineCount++
+				}
+			}
+			if storageFile != nil {
+				_ = storageFile.Append(resp.Payload)
+			}
+			if isPassthrough {
+				_, _ = stdout.Write(resp.Payload)
+			} else {
+				if stdoutBuf.Len()+stderrBuf.Len()+len(resp.Payload) > maxMemoryBufferLimit {
+					log.Info().Msg("fakebash: in-memory buffer exceeded limit; stopping memory buffering to bound memory usage")
+				} else {
+					stdoutBuf.Write(resp.Payload)
+				}
+			}
+		case pb.CommandResponse_STDERR:
+			totalBytes += int64(len(resp.Payload))
+			for _, b := range resp.Payload {
+				if b == '\n' {
+					lineCount++
+				}
+			}
+			if storageFile != nil {
+				_ = storageFile.Append(resp.Payload)
+			}
+			if isPassthrough {
+				_, _ = stderr.Write(resp.Payload)
+			} else {
+				if stdoutBuf.Len()+stderrBuf.Len()+len(resp.Payload) > maxMemoryBufferLimit {
+					log.Info().Msg("fakebash: in-memory buffer exceeded limit; stopping memory buffering to bound memory usage")
+				} else {
+					stderrBuf.Write(resp.Payload)
+				}
+			}
+		case pb.CommandResponse_EXIT:
+			// Path 1: Normal EXIT frame
+			if timer != nil {
+				timer.Stop()
+			}
+			exitCode := 0
+			if len(resp.Payload) > 0 {
+				exitCode, _ = strconv.Atoi(string(resp.Payload))
+			}
+			log.Info().Int("exitCode", exitCode).Dur("elapsed", time.Since(startTime)).Msg("fakebash: received EXIT frame from fakebashd")
+
+			if storageFile != nil {
+				_ = storageFile.Finish(exitCode)
+			}
+
+			if replayed && isPassthrough {
+				// Already streamed raw output in realtime via watchdog; nothing left to replay.
+				return exitCode, nil
+			}
+
+			if p != nil {
+				processed, pErr := p.Process(ctx, cmdStr, cmdID, totalBytes, lineCount, exitCode)
+				if pErr == nil {
+					_, _ = stdout.Write([]byte(processed))
+					if !strings.HasSuffix(processed, "\n") {
+						_, _ = stdout.Write([]byte("\n"))
+					}
+					return exitCode, nil
+				}
+				log.Warn().Err(pErr).Msg("fakebash: pipeline processing failed; falling back to raw output")
+			}
+
+			// Fallback: flush raw output from storage, or memory buffers if storage/pipeline is unavailable
+			flushBuffers(stdout, stderr, p, storageFile, cmdID, &stdoutBuf, &stderrBuf)
+			return exitCode, nil
+		}
+	}
 }
 
 func RunClient(args []string) error {
@@ -83,45 +310,23 @@ func RunClient(args []string) error {
 	cwd, _ := os.Getwd()
 	env := os.Environ()
 
-	log.Info().Interface("args", args).Str("cwd", cwd).Msg("fakebash: forwarding command to fakebashd via gRPC")
-	startTime := time.Now()
-
-	stream, err := client.RunCommand(context.Background(), &pb.CommandRequest{
-		Args: args[1:],
-		Cwd:  cwd,
-		Env:  env,
-	})
+	storage, err := NewStorage("")
 	if err != nil {
-		log.Error().Err(err).Msg("fakebash: RunCommand RPC failed")
-		return fmt.Errorf("run command stream error: %w", err)
+		log.Debug().Err(err).Msg("failed to initialize storage; proceeding without pipeline")
 	}
 
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			if err == io.EOF {
-				log.Info().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream received EOF from fakebashd")
-				break
-			}
-			log.Error().Err(err).Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream recv error from fakebashd")
-			return fmt.Errorf("stream recv error: %w", err)
-		}
-
-		switch resp.Type {
-		case pb.CommandResponse_STDOUT:
-			_, _ = os.Stdout.Write(resp.Payload)
-		case pb.CommandResponse_STDERR:
-			_, _ = os.Stderr.Write(resp.Payload)
-		case pb.CommandResponse_EXIT:
-			code := 0
-			if len(resp.Payload) > 0 {
-				code, _ = strconv.Atoi(string(resp.Payload))
-			}
-			log.Info().Int("exitCode", code).Dur("elapsed", time.Since(startTime)).Msg("fakebash: received EXIT frame from fakebashd, exiting")
-			os.Exit(code)
-		}
+	var pipeline *Pipeline
+	if storage != nil {
+		evaluator := NewJevEvaluator(storage)
+		summarizer := NewGenAISummarizer(storage)
+		pipeline = NewPipeline(storage, evaluator, summarizer)
 	}
-	log.Warn().Dur("elapsed", time.Since(startTime)).Msg("fakebash: stream ended without EXIT frame, exiting 0")
+
+	code, err := runStream(context.Background(), client, args[1:], cwd, env, os.Stdout, os.Stderr, pipeline)
+	if err != nil {
+		log.Error().Err(err).Msg("fakebash stream error")
+	}
+	os.Exit(code)
 	return nil
 }
 
