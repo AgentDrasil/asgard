@@ -28,6 +28,7 @@ var allowlist = map[string]struct{}{
 	"call-peer":     {},
 	"ask-user":      {},
 	"ask_user":      {},
+	"show-output":   {},
 }
 
 var ProtectedProxyEnvKeys = []string{

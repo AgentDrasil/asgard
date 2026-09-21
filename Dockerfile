@@ -105,6 +105,7 @@ COPY agystatusline/go.mod agystatusline/go.sum* ./agystatusline/
 COPY fakebash/go.mod fakebash/go.sum* ./fakebash/
 COPY llms/go.mod llms/go.sum* ./llms/
 COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
+COPY pkg/jev/go.mod pkg/jev/go.sum* ./pkg/jev/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
 COPY pkg/paths/go.mod ./pkg/paths/
 COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
@@ -115,6 +116,7 @@ COPY cmd/asgard/go.mod cmd/asgard/go.sum* ./cmd/asgard/
 COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
 COPY cmd/call-peer/go.mod cmd/call-peer/go.sum* ./cmd/call-peer/
 COPY cmd/find-peer/go.mod cmd/find-peer/go.sum* ./cmd/find-peer/
+COPY cmd/show-output/go.mod cmd/show-output/go.sum* ./cmd/show-output/
 COPY cmd/tester/go.mod cmd/tester/go.sum* ./cmd/tester/
 COPY simplest/go.mod simplest/go.sum* ./simplest/
 
@@ -124,6 +126,7 @@ RUN (cd backend && go mod download) && \
     (cd fakebash && go mod download) && \
     (cd llms && go mod download) && \
     (cd pkg/agentspec && go mod download) && \
+    (cd pkg/jev && go mod download) && \
     (cd pkg/logger && go mod download) && \
     (cd pkg/paths && go mod download) && \
     (cd pkg/pluginsdk && go mod download) && \
@@ -134,6 +137,7 @@ RUN (cd backend && go mod download) && \
     (cd cmd/ask-user && go mod download) && \
     (cd cmd/call-peer && go mod download) && \
     (cd cmd/find-peer && go mod download) && \
+    (cd cmd/show-output && go mod download) && \
     (cd cmd/tester && go mod download) && \
     (cd simplest && go mod download)
 

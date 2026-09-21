@@ -9,6 +9,7 @@ use (
 	./cmd/ask-user
 	./cmd/call-peer
 	./cmd/find-peer
+	./cmd/show-output
 	./cmd/tester
 	./fakebash
 	./llms

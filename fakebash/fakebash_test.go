@@ -169,6 +169,24 @@ func TestUnpackCommand(t *testing.T) {
 			wantOk:  true,
 		},
 		{
+			name:    "direct call show-output",
+			args:    []string{"show-output"},
+			wantCmd: []string{"show-output"},
+			wantOk:  true,
+		},
+		{
+			name:    "direct call show-output with arg",
+			args:    []string{"show-output", "c-123"},
+			wantCmd: []string{"show-output", "c-123"},
+			wantOk:  true,
+		},
+		{
+			name:    "bash -c with show-output and flags",
+			args:    []string{"-c", "/bin/show-output --tail=50"},
+			wantCmd: []string{"/bin/show-output", "--tail=50"},
+			wantOk:  true,
+		},
+		{
 			name:    "direct call not allowlisted",
 			args:    []string{"ls", "-la"},
 			wantCmd: nil,
