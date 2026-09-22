@@ -6,6 +6,16 @@ marked.setOptions({
   breaks: true,
 });
 
+// Disable strikethrough parsing so numeric ranges and punctuation containing ~ (e.g. 0.79~1.02, -1.1%~+5.2%)
+// are preserved as plain text rather than converting surrounding content into <del>.
+marked.use({
+  tokenizer: {
+    del() {
+      return undefined;
+    },
+  },
+});
+
 marked.use(markedKatex());
 
 export type RawSegment =

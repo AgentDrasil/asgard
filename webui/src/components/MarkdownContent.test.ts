@@ -60,6 +60,19 @@ sequenceDiagram
     expect(textSegments[0].type).toBe("markdown");
   });
 
+  it("does not parse ~ or ~~ as strikethrough <del> tags", () => {
+    const text = "*整体 beta 偏高**（0.79~1.02），alpha 仅 −1.1%~+5.2%，绝对收益主要来自市场暴露。";
+    const segments = splitMarkdownTokens(text);
+    expect(segments).toHaveLength(1);
+
+    const firstSeg = segments[0] as Extract<RawSegment, { type: "markdown" }>;
+    const html = marked.parser(firstSeg.tokens);
+    expect(html).not.toContain("<del>");
+    expect(html).not.toContain("</del>");
+    expect(html).toContain("0.79~1.02");
+    expect(html).toContain("−1.1%~+5.2%");
+  });
+
   it("extracts nested mermaid code blocks from list items as fallback", () => {
     const markdown = `1. Step 1: Initialize
    \`\`\`mermaid
