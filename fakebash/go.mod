@@ -9,7 +9,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/genai v1.71.0
-	google.golang.org/grpc v1.83.2
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )
 
