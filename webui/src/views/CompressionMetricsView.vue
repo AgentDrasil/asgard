@@ -40,8 +40,17 @@ interface StatGroup {
   tiles: StatTile[];
 }
 
+// The retrieval rate is only meaningful once something has been compressed;
+// with a zero denominator it would read as a reassuring 0%.
+const retrievalRateDisplay = computed(() => {
+  const m = metrics.value;
+  if (!m || m.compressed_outputs === 0) return "—";
+  return `${(m.show_output_rate * 100).toFixed(1)}%`;
+});
+
 const groups = computed<StatGroup[]>(() => {
   const m = metrics.value;
+  const compressedOutputs = m?.compressed_outputs ?? 0;
   return [
     {
       key: "jev",
@@ -90,24 +99,42 @@ const groups = computed<StatGroup[]>(() => {
       ],
     },
     {
-      key: "output",
-      icon: "mynaui:layers-three",
-      title: t("compressionStats.output.title"),
-      description: t("compressionStats.output.description"),
+      key: "quality",
+      icon: "mynaui:target",
+      title: t("compressionStats.quality.title"),
+      description: t("compressionStats.quality.description"),
       tiles: [
         {
-          key: "truncations",
-          label: t("compressionStats.output.truncations"),
-          value: humanfriendly(m?.truncations ?? 0),
-        },
-        {
-          key: "showOutputCalls",
-          label: t("compressionStats.output.showOutputCalls"),
+          key: "retrievals",
+          label: t("compressionStats.quality.retrievals"),
           value: humanfriendly(m?.show_output_calls ?? 0),
         },
         {
+          key: "retrievalRate",
+          label: t("compressionStats.quality.retrievalRate"),
+          value: retrievalRateDisplay.value,
+        },
+        {
+          key: "compressedOutputs",
+          label: t("compressionStats.quality.compressedOutputs"),
+          value: humanfriendly(compressedOutputs),
+        },
+      ],
+    },
+    {
+      key: "volume",
+      icon: "mynaui:layers-three",
+      title: t("compressionStats.volume.title"),
+      description: t("compressionStats.volume.description"),
+      tiles: [
+        {
+          key: "truncations",
+          label: t("compressionStats.volume.truncations"),
+          value: humanfriendly(m?.truncations ?? 0),
+        },
+        {
           key: "showOutputBytes",
-          label: t("compressionStats.output.showOutputBytes"),
+          label: t("compressionStats.volume.showOutputBytes"),
           value: formatFileSize(m?.show_output_bytes ?? 0),
         },
       ],

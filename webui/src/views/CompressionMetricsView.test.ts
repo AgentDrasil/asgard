@@ -30,11 +30,13 @@ const sampleMetrics: CompressionMetrics = {
   jev_tokens: 1500,
   compass_calls: 4,
   compass_tokens: 800,
+  compressed_outputs: 8,
   truncations: 3,
-  show_output_calls: 7,
+  show_output_calls: 2,
   show_output_bytes: 12_697,
   jev_avg_tokens: 125,
   compass_avg_tokens: 200,
+  show_output_rate: 0.25,
 };
 
 describe("CompressionMetricsView.vue", () => {
@@ -81,10 +83,37 @@ describe("CompressionMetricsView.vue", () => {
     expect(root.textContent).toContain("Command Output Compression");
     expect(root.textContent).toContain("Jev (Level 1 Classifier)");
     expect(root.textContent).toContain("Compass (Level 2 Summarizer)");
-    expect(root.textContent).toContain("Output Handling");
+    expect(root.textContent).toContain("Compression Quality");
     expect(root.textContent).toContain("Avg Tokens / Call");
-    expect(root.textContent).toContain("show-output Calls");
-    expect(root.textContent).toContain("Raw Bytes Retrieved");
+    expect(root.textContent).toContain("LLM Raw Retrievals (show-output)");
+    expect(root.textContent).toContain("Retrieval Rate");
+    expect(root.textContent).toContain("Compressed Outputs");
+    expect(root.textContent).toContain("Raw Output Volume");
+
+    app.unmount();
+  });
+
+  it("presents raw retrievals as a rate against compressed outputs", async () => {
+    const app = await mount();
+
+    // 2 retrievals over 8 compressed outputs.
+    expect(root.textContent).toContain("25.0%");
+
+    app.unmount();
+  });
+
+  it("avoids reporting a reassuring rate when nothing was compressed", async () => {
+    vi.spyOn(api, "getCompressionMetrics").mockResolvedValue({
+      ...sampleMetrics,
+      compressed_outputs: 0,
+      show_output_rate: 0,
+    });
+    const app = await mount();
+
+    // A 0% reading would imply the agent never rejected a result, which is not
+    // a claim we can make with an empty denominator.
+    expect(root.textContent).not.toContain("0.0%");
+    expect(root.textContent).toContain("—");
 
     app.unmount();
   });
@@ -116,9 +145,10 @@ describe("CompressionMetricsView.vue", () => {
     expect(root.textContent).toContain("命令输出压缩统计");
     expect(root.textContent).toContain("Jev（Level 1 分类器）");
     expect(root.textContent).toContain("Compass（Level 2 摘要器）");
-    expect(root.textContent).toContain("调用次数");
-    expect(root.textContent).toContain("平均每次 Token");
-    expect(root.textContent).toContain("show-output 调用次数");
+    expect(root.textContent).toContain("压缩质量");
+    expect(root.textContent).toContain("LLM 取回原文次数（show-output）");
+    expect(root.textContent).toContain("取回率");
+    expect(root.textContent).toContain("被压缩的命令数");
 
     app.unmount();
   });

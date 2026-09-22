@@ -63,9 +63,15 @@ func FormatOverflowFooter(cmdID string) string {
 // pipeline: the text handed back to the agent, plus the model usage incurred
 // while deciding what to do with it.
 type Outcome struct {
-	Output    string
-	Jev       ModelUsage
-	Compass   ModelUsage
+	Output  string
+	Jev     ModelUsage
+	Compass ModelUsage
+	// Compressed reports that the agent received less than the full raw output,
+	// whether by summarization, drop-on-success, or truncation. It is false when
+	// the raw payload was returned intact, so it is exactly the set of results the
+	// agent might want to pull back with show-output.
+	Compressed bool
+	// Truncated narrows Compressed to the overflow path specifically.
 	Truncated bool
 }
 
@@ -110,7 +116,7 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 			chunk = chunk[:oneMB]
 		}
 		footer := FormatOverflowFooter(cmdID)
-		return Outcome{Output: string(chunk) + "\n" + footer, Truncated: true}, nil
+		return Outcome{Output: string(chunk) + "\n" + footer, Compressed: true, Truncated: true}, nil
 	}
 
 	// 4. Level 1 Jev decision
@@ -135,7 +141,7 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 
 	// 5. Level 2 Processing
 	if strategy == StrategyDropOnSuccess {
-		return Outcome{Output: FormatDropOnSuccess(cmdID), Jev: jevUsage}, nil
+		return Outcome{Output: FormatDropOnSuccess(cmdID), Jev: jevUsage, Compressed: true}, nil
 	}
 
 	// extract_failure or summarize
@@ -148,7 +154,7 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 			raw, rErr := p.storage.ReadPayload(cmdID)
 			if rErr == nil && summary != string(raw) {
 				footer := FormatFooter(cmdID)
-				return Outcome{Output: summary + "\n" + footer, Jev: jevUsage, Compass: compassUsage}, nil
+				return Outcome{Output: summary + "\n" + footer, Jev: jevUsage, Compass: compassUsage, Compressed: true}, nil
 			}
 		}
 	}

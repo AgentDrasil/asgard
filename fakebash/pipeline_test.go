@@ -108,6 +108,7 @@ func TestPipeline_OverflowHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, out.Truncated)
+	assert.True(t, out.Compressed, "truncation is a lossy result the agent may want to retrieve")
 	assert.Contains(t, out.Output, "output too large")
 	assert.Contains(t, out.Output, fmt.Sprintf("show-output %s", sf.ID()))
 	assert.NotContains(t, out.Output, "# CMD:")
@@ -182,6 +183,82 @@ func TestPipeline_KeepsCompassUsageWhenSummaryIsDiscarded(t *testing.T) {
 	assert.Equal(t, int64(10), out.Jev.Tokens)
 	assert.True(t, out.Compass.Issued, "a discarded summary was still a billed call")
 	assert.Equal(t, int64(33), out.Compass.Tokens)
+}
+
+// TestPipeline_CompressedFlag pins the denominator the retrieval rate is computed
+// against: it must be true exactly when the agent received a lossy result, since
+// only then would it have any reason to call show-output.
+func TestPipeline_CompressedFlag(t *testing.T) {
+	t.Parallel()
+
+	longContent := strings.Repeat("compiling module...\n", 40)
+	require.Greater(t, len(longContent), ShortCircuitMaxBytes)
+
+	tests := []struct {
+		name      string
+		strategy  Strategy
+		summary   string
+		content   string
+		wantLossy bool
+	}{
+		{
+			name:      "keep_raw hands the full output back",
+			strategy:  StrategyKeepRaw,
+			content:   longContent,
+			wantLossy: false,
+		},
+		{
+			name:      "drop_on_success hides the output",
+			strategy:  StrategyDropOnSuccess,
+			content:   longContent,
+			wantLossy: true,
+		},
+		{
+			name:      "summarize replaces the output",
+			strategy:  StrategySummarize,
+			summary:   "condensed diagnosis",
+			content:   longContent,
+			wantLossy: true,
+		},
+		{
+			name:      "summary identical to the payload falls back to raw",
+			strategy:  StrategySummarize,
+			summary:   longContent,
+			content:   longContent,
+			wantLossy: false,
+		},
+		{
+			name:      "short circuit hands the full output back",
+			strategy:  StrategySummarize,
+			summary:   "condensed diagnosis",
+			content:   "tiny\n",
+			wantLossy: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			storage, err := NewStorage(t.TempDir())
+			require.NoError(t, err)
+
+			sf, err := storage.CreateFile("go build ./...")
+			require.NoError(t, err)
+			require.NoError(t, sf.Append([]byte(tc.content)))
+			require.NoError(t, sf.Finish(0))
+
+			pipeline := NewPipeline(storage,
+				&fakeEvaluator{strategy: tc.strategy},
+				&fakeSummarizer{summary: tc.summary},
+			)
+
+			out, err := pipeline.Process(context.Background(), "go build ./...", sf.ID(), int64(len(tc.content)), 0)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantLossy, out.Compressed)
+		})
+	}
 }
 
 // fakeEvaluator implements Evaluator for testing

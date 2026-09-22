@@ -240,15 +240,20 @@ export interface CompressionMetricsCounters {
   jev_tokens: number;
   compass_calls: number;
   compass_tokens: number;
+  compressed_outputs: number;
   truncations: number;
   show_output_calls: number;
   show_output_bytes: number;
 }
 
-// CompressionMetrics adds the per-call token averages derived from the counters.
+// CompressionMetrics adds the token averages and retrieval rate derived from the
+// counters.
 export interface CompressionMetrics extends CompressionMetricsCounters {
   jev_avg_tokens: number;
   compass_avg_tokens: number;
+  // Share of compressed outputs the agent rejected and pulled back raw, as a
+  // fraction. Zero when nothing was compressed.
+  show_output_rate: number;
 }
 
 export interface ToastItem {

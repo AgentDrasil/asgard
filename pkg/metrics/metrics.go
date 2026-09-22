@@ -30,6 +30,10 @@ const (
 	KindCompass Kind = "compass"
 	// KindTruncate counts a command whose output exceeded the overflow limit.
 	KindTruncate Kind = "truncate"
+	// KindCompressed counts a command whose output reached the agent without its
+	// full raw contents, whether by summarization, drop-on-success, or truncation.
+	// It is the denominator for how often the agent pulled raw output back.
+	KindCompressed Kind = "compressed"
 	// KindShowOutput counts an invocation of show-output that dumped raw output.
 	KindShowOutput Kind = "show_output"
 )

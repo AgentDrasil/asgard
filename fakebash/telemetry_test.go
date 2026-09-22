@@ -55,15 +55,17 @@ func TestReportTelemetry_MapsOutcomeToEvents(t *testing.T) {
 	rec := newMetricsRecorder(t)
 
 	reportTelemetry(context.Background(), Outcome{
-		Output:    "compressed",
-		Jev:       ModelUsage{Issued: true, Tokens: 120},
-		Compass:   ModelUsage{Issued: true, Tokens: 45},
-		Truncated: true,
+		Output:     "compressed",
+		Jev:        ModelUsage{Issued: true, Tokens: 120},
+		Compass:    ModelUsage{Issued: true, Tokens: 45},
+		Compressed: true,
+		Truncated:  true,
 	})
 
 	assert.Equal(t, []metrics.Event{
 		{Kind: metrics.KindJev, Tokens: 120},
 		{Kind: metrics.KindCompass, Tokens: 45},
+		{Kind: metrics.KindCompressed},
 		{Kind: metrics.KindTruncate},
 	}, rec.recorded())
 }
@@ -116,5 +118,6 @@ func TestRunStream_ReportsTelemetry(t *testing.T) {
 	assert.Equal(t, []metrics.Event{
 		{Kind: metrics.KindJev, Tokens: 120},
 		{Kind: metrics.KindCompass, Tokens: 45},
+		{Kind: metrics.KindCompressed},
 	}, rec.recorded())
 }

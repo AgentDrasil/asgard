@@ -588,11 +588,18 @@ export const en = {
       tokens: "Tokens",
       avgTokens: "Avg Tokens / Call",
     },
-    output: {
-      title: "Output Handling",
-      description: "How much raw output exceeded or bypassed the compression pipeline.",
-      truncations: "Outputs Truncated",
-      showOutputCalls: "show-output Calls",
+    quality: {
+      title: "Compression Quality",
+      description:
+        "Whether the agent accepted the compressed result. A raw retrieval means the agent called show-output because the summary or classification dropped detail it needed; a rising rate points at the classifier or summarizer prompt.",
+      retrievals: "LLM Raw Retrievals (show-output)",
+      retrievalRate: "Retrieval Rate",
+      compressedOutputs: "Compressed Outputs",
+    },
+    volume: {
+      title: "Raw Output Volume",
+      description: "Outputs cut off at the size limit, and the raw bytes the agent pulled back.",
+      truncations: "Truncated Outputs",
       showOutputBytes: "Raw Bytes Retrieved",
     },
     empty: {

@@ -17,6 +17,9 @@ func reportTelemetry(ctx context.Context, out Outcome) {
 	if out.Compass.Issued {
 		events = append(events, metrics.Event{Kind: metrics.KindCompass, Tokens: out.Compass.Tokens})
 	}
+	if out.Compressed {
+		events = append(events, metrics.Event{Kind: metrics.KindCompressed})
+	}
 	if out.Truncated {
 		events = append(events, metrics.Event{Kind: metrics.KindTruncate})
 	}

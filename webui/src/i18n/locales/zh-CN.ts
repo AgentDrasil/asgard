@@ -576,11 +576,18 @@ export const zhCN: MessageSchema = {
       tokens: "Token 总量",
       avgTokens: "平均每次 Token",
     },
-    output: {
-      title: "输出处理",
-      description: "超出上限或被绕过压缩管道的原始输出规模。",
+    quality: {
+      title: "压缩质量",
+      description:
+        "Agent 是否接受了压缩结果。取回原文意味着 Agent 调用了 show-output，因为摘要或分类丢掉了它需要的信息；比率上升就说明分类器或摘要器的 prompt 有问题。",
+      retrievals: "LLM 取回原文次数（show-output）",
+      retrievalRate: "取回率",
+      compressedOutputs: "被压缩的命令数",
+    },
+    volume: {
+      title: "原始输出规模",
+      description: "达到体积上限而被截断的输出，以及 Agent 取回的原始字节数。",
       truncations: "被截断次数",
-      showOutputCalls: "show-output 调用次数",
       showOutputBytes: "取回的原始字节数",
     },
     empty: {

@@ -22,21 +22,28 @@ func compressionMetricsFile() string {
 // CompressionCounters is the cumulative tally of command-output compression
 // activity reported by the sandbox tools.
 type CompressionCounters struct {
-	JevCalls        int64 `json:"jev_calls"`
-	JevTokens       int64 `json:"jev_tokens"`
-	CompassCalls    int64 `json:"compass_calls"`
-	CompassTokens   int64 `json:"compass_tokens"`
-	Truncations     int64 `json:"truncations"`
-	ShowOutputCalls int64 `json:"show_output_calls"`
-	ShowOutputBytes int64 `json:"show_output_bytes"`
+	JevCalls          int64 `json:"jev_calls"`
+	JevTokens         int64 `json:"jev_tokens"`
+	CompassCalls      int64 `json:"compass_calls"`
+	CompassTokens     int64 `json:"compass_tokens"`
+	CompressedOutputs int64 `json:"compressed_outputs"`
+	Truncations       int64 `json:"truncations"`
+	ShowOutputCalls   int64 `json:"show_output_calls"`
+	ShowOutputBytes   int64 `json:"show_output_bytes"`
 }
 
-// CompressionMetricsSnapshot is the counters plus the per-call averages derived
-// from them, which is what the settings UI renders.
+// CompressionMetricsSnapshot is the counters plus the derived averages and rate
+// that the settings UI renders.
 type CompressionMetricsSnapshot struct {
 	CompressionCounters
 	JevAvgTokens     float64 `json:"jev_avg_tokens"`
 	CompassAvgTokens float64 `json:"compass_avg_tokens"`
+	// ShowOutputRate is ShowOutputCalls / CompressedOutputs: the share of lossy
+	// results the agent rejected and pulled back raw. It is the headline quality
+	// signal, since a rising rate means the classifier or summarizer dropped
+	// detail the agent needed. It is zero when nothing was compressed, and can
+	// exceed 1 if the agent retrieves the same output more than once.
+	ShowOutputRate float64 `json:"show_output_rate"`
 }
 
 // CompressionMetricsStore aggregates compression telemetry and persists it so
@@ -91,6 +98,8 @@ func (s *CompressionMetricsStore) Record(events []metrics.Event) {
 		case metrics.KindCompass:
 			s.counters.CompassCalls++
 			s.counters.CompassTokens += e.Tokens
+		case metrics.KindCompressed:
+			s.counters.CompressedOutputs++
 		case metrics.KindTruncate:
 			s.counters.Truncations++
 		case metrics.KindShowOutput:
@@ -119,6 +128,9 @@ func (s *CompressionMetricsStore) Snapshot() CompressionMetricsSnapshot {
 	}
 	if s.counters.CompassCalls > 0 {
 		snap.CompassAvgTokens = float64(s.counters.CompassTokens) / float64(s.counters.CompassCalls)
+	}
+	if s.counters.CompressedOutputs > 0 {
+		snap.ShowOutputRate = float64(s.counters.ShowOutputCalls) / float64(s.counters.CompressedOutputs)
 	}
 	return snap
 }
