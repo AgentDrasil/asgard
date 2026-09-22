@@ -12,6 +12,10 @@ import (
 const (
 	MaxBufferedOutput = 16 * 1024 * 1024 // 16MB overflow threshold
 	oneMB             = 1024 * 1024      // 1MB truncate slice
+
+	// ShortCircuitMaxBytes is the output size below which the raw output is always
+	// returned verbatim, independent of exit code and line count.
+	ShortCircuitMaxBytes = 256
 )
 
 // Pipeline coordinates command output storage, classification, and summarization.
@@ -32,72 +36,62 @@ func NewPipeline(storage Storage, evaluator Evaluator, summarizer Summarizer) *P
 
 // ShouldShortCircuit determines whether the command output qualifies for immediate
 // fast-path pass-through without any compression or evaluation.
-// Both successful and failed commands (any exitCode) short-circuit if totalBytes < 256 and lineCount <= 5.
-func ShouldShortCircuit(totalBytes int64, lineCount int, exitCode int) bool {
-	return totalBytes < 256 && lineCount <= 5
-}
-
-// formatBytes returns a human-readable byte string such as "420B", "15KB", "2MB".
-func formatBytes(b int64) string {
-	const unit = 1000
-	if b < unit {
-		return fmt.Sprintf("%dB", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	units := []string{"KB", "MB", "GB", "TB"}
-	val := float64(b) / float64(div)
-	if val == float64(int64(val)) {
-		return fmt.Sprintf("%.0f%s", val, units[exp])
-	}
-	return fmt.Sprintf("%.1f%s", val, units[exp])
+// Tiny output bypasses evaluation entirely, whatever the exit code: when the result
+// is this small, the raw bytes carry more information than any summary of them and
+// spending an LLM call to restate them is pure cost.
+func ShouldShortCircuit(totalBytes int64) bool {
+	return totalBytes < ShortCircuitMaxBytes
 }
 
 // FormatFooter formats the standard fakebash compressed output footer.
-func FormatFooter(origBytes, newBytes int64, cmdID string) string {
-	return fmt.Sprintf("[fakebash: output compressed from %s -> %s. To view raw output, run: show-output %s (or 'show-output' for the latest)]",
-		formatBytes(origBytes), formatBytes(newBytes), cmdID)
+func FormatFooter(cmdID string) string {
+	return fmt.Sprintf("[fakebash: output compressed. To view raw output, run: show-output %s]", cmdID)
 }
 
 // FormatDropOnSuccess formats the summary prompt and footer for commands whose verbose output was dropped on success.
-func FormatDropOnSuccess(origBytes int64, cmdID string) string {
-	lead := "[fakebash: command succeeded with exit code 0. Verbose output truncated by sandbox]"
-	footer := FormatFooter(origBytes, int64(len(lead)), cmdID)
-	return lead + "\n" + footer
+func FormatDropOnSuccess(cmdID string) string {
+	lead := "[fakebash: command succeeded with exit code 0. Verbose output truncated]"
+	return lead + "\n" + FormatFooter(cmdID)
 }
 
 // FormatOverflowFooter formats the footer when output exceeds MaxBufferedOutput.
-func FormatOverflowFooter(origBytes, truncatedBytes int64, cmdID string) string {
-	return fmt.Sprintf("[fakebash: output too large (%s > 16MB), truncated to %s. To view full raw output, run: show-output %s (or 'show-output' for the latest)]",
-		formatBytes(origBytes), formatBytes(truncatedBytes), cmdID)
+func FormatOverflowFooter(cmdID string) string {
+	return fmt.Sprintf("[fakebash: output too large, truncated. To view full raw output, run: show-output %s]", cmdID)
+}
+
+// Outcome is the result of running a command's output through the compression
+// pipeline: the text handed back to the agent, plus the model usage incurred
+// while deciding what to do with it.
+type Outcome struct {
+	Output    string
+	Jev       ModelUsage
+	Compass   ModelUsage
+	Truncated bool
 }
 
 // Process coordinates the compression pipeline:
 // 1. Bypass check (ASGARD_BASH_COMPACT=0 or ASGARD_BASH_COMPACT_RAW=1)
-// 2. Fast-path check (< 256B and <= 5 lines)
+// 2. Fast-path check (< ShortCircuitMaxBytes)
 // 3. Overflow check (> 16MB -> truncate first 1MB of payload + footer)
 // 4. Level 1 Jev evaluation
 // 5. Level 2 Summarization (drop_on_success, extract_failure, summarize)
-func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalBytes int64, lineCount int, exitCode int) (string, error) {
+func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalBytes int64, exitCode int) (Outcome, error) {
 	// 1. Bypass check
 	if os.Getenv("ASGARD_BASH_COMPACT") == "0" || os.Getenv("ASGARD_BASH_COMPACT_RAW") == "1" {
 		raw, err := p.storage.ReadPayload(cmdID)
 		if err != nil {
-			return "", err
+			return Outcome{}, err
 		}
-		return string(raw), nil
+		return Outcome{Output: string(raw)}, nil
 	}
 
 	// 2. Fast-path check
-	if ShouldShortCircuit(totalBytes, lineCount, exitCode) {
+	if ShouldShortCircuit(totalBytes) {
 		raw, err := p.storage.ReadPayload(cmdID)
 		if err != nil {
-			return "", err
+			return Outcome{}, err
 		}
-		return string(raw), nil
+		return Outcome{Output: string(raw)}, nil
 	}
 
 	// 3. Overflow check (> 16MB)
@@ -105,7 +99,7 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 		// Read raw chunk starting at offset 0 up to 1MB + 4KB to locate and strip header line
 		chunk, err := p.storage.ReadRange(cmdID, 0, oneMB+4096)
 		if err != nil {
-			return "", err
+			return Outcome{}, err
 		}
 		if bytes.HasPrefix(chunk, []byte("# CMD: ")) {
 			if idx := bytes.IndexByte(chunk, '\n'); idx != -1 {
@@ -115,15 +109,16 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 		if len(chunk) > oneMB {
 			chunk = chunk[:oneMB]
 		}
-		footer := FormatOverflowFooter(totalBytes, int64(len(chunk)), cmdID)
-		return string(chunk) + "\n" + footer, nil
+		footer := FormatOverflowFooter(cmdID)
+		return Outcome{Output: string(chunk) + "\n" + footer, Truncated: true}, nil
 	}
 
 	// 4. Level 1 Jev decision
 	strategy := StrategyKeepRaw
+	var jevUsage ModelUsage
 	if p.evaluator != nil {
 		var err error
-		strategy, err = p.evaluator.Classify(ctx, cmd, exitCode, cmdID)
+		strategy, jevUsage, err = p.evaluator.Classify(ctx, cmd, exitCode, cmdID)
 		if err != nil {
 			log.Debug().Err(err).Msg("evaluator error; falling back to keep_raw")
 			strategy = StrategyKeepRaw
@@ -133,32 +128,36 @@ func (p *Pipeline) Process(ctx context.Context, cmd string, cmdID string, totalB
 	if strategy == StrategyKeepRaw {
 		raw, err := p.storage.ReadPayload(cmdID)
 		if err != nil {
-			return "", err
+			return Outcome{}, err
 		}
-		return string(raw), nil
+		return Outcome{Output: string(raw), Jev: jevUsage}, nil
 	}
 
 	// 5. Level 2 Processing
 	if strategy == StrategyDropOnSuccess {
-		return FormatDropOnSuccess(totalBytes, cmdID), nil
+		return Outcome{Output: FormatDropOnSuccess(cmdID), Jev: jevUsage}, nil
 	}
 
 	// extract_failure or summarize
+	var compassUsage ModelUsage
 	if p.summarizer != nil {
-		summary, err := p.summarizer.Summarize(ctx, cmd, exitCode, strategy, cmdID, totalBytes)
+		var summary string
+		var err error
+		summary, compassUsage, err = p.summarizer.Summarize(ctx, cmd, exitCode, strategy, cmdID, totalBytes)
 		if err == nil && summary != "" {
 			raw, rErr := p.storage.ReadPayload(cmdID)
 			if rErr == nil && summary != string(raw) {
-				footer := FormatFooter(totalBytes, int64(len(summary)), cmdID)
-				return summary + "\n" + footer, nil
+				footer := FormatFooter(cmdID)
+				return Outcome{Output: summary + "\n" + footer, Jev: jevUsage, Compass: compassUsage}, nil
 			}
 		}
 	}
 
-	// Fallback to raw output
+	// Fallback to raw output. The compass call still happened and was billed, so
+	// its usage is carried through even though its summary was discarded.
 	raw, err := p.storage.ReadPayload(cmdID)
 	if err != nil {
-		return "", err
+		return Outcome{}, err
 	}
-	return string(raw), nil
+	return Outcome{Output: string(raw), Jev: jevUsage, Compass: compassUsage}, nil
 }

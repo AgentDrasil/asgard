@@ -2,6 +2,7 @@ import type {
   AgentInfo,
   Attachment,
   ChatSession,
+  CompressionMetrics,
   ConfigFileResponse,
   ConfigSaveResponse,
   DirInfo,
@@ -62,6 +63,18 @@ export async function getSystemLogs(level?: string): Promise<SystemLogEntry[]> {
   } catch (err) {
     console.error("getSystemLogs error:", err);
     return [];
+  }
+}
+
+// Fetch command-output compression statistics (returns null on non-ok or network failure)
+export async function getCompressionMetrics(): Promise<CompressionMetrics | null> {
+  try {
+    const res = await apiFetch("/api/compression-metrics");
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("getCompressionMetrics error:", err);
+    return null;
   }
 }
 

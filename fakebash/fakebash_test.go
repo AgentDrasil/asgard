@@ -758,7 +758,7 @@ func TestFakebashGRPC_MemoryBufferCap_PipelineCompressed(t *testing.T) {
 
 	// Output must NOT be bypassed; it should be compressed by pipeline without duplicate chunks.
 	outStr := stdoutBuf.String()
-	assert.Contains(t, outStr, "[fakebash: command succeeded with exit code 0. Verbose output truncated by sandbox]")
+	assert.Contains(t, outStr, "[fakebash: command succeeded with exit code 0. Verbose output truncated]")
 	assert.NotContains(t, outStr, strings.Repeat("A", 1000))
 	assert.True(t, len(outStr) < 2048, "Output should be compressed summary, got %d bytes", len(outStr))
 }

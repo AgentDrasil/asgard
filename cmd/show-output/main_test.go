@@ -2,14 +2,20 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/metrics"
 )
 
 func setupTestLogDir(t *testing.T) (dir string, cmdID string, filePath string) {
@@ -127,4 +133,50 @@ func TestShowOutput_Run_InvalidID(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.Empty(t, stdout.String())
 	assert.Contains(t, stderr.String(), "invalid command ID format")
+}
+
+// setupMetricsRecorder installs a stand-in backend and returns the events it
+// captured.
+func setupMetricsRecorder(t *testing.T) *[]metrics.Event {
+	t.Helper()
+	var (
+		mu     sync.Mutex
+		events []metrics.Event
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, metrics.EndpointPath, r.URL.Path)
+		var batch []metrics.Event
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&batch))
+		mu.Lock()
+		events = append(events, batch...)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ASGARD_INTERNAL_API_HOST", server.URL)
+	return &events
+}
+
+func TestShowOutput_Run_ReportsBytesSurfaced(t *testing.T) {
+	_, cmdID, _ := setupTestLogDir(t)
+	events := setupMetricsRecorder(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--tail=10", cmdID}, &stdout, &stderr)
+	require.Equal(t, 0, code)
+
+	require.Len(t, *events, 1)
+	assert.Equal(t, metrics.KindShowOutput, (*events)[0].Kind)
+	assert.Equal(t, int64(stdout.Len()), (*events)[0].Bytes)
+}
+
+func TestShowOutput_Run_PathOnlyReportsNothing(t *testing.T) {
+	_, cmdID, _ := setupTestLogDir(t)
+	events := setupMetricsRecorder(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--path", cmdID}, &stdout, &stderr)
+	require.Equal(t, 0, code)
+
+	assert.Empty(t, *events, "--path surfaces no raw output, so there is nothing to tally")
 }

@@ -101,9 +101,10 @@ func TestEvaluator_Classify_MockJevChoices(t *testing.T) {
 			require.NoError(t, err)
 
 			evaluator := NewJevEvaluator(storage, WithJevClient(client))
-			strategy, err := evaluator.Classify(context.Background(), tc.cmd, tc.exitCode, sf.ID())
+			strategy, usage, err := evaluator.Classify(context.Background(), tc.cmd, tc.exitCode, sf.ID())
 			require.NoError(t, err)
 			assert.Equal(t, tc.expected, strategy)
+			assert.True(t, usage.Issued, "a Jev response was received, so the call must be reported as issued")
 		})
 	}
 }
@@ -131,9 +132,10 @@ func TestEvaluator_Classify_TimeoutFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	evaluator := NewJevEvaluator(storage, WithJevClient(client), WithTimeout(20*time.Millisecond))
-	strategy, err := evaluator.Classify(context.Background(), "go test ./...", 1, sf.ID())
+	strategy, usage, err := evaluator.Classify(context.Background(), "go test ./...", 1, sf.ID())
 	require.NoError(t, err)
 	assert.Equal(t, StrategyKeepRaw, strategy)
+	assert.False(t, usage.Issued, "a timed-out call must not be counted as an issued call")
 }
 
 func TestEvaluator_Classify_NoAPIKey(t *testing.T) {
@@ -152,7 +154,8 @@ func TestEvaluator_Classify_NoAPIKey(t *testing.T) {
 	require.NoError(t, os.Unsetenv("TYPESAFE_API_KEY"))
 
 	evaluator := NewJevEvaluator(storage)
-	strategy, err := evaluator.Classify(context.Background(), "ls -la", 0, sf.ID())
+	strategy, usage, err := evaluator.Classify(context.Background(), "ls -la", 0, sf.ID())
 	require.NoError(t, err)
 	assert.Equal(t, StrategyKeepRaw, strategy)
+	assert.False(t, usage.Issued)
 }

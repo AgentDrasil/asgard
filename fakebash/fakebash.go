@@ -133,7 +133,6 @@ func runStream(ctx context.Context, client pb.FakebashServiceClient, args []stri
 	var timer *time.Timer
 	var passthrough atomic.Bool
 	var totalBytes int64
-	var lineCount int
 
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -189,11 +188,6 @@ func runStream(ctx context.Context, client pb.FakebashServiceClient, args []stri
 
 		processStreamChunk := func(w io.Writer, buf *bytes.Buffer) {
 			totalBytes += int64(len(resp.Payload))
-			for _, b := range resp.Payload {
-				if b == '\n' {
-					lineCount++
-				}
-			}
 			if storageFile != nil {
 				_ = storageFile.Append(resp.Payload)
 			}
@@ -235,10 +229,11 @@ func runStream(ctx context.Context, client pb.FakebashServiceClient, args []stri
 			}
 
 			if p != nil {
-				processed, pErr := p.Process(ctx, cmdStr, cmdID, totalBytes, lineCount, exitCode)
+				out, pErr := p.Process(ctx, cmdStr, cmdID, totalBytes, exitCode)
 				if pErr == nil {
-					_, _ = stdout.Write([]byte(processed))
-					if !strings.HasSuffix(processed, "\n") {
+					reportTelemetry(ctx, out)
+					_, _ = stdout.Write([]byte(out.Output))
+					if !strings.HasSuffix(out.Output, "\n") {
 						_, _ = stdout.Write([]byte("\n"))
 					}
 					return exitCode, nil

@@ -32,6 +32,7 @@ replace (
 	github.com/AgentDrasil/asgard/llms => ../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../pkg/agentspec
 	github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
+	github.com/AgentDrasil/asgard/pkg/metrics => ../pkg/metrics
 	github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
@@ -43,6 +44,7 @@ require (
 	cloud.google.com/go/auth v0.23.2 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

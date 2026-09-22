@@ -6,6 +6,7 @@ import DashboardView from "./views/DashboardView.vue";
 import KeyBindingsView from "./views/KeyBindingsView.vue";
 import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
+import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 
 describe("router configuration", () => {
   it("redirects root path '/' to '/dashboard'", () => {
@@ -20,6 +21,7 @@ describe("router configuration", () => {
     const keybindingsRoute = routes.find((r) => r.path === "/settings/keybindings");
     const configRoute = routes.find((r) => r.path === "/settings/config");
     const logsRoute = routes.find((r) => r.path === "/settings/logs");
+    const compressionRoute = routes.find((r) => r.path === "/settings/compression");
 
     expect(dashboardRoute).toBeDefined();
     expect(dashboardRoute?.name).toBe("dashboard");
@@ -40,5 +42,9 @@ describe("router configuration", () => {
     expect(logsRoute).toBeDefined();
     expect(logsRoute?.name).toBe("settings-logs");
     expect(logsRoute?.component).toBe(LogView);
+
+    expect(compressionRoute).toBeDefined();
+    expect(compressionRoute?.name).toBe("settings-compression");
+    expect(compressionRoute?.component).toBe(CompressionMetricsView);
   });
 });

@@ -6,6 +6,7 @@ import SettingsView from "./views/SettingsView.vue";
 import KeyBindingsView from "./views/KeyBindingsView.vue";
 import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
+import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -56,6 +57,11 @@ export const routes: RouteRecordRaw[] = [
     path: "/settings/logs",
     name: "settings-logs",
     component: LogView,
+  },
+  {
+    path: "/settings/compression",
+    name: "settings-compression",
+    component: CompressionMetricsView,
   },
 ];
 

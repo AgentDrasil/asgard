@@ -5,18 +5,13 @@ go 1.27.1
 require (
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0-00010101000000-000000000000
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
+	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/genai v1.71.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
-
-replace github.com/AgentDrasil/asgard/pkg/jev => ../pkg/jev
-
-replace github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
-
-replace github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
@@ -48,3 +43,11 @@ require (
 	google.golang.org/api v0.297.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
 )
+
+replace github.com/AgentDrasil/asgard/pkg/jev => ../pkg/jev
+
+replace github.com/AgentDrasil/asgard/pkg/logger => ../pkg/logger
+
+replace github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
+
+replace github.com/AgentDrasil/asgard/pkg/metrics => ../pkg/metrics

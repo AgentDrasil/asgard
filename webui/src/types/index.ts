@@ -233,6 +233,24 @@ export interface SystemLogsResponse {
   logs: SystemLogEntry[];
 }
 
+// Cumulative tally of command-output compression activity reported by the
+// sandbox tools (fakebash, show-output).
+export interface CompressionMetricsCounters {
+  jev_calls: number;
+  jev_tokens: number;
+  compass_calls: number;
+  compass_tokens: number;
+  truncations: number;
+  show_output_calls: number;
+  show_output_bytes: number;
+}
+
+// CompressionMetrics adds the per-call token averages derived from the counters.
+export interface CompressionMetrics extends CompressionMetricsCounters {
+  jev_avg_tokens: number;
+  compass_avg_tokens: number;
+}
+
 export interface ToastItem {
   id: string;
   type: "info" | "success" | "warning" | "error";

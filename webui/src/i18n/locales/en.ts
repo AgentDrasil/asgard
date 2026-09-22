@@ -362,6 +362,9 @@ export const en = {
       "View and customize keyboard shortcuts for quick actions and panel toggling.",
     logsAndDiagnostics: "System Logs & Diagnostics",
     logsAndDiagnosticsDesc: "View system startup diagnostics, error history, and active warnings.",
+    compressionStats: "Compression Statistics",
+    compressionStatsDesc:
+      "Inspect how much command output fakebash compressed, truncated, or left raw.",
     errorsCount: "{count} error | {count} errors",
     warnsCount: "{count} warn | {count} warns",
     reloadSuccessTitle: "Reload Success",
@@ -564,6 +567,37 @@ export const en = {
       title: "No logs found",
       filtered: "No logs match your current filter criteria.",
       healthy: "No diagnostic or system logs recorded since startup. System is healthy!",
+    },
+  },
+  compressionStats: {
+    title: "Command Output Compression",
+    backToSettings: "Back to Settings",
+    refresh: "Refresh",
+    refreshTooltip: "Refresh Statistics",
+    jev: {
+      title: "Jev (Level 1 Classifier)",
+      description: "TypeSafe System One calls that decide how each command's output is handled.",
+      calls: "Calls",
+      tokens: "Tokens",
+      avgTokens: "Avg Tokens / Call",
+    },
+    compass: {
+      title: "Compass (Level 2 Summarizer)",
+      description: "Gemini calls that condense verbose output before the agent sees it.",
+      calls: "Calls",
+      tokens: "Tokens",
+      avgTokens: "Avg Tokens / Call",
+    },
+    output: {
+      title: "Output Handling",
+      description: "How much raw output exceeded or bypassed the compression pipeline.",
+      truncations: "Outputs Truncated",
+      showOutputCalls: "show-output Calls",
+      showOutputBytes: "Raw Bytes Retrieved",
+    },
+    empty: {
+      title: "No statistics yet",
+      description: "Numbers appear here once the sandbox compresses its first command output.",
     },
   },
   vcs: {

@@ -24,7 +24,7 @@ var failureKeywordRegex = regexp.MustCompile(`(?i)(fail|panic:|error:|fatal:|bui
 
 // Summarizer defines the interface for Level 2 intelligent command output summarization.
 type Summarizer interface {
-	Summarize(ctx context.Context, cmd string, exitCode int, strategy Strategy, cmdID string, totalBytes int64) (string, error)
+	Summarize(ctx context.Context, cmd string, exitCode int, strategy Strategy, cmdID string, totalBytes int64) (string, ModelUsage, error)
 }
 
 // GenAISummarizer implements Level 2 summarization using Google GenAI SDK.
@@ -113,19 +113,21 @@ func extractInspectorSnippet(rawContent string) string {
 }
 
 // Summarize performs Level 2 summarization based on strategy and log size.
-// If anything fails or client is unavailable, it gracefully returns raw output without error.
-func (s *GenAISummarizer) Summarize(ctx context.Context, cmd string, exitCode int, strategy Strategy, cmdID string, totalBytes int64) (string, error) {
+// It returns the summary text plus the token cost of the call. If anything
+// fails or the client is unavailable, it gracefully returns raw output and a
+// zero ModelUsage without error.
+func (s *GenAISummarizer) Summarize(ctx context.Context, cmd string, exitCode int, strategy Strategy, cmdID string, totalBytes int64) (string, ModelUsage, error) {
 	rawPayload, err := s.storage.ReadPayload(cmdID)
 	if err != nil {
 		log.Debug().Err(err).Str("cmd_id", cmdID).Msg("failed to read raw payload from storage")
-		return "", err
+		return "", ModelUsage{}, err
 	}
 
 	payloadStr := string(rawPayload)
 
 	if s.client == nil {
 		log.Debug().Msg("genai client not available; returning raw payload")
-		return payloadStr, nil
+		return payloadStr, ModelUsage{}, nil
 	}
 
 	var inputLog string
@@ -174,16 +176,21 @@ Your goal is to extract concise, actionable diagnostic information from the comm
 	resp, err := s.client.Models.GenerateContent(evalCtx, s.model, contents, config)
 	if err != nil {
 		log.Debug().Err(err).Str("cmd_id", cmdID).Msg("gemini summarization failed or timed out; falling back to raw payload")
-		return payloadStr, nil
+		return payloadStr, ModelUsage{}, nil
+	}
+
+	usage := ModelUsage{Issued: true}
+	if resp.UsageMetadata != nil {
+		usage.Tokens = int64(resp.UsageMetadata.TotalTokenCount)
 	}
 
 	text := resp.Text()
 	if strings.TrimSpace(text) == "" {
 		log.Debug().Str("cmd_id", cmdID).Msg("gemini returned empty summary; falling back to raw payload")
-		return payloadStr, nil
+		return payloadStr, usage, nil
 	}
 
-	return text, nil
+	return text, usage, nil
 }
 
 const (

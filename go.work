@@ -16,6 +16,7 @@ use (
 	./pkg/agentspec
 	./pkg/jev
 	./pkg/logger
+	./pkg/metrics
 	./pkg/paths
 	./pkg/pluginsdk
 	./pkg/workflowspec

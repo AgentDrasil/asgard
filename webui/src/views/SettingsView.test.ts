@@ -85,6 +85,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("Restart Server");
     expect(root.textContent).toContain("Usage & Quota");
     expect(root.textContent).toContain("Configuration & Diagnostics");
+    expect(root.textContent).toContain("Compression Statistics");
 
     app.unmount();
   });
@@ -110,6 +111,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("重启服务器");
     expect(root.textContent).toContain("用量与配额");
     expect(root.textContent).toContain("配置与诊断");
+    expect(root.textContent).toContain("压缩统计");
 
     app.unmount();
   });

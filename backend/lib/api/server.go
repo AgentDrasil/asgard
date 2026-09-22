@@ -25,6 +25,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/metrics"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
@@ -33,23 +34,24 @@ var ErrServerShutdownBeforeStart = errors.New("server shut down before start com
 
 // Server manages the HTTP server hosting agents.
 type Server struct {
-	conf             *config.Config
-	configPath       string
-	restartTrigger   func()
-	mu               sync.RWMutex
-	agents           []*agentspec.Agent
-	mux              *http.ServeMux
-	repo             *dbmodels.SessionRepository
-	workflowRunRepo  *dbmodels.WorkflowRunRepository
-	statusListeners  map[string][]*statusListener
-	ttydManager      *ttyd.Manager
-	workflowEngine   *workflow.Engine
-	cronManager      *trigger.WorkflowCronManager
-	eventHub         *SessionEventHub
-	diagnostics      *SystemDiagnostics
-	ctx              context.Context
-	cancel           context.CancelFunc
-	activeExecutions sync.Map // chatID -> *executionHandle (or legacy struct{} placeholder)
+	conf               *config.Config
+	configPath         string
+	restartTrigger     func()
+	mu                 sync.RWMutex
+	agents             []*agentspec.Agent
+	mux                *http.ServeMux
+	repo               *dbmodels.SessionRepository
+	workflowRunRepo    *dbmodels.WorkflowRunRepository
+	statusListeners    map[string][]*statusListener
+	ttydManager        *ttyd.Manager
+	workflowEngine     *workflow.Engine
+	cronManager        *trigger.WorkflowCronManager
+	eventHub           *SessionEventHub
+	diagnostics        *SystemDiagnostics
+	compressionMetrics *CompressionMetricsStore
+	ctx                context.Context
+	cancel             context.CancelFunc
+	activeExecutions   sync.Map // chatID -> *executionHandle (or legacy struct{} placeholder)
 	// cancelledExecutions records chatIDs whose execution was aborted via the
 	// stop API (chatID -> cancel time). It lets event handlers distinguish
 	// cancellation-induced node failures from genuine errors.
@@ -144,6 +146,21 @@ func WithDiagnostics(d *SystemDiagnostics) ServerOption {
 	return func(s *Server) {
 		s.diagnostics = d
 	}
+}
+
+// WithCompressionMetrics sets the CompressionMetricsStore for the Server.
+func WithCompressionMetrics(m *CompressionMetricsStore) ServerOption {
+	return func(s *Server) {
+		s.compressionMetrics = m
+	}
+}
+
+// CompressionMetrics returns the Server's CompressionMetricsStore instance.
+func (s *Server) CompressionMetrics() *CompressionMetricsStore {
+	if s == nil {
+		return nil
+	}
+	return s.compressionMetrics
 }
 
 // Diagnostics returns the Server's SystemDiagnostics instance.
@@ -262,6 +279,10 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		s.diagnostics = NewSystemDiagnostics()
 	}
 
+	if s.compressionMetrics == nil {
+		s.compressionMetrics = NewCompressionMetricsStore("")
+	}
+
 	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
@@ -373,6 +394,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	mux.HandleFunc("GET /api/system/logs", s.handleSystemLogs)
+	mux.HandleFunc("GET "+metrics.EndpointPath, s.handleGetCompressionMetrics)
 	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
 	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
 	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)
@@ -449,6 +471,7 @@ func (s *Server) Start() error {
 	internalMux := http.NewServeMux()
 	internalMux.HandleFunc("/agent-status", s.handleAgentStatus)
 	internalMux.HandleFunc("/api/ask-user", s.handleAskUser)
+	internalMux.HandleFunc("POST "+metrics.EndpointPath, s.handleRecordCompressionMetrics)
 	internalSrv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", s.conf.InternalPort),
 		Handler: internalMux,

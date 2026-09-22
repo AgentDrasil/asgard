@@ -215,6 +215,10 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
     *   Identifies that agent's team configurations.
     *   Returns details on all other agents that belong to the same team.
 
+### 4. Compression Telemetry API
+*   **Record Metrics** (`POST /api/compression-metrics`, internal loopback server only): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
+*   **Read Metrics** (`GET /api/compression-metrics`): Returns the aggregated counters (Jev and compass calls, tokens and per-call token averages, truncations, `show-output` calls and raw bytes retrieved) rendered by the WebUI compression statistics page.
+
 ## SSH Agent Integration
 
 Asgard uses standard `ssh-agent` Socket passthrough to allow agents to perform SSH operations (e.g., `git clone`, `git push`) without exposing private keys (`/home/user/.ssh`) inside the sandboxes.

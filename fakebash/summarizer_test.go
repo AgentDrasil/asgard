@@ -89,7 +89,7 @@ func TestSummarizer_SmallLog_DirectExtract(t *testing.T) {
 	require.NoError(t, err)
 
 	summarizer := NewGenAISummarizer(storage, WithGenAIClient(genaiClient))
-	res, err := summarizer.Summarize(context.Background(), "go test ./...", 1, StrategyExtractFailure, sf.ID(), int64(len(content)))
+	res, usage, err := summarizer.Summarize(context.Background(), "go test ./...", 1, StrategyExtractFailure, sf.ID(), int64(len(content)))
 	require.NoError(t, err)
 
 	mu.Lock()
@@ -97,6 +97,7 @@ func TestSummarizer_SmallLog_DirectExtract(t *testing.T) {
 	mu.Unlock()
 
 	assert.Contains(t, res, "Failed test: TestUserAuth at auth_test.go:42")
+	assert.True(t, usage.Issued)
 	assert.Contains(t, body, "Inspector Mode: false")
 	assert.Contains(t, body, "auth_test.go:42: passwords do not match")
 }
@@ -191,7 +192,7 @@ func TestSummarizer_LargeLog_InspectorRetrieval(t *testing.T) {
 			require.NoError(t, err)
 
 			summarizer := NewGenAISummarizer(storage, WithGenAIClient(genaiClient))
-			res, err := summarizer.Summarize(context.Background(), "go test ./...", 2, StrategyExtractFailure, sf.ID(), int64(len(content)))
+			res, _, err := summarizer.Summarize(context.Background(), "go test ./...", 2, StrategyExtractFailure, sf.ID(), int64(len(content)))
 			require.NoError(t, err)
 
 			mu.Lock()
@@ -246,11 +247,12 @@ func TestSummarizer_DegradeOnFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	summarizer := NewGenAISummarizer(storage, WithGenAIClient(genaiClient), WithSummarizerTimeout(100*time.Millisecond))
-	res, err := summarizer.Summarize(context.Background(), "make", 1, StrategyExtractFailure, sf.ID(), int64(len(rawOutput)))
+	res, usage, err := summarizer.Summarize(context.Background(), "make", 1, StrategyExtractFailure, sf.ID(), int64(len(rawOutput)))
 	require.NoError(t, err)
 
 	// Should gracefully degrade to raw output without panic or error
 	assert.Contains(t, res, "compilation error: undefined symbol")
+	assert.False(t, usage.Issued, "a timed-out call must not be counted as an issued call")
 	// Ensure no # CMD: or # EXIT: leaked in degrade output
 	assert.NotContains(t, res, "# CMD:")
 	assert.NotContains(t, res, "# EXIT:")

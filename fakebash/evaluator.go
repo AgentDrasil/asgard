@@ -22,9 +22,17 @@ const (
 	StrategySummarize      Strategy = "summarize"
 )
 
+// ModelUsage records whether a model was consulted for a command and how many
+// tokens that consultation consumed. Issued is false when no call was made at
+// all (no client configured, or the call failed before returning a response).
+type ModelUsage struct {
+	Issued bool
+	Tokens int64
+}
+
 // Evaluator evaluates command output metadata and determines a compression strategy.
 type Evaluator interface {
-	Classify(ctx context.Context, cmd string, exitCode int, cmdID string) (Strategy, error)
+	Classify(ctx context.Context, cmd string, exitCode int, cmdID string) (Strategy, ModelUsage, error)
 }
 
 // JevEvaluator implements Level 1 classification using TypeSafe Jev System One evaluation.
@@ -84,18 +92,19 @@ func NewJevEvaluator(storage Storage, opts ...JevEvaluatorOption) *JevEvaluator 
 	return e
 }
 
-// Classify evaluates the command result and returns the selected Strategy.
+// Classify evaluates the command result and returns the selected Strategy along
+// with the token cost of the call that produced it.
 // If TYPESAFE_API_KEY is missing or the request fails/times out, it gracefully falls back to StrategyKeepRaw.
-func (e *JevEvaluator) Classify(ctx context.Context, cmd string, exitCode int, cmdID string) (Strategy, error) {
+func (e *JevEvaluator) Classify(ctx context.Context, cmd string, exitCode int, cmdID string) (Strategy, ModelUsage, error) {
 	if e.jevClient == nil {
 		log.Debug().Msg("no jev client or TYPESAFE_API_KEY configured; falling back to keep_raw")
-		return StrategyKeepRaw, nil
+		return StrategyKeepRaw, ModelUsage{}, nil
 	}
 
 	head, tail, totalBytes, _, err := e.storage.GetHeadAndTail(cmdID, 1024, 1024)
 	if err != nil {
 		log.Debug().Err(err).Str("cmd_id", cmdID).Msg("failed to get head and tail from storage; falling back to keep_raw")
-		return StrategyKeepRaw, nil
+		return StrategyKeepRaw, ModelUsage{}, nil
 	}
 
 	var outputSample string
@@ -113,12 +122,12 @@ func (e *JevEvaluator) Classify(ctx context.Context, cmd string, exitCode int, c
 	}
 
 	question := jev.NewChoice(
-		"Select the optimal output handling strategy for this command execution result.",
+		"Select how to handle the captured output of this finished command. Decide by what the caller needs next, not by output size.",
 		map[string]any{
-			string(StrategyKeepRaw):        "Output is short, critical interactive prompt, or should be preserved completely as-is without modification.",
-			string(StrategyDropOnSuccess):  "Command succeeded with exit code 0 and generated verbose build/install logs, progress bars, or noisy output where success status is sufficient.",
-			string(StrategyExtractFailure): "Command failed (non-zero exit code) with compilation errors, test failures, panic traces, or exception messages where pinpointing the exact failure cause is critical.",
-			string(StrategySummarize):      "Command succeeded or had informational output that is excessively long and needs a high-level concise summary.",
+			string(StrategyKeepRaw):        "Exit code 0 and the output is itself the deliverable: data consumed verbatim downstream (file listings, diffs, query results, tables, structured output) or an interactive prompt. Return it unchanged.",
+			string(StrategyDropOnSuccess):  "Exit code 0 and the output carries no information worth returning: progress or status chatter, build/install/download noise, acknowledgements, or a command that produced nothing notable. The success status alone is sufficient.",
+			string(StrategyExtractFailure): "Exit code is non-zero: compilation or linker errors, failed tests, panics, or exceptions where the exact failure cause must be pinpointed.",
+			string(StrategySummarize):      "Exit code 0 with genuinely long output (hundreds of lines) whose overall gist is useful but whose full detail is not; produce a concise high-level summary.",
 		},
 	)
 
@@ -133,20 +142,22 @@ func (e *JevEvaluator) Classify(ctx context.Context, cmd string, exitCode int, c
 	})
 	if err != nil {
 		log.Debug().Err(err).Str("cmd_id", cmdID).Msg("jev evaluation timed out or failed; falling back to keep_raw")
-		return StrategyKeepRaw, nil
+		return StrategyKeepRaw, ModelUsage{}, nil
 	}
+
+	usage := ModelUsage{Issued: true, Tokens: int64(resp.Usage.InputTokens + resp.Usage.OutputTokens)}
 
 	ans, ok := resp.Answers["compression_strategy"]
 	if !ok || ans.Choice == "" {
 		log.Debug().Str("cmd_id", cmdID).Msg("jev returned no answer for compression_strategy; falling back to keep_raw")
-		return StrategyKeepRaw, nil
+		return StrategyKeepRaw, usage, nil
 	}
 
 	switch Strategy(ans.Choice) {
 	case StrategyKeepRaw, StrategyDropOnSuccess, StrategyExtractFailure, StrategySummarize:
-		return Strategy(ans.Choice), nil
+		return Strategy(ans.Choice), usage, nil
 	default:
 		log.Debug().Str("choice", ans.Choice).Msg("unrecognized choice from jev; falling back to keep_raw")
-		return StrategyKeepRaw, nil
+		return StrategyKeepRaw, usage, nil
 	}
 }

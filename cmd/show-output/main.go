@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/AgentDrasil/asgard/pkg/metrics"
 )
 
 const (
@@ -70,6 +73,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// Content writes are tallied so the backend can report how much raw output
+	// was pulled back past the compression pipeline.
+	countingStdout := &countingWriter{w: stdout}
+
 	f, err := os.Open(logPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error opening log file %s: %v\n", logPath, err)
@@ -104,7 +111,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 				lines = lines[1:]
 			}
 		} else {
-			_, _ = fmt.Fprintln(stdout, line)
+			_, _ = fmt.Fprintln(countingStdout, line)
 		}
 	}
 
@@ -115,11 +122,31 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 	if tailN > 0 {
 		for _, line := range lines {
-			_, _ = fmt.Fprintln(stdout, line)
+			_, _ = fmt.Fprintln(countingStdout, line)
 		}
 	}
 
+	reportUsage(countingStdout.n)
+
 	return 0
+}
+
+// countingWriter tallies the bytes handed to the wrapped writer.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// reportUsage tells the backend how many times show-output retrieved raw output
+// and how many bytes it surfaced. Best-effort: see metrics.Report.
+func reportUsage(bytes int64) {
+	metrics.Report(context.Background(), metrics.Event{Kind: metrics.KindShowOutput, Bytes: bytes})
 }
 
 func resolveLogPath(cmdID string) (string, error) {
