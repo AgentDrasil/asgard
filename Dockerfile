@@ -107,6 +107,7 @@ COPY llms/go.mod llms/go.sum* ./llms/
 COPY pkg/agentspec/go.mod pkg/agentspec/go.sum* ./pkg/agentspec/
 COPY pkg/jev/go.mod pkg/jev/go.sum* ./pkg/jev/
 COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
+COPY pkg/metrics/go.mod pkg/metrics/go.sum* ./pkg/metrics/
 COPY pkg/paths/go.mod ./pkg/paths/
 COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
 COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
@@ -128,6 +129,7 @@ RUN (cd backend && go mod download) && \
     (cd pkg/agentspec && go mod download) && \
     (cd pkg/jev && go mod download) && \
     (cd pkg/logger && go mod download) && \
+    (cd pkg/metrics && go mod download) && \
     (cd pkg/paths && go mod download) && \
     (cd pkg/pluginsdk && go mod download) && \
     (cd pkg/workflowspec && go mod download) && \
