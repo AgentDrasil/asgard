@@ -91,6 +91,40 @@ describe("useInPageFind", () => {
     expect(find.currentIndex.value).toBe(1);
   });
 
+  it("auto-expands ancestor details elements when navigating to a match", () => {
+    const containerRef = ref<HTMLElement | null>(null);
+    const find = useInPageFind(containerRef);
+
+    const mockDetails = {
+      tagName: "DETAILS",
+      open: false,
+      parentElement: null,
+    } as unknown as HTMLDetailsElement;
+
+    const mockParent = {
+      tagName: "DIV",
+      parentElement: mockDetails,
+    } as unknown as HTMLElement;
+
+    const mockEl = {
+      tagName: "MARK",
+      parentElement: mockParent,
+      classList: {
+        add: vi.fn<(tokens: string) => void>(),
+        remove: vi.fn<(tokens: string) => void>(),
+      },
+      scrollIntoView: vi.fn<() => void>(),
+    } as unknown as HTMLElement;
+
+    find.matches.value = [mockEl];
+    find.totalMatches.value = 1;
+
+    find.setActiveMatch(0);
+
+    expect(mockDetails.open).toBe(true);
+    expect(mockEl.scrollIntoView).toHaveBeenCalled();
+  });
+
   it("clears highlights and resets counts on clearHighlights", () => {
     const mockMark = {
       parentNode: {

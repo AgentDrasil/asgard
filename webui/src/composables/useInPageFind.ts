@@ -158,9 +158,16 @@ export function useInPageFind(
       }
     });
 
-    // Scroll into view
+    // Scroll into view (auto-expand any parent <details> elements such as collapsed tool calling boxes)
     const targetEl = matches.value[targetIndex];
     if (targetEl) {
+      let parent = targetEl.parentElement;
+      while (parent) {
+        if (parent.tagName.toUpperCase() === "DETAILS" && !(parent as HTMLDetailsElement).open) {
+          (parent as HTMLDetailsElement).open = true;
+        }
+        parent = parent.parentElement;
+      }
       targetEl.scrollIntoView({
         behavior: "smooth",
         block: "center",
