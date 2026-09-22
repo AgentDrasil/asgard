@@ -7,8 +7,8 @@ db: sqlite
 # SQLite always lives at ~/asgard/data/data.db.
 gemini_api_key: [GCP_API_KEY]
 gemini_model_for_chat_title: gemini-3.1-flash-lite
-# Model used for fakebash command output summarization (default: gemini-2.5-flash-lite)
-gemini_model_for_command_result_compass: gemini-2.5-flash-lite
+# Model used for fakebash command output summarization (default: gemini-3.5-flash-lite)
+gemini_model_for_command_result_compass: gemini-3.5-flash-lite
 # TypeSafe API key for Jev System One evaluation (optional, falls back to TYPESAFE_API_KEY env)
 typesafe_api_key: [TYPESAFE_API_KEY]
 # Language preferences for agents (default: English (US))
@@ -50,4 +50,3 @@ firebase_webpush_web:
 #       real_secret: "Bearer sk-real-key"
 #       dummy_secret: "Bearer dummy-token"
 #       env: "OPENAI_API_KEY"
-

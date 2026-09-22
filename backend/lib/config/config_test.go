@@ -778,7 +778,7 @@ gemini_model_for_chat_title: "gemini-3.1-flash-lite"
 		require.NoError(t, err)
 		require.NotNil(t, cfg)
 
-		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
+		assert.Equal(t, "gemini-3.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, os.Getenv("TYPESAFE_API_KEY"), cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "test-key", cfg.GetGeminiAPIKey())
 	})
@@ -811,7 +811,7 @@ typesafe_api_key: "test-typesafe-key-123"
 	t.Run("nil config safety", func(t *testing.T) {
 		t.Parallel()
 		var cfg *Config
-		assert.Equal(t, "gemini-2.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
+		assert.Equal(t, "gemini-3.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "", cfg.GetGeminiAPIKey())
 	})

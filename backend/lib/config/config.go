@@ -128,7 +128,7 @@ func (c *Config) GetUILang() string {
 
 func (c *Config) GetGeminiModelForCommandResultCompass() string {
 	if c == nil || c.GeminiModelForCommandResultCompass == "" {
-		return "gemini-2.5-flash-lite"
+		return "gemini-3.5-flash-lite"
 	}
 	return c.GeminiModelForCommandResultCompass
 }

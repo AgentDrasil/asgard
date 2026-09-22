@@ -120,7 +120,7 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
 - **Heterogeneous Node Types**:
   - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `~/asgard/data/sessions/<chat-id>`).
   - `command`: Executes sandboxed or direct bash shell commands.
-  - `llm`: Invokes raw LLM models (e.g. `gemini-2.5-flash`) for fast classification or summarization.
+  - `llm`: Invokes raw LLM models (e.g. `gemini-3.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.
 - **Smart Edge Conditions & Join Rules**:
   - `when`: Dot-notation expressions (e.g. `nodes.build_cmd.exit_code != 0`) to trigger conditional repair or fallback branches. Node result fields addressable in expressions: `status`, `exit_code`, `output`, `error`, `skip_reason`, and `loop_iteration.<loop_id>` (the owning loop's iteration counter snapshotted when the node settled).
