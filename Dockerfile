@@ -2,7 +2,7 @@ ARG GO_VERSION=1.27.1
 ARG GOLANGCI_LINT_VERSION=v2.13.1
 ARG NODE_VERSION=26
 ARG DEBIAN_VERSION=bookworm
-ARG AGY_VERSION=1.2.9
+ARG AGY_VERSION=1.2.11
 ARG USER_UID=1000
 ARG USER_GID=1000
 
@@ -15,6 +15,7 @@ ARG AGY_VERSION
 # Add sid repository for ttyd package (not yet in Debian stable/testing)
 RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list && \
     apt update && apt install -y --no-install-recommends \
+    build-essential \
     bubblewrap \
     git \
     bash \
