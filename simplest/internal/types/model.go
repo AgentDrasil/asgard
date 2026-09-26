@@ -104,6 +104,8 @@ type StreamOptions struct {
 	ThinkingLevel ThinkingLevel `json:"thinkingLevel,omitempty"`
 	// APIKey overrides the provider's configured key for this call.
 	APIKey string `json:"-"`
+	// RetryPolicy controls request retry behavior. A nil value defaults to DefaultRetryPolicy().
+	RetryPolicy *RetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // Provider streams one assistant response over the given wire protocol.

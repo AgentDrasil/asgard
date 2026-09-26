@@ -31,9 +31,23 @@ func CalculateCost(m *types.Model, u *types.Usage) {
 	u.Cost.Total = u.Cost.Input + u.Cost.Output + u.Cost.CacheRead + u.Cost.CacheWrite
 }
 
+// HTTPStatusError represents a non-2xx HTTP response from an LLM provider.
+type HTTPStatusError struct {
+	StatusCode int
+	Body       string
+	RetryAfter string
+}
+
+func (e *HTTPStatusError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("provider returned HTTP %d", e.StatusCode)
+	}
+	return fmt.Sprintf("%d: %s", e.StatusCode, e.Body)
+}
+
 // postSSE issues a POST expecting an SSE response. Non-2xx responses are
-// converted to errors carrying up to 4000 chars of the body, formatted as
-// "<status>: <body>".
+// converted to HTTPStatusError carrying up to 4000 chars of the body and
+// any Retry-After response header.
 func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -48,16 +62,18 @@ func postSSE(ctx context.Context, client *http.Client, url string, headers map[s
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		retryAfter := resp.Header.Get("Retry-After")
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		snippet := string(bytes.TrimSpace(b))
 		if len(snippet) > 4000 {
 			snippet = snippet[:4000]
 		}
-		if snippet == "" {
-			return nil, fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
+		return nil, &HTTPStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       snippet,
+			RetryAfter: retryAfter,
 		}
-		return nil, fmt.Errorf("%d: %s", resp.StatusCode, snippet)
 	}
 	return resp, nil
 }

@@ -174,6 +174,11 @@ type (
 	ModelCostRates = types.ModelCostRates
 	Provider       = types.Provider
 	Context        = types.Context
+	RetryPolicy    = types.RetryPolicy
+)
+
+var (
+	DefaultRetryPolicy = types.DefaultRetryPolicy
 )
 
 const (

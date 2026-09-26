@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/genai"
 
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
@@ -398,4 +400,47 @@ func TestGeminiConvertMessagesImageBase64Decoded(t *testing.T) {
 	if !bytes.Equal(foundToolBlob.Data, rawBytes) {
 		t.Fatalf("tool result inline blob data was not base64-decoded: got %v, want %v", foundToolBlob.Data, rawBytes)
 	}
+}
+
+func TestGeminiRetryOn503(t *testing.T) {
+	t.Parallel()
+
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, `{"error":{"code":503,"message":"Service Unavailable","status":"UNAVAILABLE"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"candidates":[{"content":{"parts":[{"text":"hello after retry"}]},"finishReason":"STOP"}]}`)
+		f := w.(http.Flusher)
+		f.Flush()
+	}))
+	t.Cleanup(srv.Close)
+
+	p := NewGemini("g-key")
+	m := gModel(srv.URL)
+	opts := &types.StreamOptions{
+		RetryPolicy: &types.RetryPolicy{
+			Enabled:     true,
+			MaxRetries:  2,
+			BaseDelayMs: 10,
+			MaxDelayMs:  50,
+		},
+	}
+	evs, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopStop, done.Reason)
+	assert.Equal(t, 2, attempts)
+
+	startCount := 0
+	for _, ev := range evs {
+		if part, ok := ev.(types.Partial); ok && part.Kind == types.EvStart {
+			startCount++
+		}
+	}
+	assert.Equal(t, 1, startCount, "EvStart must be emitted exactly once")
 }

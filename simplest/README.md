@@ -397,3 +397,28 @@ Run tests with:
 ```bash
 go vet ./... && go test ./...
 ```
+
+## Roadmap
+
+Provider-specific capabilities are intentionally not implemented yet. Before
+onboarding the relevant endpoints, revisit the iteration plan
+(`tmp/docs/pi-core-iteration-plan.md`):
+
+- **Anthropic Messages only**: `cache_control` breakpoints, signed thinking
+  replay, per-turn effort markers.
+- **OpenAI Responses only**: `prompt_cache_key`/`prompt_cache_retention`,
+  `prompt_cache_options`, `additional_tools`/tool search.
+- **Strict tool schemas** (`constrainedSampling`): opt-in per endpoint; off by
+  default for unknown OpenAI-compatible endpoints.
+- **Session-affinity headers** (`x-session-id`, etc.) and provider prompt-cache
+  routing.
+
+### Cross-layer contracts
+
+- **Model definitions** live solely in `internal/config`: any new model field
+  must add the YAML key, its default, and the `GetAvailableModels` mapping, and
+  update `agentwrapper` (e.g. reasoning-effort validation) in lockstep.
+- **Session entries are a cross-layer contract**: adding an entry type or
+  changing projection/reconciliation semantics requires updating
+  `agentwrapper` (`prompt.go`, `contract_test.go`) and, when relevant,
+  `backend`.

@@ -421,7 +421,13 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 		for k, v := range model.Headers {
 			headers[k] = v
 		}
-		resp, err := postSSE(ctx, p.client(), url, headers, body)
+		var policy *types.RetryPolicy
+		if opts != nil {
+			policy = opts.RetryPolicy
+		}
+		resp, err := ExecuteWithRetry(ctx, policy, func() (*http.Response, error) {
+			return postSSE(ctx, p.client(), url, headers, body)
+		})
 		if err != nil {
 			em.fail(ctx, err)
 			return

@@ -315,87 +315,141 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 		if model.BaseURL != "" {
 			cc.HTTPOptions.BaseURL = model.BaseURL
 		}
-		client, err := genai.NewClient(ctx, cc)
-		if err != nil {
-			em.fail(ctx, err)
-			return
+		var policy *types.RetryPolicy
+		if opts != nil {
+			policy = opts.RetryPolicy
+		}
+		if policy == nil {
+			pPolicy := types.DefaultRetryPolicy()
+			policy = &pPolicy
 		}
 
-		em.start(model.API, model.Provider, model.ID)
-		toolCallCounter := 0
-		finishReason := genai.FinishReasonUnspecified
+		maxRetries := 0
+		if policy.Enabled {
+			maxRetries = policy.MaxRetries
+		}
 
-		for resp, err := range client.Models.GenerateContentStream(ctx, model.WireID(), contents, config) {
-			if err != nil {
-				em.fail(ctx, err)
+		var (
+			hasEmitted      bool
+			finishReason    = genai.FinishReasonUnspecified
+			toolCallCounter int
+			lastErr         error
+		)
+
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				delay := CalculateDelay(attempt-1, policy, lastErr)
+				select {
+				case <-ctx.Done():
+					em.fail(ctx, ctx.Err())
+					return
+				case <-time.After(delay):
+				}
+			}
+
+			if ctx.Err() != nil {
+				em.fail(ctx, ctx.Err())
 				return
 			}
-			if em.out.ResponseID == "" && resp.ResponseID != "" {
-				em.out.ResponseID = resp.ResponseID
-			}
-			if um := resp.UsageMetadata; um != nil {
-				input := int64(um.PromptTokenCount) - int64(um.CachedContentTokenCount)
-				if input < 0 {
-					input = 0
+
+			client, err := genai.NewClient(ctx, cc)
+			if err != nil {
+				lastErr = err
+				if !policy.Enabled || !IsRetryableError(err) || attempt >= maxRetries {
+					em.fail(ctx, err)
+					return
 				}
-				thoughts := int64(um.ThoughtsTokenCount)
-				usage := types.Usage{
-					Input:       input,
-					Output:      int64(um.CandidatesTokenCount) + thoughts,
-					CacheRead:   int64(um.CachedContentTokenCount),
-					Reasoning:   &thoughts,
-					TotalTokens: int64(um.TotalTokenCount),
-				}
-				CalculateCost(model, &usage)
-				em.out.Usage = usage
-			}
-			if len(resp.Candidates) == 0 {
 				continue
 			}
-			cand := resp.Candidates[0]
-			if cand.FinishReason != "" && cand.FinishReason != genai.FinishReasonUnspecified {
-				finishReason = cand.FinishReason
-			}
-			if cand.Content == nil {
-				continue
-			}
-			for _, part := range cand.Content.Parts {
-				if part.Text != "" {
-					if part.Thought {
-						em.thinkingDelta(part.Text, string(part.ThoughtSignature))
-					} else {
-						em.textDelta(part.Text)
+
+			streamFailed := false
+			for resp, err := range client.Models.GenerateContentStream(ctx, model.WireID(), contents, config) {
+				if err != nil {
+					lastErr = err
+					streamFailed = true
+					break
+				}
+				if !hasEmitted {
+					em.start(model.API, model.Provider, model.ID)
+					hasEmitted = true
+				}
+				if em.out.ResponseID == "" && resp.ResponseID != "" {
+					em.out.ResponseID = resp.ResponseID
+				}
+				if um := resp.UsageMetadata; um != nil {
+					input := int64(um.PromptTokenCount) - int64(um.CachedContentTokenCount)
+					if input < 0 {
+						input = 0
 					}
+					thoughts := int64(um.ThoughtsTokenCount)
+					usage := types.Usage{
+						Input:       input,
+						Output:      int64(um.CandidatesTokenCount) + thoughts,
+						CacheRead:   int64(um.CachedContentTokenCount),
+						Reasoning:   &thoughts,
+						TotalTokens: int64(um.TotalTokenCount),
+					}
+					CalculateCost(model, &usage)
+					em.out.Usage = usage
+				}
+				if len(resp.Candidates) == 0 {
 					continue
 				}
-				if part.FunctionCall != nil {
-					fc := part.FunctionCall
-					id := fc.ID
-					dup := id == ""
-					for _, blk := range em.out.Content {
-						if tc, ok := blk.(types.ToolCall); ok && id != "" && tc.ID == id {
-							dup = true
-							break
+				cand := resp.Candidates[0]
+				if cand.FinishReason != "" && cand.FinishReason != genai.FinishReasonUnspecified {
+					finishReason = cand.FinishReason
+				}
+				if cand.Content == nil {
+					continue
+				}
+				for _, part := range cand.Content.Parts {
+					if part.Text != "" {
+						if part.Thought {
+							em.thinkingDelta(part.Text, string(part.ThoughtSignature))
+						} else {
+							em.textDelta(part.Text)
 						}
+						continue
 					}
-					if dup {
-						toolCallCounter++
-						id = fmt.Sprintf("%s_%d_%d", fc.Name, time.Now().UnixMilli(), toolCallCounter)
-					}
-					args := json.RawMessage("{}")
-					if len(fc.Args) > 0 {
-						if raw, merr := json.Marshal(fc.Args); merr == nil {
-							args = raw
+					if part.FunctionCall != nil {
+						fc := part.FunctionCall
+						id := fc.ID
+						dup := id == ""
+						for _, blk := range em.out.Content {
+							if tc, ok := blk.(types.ToolCall); ok && id != "" && tc.ID == id {
+								dup = true
+								break
+							}
 						}
+						if dup {
+							toolCallCounter++
+							id = fmt.Sprintf("%s_%d_%d", fc.Name, time.Now().UnixMilli(), toolCallCounter)
+						}
+						args := json.RawMessage("{}")
+						if len(fc.Args) > 0 {
+							if raw, merr := json.Marshal(fc.Args); merr == nil {
+								args = raw
+							}
+						}
+						idx := em.appendToolCall(types.ToolCall{
+							Type: types.TypeToolCall, ID: id, Name: fc.Name, Arguments: args,
+							Signature: string(part.ThoughtSignature),
+						})
+						em.toolCallDelta(idx, string(args), args)
+						em.toolCallEnd(idx)
 					}
-					idx := em.appendToolCall(types.ToolCall{
-						Type: types.TypeToolCall, ID: id, Name: fc.Name, Arguments: args,
-						Signature: string(part.ThoughtSignature),
-					})
-					em.toolCallDelta(idx, string(args), args)
-					em.toolCallEnd(idx)
 				}
 			}
+
+			if streamFailed {
+				if !hasEmitted && policy.Enabled && IsRetryableError(lastErr) && attempt < maxRetries {
+					continue
+				}
+				em.fail(ctx, lastErr)
+				return
+			}
+
+			break
 		}
 
 		if streamAborted(ctx) {
