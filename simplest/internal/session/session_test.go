@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -642,4 +645,69 @@ func mustDecode(t *testing.T, raw json.RawMessage) []types.AssistantContent {
 		t.Fatal(err)
 	}
 	return blocks
+}
+
+func TestSession_UsageEntry(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("hello"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testAssistant("world"))
+	require.NoError(t, err)
+
+	usageData := &types.Usage{
+		Input:       120,
+		Output:      60,
+		CacheWrite:  25,
+		CacheRead:   15,
+		TotalTokens: 180,
+	}
+	usageID, err := sf.AppendUsage(usageData, "cache warm-up")
+	require.NoError(t, err)
+	require.NotEmpty(t, usageID)
+
+	// Verify in-memory entry
+	entries := sf.Entries()
+	require.Len(t, entries, 3)
+	lastEntry := entries[2]
+	assert.Equal(t, usageID, lastEntry.ID)
+	assert.Equal(t, TypeUsage, lastEntry.Type)
+	assert.Equal(t, "cache warm-up", lastEntry.UsageNote)
+	require.NotNil(t, lastEntry.Usage)
+	assert.Equal(t, int64(120), lastEntry.Usage.Input)
+	assert.Equal(t, int64(60), lastEntry.Usage.Output)
+	assert.Equal(t, int64(180), lastEntry.Usage.TotalTokens)
+
+	// Verify persistence and reloading from disk
+	header, loadedEntries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	assert.Equal(t, sf.Header().ID, header.ID)
+	require.Len(t, loadedEntries, 3)
+
+	loadedUsage := loadedEntries[2]
+	assert.Equal(t, usageID, loadedUsage.ID)
+	assert.Equal(t, TypeUsage, loadedUsage.Type)
+	assert.Equal(t, "cache warm-up", loadedUsage.UsageNote)
+	require.NotNil(t, loadedUsage.Usage)
+	assert.Equal(t, int64(120), loadedUsage.Usage.Input)
+	assert.Equal(t, int64(60), loadedUsage.Usage.Output)
+	assert.Equal(t, int64(25), loadedUsage.Usage.CacheWrite)
+	assert.Equal(t, int64(15), loadedUsage.Usage.CacheRead)
+	assert.Equal(t, int64(180), loadedUsage.Usage.TotalTokens)
+
+	// Verify projection ignores TypeUsage: SessionEntryToContextMessages returns nil, nil
+	msgs, err := SessionEntryToContextMessages(loadedUsage)
+	require.NoError(t, err)
+	assert.Nil(t, msgs)
+
+	// Verify BuildContext skips TypeUsage and only returns the 2 conversation messages
+	ctx, err := BuildContext(loadedEntries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
+	assert.Equal(t, types.RoleAssistant, ctx.Messages[1].MessageRole())
 }

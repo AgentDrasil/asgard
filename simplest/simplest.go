@@ -120,6 +120,10 @@ var (
 	LoadSessionFile = session.LoadFile
 )
 
+const (
+	TypeUsage = session.TypeUsage
+)
+
 // ---- types: messages & content ----
 
 type (

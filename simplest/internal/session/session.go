@@ -23,6 +23,7 @@ const (
 	TypeCustomMessage       = "custom_message"
 	TypeLabel               = "label"
 	TypeSessionInfo         = "session_info"
+	TypeUsage               = "usage"
 )
 
 // Compaction/branch summary framing used when projecting entries into
@@ -82,6 +83,8 @@ type Entry struct {
 	Label    *string `json:"label,omitempty"`
 	// TypeSessionInfo.
 	Name string `json:"name,omitempty"`
+	// TypeUsage.
+	UsageNote string `json:"usageNote,omitempty"`
 }
 
 // DecodeMessage decodes the entry's role-enveloped message payload.
@@ -301,6 +304,8 @@ func SessionEntryToContextMessages(e *Entry) ([]types.Message, error) {
 		return []types.Message{summaryUserMessage(BranchSummaryPrefix+e.Summary+BranchSummarySuffix, e.Timestamp)}, nil
 	case TypeCompaction:
 		return []types.Message{summaryUserMessage(CompactionSummaryPrefix+e.Summary+CompactionSummarySuffix, e.Timestamp)}, nil
+	case TypeUsage:
+		return nil, nil
 	default:
 		return nil, nil
 	}

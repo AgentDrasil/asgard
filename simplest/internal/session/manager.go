@@ -474,6 +474,17 @@ func (sf *SessionFile) AppendSessionInfo(name string) (string, error) {
 	return sf.appendAutoParentLocked(&Entry{Type: TypeSessionInfo, Name: name})
 }
 
+// AppendUsage records out-of-band model usage (e.g. cache warm-up, separate accounting).
+func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, error) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.appendAutoParentLocked(&Entry{
+		Type:      TypeUsage,
+		Usage:     usage,
+		UsageNote: note,
+	})
+}
+
 // SessionName returns the latest session_info display name, if any.
 func (sf *SessionFile) SessionName() string {
 	sf.mu.Lock()
