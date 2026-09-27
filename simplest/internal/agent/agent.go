@@ -40,6 +40,10 @@ type Request struct {
 	// Returning nil means no change; returning a new *Request replaces the active configuration.
 	PrepareRequest func(*Request) *Request
 
+	// Persist is called incrementally whenever a completed message (user steering/follow-up/compaction-summary,
+	// assistant, or tool result) is added to the active message log.
+	Persist func(types.Message) error
+
 	// FinishTurn hook runs after an assistant turn (and all its tool executions)
 	// completes. Called on normal, error, and aborted turns. Returning FinishTurnEnd
 	// causes the loop to stop after turn_end. Returning FinishTurnContinue ensures
@@ -165,6 +169,13 @@ type loop struct {
 	endSent     bool
 }
 
+func (l *loop) appendNewMsg(m types.Message) {
+	l.newMsgs = append(l.newMsgs, m)
+	if l.req.Persist != nil {
+		_ = l.req.Persist(m)
+	}
+}
+
 // end delivers the terminal agent_end event exactly once. It bypasses the
 // context guard so cancellation still yields a well-formed event stream.
 func (l *loop) end() {
@@ -222,7 +233,7 @@ outer:
 			for _, m := range pending {
 				l.emitUserish(m)
 				l.messages = append(l.messages, m)
-				l.newMsgs = append(l.newMsgs, m)
+				l.appendNewMsg(m)
 			}
 
 			if l.req.PrepareRequest != nil {
@@ -236,7 +247,7 @@ outer:
 			if msg == nil {
 				return // stream aborted/emitted failure already
 			}
-			l.newMsgs = append(l.newMsgs, msg)
+			l.appendNewMsg(msg)
 
 			if msg.StopReason == types.StopError || msg.StopReason == types.StopAborted {
 				if l.req.FinishTurn != nil {
@@ -268,7 +279,7 @@ outer:
 				hasMoreToolCalls = len(toolCalls) > 0 && !terminate
 				for _, r := range batch {
 					l.messages = append(l.messages, r)
-					l.newMsgs = append(l.newMsgs, r)
+					l.appendNewMsg(r)
 				}
 			}
 
@@ -308,7 +319,7 @@ outer:
 							Timestamp:    time.Now().UnixMilli(),
 						}
 						l.messages = append(l.messages, final)
-						l.newMsgs = append(l.newMsgs, final)
+						l.appendNewMsg(final)
 						l.emitAssistant(final, true)
 						l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
 						l.end()
@@ -317,7 +328,7 @@ outer:
 					for _, m := range extraMsgs {
 						l.emitUserish(m)
 						l.messages = append(l.messages, m)
-						l.newMsgs = append(l.newMsgs, m)
+						l.appendNewMsg(m)
 					}
 				}
 			}
@@ -339,7 +350,7 @@ outer:
 						Timestamp:    time.Now().UnixMilli(),
 					}
 					l.messages = append(l.messages, final)
-					l.newMsgs = append(l.newMsgs, final)
+					l.appendNewMsg(final)
 					l.emitAssistant(final, true)
 					l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
 					l.end()
@@ -348,7 +359,7 @@ outer:
 				for _, m := range extraMsgs {
 					l.emitUserish(m)
 					l.messages = append(l.messages, m)
-					l.newMsgs = append(l.newMsgs, m)
+					l.appendNewMsg(m)
 				}
 			}
 			continue outer
@@ -753,7 +764,7 @@ func (l *loop) maybeCompact() {
 	})
 	sum := &types.UserMessage{Content: raw, Timestamp: time.Now().UnixMilli()}
 	l.messages = []types.Message{sum}
-	l.newMsgs = append(l.newMsgs, sum)
+	l.appendNewMsg(sum)
 }
 
 func messageCharLen(m types.Message) int {

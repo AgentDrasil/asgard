@@ -133,6 +133,8 @@ var (
 )
 
 const (
+	TypeSession     = session.TypeSession
+	TypeMessage     = session.TypeMessage
 	TypeUsage       = session.TypeUsage
 	TypeContextEdit = session.TypeContextEdit
 )
@@ -168,6 +170,11 @@ const (
 	RoleUser       = types.RoleUser
 	RoleAssistant  = types.RoleAssistant
 	RoleToolResult = types.RoleToolResult
+
+	TypeText     = types.TypeText
+	TypeThinking = types.TypeThinking
+	TypeImage    = types.TypeImage
+	TypeToolCall = types.TypeToolCall
 
 	StopStop    = types.StopStop
 	StopToolUse = types.StopToolUse

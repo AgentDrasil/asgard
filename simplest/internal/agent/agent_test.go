@@ -848,3 +848,67 @@ func TestAgent_PrepareNextTurn_OnlyOnContinuation(t *testing.T) {
 		assert.Equal(t, "injected prepare error", lastMsg.ErrorMessage)
 	})
 }
+
+func TestAgent_PersistCallback_InvokedPerTurn(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("done"),
+	}}
+
+	longUser := &types.UserMessage{
+		Content:   types.TextOnly(strings.Repeat("filler ", 60)),
+		Timestamp: 1,
+	}
+
+	req := Request{
+		SystemPrompt: "sys",
+		Messages:     []types.Message{longUser},
+		Model:        &types.Model{ID: "m", API: types.APIOpenAICompat, Provider: "p", ContextWindow: 10},
+		Provider:     fp,
+		Tools:        []types.AgentTool{tool},
+		AutoCompact: &AutoCompactConfig{
+			ThresholdFrac: 0.5,
+			Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+				return "compacted summary", nil
+			},
+		},
+	}
+
+	// Steering queue with one message
+	steeringDone := false
+	req.GetSteeringMessages = func() []types.Message {
+		if !steeringDone {
+			steeringDone = true
+			return []types.Message{
+				&types.UserMessage{
+					Content:   types.TextOnly("steering message"),
+					Timestamp: 2,
+				},
+			}
+		}
+		return nil
+	}
+
+	var mu sync.Mutex
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		persisted = append(persisted, m)
+		return nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Equal(t, len(end.Messages), len(persisted), "persisted message count must match end.Messages")
+	for i := range end.Messages {
+		assert.Same(t, end.Messages[i], persisted[i], "persisted message at index %d must match end.Messages[%d]", i, i)
+	}
+}

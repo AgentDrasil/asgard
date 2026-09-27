@@ -1088,3 +1088,217 @@ func TestPrompt_ContextWindowFallback(t *testing.T) {
 	assert.Equal(t, 15, res.InputTokens)
 	assert.Equal(t, 256000, res.MaxTokens)
 }
+
+func TestPrompt_IncrementalPersistenceOnCancel(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockResp1 := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.ToolCall{
+				Type:      simplest.TypeToolCall,
+				ID:        "call_1",
+				Name:      "bash",
+				Arguments: []byte(`{"command":"echo first turn"}`),
+			},
+		},
+		StopReason: simplest.StopToolUse,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	callCount := 0
+	mockP := &mockStreamProvider{
+		streamFunc: func(c context.Context, model *simplest.Model, cx *simplest.Context, opts *simplest.StreamOptions) <-chan simplest.AssistantMessageEvent {
+			callCount++
+			ch := make(chan simplest.AssistantMessageEvent, 10)
+			go func(callNum int) {
+				defer close(ch)
+				if callNum == 1 {
+					partial := &simplest.AssistantMessage{
+						Content:   mockResp1.Content,
+						API:       model.API,
+						Provider:  model.Provider,
+						Model:     model.ID,
+						Timestamp: time.Now().UnixMilli(),
+					}
+					ch <- simplest.Partial{
+						Kind:    simplest.EvStart,
+						Partial: partial,
+					}
+					ch <- simplest.DoneEvent{
+						Kind:    simplest.EvDone,
+						Reason:  simplest.StopToolUse,
+						Message: mockResp1,
+					}
+				} else {
+					// Second turn: cancel context and wait for ctx.Done()
+					cancel()
+					<-c.Done()
+					errMsg := &simplest.AssistantMessage{
+						Content:      []simplest.AssistantContent{},
+						StopReason:   simplest.StopAborted,
+						ErrorMessage: c.Err().Error(),
+					}
+					ch <- simplest.StreamErrorEvent{
+						Kind:    simplest.EvStreamError,
+						Reason:  simplest.StopAborted,
+						Message: errMsg,
+					}
+				}
+			}(callCount)
+			return ch
+		},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-cancel-model",
+		Name:          "Test Cancel Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, mockP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	res, err := Prompt(ctx, "Run bash task", types.PromptOptions{
+		Dir:        testDir,
+		ToolAccess: types.ToolAccessFull,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotEmpty(t, res.SessionID)
+
+	mgr := simplest.New(simplest.DefaultBaseDir())
+	sessionDir, err := mgr.SessionDir(testDir)
+	require.NoError(t, err)
+
+	var sessionFilePath string
+	dirents, err := os.ReadDir(sessionDir)
+	require.NoError(t, err)
+	for _, de := range dirents {
+		if strings.HasSuffix(de.Name(), ".jsonl") {
+			p := filepath.Join(sessionDir, de.Name())
+			header, _, err := simplest.LoadSessionFile(p)
+			if err == nil && header != nil && header.ID == res.SessionID {
+				sessionFilePath = p
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, sessionFilePath, "session file must exist for cancelled run")
+
+	header, entries, err := simplest.LoadSessionFile(sessionFilePath)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+
+	// Verify that the initial user message, assistant tool call message, and tool result were persisted
+	var persistedUserCount, persistedAssistantCount, persistedToolResultCount int
+	for _, entry := range entries {
+		if entry.Type == simplest.TypeMessage {
+			msg, err := entry.DecodeMessage()
+			require.NoError(t, err)
+			switch msg.MessageRole() {
+			case simplest.RoleUser:
+				persistedUserCount++
+			case simplest.RoleAssistant:
+				persistedAssistantCount++
+			case simplest.RoleToolResult:
+				persistedToolResultCount++
+			}
+		}
+	}
+
+	assert.Equal(t, 1, persistedUserCount, "user message must be persisted")
+	assert.GreaterOrEqual(t, persistedAssistantCount, 1, "assistant tool call message from first turn must be persisted")
+	assert.Equal(t, 1, persistedToolResultCount, "tool result from first turn must be persisted")
+}
+
+func TestPrompt_PersistErrorPropagated(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	testDir := filepath.Join(tempHome, "workspace")
+	require.NoError(t, os.MkdirAll(testDir, 0755))
+
+	// Pre-create session directory and mark it read-only so that
+	// appending messages during the run fails with a persistence error.
+	mgr := simplest.New(simplest.DefaultBaseDir())
+	sessionDir, err := mgr.SessionDir(testDir)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	mockResp := &simplest.AssistantMessage{
+		Content: []simplest.AssistantContent{
+			simplest.TextContent{
+				Type: simplest.TypeText,
+				Text: "hello world",
+			},
+		},
+		StopReason: simplest.StopStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	mockP := &mockStreamProvider{
+		streamFunc: func(c context.Context, model *simplest.Model, cx *simplest.Context, opts *simplest.StreamOptions) <-chan simplest.AssistantMessageEvent {
+			// At the start of streaming, find the session file written for the first user message
+			// and make it read-only so that appending subsequent messages fails with EACCES.
+			dirents, err := os.ReadDir(sessionDir)
+			require.NoError(t, err)
+			for _, de := range dirents {
+				if strings.HasSuffix(de.Name(), ".jsonl") {
+					p := filepath.Join(sessionDir, de.Name())
+					require.NoError(t, os.Chmod(p, 0444))
+				}
+			}
+			ch := make(chan simplest.AssistantMessageEvent, 2)
+			go func() {
+				defer close(ch)
+				ch <- simplest.DoneEvent{
+					Kind:    simplest.EvDone,
+					Reason:  simplest.StopStop,
+					Message: mockResp,
+				}
+			}()
+			return ch
+		},
+	}
+
+	testModel := &simplest.Model{
+		ID:            "test-persist-err-model",
+		Name:          "Test Persist Err Model",
+		Provider:      "mock",
+		API:           "mock",
+		ContextWindow: 1048576,
+	}
+
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return testModel, mockP, nil
+	})
+	t.Cleanup(ResetProviderResolver)
+
+	res, err := Prompt(ctx, "hello", types.PromptOptions{
+		Dir:        testDir,
+		ToolAccess: types.ToolAccessFull,
+	})
+	require.Error(t, err, "Prompt must return an error when message persistence fails")
+	assert.Nil(t, res)
+	assert.ErrorContains(t, err, "persisting session message")
+}
+
+type mockStreamProvider struct {
+	streamFunc func(ctx context.Context, model *simplest.Model, cx *simplest.Context, opts *simplest.StreamOptions) <-chan simplest.AssistantMessageEvent
+}
+
+func (m *mockStreamProvider) Stream(ctx context.Context, model *simplest.Model, cx *simplest.Context, opts *simplest.StreamOptions) <-chan simplest.AssistantMessageEvent {
+	return m.streamFunc(ctx, model, cx, opts)
+}

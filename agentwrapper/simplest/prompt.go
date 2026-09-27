@@ -208,6 +208,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		ContextFiles:     contextFiles,
 	})
 
+	var persistErr error
 	req := simplest.Request{
 		SystemPrompt:  sysPrompt,
 		Messages:      sessionCtx.Messages,
@@ -215,6 +216,15 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		Provider:      prov,
 		Tools:         toolList,
 		ThinkingLevel: thinkingLevel,
+		Persist: func(m simplest.Message) error {
+			if persistErr != nil {
+				return persistErr
+			}
+			if _, err := sf.AppendMessage(m); err != nil {
+				persistErr = fmt.Errorf("persisting session message: %w", err)
+			}
+			return persistErr
+		},
 	}
 
 	maxTokens := int(model.ContextWindow)
@@ -306,12 +316,10 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		}
 	}
 
-	// Append newly produced messages to session file and flush
-	for _, m := range finalMessages {
-		if _, err := sf.AppendMessage(m); err != nil {
-			return nil, fmt.Errorf("persisting session message: %w", err)
-		}
+	if persistErr != nil {
+		return nil, persistErr
 	}
+
 	if err := sf.Flush(); err != nil {
 		return nil, fmt.Errorf("flushing session file: %w", err)
 	}
