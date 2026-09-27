@@ -152,12 +152,25 @@ func salvageConfig(path string) *config.Config {
 	return cfg
 }
 
+// loggerOnce serializes the process-global logging configuration below.
+// zerolog's level and the log package's Logger are process-wide singletons, so
+// they must be configured exactly once: reconfiguring them while other
+// goroutines log is a data race.
+var loggerOnce sync.Once
+
+// setupLogger applies the debug logging configuration of the first App built in
+// this process. Later constructions are no-ops because the globals are already
+// in effect for the whole process.
 func setupLogger(conf *config.Config) {
-	if conf != nil && conf.Debug {
+	if conf == nil || !conf.Debug {
+		return
+	}
+
+	loggerOnce.Do(func() {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
 		log.Warn().Msg("Debug mode is enabled")
-	}
+	})
 }
 
 // New creates and initializes an App instance according to the provided options.
