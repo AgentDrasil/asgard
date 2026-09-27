@@ -971,3 +971,336 @@ func TestCalculateCost_Tiers(t *testing.T) {
 		})
 	}
 }
+
+func TestEmitter_ContentIndexOrdering(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		run         func(em *emitter)
+		wantKinds   []string
+		wantIndices []int
+		wantContent func(t *testing.T, content []types.AssistantContent)
+		wantStop    types.StopReason
+	}{
+		{
+			name: "interleaved Text -> Thinking -> Text -> ToolCall -> ToolCall",
+			run: func(em *emitter) {
+				em.start("openai-completions", "openai", "gpt-test")
+				// Block 0: Text
+				em.textDelta("First ")
+				em.textDelta("text chunk.")
+				// Block 1: Thinking
+				em.thinkingDelta("Thinking step 1. ", "sig-1")
+				em.thinkingDelta("Thinking step 2.", "")
+				// Block 2: Text
+				em.textDelta("Second text chunk.")
+				// Block 3: ToolCall
+				idx1 := em.appendToolCall(types.ToolCall{Type: types.TypeToolCall, ID: "call_1", Name: "search"})
+				em.toolCallDelta(idx1, `{"query":"test"}`, json.RawMessage(`{"query":"test"}`))
+				em.toolCallEnd(idx1)
+				// Block 4: ToolCall
+				idx2 := em.appendToolCall(types.ToolCall{Type: types.TypeToolCall, ID: "call_2", Name: "exec"})
+				em.toolCallDelta(idx2, `{"cmd":"ls"}`, json.RawMessage(`{"cmd":"ls"}`))
+				em.toolCallEnd(idx2)
+
+				em.done(types.StopToolUse)
+			},
+			wantKinds: []string{
+				"start",
+				"text_start", "text_delta", "text_delta", "text_end",
+				"thinking_start", "thinking_delta", "thinking_delta", "thinking_end",
+				"text_start", "text_delta", "text_end",
+				"toolcall_start", "toolcall_delta", "toolcall_end",
+				"toolcall_start", "toolcall_delta", "toolcall_end",
+				"done",
+			},
+			wantIndices: []int{
+				0,          // start
+				0, 0, 0, 0, // text
+				1, 1, 1, 1, // thinking
+				2, 2, 2, // text
+				3, 3, 3, // toolcall 1
+				4, 4, 4, // toolcall 2
+			},
+			wantContent: func(t *testing.T, content []types.AssistantContent) {
+				require.Len(t, content, 5)
+
+				c0, ok := content[0].(types.TextContent)
+				require.True(t, ok)
+				assert.Equal(t, "First text chunk.", c0.Text)
+
+				c1, ok := content[1].(types.ThinkingContent)
+				require.True(t, ok)
+				assert.Equal(t, "Thinking step 1. Thinking step 2.", c1.Thinking)
+				assert.Equal(t, "sig-1", c1.Signature)
+
+				c2, ok := content[2].(types.TextContent)
+				require.True(t, ok)
+				assert.Equal(t, "Second text chunk.", c2.Text)
+
+				c3, ok := content[3].(types.ToolCall)
+				require.True(t, ok)
+				assert.Equal(t, "call_1", c3.ID)
+				assert.Equal(t, "search", c3.Name)
+				assert.JSONEq(t, `{"query":"test"}`, string(c3.Arguments))
+
+				c4, ok := content[4].(types.ToolCall)
+				require.True(t, ok)
+				assert.Equal(t, "call_2", c4.ID)
+				assert.Equal(t, "exec", c4.Name)
+				assert.JSONEq(t, `{"cmd":"ls"}`, string(c4.Arguments))
+			},
+			wantStop: types.StopToolUse,
+		},
+		{
+			name: "Thinking -> Text -> Done closes open text block",
+			run: func(em *emitter) {
+				em.start("openai-completions", "openai", "gpt-test")
+				em.thinkingDelta("reasoning", "")
+				em.textDelta("final answer")
+				em.done(types.StopStop)
+			},
+			wantKinds: []string{
+				"start",
+				"thinking_start", "thinking_delta", "thinking_end",
+				"text_start", "text_delta", "text_end",
+				"done",
+			},
+			wantIndices: []int{
+				0,       // start
+				0, 0, 0, // thinking
+				1, 1, 1, // text
+			},
+			wantContent: func(t *testing.T, content []types.AssistantContent) {
+				require.Len(t, content, 2)
+
+				c0, ok := content[0].(types.ThinkingContent)
+				require.True(t, ok)
+				assert.Equal(t, "reasoning", c0.Thinking)
+
+				c1, ok := content[1].(types.TextContent)
+				require.True(t, ok)
+				assert.Equal(t, "final answer", c1.Text)
+			},
+			wantStop: types.StopStop,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ch := make(chan types.AssistantMessageEvent, 64)
+			em := newEmitter(ch)
+
+			go func() {
+				defer close(ch)
+				tt.run(em)
+			}()
+
+			evs, done, errEv := drain(ch)
+			require.Nil(t, errEv)
+			require.NotNil(t, done)
+			assert.Equal(t, tt.wantStop, done.Reason)
+
+			kinds := eventKinds(evs)
+			assert.Equal(t, tt.wantKinds, kinds)
+
+			// Collect Partial ContentIndex
+			var gotIndices []int
+			for _, ev := range evs {
+				if p, ok := ev.(types.Partial); ok {
+					gotIndices = append(gotIndices, p.ContentIndex)
+				}
+			}
+			assert.Equal(t, tt.wantIndices, gotIndices)
+
+			tt.wantContent(t, done.Message.Content)
+		})
+	}
+}
+
+func TestOpenAICompat_MetadataExtraction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		modelID           string
+		chunks            []string
+		wantResponseID    string
+		wantResponseModel string
+		wantRawStopReason string
+		wantStopReason    types.StopReason
+	}{
+		{
+			name:    "upstream model differs from configured model",
+			modelID: "gpt-4o",
+			chunks: []string{
+				`{"id":"chatcmpl-meta-1","model":"gpt-4o-2024-08-06","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
+				`{"id":"chatcmpl-meta-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				"[DONE]",
+			},
+			wantResponseID:    "chatcmpl-meta-1",
+			wantResponseModel: "gpt-4o-2024-08-06",
+			wantRawStopReason: "stop",
+			wantStopReason:    types.StopStop,
+		},
+		{
+			name:    "upstream model identical to configured model leaves responseModel empty",
+			modelID: "gpt-test",
+			chunks: []string{
+				`{"id":"chatcmpl-meta-2","model":"gpt-test","choices":[{"index":0,"delta":{"content":"Hi"}}]}`,
+				`{"id":"chatcmpl-meta-2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				"[DONE]",
+			},
+			wantResponseID:    "chatcmpl-meta-2",
+			wantResponseModel: "",
+			wantRawStopReason: "stop",
+			wantStopReason:    types.StopStop,
+		},
+		{
+			name:    "tool_calls finish reason captured in rawStopReason",
+			modelID: "gpt-4o",
+			chunks: []string{
+				`{"id":"chatcmpl-meta-3","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fetch","arguments":"{}"}}]}}]}`,
+				`{"id":"chatcmpl-meta-3","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+				"[DONE]",
+			},
+			wantResponseID:    "chatcmpl-meta-3",
+			wantResponseModel: "gpt-4o-mini",
+			wantRawStopReason: "tool_calls",
+			wantStopReason:    types.StopToolUse,
+		},
+		{
+			name:    "length finish reason captured in rawStopReason",
+			modelID: "gpt-4o",
+			chunks: []string{
+				`{"id":"chatcmpl-meta-4","model":"gpt-4o-2024-11-20","choices":[{"index":0,"delta":{"content":"trunc"}}]}`,
+				`{"id":"chatcmpl-meta-4","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+				"[DONE]",
+			},
+			wantResponseID:    "chatcmpl-meta-4",
+			wantResponseModel: "gpt-4o-2024-11-20",
+			wantRawStopReason: "length",
+			wantStopReason:    types.StopLength,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(t, tt.chunks, nil, nil, "/chat/completions")
+			t.Cleanup(srv.Close)
+
+			p := NewOpenAICompat("sk-test")
+			m := oaModel(srv.URL)
+			m.ID = tt.modelID
+
+			evs, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+			require.Nil(t, errEv)
+			require.NotNil(t, done)
+
+			// Verify Partial events received after first chunk carries metadata
+			seenPartial := false
+			for _, ev := range evs {
+				if pEv, ok := ev.(types.Partial); ok && pEv.Kind != types.EvStart {
+					seenPartial = true
+					require.NotNil(t, pEv.Partial)
+					assert.Equal(t, tt.wantResponseID, pEv.Partial.ResponseID)
+					assert.Equal(t, tt.wantResponseModel, pEv.Partial.ResponseModel)
+				}
+			}
+			assert.True(t, seenPartial, "expected at least one non-start Partial event")
+
+			// Verify DoneEvent message metadata
+			assert.Equal(t, tt.wantResponseID, done.Message.ResponseID)
+			assert.Equal(t, tt.wantResponseModel, done.Message.ResponseModel)
+			assert.Equal(t, tt.wantRawStopReason, done.Message.RawStopReason)
+			assert.Equal(t, tt.wantStopReason, done.Reason)
+			assert.Equal(t, tt.wantStopReason, done.Message.StopReason)
+		})
+	}
+}
+
+func TestGoogleGemini_MetadataExtraction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		chunks            []string
+		wantResponseID    string
+		wantResponseModel string
+		wantRawStopReason string
+		wantStopReason    types.StopReason
+	}{
+		{
+			name: "STOP with responseId and modelVersion",
+			chunks: []string{
+				`{"responseId":"resp-gemini-1","modelVersion":"gemini-2.5-flash-001","candidates":[{"content":{"parts":[{"text":"Hello from Gemini"}]}}]}`,
+				`{"candidates":[{"finishReason":"STOP"}]}`,
+			},
+			wantResponseID:    "resp-gemini-1",
+			wantResponseModel: "gemini-2.5-flash-001",
+			wantRawStopReason: "STOP",
+			wantStopReason:    types.StopStop,
+		},
+		{
+			name: "MAX_TOKENS with responseId and modelVersion",
+			chunks: []string{
+				`{"responseId":"resp-gemini-2","modelVersion":"gemini-3-pro-exp-02","candidates":[{"content":{"parts":[{"text":"Too long text..."}]}}]}`,
+				`{"candidates":[{"finishReason":"MAX_TOKENS"}]}`,
+			},
+			wantResponseID:    "resp-gemini-2",
+			wantResponseModel: "gemini-3-pro-exp-02",
+			wantRawStopReason: "MAX_TOKENS",
+			wantStopReason:    types.StopLength,
+		},
+		{
+			name: "First non-empty modelVersion is preserved across chunks",
+			chunks: []string{
+				`{"responseId":"resp-gemini-3","modelVersion":"gemini-3-flash-preview","candidates":[{"content":{"parts":[{"text":"part1"}]}}]}`,
+				`{"candidates":[{"content":{"parts":[{"text":"part2"}]}}]}`,
+				`{"candidates":[{"finishReason":"STOP"}]}`,
+			},
+			wantResponseID:    "resp-gemini-3",
+			wantResponseModel: "gemini-3-flash-preview",
+			wantRawStopReason: "STOP",
+			wantStopReason:    types.StopStop,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(t, tt.chunks, nil, nil, ":streamGenerateContent")
+			t.Cleanup(srv.Close)
+
+			p := NewGemini("test-api-key")
+			evs, done, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
+			require.Nil(t, errEv)
+			require.NotNil(t, done)
+
+			// Verify Partial events received after first chunk carries metadata
+			seenPartial := false
+			for _, ev := range evs {
+				if pEv, ok := ev.(types.Partial); ok && pEv.Kind != types.EvStart {
+					seenPartial = true
+					require.NotNil(t, pEv.Partial)
+					assert.Equal(t, tt.wantResponseID, pEv.Partial.ResponseID)
+					assert.Equal(t, tt.wantResponseModel, pEv.Partial.ResponseModel)
+				}
+			}
+			assert.True(t, seenPartial, "expected at least one non-start Partial event")
+
+			// Verify DoneEvent message metadata
+			assert.Equal(t, tt.wantResponseID, done.Message.ResponseID)
+			assert.Equal(t, tt.wantResponseModel, done.Message.ResponseModel)
+			assert.Equal(t, tt.wantRawStopReason, done.Message.RawStopReason)
+			assert.Equal(t, tt.wantStopReason, done.Reason)
+			assert.Equal(t, tt.wantStopReason, done.Message.StopReason)
+		})
+	}
+}

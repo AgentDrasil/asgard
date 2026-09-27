@@ -408,6 +408,9 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 				if em.out.ResponseID == "" && resp.ResponseID != "" {
 					em.out.ResponseID = resp.ResponseID
 				}
+				if resp.ModelVersion != "" && em.out.ResponseModel == "" {
+					em.out.ResponseModel = resp.ModelVersion
+				}
 				if um := resp.UsageMetadata; um != nil {
 					input := int64(um.PromptTokenCount) - int64(um.CachedContentTokenCount)
 					if input < 0 {
