@@ -417,15 +417,6 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
 
-	// Target-specific sensitive auth file masks (e.g. simplest key.yaml)
-	if spec != nil {
-		for _, file := range spec.AuthFiles(home) {
-			if fi, err := os.Stat(file); err == nil && !fi.IsDir() {
-				args = append(args, "--ro-bind", "/dev/null", file)
-			}
-		}
-	}
-
 	// Append config file and proxy sensitive file masking after all directory mounts
 	// to prevent subsequent binds from shadowing /dev/null masking (D1/R1/N2)
 	args = appendConfigMaskArgs(args, configPath)
