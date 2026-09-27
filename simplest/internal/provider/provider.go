@@ -20,14 +20,34 @@ import (
 const eventBuffer = 64
 
 // CalculateCost fills u.Cost from the model's $/MTok rates.
+// If tiered pricing is configured, it selects the tier matching the total input tokens
+// (Input + CacheRead + CacheWrite) with the highest InputTokensAbove threshold,
+// falling back to base rates otherwise.
 func CalculateCost(m *types.Model, u *types.Usage) {
 	if m == nil || u == nil {
 		return
 	}
-	u.Cost.Input = m.Cost.Input / 1e6 * float64(u.Input)
-	u.Cost.Output = m.Cost.Output / 1e6 * float64(u.Output)
-	u.Cost.CacheRead = m.Cost.CacheRead / 1e6 * float64(u.CacheRead)
-	u.Cost.CacheWrite = m.Cost.CacheWrite / 1e6 * float64(u.CacheWrite)
+	rates := m.Cost.ModelCostRates
+	if len(m.Cost.Tiers) > 0 {
+		totalInput := u.Input + u.CacheRead + u.CacheWrite
+		var matchedTier *types.ModelCostTier
+		for i := range m.Cost.Tiers {
+			tier := &m.Cost.Tiers[i]
+			if totalInput >= tier.InputTokensAbove {
+				if matchedTier == nil || tier.InputTokensAbove > matchedTier.InputTokensAbove {
+					matchedTier = tier
+				}
+			}
+		}
+		if matchedTier != nil {
+			rates = matchedTier.ModelCostRates
+		}
+	}
+
+	u.Cost.Input = rates.Input / 1e6 * float64(u.Input)
+	u.Cost.Output = rates.Output / 1e6 * float64(u.Output)
+	u.Cost.CacheRead = rates.CacheRead / 1e6 * float64(u.CacheRead)
+	u.Cost.CacheWrite = rates.CacheWrite / 1e6 * float64(u.CacheWrite)
 	u.Cost.Total = u.Cost.Input + u.Cost.Output + u.Cost.CacheRead + u.Cost.CacheWrite
 }
 

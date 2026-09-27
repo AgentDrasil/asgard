@@ -314,3 +314,183 @@ models:
 	assert.True(t, models[1].SupportsReasoningEffort("high"))
 	assert.False(t, models[1].SupportsReasoningEffort("max"))
 }
+
+func TestConfig_ModelMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "config_metadata.yaml")
+
+	yamlContent := `
+providers:
+  custom-provider:
+    api: openai-compat
+    apiKey: "dummy-key"
+models:
+  - id: advanced-model
+    name: "Advanced Model"
+    type: chat
+    provider: custom-provider
+    thinkingLevelMap:
+      minimal: null
+      low: "low"
+      high: "max"
+    promptCache:
+      short: 1024
+      long: 8192
+    samplingParams:
+      temperature: 0.7
+      top_p: 0.95
+    inputLimits:
+      maxRequestBytes: 10485760
+      images:
+        maxPerMessage: 5
+        maxPerRequest: 10
+        resize:
+          maxWidth: 1920
+          maxHeight: 1080
+          maxBytes: 2097152
+          jpegQuality: 85
+    cost:
+      input: 1.5
+      output: 3.0
+      cacheRead: 0.5
+      cacheWrite: 1.0
+      tiers:
+        - inputTokensAbove: 100000
+          input: 1.0
+          output: 2.0
+          cacheRead: 0.25
+          cacheWrite: 0.5
+`
+	require.NoError(t, os.WriteFile(configFile, []byte(yamlContent), 0o600))
+
+	cfg, err := LoadFrom(configFile)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	models := cfg.GetAvailableModels()
+	require.Len(t, models, 1)
+
+	m := models[0]
+	assert.Equal(t, "advanced-model", m.ID)
+	assert.Equal(t, types.ModelTypeChat, m.Type)
+
+	// ThinkingLevelMap: minimal should be nil, low should be "low", high should be "max"
+	require.NotNil(t, m.ThinkingLevelMap)
+	minVal, hasMin := m.ThinkingLevelMap[types.ThinkingMinimal]
+	assert.True(t, hasMin)
+	assert.Nil(t, minVal)
+
+	lowVal, hasLow := m.ThinkingLevelMap[types.ThinkingLow]
+	assert.True(t, hasLow)
+	require.NotNil(t, lowVal)
+	assert.Equal(t, "low", *lowVal)
+
+	highVal, hasHigh := m.ThinkingLevelMap[types.ThinkingHigh]
+	assert.True(t, hasHigh)
+	require.NotNil(t, highVal)
+	assert.Equal(t, "max", *highVal)
+
+	// PromptCache
+	require.NotNil(t, m.PromptCache)
+	assert.Equal(t, 1024, m.PromptCache.Short)
+	assert.Equal(t, 8192, m.PromptCache.Long)
+
+	// SamplingParams
+	require.NotNil(t, m.SamplingParams)
+	assert.Equal(t, 0.7, m.SamplingParams["temperature"])
+	assert.Equal(t, 0.95, m.SamplingParams["top_p"])
+
+	// InputLimits
+	require.NotNil(t, m.InputLimits)
+	assert.Equal(t, int64(10485760), m.InputLimits.MaxRequestBytes)
+	require.NotNil(t, m.InputLimits.Images)
+	assert.Equal(t, 5, m.InputLimits.Images.MaxPerMessage)
+	assert.Equal(t, 10, m.InputLimits.Images.MaxPerRequest)
+	require.NotNil(t, m.InputLimits.Images.Resize)
+	assert.Equal(t, 1920, m.InputLimits.Images.Resize.MaxWidth)
+	assert.Equal(t, 1080, m.InputLimits.Images.Resize.MaxHeight)
+	assert.Equal(t, int64(2097152), m.InputLimits.Images.Resize.MaxBytes)
+	assert.Equal(t, 85, m.InputLimits.Images.Resize.JPEGQuality)
+
+	// Cost & Tiers
+	assert.Equal(t, 1.5, m.Cost.Input)
+	assert.Equal(t, 3.0, m.Cost.Output)
+	assert.Equal(t, 0.5, m.Cost.CacheRead)
+	assert.Equal(t, 1.0, m.Cost.CacheWrite)
+	require.Len(t, m.Cost.Tiers, 1)
+	assert.Equal(t, int64(100000), m.Cost.Tiers[0].InputTokensAbove)
+	assert.Equal(t, 1.0, m.Cost.Tiers[0].Input)
+	assert.Equal(t, 2.0, m.Cost.Tiers[0].Output)
+	assert.Equal(t, 0.25, m.Cost.Tiers[0].CacheRead)
+	assert.Equal(t, 0.5, m.Cost.Tiers[0].CacheWrite)
+}
+
+func TestConfig_TypeNormalization(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		configured   string
+		expectedType types.ModelType
+	}{
+		{
+			name:         "empty type defaults to chat",
+			configured:   "",
+			expectedType: types.ModelTypeChat,
+		},
+		{
+			name:         "explicit chat type preserved",
+			configured:   "chat",
+			expectedType: types.ModelTypeChat,
+		},
+		{
+			name:         "explicit image type preserved",
+			configured:   "image",
+			expectedType: types.ModelTypeImage,
+		},
+		{
+			name:         "explicit classifier type preserved",
+			configured:   "classifier",
+			expectedType: types.ModelTypeClassifier,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &Config{
+				Providers: map[string]ProviderConfig{
+					"test-prov": {API: types.APIOpenAICompat},
+				},
+				Models: []ModelConfig{
+					{
+						ID:       "m1",
+						Provider: "test-prov",
+						Type:     tt.configured,
+					},
+				},
+			}
+
+			models := cfg.GetAvailableModels()
+			require.Len(t, models, 1)
+			assert.Equal(t, tt.expectedType, models[0].Type)
+		})
+	}
+}
+
+func TestConfig_DefaultFallbackConfig(t *testing.T) {
+	cfg := defaultFallbackConfig()
+	require.NotNil(t, cfg)
+
+	// When neither env var is set
+	if len(cfg.Models) == 0 {
+		return
+	}
+
+	for _, m := range cfg.Models {
+		assert.Equal(t, "chat", m.Type)
+	}
+}

@@ -13,12 +13,67 @@ const (
 	APIGemini       = "gemini"
 )
 
+// ModelType distinguishes chat models, image models, and classifier models.
+type ModelType string
+
+const (
+	ModelTypeChat       ModelType = "chat"
+	ModelTypeImage      ModelType = "image"
+	ModelTypeClassifier ModelType = "classifier"
+)
+
+// ThinkingLevelMap maps thinking level to provider-specific wire string representation.
+// A nil pointer indicates that the specific level is explicitly unsupported.
+type ThinkingLevelMap map[ThinkingLevel]*string
+
+// ModelPromptCache defines prompt caching threshold parameters in tokens.
+type ModelPromptCache struct {
+	Short int `json:"short,omitempty" yaml:"short,omitempty"`
+	Long  int `json:"long,omitempty" yaml:"long,omitempty"`
+}
+
+// ModelSamplingParams represents arbitrary model sampling parameters.
+type ModelSamplingParams map[string]any
+
+// ModelImageResizeOptions specifies resizing parameters for image input.
+type ModelImageResizeOptions struct {
+	MaxWidth    int   `json:"maxWidth,omitempty" yaml:"maxWidth,omitempty"`
+	MaxHeight   int   `json:"maxHeight,omitempty" yaml:"maxHeight,omitempty"`
+	MaxBytes    int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
+	JPEGQuality int   `json:"jpegQuality,omitempty" yaml:"jpegQuality,omitempty"`
+}
+
+// ModelImageInputLimits defines per-message, per-request, and resizing limits for image inputs.
+type ModelImageInputLimits struct {
+	Resize        *ModelImageResizeOptions `json:"resize,omitempty" yaml:"resize,omitempty"`
+	MaxPerMessage int                      `json:"maxPerMessage,omitempty" yaml:"maxPerMessage,omitempty"`
+	MaxPerRequest int                      `json:"maxPerRequest,omitempty" yaml:"maxPerRequest,omitempty"`
+}
+
+// ModelInputLimits defines request-level and media-specific input constraints.
+type ModelInputLimits struct {
+	MaxRequestBytes int64                  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
+	Images          *ModelImageInputLimits `json:"images,omitempty" yaml:"images,omitempty"`
+}
+
 // ModelCostRates is pricing in $/million tokens.
 type ModelCostRates struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cacheRead"`
-	CacheWrite float64 `json:"cacheWrite"`
+	Input      float64 `json:"input" yaml:"input"`
+	Output     float64 `json:"output" yaml:"output"`
+	CacheRead  float64 `json:"cacheRead" yaml:"cacheRead"`
+	CacheWrite float64 `json:"cacheWrite" yaml:"cacheWrite"`
+}
+
+// ModelCostTier defines tiered pricing rates when input tokens exceed InputTokensAbove.
+type ModelCostTier struct {
+	ModelCostRates   `yaml:",inline"`
+	InputTokensAbove int64 `json:"inputTokensAbove" yaml:"inputTokensAbove"`
+}
+
+// ModelCost describes base pricing rates and optional tiered pricing.
+type ModelCost struct {
+	ModelCostRates `yaml:",inline"`
+	Tiers          []ModelCostTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
 }
 
 // Model describes one callable model endpoint. Configured programmatically.
@@ -31,18 +86,23 @@ type Model struct {
 	// carry expiry or preview suffixes (e.g. ID "ds-v4.1-flash" maps to wire
 	// model "deepseek-v4.1-flash-expires-on-0910"). Empty means ID is sent
 	// as-is.
-	Model           string            `json:"model,omitempty"`
-	Name            string            `json:"name"`
-	API             string            `json:"api"` // APIOpenAICompat or APIGemini
-	Provider        string            `json:"provider"`
-	BaseURL         string            `json:"baseUrl"`
-	Reasoning       bool              `json:"reasoning"`
-	ReasoningEffort []string          `json:"reasoningEffort,omitempty"`
-	Input           []string          `json:"input"` // "text", "image"
-	Cost            ModelCostRates    `json:"cost"`
-	ContextWindow   int64             `json:"contextWindow"`
-	MaxTokens       int64             `json:"maxTokens"`
-	Headers         map[string]string `json:"headers,omitempty"`
+	Model            string              `json:"model,omitempty"`
+	Name             string              `json:"name"`
+	Type             ModelType           `json:"type,omitempty"`
+	API              string              `json:"api"` // APIOpenAICompat or APIGemini
+	Provider         string              `json:"provider"`
+	BaseURL          string              `json:"baseUrl"`
+	Reasoning        bool                `json:"reasoning"`
+	ReasoningEffort  []string            `json:"reasoningEffort,omitempty"`
+	ThinkingLevelMap ThinkingLevelMap    `json:"thinkingLevelMap,omitempty"`
+	Input            []string            `json:"input"` // "text", "image"
+	Cost             ModelCost           `json:"cost"`
+	PromptCache      *ModelPromptCache   `json:"promptCache,omitempty"`
+	SamplingParams   ModelSamplingParams `json:"samplingParams,omitempty"`
+	InputLimits      *ModelInputLimits   `json:"inputLimits,omitempty"`
+	ContextWindow    int64               `json:"contextWindow"`
+	MaxTokens        int64               `json:"maxTokens"`
+	Headers          map[string]string   `json:"headers,omitempty"`
 }
 
 // WireID returns the model identifier placed in the API request: Model when

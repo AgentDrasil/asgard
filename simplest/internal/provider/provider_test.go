@@ -62,7 +62,7 @@ func oaModel(url string) *types.Model {
 	return &types.Model{
 		ID: "gpt-test", Name: "GPT Test", API: types.APIOpenAICompat, Provider: "openai",
 		BaseURL: url, Reasoning: true, ContextWindow: 128000, MaxTokens: 4096,
-		Cost:  types.ModelCostRates{Input: 1, Output: 2},
+		Cost:  types.ModelCost{ModelCostRates: types.ModelCostRates{Input: 1, Output: 2}},
 		Input: []string{"text", "image"},
 	}
 }
@@ -71,7 +71,7 @@ func gModel(url string) *types.Model {
 	return &types.Model{
 		ID: "gemini-3-flash", Name: "Gemini", API: types.APIGemini, Provider: "gemini",
 		BaseURL: url, Reasoning: true, ContextWindow: 1e6, MaxTokens: 8192,
-		Cost:  types.ModelCostRates{Input: 0.3, Output: 2.5},
+		Cost:  types.ModelCost{ModelCostRates: types.ModelCostRates{Input: 0.3, Output: 2.5}},
 		Input: []string{"text", "image"},
 	}
 }
@@ -776,4 +776,115 @@ func TestOpenAI_OnProviderStreamEvent(t *testing.T) {
 	assert.Contains(t, rawDatas[0], `"content":"hello"`)
 	assert.Contains(t, rawDatas[1], `"finish_reason":"stop"`)
 	assert.Equal(t, "[DONE]", rawDatas[2])
+}
+
+func TestCalculateCost_Tiers(t *testing.T) {
+	t.Parallel()
+
+	model := &types.Model{
+		ID: "tiered-model",
+		Cost: types.ModelCost{
+			ModelCostRates: types.ModelCostRates{
+				Input:      3.0,
+				Output:     15.0,
+				CacheRead:  0.75,
+				CacheWrite: 3.0,
+			},
+			Tiers: []types.ModelCostTier{
+				{
+					InputTokensAbove: 128000,
+					ModelCostRates: types.ModelCostRates{
+						Input:      6.0,
+						Output:     30.0,
+						CacheRead:  1.5,
+						CacheWrite: 6.0,
+					},
+				},
+				{
+					InputTokensAbove: 256000,
+					ModelCostRates: types.ModelCostRates{
+						Input:      10.0,
+						Output:     50.0,
+						CacheRead:  2.5,
+						CacheWrite: 10.0,
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		usage         types.Usage
+		wantInputCost float64
+		wantOutCost   float64
+		wantTotalCost float64
+	}{
+		{
+			name: "below tier 1 threshold uses base rates",
+			usage: types.Usage{
+				Input:      100000,
+				Output:     1000,
+				CacheRead:  10000, // total input: 110,000 < 128,000
+				CacheWrite: 0,
+			},
+			// Base rates: input=3.0, output=15.0, cacheRead=0.75
+			// inputCost = 3.0 / 1e6 * 100000 = 0.3
+			// outputCost = 15.0 / 1e6 * 1000 = 0.015
+			// cacheReadCost = 0.75 / 1e6 * 10000 = 0.0075
+			// total = 0.3 + 0.015 + 0.0075 = 0.3225
+			wantInputCost: 0.3,
+			wantOutCost:   0.015,
+			wantTotalCost: 0.3225,
+		},
+		{
+			name: "hits tier 1 threshold (>= 128000)",
+			usage: types.Usage{
+				Input:      100000,
+				Output:     1000,
+				CacheRead:  20000,
+				CacheWrite: 10000, // total input: 130,000 >= 128,000 but < 256,000
+			},
+			// Tier 1 rates: input=6.0, output=30.0, cacheRead=1.5, cacheWrite=6.0
+			// inputCost = 6.0 / 1e6 * 100000 = 0.6
+			// outputCost = 30.0 / 1e6 * 1000 = 0.03
+			// cacheReadCost = 1.5 / 1e6 * 20000 = 0.03
+			// cacheWriteCost = 6.0 / 1e6 * 10000 = 0.06
+			// total = 0.6 + 0.03 + 0.03 + 0.06 = 0.72
+			wantInputCost: 0.6,
+			wantOutCost:   0.03,
+			wantTotalCost: 0.72,
+		},
+		{
+			name: "hits tier 2 threshold (>= 256000)",
+			usage: types.Usage{
+				Input:      200000,
+				Output:     2000,
+				CacheRead:  50000,
+				CacheWrite: 10000, // total input: 260,000 >= 256,000
+			},
+			// Tier 2 rates: input=10.0, output=50.0, cacheRead=2.5, cacheWrite=10.0
+			// inputCost = 10.0 / 1e6 * 200000 = 2.0
+			// outputCost = 50.0 / 1e6 * 2000 = 0.1
+			// cacheReadCost = 2.5 / 1e6 * 50000 = 0.125
+			// cacheWriteCost = 10.0 / 1e6 * 10000 = 0.1
+			// total = 2.0 + 0.1 + 0.125 + 0.1 = 2.325
+			wantInputCost: 2.0,
+			wantOutCost:   0.1,
+			wantTotalCost: 2.325,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := tt.usage
+			CalculateCost(model, &u)
+
+			assert.InDelta(t, tt.wantInputCost, u.Cost.Input, 1e-9)
+			assert.InDelta(t, tt.wantOutCost, u.Cost.Output, 1e-9)
+			assert.InDelta(t, tt.wantTotalCost, u.Cost.Total, 1e-9)
+		})
+	}
 }

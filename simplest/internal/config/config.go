@@ -38,18 +38,23 @@ type ProviderConfig struct {
 // ModelConfig defines configuration for a specific model endpoint.
 // The API wire protocol is defined once on the referenced ProviderConfig.
 type ModelConfig struct {
-	ID              string               `yaml:"id" json:"id"`
-	Model           string               `yaml:"model,omitempty" json:"model,omitempty"`
-	Name            string               `yaml:"name,omitempty" json:"name,omitempty"`
-	Provider        string               `yaml:"provider" json:"provider"`
-	BaseURL         string               `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
-	ContextWindow   int64                `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
-	MaxTokens       int64                `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
-	Reasoning       bool                 `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
-	ReasoningEffort []string             `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
-	Cost            types.ModelCostRates `yaml:"cost,omitempty" json:"cost,omitempty"`
-	Input           []string             `yaml:"input,omitempty" json:"input,omitempty"`
-	Headers         map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ID               string                  `yaml:"id" json:"id"`
+	Model            string                  `yaml:"model,omitempty" json:"model,omitempty"`
+	Name             string                  `yaml:"name,omitempty" json:"name,omitempty"`
+	Type             string                  `yaml:"type,omitempty" json:"type,omitempty"`
+	Provider         string                  `yaml:"provider" json:"provider"`
+	BaseURL          string                  `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
+	ContextWindow    int64                   `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
+	MaxTokens        int64                   `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
+	Reasoning        bool                    `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
+	ReasoningEffort  []string                `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
+	ThinkingLevelMap map[string]*string      `yaml:"thinkingLevelMap,omitempty" json:"thinkingLevelMap,omitempty"`
+	Cost             types.ModelCost         `yaml:"cost,omitempty" json:"cost,omitempty"`
+	PromptCache      *types.ModelPromptCache `yaml:"promptCache,omitempty" json:"promptCache,omitempty"`
+	SamplingParams   map[string]any          `yaml:"samplingParams,omitempty" json:"samplingParams,omitempty"`
+	InputLimits      *types.ModelInputLimits `yaml:"inputLimits,omitempty" json:"inputLimits,omitempty"`
+	Input            []string                `yaml:"input,omitempty" json:"input,omitempty"`
+	Headers          map[string]string       `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
 // RawModelConfig is a type alias to ModelConfig used to prevent infinite recursion during UnmarshalYAML.
@@ -179,6 +184,7 @@ func defaultFallbackConfig() *Config {
 		cfg.Models = append(cfg.Models, ModelConfig{
 			ID:            "gemini-3.7-flash",
 			Name:          "Gemini 3.7 Flash",
+			Type:          "chat",
 			Provider:      "gemini",
 			ContextWindow: 1_048_576,
 			MaxTokens:     8192,
@@ -200,6 +206,7 @@ func defaultFallbackConfig() *Config {
 		cfg.Models = append(cfg.Models, ModelConfig{
 			ID:            "gpt-4o",
 			Name:          "GPT-4o",
+			Type:          "chat",
 			Provider:      "openai",
 			BaseURL:       baseURL,
 			ContextWindow: 128_000,
@@ -248,20 +255,44 @@ func (c *Config) GetAvailableModels() []*types.Model {
 			}
 		}
 
+		// Default value normalization: when mc.Type is empty, normalize to types.ModelTypeChat.
+		modelType := types.ModelType(mc.Type)
+		if modelType == "" {
+			modelType = types.ModelTypeChat
+		}
+
+		var thinkingLevelMap types.ThinkingLevelMap
+		if mc.ThinkingLevelMap != nil {
+			thinkingLevelMap = make(types.ThinkingLevelMap, len(mc.ThinkingLevelMap))
+			for k, v := range mc.ThinkingLevelMap {
+				thinkingLevelMap[types.ThinkingLevel(k)] = v
+			}
+		}
+
+		var samplingParams types.ModelSamplingParams
+		if mc.SamplingParams != nil {
+			samplingParams = types.ModelSamplingParams(mc.SamplingParams)
+		}
+
 		m := &types.Model{
-			ID:              mc.ID,
-			Model:           mc.Model,
-			Name:            mc.Name,
-			API:             api,
-			Provider:        mc.Provider,
-			BaseURL:         baseURL,
-			Reasoning:       mc.Reasoning,
-			ReasoningEffort: mc.ReasoningEffort,
-			Input:           mc.Input,
-			Cost:            mc.Cost,
-			ContextWindow:   mc.ContextWindow,
-			MaxTokens:       mc.MaxTokens,
-			Headers:         mergedHeaders,
+			ID:               mc.ID,
+			Model:            mc.Model,
+			Name:             mc.Name,
+			Type:             modelType,
+			API:              api,
+			Provider:         mc.Provider,
+			BaseURL:          baseURL,
+			Reasoning:        mc.Reasoning,
+			ReasoningEffort:  mc.ReasoningEffort,
+			ThinkingLevelMap: thinkingLevelMap,
+			Input:            mc.Input,
+			Cost:             mc.Cost,
+			PromptCache:      mc.PromptCache,
+			SamplingParams:   samplingParams,
+			InputLimits:      mc.InputLimits,
+			ContextWindow:    mc.ContextWindow,
+			MaxTokens:        mc.MaxTokens,
+			Headers:          mergedHeaders,
 		}
 		res = append(res, m)
 	}

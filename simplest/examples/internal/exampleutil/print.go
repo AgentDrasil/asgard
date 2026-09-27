@@ -38,7 +38,7 @@ func GeminiModel() *s.Model {
 		ContextWindow: 1_000_000,
 		MaxTokens:     8192,
 		Input:         []string{"text", "image"},
-		Cost:          s.ModelCostRates{Input: 0.3, Output: 2.5},
+		Cost:          s.ModelCost{ModelCostRates: s.ModelCostRates{Input: 0.3, Output: 2.5}},
 	}
 }
 

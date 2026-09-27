@@ -195,14 +195,27 @@ var (
 	UnmarshalMessage = types.UnmarshalMessage
 )
 
-// ---- types: models & providers ----
-
 type (
-	Model          = types.Model
-	ModelCostRates = types.ModelCostRates
-	Provider       = types.Provider
-	Context        = types.Context
-	RetryPolicy    = types.RetryPolicy
+	Model                   = types.Model
+	ModelType               = types.ModelType
+	ThinkingLevelMap        = types.ThinkingLevelMap
+	ModelPromptCache        = types.ModelPromptCache
+	ModelSamplingParams     = types.ModelSamplingParams
+	ModelImageResizeOptions = types.ModelImageResizeOptions
+	ModelImageInputLimits   = types.ModelImageInputLimits
+	ModelInputLimits        = types.ModelInputLimits
+	ModelCost               = types.ModelCost
+	ModelCostTier           = types.ModelCostTier
+	ModelCostRates          = types.ModelCostRates
+	Provider                = types.Provider
+	Context                 = types.Context
+	RetryPolicy             = types.RetryPolicy
+)
+
+const (
+	ModelTypeChat       = types.ModelTypeChat
+	ModelTypeImage      = types.ModelTypeImage
+	ModelTypeClassifier = types.ModelTypeClassifier
 )
 
 var (
