@@ -210,6 +210,21 @@ func (m *Model) SupportsImage() bool {
 	return false
 }
 
+// GetImageLimits returns the image input limits for this model, or default limits if unset.
+func (m *Model) GetImageLimits() *ModelImageInputLimits {
+	if m == nil || m.InputLimits == nil || m.InputLimits.Images == nil {
+		return &ModelImageInputLimits{
+			Resize: &ModelImageResizeOptions{
+				MaxWidth:    2000,
+				MaxHeight:   2000,
+				MaxBytes:    4718592, // 4.5 MiB base64 payload
+				JPEGQuality: 80,
+			},
+		}
+	}
+	return m.InputLimits.Images
+}
+
 // ToolDef is the provider-facing description of a tool sent to the LLM API.
 type ToolDef struct {
 	Name        string          `json:"name"`

@@ -945,3 +945,39 @@ func TestAgent_PersistCallback_InvokedPerTurn(t *testing.T) {
 		assert.Same(t, end.Messages[i], persisted[i], "persisted message at index %d must match end.Messages[%d]", i, i)
 	}
 }
+
+type modelAwareTool struct {
+	model *types.Model
+}
+
+func (m *modelAwareTool) Name() string                           { return "aware_tool" }
+func (m *modelAwareTool) Label() string                          { return "aware_tool" }
+func (m *modelAwareTool) Description() string                    { return "tool aware of model" }
+func (m *modelAwareTool) Parameters() json.RawMessage            { return json.RawMessage(`{"type":"object"}`) }
+func (m *modelAwareTool) PromptSnippet() string                  { return "" }
+func (m *modelAwareTool) PromptGuidelines() []string             { return nil }
+func (m *modelAwareTool) ExecutionMode() types.ToolExecutionMode { return "" }
+func (m *modelAwareTool) Execute(ctx context.Context, id string, args json.RawMessage, onUpdate types.UpdateFunc) (*types.ToolResult, error) {
+	return &types.ToolResult{}, nil
+}
+func (m *modelAwareTool) SetModel(model *types.Model) {
+	m.model = model
+}
+
+func TestRun_InjectsModelIntoTools(t *testing.T) {
+	t.Parallel()
+
+	targetModel := &types.Model{
+		ID:       "test-model",
+		Provider: "openai",
+	}
+
+	tool := &modelAwareTool{}
+	req := baseRequest(&fakeProvider{responses: []*types.AssistantMessage{textMsg("hello")}})
+	req.Model = targetModel
+	req.Tools = []types.AgentTool{tool}
+
+	collect(t, Run(context.Background(), req))
+
+	assert.Equal(t, targetModel, tool.model)
+}

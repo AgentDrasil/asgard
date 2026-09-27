@@ -42,6 +42,17 @@ func (r *Registry) Get(name string) (types.AgentTool, bool) {
 	return t, ok
 }
 
+// SetModel propagates the model configuration to all registered tools that implement SetModel.
+func (r *Registry) SetModel(m *types.Model) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.byName {
+		if sm, ok := t.(interface{ SetModel(*types.Model) }); ok {
+			sm.SetModel(m)
+		}
+	}
+}
+
 // Names returns registered tool names in registration order.
 func (r *Registry) Names() []string {
 	r.mu.RLock()

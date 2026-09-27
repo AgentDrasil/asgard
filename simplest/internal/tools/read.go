@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/AgentDrasil/asgard/simplest/internal/images"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -40,15 +40,21 @@ var imageExts = map[string]string{
 }
 
 // ReadTool reads file contents, with head truncation and image support.
-// Images are returned as base64 ImageContent blocks
-// without resizing.
+// Images are returned as base64 ImageContent blocks, resized and bounded
+// according to model limits.
 type ReadTool struct {
-	cwd string
+	cwd   string
+	model *types.Model
 }
 
 // NewReadTool creates a read tool rooted at cwd.
 func NewReadTool(cwd string) *ReadTool {
 	return &ReadTool{cwd: cwd}
+}
+
+// SetModel configures the active model for vision capability checks and image input limits.
+func (t *ReadTool) SetModel(m *types.Model) {
+	t.model = m
 }
 
 func (t *ReadTool) Name() string  { return "read" }
@@ -85,15 +91,39 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 
 	ext := strings.ToLower(filepath.Ext(absolutePath))
 	if mime, ok := imageExts[ext]; ok {
+		if t.model != nil && !t.model.SupportsImage() {
+			modelID := t.model.ID
+			if modelID == "" {
+				modelID = t.model.WireID()
+			}
+			msg := fmt.Sprintf("[image omitted: model %s does not support images]", modelID)
+			return &types.ToolResult{
+				Content: []types.AssistantContent{
+					types.TextContent{Type: types.TypeText, Text: msg},
+				},
+			}, nil
+		}
+
 		data, err := os.ReadFile(absolutePath)
 		if err != nil {
 			return nil, err
 		}
-		note := fmt.Sprintf("Read image file [%s]", mime)
+
+		limits := t.model.GetImageLimits()
+		processed, err := images.ProcessImage(data, mime, limits)
+		if err != nil {
+			return nil, err
+		}
+
+		note := fmt.Sprintf("Read image file [%s]", processed.MimeType)
+		if len(processed.Notes) > 0 {
+			note = fmt.Sprintf("Read image file [%s, %s]", processed.MimeType, strings.Join(processed.Notes, ", "))
+		}
+
 		return &types.ToolResult{
 			Content: []types.AssistantContent{
 				types.TextContent{Type: types.TypeText, Text: note},
-				types.ImageContent{Type: types.TypeImage, Data: base64.StdEncoding.EncodeToString(data), MimeType: mime},
+				types.ImageContent{Type: types.TypeImage, Data: processed.Data, MimeType: processed.MimeType},
 			},
 		}, nil
 	}
