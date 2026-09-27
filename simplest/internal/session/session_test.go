@@ -988,3 +988,76 @@ func TestSession_ContextEdit_BranchRelative(t *testing.T) {
 	assert.Equal(t, "base user message", types.StringContentOf(mustDecode(t, ctxB.Messages[0].(*types.UserMessage).Content)))
 	assert.Equal(t, "branch B user message", types.StringContentOf(mustDecode(t, ctxB.Messages[1].(*types.UserMessage).Content)))
 }
+
+func TestSession_Compaction_RetainNone(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("user-1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testAssistant("asst-1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testUser("user-2"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testAssistant("asst-2"))
+	require.NoError(t, err)
+
+	compID, err := sf.AppendCompaction("summary of everything", "", 1000, nil, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, compID)
+
+	compEntry := sf.GetEntry(compID)
+	require.NotNil(t, compEntry)
+	assert.Equal(t, "", compEntry.FirstKeptEntryID)
+
+	newUser, err := sf.AppendMessage(testUser("new user message"))
+	require.NoError(t, err)
+	require.NotEmpty(t, newUser)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+
+	firstMsg, ok := ctx.Messages[0].(*types.UserMessage)
+	require.True(t, ok)
+	firstContent := types.StringContentOf(mustDecode(t, firstMsg.Content))
+	wantSummary := CompactionSummaryPrefix + "summary of everything" + CompactionSummarySuffix
+	assert.Equal(t, wantSummary, firstContent)
+
+	secondMsg, ok := ctx.Messages[1].(*types.UserMessage)
+	require.True(t, ok)
+	secondContent := types.StringContentOf(mustDecode(t, secondMsg.Content))
+	assert.Equal(t, "new user message", secondContent)
+
+	// Also verify serialization round-trip: firstKeptEntryId should be omitted in JSONL
+	header, loadedEntries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	assert.Equal(t, sf.Header().ID, header.ID)
+	loadedCtx, err := BuildContext(loadedEntries, nil)
+	require.NoError(t, err)
+	require.Len(t, loadedCtx.Messages, 2)
+
+	// Also verify projection rule when comp.FirstKeptEntryID == comp.ID
+	sfSelfRef := mgr.InMemory("/tmp/selfref")
+	_, err = sfSelfRef.AppendMessage(testUser("old-msg"))
+	require.NoError(t, err)
+	selfCompID := "comp-self"
+	_, err = sfSelfRef.AppendEntry(&Entry{
+		Type:             TypeCompaction,
+		ID:               selfCompID,
+		Summary:          "self ref summary",
+		FirstKeptEntryID: selfCompID,
+	})
+	require.NoError(t, err)
+	_, err = sfSelfRef.AppendMessage(testUser("after-self"))
+	require.NoError(t, err)
+
+	ctxSelf, err := sfSelfRef.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctxSelf.Messages, 2)
+	assert.Contains(t, types.StringContentOf(mustDecode(t, ctxSelf.Messages[0].(*types.UserMessage).Content)), "self ref summary")
+	assert.Equal(t, "after-self", types.StringContentOf(mustDecode(t, ctxSelf.Messages[1].(*types.UserMessage).Content)))
+}

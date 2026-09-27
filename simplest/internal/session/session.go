@@ -245,6 +245,9 @@ func buildContextEntriesFromPath(path []*Entry) []*Entry {
 		}
 		if compIdx < 0 {
 			kept = path
+		} else if comp.FirstKeptEntryID == "" || comp.FirstKeptEntryID == comp.ID {
+			kept = []*Entry{comp}
+			kept = append(kept, path[compIdx+1:]...)
 		} else {
 			kept = []*Entry{comp}
 			foundFirstKept := false
