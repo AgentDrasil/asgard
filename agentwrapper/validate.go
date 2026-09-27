@@ -55,11 +55,14 @@ func ValidateOpencodeSetup() error {
 }
 
 // ValidateSimplestSetup verifies that simplest is correctly set up on the user's system.
-// It checks $SIMPLEST_CONFIG_PATH, ~/.config/simplest/config.yaml or ~/.simplest/config.yaml.
+// It checks $SIMPLEST_KEY_PATH, $SIMPLEST_CONFIG_PATH, ~/.config/simplest/key.yaml, ~/.simplest/key.yaml, etc.
 // If a config file is present, it validates that it can be parsed and loaded.
 // If no config file is present, it checks for fallback environment variables (GEMINI_API_KEY / OPENAI_API_KEY).
 func ValidateSimplestSetup() error {
 	var candidates []string
+	if envPath := os.Getenv("SIMPLEST_KEY_PATH"); envPath != "" {
+		candidates = append(candidates, envPath)
+	}
 	if envPath := os.Getenv("SIMPLEST_CONFIG_PATH"); envPath != "" {
 		candidates = append(candidates, envPath)
 	}
@@ -67,6 +70,10 @@ func ValidateSimplestSetup() error {
 	home, err := homeDirFn()
 	if err == nil && home != "" {
 		candidates = append(candidates,
+			filepath.Join(home, ".config", "simplest", "key.yaml"),
+			filepath.Join(home, ".config", "simplest", "key.yml"),
+			filepath.Join(home, ".simplest", "key.yaml"),
+			filepath.Join(home, ".simplest", "key.yml"),
 			filepath.Join(home, ".config", "simplest", "config.yaml"),
 			filepath.Join(home, ".config", "simplest", "config.yml"),
 			filepath.Join(home, ".simplest", "config.yaml"),

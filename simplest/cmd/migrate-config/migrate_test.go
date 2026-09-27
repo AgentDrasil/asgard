@@ -164,20 +164,27 @@ models:
 	}
 }
 
-func TestMigrateConfigFile_DryRun(t *testing.T) {
+func TestMigrateAndSplitConfigFile_DryRunLeavesFileUnchanged(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
 
-	originalContent := `models:
+	originalContent := `providers:
+  openai:
+    api: openai-compat
+    apiKey: sk-test
+models:
   - id: model-a
     provider: openai
 `
 	err := os.WriteFile(configPath, []byte(originalContent), 0o600)
 	require.NoError(t, err)
 
-	changed, err := MigrateConfigFile(configPath, true)
+	changed, err := MigrateAndSplitConfigFile(configPath, keyPath, providersPath, modelsPath, true)
 	require.NoError(t, err)
 	assert.True(t, changed)
 
@@ -185,28 +192,58 @@ func TestMigrateConfigFile_DryRun(t *testing.T) {
 	diskData, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	assert.Equal(t, originalContent, string(diskData))
+
+	_, errKey := os.Stat(keyPath)
+	assert.True(t, os.IsNotExist(errKey))
+	_, errProv := os.Stat(providersPath)
+	assert.True(t, os.IsNotExist(errProv))
+	_, errModels := os.Stat(modelsPath)
+	assert.True(t, os.IsNotExist(errModels))
 }
 
-func TestMigrateConfigFile_AtomicWriteSuccess(t *testing.T) {
+func TestMigrateAndSplitConfigFile_AtomicWriteSuccess(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
 
-	originalContent := `models:
+	originalContent := `providers:
+  openai:
+    api: openai-compat
+    apiKey: sk-test
+models:
   - id: model-a
     provider: openai
 `
 	err := os.WriteFile(configPath, []byte(originalContent), 0o600)
 	require.NoError(t, err)
 
-	changed, err := MigrateConfigFile(configPath, false)
+	changed, err := MigrateAndSplitConfigFile(configPath, keyPath, providersPath, modelsPath, false)
 	require.NoError(t, err)
 	assert.True(t, changed)
 
-	diskData, err := os.ReadFile(configPath)
+	keyData, err := os.ReadFile(keyPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(diskData), "type: chat")
+	assert.Contains(t, string(keyData), "apiKey: sk-test")
+	assert.NotContains(t, string(keyData), "api: openai-compat")
+	assert.NotContains(t, string(keyData), "models:")
+
+	provData, err := os.ReadFile(providersPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(provData), "api: openai-compat")
+	assert.NotContains(t, string(provData), "apiKey:")
+
+	modelsData, err := os.ReadFile(modelsPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(modelsData), "models:")
+	assert.Contains(t, string(modelsData), "type: chat")
+
+	// Old configPath removed
+	_, errOld := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(errOld))
 
 	// Ensure no temp files remained in tempDir
 	entries, err := os.ReadDir(tempDir)
@@ -216,7 +253,7 @@ func TestMigrateConfigFile_AtomicWriteSuccess(t *testing.T) {
 	}
 }
 
-func TestMigrateConfigFile_AtomicFailurePreservesOriginalAndCleansUp(t *testing.T) {
+func TestMigrateAndSplitConfigFile_AtomicFailurePreservesOriginalAndCleansUp(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -225,7 +262,14 @@ func TestMigrateConfigFile_AtomicFailurePreservesOriginalAndCleansUp(t *testing.
 	require.NoError(t, err)
 
 	configPath := filepath.Join(subDir, "config.yaml")
-	originalContent := `models:
+	keyPath := filepath.Join(subDir, "key.yaml")
+	providersPath := filepath.Join(subDir, "providers.yaml")
+	modelsPath := filepath.Join(subDir, "models.yaml")
+	originalContent := `providers:
+  openai:
+    api: openai-compat
+    apiKey: sk-test
+models:
   - id: model-a
     provider: openai
 `
@@ -239,7 +283,7 @@ func TestMigrateConfigFile_AtomicFailurePreservesOriginalAndCleansUp(t *testing.
 		_ = os.Chmod(subDir, 0o700)
 	})
 
-	changed, err := MigrateConfigFile(configPath, false)
+	changed, err := MigrateAndSplitConfigFile(configPath, keyPath, providersPath, modelsPath, false)
 	require.Error(t, err)
 	assert.False(t, changed)
 
@@ -258,4 +302,72 @@ func TestMigrateConfigFile_AtomicFailurePreservesOriginalAndCleansUp(t *testing.
 	for _, entry := range entries {
 		assert.False(t, strings.HasPrefix(entry.Name(), ".tmp-config-"), "residual temp file found: %s", entry.Name())
 	}
+}
+
+func TestMigrateAndSplitConfigFile_FullSplit(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
+
+	originalContent := `# Top comment
+providers:
+  google:
+    api: "gemini"
+    apiKey: "test-key"
+
+models:
+  # Gemini Flash comment
+  - id: "gemini-3.8-flash"
+    name: "Gemini 3.8 Flash"
+    provider: "google"
+    reasoningEffort:
+      - "low"
+      - "medium"
+      - "high"
+    input:
+      - "text"
+      - "image"
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(originalContent), 0o600))
+
+	changed, err := MigrateAndSplitConfigFile(configPath, keyPath, providersPath, modelsPath, false)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	// Verify key.yaml
+	keyData, err := os.ReadFile(keyPath)
+	require.NoError(t, err)
+	keyStr := string(keyData)
+	assert.Contains(t, keyStr, "# Top comment")
+	assert.Contains(t, keyStr, "providers:")
+	assert.Contains(t, keyStr, "google:")
+	assert.Contains(t, keyStr, "apiKey: \"test-key\"")
+	assert.NotContains(t, keyStr, "api: \"gemini\"")
+	assert.NotContains(t, keyStr, "gemini-3.8-flash")
+	assert.NotContains(t, keyStr, "models:")
+
+	// Verify providers.yaml
+	provData, err := os.ReadFile(providersPath)
+	require.NoError(t, err)
+	provStr := string(provData)
+	assert.Contains(t, provStr, "providers:")
+	assert.Contains(t, provStr, "google:")
+	assert.Contains(t, provStr, "api: \"gemini\"")
+	assert.NotContains(t, provStr, "apiKey:")
+	assert.NotContains(t, provStr, "models:")
+
+	// Verify models.yaml
+	modelsData, err := os.ReadFile(modelsPath)
+	require.NoError(t, err)
+	modelsStr := string(modelsData)
+	assert.Contains(t, modelsStr, "models:")
+	assert.Contains(t, modelsStr, "gemini-3.8-flash")
+	assert.Contains(t, modelsStr, "type: chat")
+	assert.Contains(t, modelsStr, "thinkingLevelMap:")
+	assert.Contains(t, modelsStr, "inputLimits:")
+	assert.NotContains(t, modelsStr, "providers:")
 }

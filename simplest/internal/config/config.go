@@ -87,13 +87,20 @@ type Config struct {
 	DocToolAllowedDirs []string `yaml:"docToolAllowedDirs,omitempty" json:"docToolAllowedDirs,omitempty"`
 }
 
-// DefaultConfigPath resolves the configuration file path by precedence:
-// 1. $SIMPLEST_CONFIG_PATH
-// 2. $XDG_CONFIG_HOME/simplest/config.yaml (or ~/.config/simplest/config.yaml)
-// 3. $XDG_CONFIG_HOME/simplest/config.yml (or ~/.config/simplest/config.yml)
-// 4. ~/.simplest/config.yaml
-// 5. ~/.simplest/config.yml
+// DefaultConfigPath resolves the configuration (keys/providers) file path by precedence:
+// 1. $SIMPLEST_KEY_PATH / $SIMPLEST_CONFIG_PATH
+// 2. $XDG_CONFIG_HOME/simplest/key.yaml (or ~/.config/simplest/key.yaml)
+// 3. $XDG_CONFIG_HOME/simplest/key.yml (or ~/.config/simplest/key.yml)
+// 4. ~/.simplest/key.yaml
+// 5. ~/.simplest/key.yml
+// 6. $XDG_CONFIG_HOME/simplest/config.yaml (or ~/.config/simplest/config.yaml)
+// 7. $XDG_CONFIG_HOME/simplest/config.yml (or ~/.config/simplest/config.yml)
+// 8. ~/.simplest/config.yaml
+// 9. ~/.simplest/config.yml
 func DefaultConfigPath() string {
+	if envPath := os.Getenv("SIMPLEST_KEY_PATH"); envPath != "" {
+		return envPath
+	}
 	if envPath := os.Getenv("SIMPLEST_CONFIG_PATH"); envPath != "" {
 		return envPath
 	}
@@ -104,7 +111,19 @@ func DefaultConfigPath() string {
 		xdgConfigHome = filepath.Join(homeDir, ".config")
 	}
 
-	candidates := make([]string, 0, 4)
+	candidates := make([]string, 0, 8)
+	if xdgConfigHome != "" {
+		candidates = append(candidates,
+			filepath.Join(xdgConfigHome, "simplest", "key.yaml"),
+			filepath.Join(xdgConfigHome, "simplest", "key.yml"),
+		)
+	}
+	if homeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".simplest", "key.yaml"),
+			filepath.Join(homeDir, ".simplest", "key.yml"),
+		)
+	}
 	if xdgConfigHome != "" {
 		candidates = append(candidates,
 			filepath.Join(xdgConfigHome, "simplest", "config.yaml"),
@@ -124,7 +143,101 @@ func DefaultConfigPath() string {
 		}
 	}
 
-	// Default fallback path if none exist on filesystem.
+	// Default fallback path if none exist on filesystem: ~/.config/simplest/key.yaml
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
+}
+
+// DefaultProvidersPath resolves the providers configuration file path (defining api, baseUrl, etc.)
+// corresponding to a config path, or discovers it from standard candidate directories if configDir is empty.
+func DefaultProvidersPath(configDir string) string {
+	if configDir != "" {
+		for _, name := range []string{"providers.yaml", "providers.yml"} {
+			cand := filepath.Join(configDir, name)
+			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+				return cand
+			}
+		}
+		return filepath.Join(configDir, "providers.yaml")
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+	if xdgConfigHome == "" && homeDir != "" {
+		xdgConfigHome = filepath.Join(homeDir, ".config")
+	}
+
+	candidates := make([]string, 0, 4)
+	if xdgConfigHome != "" {
+		candidates = append(candidates,
+			filepath.Join(xdgConfigHome, "simplest", "providers.yaml"),
+			filepath.Join(xdgConfigHome, "simplest", "providers.yml"),
+		)
+	}
+	if homeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".simplest", "providers.yaml"),
+			filepath.Join(homeDir, ".simplest", "providers.yml"),
+		)
+	}
+
+	for _, cand := range candidates {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand
+		}
+	}
+
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
+}
+
+// DefaultModelsPath resolves the models configuration file path corresponding to a config path,
+// or discovers it from standard candidate directories if configDir is empty.
+func DefaultModelsPath(configDir string) string {
+	if envPath := os.Getenv("SIMPLEST_MODELS_PATH"); envPath != "" {
+		return envPath
+	}
+
+	if configDir != "" {
+		for _, name := range []string{"models.yaml", "models.yml"} {
+			cand := filepath.Join(configDir, name)
+			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+				return cand
+			}
+		}
+		return filepath.Join(configDir, "models.yaml")
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+	if xdgConfigHome == "" && homeDir != "" {
+		xdgConfigHome = filepath.Join(homeDir, ".config")
+	}
+
+	candidates := make([]string, 0, 4)
+	if xdgConfigHome != "" {
+		candidates = append(candidates,
+			filepath.Join(xdgConfigHome, "simplest", "models.yaml"),
+			filepath.Join(xdgConfigHome, "simplest", "models.yml"),
+		)
+	}
+	if homeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".simplest", "models.yaml"),
+			filepath.Join(homeDir, ".simplest", "models.yml"),
+		)
+	}
+
+	for _, cand := range candidates {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand
+		}
+	}
+
 	if len(candidates) > 0 {
 		return candidates[0]
 	}
@@ -151,8 +264,12 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// LoadFrom loads and parses a YAML configuration file from the specified path.
-// It expands environment variables and validates structure.
+// LoadFrom loads and parses configuration files.
+// Under the split configuration policy:
+//  1. key.yaml only defines provider secrets (apiKey / key) and security settings (docToolAllowedDirs).
+//     Defining api, baseUrl, or models in key.yaml is rejected with an error instructing migration.
+//  2. providers.yaml defines provider metadata (api, baseUrl, headers).
+//  3. models.yaml defines model catalog.
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -162,9 +279,94 @@ func LoadFrom(path string) (*Config, error) {
 	// Expand environment variables across the YAML content.
 	expanded := os.ExpandEnv(string(data))
 
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+	var rawKeyDoc struct {
+		Providers          map[string]ProviderConfig `yaml:"providers"`
+		Models             []ModelConfig             `yaml:"models"`
+		DocToolAllowedDirs []string                  `yaml:"docToolAllowedDirs"`
+	}
+	if err := yaml.Unmarshal([]byte(expanded), &rawKeyDoc); err != nil {
 		return nil, fmt.Errorf("parse yaml config %s: %w", path, err)
+	}
+
+	if len(rawKeyDoc.Models) > 0 {
+		return nil, fmt.Errorf("config %s defines models inline; inline models are deprecated, please run migrate-config to split into key.yaml, providers.yaml, and models.yaml", path)
+	}
+
+	// Check if key.yaml defines api or baseUrl
+	for provName, prov := range rawKeyDoc.Providers {
+		if prov.API != "" || prov.BaseURL != "" {
+			return nil, fmt.Errorf("provider %q in %s defines api or baseUrl; provider endpoints and api types must be defined in providers.yaml, please run migrate-config", provName, path)
+		}
+	}
+
+	cfg := Config{
+		Providers:          make(map[string]ProviderConfig),
+		Models:             make([]ModelConfig, 0),
+		DocToolAllowedDirs: rawKeyDoc.DocToolAllowedDirs,
+	}
+
+	// Load providers from standalone providers.yaml/providers.yml
+	configDir := filepath.Dir(path)
+	providersPath := DefaultProvidersPath(configDir)
+	if providersPath != "" {
+		if provData, readErr := os.ReadFile(providersPath); readErr == nil {
+			expandedProv := os.ExpandEnv(string(provData))
+			var provDoc struct {
+				Providers map[string]ProviderConfig `yaml:"providers"`
+			}
+			if err := yaml.Unmarshal([]byte(expandedProv), &provDoc); err != nil {
+				return nil, fmt.Errorf("parse providers file %s: %w", providersPath, err)
+			}
+			for k, v := range provDoc.Providers {
+				cfg.Providers[k] = v
+			}
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("read providers file %s: %w", providersPath, readErr)
+		}
+	}
+
+	// Merge keys from rawKeyDoc into cfg.Providers
+	for provName, keyProv := range rawKeyDoc.Providers {
+		baseProv, exists := cfg.Providers[provName]
+		if !exists {
+			baseProv = ProviderConfig{}
+		}
+		if keyProv.APIKey != "" {
+			baseProv.APIKey = keyProv.APIKey
+		}
+		if len(keyProv.Headers) > 0 {
+			if baseProv.Headers == nil {
+				baseProv.Headers = make(map[string]string, len(keyProv.Headers))
+			}
+			for hk, hv := range keyProv.Headers {
+				baseProv.Headers[hk] = hv
+			}
+		}
+		cfg.Providers[provName] = baseProv
+	}
+
+	// Load models from standalone models.yaml/models.yml
+	modelsPath := DefaultModelsPath(configDir)
+	if modelsPath != "" {
+		if modelsData, readErr := os.ReadFile(modelsPath); readErr == nil {
+			expandedModels := os.ExpandEnv(string(modelsData))
+			var modelsDoc struct {
+				Models []ModelConfig `yaml:"models"`
+			}
+			// Support both `models: [...]` wrapper or top-level `[...]` list
+			if err := yaml.Unmarshal([]byte(expandedModels), &modelsDoc); err == nil && len(modelsDoc.Models) > 0 {
+				cfg.Models = modelsDoc.Models
+			} else {
+				var rawList []ModelConfig
+				if errList := yaml.Unmarshal([]byte(expandedModels), &rawList); errList == nil && len(rawList) > 0 {
+					cfg.Models = rawList
+				} else if err != nil {
+					return nil, fmt.Errorf("parse models file %s: %w", modelsPath, err)
+				}
+			}
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("read models file %s: %w", modelsPath, readErr)
+		}
 	}
 
 	return &cfg, nil

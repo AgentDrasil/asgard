@@ -52,6 +52,10 @@ func (c *Client) AuthDirectory(home string) string {
 	return home + "/.gemini"
 }
 
+func (c *Client) AuthFiles(home string) []string {
+	return nil
+}
+
 func (c *Client) ExtraArgs() []string {
 	return []string{"--add-tmp-to-dir"}
 }

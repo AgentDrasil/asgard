@@ -30,6 +30,7 @@ type SandboxSpec interface {
 	SkillsMountPath(home string) string
 	MountDirectories(home string) []string
 	AuthDirectory(home string) string
+	AuthFiles(home string) []string
 	ExtraArgs() []string
 }
 

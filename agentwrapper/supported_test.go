@@ -123,21 +123,34 @@ func TestSupportedCLIs_SimplestRegistration(t *testing.T) {
 
 func TestSupportedCLIs_SimplestModelsAndQuota(t *testing.T) {
 	// Fixture: simplest whitelist config
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	validYAML := `providers:
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key.yaml")
+	providersPath := filepath.Join(dir, "providers.yaml")
+	modelsPath := filepath.Join(dir, "models.yaml")
+	keyYAML := `providers:
+  gemini:
+    apiKey: test-key
+`
+	providersYAML := `providers:
   gemini:
     api: gemini
-    apiKey: test-key
-models:
+`
+	modelsYAML := `models:
   - id: gemini-3.7-flash
     provider: gemini
   - id: gemini-3.7-pro
     provider: gemini
 `
-	if err := os.WriteFile(cfgPath, []byte(validYAML), 0600); err != nil {
-		t.Fatalf("writing fixture config: %v", err)
+	if err := os.WriteFile(keyPath, []byte(keyYAML), 0600); err != nil {
+		t.Fatalf("writing fixture key: %v", err)
 	}
-	t.Setenv("SIMPLEST_CONFIG_PATH", cfgPath)
+	if err := os.WriteFile(providersPath, []byte(providersYAML), 0600); err != nil {
+		t.Fatalf("writing fixture providers: %v", err)
+	}
+	if err := os.WriteFile(modelsPath, []byte(modelsYAML), 0600); err != nil {
+		t.Fatalf("writing fixture models: %v", err)
+	}
+	t.Setenv("SIMPLEST_KEY_PATH", keyPath)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	simplestpkg.ResetGlobalConfig()

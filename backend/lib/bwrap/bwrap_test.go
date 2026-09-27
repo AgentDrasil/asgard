@@ -377,6 +377,19 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create config.yaml: %v", err)
 	}
 
+	simplestDir := filepath.Join(tmpDir, ".config", "simplest")
+	if err := os.MkdirAll(simplestDir, 0755); err != nil {
+		t.Fatalf("failed to create simplest dir: %v", err)
+	}
+	simplestKeyFile := filepath.Join(simplestDir, "key.yaml")
+	if err := os.WriteFile(simplestKeyFile, []byte("providers: {}"), 0600); err != nil {
+		t.Fatalf("failed to create simplest key.yaml: %v", err)
+	}
+	simplestModelsFile := filepath.Join(simplestDir, "models.yaml")
+	if err := os.WriteFile(simplestModelsFile, []byte("models: []"), 0644); err != nil {
+		t.Fatalf("failed to create simplest models.yaml: %v", err)
+	}
+
 	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath, true)
 	if err != nil {
 		t.Fatalf("CommandForCommandExec error: %v", err)
@@ -406,6 +419,12 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--tmpfs "+opencodeAuthDir) {
 		t.Errorf("expected opencode auth dir masking, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--ro-bind /dev/null "+simplestKeyFile) {
+		t.Errorf("expected simplest key file masking ro-bind /dev/null, got: %s", argStr)
+	}
+	if strings.Contains(argStr, "--tmpfs "+simplestDir) {
+		t.Errorf("simplest dir must NOT be masked with tmpfs so models.yaml remains readable, got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--tmpfs "+sshDir) {
 		t.Errorf("expected ssh dir masking, got: %s", argStr)

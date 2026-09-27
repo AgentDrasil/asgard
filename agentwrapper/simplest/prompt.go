@@ -170,7 +170,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if err != nil {
 		return nil, fmt.Errorf("getting home directory: %w", err)
 	}
-	agentCfgDir := (&Client{}).AuthDirectory(home)
+	agentCfgDir := filepath.Join(home, ".config", "simplest")
 	contextFiles := simplest.LoadProjectContextFiles(runDir, agentCfgDir)
 	var customPrompt string
 	if hasContract {

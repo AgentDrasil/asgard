@@ -25,17 +25,24 @@ func TestLoad_FromPath(t *testing.T) {
 	t.Setenv("TEST_BASE_URL", "https://api.openai.com/v1")
 
 	tempDir := t.TempDir()
-	configContent := `
+	keyContent := `
+providers:
+  custom-openai:
+    apiKey: ${TEST_API_KEY}
+  gemini:
+    apiKey: "gemini-key"
+`
+	providersContent := `
 providers:
   custom-openai:
     api: openai-compat
-    apiKey: ${TEST_API_KEY}
     baseUrl: ${TEST_BASE_URL}
     headers:
       X-Custom-Header: "provider-val"
   gemini:
     api: gemini
-    apiKey: "gemini-key"
+`
+	modelsContent := `
 models:
   - id: custom-model-1
     name: "Custom Model 1"
@@ -49,11 +56,14 @@ models:
     name: "Gemini 3.7 Flash"
     provider: gemini
 `
-	configPath := filepath.Join(tempDir, "config.yaml")
-	err := os.WriteFile(configPath, []byte(configContent), 0o600)
-	require.NoError(t, err)
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
+	require.NoError(t, os.WriteFile(keyPath, []byte(keyContent), 0o600))
+	require.NoError(t, os.WriteFile(providersPath, []byte(providersContent), 0o600))
+	require.NoError(t, os.WriteFile(modelsPath, []byte(modelsContent), 0o600))
 
-	cfg, err := LoadFrom(configPath)
+	cfg, err := LoadFrom(keyPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
@@ -260,17 +270,26 @@ func TestResolveModelAndProvider_MissingProviderEntry(t *testing.T) {
 
 func TestLoad_ReasoningEffort(t *testing.T) {
 	tempDir := t.TempDir()
-	configFile := filepath.Join(tempDir, "config_reasoning.yaml")
+	keyFile := filepath.Join(tempDir, "key.yaml")
+	providersFile := filepath.Join(tempDir, "providers.yaml")
+	modelsFile := filepath.Join(tempDir, "models.yaml")
 
-	yamlContent := `
+	keyContent := `
+providers:
+  deepseek:
+    apiKey: "dummy-key"
+  zai-coding-plan:
+    apiKey: "dummy-key"
+`
+	providersContent := `
 providers:
   deepseek:
     api: openai-compat
-    apiKey: "dummy-key"
     baseUrl: "https://api.deepseek.com"
   zai-coding-plan:
     api: openai-compat
-    apiKey: "dummy-key"
+`
+	modelsContent := `
 models:
   - id: deepseek-v4-flash
     name: "DeepSeek V4 Flash"
@@ -288,9 +307,11 @@ models:
       - low
       - high
 `
-	require.NoError(t, os.WriteFile(configFile, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(keyFile, []byte(keyContent), 0644))
+	require.NoError(t, os.WriteFile(providersFile, []byte(providersContent), 0644))
+	require.NoError(t, os.WriteFile(modelsFile, []byte(modelsContent), 0644))
 
-	cfg, err := LoadFrom(configFile)
+	cfg, err := LoadFrom(keyFile)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
@@ -319,13 +340,21 @@ func TestConfig_ModelMetadataRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
-	configFile := filepath.Join(tempDir, "config_metadata.yaml")
+	keyFile := filepath.Join(tempDir, "key.yaml")
+	providersFile := filepath.Join(tempDir, "providers.yaml")
+	modelsFile := filepath.Join(tempDir, "models.yaml")
 
-	yamlContent := `
+	keyContent := `
+providers:
+  custom-provider:
+    apiKey: "dummy-key"
+`
+	providersContent := `
 providers:
   custom-provider:
     api: openai-compat
-    apiKey: "dummy-key"
+`
+	modelsContent := `
 models:
   - id: advanced-model
     name: "Advanced Model"
@@ -363,9 +392,11 @@ models:
           cacheRead: 0.25
           cacheWrite: 0.5
 `
-	require.NoError(t, os.WriteFile(configFile, []byte(yamlContent), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, []byte(keyContent), 0o600))
+	require.NoError(t, os.WriteFile(providersFile, []byte(providersContent), 0o600))
+	require.NoError(t, os.WriteFile(modelsFile, []byte(modelsContent), 0o600))
 
-	cfg, err := LoadFrom(configFile)
+	cfg, err := LoadFrom(keyFile)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
@@ -525,4 +556,83 @@ func TestConfig_ThinkingLevelMap_CaseInsensitiveNormalization(t *testing.T) {
 	assert.Equal(t, types.ThinkingHigh, level)
 	require.NotNil(t, wireVal)
 	assert.Equal(t, "max", *wireVal)
+}
+
+func TestLoadFrom_SplitFiles(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	keyYAML := `providers:
+  google:
+    apiKey: "test-gemini-key"
+`
+	providersYAML := `providers:
+  google:
+    api: "gemini"
+`
+	modelsYAML := `models:
+  - id: "gemini-3.8-flash"
+    name: "Gemini 3.8 Flash"
+    provider: "google"
+    contextWindow: 1048576
+`
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
+
+	require.NoError(t, os.WriteFile(keyPath, []byte(keyYAML), 0o600))
+	require.NoError(t, os.WriteFile(providersPath, []byte(providersYAML), 0o600))
+	require.NoError(t, os.WriteFile(modelsPath, []byte(modelsYAML), 0o600))
+
+	cfg, err := LoadFrom(keyPath)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	prov, ok := cfg.Providers["google"]
+	require.True(t, ok)
+	assert.Equal(t, "gemini", prov.API)
+	assert.Equal(t, "test-gemini-key", prov.APIKey)
+
+	require.Len(t, cfg.Models, 1)
+	assert.Equal(t, "gemini-3.8-flash", cfg.Models[0].ID)
+	assert.Equal(t, "Gemini 3.8 Flash", cfg.Models[0].Name)
+	assert.Equal(t, "google", cfg.Models[0].Provider)
+}
+
+func TestLoadFrom_APIInKeyFileError(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	keyYAML := `providers:
+  google:
+    api: "gemini"
+    apiKey: "test-gemini-key"
+`
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	require.NoError(t, os.WriteFile(keyPath, []byte(keyYAML), 0o600))
+
+	cfg, err := LoadFrom(keyPath)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "defines api or baseUrl")
+}
+
+func TestLoadFrom_InlineModelsError(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configYAML := `providers:
+  google:
+    apiKey: "test-gemini-key"
+models:
+  - id: "gemini-3.8-flash"
+    provider: "google"
+`
+	configPath := filepath.Join(tempDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0o600))
+
+	cfg, err := LoadFrom(configPath)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "inline models are deprecated")
 }

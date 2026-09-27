@@ -54,7 +54,16 @@ func (c *Client) MountDirectories(home string) []string {
 }
 
 func (c *Client) AuthDirectory(home string) string {
-	return home + "/.config/simplest"
+	return ""
+}
+
+func (c *Client) AuthFiles(home string) []string {
+	return []string{
+		home + "/.config/simplest/key.yaml",
+		home + "/.config/simplest/key.yml",
+		home + "/.simplest/key.yaml",
+		home + "/.simplest/key.yml",
+	}
 }
 
 func (c *Client) ExtraArgs() []string {

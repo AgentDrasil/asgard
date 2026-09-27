@@ -17,6 +17,7 @@ type FakeClient struct {
 	SkillsMountPathFunc        func(home string) string
 	MountDirectoriesFunc       func(home string) []string
 	AuthDirectoryFunc          func(home string) string
+	AuthFilesFunc              func(home string) []string
 	ExtraArgsFunc              func() []string
 }
 
@@ -82,6 +83,13 @@ func (c *FakeClient) AuthDirectory(home string) string {
 		return c.AuthDirectoryFunc(home)
 	}
 	return ""
+}
+
+func (c *FakeClient) AuthFiles(home string) []string {
+	if c.AuthFilesFunc != nil {
+		return c.AuthFilesFunc(home)
+	}
+	return nil
 }
 
 func (c *FakeClient) ExtraArgs() []string {

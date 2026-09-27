@@ -30,6 +30,8 @@ var (
 	GetAvailableModels      = config.GetAvailableModels
 	ResolveModelAndProvider = config.ResolveModelAndProvider
 	DefaultConfigPath       = config.DefaultConfigPath
+	DefaultProvidersPath    = config.DefaultProvidersPath
+	DefaultModelsPath       = config.DefaultModelsPath
 	SetGlobalConfig         = config.SetGlobalConfig
 	ResetGlobalConfig       = config.ResetGlobalConfig
 	GetGlobalConfig         = config.GetGlobalConfig

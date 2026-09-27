@@ -159,30 +159,46 @@ func TestValidateSimplestSetup(t *testing.T) {
 		t.Fatal("expected error with corrupted config YAML, got nil")
 	}
 
-	// 5. Config file exists and is valid -> Success
-	validYAML := `
+	// 5. Config files exist and are valid -> Success
+	keyFile := filepath.Join(cfgDir, "key.yaml")
+	validKeyYAML := `
+providers:
+  gemini:
+    apiKey: valid-key
+`
+	providersFile := filepath.Join(cfgDir, "providers.yaml")
+	validProvidersYAML := `
 providers:
   gemini:
     api: gemini
-    apiKey: valid-key
+`
+	modelsFile := filepath.Join(cfgDir, "models.yaml")
+	validModelsYAML := `
 models:
   - id: gemini-3.7-flash
     provider: gemini
 `
-	if err := os.WriteFile(cfgFile, []byte(validYAML), 0600); err != nil {
-		t.Fatalf("failed to write valid config: %v", err)
+	_ = os.Remove(cfgFile)
+	if err := os.WriteFile(keyFile, []byte(validKeyYAML), 0600); err != nil {
+		t.Fatalf("failed to write valid key: %v", err)
+	}
+	if err := os.WriteFile(providersFile, []byte(validProvidersYAML), 0600); err != nil {
+		t.Fatalf("failed to write valid providers: %v", err)
+	}
+	if err := os.WriteFile(modelsFile, []byte(validModelsYAML), 0600); err != nil {
+		t.Fatalf("failed to write valid models: %v", err)
 	}
 	if err := ValidateSimplestSetup(); err != nil {
-		t.Fatalf("expected success with valid config YAML, got: %v", err)
+		t.Fatalf("expected success with valid key YAML, got: %v", err)
 	}
 
-	// 6. Explicit SIMPLEST_CONFIG_PATH takes precedence
-	customCfg := filepath.Join(tempDir, "custom.yaml")
-	if err := os.WriteFile(customCfg, []byte("invalid: yaml: ["), 0600); err != nil {
-		t.Fatalf("failed to write custom config: %v", err)
+	// 6. Explicit SIMPLEST_KEY_PATH takes precedence
+	customKey := filepath.Join(tempDir, "custom_key.yaml")
+	if err := os.WriteFile(customKey, []byte("invalid: yaml: ["), 0600); err != nil {
+		t.Fatalf("failed to write custom key: %v", err)
 	}
-	t.Setenv("SIMPLEST_CONFIG_PATH", customCfg)
+	t.Setenv("SIMPLEST_KEY_PATH", customKey)
 	if err := ValidateSimplestSetup(); err == nil {
-		t.Fatal("expected error with corrupt custom config, got nil")
+		t.Fatal("expected error with corrupt custom key, got nil")
 	}
 }

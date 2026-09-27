@@ -43,7 +43,13 @@ func TestClient_SandboxSpecPaths(t *testing.T) {
 	home := "/home/testuser"
 
 	assert.Equal(t, "/home/testuser/.config/simplest/skills", client.SkillsMountPath(home))
-	assert.Equal(t, "/home/testuser/.config/simplest", client.AuthDirectory(home))
+	assert.Equal(t, "", client.AuthDirectory(home))
+	assert.Equal(t, []string{
+		"/home/testuser/.config/simplest/key.yaml",
+		"/home/testuser/.config/simplest/key.yml",
+		"/home/testuser/.simplest/key.yaml",
+		"/home/testuser/.simplest/key.yml",
+	}, client.AuthFiles(home))
 	assert.Equal(t, []string{"/home/testuser/.simplest", "/home/testuser/.config/simplest"}, client.MountDirectories(home))
 	assert.Nil(t, client.ExtraArgs())
 }
