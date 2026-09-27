@@ -444,3 +444,48 @@ func TestGeminiRetryOn503(t *testing.T) {
 	}
 	assert.Equal(t, 1, startCount, "EvStart must be emitted exactly once")
 }
+
+func TestGemini_BeforeProviderRequest_NoOp(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("X-Attempt-Hook"), "Gemini SDK should not have hook header applied")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"candidates":[{"content":{"parts":[{"text":"hello gemini"}]},"finishReason":"STOP"}]}`)
+		f := w.(http.Flusher)
+		f.Flush()
+	}))
+	t.Cleanup(srv.Close)
+
+	var hookCalled bool
+	var streamEvents []string
+
+	p := NewGemini("g-key")
+	m := gModel(srv.URL)
+	opts := &types.StreamOptions{
+		BeforeProviderRequest: func(req *http.Request, body []byte) ([]byte, error) {
+			hookCalled = true
+			req.Header.Set("X-Attempt-Hook", "should-not-be-called")
+			return body, nil
+		},
+		OnProviderStreamEvent: func(rawEvent string, rawData []byte) {
+			streamEvents = append(streamEvents, rawEvent)
+		},
+	}
+
+	evs, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopStop, done.Reason)
+	assert.False(t, hookCalled, "BeforeProviderRequest must be no-op on Gemini")
+	require.Len(t, streamEvents, 1)
+	assert.Equal(t, "generate_content", streamEvents[0])
+
+	var text string
+	for _, ev := range evs {
+		if pEv, ok := ev.(types.Partial); ok && pEv.Kind == types.EvTextDelta {
+			text += pEv.Delta
+		}
+	}
+	assert.Equal(t, "hello gemini", text)
+}

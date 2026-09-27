@@ -422,11 +422,15 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			headers[k] = v
 		}
 		var policy *types.RetryPolicy
+		var beforeReq func(req *http.Request, body []byte) ([]byte, error)
+		var onStreamEvent func(rawEvent string, rawData []byte)
 		if opts != nil {
 			policy = opts.RetryPolicy
+			beforeReq = opts.BeforeProviderRequest
+			onStreamEvent = opts.OnProviderStreamEvent
 		}
 		resp, err := ExecuteWithRetry(ctx, policy, func() (*http.Response, error) {
-			return postSSE(ctx, p.client(), url, headers, body)
+			return postSSE(ctx, p.client(), url, headers, body, beforeReq)
 		})
 		if err != nil {
 			em.fail(ctx, err)
@@ -438,6 +442,9 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 		hasFinish := false
 
 		scanErr := scanSSE(resp, func(payload string) error {
+			if onStreamEvent != nil {
+				onStreamEvent("message", []byte(payload))
+			}
 			if payload == "[DONE]" {
 				return ioEOF()
 			}

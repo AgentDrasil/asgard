@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 )
 
@@ -106,6 +107,11 @@ type StreamOptions struct {
 	APIKey string `json:"-"`
 	// RetryPolicy controls request retry behavior. A nil value defaults to DefaultRetryPolicy().
 	RetryPolicy *RetryPolicy `json:"retryPolicy,omitempty"`
+	// BeforeProviderRequest allows inspecting or mutating the outgoing HTTP request payload/headers.
+	// NOTE: Supported only for OpenAI-compatible providers. On Gemini (genai SDK), this is a no-op.
+	BeforeProviderRequest func(req *http.Request, body []byte) ([]byte, error) `json:"-"`
+	// OnProviderStreamEvent is called with raw provider stream events prior to normalization.
+	OnProviderStreamEvent func(rawEvent string, rawData []byte) `json:"-"`
 }
 
 // Provider streams one assistant response over the given wire protocol.

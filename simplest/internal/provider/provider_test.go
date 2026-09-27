@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -681,4 +684,95 @@ func TestParseStreamingJSONRepairsTruncation(t *testing.T) {
 			t.Errorf("parse(%q) = %s, want %s", c.in, got, c.want)
 		}
 	}
+}
+
+func TestOpenAI_BeforeProviderRequest_PerAttempt(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	var receivedHeaders []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		receivedHeaders = append(receivedHeaders, r.Header.Clone())
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, `{"error":"temporary unavailable"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`)
+		_, _ = fmt.Fprintf(w, "data: [DONE]\r\n\r\n")
+		f := w.(http.Flusher)
+		f.Flush()
+	}))
+	t.Cleanup(srv.Close)
+
+	p := NewOpenAICompat("sk-test")
+	m := oaModel(srv.URL)
+	opts := &types.StreamOptions{
+		RetryPolicy: &types.RetryPolicy{
+			Enabled:     true,
+			MaxRetries:  2,
+			BaseDelayMs: 5,
+			MaxDelayMs:  20,
+		},
+		BeforeProviderRequest: func(req *http.Request, body []byte) ([]byte, error) {
+			req.Header.Set("X-Attempt-Hook", "true")
+			return body, nil
+		},
+	}
+
+	evs, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopStop, done.Reason)
+	assert.Equal(t, 2, attempts)
+	require.Len(t, receivedHeaders, 2)
+	assert.Equal(t, "true", receivedHeaders[0].Get("X-Attempt-Hook"), "first attempt must have hook header")
+	assert.Equal(t, "true", receivedHeaders[1].Get("X-Attempt-Hook"), "second attempt (retry) must also have hook header")
+
+	var text string
+	for _, ev := range evs {
+		if pEv, ok := ev.(types.Partial); ok && pEv.Kind == types.EvTextDelta {
+			text += pEv.Delta
+		}
+	}
+	assert.Equal(t, "ok", text)
+}
+
+func TestOpenAI_OnProviderStreamEvent(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"choices":[{"delta":{"content":"hello"},"finish_reason":""}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+		_, _ = fmt.Fprintf(w, "data: [DONE]\r\n\r\n")
+		f := w.(http.Flusher)
+		f.Flush()
+	}))
+	t.Cleanup(srv.Close)
+
+	var rawEvents []string
+	var rawDatas [][]byte
+
+	p := NewOpenAICompat("sk-test")
+	m := oaModel(srv.URL)
+	opts := &types.StreamOptions{
+		OnProviderStreamEvent: func(rawEvent string, rawData []byte) {
+			rawEvents = append(rawEvents, rawEvent)
+			rawDatas = append(rawDatas, append([]byte(nil), rawData...))
+		},
+	}
+
+	_, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopStop, done.Reason)
+
+	require.Len(t, rawEvents, 3)
+	assert.Equal(t, []string{"message", "message", "message"}, rawEvents)
+	assert.Contains(t, string(rawDatas[0]), `"content":"hello"`)
+	assert.Contains(t, string(rawDatas[1]), `"finish_reason":"stop"`)
+	assert.Equal(t, "[DONE]", string(rawDatas[2]))
 }

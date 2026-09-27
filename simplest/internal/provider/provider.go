@@ -48,7 +48,7 @@ func (e *HTTPStatusError) Error() string {
 // postSSE issues a POST expecting an SSE response. Non-2xx responses are
 // converted to HTTPStatusError carrying up to 4000 chars of the body and
 // any Retry-After response header.
-func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte) (*http.Response, error) {
+func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte, beforeRequest func(*http.Request, []byte) ([]byte, error)) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -56,6 +56,16 @@ func postSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
+	}
+	if beforeRequest != nil {
+		mutatedBody, err := beforeRequest(req, body)
+		if err != nil {
+			return nil, err
+		}
+		if mutatedBody != nil {
+			req.Body = io.NopCloser(bytes.NewReader(mutatedBody))
+			req.ContentLength = int64(len(mutatedBody))
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

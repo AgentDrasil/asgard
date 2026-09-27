@@ -336,6 +336,11 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			lastErr         error
 		)
 
+		var onStreamEvent func(rawEvent string, rawData []byte)
+		if opts != nil {
+			onStreamEvent = opts.OnProviderStreamEvent
+		}
+
 		for attempt := 0; attempt <= maxRetries; attempt++ {
 			if attempt > 0 {
 				delay := CalculateDelay(attempt-1, policy, lastErr)
@@ -368,6 +373,10 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 					lastErr = err
 					streamFailed = true
 					break
+				}
+				if onStreamEvent != nil {
+					rawData, _ := json.Marshal(resp)
+					onStreamEvent("generate_content", rawData)
 				}
 				if !hasEmitted {
 					em.start(model.API, model.Provider, model.ID)
