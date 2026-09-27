@@ -265,7 +265,18 @@ func (c *Config) GetAvailableModels() []*types.Model {
 		if mc.ThinkingLevelMap != nil {
 			thinkingLevelMap = make(types.ThinkingLevelMap, len(mc.ThinkingLevelMap))
 			for k, v := range mc.ThinkingLevelMap {
-				thinkingLevelMap[types.ThinkingLevel(strings.ToLower(k))] = v
+				normK := strings.ToLower(k)
+				isStandard := false
+				for _, lvl := range types.OrderedThinkingLevels {
+					if string(lvl) == normK {
+						isStandard = true
+						break
+					}
+				}
+				if !isStandard {
+					fmt.Fprintf(os.Stderr, "Warning: model %q specifies unknown thinkingLevelMap key %q; canonical levels are: %v\n", mc.ID, k, types.OrderedThinkingLevels)
+				}
+				thinkingLevelMap[types.ThinkingLevel(normK)] = v
 			}
 		}
 

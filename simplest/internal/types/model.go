@@ -57,6 +57,8 @@ type ModelInputLimits struct {
 }
 
 // ModelCostRates is pricing in $/million tokens.
+// Note: JSON tags intentionally lack omitempty so that zero-value rates are explicitly serialized,
+// matching pre-upgrade behavior.
 type ModelCostRates struct {
 	Input      float64 `json:"input" yaml:"input"`
 	Output     float64 `json:"output" yaml:"output"`
@@ -168,6 +170,10 @@ func (m *Model) wireThinkingValue(level ThinkingLevel) *string {
 // If the requested level is supported, it is returned with ok=true.
 // If unsupported, it clamps strictly downwards to the nearest supported level in OrderedThinkingLevels,
 // or ThinkingOff if no lower level is supported, returning ok=false.
+// Note: When falling back to ThinkingOff, the wire value is m.wireThinkingValue(ThinkingOff). If ThinkingOff
+// is unmapped in ThinkingLevelMap (or ThinkingLevelMap is nil), this wire value will be nil. Callers can
+// distinguish "ThinkingOff mapped to null" (ok=false, level=ThinkingOff, wireValue=nil) from an explicitly mapped
+// string representation by checking whether wireValue is nil or non-nil.
 func (m *Model) ClampThinkingLevel(level ThinkingLevel) (ThinkingLevel, *string, bool) {
 	if m.SupportsThinkingLevel(level) {
 		return level, m.wireThinkingValue(level), true

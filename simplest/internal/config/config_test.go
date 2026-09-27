@@ -482,13 +482,12 @@ func TestConfig_TypeNormalization(t *testing.T) {
 }
 
 func TestConfig_DefaultFallbackConfig(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "dummy-gemini-key")
+	t.Setenv("OPENAI_API_KEY", "dummy-openai-key")
+
 	cfg := defaultFallbackConfig()
 	require.NotNil(t, cfg)
-
-	// When neither env var is set
-	if len(cfg.Models) == 0 {
-		return
-	}
+	require.NotEmpty(t, cfg.Models)
 
 	for _, m := range cfg.Models {
 		assert.Equal(t, "chat", m.Type)

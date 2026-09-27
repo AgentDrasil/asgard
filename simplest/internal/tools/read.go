@@ -115,10 +115,8 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 			return nil, err
 		}
 
-		note := fmt.Sprintf("Read image file [%s]", processed.MimeType)
-		if len(processed.Notes) > 0 {
-			note = fmt.Sprintf("Read image file [%s, %s]", processed.MimeType, strings.Join(processed.Notes, ", "))
-		}
+		noteParts := append([]string{processed.MimeType}, processed.Notes...)
+		note := fmt.Sprintf("Read image file [%s]", strings.Join(noteParts, ", "))
 
 		return &types.ToolResult{
 			Content: []types.AssistantContent{

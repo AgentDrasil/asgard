@@ -153,6 +153,8 @@ func TestGoogleThinkingConfigIncludeThoughts(t *testing.T) {
 }
 
 func TestGoogleThinkingConfigWithMap(t *testing.T) {
+	t.Parallel()
+
 	id := "gemini-3.7-flash"
 	minMapped := "low"
 	highMapped := "minimal"

@@ -67,6 +67,7 @@ func MigrateConfigBytes(data []byte) ([]byte, bool, error) {
 		}
 
 		var (
+			modelID          string
 			hasType          = false
 			hasThinkingMap   = false
 			reasoningEfforts []string
@@ -79,6 +80,8 @@ func MigrateConfigBytes(data []byte) ([]byte, bool, error) {
 			vNode := modelNode.Content[i+1]
 
 			switch kNode.Value {
+			case "id":
+				modelID = vNode.Value
 			case "type":
 				hasType = true
 			case "thinkingLevelMap":
@@ -130,6 +133,21 @@ func MigrateConfigBytes(data []byte) ([]byte, bool, error) {
 				Tag:  "!!map",
 			}
 
+			// Warn if legacy reasoningEfforts contain non-standard levels that cannot be automatically mapped
+			for _, effort := range reasoningEfforts {
+				norm := strings.ToLower(effort)
+				found := false
+				for _, lvl := range standardThinkingLevels {
+					if lvl == norm {
+						found = true
+						break
+					}
+				}
+				if !found {
+					fmt.Fprintf(os.Stderr, "Warning: model %s specifies non-standard reasoningEffort %q which will be omitted from thinkingLevelMap; manual review recommended\n", modelID, effort)
+				}
+			}
+
 			for _, lvl := range standardThinkingLevels {
 				kNode := &yaml.Node{
 					Kind:  yaml.ScalarNode,
@@ -144,12 +162,15 @@ func MigrateConfigBytes(data []byte) ([]byte, bool, error) {
 						Value: lvl,
 					}
 				} else if lvl != "off" {
+					// Levels higher than off that are absent in legacy reasoningEfforts are explicitly set to null
 					vNode = &yaml.Node{
 						Kind:  yaml.ScalarNode,
 						Tag:   "!!null",
 						Value: "null",
 					}
 				} else {
+					// "off" is intentionally skipped if not explicitly in reasoningEfforts,
+					// matching the default behavior where reasoning off is the baseline.
 					continue
 				}
 				mapNode.Content = append(mapNode.Content, kNode, vNode)

@@ -1,3 +1,14 @@
+// Package images provides image processing and resizing capabilities to enforce
+// per-model input limits (maxWidth, maxHeight, maxBytes, animated GIF flattening).
+//
+// Format conversions and transparency trade-offs:
+// When input images exceed maxBytes or are animated GIFs, they are compressed to JPEG
+// with progressive quality downscaling and dimension scaling. Because JPEG does not support
+// an alpha channel (and standard Go does not provide a built-in WebP encoder), converting
+// transparent PNG images to JPEG causes transparent areas to be rendered against a solid
+// background (default black or background fill in JPEG encoding). If an image fits within
+// maxBytes without re-encoding and is a non-animated PNG, the original PNG format and its
+// alpha channel are preserved.
 package images
 
 import (
@@ -109,7 +120,7 @@ func safeDecodeImage(data []byte, mimeType string) (img image.Image, origW, orig
 
 func resizeBilinear(src image.Image, targetW, targetH int) image.Image {
 	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
-	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
 	return dst
 }
 
@@ -233,10 +244,12 @@ func ProcessImage(data []byte, mimeType string, limits *types.ModelImageInputLim
 
 	// If outBytes is still nil or exceeds maxBytes, attempt JPEG with decreasing quality and/or scaling down
 	if outBytes == nil || int64(base64.StdEncoding.EncodedLen(len(outBytes))) > maxBytes {
-		// JPEG quality degradation: 80 -> 60 -> 40
-		qualities := []int{80, 60, 40}
-		if jpegQuality < 80 {
-			qualities = []int{jpegQuality, 40}
+		// JPEG quality degradation: step down from jpegQuality to 40 by steps of 20
+		qualities := []int{jpegQuality}
+		for q := ((jpegQuality - 1) / 20) * 20; q >= 40; q -= 20 {
+			if q < jpegQuality {
+				qualities = append(qualities, q)
+			}
 		}
 
 		fits := false

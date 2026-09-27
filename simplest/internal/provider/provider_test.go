@@ -198,6 +198,8 @@ func TestOpenAIRequestOptionsAndTools(t *testing.T) {
 }
 
 func TestOpenAIThinkingLevelWithMap(t *testing.T) {
+	t.Parallel()
+
 	var captured map[string]any
 	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
 	defer srv.Close()
@@ -477,6 +479,8 @@ func TestOpenAIReasoningEffortValidation(t *testing.T) {
 }
 
 func TestOpenAIReasoningEffortThinkingLevelMap(t *testing.T) {
+	t.Parallel()
+
 	chunks := []string{
 		`{"choices":[{"delta":{"content":"ok"}}]}`,
 		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
@@ -1121,6 +1125,20 @@ func TestEmitter_ContentIndexOrdering(t *testing.T) {
 	}
 }
 
+func assertPartialMetadata(t *testing.T, evs []types.AssistantMessageEvent, wantID, wantModel string) {
+	t.Helper()
+	seenPartial := false
+	for _, ev := range evs {
+		if pEv, ok := ev.(types.Partial); ok && pEv.Kind != types.EvStart {
+			seenPartial = true
+			require.NotNil(t, pEv.Partial)
+			assert.Equal(t, wantID, pEv.Partial.ResponseID)
+			assert.Equal(t, wantModel, pEv.Partial.ResponseModel)
+		}
+	}
+	assert.True(t, seenPartial, "expected at least one non-start Partial event")
+}
+
 func TestOpenAICompat_MetadataExtraction(t *testing.T) {
 	t.Parallel()
 
@@ -1203,16 +1221,7 @@ func TestOpenAICompat_MetadataExtraction(t *testing.T) {
 			require.NotNil(t, done)
 
 			// Verify Partial events received after first chunk carries metadata
-			seenPartial := false
-			for _, ev := range evs {
-				if pEv, ok := ev.(types.Partial); ok && pEv.Kind != types.EvStart {
-					seenPartial = true
-					require.NotNil(t, pEv.Partial)
-					assert.Equal(t, tt.wantResponseID, pEv.Partial.ResponseID)
-					assert.Equal(t, tt.wantResponseModel, pEv.Partial.ResponseModel)
-				}
-			}
-			assert.True(t, seenPartial, "expected at least one non-start Partial event")
+			assertPartialMetadata(t, evs, tt.wantResponseID, tt.wantResponseModel)
 
 			// Verify DoneEvent message metadata
 			assert.Equal(t, tt.wantResponseID, done.Message.ResponseID)
@@ -1261,7 +1270,7 @@ func TestGoogleGemini_MetadataExtraction(t *testing.T) {
 			name: "First non-empty modelVersion is preserved across chunks",
 			chunks: []string{
 				`{"responseId":"resp-gemini-3","modelVersion":"gemini-3-flash-preview","candidates":[{"content":{"parts":[{"text":"part1"}]}}]}`,
-				`{"candidates":[{"content":{"parts":[{"text":"part2"}]}}]}`,
+				`{"modelVersion":"gemini-later-should-not-overwrite","candidates":[{"content":{"parts":[{"text":"part2"}]}}]}`,
 				`{"candidates":[{"finishReason":"STOP"}]}`,
 			},
 			wantResponseID:    "resp-gemini-3",
@@ -1284,16 +1293,7 @@ func TestGoogleGemini_MetadataExtraction(t *testing.T) {
 			require.NotNil(t, done)
 
 			// Verify Partial events received after first chunk carries metadata
-			seenPartial := false
-			for _, ev := range evs {
-				if pEv, ok := ev.(types.Partial); ok && pEv.Kind != types.EvStart {
-					seenPartial = true
-					require.NotNil(t, pEv.Partial)
-					assert.Equal(t, tt.wantResponseID, pEv.Partial.ResponseID)
-					assert.Equal(t, tt.wantResponseModel, pEv.Partial.ResponseModel)
-				}
-			}
-			assert.True(t, seenPartial, "expected at least one non-start Partial event")
+			assertPartialMetadata(t, evs, tt.wantResponseID, tt.wantResponseModel)
 
 			// Verify DoneEvent message metadata
 			assert.Equal(t, tt.wantResponseID, done.Message.ResponseID)

@@ -133,15 +133,19 @@ type AfterToolCallOverride struct {
 	Terminate bool
 }
 
+func injectModel(tools []types.AgentTool, m *types.Model) {
+	for _, t := range tools {
+		if sm, ok := t.(interface{ SetModel(*types.Model) }); ok {
+			sm.SetModel(m)
+		}
+	}
+}
+
 // Run starts the agent loop and streams events on a buffered channel that is
 // closed after the terminal agent_end event (delivered exactly once, even on
 // cancellation).
 func Run(ctx context.Context, req Request) <-chan types.AgentEvent {
-	for _, t := range req.Tools {
-		if sm, ok := t.(interface{ SetModel(*types.Model) }); ok {
-			sm.SetModel(req.Model)
-		}
-	}
+	injectModel(req.Tools, req.Model)
 	ch := make(chan types.AgentEvent, 64)
 	go func() {
 		defer close(ch)
@@ -251,11 +255,7 @@ outer:
 				if nextReq := l.req.PrepareRequest(l.req); nextReq != nil {
 					l.req = nextReq
 					l.toolsByName = toolIndex(nextReq.Tools)
-					for _, t := range nextReq.Tools {
-						if sm, ok := t.(interface{ SetModel(*types.Model) }); ok {
-							sm.SetModel(nextReq.Model)
-						}
-					}
+					injectModel(nextReq.Tools, nextReq.Model)
 				}
 			}
 
