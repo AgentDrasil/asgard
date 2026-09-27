@@ -140,8 +140,10 @@ func appendBaseSandboxArgs(args []string, home string, chatID string) ([]string,
 		}
 	}
 
-	// Mount library/timezone/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility and timezone inheritance
-	extraROPaths := []string{"/lib", "/lib64", "/usr/lib", "/usr/share/zoneinfo", "/usr/share/zoneinfo-icu", "/etc"}
+	// Mount library/timezone/etc/proc/dev paths as ro/proc/dev if they exist for binary dynamic linking compatibility and timezone inheritance.
+	// /usr/libexec carries the compiler backends (cc1/cc1plus/collect2) and /usr/include the libc headers, so cgo-based builds
+	// (e.g. `go test -race`) work inside the sandbox.
+	extraROPaths := []string{"/lib", "/lib64", "/usr/lib", "/usr/libexec", "/usr/include", "/usr/share/zoneinfo", "/usr/share/zoneinfo-icu", "/etc"}
 	for _, p := range extraROPaths {
 		if !mountedPaths[p] {
 			if _, err := os.Stat(p); err == nil {

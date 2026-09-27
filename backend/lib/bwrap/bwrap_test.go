@@ -325,6 +325,25 @@ func TestTimezoneInheritance(t *testing.T) {
 	}
 }
 
+// TestCompilerToolchainMounts verifies that the C compiler backend directory
+// (/usr/libexec, holding cc1/collect2) and the libc headers (/usr/include) are
+// bind-mounted read-only so cgo-based builds such as `go test -race` work
+// inside the sandbox.
+func TestCompilerToolchainMounts(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	args, err := appendBaseSandboxArgs([]string{}, tmpDir, "test-toolchain")
+	require.NoError(t, err)
+
+	argStr := strings.Join(args, " ")
+	for _, p := range []string{"/usr/libexec", "/usr/include"} {
+		if _, err := os.Stat(p); err == nil {
+			assert.Contains(t, argStr, "--ro-bind "+p+" "+p)
+		}
+	}
+}
+
 func TestCommandForCommandExec(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
