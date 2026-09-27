@@ -47,6 +47,10 @@ type Request struct {
 	// For error and aborted turns, the return decision is ignored and the run terminates.
 	FinishTurn func(TurnSummary) *FinishTurnDecision
 
+	// PrepareNextTurn runs ONLY when the loop is confirmed to start another assistant turn.
+	// It does not run on final/terminating turns. Optional returned messages are appended.
+	PrepareNextTurn func(turnIndex int) ([]types.Message, error)
+
 	// Hooks.
 	BeforeToolCall func(BeforeToolCallInput) *BeforeToolCallDecision
 	AfterToolCall  func(AfterToolCallInput) *AfterToolCallOverride
@@ -189,6 +193,7 @@ func (l *loop) run() {
 
 	pending := l.drain(l.req.GetSteeringMessages)
 	firstTurn := true
+	turnIndex := 0
 
 outer:
 	for {
@@ -284,12 +289,68 @@ outer:
 				}
 			}
 
+			turnIndex++
 			pending = l.drain(l.req.GetSteeringMessages)
+
+			// If another assistant turn is confirmed to start (either through remaining tool results /
+			// FinishTurnContinue or pending steering messages), trigger PrepareNextTurn.
+			if hasMoreToolCalls || len(pending) > 0 {
+				if l.req.PrepareNextTurn != nil {
+					extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
+					if err != nil {
+						final := &types.AssistantMessage{
+							Content:      []types.AssistantContent{},
+							API:          l.req.Model.API,
+							Provider:     l.req.Model.Provider,
+							Model:        l.req.Model.ID,
+							StopReason:   types.StopError,
+							ErrorMessage: err.Error(),
+							Timestamp:    time.Now().UnixMilli(),
+						}
+						l.messages = append(l.messages, final)
+						l.newMsgs = append(l.newMsgs, final)
+						l.emitAssistant(final, true)
+						l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
+						l.end()
+						return
+					}
+					for _, m := range extraMsgs {
+						l.emitUserish(m)
+						l.messages = append(l.messages, m)
+						l.newMsgs = append(l.newMsgs, m)
+					}
+				}
+			}
 		}
 
 		followUps := l.drain(l.req.GetFollowUpMessages)
 		if len(followUps) > 0 {
 			pending = followUps
+			if l.req.PrepareNextTurn != nil {
+				extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
+				if err != nil {
+					final := &types.AssistantMessage{
+						Content:      []types.AssistantContent{},
+						API:          l.req.Model.API,
+						Provider:     l.req.Model.Provider,
+						Model:        l.req.Model.ID,
+						StopReason:   types.StopError,
+						ErrorMessage: err.Error(),
+						Timestamp:    time.Now().UnixMilli(),
+					}
+					l.messages = append(l.messages, final)
+					l.newMsgs = append(l.newMsgs, final)
+					l.emitAssistant(final, true)
+					l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
+					l.end()
+					return
+				}
+				for _, m := range extraMsgs {
+					l.emitUserish(m)
+					l.messages = append(l.messages, m)
+					l.newMsgs = append(l.newMsgs, m)
+				}
+			}
 			continue outer
 		}
 		break

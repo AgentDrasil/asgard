@@ -734,3 +734,117 @@ func TestAgent_PrepareRequest_CalledBeforeStream(t *testing.T) {
 		assert.Equal(t, types.ThinkingMedium, fp.options[0].ThinkingLevel)
 	})
 }
+
+func TestAgent_PrepareNextTurn_OnlyOnContinuation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Case A: single turn ends without tools, hook not called", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			textMsg("done immediately"),
+		}}
+		req := baseRequest(fp)
+
+		var hookCalled bool
+		req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+			hookCalled = true
+			return nil, nil
+		}
+		req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+			return &FinishTurnDecision{Action: FinishTurnEnd}
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		assert.False(t, hookCalled, "PrepareNextTurn must not be called when turn is ending without continuation")
+		assert.Equal(t, 1, fp.calls)
+	})
+
+	t.Run("Case B: tool call continues, hook called and extra message injected into context", func(t *testing.T) {
+		t.Parallel()
+
+		tool := newRecordingTool("tool1")
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			toolCallMsg(call("c1", "tool1", `{}`)),
+			textMsg("final"),
+		}}
+		req := baseRequest(fp, tool)
+
+		var capturedTurnIndices []int
+		extraUserMsg := &types.UserMessage{
+			Content:   types.TextOnly("hint for next turn"),
+			Timestamp: 42,
+		}
+		req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+			capturedTurnIndices = append(capturedTurnIndices, turnIndex)
+			return []types.Message{extraUserMsg}, nil
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		assert.Equal(t, 2, fp.calls)
+		require.Len(t, capturedTurnIndices, 1)
+		assert.Equal(t, 1, capturedTurnIndices[0])
+
+		// Verify extra message was injected into fp.contexts[1]
+		require.Len(t, fp.contexts, 2)
+		secondContextMsgs := fp.contexts[1].Messages
+		var foundExtra bool
+		for _, m := range secondContextMsgs {
+			if u, ok := m.(*types.UserMessage); ok {
+				blocks, err := types.DecodeUserContent(u.Content)
+				if err == nil && types.StringContentOf(blocks) == "hint for next turn" {
+					foundExtra = true
+					break
+				}
+			}
+		}
+		assert.True(t, foundExtra, "extra message from PrepareNextTurn must be present in the second turn context")
+
+		// Verify extra message is included in end.Messages
+		var foundInEnd bool
+		for _, m := range end.Messages {
+			if u, ok := m.(*types.UserMessage); ok {
+				blocks, err := types.DecodeUserContent(u.Content)
+				if err == nil && types.StringContentOf(blocks) == "hint for next turn" {
+					foundInEnd = true
+					break
+				}
+			}
+		}
+		assert.True(t, foundInEnd, "extra message must be included in end.Messages")
+	})
+
+	t.Run("Case C: hook error terminates run cleanly", func(t *testing.T) {
+		t.Parallel()
+
+		tool := newRecordingTool("tool1")
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			toolCallMsg(call("c1", "tool1", `{}`)),
+			textMsg("should never run"),
+		}}
+		req := baseRequest(fp, tool)
+
+		req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+			return nil, fmt.Errorf("injected prepare error")
+		}
+
+		evs, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		assert.Equal(t, 1, fp.calls, "provider stream should not be called again after prepare error")
+
+		var hasTurnEnd bool
+		var lastMsg *types.AssistantMessage
+		for _, ev := range evs {
+			if ev.Kind == types.TurnEnd && ev.Message != nil {
+				hasTurnEnd = true
+				lastMsg = ev.Message
+			}
+		}
+		assert.True(t, hasTurnEnd)
+		require.NotNil(t, lastMsg)
+		assert.Equal(t, types.StopError, lastMsg.StopReason)
+		assert.Equal(t, "injected prepare error", lastMsg.ErrorMessage)
+	})
+}
