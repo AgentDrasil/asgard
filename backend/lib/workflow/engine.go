@@ -61,6 +61,8 @@ type RunContext struct {
 	// replay cannot reach because it has no static in-edges).
 	ActivateNodes []string
 	// HumanReplies maps human node IDs to pre-supplied user replies (resume).
+	// Node workers consume their own entry concurrently, so access is
+	// serialized by Engine.waitMu (see takeHumanReply).
 	HumanReplies map[string]string
 	// WorkflowRunDirs carries workflow/parent configured run directories.
 	WorkflowRunDirs []string
@@ -1077,7 +1079,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 				var result *workflowspec.NodeResult
 				var err error
 				if node.Type == workflowspec.NodeTypeHuman {
-					if rc.HumanReplies[node.ID] == "" {
+					if !e.humanReplyPending(rc, node.ID) {
 						mu.Lock()
 						hasSuspended = true
 						mu.Unlock()

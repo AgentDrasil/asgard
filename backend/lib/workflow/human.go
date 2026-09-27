@@ -13,6 +13,32 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
+// takeHumanReply consumes and returns the reply pre-supplied for nodeID, or
+// "" when there is none. Consuming it means a later iteration of the same node
+// suspends and waits for a fresh user decision instead of replaying the reply
+// forever.
+//
+// Node workers settle a run concurrently under an errgroup, so RunContext's
+// suspension maps are accessed under waitMu - the same lock that guards the
+// waiter registry they belong to.
+func (e *Engine) takeHumanReply(rc RunContext, nodeID string) string {
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+
+	reply := rc.HumanReplies[nodeID]
+	delete(rc.HumanReplies, nodeID)
+	return reply
+}
+
+// humanReplyPending reports whether a reply is pre-supplied for nodeID without
+// consuming it.
+func (e *Engine) humanReplyPending(rc RunContext, nodeID string) bool {
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+
+	return rc.HumanReplies[nodeID] != ""
+}
+
 // runHumanNode executes a `type: human` node. When a reply was pre-supplied
 // (resume path) the node settles immediately; otherwise the run suspends: the
 // WAITING_HUMAN snapshot is persisted, the suspension is delivered to the host
@@ -26,8 +52,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 		return &workflowspec.NodeResult{Status: workflowspec.StatusFailed, Error: fmt.Errorf("node %s: headless execution: human nodes not supported", node.ID)}
 	}
 
-	if reply := rc.HumanReplies[node.ID]; reply != "" {
-		delete(rc.HumanReplies, node.ID)
+	if reply := e.takeHumanReply(rc, node.ID); reply != "" {
 		return humanReplyResult(nctx, reply)
 	}
 

@@ -47,8 +47,7 @@ func (e *Engine) runQuotaSuspension(
 	// Consumed once: if the quota is still exhausted after applying it, the
 	// next suspension waits for a fresh user decision instead of replaying
 	// this reply in a loop.
-	if reply := rc.HumanReplies[node.ID]; reply != "" {
-		delete(rc.HumanReplies, node.ID)
+	if reply := e.takeHumanReply(rc, node.ID); reply != "" {
 		return reply, nil
 	}
 
