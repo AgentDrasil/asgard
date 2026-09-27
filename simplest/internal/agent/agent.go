@@ -35,6 +35,11 @@ type Request struct {
 	GetSteeringMessages func() []types.Message
 	GetFollowUpMessages func() []types.Message
 
+	// PrepareRequest runs immediately before each provider stream request (including the first),
+	// allowing dynamic adjustment of request parameters without polling queues.
+	// Returning nil means no change; returning a new *Request replaces the active configuration.
+	PrepareRequest func(*Request) *Request
+
 	// FinishTurn hook runs after an assistant turn (and all its tool executions)
 	// completes. Called on normal, error, and aborted turns. Returning FinishTurnEnd
 	// causes the loop to stop after turn_end. Returning FinishTurnContinue ensures
@@ -213,6 +218,13 @@ outer:
 				l.emitUserish(m)
 				l.messages = append(l.messages, m)
 				l.newMsgs = append(l.newMsgs, m)
+			}
+
+			if l.req.PrepareRequest != nil {
+				if nextReq := l.req.PrepareRequest(l.req); nextReq != nil {
+					l.req = nextReq
+					l.toolsByName = toolIndex(nextReq.Tools)
+				}
 			}
 
 			msg := l.streamAssistant()

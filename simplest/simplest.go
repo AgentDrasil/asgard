@@ -68,6 +68,7 @@ type (
 	TurnSummary        = agent.TurnSummary
 	FinishTurnAction   = agent.FinishTurnAction
 	FinishTurnDecision = agent.FinishTurnDecision
+	Queue              = agent.Queue
 )
 
 const (
@@ -75,8 +76,11 @@ const (
 	FinishTurnContinue = agent.FinishTurnContinue
 )
 
-// Run starts the agent loop and streams events until the run completes.
-var Run = agent.Run
+var (
+	// Run starts the agent loop and streams events until the run completes.
+	Run      = agent.Run
+	NewQueue = agent.NewQueue
+)
 
 // ---- providers ----
 

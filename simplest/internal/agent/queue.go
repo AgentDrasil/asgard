@@ -50,3 +50,20 @@ func (q *Queue) Poll() []types.Message {
 	q.msgs = nil
 	return out
 }
+
+// Peek returns a copy of pending messages without removing them from the queue.
+func (q *Queue) Peek() []types.Message {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.msgs) == 0 {
+		return nil
+	}
+	out := make([]types.Message, len(q.msgs))
+	copy(out, q.msgs)
+	return out
+}
+
+// PeekQueuedMessages is an alias of Peek for caller readability.
+func (q *Queue) PeekQueuedMessages() []types.Message {
+	return q.Peek()
+}

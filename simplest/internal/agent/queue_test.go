@@ -4,6 +4,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -76,4 +79,47 @@ func TestQueueFitsRequestFuncs(t *testing.T) {
 	if req.GetSteeringMessages == nil || req.GetFollowUpMessages == nil {
 		t.Fatal("method values must be assignable")
 	}
+}
+
+func TestQueue_PeekQueuedMessages(t *testing.T) {
+	t.Parallel()
+
+	q := NewQueue()
+
+	// Initial empty queue peek
+	assert.Nil(t, q.Peek())
+	assert.Nil(t, q.PeekQueuedMessages())
+
+	m1 := &types.UserMessage{Content: types.TextOnly("first"), Timestamp: 100}
+	m2 := &types.UserMessage{Content: types.TextOnly("second"), Timestamp: 200}
+	q.Push(m1, m2)
+
+	// Call Peek and PeekQueuedMessages multiple times
+	peek1 := q.Peek()
+	require.Len(t, peek1, 2)
+	assert.Same(t, m1, peek1[0])
+	assert.Same(t, m2, peek1[1])
+	assert.Equal(t, 2, q.Len())
+
+	peek2 := q.PeekQueuedMessages()
+	require.Len(t, peek2, 2)
+	assert.Same(t, m1, peek2[0])
+	assert.Same(t, m2, peek2[1])
+	assert.Equal(t, 2, q.Len())
+
+	// Mutating the returned slice must not affect internal queue
+	peek2[0] = &types.UserMessage{Content: types.TextOnly("mutated")}
+	peek3 := q.Peek()
+	assert.Same(t, m1, peek3[0])
+
+	// Draining with Poll
+	polled := q.Poll()
+	require.Len(t, polled, 2)
+	assert.Same(t, m1, polled[0])
+	assert.Same(t, m2, polled[1])
+
+	// Queue is now empty
+	assert.Equal(t, 0, q.Len())
+	assert.Nil(t, q.Peek())
+	assert.Nil(t, q.PeekQueuedMessages())
 }

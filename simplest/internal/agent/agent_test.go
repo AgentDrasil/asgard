@@ -22,6 +22,7 @@ type fakeProvider struct {
 	responses []*types.AssistantMessage
 	calls     int
 	contexts  []*types.Context
+	options   []*types.StreamOptions
 }
 
 func (f *fakeProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
@@ -29,6 +30,7 @@ func (f *fakeProvider) Stream(ctx context.Context, model *types.Model, cx *types
 	i := f.calls
 	f.calls++
 	f.contexts = append(f.contexts, cx)
+	f.options = append(f.options, opts)
 	f.mu.Unlock()
 
 	ch := make(chan types.AssistantMessageEvent, 8)
@@ -676,4 +678,59 @@ func TestContextCancellationAborts(t *testing.T) {
 func mustDecodeUser(raw json.RawMessage) []types.AssistantContent {
 	blocks, _ := types.DecodeUserContent(raw)
 	return blocks
+}
+
+func TestAgent_PrepareRequest_CalledBeforeStream(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dynamic modification persists across turns", func(t *testing.T) {
+		t.Parallel()
+
+		tool := newRecordingTool("tool1")
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			toolCallMsg(call("c1", "tool1", `{}`)),
+			textMsg("done"),
+		}}
+		req := baseRequest(fp, tool)
+		req.ThinkingLevel = types.ThinkingOff
+
+		var callCount int
+		req.PrepareRequest = func(r *Request) *Request {
+			callCount++
+			cloned := *r
+			cloned.ThinkingLevel = types.ThinkingHigh
+			return &cloned
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		assert.Equal(t, 2, fp.calls)
+		assert.Equal(t, 2, callCount)
+		require.Len(t, fp.options, 2)
+		assert.Equal(t, types.ThinkingHigh, fp.options[0].ThinkingLevel)
+		assert.Equal(t, types.ThinkingHigh, fp.options[1].ThinkingLevel)
+	})
+
+	t.Run("returning nil keeps original config without panic", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			textMsg("hello"),
+		}}
+		req := baseRequest(fp)
+		req.ThinkingLevel = types.ThinkingMedium
+
+		var callCount int
+		req.PrepareRequest = func(r *Request) *Request {
+			callCount++
+			return nil
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		assert.Equal(t, 1, fp.calls)
+		assert.Equal(t, 1, callCount)
+		require.Len(t, fp.options, 1)
+		assert.Equal(t, types.ThinkingMedium, fp.options[0].ThinkingLevel)
+	})
 }
