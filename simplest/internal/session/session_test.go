@@ -46,11 +46,14 @@ func TestCreateDeferredFlushAndFormat(t *testing.T) {
 	if sf.Path() == "" {
 		t.Fatal("expected persisted path")
 	}
+	if _, err := os.Stat(sf.Path()); !os.IsNotExist(err) {
+		t.Fatalf("file must not exist before first user message")
+	}
 	if _, err := sf.AppendMessage(testUser("hello")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(sf.Path()); !os.IsNotExist(err) {
-		t.Fatalf("file must not exist before first assistant message")
+	if _, err := os.Stat(sf.Path()); err != nil {
+		t.Fatalf("file must exist after first user message: %v", err)
 	}
 	if _, err := sf.AppendMessage(testAssistant("hi")); err != nil {
 		t.Fatal(err)
@@ -442,12 +445,12 @@ func TestFindMostRecentAndList(t *testing.T) {
 	_ = os.MkdirAll(dirA, 0o755)
 
 	sfA1, _ := mgr.Create("/proj/a", nil)
-	if _, err := sfA1.AppendMessage(testUser("a-one")); err != nil {
-		t.Fatal(err)
-	}
-	// Deferred flush means no assistant message => nothing on disk yet.
+	// Deferred flush means no user message => nothing on disk yet.
 	if _, err := os.Stat(sfA1.Path()); !os.IsNotExist(err) {
 		t.Fatalf("sfA1 should not be flushed yet")
+	}
+	if _, err := sfA1.AppendMessage(testUser("a-one")); err != nil {
+		t.Fatal(err)
 	}
 	if err := sfA1.Flush(); err != nil {
 		t.Fatal(err)
@@ -540,7 +543,7 @@ func TestAppendPersistenceErrorAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u1, err := sf.AppendMessage(testUser("hello"))
+	u1, err := sf.AppendSessionInfo("test session")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,8 +554,8 @@ func TestAppendPersistenceErrorAndRollback(t *testing.T) {
 	}
 	defer func() { _ = os.Remove(sf.Path()) }()
 
-	// Attempting to append assistant message should fail when persisting.
-	id, err := sf.AppendMessage(testAssistant("hi"))
+	// Attempting to append user message should fail when persisting.
+	id, err := sf.AppendMessage(testUser("hello"))
 	if err == nil {
 		t.Fatal("expected persistence error when writing to invalid file path")
 	}
@@ -1060,4 +1063,71 @@ func TestSession_Compaction_RetainNone(t *testing.T) {
 	require.Len(t, ctxSelf.Messages, 2)
 	assert.Contains(t, types.StringContentOf(mustDecode(t, ctxSelf.Messages[0].(*types.UserMessage).Content)), "self ref summary")
 	assert.Equal(t, "after-self", types.StringContentOf(mustDecode(t, ctxSelf.Messages[1].(*types.UserMessage).Content)))
+}
+
+func TestSession_PersistOnFirstUserMessage(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create("/home/user/proj", nil)
+	require.NoError(t, err)
+
+	_, err = os.Stat(sf.Path())
+	require.True(t, os.IsNotExist(err), "file should not exist before user message")
+
+	// Append user message without any assistant message
+	_, err = sf.AppendMessage(testUser("hello world"))
+	require.NoError(t, err)
+
+	// Verify disk file exists immediately
+	_, err = os.Stat(sf.Path())
+	require.NoError(t, err, "file must exist immediately after first user message")
+
+	// Verify LoadFile parses it completely
+	header, entries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, sf.Header().ID, header.ID)
+	require.Len(t, entries, 1)
+
+	msg, err := entries[0].DecodeMessage()
+	require.NoError(t, err)
+	userMsg, ok := msg.(*types.UserMessage)
+	require.True(t, ok)
+	blocks, err := types.DecodeUserContent(userMsg.Content)
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", types.StringContentOf(blocks))
+}
+
+func TestSession_OpenExisting_MaintainsHasUser(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create("/home/user/proj", nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("initial question"))
+	require.NoError(t, err)
+	filePath := sf.Path()
+
+	// Open the existing session file
+	openedSF, err := mgr.Open(filePath)
+	require.NoError(t, err)
+
+	// Append a new user message without any assistant message
+	newID, err := openedSF.AppendMessage(testUser("follow-up question"))
+	require.NoError(t, err)
+
+	// Verify the file on disk was updated immediately with the new entry
+	header, entries, err := LoadFile(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.Len(t, entries, 2)
+	assert.Equal(t, newID, entries[1].ID)
+
+	msg, err := entries[1].DecodeMessage()
+	require.NoError(t, err)
+	userMsg, ok := msg.(*types.UserMessage)
+	require.True(t, ok)
+	blocks, err := types.DecodeUserContent(userMsg.Content)
+	require.NoError(t, err)
+	assert.Equal(t, "follow-up question", types.StringContentOf(blocks))
 }

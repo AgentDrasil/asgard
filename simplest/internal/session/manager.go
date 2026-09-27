@@ -99,6 +99,7 @@ type SessionFile struct {
 	labelTsByID  map[string]string
 	leafID       *string // nil = auto (last entry); &"" = reset
 	hasAssistant bool
+	hasUser      bool
 	flushed      bool
 }
 
@@ -122,7 +123,7 @@ func newCore(cwd, id, parentSession string) *SessionFile {
 }
 
 // Create starts a new persisted session for cwd under the manager's sessions
-// directory. The file is created lazily on the first assistant message
+// directory. The file is created lazily on the first user message
 // (deferred flush).
 func (m *Manager) Create(cwd string, opts *CreateOptions) (*SessionFile, error) {
 	id := ""
@@ -214,8 +215,14 @@ func (sf *SessionFile) buildIndex() {
 	sf.labelTsByID = map[string]string{}
 	for _, e := range sf.entries {
 		sf.byID[e.ID] = e
-		if e.Type == TypeMessage && messageRole(e.Message) == string(types.RoleAssistant) {
-			sf.hasAssistant = true
+		if e.Type == TypeMessage {
+			role := messageRole(e.Message)
+			if role == string(types.RoleAssistant) {
+				sf.hasAssistant = true
+			}
+			if role == string(types.RoleUser) {
+				sf.hasUser = true
+			}
 		}
 		if e.Type == TypeLabel {
 			if e.Label != nil && *e.Label != "" {
@@ -317,6 +324,7 @@ func (sf *SessionFile) appendLocked(e *Entry) (string, error) {
 
 	prevLeaf := sf.leafID
 	prevHasAssistant := sf.hasAssistant
+	prevHasUser := sf.hasUser
 	var prevLabelVal *string
 	var prevLabelTsVal string
 	hadLabel := false
@@ -341,8 +349,14 @@ func (sf *SessionFile) appendLocked(e *Entry) (string, error) {
 	sf.byID[e.ID] = e
 	leaf := e.ID
 	sf.leafID = &leaf
-	if e.Type == TypeMessage && messageRole(e.Message) == string(types.RoleAssistant) {
-		sf.hasAssistant = true
+	if e.Type == TypeMessage {
+		role := messageRole(e.Message)
+		if role == string(types.RoleAssistant) {
+			sf.hasAssistant = true
+		}
+		if role == string(types.RoleUser) {
+			sf.hasUser = true
+		}
 	}
 
 	if err := sf.persistLocked(e); err != nil {
@@ -351,6 +365,7 @@ func (sf *SessionFile) appendLocked(e *Entry) (string, error) {
 		delete(sf.byID, e.ID)
 		sf.leafID = prevLeaf
 		sf.hasAssistant = prevHasAssistant
+		sf.hasUser = prevHasUser
 		if e.Type == TypeLabel {
 			if hadLabel {
 				sf.labelsByID[e.TargetID] = *prevLabelVal
@@ -571,7 +586,7 @@ func (sf *SessionFile) Label(id string) string {
 }
 
 // Flush writes any pending entries to disk immediately (normally deferred to
-// the first assistant message).
+// the first user message).
 func (sf *SessionFile) Flush() error {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -585,8 +600,8 @@ func (sf *SessionFile) persistLocked(entry *Entry) error {
 	if !sf.persist || sf.path == "" {
 		return nil
 	}
-	if !sf.hasAssistant {
-		// Deferred: buffer in memory until the first assistant message lands.
+	if !sf.hasUser && !sf.hasAssistant {
+		// Deferred: buffer in memory until the first user/assistant message lands.
 		return nil
 	}
 	if !sf.flushed {
