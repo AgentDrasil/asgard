@@ -1354,17 +1354,52 @@ func TestEngine_Resume_ConcurrentReplyDuringReplay(t *testing.T) {
 	// Recreate engine2
 	engine2, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
 
-	// Concurrently start replay for msgA and deliver reply for msgB during replayPending phase
+	// Replay msgA: the re-drive settles human_a from its reply and parks human_b
+	// on a live waiter, so it only returns once msgB has been answered.
+	replayRes := make(chan *WorkflowRunResult, 1)
+	replayErr := make(chan error, 1)
 	go func() {
-		time.Sleep(5 * time.Millisecond)
-		_, _, _ = engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+		_, res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		replayErr <- err
+		replayRes <- res
 	}()
 
-	_, resA, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+	// Wait for the re-drive to actually own the run before replying for msgB;
+	// otherwise the reply claims the resume itself and the msgA call is the one
+	// that gets ignored as a duplicate.
+	waitFor(t, func() bool {
+		engine2.waitMu.Lock()
+		defer engine2.waitMu.Unlock()
+		return engine2.executing["run-concurrent-replay"]
+	}, "replay must claim the run")
+
+	// Wait for human_b to be parked on a live waiter, then deliver the reply for
+	// msgB into the in-flight re-drive. Once the waiter is registered the delivery
+	// is unconditional, so this needs no retry loop: ordering is established by
+	// the two conditions above rather than by sleeping between attempts.
+	waitFor(t, func() bool {
+		engine2.waitMu.Lock()
+		defer engine2.waitMu.Unlock()
+		_, parked := engine2.waitingByMsg[msgB]
+		return parked
+	}, "human_b must be waiting on a live waiter")
+
+	outcome, _, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
 	require.NoError(t, err)
-	require.NotNil(t, resA)
-	assert.Equal(t, RunStatusCompleted, resA.Status)
-	assert.Equal(t, PersistStatusCompleted, store.get("run-concurrent-replay").Status)
+	assert.Equal(t, ResumeDeliveredLive, outcome)
+
+	// Bound the wait for the replay result so an engine regression fails the test
+	// instead of hanging it until the package timeout. This is failure detection
+	// only; the result arrives because the delivery above unblocked human_b.
+	select {
+	case resA := <-replayRes:
+		require.NoError(t, <-replayErr)
+		require.NotNil(t, resA)
+		assert.Equal(t, RunStatusCompleted, resA.Status)
+		assert.Equal(t, PersistStatusCompleted, store.get("run-concurrent-replay").Status)
+	case <-time.After(10 * time.Second):
+		t.Fatal("replay did not settle after the human_b reply")
+	}
 }
 
 func TestEngine_ParallelHuman_BrotherNodeSettlement_Persisted(t *testing.T) {

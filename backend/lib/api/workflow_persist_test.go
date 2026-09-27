@@ -872,11 +872,17 @@ nodes:
 	}
 	require.NotEmpty(t, askMessageID)
 
-	sess, err := repo.GetSession(chatID)
-	require.NoError(t, err)
-	assert.False(t, s.isSessionRunning(sess), "Session must not be running while waiting for human")
+	// The suspension is delivered as message(ask_user) -> status(isRunning:false),
+	// and the execution guard is released right after, when the engine emits
+	// EventWorkflowSuspended. Wait for that to settle: sampling as soon as the
+	// ask_user message arrives can still observe a running session, and the
+	// trailing isRunning:false status would leak into the resume collection below.
+	assert.Eventually(t, func() bool {
+		sess, err := repo.GetSession(chatID)
+		return err == nil && sess != nil && !s.isSessionRunning(sess)
+	}, 5*time.Second, 10*time.Millisecond, "session must stop running once the human node waits")
 
-	// Drain any events from the pre-resume/suspension phase before starting resume collection
+	// Drain the suspension phase before starting resume collection
 	drain := true
 	for drain {
 		select {
@@ -921,11 +927,12 @@ nodes:
 	replyRec := postAskUserReply(t, s, chatID, askMessageID, "Approved")
 	assert.Equal(t, http.StatusOK, replyRec.Code)
 
-	// Sample running status while workflow is running the final node
-	time.Sleep(50 * time.Millisecond)
-	sessRunning, err := repo.GetSession(chatID)
-	require.NoError(t, err)
-	assert.True(t, s.isSessionRunning(sessRunning), "Session must be running during resumed execution")
+	// The resume is dispatched asynchronously, so poll for the resumed run
+	// instead of sampling once after a fixed delay.
+	assert.Eventually(t, func() bool {
+		sess, err := repo.GetSession(chatID)
+		return err == nil && sess != nil && s.isSessionRunning(sess)
+	}, 5*time.Second, 5*time.Millisecond, "session must be running during resumed execution")
 
 	// Wait until workflow run completes
 	waitForRunStatus(t, testDB, chatID, workflow.PersistStatusCompleted)

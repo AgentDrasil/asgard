@@ -69,7 +69,9 @@ func TestStopSession_SingleAgentRunning(t *testing.T) {
 	chatID := "018f3a5b-0000-7000-8000-0000000000a2"
 	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
 
-	started := make(chan struct{})
+	// Buffered: the worker signals with a non-blocking send, so the slot must be
+	// reserved before the test starts waiting on it.
+	started := make(chan struct{}, 1)
 	runErr := make(chan error, 1)
 	server.runSingleAgentFn = func(ctx context.Context, agent *agentspec.Agent, cid string, req TriggerMessageRequest) (string, string, error) {
 		select {
@@ -165,7 +167,8 @@ func TestStopSession_ClearsQueuedMessages(t *testing.T) {
 	chatID := "018f3a5b-0000-7000-8000-0000000000a4"
 	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
 
-	started := make(chan struct{})
+	// Buffered: same non-blocking signal as above.
+	started := make(chan struct{}, 1)
 	server.runSingleAgentFn = func(ctx context.Context, agent *agentspec.Agent, cid string, req TriggerMessageRequest) (string, string, error) {
 		select {
 		case started <- struct{}{}:
