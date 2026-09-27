@@ -1131,3 +1131,97 @@ func TestSession_OpenExisting_MaintainsHasUser(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "follow-up question", types.StringContentOf(blocks))
 }
+
+func TestSession_LoadFile_TornTail_And_CorruptLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		fileContent   string
+		wantHeaderID  string
+		wantEntries   int
+		wantFirstText string
+	}{
+		{
+			name: "Case A: Torn tail incomplete JSON at file end",
+			fileContent: `{"type":"session","version":1,"id":"sess-torn","timestamp":"2026-09-26T00:00:00Z","cwd":"/proj"}
+{"type":"message","id":"msg-1","timestamp":"2026-09-26T00:00:01Z","message":{"role":"user","content":"hello"}}
+{"type":"message","id":"msg-2","timestamp":"2026-09-26T00:00:02Z","message":{"role":"assistant","conte`,
+			wantHeaderID:  "sess-torn",
+			wantEntries:   1,
+			wantFirstText: "hello",
+		},
+		{
+			name: "Case B: Corrupt line in the middle",
+			fileContent: `{"type":"session","version":1,"id":"sess-mid","timestamp":"2026-09-26T00:00:00Z","cwd":"/proj"}
+not a valid json line here!
+{"type":"message","id":"msg-valid","timestamp":"2026-09-26T00:00:01Z","message":{"role":"user","content":"valid line"}}`,
+			wantHeaderID:  "sess-mid",
+			wantEntries:   1,
+			wantFirstText: "valid line",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tempDir := t.TempDir()
+			filePath := filepath.Join(tempDir, "session.jsonl")
+			err := os.WriteFile(filePath, []byte(tt.fileContent), 0o644)
+			require.NoError(t, err)
+
+			header, entries, err := LoadFile(filePath)
+			require.NoError(t, err)
+			require.NotNil(t, header)
+			assert.Equal(t, tt.wantHeaderID, header.ID)
+			require.Len(t, entries, tt.wantEntries)
+
+			msg, err := entries[0].DecodeMessage()
+			require.NoError(t, err)
+			userMsg, ok := msg.(*types.UserMessage)
+			require.True(t, ok)
+			blocks, err := types.DecodeUserContent(userMsg.Content)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantFirstText, types.StringContentOf(blocks))
+		})
+	}
+}
+
+func TestSession_AtomicRewrite(t *testing.T) {
+	t.Parallel()
+	mgr, baseDir := newTestManager(t)
+	projDir := filepath.Join(baseDir, "workspace")
+	require.NoError(t, os.MkdirAll(projDir, 0o755))
+
+	sf, err := mgr.Create(projDir, nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("msg 1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testAssistant("reply 1"))
+	require.NoError(t, err)
+
+	sessionPath := sf.Path()
+	sessionDir := filepath.Dir(sessionPath)
+
+	// Trigger a rewrite via Flush (or Compact / rewriteLocked)
+	// Since sf is already flushed from AppendMessage, we can call rewriteLocked indirectly or directly
+	sf.mu.Lock()
+	err = sf.rewriteLocked()
+	sf.mu.Unlock()
+	require.NoError(t, err)
+
+	// Verify session file exists and is valid
+	header, entries, err := LoadFile(sessionPath)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, sf.Header().ID, header.ID)
+	require.Len(t, entries, 2)
+
+	// Verify no temporary .session-tmp-* files remained in sessionDir
+	files, err := os.ReadDir(sessionDir)
+	require.NoError(t, err)
+	for _, f := range files {
+		assert.False(t, strings.HasPrefix(f.Name(), ".session-tmp-"), "found leftover temporary file: %s", f.Name())
+	}
+}

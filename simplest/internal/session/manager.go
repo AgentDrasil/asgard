@@ -629,6 +629,23 @@ func writeEntryLine(f *os.File, v any) error {
 }
 
 func (sf *SessionFile) rewriteLocked() error {
+	dir := filepath.Dir(sf.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmpFile, err := os.CreateTemp(dir, ".session-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+
 	var buf bytes.Buffer
 	hb, err := json.Marshal(sf.header)
 	if err != nil {
@@ -644,9 +661,21 @@ func (sf *SessionFile) rewriteLocked() error {
 		buf.Write(eb)
 		buf.WriteByte('\n')
 	}
-	if err := os.WriteFile(sf.path, buf.Bytes(), 0o644); err != nil {
+
+	if _, err := tmpFile.Write(buf.Bytes()); err != nil {
 		return err
 	}
+	if err := tmpFile.Sync(); err != nil {
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpName, sf.path); err != nil {
+		return err
+	}
+	cleanup = false
 	sf.flushed = true
 	return nil
 }
