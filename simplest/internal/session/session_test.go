@@ -161,8 +161,8 @@ func TestOpenRoundTripWithContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ctx.Messages) != 2 {
-		t.Fatalf("want 2 messages, got %d", len(ctx.Messages))
+	if len(ctx.Messages) != 3 {
+		t.Fatalf("want 3 messages (with reconciled interrupted tool call), got %d", len(ctx.Messages))
 	}
 	got, ok := ctx.Messages[1].(*types.AssistantMessage)
 	if !ok {
@@ -1224,4 +1224,113 @@ func TestSession_AtomicRewrite(t *testing.T) {
 	for _, f := range files {
 		assert.False(t, strings.HasPrefix(f.Name(), ".session-tmp-"), "found leftover temporary file: %s", f.Name())
 	}
+}
+
+func TestSession_Reconcile_OrphanToolCall(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("please run command"))
+	require.NoError(t, err)
+
+	asst := &types.AssistantMessage{
+		Content: []types.AssistantContent{
+			types.ToolCall{
+				Type:      types.TypeToolCall,
+				ID:        "call_123",
+				Name:      "bash",
+				Arguments: []byte(`{"command":"echo hello"}`),
+			},
+		},
+		API:        types.APIOpenAICompat,
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: types.StopToolUse,
+		Timestamp:  2000,
+	}
+	_, err = sf.AppendMessage(asst)
+	require.NoError(t, err)
+
+	sessionPath := sf.Path()
+	require.NotEmpty(t, sessionPath)
+
+	header, entries, err := LoadFile(sessionPath)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	initialEntriesLen := len(entries)
+	require.Equal(t, 2, initialEntriesLen)
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 3)
+
+	_, ok := ctx.Messages[0].(*types.UserMessage)
+	require.True(t, ok)
+	_, ok = ctx.Messages[1].(*types.AssistantMessage)
+	require.True(t, ok)
+
+	trm, ok := ctx.Messages[2].(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.Equal(t, "call_123", trm.ToolCallID)
+	assert.Equal(t, "bash", trm.ToolName)
+	assert.True(t, trm.IsError)
+
+	blocks, err := types.DecodeToolResultContent(trm.Content)
+	require.NoError(t, err)
+	textContent := types.StringContentOf(blocks)
+	assert.Contains(t, textContent, "interrupted: session was terminated before tool execution completed")
+
+	// Ensure disk / entries are not contaminated
+	headerAfter, entriesAfter, err := LoadFile(sessionPath)
+	require.NoError(t, err)
+	require.NotNil(t, headerAfter)
+	assert.Len(t, entriesAfter, initialEntriesLen)
+
+	// Also verify sf.BuildContext produces the reconciled message
+	sfCtx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, sfCtx.Messages, 3)
+	sfTRM, ok := sfCtx.Messages[2].(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.Equal(t, "call_123", sfTRM.ToolCallID)
+	assert.True(t, sfTRM.IsError)
+}
+
+func TestSession_Reconcile_DanglingUser(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("dangling user prompt"))
+	require.NoError(t, err)
+
+	sessionPath := sf.Path()
+	require.NotEmpty(t, sessionPath)
+
+	header, entries, err := LoadFile(sessionPath)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.Len(t, entries, 1)
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 1)
+
+	uMsg, ok := ctx.Messages[0].(*types.UserMessage)
+	require.True(t, ok)
+	userBlocks, err := types.DecodeUserContent(uMsg.Content)
+	require.NoError(t, err)
+	assert.Equal(t, "dangling user prompt", types.StringContentOf(userBlocks))
+
+	// Reopen via mgr.Open and verify BuildContext works cleanly
+	reopened, err := mgr.Open(sessionPath)
+	require.NoError(t, err)
+	reopenedCtx, err := reopened.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, reopenedCtx.Messages, 1)
 }

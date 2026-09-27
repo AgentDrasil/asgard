@@ -410,6 +410,9 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 	edits := collectPathEdits(path)
 
 	messages := make([]types.Message, 0, len(selected))
+	pendingToolCalls := make(map[string]types.ToolCall)
+	var pendingOrder []string
+
 	for _, e := range selected {
 		msgs, err := SessionEntryToContextMessages(e)
 		if err != nil {
@@ -423,7 +426,45 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 				msgs[i] = applyMessageReplacement(m, *edit.Replacement)
 			}
 		}
+
+		for _, m := range msgs {
+			switch msg := m.(type) {
+			case *types.AssistantMessage:
+				for _, blk := range msg.Content {
+					if tc, ok := blk.(types.ToolCall); ok && tc.ID != "" {
+						if _, exists := pendingToolCalls[tc.ID]; !exists {
+							pendingOrder = append(pendingOrder, tc.ID)
+						}
+						pendingToolCalls[tc.ID] = tc
+					}
+				}
+			case *types.ToolResultMessage:
+				if msg.ToolCallID != "" {
+					delete(pendingToolCalls, msg.ToolCallID)
+				}
+			}
+		}
+
 		messages = append(messages, msgs...)
 	}
+
+	for _, id := range pendingOrder {
+		if tc, ok := pendingToolCalls[id]; ok {
+			errBlocks, _ := types.MarshalBlocks([]types.AssistantContent{
+				types.TextContent{
+					Type: types.TypeText,
+					Text: "interrupted: session was terminated before tool execution completed",
+				},
+			})
+			messages = append(messages, &types.ToolResultMessage{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
+				Content:    errBlocks,
+				IsError:    true,
+				Timestamp:  time.Now().UnixMilli(),
+			})
+		}
+	}
+
 	return Context{Messages: messages, ThinkingLevel: thinkingLevel, Model: model}, nil
 }
