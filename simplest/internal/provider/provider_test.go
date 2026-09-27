@@ -197,6 +197,30 @@ func TestOpenAIRequestOptionsAndTools(t *testing.T) {
 	}
 }
 
+func TestOpenAIThinkingLevelWithMap(t *testing.T) {
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+	defer srv.Close()
+
+	maxEffort := "max"
+	m := oaModel(srv.URL)
+	m.ThinkingLevelMap = types.ThinkingLevelMap{
+		types.ThinkingHigh: &maxEffort,
+	}
+
+	cx := simpleContext()
+	opts := &types.StreamOptions{ThinkingLevel: types.ThinkingHigh}
+	p := NewOpenAICompat("k")
+	_, _, errEv := drain(p.Stream(context.Background(), m, cx, opts))
+	if errEv != nil {
+		t.Fatalf("unexpected stream error: %+v", errEv)
+	}
+
+	if captured["reasoning_effort"] != "max" {
+		t.Fatalf("reasoning_effort = %v, want max", captured["reasoning_effort"])
+	}
+}
+
 func TestOpenAISystemPromptAndRoles(t *testing.T) {
 	var captured map[string]any
 	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
@@ -450,6 +474,65 @@ func TestOpenAIReasoningEffortValidation(t *testing.T) {
 	if !strings.Contains(errEv.Message.ErrorMessage, "unsupported reasoning effort \"max\"") {
 		t.Fatalf("unexpected error message: %q", errEv.Message.ErrorMessage)
 	}
+}
+
+func TestOpenAIReasoningEffortThinkingLevelMap(t *testing.T) {
+	chunks := []string{
+		`{"choices":[{"delta":{"content":"ok"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"[DONE]",
+	}
+	var captured map[string]any
+	srv := sseServer(t, chunks, &captured, nil, "/chat/completions")
+	defer srv.Close()
+
+	highMapped := "max"
+	offMapped := "none"
+	model := oaModel(srv.URL)
+	model.Reasoning = true
+	model.ThinkingLevelMap = types.ThinkingLevelMap{
+		types.ThinkingMinimal: nil,
+		types.ThinkingHigh:    &highMapped,
+		types.ThinkingOff:     &offMapped,
+	}
+
+	p := NewOpenAICompat("sk-test")
+
+	// 1. ThinkingHigh mapped to "max"
+	_, done, errEv := drain(p.Stream(context.Background(), model, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingHigh,
+	}))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, "max", captured["reasoning_effort"])
+
+	// 2. ThinkingOff mapped to "none"
+	captured = nil
+	_, done, errEv = drain(p.Stream(context.Background(), model, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingOff,
+	}))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, "none", captured["reasoning_effort"])
+
+	// 3. ThinkingOff without "none" mapping is omitted
+	modelWithoutNone := oaModel(srv.URL)
+	modelWithoutNone.Reasoning = true
+	captured = nil
+	_, done, errEv = drain(p.Stream(context.Background(), modelWithoutNone, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingOff,
+	}))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	_, hasEffort := captured["reasoning_effort"]
+	assert.False(t, hasEffort)
+
+	// 4. ThinkingMinimal explicitly disabled (nil) -> rejected
+	_, _, errEv = drain(p.Stream(context.Background(), model, simpleContext(), &types.StreamOptions{
+		ThinkingLevel: types.ThinkingMinimal,
+	}))
+	require.NotNil(t, errEv)
+	assert.Contains(t, errEv.Message.ErrorMessage, "unsupported reasoning effort \"minimal\"")
 }
 
 // --- Google Generative AI ---

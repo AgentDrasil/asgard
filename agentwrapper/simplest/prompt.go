@@ -81,8 +81,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("resolving model and provider: %w", err)
 	}
 
-	if rawVariant != "" && len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(rawVariant) {
-		return nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", rawVariant, model.ID, model.ReasoningEffort)
+	if rawVariant != "" && !model.SupportsThinkingLevel(thinkingLevel) {
+		return nil, fmt.Errorf("unsupported thinking level %q for model %q", rawVariant, model.ID)
 	}
 
 	baseDir := simplest.DefaultBaseDir()

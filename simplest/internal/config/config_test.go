@@ -300,19 +300,19 @@ models:
 	// Check reasoning_effort snake_case mapping
 	assert.Equal(t, "deepseek-v4-flash", models[0].ID)
 	assert.Equal(t, []string{"low", "high", "max"}, models[0].ReasoningEffort)
-	assert.True(t, models[0].SupportsReasoningEffort("low"))
-	assert.True(t, models[0].SupportsReasoningEffort("high"))
-	assert.True(t, models[0].SupportsReasoningEffort("max"))
-	assert.True(t, models[0].SupportsReasoningEffort("LOW"))
-	assert.False(t, models[0].SupportsReasoningEffort("minimal"))
-	assert.False(t, models[0].SupportsReasoningEffort("medium"))
+	assert.True(t, models[0].SupportsThinkingLevel("low"))
+	assert.True(t, models[0].SupportsThinkingLevel("high"))
+	assert.True(t, models[0].SupportsThinkingLevel("max"))
+	assert.True(t, models[0].SupportsThinkingLevel("LOW"))
+	assert.False(t, models[0].SupportsThinkingLevel("minimal"))
+	assert.False(t, models[0].SupportsThinkingLevel("medium"))
 
 	// Check reasoningEffort camelCase mapping
 	assert.Equal(t, "glm-5.3", models[1].ID)
 	assert.Equal(t, []string{"low", "high"}, models[1].ReasoningEffort)
-	assert.True(t, models[1].SupportsReasoningEffort("low"))
-	assert.True(t, models[1].SupportsReasoningEffort("high"))
-	assert.False(t, models[1].SupportsReasoningEffort("max"))
+	assert.True(t, models[1].SupportsThinkingLevel("low"))
+	assert.True(t, models[1].SupportsThinkingLevel("high"))
+	assert.False(t, models[1].SupportsThinkingLevel("max"))
 }
 
 func TestConfig_ModelMetadataRoundTrip(t *testing.T) {
@@ -493,4 +493,37 @@ func TestConfig_DefaultFallbackConfig(t *testing.T) {
 	for _, m := range cfg.Models {
 		assert.Equal(t, "chat", m.Type)
 	}
+}
+
+func TestConfig_ThinkingLevelMap_CaseInsensitiveNormalization(t *testing.T) {
+	t.Parallel()
+
+	maxVal := "max"
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{
+			"test-prov": {API: types.APIOpenAICompat},
+		},
+		Models: []ModelConfig{
+			{
+				ID:        "m1",
+				Provider:  "test-prov",
+				Reasoning: true,
+				ThinkingLevelMap: map[string]*string{
+					"High": &maxVal,
+				},
+			},
+		},
+	}
+
+	m, _, err := cfg.ResolveModelAndProvider("m1")
+	require.NoError(t, err)
+	require.NotNil(t, m)
+
+	// Normalized to lowercase ThinkingHigh ("high")
+	assert.True(t, m.SupportsThinkingLevel(types.ThinkingHigh))
+	level, wireVal, ok := m.ClampThinkingLevel(types.ThinkingHigh)
+	assert.True(t, ok)
+	assert.Equal(t, types.ThinkingHigh, level)
+	require.NotNil(t, wireVal)
+	assert.Equal(t, "max", *wireVal)
 }

@@ -265,7 +265,7 @@ func (c *Config) GetAvailableModels() []*types.Model {
 		if mc.ThinkingLevelMap != nil {
 			thinkingLevelMap = make(types.ThinkingLevelMap, len(mc.ThinkingLevelMap))
 			for k, v := range mc.ThinkingLevelMap {
-				thinkingLevelMap[types.ThinkingLevel(k)] = v
+				thinkingLevelMap[types.ThinkingLevel(strings.ToLower(k))] = v
 			}
 		}
 

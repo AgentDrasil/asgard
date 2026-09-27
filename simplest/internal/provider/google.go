@@ -81,14 +81,37 @@ func sameModel(am *types.AssistantMessage, model *types.Model) bool {
 
 // thinking configuration.
 
+func parseGenaiThinkingLevel(s string) (genai.ThinkingLevel, bool) {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "MINIMAL":
+		return genai.ThinkingLevelMinimal, true
+	case "LOW":
+		return genai.ThinkingLevelLow, true
+	case "MEDIUM":
+		return genai.ThinkingLevelMedium, true
+	case "HIGH":
+		return genai.ThinkingLevelHigh, true
+	default:
+		return "", false
+	}
+}
+
 // googleThinkingConfig resolves the thinking config for a request based on
 // the requested level and model family. Gemma 4 supports no thinking config;
 // unknown families are rejected by the caller.
-func googleThinkingConfig(level types.ThinkingLevel, modelID string) *genai.ThinkingConfig {
+func googleThinkingConfig(level types.ThinkingLevel, modelID string, tlMap types.ThinkingLevelMap) *genai.ThinkingConfig {
 	family := gemini3Family(modelID)
-	switch family {
-	case "":
+	if family == "" {
 		return nil // gemma: no thinking control
+	}
+	if tlMap != nil {
+		if mapped, ok := tlMap[level]; ok && mapped != nil {
+			if gl, ok := parseGenaiThinkingLevel(*mapped); ok {
+				return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: gl}
+			}
+		}
+	}
+	switch family {
 	case "pro":
 		// gemini-3 pro supports LOW/HIGH only and cannot disable thinking.
 		lvl := genai.ThinkingLevelHigh
@@ -515,10 +538,13 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 		}
 		level := opts.ThinkingLevel
 		if model.Reasoning && level != "" {
-			if len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(string(level)) {
-				return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+			if !model.SupportsThinkingLevel(level) {
+				if len(model.ReasoningEffort) > 0 {
+					return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+				}
+				return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q", level, model.ID)
 			}
-			config.ThinkingConfig = googleThinkingConfig(level, model.WireID())
+			config.ThinkingConfig = googleThinkingConfig(level, model.WireID(), model.ThinkingLevelMap)
 		}
 	} else if model.Reasoning {
 		config.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}

@@ -97,58 +97,80 @@ func tcLevel(tc *genai.ThinkingConfig) genai.ThinkingLevel {
 
 func TestGoogleThinkingConfigPro(t *testing.T) {
 	id := "gemini-3.1-pro-preview"
-	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id)); got != genai.ThinkingLevelLow {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id, nil)); got != genai.ThinkingLevelLow {
 		t.Errorf("off -> %q, want LOW", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingMinimal, id)); got != genai.ThinkingLevelLow {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingMinimal, id, nil)); got != genai.ThinkingLevelLow {
 		t.Errorf("minimal -> %q, want LOW (MINIMAL unsupported)", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingHigh, id)); got != genai.ThinkingLevelHigh {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingHigh, id, nil)); got != genai.ThinkingLevelHigh {
 		t.Errorf("high -> %q, want HIGH", got)
 	}
 }
 
 func TestGoogleThinkingConfigFlash(t *testing.T) {
 	id := "gemini-3.7-flash"
-	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id)); got != genai.ThinkingLevelLow {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id, nil)); got != genai.ThinkingLevelLow {
 		t.Errorf("off -> %q, want LOW", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingMinimal, id)); got != genai.ThinkingLevelLow {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingMinimal, id, nil)); got != genai.ThinkingLevelLow {
 		t.Errorf("minimal -> %q, want LOW (MINIMAL unsupported)", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingMedium, id)); got != genai.ThinkingLevelMedium {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingMedium, id, nil)); got != genai.ThinkingLevelMedium {
 		t.Errorf("medium -> %q, want MEDIUM", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingHigh, id)); got != genai.ThinkingLevelHigh {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingHigh, id, nil)); got != genai.ThinkingLevelHigh {
 		t.Errorf("high -> %q, want HIGH", got)
 	}
 }
 
 func TestGoogleThinkingConfigLite(t *testing.T) {
 	id := "gemini-3.5-flash-lite"
-	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id)); got != genai.ThinkingLevelMinimal {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingOff, id, nil)); got != genai.ThinkingLevelMinimal {
 		t.Errorf("off -> %q, want MINIMAL", got)
 	}
-	if got := tcLevel(googleThinkingConfig(types.ThinkingLow, id)); got != genai.ThinkingLevelLow {
+	if got := tcLevel(googleThinkingConfig(types.ThinkingLow, id, nil)); got != genai.ThinkingLevelLow {
 		t.Errorf("low -> %q, want LOW", got)
 	}
 }
 
 func TestGoogleThinkingConfigGemmaAndUnknown(t *testing.T) {
-	if tc := googleThinkingConfig(types.ThinkingHigh, "gemma-4-31b-it"); tc != nil {
+	if tc := googleThinkingConfig(types.ThinkingHigh, "gemma-4-31b-it", nil); tc != nil {
 		t.Errorf("gemma must get no thinking config, got %+v", tc)
 	}
-	if tc := googleThinkingConfig(types.ThinkingHigh, "gemini-2.5-flash"); tc != nil {
+	if tc := googleThinkingConfig(types.ThinkingHigh, "gemini-2.5-flash", nil); tc != nil {
 		t.Errorf("unknown family must get no thinking config, got %+v", tc)
 	}
 }
 
 func TestGoogleThinkingConfigIncludeThoughts(t *testing.T) {
 	for _, id := range []string{"gemini-3.7-flash", "gemini-3.1-pro-preview"} {
-		tc := googleThinkingConfig(types.ThinkingMedium, id)
+		tc := googleThinkingConfig(types.ThinkingMedium, id, nil)
 		if tc == nil || !tc.IncludeThoughts {
 			t.Errorf("%s: IncludeThoughts not set: %+v", id, tc)
 		}
+	}
+}
+
+func TestGoogleThinkingConfigWithMap(t *testing.T) {
+	id := "gemini-3.7-flash"
+	minMapped := "low"
+	highMapped := "minimal"
+	tlMap := types.ThinkingLevelMap{
+		types.ThinkingMinimal: &minMapped,
+		types.ThinkingHigh:    &highMapped,
+	}
+
+	if got := tcLevel(googleThinkingConfig(types.ThinkingMinimal, id, tlMap)); got != genai.ThinkingLevelLow {
+		t.Errorf("minimal -> %q, want LOW", got)
+	}
+
+	if got := tcLevel(googleThinkingConfig(types.ThinkingHigh, id, tlMap)); got != genai.ThinkingLevelMinimal {
+		t.Errorf("high -> %q, want MINIMAL", got)
+	}
+
+	if got := tcLevel(googleThinkingConfig(types.ThinkingMedium, id, tlMap)); got != genai.ThinkingLevelMedium {
+		t.Errorf("medium -> %q, want MEDIUM", got)
 	}
 }
 

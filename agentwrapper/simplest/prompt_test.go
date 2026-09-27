@@ -708,8 +708,26 @@ func TestPrompt_ReasoningEffortDisallowedError(t *testing.T) {
 		Model: "deepseek/deepseek-v4-flash/max",
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported reasoning effort \"max\"")
+	assert.Contains(t, err.Error(), "unsupported thinking level \"max\"")
 	assert.Contains(t, err.Error(), "deepseek-v4-flash")
+
+	// Non-reasoning model rejects any non-off variant
+	nonReasoningModel := &simplest.Model{
+		ID:        "gpt-4o",
+		API:       simplest.APIOpenAICompat,
+		Provider:  "openai",
+		Reasoning: false,
+	}
+	SetProviderResolver(func(modelID string) (*simplest.Model, simplest.Provider, error) {
+		return nonReasoningModel, nil, nil
+	})
+	_, err = Prompt(context.Background(), "Coding task", types.PromptOptions{
+		Dir:   testDir,
+		Model: "openai/gpt-4o/low",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported thinking level \"low\"")
+	assert.Contains(t, err.Error(), "gpt-4o")
 }
 
 func TestPrompt_SandboxSystemPromptAssembly(t *testing.T) {

@@ -117,18 +117,84 @@ func (m *Model) WireID() string {
 	return m.ID
 }
 
-// SupportsReasoningEffort reports whether the given effort is allowed for this model.
-// If ReasoningEffort is empty, all valid thinking levels are considered supported.
-func (m *Model) SupportsReasoningEffort(effort string) bool {
-	if m == nil || len(m.ReasoningEffort) == 0 {
+// OrderedThinkingLevels defines thinking levels in increasing reasoning effort order.
+var OrderedThinkingLevels = []ThinkingLevel{
+	ThinkingOff,
+	ThinkingMinimal,
+	ThinkingLow,
+	ThinkingMedium,
+	ThinkingHigh,
+	ThinkingXHigh,
+	ThinkingMax,
+}
+
+// SupportsThinkingLevel reports whether the given thinking level is supported by this model.
+func (m *Model) SupportsThinkingLevel(level ThinkingLevel) bool {
+	if m == nil || !m.Reasoning {
+		return level == ThinkingOff || level == "" || strings.EqualFold(string(level), string(ThinkingOff))
+	}
+	if m.ThinkingLevelMap != nil {
+		if ptr, ok := m.ThinkingLevelMap[level]; ok {
+			return ptr != nil
+		}
+		if len(m.ReasoningEffort) > 0 {
+			return m.hasReasoningEffort(string(level))
+		}
 		return true
 	}
+	if len(m.ReasoningEffort) > 0 {
+		return m.hasReasoningEffort(string(level))
+	}
+	return true
+}
+
+func (m *Model) hasReasoningEffort(effort string) bool {
 	for _, allowed := range m.ReasoningEffort {
 		if strings.EqualFold(allowed, effort) {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *Model) wireThinkingValue(level ThinkingLevel) *string {
+	if m == nil || m.ThinkingLevelMap == nil {
+		return nil
+	}
+	return m.ThinkingLevelMap[level]
+}
+
+// ClampThinkingLevel resolves a thinking level to a supported level and its wire value (if mapped).
+// If the requested level is supported, it is returned with ok=true.
+// If unsupported, it clamps strictly downwards to the nearest supported level in OrderedThinkingLevels,
+// or ThinkingOff if no lower level is supported, returning ok=false.
+func (m *Model) ClampThinkingLevel(level ThinkingLevel) (ThinkingLevel, *string, bool) {
+	if m.SupportsThinkingLevel(level) {
+		return level, m.wireThinkingValue(level), true
+	}
+	idx := -1
+	for i, l := range OrderedThinkingLevels {
+		if l == level || strings.EqualFold(string(l), string(level)) {
+			idx = i
+			break
+		}
+	}
+	if idx > 0 {
+		for i := idx - 1; i >= 0; i-- {
+			cand := OrderedThinkingLevels[i]
+			if m.SupportsThinkingLevel(cand) {
+				return cand, m.wireThinkingValue(cand), false
+			}
+		}
+	}
+	return ThinkingOff, m.wireThinkingValue(ThinkingOff), false
+}
+
+// SupportsReasoningEffort reports whether the given effort is allowed for this model.
+//
+// Deprecated: Use SupportsThinkingLevel instead.
+func (m *Model) SupportsReasoningEffort(effort string) bool {
+	return m.SupportsThinkingLevel(ThinkingLevel(effort))
 }
 
 // SupportsImage reports whether the model supports image input.

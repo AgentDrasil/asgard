@@ -593,11 +593,26 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 			req.MaxCompletionTokens = &mx
 		}
 		level := opts.ThinkingLevel
-		if model.Reasoning && level != "" && level != types.ThinkingOff {
-			if len(model.ReasoningEffort) > 0 && !model.SupportsReasoningEffort(string(level)) {
-				return nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+		if model.Reasoning && level != "" {
+			if !model.SupportsThinkingLevel(level) {
+				if len(model.ReasoningEffort) > 0 {
+					return nil, fmt.Errorf("unsupported reasoning effort %q for model %q: allowed values are %v", level, model.ID, model.ReasoningEffort)
+				}
+				return nil, fmt.Errorf("unsupported reasoning effort %q for model %q", level, model.ID)
 			}
-			req.ReasoningEffort = string(level)
+			wireEffort := string(level)
+			if model.ThinkingLevelMap != nil {
+				if mapped, ok := model.ThinkingLevelMap[level]; ok && mapped != nil {
+					wireEffort = *mapped
+				}
+			}
+			if level == types.ThinkingOff {
+				if wireEffort == "none" {
+					req.ReasoningEffort = "none"
+				}
+			} else {
+				req.ReasoningEffort = wireEffort
+			}
 		}
 	}
 	for _, td := range cx.Tools {
