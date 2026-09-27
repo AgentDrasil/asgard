@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -227,10 +228,17 @@ func lastCompaction(path []*Entry) *Entry {
 func BuildContextEntries(entries []*Entry, leafID *string) []*Entry {
 	byID := indexEntries(entries)
 	path := buildPath(entries, byID, leafID)
-	return buildContextEntriesFromPath(path)
+	selected, _ := buildContextEntriesFromPath(path)
+	return selected
 }
 
-func buildContextEntriesFromPath(path []*Entry) []*Entry {
+// isRetainNoneCompaction reports whether comp compaction discarded all prior
+// entries (no kept range).
+func isRetainNoneCompaction(comp *Entry) bool {
+	return comp.FirstKeptEntryID == "" || comp.FirstKeptEntryID == comp.ID
+}
+
+func buildContextEntriesFromPath(path []*Entry) ([]*Entry, map[string]*Entry) {
 	comp := lastCompaction(path)
 	var kept []*Entry
 	if comp == nil {
@@ -245,7 +253,7 @@ func buildContextEntriesFromPath(path []*Entry) []*Entry {
 		}
 		if compIdx < 0 {
 			kept = path
-		} else if comp.FirstKeptEntryID == "" || comp.FirstKeptEntryID == comp.ID {
+		} else if isRetainNoneCompaction(comp) {
 			kept = []*Entry{comp}
 			kept = append(kept, path[compIdx+1:]...)
 		} else {
@@ -275,7 +283,7 @@ func buildContextEntriesFromPath(path []*Entry) []*Entry {
 		}
 		out = append(out, e)
 	}
-	return out
+	return out, edits
 }
 
 func indexEntries(entries []*Entry) map[string]*Entry {
@@ -406,12 +414,14 @@ func applyMessageReplacement(msg types.Message, text string) types.Message {
 func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *string) (Context, error) {
 	path := buildPath(entries, byID, leafID)
 	thinkingLevel, model := getSessionContextSettings(path)
-	selected := buildContextEntriesFromPath(path)
-	edits := collectPathEdits(path)
+	selected, edits := buildContextEntriesFromPath(path)
 
 	messages := make([]types.Message, 0, len(selected))
 	pendingToolCalls := make(map[string]types.ToolCall)
 	var pendingOrder []string
+	// lastAssistantTS timestamps synthesized orphan tool results; defaulting to
+	// now keeps it sensible when no assistant message exists on the path.
+	lastAssistantTS := time.Now().UnixMilli()
 
 	for _, e := range selected {
 		msgs, err := SessionEntryToContextMessages(e)
@@ -430,6 +440,9 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 		for _, m := range msgs {
 			switch msg := m.(type) {
 			case *types.AssistantMessage:
+				if msg.Timestamp > 0 {
+					lastAssistantTS = msg.Timestamp
+				}
 				for _, blk := range msg.Content {
 					if tc, ok := blk.(types.ToolCall); ok && tc.ID != "" {
 						if _, exists := pendingToolCalls[tc.ID]; !exists {
@@ -450,18 +463,26 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 
 	for _, id := range pendingOrder {
 		if tc, ok := pendingToolCalls[id]; ok {
-			errBlocks, _ := types.MarshalBlocks([]types.AssistantContent{
+			// MarshalBlocks cannot fail for a pure-text block list; fall back to
+			// TextOnly defensively.
+			errBlocks, err := types.MarshalBlocks([]types.AssistantContent{
 				types.TextContent{
 					Type: types.TypeText,
 					Text: "interrupted: session was terminated before tool execution completed",
 				},
 			})
+			if err != nil {
+				errBlocks = json.RawMessage(strconv.Quote("interrupted: session was terminated before tool execution completed"))
+			}
+			// Timestamp derives from the last assistant message so BuildContext
+			// stays a pure function of entries; pendingOrder preserves declaration
+			// order, so multiple orphans are synthesized in the order declared.
 			messages = append(messages, &types.ToolResultMessage{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Name,
 				Content:    errBlocks,
 				IsError:    true,
-				Timestamp:  time.Now().UnixMilli(),
+				Timestamp:  lastAssistantTS,
 			})
 		}
 	}

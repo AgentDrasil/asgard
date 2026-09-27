@@ -723,6 +723,31 @@ func TestSession_UsageEntry(t *testing.T) {
 	assert.Equal(t, types.RoleAssistant, ctx.Messages[1].MessageRole())
 }
 
+func TestSession_UsageEntry_NilUsageTolerance(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("hello"))
+	require.NoError(t, err)
+
+	// A nil usage must persist and reload with Usage == nil.
+	usageID, err := sf.AppendUsage(nil, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, usageID)
+
+	_, loadedEntries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	require.Len(t, loadedEntries, 2)
+	loaded := loadedEntries[1]
+	assert.Equal(t, usageID, loaded.ID)
+	assert.Equal(t, TypeUsage, loaded.Type)
+	assert.Nil(t, loaded.Usage)
+	assert.Empty(t, loaded.UsageNote)
+}
+
 func TestSession_ContextEdit_Omit(t *testing.T) {
 	t.Parallel()
 
@@ -923,6 +948,50 @@ func TestSession_ContextEdit_WithCompaction(t *testing.T) {
 		keptText := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
 		assert.Equal(t, "kept-user", keptText)
 	})
+
+	t.Run("edit targeting compaction summary entry", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		_, err = sf.AppendMessage(testUser("user-1"))
+		require.NoError(t, err)
+		uKept, err := sf.AppendMessage(testUser("user-2"))
+		require.NoError(t, err)
+		compID, err := sf.AppendCompaction("original summary", uKept, 500, nil, false)
+		require.NoError(t, err)
+
+		// Pin behavior: a replacement edit on the compaction entry replaces its
+		// projected summary text with the given plain text.
+		replaced := "edited summary"
+		_, err = sf.AppendContextEdit(compID, &replaced)
+		require.NoError(t, err)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		require.Len(t, ctx.Messages, 2)
+		sumText := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
+		assert.Equal(t, replaced, sumText)
+
+		// Omit edit on the compaction entry removes the summary from context.
+		sf2, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+		_, err = sf2.AppendMessage(testUser("user-1"))
+		require.NoError(t, err)
+		uKept2, err := sf2.AppendMessage(testUser("user-2"))
+		require.NoError(t, err)
+		compID2, err := sf2.AppendCompaction("original summary 2", uKept2, 500, nil, false)
+		require.NoError(t, err)
+		_, err = sf2.AppendContextEdit(compID2, nil)
+		require.NoError(t, err)
+
+		ctx2, err := sf2.BuildContext("")
+		require.NoError(t, err)
+		require.Len(t, ctx2.Messages, 1)
+		assert.Equal(t, "user-2", types.StringContentOf(mustDecode(t, ctx2.Messages[0].(*types.UserMessage).Content)))
+	})
 }
 
 func TestSession_ContextEdit_ReplaceToolResult(t *testing.T) {
@@ -1044,6 +1113,14 @@ func TestSession_Compaction_RetainNone(t *testing.T) {
 	assert.Equal(t, "new user message", secondContent)
 
 	// Also verify serialization round-trip: firstKeptEntryId should be omitted in JSONL
+	// (assert directly on the raw JSONL line for the compaction entry).
+	raw, err := os.ReadFile(sf.Path())
+	require.NoError(t, err)
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, compID) {
+			assert.NotContains(t, line, "firstKeptEntryId")
+		}
+	}
 	header, loadedEntries, err := LoadFile(sf.Path())
 	require.NoError(t, err)
 	assert.Equal(t, sf.Header().ID, header.ID)
@@ -1140,6 +1217,34 @@ func TestSession_OpenExisting_MaintainsHasUser(t *testing.T) {
 	blocks, err := types.DecodeUserContent(userMsg.Content)
 	require.NoError(t, err)
 	assert.Equal(t, "follow-up question", types.StringContentOf(blocks))
+}
+
+func TestSession_OpenThenAppendNonMessage_FlushesImmediately(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create("/home/user/proj", nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("initial question"))
+	require.NoError(t, err)
+	filePath := sf.Path()
+	require.NoError(t, sf.Close())
+
+	openA, err := mgr.Open(filePath)
+	require.NoError(t, err)
+	defer func() { _ = openA.Close() }()
+
+	// Control: appending a non-message entry (session_info) after Open must
+	// hit disk immediately — the in-memory hasUser/hasAssistant rebuild keeps
+	// the deferred-flush gate active, so non-message entries always flush.
+	_, err = openA.AppendSessionInfo("my session")
+	require.NoError(t, err)
+
+	_, entries, err := LoadFile(filePath)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.Equal(t, TypeSessionInfo, entries[1].Type)
+	assert.Equal(t, "my session", entries[1].Name)
 }
 
 func TestSession_LoadFile_TornTail_And_CorruptLine(t *testing.T) {
@@ -1307,6 +1412,53 @@ func TestSession_Reconcile_OrphanToolCall(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "call_123", sfTRM.ToolCallID)
 	assert.True(t, sfTRM.IsError)
+}
+
+func TestSession_Reconcile_MultipleOrphanToolCalls(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("run two commands"))
+	require.NoError(t, err)
+
+	asst := &types.AssistantMessage{
+		Content: []types.AssistantContent{
+			types.ToolCall{Type: types.TypeToolCall, ID: "call_a", Name: "bash", Arguments: []byte(`{}`)},
+			types.ToolCall{Type: types.TypeToolCall, ID: "call_b", Name: "fetch", Arguments: []byte(`{}`)},
+		},
+		API:        types.APIOpenAICompat,
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: types.StopToolUse,
+		Timestamp:  4242,
+	}
+	_, err = sf.AppendMessage(asst)
+	require.NoError(t, err)
+
+	_, entries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 4)
+
+	// Both orphans are synthesized in declaration order.
+	trmA, ok := ctx.Messages[2].(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.Equal(t, "call_a", trmA.ToolCallID)
+	assert.Equal(t, "bash", trmA.ToolName)
+	assert.True(t, trmA.IsError)
+	trmB, ok := ctx.Messages[3].(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.Equal(t, "call_b", trmB.ToolCallID)
+	assert.Equal(t, "fetch", trmB.ToolName)
+	assert.True(t, trmB.IsError)
+	// Synthesized timestamps derive from the last assistant message.
+	assert.Equal(t, int64(4242), trmA.Timestamp)
+	assert.Equal(t, int64(4242), trmB.Timestamp)
 }
 
 func TestSession_Reconcile_DanglingUser(t *testing.T) {

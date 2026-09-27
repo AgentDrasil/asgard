@@ -53,6 +53,9 @@ type Request struct {
 
 	// PrepareNextTurn runs ONLY when the loop is confirmed to start another assistant turn.
 	// It does not run on final/terminating turns. Optional returned messages are appended.
+	// turnIndex is the 1-based index of the upcoming turn. Returned messages are
+	// appended to the transcript immediately — before this iteration's steering
+	// messages, which are drained at the top of the next loop iteration.
 	PrepareNextTurn func(turnIndex int) ([]types.Message, error)
 
 	// Hooks.
@@ -169,6 +172,9 @@ type loop struct {
 	endSent     bool
 }
 
+// appendNewMsg records a message for persistence. Callers must only invoke
+// it once a message is final and complete: it pairs the transcript append with
+// an immediate Persist call, so partially-built messages must not be passed.
 func (l *loop) appendNewMsg(m types.Message) {
 	l.newMsgs = append(l.newMsgs, m)
 	if l.req.Persist != nil {
@@ -306,30 +312,8 @@ outer:
 			// If another assistant turn is confirmed to start (either through remaining tool results /
 			// FinishTurnContinue or pending steering messages), trigger PrepareNextTurn.
 			if hasMoreToolCalls || len(pending) > 0 {
-				if l.req.PrepareNextTurn != nil {
-					extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
-					if err != nil {
-						final := &types.AssistantMessage{
-							Content:      []types.AssistantContent{},
-							API:          l.req.Model.API,
-							Provider:     l.req.Model.Provider,
-							Model:        l.req.Model.ID,
-							StopReason:   types.StopError,
-							ErrorMessage: err.Error(),
-							Timestamp:    time.Now().UnixMilli(),
-						}
-						l.messages = append(l.messages, final)
-						l.appendNewMsg(final)
-						l.emitAssistant(final, true)
-						l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
-						l.end()
-						return
-					}
-					for _, m := range extraMsgs {
-						l.emitUserish(m)
-						l.messages = append(l.messages, m)
-						l.appendNewMsg(m)
-					}
+				if !l.runPrepareNextTurn(turnIndex) {
+					return
 				}
 			}
 		}
@@ -337,30 +321,8 @@ outer:
 		followUps := l.drain(l.req.GetFollowUpMessages)
 		if len(followUps) > 0 {
 			pending = followUps
-			if l.req.PrepareNextTurn != nil {
-				extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
-				if err != nil {
-					final := &types.AssistantMessage{
-						Content:      []types.AssistantContent{},
-						API:          l.req.Model.API,
-						Provider:     l.req.Model.Provider,
-						Model:        l.req.Model.ID,
-						StopReason:   types.StopError,
-						ErrorMessage: err.Error(),
-						Timestamp:    time.Now().UnixMilli(),
-					}
-					l.messages = append(l.messages, final)
-					l.appendNewMsg(final)
-					l.emitAssistant(final, true)
-					l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
-					l.end()
-					return
-				}
-				for _, m := range extraMsgs {
-					l.emitUserish(m)
-					l.messages = append(l.messages, m)
-					l.appendNewMsg(m)
-				}
+			if !l.runPrepareNextTurn(turnIndex) {
+				return
 			}
 			continue outer
 		}
@@ -375,6 +337,40 @@ func (l *loop) drain(fn func() []types.Message) []types.Message {
 		return nil
 	}
 	return fn()
+}
+
+// runPrepareNextTurn invokes the PrepareNextTurn hook (if set) for the given
+// upcoming turn index. On hook error it synthesizes a terminal StopError
+// assistant message, emits it, ends the run and returns false; otherwise it
+// appends any returned messages and returns true.
+func (l *loop) runPrepareNextTurn(turnIndex int) bool {
+	if l.req.PrepareNextTurn == nil {
+		return true
+	}
+	extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
+	if err != nil {
+		final := &types.AssistantMessage{
+			Content:      []types.AssistantContent{},
+			API:          l.req.Model.API,
+			Provider:     l.req.Model.Provider,
+			Model:        l.req.Model.ID,
+			StopReason:   types.StopError,
+			ErrorMessage: err.Error(),
+			Timestamp:    time.Now().UnixMilli(),
+		}
+		l.messages = append(l.messages, final)
+		l.appendNewMsg(final)
+		l.emitAssistant(final, true)
+		l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
+		l.end()
+		return false
+	}
+	for _, m := range extraMsgs {
+		l.emitUserish(m)
+		l.messages = append(l.messages, m)
+		l.appendNewMsg(m)
+	}
+	return true
 }
 
 func (l *loop) emitUserish(m types.Message) {

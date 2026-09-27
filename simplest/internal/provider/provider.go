@@ -63,7 +63,12 @@ func postSSE(ctx context.Context, client *http.Client, url string, headers map[s
 			return nil, err
 		}
 		if mutatedBody != nil {
+			// Update GetBody alongside Body so transport-level retries or
+			// redirects replay the mutated body, not the original.
 			req.Body = io.NopCloser(bytes.NewReader(mutatedBody))
+			req.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(mutatedBody)), nil
+			}
 			req.ContentLength = int64(len(mutatedBody))
 		}
 	}

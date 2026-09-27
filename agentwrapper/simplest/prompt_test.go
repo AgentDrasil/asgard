@@ -172,11 +172,21 @@ func TestPrompt_EndToEndWithCallbackAndSession(t *testing.T) {
 	recent, err := simplest.FindMostRecent(sessionDir, testDir)
 	require.NoError(t, err)
 	require.NotEmpty(t, recent)
+	assert.Equal(t, res.SessionID, recentHeaderID(recent), "FindMostRecent must resolve the session created by this test")
 
 	openedSF, err := mgr.Open(recent)
 	require.NoError(t, err)
 	require.NotNil(t, openedSF)
 	require.NoError(t, openedSF.Close())
+}
+
+// recentHeaderID loads just the header of a session JSONL file.
+func recentHeaderID(path string) string {
+	hdr, _, err := simplest.LoadSessionFile(path)
+	if err != nil {
+		return ""
+	}
+	return hdr.ID
 }
 
 func TestExtractTargetFiles(t *testing.T) {
@@ -1232,7 +1242,9 @@ func TestPrompt_IncrementalPersistenceOnCancel(t *testing.T) {
 	}
 
 	assert.Equal(t, 1, persistedUserCount, "user message must be persisted")
-	assert.GreaterOrEqual(t, persistedAssistantCount, 1, "assistant tool call message from first turn must be persisted")
+	// Pin exact counts to catch duplicate-persistence regressions: one tool-call
+	// assistant message plus one aborted (StopAborted) assistant message.
+	assert.Equal(t, 2, persistedAssistantCount, "exactly one tool-call assistant and one aborted assistant must be persisted")
 	assert.Equal(t, 1, persistedToolResultCount, "tool result from first turn must be persisted")
 }
 

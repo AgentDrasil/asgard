@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -689,12 +690,12 @@ func TestParseStreamingJSONRepairsTruncation(t *testing.T) {
 func TestOpenAI_BeforeProviderRequest_PerAttempt(t *testing.T) {
 	t.Parallel()
 
-	attempts := 0
+	var attempts atomic.Int32
 	var receivedHeaders []http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
+		n := attempts.Add(1)
 		receivedHeaders = append(receivedHeaders, r.Header.Clone())
-		if attempts == 1 {
+		if n == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprint(w, `{"error":"temporary unavailable"}`)
 			return
@@ -726,7 +727,7 @@ func TestOpenAI_BeforeProviderRequest_PerAttempt(t *testing.T) {
 	require.Nil(t, errEv)
 	require.NotNil(t, done)
 	assert.Equal(t, types.StopStop, done.Reason)
-	assert.Equal(t, 2, attempts)
+	assert.Equal(t, int32(2), attempts.Load())
 	require.Len(t, receivedHeaders, 2)
 	assert.Equal(t, "true", receivedHeaders[0].Get("X-Attempt-Hook"), "first attempt must have hook header")
 	assert.Equal(t, "true", receivedHeaders[1].Get("X-Attempt-Hook"), "second attempt (retry) must also have hook header")
@@ -754,14 +755,14 @@ func TestOpenAI_OnProviderStreamEvent(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var rawEvents []string
-	var rawDatas [][]byte
+	var rawDatas []string
 
 	p := NewOpenAICompat("sk-test")
 	m := oaModel(srv.URL)
 	opts := &types.StreamOptions{
 		OnProviderStreamEvent: func(rawEvent string, rawData []byte) {
 			rawEvents = append(rawEvents, rawEvent)
-			rawDatas = append(rawDatas, append([]byte(nil), rawData...))
+			rawDatas = append(rawDatas, string(rawData))
 		},
 	}
 
@@ -772,7 +773,7 @@ func TestOpenAI_OnProviderStreamEvent(t *testing.T) {
 
 	require.Len(t, rawEvents, 3)
 	assert.Equal(t, []string{"message", "message", "message"}, rawEvents)
-	assert.Contains(t, string(rawDatas[0]), `"content":"hello"`)
-	assert.Contains(t, string(rawDatas[1]), `"finish_reason":"stop"`)
-	assert.Equal(t, "[DONE]", string(rawDatas[2]))
+	assert.Contains(t, rawDatas[0], `"content":"hello"`)
+	assert.Contains(t, rawDatas[1], `"finish_reason":"stop"`)
+	assert.Equal(t, "[DONE]", rawDatas[2])
 }

@@ -140,6 +140,34 @@ const (
 	TypeContextEdit = session.TypeContextEdit
 )
 
+const (
+	RoleUser       = types.RoleUser
+	RoleAssistant  = types.RoleAssistant
+	RoleToolResult = types.RoleToolResult
+
+	// The block-type and stop-reason aliases below exist primarily for test
+	// ergonomics in downstream packages (e.g. prompt_test.go); they are
+	// re-exported for symmetry with the full alias set above.
+	TypeText     = types.TypeText
+	TypeThinking = types.TypeThinking
+	TypeImage    = types.TypeImage
+	TypeToolCall = types.TypeToolCall
+
+	StopStop    = types.StopStop
+	StopToolUse = types.StopToolUse
+	StopLength  = types.StopLength
+	StopError   = types.StopError
+	StopAborted = types.StopAborted
+
+	ThinkingOff     = types.ThinkingOff
+	ThinkingMinimal = types.ThinkingMinimal
+	ThinkingLow     = types.ThinkingLow
+	ThinkingMedium  = types.ThinkingMedium
+	ThinkingHigh    = types.ThinkingHigh
+	ThinkingXHigh   = types.ThinkingXHigh
+	ThinkingMax     = types.ThinkingMax
+)
+
 // ---- types: messages & content ----
 
 type (
@@ -165,31 +193,6 @@ var (
 	StringContentOf  = types.StringContentOf
 	MarshalMessage   = types.MarshalMessage
 	UnmarshalMessage = types.UnmarshalMessage
-)
-
-const (
-	RoleUser       = types.RoleUser
-	RoleAssistant  = types.RoleAssistant
-	RoleToolResult = types.RoleToolResult
-
-	TypeText     = types.TypeText
-	TypeThinking = types.TypeThinking
-	TypeImage    = types.TypeImage
-	TypeToolCall = types.TypeToolCall
-
-	StopStop    = types.StopStop
-	StopToolUse = types.StopToolUse
-	StopLength  = types.StopLength
-	StopError   = types.StopError
-	StopAborted = types.StopAborted
-
-	ThinkingOff     = types.ThinkingOff
-	ThinkingMinimal = types.ThinkingMinimal
-	ThinkingLow     = types.ThinkingLow
-	ThinkingMedium  = types.ThinkingMedium
-	ThinkingHigh    = types.ThinkingHigh
-	ThinkingXHigh   = types.ThinkingXHigh
-	ThinkingMax     = types.ThinkingMax
 )
 
 // ---- types: models & providers ----

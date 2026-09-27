@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -84,6 +85,30 @@ func TestRetry_RespectRetryAfter(t *testing.T) {
 	require.NotNil(t, capturedErr)
 	assert.Equal(t, "1", capturedErr.RetryAfter)
 	assert.GreaterOrEqual(t, elapsed, 1*time.Second)
+}
+
+func TestRetry_After_HeaderCapturedEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limit exceeded"))
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	policy := &types.RetryPolicy{Enabled: false}
+
+	_, err := ExecuteWithRetry(ctx, policy, func() (*http.Response, error) {
+		return postSSE(ctx, srv.Client(), srv.URL, nil, []byte(`{}`), nil)
+	})
+
+	var httpErr *HTTPStatusError
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusTooManyRequests, httpErr.StatusCode)
+	assert.Equal(t, "1", httpErr.RetryAfter)
+	assert.Equal(t, time.Second, ParseRetryAfter(httpErr.RetryAfter))
 }
 
 func TestRetry_NonRetryableError(t *testing.T) {

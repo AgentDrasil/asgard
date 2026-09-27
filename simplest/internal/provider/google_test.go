@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -405,10 +406,10 @@ func TestGeminiConvertMessagesImageBase64Decoded(t *testing.T) {
 func TestGeminiRetryOn503(t *testing.T) {
 	t.Parallel()
 
-	var attempts int
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
+		n := attempts.Add(1)
+		if n == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprint(w, `{"error":{"code":503,"message":"Service Unavailable","status":"UNAVAILABLE"}}`)
 			return
@@ -434,7 +435,7 @@ func TestGeminiRetryOn503(t *testing.T) {
 	require.Nil(t, errEv)
 	require.NotNil(t, done)
 	assert.Equal(t, types.StopStop, done.Reason)
-	assert.Equal(t, 2, attempts)
+	assert.Equal(t, int32(2), attempts.Load())
 
 	startCount := 0
 	for _, ev := range evs {

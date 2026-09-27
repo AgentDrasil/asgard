@@ -55,6 +55,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer func() { _ = sf.Close() }() // release the session lock when done
 	req2 := base
 	req2.Messages = cx.Messages
 	exampleutil.RunAndPrint(req2)

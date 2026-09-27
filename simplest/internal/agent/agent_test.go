@@ -503,7 +503,6 @@ func TestAgent_FinishTurn_End(t *testing.T) {
 	}}
 	req := baseRequest(fp, tool)
 	var calledSummary *TurnSummary
-	var seenTurnEndBeforeDecision bool
 	req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
 		calledSummary = &s
 		return &FinishTurnDecision{Action: FinishTurnEnd}
@@ -521,7 +520,6 @@ func TestAgent_FinishTurn_End(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, turnEndCount)
-	_ = seenTurnEndBeforeDecision
 }
 
 func TestAgent_FinishTurn_Continue(t *testing.T) {
@@ -732,6 +730,41 @@ func TestAgent_PrepareRequest_CalledBeforeStream(t *testing.T) {
 		assert.Equal(t, 1, callCount)
 		require.Len(t, fp.options, 1)
 		assert.Equal(t, types.ThinkingMedium, fp.options[0].ThinkingLevel)
+	})
+
+	t.Run("replacing Tools rebuilds toolsByName", func(t *testing.T) {
+		t.Parallel()
+
+		// Tool set swapped via PrepareRequest: the new tool must resolve and the
+		// removed one must not (regression cover for toolIndex(nextReq.Tools)).
+		newTool := newRecordingTool("replacement")
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			toolCallMsg(call("c1", "replacement", `{}`)),
+			textMsg("done"),
+		}}
+		req := baseRequest(fp, newRecordingTool("original"))
+
+		req.PrepareRequest = func(r *Request) *Request {
+			cloned := *r
+			cloned.Tools = []types.AgentTool{newTool}
+			return &cloned
+		}
+
+		evs, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		// The replacement tool executed exactly once and the run completed normally.
+		assert.Equal(t, []string{"c1"}, newTool.executions)
+		foundTR := false
+		for _, ev := range evs {
+			if ev.Kind == types.AgentEnd {
+				for _, m := range ev.Messages {
+					if tr, ok := m.(*types.ToolResultMessage); ok {
+						foundTR = !tr.IsError
+					}
+				}
+			}
+		}
+		assert.True(t, foundTR, "replacement tool must have resolved and succeeded")
 	})
 }
 

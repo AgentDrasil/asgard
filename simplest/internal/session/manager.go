@@ -105,8 +105,10 @@ type SessionFile struct {
 	leafID       *string // nil = auto (last entry); &"" = reset
 	hasAssistant bool
 	hasUser      bool
-	flushed      bool
-	lockFile     *os.File
+	// Deferred-flush gate: persistLocked defers disk writes until either
+	// hasUser or hasAssistant is true (see persistLocked).
+	flushed  bool
+	lockFile *os.File
 }
 
 func newCore(cwd, id, parentSession string) *SessionFile {
@@ -504,7 +506,9 @@ func (sf *SessionFile) AppendSessionInfo(name string) (string, error) {
 	return sf.appendAutoParentLocked(&Entry{Type: TypeSessionInfo, Name: name})
 }
 
-// AppendUsage records out-of-band model usage (e.g. cache warm-up, separate accounting).
+// AppendUsage records out-of-band model usage (e.g. cache warm-up, separate
+// accounting). The entry is parented to the current leaf entry and advances
+// the leaf, mirroring upstream appendUsage semantics.
 func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, error) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -517,9 +521,11 @@ func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, err
 
 // AppendContextEdit records an append-only modification to an earlier entry in
 // LLM context projection. A nil replacement omits the target entry from context;
-// a non-nil replacement replaces its content with plain text. Callers should
-// avoid replacing assistant messages containing tool calls if subsequent tool results
-// rely on them.
+// a non-nil replacement replaces its content with plain text. Contract notes:
+// empty or dangling targetIDs are silently ignored during projection; editing an
+// assistant message containing tool calls would orphan its tool results, so callers
+// should avoid replacing such messages (or preserve the ToolCall blocks when
+// replacing).
 func (sf *SessionFile) AppendContextEdit(targetID string, replacement *string) (string, error) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -628,6 +634,9 @@ func (sf *SessionFile) acquireLock() error {
 
 // Close flushes any pending entries and releases the companion lock file.
 // Close is idempotent and preserves read access to session metadata and in-memory entries.
+// Note: the companion `<file>.jsonl.lock` file is intentionally left on disk
+// (unlinking on Close races with other openers); it is an empty file reused by
+// subsequent Opens and should be cleaned up by session delete/archive flows.
 func (sf *SessionFile) Close() error {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -702,6 +711,8 @@ func (sf *SessionFile) rewriteLocked() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	// Temp name pattern ".session-tmp-*" is also asserted by
+	// TestSession_AtomicRewrite; keep them in sync.
 	tmpFile, err := os.CreateTemp(dir, ".session-tmp-*")
 	if err != nil {
 		return err

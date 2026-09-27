@@ -88,6 +88,9 @@ func IsRetryableError(err error) bool {
 // ParseRetryAfter parses a Retry-After header string into a time.Duration.
 // It supports both integer seconds (e.g. "120") and HTTP-date formats.
 // If the header is invalid or in the past, it returns 0.
+// Note: HTTP-date values are parsed with time.Parse, which assumes the
+// server timestamp is UTC — valid per RFC 9110 (Retry-After HTTP-dates MUST
+// be GMT), so no explicit zone handling is needed.
 func ParseRetryAfter(header string) time.Duration {
 	header = strings.TrimSpace(header)
 	if header == "" {

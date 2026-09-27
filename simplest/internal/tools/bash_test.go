@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -101,14 +102,23 @@ func TestBashToolWorkingDirectory(t *testing.T) {
 func TestBashTool_SignalExitCode(t *testing.T) {
 	// Not running t.Parallel() to avoid cross-test signal interference.
 	dir := t.TempDir()
-	_, err := execTool(t, NewBashTool(dir), `{"command":"kill -TERM $$"}`)
-	if err == nil {
-		t.Fatal("expected error when process is killed by signal")
-	}
-	if !strings.Contains(err.Error(), "Command exited with code 143") {
-		t.Errorf("error %q should contain 'Command exited with code 143'", err.Error())
-	}
-	if strings.Contains(err.Error(), "code -1") {
-		t.Errorf("error %q should not contain 'code -1'", err.Error())
+	// 128+signal mapping, table-driven.
+	for _, tc := range []struct {
+		cmd  string
+		code int
+	}{
+		{"kill -TERM $$", 143},
+		{"kill -KILL $$", 137},
+	} {
+		_, err := execTool(t, NewBashTool(dir), fmt.Sprintf(`{"command":%q}`, tc.cmd))
+		if err == nil {
+			t.Fatalf("%s: expected error when process is killed by signal", tc.cmd)
+		}
+		if want := fmt.Sprintf("Command exited with code %d", tc.code); !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error %q should contain %q", tc.cmd, err.Error(), want)
+		}
+		if strings.Contains(err.Error(), "code -1") {
+			t.Errorf("%s: error %q should not contain 'code -1'", tc.cmd, err.Error())
+		}
 	}
 }

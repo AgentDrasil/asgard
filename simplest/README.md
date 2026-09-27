@@ -353,6 +353,11 @@ If you need to change what you want to send, build a new message and push
 that instead. A buffered channel with a non-blocking drain also satisfies the
 contract; whatever you use must be safe for concurrent write during polling.
 
+Both `Peek()` (aliased as `PeekQueuedMessages()`) let you preview queued
+messages non-destructively — they return a copy of the pending items without
+removing them from the queue, useful for inspecting what will be delivered on
+the next poll.
+
 Timing rules:
 
 | Goal | Mechanism | Consumed when |
