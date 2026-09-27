@@ -97,3 +97,18 @@ func TestBashToolWorkingDirectory(t *testing.T) {
 		t.Errorf("err = %v, want missing-cwd error", err)
 	}
 }
+
+func TestBashTool_SignalExitCode(t *testing.T) {
+	// Not running t.Parallel() to avoid cross-test signal interference.
+	dir := t.TempDir()
+	_, err := execTool(t, NewBashTool(dir), `{"command":"kill -TERM $$"}`)
+	if err == nil {
+		t.Fatal("expected error when process is killed by signal")
+	}
+	if !strings.Contains(err.Error(), "Command exited with code 143") {
+		t.Errorf("error %q should contain 'Command exited with code 143'", err.Error())
+	}
+	if strings.Contains(err.Error(), "code -1") {
+		t.Errorf("error %q should not contain 'code -1'", err.Error())
+	}
+}

@@ -161,7 +161,11 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	}
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("%s", appendStatus(fmt.Sprintf("Command exited with code %d", exitErr.ExitCode())))
+			exitCode := exitErr.ExitCode()
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				exitCode = 128 + int(status.Signal())
+			}
+			return nil, fmt.Errorf("%s", appendStatus(fmt.Sprintf("Command exited with code %d", exitCode)))
 		}
 		return nil, runErr
 	}
