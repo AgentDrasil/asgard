@@ -125,11 +125,12 @@ type (
 )
 
 var (
-	New             = session.New
-	DefaultBaseDir  = session.DefaultBaseDir
-	ListSessions    = session.List
-	FindMostRecent  = session.FindMostRecent
-	LoadSessionFile = session.LoadFile
+	New              = session.New
+	DefaultBaseDir   = session.DefaultBaseDir
+	ListSessions     = session.List
+	FindMostRecent   = session.FindMostRecent
+	LoadSessionFile  = session.LoadFile
+	ErrSessionLocked = session.ErrSessionLocked
 )
 
 const (

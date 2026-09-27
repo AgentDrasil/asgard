@@ -152,11 +152,15 @@ func TestOpenRoundTripWithContext(t *testing.T) {
 	if _, err := sf.AppendMessage(am); err != nil {
 		t.Fatal(err)
 	}
+	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	reopened, err := mgr.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = reopened.Close() }()
 	ctx, err := reopened.BuildContext("")
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +489,10 @@ func TestFindMostRecentAndList(t *testing.T) {
 	if list[0].FirstMessage != "a-two" && list[1].FirstMessage != "a-two" {
 		t.Fatalf("first messages: %+v", list)
 	}
+
+	_ = sfA1.Close()
+	_ = sfA2.Close()
+	_ = sfB.Close()
 
 	cont, err := mgr.ContinueRecent("/proj/a")
 	if err != nil {
@@ -1107,10 +1115,12 @@ func TestSession_OpenExisting_MaintainsHasUser(t *testing.T) {
 	_, err = sf.AppendMessage(testUser("initial question"))
 	require.NoError(t, err)
 	filePath := sf.Path()
+	require.NoError(t, sf.Close())
 
 	// Open the existing session file
 	openedSF, err := mgr.Open(filePath)
 	require.NoError(t, err)
+	defer func() { _ = openedSF.Close() }()
 
 	// Append a new user message without any assistant message
 	newID, err := openedSF.AppendMessage(testUser("follow-up question"))
@@ -1327,9 +1337,12 @@ func TestSession_Reconcile_DanglingUser(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "dangling user prompt", types.StringContentOf(userBlocks))
 
+	require.NoError(t, sf.Close())
+
 	// Reopen via mgr.Open and verify BuildContext works cleanly
 	reopened, err := mgr.Open(sessionPath)
 	require.NoError(t, err)
+	defer func() { _ = reopened.Close() }()
 	reopenedCtx, err := reopened.BuildContext("")
 	require.NoError(t, err)
 	require.Len(t, reopenedCtx.Messages, 1)

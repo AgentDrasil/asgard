@@ -163,6 +163,20 @@ func TestPrompt_EndToEndWithCallbackAndSession(t *testing.T) {
 	assert.Equal(t, res.SessionID, res2.SessionID)
 	assert.Equal(t, "Continuing session conversation.", res2.LastContent)
 	assert.Equal(t, 84, res2.InputTokens)
+
+	// Verify that after Prompt returns, the session companion lock is fully released
+	// so another instance can open it without error.
+	mgr := simplest.New(simplest.DefaultBaseDir())
+	sessionDir, err := mgr.SessionDir(testDir)
+	require.NoError(t, err)
+	recent, err := simplest.FindMostRecent(sessionDir, testDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, recent)
+
+	openedSF, err := mgr.Open(recent)
+	require.NoError(t, err)
+	require.NotNil(t, openedSF)
+	require.NoError(t, openedSF.Close())
 }
 
 func TestExtractTargetFiles(t *testing.T) {

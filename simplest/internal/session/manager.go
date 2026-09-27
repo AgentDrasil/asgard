@@ -3,16 +3,21 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
+
+// ErrSessionLocked indicates that the session's companion lock file is held by another process.
+var ErrSessionLocked = errors.New("session: file is locked by another process")
 
 // Manager creates and discovers session files under an agent directory.
 type Manager struct {
@@ -101,6 +106,7 @@ type SessionFile struct {
 	hasAssistant bool
 	hasUser      bool
 	flushed      bool
+	lockFile     *os.File
 }
 
 func newCore(cwd, id, parentSession string) *SessionFile {
@@ -148,6 +154,9 @@ func (m *Manager) Create(cwd string, opts *CreateOptions) (*SessionFile, error) 
 	sf.dir = dir
 	sf.persist = true
 	sf.path = filepath.Join(dir, fileTimestamp(sf.header.Timestamp)+"_"+id+".jsonl")
+	if err := sf.acquireLock(); err != nil {
+		return nil, err
+	}
 	return sf, nil
 }
 
@@ -176,6 +185,9 @@ func (m *Manager) Open(path string) (*SessionFile, error) {
 		sf.dir = filepath.Dir(path)
 		sf.persist = true
 		sf.path = path
+		if err := sf.acquireLock(); err != nil {
+			return nil, err
+		}
 		return sf, nil
 	}
 	cwd := header.CWD
@@ -192,6 +204,9 @@ func (m *Manager) Open(path string) (*SessionFile, error) {
 	}
 	sf.buildIndex()
 	sf.flushed = true
+	if err := sf.acquireLock(); err != nil {
+		return nil, err
+	}
 	return sf, nil
 }
 
@@ -583,6 +598,60 @@ func (sf *SessionFile) Label(id string) string {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.labelsByID[id]
+}
+
+// acquireLock acquires an exclusive lock on the companion .lock file.
+// If persist is false or path is empty, it returns nil immediately.
+func (sf *SessionFile) acquireLock() error {
+	if !sf.persist || sf.path == "" {
+		return nil
+	}
+	dir := filepath.Dir(sf.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	lockPath := sf.path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return ErrSessionLocked
+		}
+		return err
+	}
+	sf.lockFile = f
+	return nil
+}
+
+// Close flushes any pending entries and releases the companion lock file.
+// Close is idempotent and preserves read access to session metadata and in-memory entries.
+func (sf *SessionFile) Close() error {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	var flushErr error
+	if sf.persist && sf.path != "" && !sf.flushed {
+		flushErr = sf.rewriteLocked()
+	}
+
+	if sf.lockFile == nil {
+		return flushErr
+	}
+
+	unlockErr := syscall.Flock(int(sf.lockFile.Fd()), syscall.LOCK_UN)
+	closeErr := sf.lockFile.Close()
+	sf.lockFile = nil
+
+	if flushErr != nil {
+		return flushErr
+	}
+	if unlockErr != nil {
+		return unlockErr
+	}
+	return closeErr
 }
 
 // Flush writes any pending entries to disk immediately (normally deferred to

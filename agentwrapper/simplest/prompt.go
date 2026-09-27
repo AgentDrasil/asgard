@@ -128,6 +128,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			return nil, fmt.Errorf("creating session: %w", err)
 		}
 	}
+	defer func() { _ = sf.Close() }()
 
 	if thinkingLevel != "" {
 		if _, err := sf.AppendThinkingLevelChange(thinkingLevel); err != nil {
