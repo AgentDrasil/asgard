@@ -267,7 +267,7 @@ func Load() (*Config, error) {
 // LoadFrom loads and parses configuration files.
 // Under the split configuration policy:
 //  1. key.yaml only defines provider secrets (apiKey / key) and security settings (docToolAllowedDirs).
-//     Defining api, baseUrl, or models in key.yaml is rejected with an error instructing migration.
+//     Defining api, baseUrl, or models in key.yaml is rejected with an error.
 //  2. providers.yaml defines provider metadata (api, baseUrl, headers).
 //  3. models.yaml defines model catalog.
 func LoadFrom(path string) (*Config, error) {
@@ -289,13 +289,13 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	if len(rawKeyDoc.Models) > 0 {
-		return nil, fmt.Errorf("config %s defines models inline; inline models are deprecated, please run migrate-config to split into key.yaml, providers.yaml, and models.yaml", path)
+		return nil, fmt.Errorf("config %s defines models inline; models must be defined in models.yaml", path)
 	}
 
 	// Check if key.yaml defines api or baseUrl
 	for provName, prov := range rawKeyDoc.Providers {
 		if prov.API != "" || prov.BaseURL != "" {
-			return nil, fmt.Errorf("provider %q in %s defines api or baseUrl; provider endpoints and api types must be defined in providers.yaml, please run migrate-config", provName, path)
+			return nil, fmt.Errorf("provider %q in %s defines api or baseUrl; provider endpoints and api types must be defined in providers.yaml", provName, path)
 		}
 	}
 

@@ -634,5 +634,5 @@ models:
 	cfg, err := LoadFrom(configPath)
 	require.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "inline models are deprecated")
+	assert.Contains(t, err.Error(), "models must be defined in models.yaml")
 }
