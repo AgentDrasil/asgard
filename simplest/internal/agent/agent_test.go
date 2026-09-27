@@ -8,6 +8,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -489,21 +492,81 @@ func TestFollowUpQueueContinuesAfterStop(t *testing.T) {
 	}
 }
 
-func TestShouldStopAfterTurn(t *testing.T) {
+func TestAgent_FinishTurn_End(t *testing.T) {
+	t.Parallel()
 	tool := newRecordingTool("read")
 	fp := &fakeProvider{responses: []*types.AssistantMessage{
 		toolCallMsg(call("c1", "read", `{}`)),
 		textMsg("never reached"),
 	}}
 	req := baseRequest(fp, tool)
-	req.ShouldStopAfterTurn = func(s TurnSummary) bool { return true }
+	var calledSummary *TurnSummary
+	var seenTurnEndBeforeDecision bool
+	req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+		calledSummary = &s
+		return &FinishTurnDecision{Action: FinishTurnEnd}
+	}
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, calledSummary)
+	assert.Equal(t, 1, fp.calls, "should stop after first turn when FinishTurnEnd returned")
+	require.Len(t, end.Messages, 2, "assistant + tool result")
+
+	// Verify turn_end was emitted
+	var turnEndCount int
+	for _, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEndCount++
+		}
+	}
+	assert.Equal(t, 1, turnEndCount)
+	_ = seenTurnEndBeforeDecision
+}
+
+func TestAgent_FinishTurn_Continue(t *testing.T) {
+	t.Parallel()
+	// Model does NOT call any tools, but FinishTurn returns FinishTurnContinue on turn 1
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		textMsg("turn 1 text without tools"),
+		textMsg("turn 2 text"),
+	}}
+	req := baseRequest(fp)
+	turnCount := 0
+	req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+		turnCount++
+		if turnCount == 1 {
+			return &FinishTurnDecision{Action: FinishTurnContinue}
+		}
+		return &FinishTurnDecision{Action: FinishTurnEnd}
+	}
 	_, end := collect(t, Run(context.Background(), req))
-	if fp.calls != 1 {
-		t.Fatalf("should stop after first turn, calls=%d", fp.calls)
+	assert.Equal(t, 2, fp.calls, "FinishTurnContinue should trigger next assistant turn")
+	assert.Equal(t, 2, turnCount)
+	assert.Len(t, end.Messages, 2, "turn 1 msg + turn 2 msg")
+}
+
+func TestAgent_FinishTurn_CalledOnError(t *testing.T) {
+	t.Parallel()
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		{
+			Content:      []types.AssistantContent{},
+			StopReason:   types.StopError,
+			ErrorMessage: "something went wrong",
+			Timestamp:    1,
+		},
+	}}
+	req := baseRequest(fp)
+	var calledSummary *TurnSummary
+	req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+		calledSummary = &s
+		// Returning FinishTurnContinue must be ignored on error turns
+		return &FinishTurnDecision{Action: FinishTurnContinue}
 	}
-	if len(end.Messages) != 2 { // assistant + tool result
-		t.Fatalf("messages = %d", len(end.Messages))
-	}
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, calledSummary, "FinishTurn must be called even on error")
+	require.NotNil(t, calledSummary.Message)
+	assert.Equal(t, types.StopError, calledSummary.Message.StopReason)
+	assert.Equal(t, 1, fp.calls, "run must terminate on error even if FinishTurn returned continue")
+	assert.Len(t, end.Messages, 1)
 }
 
 func TestValidationFailureProducesErrorResult(t *testing.T) {

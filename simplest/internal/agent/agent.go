@@ -34,8 +34,13 @@ type Request struct {
 	// Queues drained by the loop (nil = empty).
 	GetSteeringMessages func() []types.Message
 	GetFollowUpMessages func() []types.Message
-	// ShouldStopAfterTurn lets the caller end the run between turns.
-	ShouldStopAfterTurn func(TurnSummary) bool
+
+	// FinishTurn hook runs after an assistant turn (and all its tool executions)
+	// completes. Called on normal, error, and aborted turns. Returning FinishTurnEnd
+	// causes the loop to stop after turn_end. Returning FinishTurnContinue ensures
+	// another assistant turn is started even if no tools were called.
+	// For error and aborted turns, the return decision is ignored and the run terminates.
+	FinishTurn func(TurnSummary) *FinishTurnDecision
 
 	// Hooks.
 	BeforeToolCall func(BeforeToolCallInput) *BeforeToolCallDecision
@@ -65,6 +70,19 @@ type AutoCompactConfig struct {
 type TurnSummary struct {
 	Message     *types.AssistantMessage
 	ToolResults []*types.ToolResultMessage
+}
+
+// FinishTurnAction specifies the action to take after finishing a turn.
+type FinishTurnAction string
+
+const (
+	FinishTurnEnd      FinishTurnAction = "end"
+	FinishTurnContinue FinishTurnAction = "continue"
+)
+
+// FinishTurnDecision directs the agent loop whether to continue or stop.
+type FinishTurnDecision struct {
+	Action FinishTurnAction
 }
 
 // BeforeToolCallInput is passed to the BeforeToolCall hook.
@@ -204,6 +222,9 @@ outer:
 			l.newMsgs = append(l.newMsgs, msg)
 
 			if msg.StopReason == types.StopError || msg.StopReason == types.StopAborted {
+				if l.req.FinishTurn != nil {
+					l.req.FinishTurn(TurnSummary{Message: msg})
+				}
 				l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: msg})
 				l.end()
 				return
@@ -234,12 +255,21 @@ outer:
 				}
 			}
 
+			var decision *FinishTurnDecision
+			if l.req.FinishTurn != nil {
+				decision = l.req.FinishTurn(TurnSummary{Message: msg, ToolResults: toolResults})
+			}
+
 			l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: msg, ToolResults: toolResults})
 
-			if l.req.ShouldStopAfterTurn != nil &&
-				l.req.ShouldStopAfterTurn(TurnSummary{Message: msg, ToolResults: toolResults}) {
-				l.end()
-				return
+			if decision != nil {
+				if decision.Action == FinishTurnEnd {
+					l.end()
+					return
+				}
+				if decision.Action == FinishTurnContinue {
+					hasMoreToolCalls = true
+				}
 			}
 
 			pending = l.drain(l.req.GetSteeringMessages)

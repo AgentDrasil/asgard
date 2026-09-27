@@ -64,7 +64,15 @@ var (
 
 type (
 	// Request describes one agent run.
-	Request = agent.Request
+	Request            = agent.Request
+	TurnSummary        = agent.TurnSummary
+	FinishTurnAction   = agent.FinishTurnAction
+	FinishTurnDecision = agent.FinishTurnDecision
+)
+
+const (
+	FinishTurnEnd      = agent.FinishTurnEnd
+	FinishTurnContinue = agent.FinishTurnContinue
 )
 
 // Run starts the agent loop and streams events until the run completes.

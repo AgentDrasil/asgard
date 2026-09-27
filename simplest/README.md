@@ -308,7 +308,12 @@ events := agent.Run(ctx, agent.Request{
 	GetFollowUpMessages: followUp.Poll,
 
 	// End the run programmatically after any turn
-	ShouldStopAfterTurn: func(s agent.TurnSummary) bool { return s.done },
+	FinishTurn: func(s agent.TurnSummary) *agent.FinishTurnDecision {
+		if s.Message != nil && s.Message.StopReason == types.StopStop {
+			return &agent.FinishTurnDecision{Action: agent.FinishTurnEnd}
+		}
+		return nil
+	},
 
 	// Opt-in context compaction (chars/4 estimate vs context window)
 	AutoCompact: &agent.AutoCompactConfig{
