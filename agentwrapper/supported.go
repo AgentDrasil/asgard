@@ -20,15 +20,32 @@ var defaultClients = map[string]types.CLIClient{
 	"simplest": &simplest.Client{},
 }
 
-var clients = defaultClients
+// clientsMu guards clients. The map itself is never mutated in place, overrides
+// replace it wholesale, but parallel tests override it concurrently.
+var (
+	clientsMu sync.RWMutex
+	clients   = defaultClients
+)
 
-// SetClients allows overriding the CLI clients, useful for testing.
+// SetClients overrides the CLI clients. Passing nil restores the defaults.
 func SetClients(c map[string]types.CLIClient) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
 	if c == nil {
 		clients = defaultClients
 	} else {
 		clients = c
 	}
+}
+
+// registeredClients returns the clients currently in effect. Callers may
+// iterate the result freely: overrides replace the map instead of mutating it.
+func registeredClients() map[string]types.CLIClient {
+	clientsMu.RLock()
+	defer clientsMu.RUnlock()
+
+	return clients
 }
 
 func GetSupportedCLIsAndModels() map[string][]string {
@@ -39,7 +56,7 @@ func GetSupportedCLIsAndModels() map[string][]string {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	for name, client := range clients {
+	for name, client := range registeredClients() {
 		wg.Add(1)
 		go func(name string, client types.CLIClient) {
 			defer wg.Done()
@@ -64,7 +81,7 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	for name, client := range clients {
+	for name, client := range registeredClients() {
 		wg.Add(1)
 		go func(name string, client types.CLIClient) {
 			defer wg.Done()
@@ -102,7 +119,7 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 }
 
 func CheckQuota(cli string, model string) float64 {
-	client, ok := clients[cli]
+	client, ok := registeredClients()[cli]
 	if !ok {
 		return 0.0
 	}
@@ -127,7 +144,7 @@ func CheckQuota(cli string, model string) float64 {
 
 // GetSandboxSpec returns the SandboxSpec for the given CLI if implemented, or nil.
 func GetSandboxSpec(cli string) types.SandboxSpec {
-	if client, ok := clients[cli]; ok {
+	if client, ok := registeredClients()[cli]; ok {
 		if spec, ok := client.(types.SandboxSpec); ok {
 			return spec
 		}
@@ -137,8 +154,9 @@ func GetSandboxSpec(cli string) types.SandboxSpec {
 
 // GetRegisteredCLIs returns all registered CLI names.
 func GetRegisteredCLIs() []string {
-	names := make([]string, 0, len(clients))
-	for name := range clients {
+	registered := registeredClients()
+	names := make([]string, 0, len(registered))
+	for name := range registered {
 		names = append(names, name)
 	}
 	return names

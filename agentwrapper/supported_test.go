@@ -29,12 +29,10 @@ func TestGetQuota_DetailedOptions(t *testing.T) {
 		}, nil
 	}
 
-	origClients := clients
-	t.Cleanup(func() { clients = origClients })
-
-	clients = map[string]types.CLIClient{
+	t.Cleanup(func() { SetClients(nil) })
+	SetClients(map[string]types.CLIClient{
 		"fake-agent": fake,
-	}
+	})
 
 	res, err := GetQuota(context.Background())
 	if err != nil {
@@ -66,12 +64,10 @@ func TestCheckQuota_ModelVariant(t *testing.T) {
 		}, nil
 	}
 
-	origClients := clients
-	t.Cleanup(func() { clients = origClients })
-
-	clients = map[string]types.CLIClient{
+	t.Cleanup(func() { SetClients(nil) })
+	SetClients(map[string]types.CLIClient{
 		"opencode": fake,
-	}
+	})
 
 	// Exact match
 	q1 := CheckQuota("opencode", "zai-coding-plan/glm-5.3")
@@ -93,8 +89,6 @@ func TestCheckQuota_ModelVariant(t *testing.T) {
 }
 
 func TestSupportedCLIs_SimplestRegistration(t *testing.T) {
-	origClients := clients
-	t.Cleanup(func() { clients = origClients })
 	SetClients(nil)
 
 	registered := GetRegisteredCLIs()
@@ -156,9 +150,8 @@ func TestSupportedCLIs_SimplestModelsAndQuota(t *testing.T) {
 	simplestpkg.ResetGlobalConfig()
 	t.Cleanup(simplestpkg.ResetGlobalConfig)
 
-	origClients := clients
-	t.Cleanup(func() { clients = origClients })
-	clients = map[string]types.CLIClient{"simplest": &simplest.Client{}}
+	t.Cleanup(func() { SetClients(nil) })
+	SetClients(map[string]types.CLIClient{"simplest": &simplest.Client{}})
 
 	// 1) GetSupportedCLIsAndModels
 	models := GetSupportedCLIsAndModels()
