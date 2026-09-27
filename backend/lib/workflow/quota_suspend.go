@@ -133,6 +133,12 @@ func (e *Engine) runQuotaSuspension(
 	}
 	if e.replayPending[rc.RunID] {
 		delete(e.replayPending, rc.RunID)
+		for mid, rid := range e.replayMsgToRun {
+			if rid == rc.RunID {
+				delete(e.replayMsgToRun, mid)
+				delete(e.replayMsgToSession, mid)
+			}
+		}
 	}
 	e.waitMu.Unlock()
 

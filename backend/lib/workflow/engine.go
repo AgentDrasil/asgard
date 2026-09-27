@@ -118,13 +118,16 @@ type Engine struct {
 	store        RunStore
 	suspendHuman SuspendHumanFunc
 
-	// waitMu guards waitingByMsg, waitingByRun, executing, sessionRuns, and replayPending.
-	waitMu        sync.Mutex
-	waitingByMsg  map[string]*humanWaiter            // key: messageID -> waiter
-	waitingByRun  map[string]map[string]*humanWaiter // key: runID -> nodeID -> waiter
-	executing     map[string]bool                    // key: runID -> true (active execution)
-	sessionRuns   map[string]map[string]bool         // key: sessionID -> runID -> true
-	replayPending map[string]bool                    // key: runID -> true (replay initializing)
+	// waitMu guards waitingByMsg, waitingByRun, executing, sessionRuns, replayPending,
+	// and replay message-to-run mappings.
+	waitMu             sync.Mutex
+	waitingByMsg       map[string]*humanWaiter            // key: messageID -> waiter
+	waitingByRun       map[string]map[string]*humanWaiter // key: runID -> nodeID -> waiter
+	executing          map[string]bool                    // key: runID -> true (active execution)
+	sessionRuns        map[string]map[string]bool         // key: sessionID -> runID -> true
+	replayPending      map[string]bool                    // key: runID -> true (replay initializing)
+	replayMsgToRun     map[string]string                  // key: messageID -> runID (during replayPending)
+	replayMsgToSession map[string]string                  // key: messageID -> sessionID (during replayPending)
 
 	// cancelMu guards runCancels, the per-run cancel funcs that let a host
 	// abort in-flight workflow execution (workflow DAGs intentionally run
@@ -141,13 +144,15 @@ type Engine struct {
 // NewEngine creates an engine backed by the given runner registry.
 func NewEngine(registry *NodeRunnerRegistry) *Engine {
 	return &Engine{
-		registry:      registry,
-		waitingByMsg:  make(map[string]*humanWaiter),
-		waitingByRun:  make(map[string]map[string]*humanWaiter),
-		executing:     make(map[string]bool),
-		sessionRuns:   make(map[string]map[string]bool),
-		replayPending: make(map[string]bool),
-		runCancels:    make(map[string]map[string]context.CancelFunc),
+		registry:           registry,
+		waitingByMsg:       make(map[string]*humanWaiter),
+		waitingByRun:       make(map[string]map[string]*humanWaiter),
+		executing:          make(map[string]bool),
+		sessionRuns:        make(map[string]map[string]bool),
+		replayPending:      make(map[string]bool),
+		replayMsgToRun:     make(map[string]string),
+		replayMsgToSession: make(map[string]string),
+		runCancels:         make(map[string]map[string]context.CancelFunc),
 	}
 }
 
@@ -307,6 +312,41 @@ func (e *Engine) IsSessionExecuting(sessionID string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// HasActiveOrReplayMessage reports whether a messageID corresponds to an active in-memory
+// waiter or a run currently replaying (replayPending) for the given session.
+func (e *Engine) HasActiveOrReplayMessage(messageID string, sessionID string) bool {
+	if e == nil || messageID == "" {
+		return false
+	}
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+
+	// 1. Check live in-memory waiter
+	if waiter, ok := e.waitingByMsg[messageID]; ok {
+		if sessionID == "" {
+			return true
+		}
+		if runs := e.sessionRuns[sessionID]; runs != nil && runs[waiter.runID] {
+			return true
+		}
+	}
+
+	// 2. Check pending replay
+	if runID, ok := e.replayMsgToRun[messageID]; ok && e.replayPending[runID] {
+		if sessionID == "" {
+			return true
+		}
+		if replayingSession, ok := e.replayMsgToSession[messageID]; ok && replayingSession == sessionID {
+			return true
+		}
+		if runs := e.sessionRuns[sessionID]; runs != nil && runs[runID] {
+			return true
+		}
+	}
+
 	return false
 }
 

@@ -146,6 +146,12 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 	if e.replayPending[rc.RunID] {
 		delete(e.replayPending, rc.RunID)
+		for mid, rid := range e.replayMsgToRun {
+			if rid == rc.RunID {
+				delete(e.replayMsgToRun, mid)
+				delete(e.replayMsgToSession, mid)
+			}
+		}
 	}
 	e.waitMu.Unlock()
 
@@ -328,6 +334,26 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 		return ResumeDeliveredLive, nil, nil
 	}
 
+	// Guard 1: if this message belongs to a run currently undergoing replay, poll until the
+	// live waiter is registered or the replay completes (B8).
+	e.waitMu.Lock()
+	replayRunID, isMsgReplaying := e.replayMsgToRun[messageID]
+	if isMsgReplaying && !e.replayPending[replayRunID] {
+		isMsgReplaying = false
+	}
+	e.waitMu.Unlock()
+
+	if isMsgReplaying {
+		if delivered, err := e.waitForReplayAndDeliver(ctx, messageID, replayRunID, replyText); delivered || err != nil {
+			if err != nil {
+				return ResumeIgnored, nil, err
+			}
+			return ResumeDeliveredLive, nil, nil
+		}
+		// Replay finished without a live waiter; fall through to the
+		// store-based lookup, which may find the run re-suspended.
+	}
+
 	store := e.store
 	if store == nil {
 		return ResumeIgnored, nil, fmt.Errorf("workflow run store is not configured")
@@ -362,27 +388,29 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 	}
 
 	e.waitMu.Lock()
-	// Guard 1: replayPending wait loop (B8)
+	// Secondary Guard 1: if runID is marked replayPending (e.g. by ResumeWithEmitter or race before map registration)
 	if e.replayPending[snap.RunID] {
+		runID := snap.RunID
 		e.waitMu.Unlock()
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			time.Sleep(5 * time.Millisecond)
-			if e.DeliverResumeByMessageID(messageID, replyText) {
-				return ResumeDeliveredLive, nil, nil
+		if delivered, err := e.waitForReplayAndDeliver(ctx, messageID, runID, replyText); delivered || err != nil {
+			if err != nil {
+				return ResumeIgnored, nil, err
 			}
-			e.waitMu.Lock()
-			stillPending := e.replayPending[snap.RunID]
-			e.waitMu.Unlock()
-			if !stillPending {
-				break
-			}
-		}
-		if e.DeliverResumeByMessageID(messageID, replyText) {
 			return ResumeDeliveredLive, nil, nil
 		}
-		log.Warn().Str("run_id", snap.RunID).Str("message_id", messageID).Msg("replay pending timeout; resume discarded safely")
-		return ResumeIgnored, nil, nil
+		// Replay finished without a live waiter; the snapshot above is stale.
+		// Reload it so the guards below decide against the current state.
+		snap, err = store.FindWaitingHumanByMessageID(messageID)
+		if err != nil {
+			return ResumeIgnored, nil, fmt.Errorf("loading waiting workflow run for message %s: %w", messageID, err)
+		}
+		if snap == nil {
+			return ResumeIgnored, nil, fmt.Errorf("no waiting workflow run found for message %s", messageID)
+		}
+		if snap.Status != PersistStatusWaitingHuman {
+			return ResumeIgnored, nil, fmt.Errorf("workflow run %s is not waiting for human input (status %s)", snap.RunID, snap.Status)
+		}
+		e.waitMu.Lock()
 	}
 
 	// Guard 2: executing or registered waiters guard (B6, N3)
@@ -392,11 +420,30 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 		return ResumeIgnored, nil, nil
 	}
 
-	// Guard 3: set replayPending flag with defer cleanup (N5/R4)
+	// Guard 3: set replayPending flag with defer cleanup and register replay message mapping
 	e.replayPending[snap.RunID] = true
+	var replayingMsgIDs []string
+	if snap.SuspendedMessageID != "" {
+		replayingMsgIDs = append(replayingMsgIDs, snap.SuspendedMessageID)
+	}
+	for _, n := range snap.SuspendedNodes {
+		if n.MessageID != "" {
+			replayingMsgIDs = append(replayingMsgIDs, n.MessageID)
+		}
+	}
+	for _, mid := range replayingMsgIDs {
+		e.replayMsgToRun[mid] = snap.RunID
+		if snap.SessionID != "" {
+			e.replayMsgToSession[mid] = snap.SessionID
+		}
+	}
 	defer func() {
 		e.waitMu.Lock()
 		delete(e.replayPending, snap.RunID)
+		for _, mid := range replayingMsgIDs {
+			delete(e.replayMsgToRun, mid)
+			delete(e.replayMsgToSession, mid)
+		}
 		e.waitMu.Unlock()
 	}()
 	e.waitMu.Unlock()
@@ -415,6 +462,54 @@ func (e *Engine) ResumeByMessageID(ctx context.Context, messageID string, replyT
 	}
 	res, err := e.Execute(ctx, defn, rc)
 	return ResumeReDriven, res, err
+}
+
+// replayWaitTimeout bounds how long a reply waits for an in-flight replay to
+// register its live waiter. Replay involves re-executing parts of the DAG, so
+// this must be far more generous than a scheduling hiccup yet still bounded.
+const replayWaitTimeout = 30 * time.Second
+
+// waitForReplayAndDeliver parks a reply addressed to a run whose replay is
+// initializing (replayPending set, waiter not yet registered). It polls until
+// the live waiter appears and the reply is delivered, the replay finishes (the
+// reply is then retried once against the store-based path by the caller's
+// fallback), or the wait times out / the context is cancelled with an explicit
+// error so the reply is never silently dropped.
+func (e *Engine) waitForReplayAndDeliver(ctx context.Context, messageID string, runID string, replyText string) (delivered bool, err error) {
+	deadline := time.NewTimer(replayWaitTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	replayDone := func() bool {
+		e.waitMu.Lock()
+		defer e.waitMu.Unlock()
+		return !e.replayPending[runID]
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("reply for message %s not delivered: run %s replay wait cancelled: %w", messageID, runID, ctx.Err())
+		case <-deadline.C:
+			return false, fmt.Errorf("reply for message %s not delivered: run %s replay did not settle within %s", messageID, runID, replayWaitTimeout)
+		case <-ticker.C:
+		}
+
+		if e.DeliverResumeByMessageID(messageID, replyText) {
+			return true, nil
+		}
+		if replayDone() {
+			// Replay finished; the waiter either settled from another reply or
+			// re-suspended. Retry once against the live registry, then let the
+			// caller's store-based path decide.
+			if e.DeliverResumeByMessageID(messageID, replyText) {
+				return true, nil
+			}
+			log.Warn().Str("run_id", runID).Str("message_id", messageID).Msg("replay finished without a live waiter; falling back to persisted run lookup")
+			return false, nil
+		}
+	}
 }
 
 // ResumeWithEmitter is like Resume but forwards every event of a re-driven run
@@ -462,9 +557,28 @@ func (e *Engine) ResumeWithEmitter(ctx context.Context, runID string, replyText 
 		return ResumeIgnored, nil, fmt.Errorf("workflow run %s is already replaying", runID)
 	}
 	e.replayPending[snap.RunID] = true
+	var replayingMsgIDs []string
+	if snap.SuspendedMessageID != "" {
+		replayingMsgIDs = append(replayingMsgIDs, snap.SuspendedMessageID)
+	}
+	for _, n := range snap.SuspendedNodes {
+		if n.MessageID != "" {
+			replayingMsgIDs = append(replayingMsgIDs, n.MessageID)
+		}
+	}
+	for _, mid := range replayingMsgIDs {
+		e.replayMsgToRun[mid] = snap.RunID
+		if snap.SessionID != "" {
+			e.replayMsgToSession[mid] = snap.SessionID
+		}
+	}
 	defer func() {
 		e.waitMu.Lock()
 		delete(e.replayPending, snap.RunID)
+		for _, mid := range replayingMsgIDs {
+			delete(e.replayMsgToRun, mid)
+			delete(e.replayMsgToSession, mid)
+		}
 		e.waitMu.Unlock()
 	}()
 	e.waitMu.Unlock()

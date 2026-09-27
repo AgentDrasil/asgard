@@ -24,6 +24,13 @@ type memStore struct {
 	mu    sync.Mutex
 	runs  map[string]*RunSnapshot
 	order []string
+
+	// gateRun pins the next MarkRunning call for that run until released,
+	// letting tests hold a run between replayPending being set and its
+	// waiter registering.
+	gateMu      sync.Mutex
+	gateRun     string
+	gateRelease chan struct{}
 }
 
 func newMemStore() *memStore {
@@ -141,12 +148,41 @@ func (m *memStore) RefreshSuspension(runID string, states map[string]PersistedNo
 }
 
 func (m *memStore) MarkRunning(runID string) error {
+	m.gateMu.Lock()
+	var release chan struct{}
+	if runID == m.gateRun && m.gateRelease != nil {
+		release = m.gateRelease
+	}
+	m.gateMu.Unlock()
+	if release != nil {
+		<-release
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if snap, ok := m.runs[runID]; ok {
 		snap.Status = PersistStatusRunning
 	}
 	return nil
+}
+
+// blockMarkRunning pins the next MarkRunning(runID) call until
+// releaseMarkRunning is called.
+func (m *memStore) blockMarkRunning(runID string) {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	m.gateRun = runID
+	m.gateRelease = make(chan struct{})
+}
+
+// releaseMarkRunning opens the gate installed by blockMarkRunning.
+func (m *memStore) releaseMarkRunning() {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	if m.gateRelease != nil {
+		close(m.gateRelease)
+		m.gateRelease = nil
+	}
+	m.gateRun = ""
 }
 
 func (m *memStore) get(runID string) *RunSnapshot {
@@ -1399,6 +1435,82 @@ func TestEngine_Resume_ConcurrentReplyDuringReplay(t *testing.T) {
 		assert.Equal(t, PersistStatusCompleted, store.get("run-concurrent-replay").Status)
 	case <-time.After(10 * time.Second):
 		t.Fatal("replay did not settle after the human_b reply")
+	}
+}
+
+func TestEngine_Resume_ConcurrentReplyDuringReplay_PollWait(t *testing.T) {
+	defn, err := workflowspec.ParseDefinition([]byte(parallelDualLoopYAML))
+	require.NoError(t, err)
+
+	store := newMemStore()
+	engine1, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		_, _ = engine1.Execute(ctx1, defn, RunContext{
+			SessionID: "chat-concurrent-poll",
+			RunID:     "run-concurrent-poll",
+			RunDir:    t.TempDir(),
+		})
+	}()
+
+	waitFor(t, func() bool {
+		snap := store.get("run-concurrent-poll")
+		return snap != nil && len(snap.SuspendedNodes) == 2
+	}, "dual suspended")
+
+	snap := store.get("run-concurrent-poll")
+	msgA := snap.SuspendedNodes["human_a"].MessageID
+	msgB := snap.SuspendedNodes["human_b"].MessageID
+
+	cancel1()
+	waitFor(t, func() bool {
+		return store.get("run-concurrent-poll").Status == PersistStatusCancelled
+	}, "cancelled")
+	require.NoError(t, store.MarkWaitingHuman(snap))
+
+	// Recreate engine2 (server restarted)
+	engine2, _ := newLoopPersistenceEngine(t, NewCommandRunner(false), store)
+
+	// Block MarkRunning so the replay is deterministically caught in the
+	// window after replayPending is set but before the human waiter is
+	// registered: replayPending is set before MarkRunning, while the waiter
+	// only registers inside Execute. Once MarkRunning is released, waiter
+	// registration follows, letting Guard 1 deliver the reply live.
+	store.blockMarkRunning("run-concurrent-poll")
+
+	replayRes := make(chan *WorkflowRunResult, 1)
+	replayErr := make(chan error, 1)
+	go func() {
+		_, res, err := engine2.ResumeByMessageID(context.Background(), msgA, "ok", nil)
+		replayErr <- err
+		replayRes <- res
+	}()
+
+	// Deterministically wait until replay is pinned at the MarkRunning gate.
+	waitFor(t, func() bool {
+		engine2.waitMu.Lock()
+		defer engine2.waitMu.Unlock()
+		return engine2.replayPending["run-concurrent-poll"]
+	}, "replayPending set")
+	store.releaseMarkRunning()
+
+	// Immediately resume msgB concurrently.
+	// Because replayPending is true and msgB is recorded in replayMsgToRun,
+	// ResumeByMessageID will enter Guard 1 (poll loop) instead of failing DB lookup.
+	// Once the replay registers human_b's waiter, Guard 1 successfully delivers the reply.
+	replyOutcome, _, err := engine2.ResumeByMessageID(context.Background(), msgB, "ok", nil)
+	require.NoError(t, err)
+	assert.Equal(t, ResumeDeliveredLive, replyOutcome)
+
+	select {
+	case resA := <-replayRes:
+		require.NoError(t, <-replayErr)
+		require.NotNil(t, resA)
+		assert.Equal(t, RunStatusCompleted, resA.Status)
+		assert.Equal(t, PersistStatusCompleted, store.get("run-concurrent-poll").Status)
+	case <-time.After(10 * time.Second):
+		t.Fatal("replay did not settle after the concurrent human_b reply")
 	}
 }
 

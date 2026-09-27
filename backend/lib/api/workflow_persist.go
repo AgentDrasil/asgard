@@ -671,6 +671,10 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 			}
 			if matched {
 				targetMessageID = messageID
+			} else if engine.HasActiveOrReplayMessage(messageID, chatID) {
+				// The message belongs to a live waiter or a run currently replaying.
+				// Route directly to ResumeByMessageID rather than falling back to guessing.
+				targetMessageID = messageID
 			} else {
 				// The reply targets a bubble no waiting run owns (stale or
 				// missing ask). Fall through to the unique-waiting fallback
