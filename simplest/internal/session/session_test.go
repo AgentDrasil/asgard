@@ -711,3 +711,280 @@ func TestSession_UsageEntry(t *testing.T) {
 	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
 	assert.Equal(t, types.RoleAssistant, ctx.Messages[1].MessageRole())
 }
+
+func TestSession_ContextEdit_Omit(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	u1, err := sf.AppendMessage(testUser("user message 1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testAssistant("assistant reply 1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testUser("user message 2"))
+	require.NoError(t, err)
+
+	// Append context_edit to omit u1 (replacement == nil)
+	editID, err := sf.AppendContextEdit(u1, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, editID)
+
+	// Verify SessionEntryToContextMessages returns nil for context_edit
+	editEntry := sf.GetEntry(editID)
+	require.NotNil(t, editEntry)
+	msgs, err := SessionEntryToContextMessages(editEntry)
+	require.NoError(t, err)
+	assert.Nil(t, msgs)
+
+	// Verify BuildContext excludes u1 and editID itself
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+	assert.Equal(t, types.RoleAssistant, ctx.Messages[0].MessageRole())
+	assert.Equal(t, types.RoleUser, ctx.Messages[1].MessageRole())
+	u2Content := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
+	assert.Equal(t, "user message 2", u2Content)
+
+	// Verify BuildContextEntries also filters out u1 and editID
+	selected := BuildContextEntries(sf.Entries(), nil)
+	require.Len(t, selected, 2)
+	assert.NotEqual(t, u1, selected[0].ID)
+	assert.NotEqual(t, editID, selected[0].ID)
+	assert.NotEqual(t, editID, selected[1].ID)
+
+	// Verify reload from disk
+	header, loadedEntries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	assert.Equal(t, sf.Header().ID, header.ID)
+	loadedCtx, err := BuildContext(loadedEntries, nil)
+	require.NoError(t, err)
+	require.Len(t, loadedCtx.Messages, 2)
+}
+
+func TestSession_ContextEdit_Replace(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	u1, err := sf.AppendMessage(testUser("original user message"))
+	require.NoError(t, err)
+	a1, err := sf.AppendMessage(testAssistant("original assistant reply"))
+	require.NoError(t, err)
+
+	repUser := "modified user message"
+	repAsst := "modified assistant reply"
+
+	_, err = sf.AppendContextEdit(u1, &repUser)
+	require.NoError(t, err)
+	_, err = sf.AppendContextEdit(a1, &repAsst)
+	require.NoError(t, err)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+
+	gotUser, ok := ctx.Messages[0].(*types.UserMessage)
+	require.True(t, ok)
+	assert.Equal(t, repUser, types.StringContentOf(mustDecode(t, gotUser.Content)))
+
+	gotAsst, ok := ctx.Messages[1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, repAsst, types.StringContentOf(gotAsst.Content))
+	// Verify other fields of original assistant message are preserved
+	assert.Equal(t, "test", gotAsst.Provider)
+	assert.Equal(t, "test-model", gotAsst.Model)
+	assert.Equal(t, types.StopStop, gotAsst.StopReason)
+}
+
+func TestSession_ContextEdit_LatestWins(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	u1, err := sf.AppendMessage(testUser("initial text"))
+	require.NoError(t, err)
+
+	edit1 := "first replacement"
+	_, err = sf.AppendContextEdit(u1, &edit1)
+	require.NoError(t, err)
+
+	edit2 := "second replacement"
+	_, err = sf.AppendContextEdit(u1, &edit2)
+	require.NoError(t, err)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 1)
+	gotUser := ctx.Messages[0].(*types.UserMessage)
+	assert.Equal(t, edit2, types.StringContentOf(mustDecode(t, gotUser.Content)))
+
+	// Now omit it as the final edit: latest wins over replacement
+	_, err = sf.AppendContextEdit(u1, nil)
+	require.NoError(t, err)
+
+	ctxOmitted, err := sf.BuildContext("")
+	require.NoError(t, err)
+	assert.Empty(t, ctxOmitted.Messages)
+}
+
+func TestSession_ContextEdit_WithCompaction(t *testing.T) {
+	t.Parallel()
+
+	t.Run("target in kept region", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		_, err = sf.AppendMessage(testUser("pruned-user-1"))
+		require.NoError(t, err)
+		_, err = sf.AppendMessage(testAssistant("pruned-asst-1"))
+		require.NoError(t, err)
+
+		uKept, err := sf.AppendMessage(testUser("kept-user"))
+		require.NoError(t, err)
+		_, err = sf.AppendMessage(testAssistant("kept-asst"))
+		require.NoError(t, err)
+
+		// Compaction keeps from uKept onwards
+		_, err = sf.AppendCompaction("summary of pruned", uKept, 500, nil, false)
+		require.NoError(t, err)
+
+		// Context edit targeting uKept after compaction
+		replaced := "modified kept-user"
+		_, err = sf.AppendContextEdit(uKept, &replaced)
+		require.NoError(t, err)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		// Expected messages: [compaction summary, modified kept-user, kept-asst]
+		require.Len(t, ctx.Messages, 3)
+		assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
+		sumText := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
+		assert.Contains(t, sumText, "summary of pruned")
+
+		midText := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
+		assert.Equal(t, replaced, midText)
+
+		asstText := types.StringContentOf(ctx.Messages[2].(*types.AssistantMessage).Content)
+		assert.Equal(t, "kept-asst", asstText)
+	})
+
+	t.Run("target in pruned region does not resurrect", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		uPruned, err := sf.AppendMessage(testUser("pruned-user-to-edit"))
+		require.NoError(t, err)
+		_, err = sf.AppendMessage(testAssistant("pruned-asst-1"))
+		require.NoError(t, err)
+
+		uKept, err := sf.AppendMessage(testUser("kept-user"))
+		require.NoError(t, err)
+
+		// Compaction prunes uPruned
+		_, err = sf.AppendCompaction("summary of pruned", uKept, 500, nil, false)
+		require.NoError(t, err)
+
+		// Edit uPruned (which was already pruned)
+		replaced := "resurrection attempt"
+		_, err = sf.AppendContextEdit(uPruned, &replaced)
+		require.NoError(t, err)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		// Must only have [compaction summary, kept-user] - uPruned must NOT be resurrected
+		require.Len(t, ctx.Messages, 2)
+		sumText := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
+		assert.Contains(t, sumText, "summary of pruned")
+		assert.NotContains(t, sumText, "resurrection attempt")
+
+		keptText := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
+		assert.Equal(t, "kept-user", keptText)
+	})
+}
+
+func TestSession_ContextEdit_ReplaceToolResult(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("user prompt"))
+	require.NoError(t, err)
+
+	trBlocks, err := types.MarshalBlocks([]types.AssistantContent{
+		types.TextContent{Type: types.TypeText, Text: "original tool output"},
+	})
+	require.NoError(t, err)
+
+	trID, err := sf.AppendMessage(&types.ToolResultMessage{
+		ToolCallID: "call-1",
+		ToolName:   "fetch",
+		Content:    trBlocks,
+		Timestamp:  1234,
+	})
+	require.NoError(t, err)
+
+	replaced := "replaced tool output"
+	_, err = sf.AppendContextEdit(trID, &replaced)
+	require.NoError(t, err)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+
+	gotTR, ok := ctx.Messages[1].(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.Equal(t, "call-1", gotTR.ToolCallID)
+	assert.Equal(t, "fetch", gotTR.ToolName)
+
+	decoded, err := types.DecodeToolResultContent(gotTR.Content)
+	require.NoError(t, err)
+	assert.Equal(t, replaced, types.StringContentOf(decoded))
+}
+
+func TestSession_ContextEdit_BranchRelative(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	u1, err := sf.AppendMessage(testUser("base user message"))
+	require.NoError(t, err)
+
+	// Branch A
+	branchAEdit := "branch A edited text"
+	editA, err := sf.AppendContextEdit(u1, &branchAEdit)
+	require.NoError(t, err)
+
+	// Fork from u1 to create Branch B
+	require.NoError(t, sf.Branch(u1))
+	msgB, err := sf.AppendMessage(testUser("branch B user message"))
+	require.NoError(t, err)
+
+	// Context on Branch A has the edit
+	ctxA, err := sf.BuildContext(editA)
+	require.NoError(t, err)
+	require.Len(t, ctxA.Messages, 1)
+	assert.Equal(t, branchAEdit, types.StringContentOf(mustDecode(t, ctxA.Messages[0].(*types.UserMessage).Content)))
+
+	// Context on Branch B does not have the edit from Branch A
+	ctxB, err := sf.BuildContext(msgB)
+	require.NoError(t, err)
+	require.Len(t, ctxB.Messages, 2)
+	assert.Equal(t, "base user message", types.StringContentOf(mustDecode(t, ctxB.Messages[0].(*types.UserMessage).Content)))
+	assert.Equal(t, "branch B user message", types.StringContentOf(mustDecode(t, ctxB.Messages[1].(*types.UserMessage).Content)))
+}

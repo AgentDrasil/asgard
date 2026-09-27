@@ -24,6 +24,7 @@ const (
 	TypeLabel               = "label"
 	TypeSessionInfo         = "session_info"
 	TypeUsage               = "usage"
+	TypeContextEdit         = "context_edit"
 )
 
 // Compaction/branch summary framing used when projecting entries into
@@ -78,9 +79,12 @@ type Entry struct {
 	// TypeCustomMessage: string or content-block array.
 	Content json.RawMessage `json:"content,omitempty"`
 	Display *bool           `json:"display,omitempty"`
+	// TypeLabel / TypeContextEdit.
+	TargetID string `json:"targetId,omitempty"`
 	// TypeLabel. Label nil means "cleared".
-	TargetID string  `json:"targetId,omitempty"`
-	Label    *string `json:"label,omitempty"`
+	Label *string `json:"label,omitempty"`
+	// TypeContextEdit. Replacement nil means "omit".
+	Replacement *string `json:"replacement,omitempty"`
 	// TypeSessionInfo.
 	Name string `json:"name,omitempty"`
 	// TypeUsage.
@@ -228,31 +232,46 @@ func BuildContextEntries(entries []*Entry, leafID *string) []*Entry {
 
 func buildContextEntriesFromPath(path []*Entry) []*Entry {
 	comp := lastCompaction(path)
+	var kept []*Entry
 	if comp == nil {
-		return path
-	}
-	compIdx := -1
-	for i, e := range path {
-		if e.ID == comp.ID {
-			compIdx = i
-			break
+		kept = path
+	} else {
+		compIdx := -1
+		for i, e := range path {
+			if e.ID == comp.ID {
+				compIdx = i
+				break
+			}
+		}
+		if compIdx < 0 {
+			kept = path
+		} else {
+			kept = []*Entry{comp}
+			foundFirstKept := false
+			for i := 0; i < compIdx; i++ {
+				e := path[i]
+				if e.ID == comp.FirstKeptEntryID {
+					foundFirstKept = true
+				}
+				if foundFirstKept {
+					kept = append(kept, e)
+				}
+			}
+			kept = append(kept, path[compIdx+1:]...)
 		}
 	}
-	if compIdx < 0 {
-		return path
-	}
-	out := []*Entry{comp}
-	foundFirstKept := false
-	for i := 0; i < compIdx; i++ {
-		e := path[i]
-		if e.ID == comp.FirstKeptEntryID {
-			foundFirstKept = true
+
+	edits := collectPathEdits(path)
+	out := make([]*Entry, 0, len(kept))
+	for _, e := range kept {
+		if e.Type == TypeContextEdit {
+			continue
 		}
-		if foundFirstKept {
-			out = append(out, e)
+		if edit, ok := edits[e.ID]; ok && edit.Replacement == nil {
+			continue
 		}
+		out = append(out, e)
 	}
-	out = append(out, path[compIdx+1:]...)
 	return out
 }
 
@@ -282,7 +301,7 @@ func summaryUserMessage(text, ts string) types.Message {
 }
 
 // SessionEntryToContextMessages projects one entry into LLM messages.
-// Plain custom entries do not participate in context.
+// Plain custom entries and context_edit entries do not participate in context.
 func SessionEntryToContextMessages(e *Entry) ([]types.Message, error) {
 	switch e.Type {
 	case TypeMessage:
@@ -304,7 +323,7 @@ func SessionEntryToContextMessages(e *Entry) ([]types.Message, error) {
 		return []types.Message{summaryUserMessage(BranchSummaryPrefix+e.Summary+BranchSummarySuffix, e.Timestamp)}, nil
 	case TypeCompaction:
 		return []types.Message{summaryUserMessage(CompactionSummaryPrefix+e.Summary+CompactionSummarySuffix, e.Timestamp)}, nil
-	case TypeUsage:
+	case TypeUsage, TypeContextEdit:
 		return nil, nil
 	default:
 		return nil, nil
@@ -343,15 +362,63 @@ func BuildContext(entries []*Entry, leafID *string) (Context, error) {
 	return buildContextFromEntries(entries, indexEntries(entries), leafID)
 }
 
+func collectPathEdits(path []*Entry) map[string]*Entry {
+	edits := make(map[string]*Entry)
+	for _, e := range path {
+		if e.Type == TypeContextEdit && e.TargetID != "" {
+			edits[e.TargetID] = e
+		}
+	}
+	return edits
+}
+
+func applyMessageReplacement(msg types.Message, text string) types.Message {
+	switch m := msg.(type) {
+	case *types.UserMessage:
+		return &types.UserMessage{
+			Content:   types.TextOnly(text),
+			Timestamp: m.Timestamp,
+		}
+	case *types.AssistantMessage:
+		clone := *m
+		clone.Content = []types.AssistantContent{
+			types.TextContent{Type: types.TypeText, Text: text},
+		}
+		return &clone
+	case *types.ToolResultMessage:
+		clone := *m
+		blocks, err := types.MarshalBlocks([]types.AssistantContent{
+			types.TextContent{Type: types.TypeText, Text: text},
+		})
+		if err != nil {
+			return msg
+		}
+		clone.Content = blocks
+		return &clone
+	default:
+		return msg
+	}
+}
+
 func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *string) (Context, error) {
 	path := buildPath(entries, byID, leafID)
 	thinkingLevel, model := getSessionContextSettings(path)
 	selected := buildContextEntriesFromPath(path)
+	edits := collectPathEdits(path)
+
 	messages := make([]types.Message, 0, len(selected))
 	for _, e := range selected {
 		msgs, err := SessionEntryToContextMessages(e)
 		if err != nil {
 			return Context{}, err
+		}
+		if len(msgs) == 0 {
+			continue
+		}
+		if edit, ok := edits[e.ID]; ok && edit.Replacement != nil {
+			for i, m := range msgs {
+				msgs[i] = applyMessageReplacement(m, *edit.Replacement)
+			}
 		}
 		messages = append(messages, msgs...)
 	}

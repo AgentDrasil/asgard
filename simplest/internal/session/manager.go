@@ -485,6 +485,21 @@ func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, err
 	})
 }
 
+// AppendContextEdit records an append-only modification to an earlier entry in
+// LLM context projection. A nil replacement omits the target entry from context;
+// a non-nil replacement replaces its content with plain text. Callers should
+// avoid replacing assistant messages containing tool calls if subsequent tool results
+// rely on them.
+func (sf *SessionFile) AppendContextEdit(targetID string, replacement *string) (string, error) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.appendAutoParentLocked(&Entry{
+		Type:        TypeContextEdit,
+		TargetID:    targetID,
+		Replacement: replacement,
+	})
+}
+
 // SessionName returns the latest session_info display name, if any.
 func (sf *SessionFile) SessionName() string {
 	sf.mu.Lock()

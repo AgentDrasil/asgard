@@ -121,7 +121,8 @@ var (
 )
 
 const (
-	TypeUsage = session.TypeUsage
+	TypeUsage       = session.TypeUsage
+	TypeContextEdit = session.TypeContextEdit
 )
 
 // ---- types: messages & content ----
