@@ -536,6 +536,29 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			em.toolCallEnd(acc.contentIdx)
 		}
 
+		// Port of pi 1b2aa0ca0: a tool-use response with a tool call whose
+		// arguments never formed valid JSON may carry cut-off or mixed-up
+		// arguments (e.g. servers that omit the tool_calls index and splice
+		// parallel calls together). Refuse to hand those calls to the agent
+		// loop instead of running them with fabricated `{}` arguments.
+		if scanErr == nil || scanErr == errDone {
+			if em.out.StopReason == types.StopToolUse {
+				for _, acc := range tools {
+					if !json.Valid([]byte(acc.partialArgs)) {
+						name, id := acc.name, acc.id
+						if name == "" {
+							name = "<unknown>"
+						}
+						if id == "" {
+							id = "<unknown>"
+						}
+						em.fail(ctx, fmt.Errorf("openai-compat: stream completed with an unfinished tool call: %s (%s)", name, id))
+						return
+					}
+				}
+			}
+		}
+
 		if scanErr != nil && scanErr != errDone {
 			em.fail(ctx, scanErr)
 			return

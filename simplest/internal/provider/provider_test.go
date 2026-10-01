@@ -1304,3 +1304,26 @@ func TestGoogleGemini_MetadataExtraction(t *testing.T) {
 		})
 	}
 }
+
+// Port of pi 1b2aa0ca0: a tool_calls-finished stream whose arguments never
+// became valid JSON must fail instead of running fabricated arguments.
+func TestOpenAIStreamUnfinishedToolCallFails(t *testing.T) {
+	chunks := []string{
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"bash","arguments":"{\"comm"}}]}}]}`,
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	}
+	var captured map[string]any
+	var hdr http.Header
+	srv := sseServer(t, chunks, &captured, &hdr, "/chat/completions")
+	defer srv.Close()
+
+	p := NewOpenAICompat("sk-test")
+	_, _, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	if errEv == nil {
+		t.Fatalf("expected error event for unfinished tool call")
+	}
+	if got := errEv.Message.ErrorMessage; !strings.Contains(got, "unfinished tool call") || !strings.Contains(got, "bash") {
+		t.Fatalf("unexpected error message: %q", got)
+	}
+}
