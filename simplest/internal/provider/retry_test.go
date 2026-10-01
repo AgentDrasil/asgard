@@ -222,6 +222,10 @@ func TestParseRetryAfter(t *testing.T) {
 		{"positive seconds", "120", 120 * time.Second},
 		{"whitespace seconds", "  5  ", 5 * time.Second},
 		{"invalid string", "not-a-number", 0},
+		{"nan", "nan", 0},
+		{"infinity", "Infinity", 0},
+		{"partial number", "12sec", 0},
+		{"float seconds", "1.5", 0},
 	}
 
 	for _, tt := range tests {
@@ -248,4 +252,28 @@ func TestParseRetryAfter(t *testing.T) {
 		got := ParseRetryAfter(header)
 		assert.Equal(t, time.Duration(0), got)
 	})
+}
+
+// TestCalculateDelay_UnparseableRetryAfter_FallsBackToExponential guards the
+// pi fix 2bbfcca4 (use exponential backoff when Retry-After is unparseable):
+// an unparseable header must yield 0 so the caller falls through to
+// exponential backoff instead of propagating an invalid delay.
+func TestCalculateDelay_UnparseableRetryAfter_FallsBackToExponential(t *testing.T) {
+	t.Parallel()
+
+	policy := &types.RetryPolicy{Enabled: true, MaxRetries: 3, BaseDelayMs: 100, MaxDelayMs: 60_000}
+
+	for _, header := range []string{"", "not-a-number", "nan", "Infinity", "12sec"} {
+		err := &HTTPStatusError{StatusCode: http.StatusTooManyRequests, RetryAfter: header}
+		got := CalculateDelay(0, policy, err)
+		assert.Equal(t, 100*time.Millisecond, got, "header %q", header)
+	}
+
+	// attempt index still drives exponential backoff when the header is bad
+	err := &HTTPStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: "later"}
+	assert.Equal(t, 400*time.Millisecond, CalculateDelay(2, policy, err))
+
+	// a valid header still wins over exponential backoff
+	err = &HTTPStatusError{StatusCode: http.StatusTooManyRequests, RetryAfter: "30"}
+	assert.Equal(t, 30*time.Second, CalculateDelay(0, policy, err))
 }
