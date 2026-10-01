@@ -34,8 +34,13 @@ type ToolResult struct {
 	// Content blocks returned to the model (text and image only).
 	Content []AssistantContent
 	// Details is arbitrary structured data for logs/UI; never sent to the LLM.
-	Details   any
-	Usage     *Usage
+	Details any
+	Usage   *Usage
+	// IsError reports a tool failure without throwing away the result: the
+	// model still sees Content as an error result, but Details survives for
+	// the UI and programmatic callers. Tools that return a Go error get the
+	// same treatment with an empty Details.
+	IsError   bool
 	Terminate bool
 }
 

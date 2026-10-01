@@ -157,7 +157,14 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		if in.Timeout != nil {
 			timeoutDisplay = strconv.FormatFloat(*in.Timeout, 'f', -1, 64)
 		}
-		return nil, fmt.Errorf("%s", appendStatus(fmt.Sprintf("Command timed out after %s seconds", timeoutDisplay)))
+		return &types.ToolResult{
+			Content: []types.AssistantContent{types.TextContent{
+				Type: types.TypeText,
+				Text: appendStatus(fmt.Sprintf("Command timed out after %s seconds", timeoutDisplay)),
+			}},
+			Details: details,
+			IsError: true,
+		}, nil
 	}
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -165,7 +172,17 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				exitCode = 128 + int(status.Signal())
 			}
-			return nil, fmt.Errorf("%s", appendStatus(fmt.Sprintf("Command exited with code %d", exitCode)))
+			// Non-zero exit is a tool-level failure, not an execution crash:
+			// keep the command output as content and the structured details,
+			// and mark the result as an error (pi 8562bcf66 isError semantics).
+			return &types.ToolResult{
+				Content: []types.AssistantContent{types.TextContent{
+					Type: types.TypeText,
+					Text: appendStatus(fmt.Sprintf("Command exited with code %d", exitCode)),
+				}},
+				Details: details,
+				IsError: true,
+			}, nil
 		}
 		return nil, runErr
 	}

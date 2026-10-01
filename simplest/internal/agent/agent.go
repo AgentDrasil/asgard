@@ -517,6 +517,7 @@ func errorToolResult(message string) *types.ToolResult {
 	return &types.ToolResult{
 		Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: message}},
 		Details: map[string]any{},
+		IsError: true,
 	}
 }
 
@@ -649,7 +650,7 @@ func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool) {
 	if result == nil {
 		return errorToolResult("tool returned no result"), true
 	}
-	return result, false
+	return result, result.IsError
 }
 
 func (l *loop) executeToolCalls(msg *types.AssistantMessage, calls []types.ToolCall) ([]*types.ToolResultMessage, bool) {

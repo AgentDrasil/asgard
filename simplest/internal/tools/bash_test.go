@@ -35,13 +35,17 @@ func TestBashToolStderrCombinedAndExitCode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := execTool(t, NewBashTool(dir), tt.args)
-			if err == nil {
-				t.Fatal("expected error")
+			result, err := execTool(t, NewBashTool(dir), tt.args)
+			if err != nil {
+				t.Fatalf("unexpected execution error: %v", err)
 			}
+			if !result.IsError {
+				t.Fatal("expected IsError result")
+			}
+			text := fmt.Sprintf("%v", result.Content[0])
 			for _, sub := range tt.wantSub {
-				if !strings.Contains(err.Error(), sub) {
-					t.Errorf("error %q missing %q", err.Error(), sub)
+				if !strings.Contains(text, sub) {
+					t.Errorf("content %q missing %q", text, sub)
 				}
 			}
 		})
@@ -110,15 +114,22 @@ func TestBashTool_SignalExitCode(t *testing.T) {
 		{"kill -TERM $$", 143},
 		{"kill -KILL $$", 137},
 	} {
-		_, err := execTool(t, NewBashTool(dir), fmt.Sprintf(`{"command":%q}`, tc.cmd))
-		if err == nil {
-			t.Fatalf("%s: expected error when process is killed by signal", tc.cmd)
+		result, err := execTool(t, NewBashTool(dir), fmt.Sprintf(`{"command":%q}`, tc.cmd))
+		if err != nil {
+			t.Fatalf("%s: unexpected execution error: %v", tc.cmd, err)
 		}
-		if want := fmt.Sprintf("Command exited with code %d", tc.code); !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: error %q should contain %q", tc.cmd, err.Error(), want)
+		if !result.IsError {
+			t.Errorf("%s: expected IsError result for signal exit", tc.cmd)
 		}
-		if strings.Contains(err.Error(), "code -1") {
-			t.Errorf("%s: error %q should not contain 'code -1'", tc.cmd, err.Error())
+		if len(result.Content) == 0 {
+			t.Fatalf("%s: expected content in result", tc.cmd)
+		}
+		text := fmt.Sprintf("%v", result.Content[0])
+		if want := fmt.Sprintf("Command exited with code %d", tc.code); !strings.Contains(text, want) {
+			t.Errorf("%s: content %q should contain %q", tc.cmd, text, want)
+		}
+		if strings.Contains(text, "code -1") {
+			t.Errorf("%s: content %q should not contain 'code -1'", tc.cmd, text)
 		}
 	}
 }
