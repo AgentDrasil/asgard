@@ -76,7 +76,7 @@ func TestPipeline_FormatFooter(t *testing.T) {
 
 	// Test FormatDropOnSuccess
 	dropMsg := FormatDropOnSuccess("c-12345-1-abc")
-	assert.Contains(t, dropMsg, "[fakebash: command succeeded with exit code 0. Verbose output truncated]")
+	assert.Contains(t, dropMsg, "[fakebash: command succeeded with exit code 0. Verbose output dropped.")
 	assert.Contains(t, dropMsg, "show-output c-12345-1-abc")
 	assert.NotContains(t, dropMsg, "by sandbox")
 }
@@ -308,7 +308,7 @@ func TestPipeline_BypassAndDropOnSuccess(t *testing.T) {
 	// 1. Drop on success
 	res, err := pipeline.Process(context.Background(), "npm run build", sf.ID(), int64(len(rawContent)), 0)
 	require.NoError(t, err)
-	assert.Contains(t, res.Output, "[fakebash: command succeeded with exit code 0. Verbose output truncated]")
+	assert.Contains(t, res.Output, "[fakebash: command succeeded with exit code 0. Verbose output dropped")
 	assert.Contains(t, res.Output, fmt.Sprintf("show-output %s", sf.ID()))
 
 	// 2. Bypass with ASGARD_BASH_COMPACT=0

@@ -48,10 +48,10 @@ func FormatFooter(cmdID string) string {
 	return fmt.Sprintf("[fakebash: output compressed. To view raw output, run: show-output %s]", cmdID)
 }
 
-// FormatDropOnSuccess formats the summary prompt and footer for commands whose verbose output was dropped on success.
+// FormatDropOnSuccess formats the single-line notice for commands whose verbose
+// output was dropped on success, including the show-output retrieval hint.
 func FormatDropOnSuccess(cmdID string) string {
-	lead := "[fakebash: command succeeded with exit code 0. Verbose output truncated]"
-	return lead + "\n" + FormatFooter(cmdID)
+	return fmt.Sprintf("[fakebash: command succeeded with exit code 0. Verbose output dropped. To view raw output, run: show-output %s]", cmdID)
 }
 
 // FormatOverflowFooter formats the footer when output exceeds MaxBufferedOutput.
