@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -69,6 +70,7 @@ type Server struct {
 	voiceHTTPClient     *http.Client
 	runSingleAgentFn    singleAgentRunner
 	proxyManager        *proxy.ProxyManager
+	auth                *auth.Service
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -207,6 +209,22 @@ func (s *Server) ProxyManager() *proxy.ProxyManager {
 	return s.proxyManager
 }
 
+// WithAuthService injects the authentication service. A nil service (the
+// default) leaves API routes unauthenticated.
+func WithAuthService(svc *auth.Service) ServerOption {
+	return func(s *Server) {
+		s.auth = svc
+	}
+}
+
+// AuthService returns the Server's authentication service, if any.
+func (s *Server) AuthService() *auth.Service {
+	if s == nil {
+		return nil
+	}
+	return s.auth
+}
+
 func (s *Server) requireRepo(w http.ResponseWriter) bool {
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -281,6 +299,17 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 
 	if s.compressionMetrics == nil {
 		s.compressionMetrics = NewCompressionMetricsStore("")
+	}
+
+	// Build the auth service once, before the initial reload; reload() only
+	// rebuilds the mux and must keep reusing this instance so a reload cannot
+	// discard pending login state or repeat discovery.
+	if s.auth == nil && s.conf != nil && s.conf.AuthConfig() != nil {
+		svc, err := auth.New(ctx, s.conf.AuthConfig(), s.conf.Host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize authentication: %w", err)
+		}
+		s.auth = svc
 	}
 
 	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
@@ -363,25 +392,77 @@ func (s *Server) recoverOrphanQueuedSessions() {
 	}
 }
 
+// authStatusPath is the public capability probe the frontend uses to decide
+// whether to run the token flow at all. It must stay reachable without
+// credentials: the client asks before it can possibly hold a token.
+const authStatusPath = "/api/auth/status"
+
+// isProtectedPath reports whether a request path requires authentication. The
+// public prefixes are matched before the /api/ fallback so the capability probe
+// and the auth endpoints are never guarded.
+func isProtectedPath(path string) bool {
+	switch {
+	case path == authStatusPath:
+		return false
+	case strings.HasPrefix(path, "/auth/"):
+		return false
+	case path == "/team":
+		return true
+	default:
+		return strings.HasPrefix(path, "/api/")
+	}
+}
+
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// CORS Headers (skip wildcard origin for manage endpoints)
-	isManage := strings.HasPrefix(r.URL.Path, "/api/manage/")
-	if !isManage {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-	}
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With")
+	s.setCORSHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
+	// Authentication runs after the OPTIONS short-circuit (so preflights are
+	// never rejected) and before the mux, which covers every /api/*, /team and
+	// metrics route in one place. The internal loopback server does not go
+	// through here and stays unauthenticated.
+	if s.auth != nil && isProtectedPath(r.URL.Path) {
+		if !s.auth.Authenticate(w, r) {
+			return // Authenticate already wrote the 401/403/503 response
+		}
+	}
+
 	s.mu.RLock()
 	mux := s.mux
 	s.mu.RUnlock()
 	mux.ServeHTTP(w, r)
+}
+
+// setCORSHeaders applies the CORS response headers. When auth is enabled the
+// allowed origin is restricted to the request's own host, because a wildcard is
+// meaningless alongside a Bearer credential; when auth is disabled the historical
+// permissive behaviour is preserved so existing integrations keep working.
+func (s *Server) setCORSHeaders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With")
+
+	if s.auth == nil {
+		// CORS wildcard is skipped for manage endpoints; they enforce an
+		// explicit same-origin check instead.
+		if !strings.HasPrefix(r.URL.Path, "/api/manage/") {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		return
+	}
+
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+	w.Header().Add("Vary", "Origin")
+	if checkManageOrigin(r) == nil {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
 }
 
 func (s *Server) buildMuxLocked() *http.ServeMux {
@@ -440,6 +521,11 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/files/search", s.handleFilesSearch)
 	mux.HandleFunc("POST /api/voice/token", s.handleCreateVoiceToken)
 
+	// Public capability probe (registered regardless of whether auth is
+	// enabled) and, when enabled, the OAuth endpoints.
+	mux.HandleFunc("GET "+authStatusPath, s.handleAuthStatus)
+	s.auth.RegisterRoutes(mux)
+
 	if s.conf != nil && s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -457,6 +543,33 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	return mux
 }
 
+// authStatusResponse is the body of the public capability probe.
+type authStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleAuthStatus reports whether the server requires authentication so the
+// frontend can choose between the token flow and its external-SSO fallback. It
+// deliberately exposes nothing else (no issuer, no role requirement).
+func (s *Server) handleAuthStatus(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(authStatusResponse{Enabled: s.auth != nil})
+}
+
+// buildInternalMux builds the loopback-only mux. Its routes are reachable
+// without credentials because they are only bound to 127.0.0.1; in particular
+// agent-to-agent calls (find-peer, call-peer) use it to bypass the public auth
+// middleware.
+func (s *Server) buildInternalMux() *http.ServeMux {
+	internalMux := http.NewServeMux()
+	internalMux.HandleFunc("/agent-status", s.handleAgentStatus)
+	internalMux.HandleFunc("/api/ask-user", s.handleAskUser)
+	internalMux.HandleFunc("POST "+metrics.EndpointPath, s.handleRecordCompressionMetrics)
+	internalMux.HandleFunc("GET /team", s.handleTeam)
+	internalMux.HandleFunc("POST /api/agents/{id}/message", s.handleTriggerMessage)
+	return internalMux
+}
+
 // Start starts the public HTTP server and an internal-only loopback HTTP server
 // for agent status callbacks. Both shut down gracefully on SIGINT/SIGTERM or
 // when the Server's root context is canceled.
@@ -468,13 +581,9 @@ func (s *Server) Start() error {
 	}
 
 	// ── Internal server (loopback only) ──────────────────────────────────────
-	internalMux := http.NewServeMux()
-	internalMux.HandleFunc("/agent-status", s.handleAgentStatus)
-	internalMux.HandleFunc("/api/ask-user", s.handleAskUser)
-	internalMux.HandleFunc("POST "+metrics.EndpointPath, s.handleRecordCompressionMetrics)
 	internalSrv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", s.conf.InternalPort),
-		Handler: internalMux,
+		Handler: s.buildInternalMux(),
 	}
 
 	s.mu.Lock()

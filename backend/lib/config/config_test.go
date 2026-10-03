@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
@@ -814,5 +815,85 @@ typesafe_api_key: "test-typesafe-key-123"
 		assert.Equal(t, "gemini-3.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "", cfg.GetGeminiAPIKey())
+	})
+}
+
+func TestConfig_AuthSection(t *testing.T) {
+	t.Parallel()
+
+	base := `
+host: %q
+db: "sqlite"
+dsn: "test.db"
+gemini_api_key: "test-key"
+gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+`
+	authYAML := `
+auth:
+  issuer: "https://idp.example.com"
+  client_id: "asgard-client"
+  client_secret: "s3cret"
+  token_source: "id_token"
+  token_audience: "account"
+  role_claim: "realm_access.roles"
+  required_role: "asgard-user"
+  auth_code_options:
+    access_type: "offline"
+`
+
+	t.Run("absent section disables auth", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := ParseAndValidate([]byte(fmt.Sprintf(base, "127.0.0.1")))
+		require.NoError(t, err)
+		assert.Nil(t, cfg.AuthConfig())
+	})
+
+	t.Run("relative host is allowed when auth is disabled", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := ParseAndValidate([]byte(fmt.Sprintf(base, "asgard.example.com")))
+		require.NoError(t, err)
+		assert.Nil(t, cfg.AuthConfig())
+	})
+
+	t.Run("full section is parsed", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := ParseAndValidate([]byte(fmt.Sprintf(base, "https://asgard.example.com") + authYAML))
+		require.NoError(t, err)
+
+		authCfg := cfg.AuthConfig()
+		require.NotNil(t, authCfg)
+		assert.Equal(t, "https://idp.example.com", authCfg.Issuer)
+		assert.Equal(t, "asgard-client", authCfg.ClientID)
+		assert.Equal(t, "s3cret", authCfg.ClientSecret)
+		assert.Equal(t, auth.TokenSourceIDToken, authCfg.TokenSource)
+		assert.Equal(t, "account", authCfg.Audience())
+		assert.Equal(t, "realm_access.roles", authCfg.Claim())
+		assert.Equal(t, "asgard-user", authCfg.RequiredRoleTrimmed())
+		assert.Equal(t, "offline", authCfg.AuthCodeOptions["access_type"])
+	})
+
+	t.Run("auth requires an absolute host", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseAndValidate([]byte(fmt.Sprintf(base, "asgard.example.com") + authYAML))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "host must be an absolute URL")
+	})
+
+	t.Run("invalid auth config is rejected", func(t *testing.T) {
+		t.Parallel()
+		broken := `
+auth:
+  issuer: "https://idp.example.com"
+  client_id: ""
+`
+		_, err := ParseAndValidate([]byte(fmt.Sprintf(base, "https://asgard.example.com") + broken))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "auth client_id is required")
+	})
+
+	t.Run("nil receiver accessor", func(t *testing.T) {
+		t.Parallel()
+		var cfg *Config
+		assert.Nil(t, cfg.AuthConfig())
 	})
 }

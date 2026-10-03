@@ -9,11 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/logger"
-	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 func main() {
@@ -26,18 +24,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	host := os.Getenv("ASGARD_API_HOST")
+	// Reach the API over the internal loopback listener: the public listener is
+	// guarded by the auth middleware, which agent-to-agent traffic must bypass.
+	host := os.Getenv("ASGARD_INTERNAL_API_HOST")
 	if host == "" {
-		port := 8080
-		if data, err := os.ReadFile(paths.ConfigFile()); err == nil {
-			var cfg struct {
-				Port int `yaml:"port"`
-			}
-			if err := yaml.Unmarshal(data, &cfg); err == nil && cfg.Port > 0 {
-				port = cfg.Port
-			}
-		}
-		host = fmt.Sprintf("http://127.0.0.1:%d", port)
+		host = "http://127.0.0.1:8081"
 	}
 	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
 		host = "http://" + host

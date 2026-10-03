@@ -3,12 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
@@ -48,8 +50,20 @@ type Config struct {
 	UILang                             string                    `yaml:"ui_lang"`
 	Providers                          []string                  `yaml:"providers" json:"providers,omitempty"`
 	Proxy                              *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
-	ConfigPath                         string                    `yaml:"-" json:"-"`
-	proxyMu                            sync.RWMutex              `yaml:"-" json:"-"`
+	// Auth enables optional OIDC/OAuth authentication. A nil value leaves every
+	// API route unauthenticated.
+	Auth       *auth.Config `yaml:"auth" json:"auth,omitempty"`
+	ConfigPath string       `yaml:"-" json:"-"`
+	proxyMu    sync.RWMutex `yaml:"-" json:"-"`
+}
+
+// AuthConfig returns the optional authentication configuration (nil when auth
+// is disabled).
+func (c *Config) AuthConfig() *auth.Config {
+	if c == nil {
+		return nil
+	}
+	return c.Auth
 }
 
 var SupportedUILangs = []string{"en", "zh-CN"}
@@ -322,6 +336,17 @@ func (c *Config) validate() error {
 	for _, p := range c.Providers {
 		if !isSupportedProvider(p) {
 			return fmt.Errorf("unsupported provider %q, must be one of %v", p, SupportedProviders)
+		}
+	}
+
+	if c.Auth != nil {
+		if err := c.Auth.Validate(); err != nil {
+			return err
+		}
+		// auth builds the OAuth redirect URI from host, which must therefore be
+		// the externally reachable absolute URL.
+		if u, err := url.Parse(c.Host); err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("host must be an absolute URL like https://asgard.example.com when auth is enabled, got %q", c.Host)
 		}
 	}
 

@@ -2,3 +2,9 @@ config.yaml
 tmp
 build
 cmd/agent-validate/agent-validate
+cmd/asgard/asgard
+cmd/ask-user/ask-user
+cmd/call-peer/call-peer
+cmd/find-peer/find-peer
+cmd/show-output/show-output
+cmd/tester/tester

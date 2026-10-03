@@ -2,212 +2,48 @@ package auth
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/backend/lib/auth/authtest"
 )
 
 // ---------------------------------------------------------------------------
-// Mock OIDC provider
+// Config
 // ---------------------------------------------------------------------------
 
-const testKID = "test-key-1"
-
-type mockProvider struct {
-	server *httptest.Server
-	key    *rsa.PrivateKey
-
-	mu sync.Mutex
-	// tokenResponse is returned by /token; when nil a default token pair is built.
-	tokenResponse map[string]any
-	tokenStatus   int
-	// jwksStatus overrides the /jwks status when non-zero.
-	jwksStatus int
-	tokenCalls int
-	jwksCalls  int
-	// lastTokenForm records the decoded form of the most recent /token request.
-	lastTokenForm url.Values
-}
-
-func newMockProvider(t *testing.T) *mockProvider {
-	t.Helper()
-
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	p := &mockProvider{key: key}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"issuer":                                p.server.URL,
-			"authorization_endpoint":                p.server.URL + "/authorize",
-			"token_endpoint":                        p.server.URL + "/token",
-			"jwks_uri":                              p.server.URL + "/jwks",
-			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		p.mu.Lock()
-		p.jwksCalls++
-		status := p.jwksStatus
-		p.mu.Unlock()
-		if status != 0 {
-			w.WriteHeader(status)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(jwksJSON(t, &key.PublicKey))
-	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-
-		p.mu.Lock()
-		p.tokenCalls++
-		p.lastTokenForm = r.PostForm
-		status := p.tokenStatus
-		resp := p.tokenResponse
-		p.mu.Unlock()
-
-		if status != 0 {
-			writeJSON(w, status, map[string]string{"error": "invalid_grant"})
-			return
-		}
-		if resp != nil {
-			writeJSON(w, http.StatusOK, resp)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"access_token":  p.sign(t, p.claims(t)),
-			"id_token":      p.sign(t, p.claims(t)),
-			"refresh_token": "refresh-1",
-			"token_type":    "Bearer",
-			"expires_in":    300,
-		})
-	})
-	p.server = httptest.NewServer(mux)
-	t.Cleanup(p.server.Close)
-	return p
-}
-
-// claims returns a base claim set valid for p.server as issuer.
-func (p *mockProvider) claims(t *testing.T) map[string]any {
-	t.Helper()
-	return map[string]any{
-		"iss": p.server.URL,
-		"aud": "client-1",
-		"sub": "user-1",
-		"exp": time.Now().Add(time.Hour).Unix(),
-	}
-}
-
-func (p *mockProvider) sign(t *testing.T, claims map[string]any) string {
-	t.Helper()
-	return signJWT(t, p.key, testKID, claims)
-}
-
-// setTokenResponse overrides the /token body.
-func (p *mockProvider) setTokenResponse(resp map[string]any) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.tokenResponse = resp
-}
-
-// setTokenStatus makes /token fail with the given status.
-func (p *mockProvider) setTokenStatus(status int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.tokenStatus = status
-}
-
-// setJWKSStatus makes /jwks fail with the given status, simulating an outage.
-func (p *mockProvider) setJWKSStatus(status int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.jwksStatus = status
-}
-
-func (p *mockProvider) tokenCallCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.tokenCalls
-}
-
-func (p *mockProvider) jwksCallCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.jwksCalls
-}
-
-func signJWT(t *testing.T, key *rsa.PrivateKey, kid string, claims map[string]any) string {
-	t.Helper()
-
-	header, err := json.Marshal(map[string]any{"alg": "RS256", "typ": "JWT", "kid": kid})
-	require.NoError(t, err)
-	payload, err := json.Marshal(claims)
-	require.NoError(t, err)
-
-	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." +
-		base64.RawURLEncoding.EncodeToString(payload)
-
-	digest := sha256.Sum256([]byte(signingInput))
-	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
-	require.NoError(t, err)
-
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
-}
-
-func jwksJSON(t *testing.T, pub *rsa.PublicKey) []byte {
-	t.Helper()
-
-	doc := map[string]any{
-		"keys": []map[string]any{{
-			"kty": "RSA",
-			"kid": testKID,
-			"use": "sig",
-			"alg": "RS256",
-			"n":   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-		}},
-	}
-	b, err := json.Marshal(doc)
-	require.NoError(t, err)
-	return b
-}
-
-// newTestService builds a Service pointed at the mock provider.
-func newTestService(t *testing.T, p *mockProvider, mutate func(*Config)) *Service {
+// newTestService builds a Service pointed at a mock OIDC provider.
+func newTestService(t *testing.T, p *authtest.Provider, mutate func(*Config)) *Service {
 	t.Helper()
 
 	cfg := &Config{
-		Issuer:       p.server.URL,
-		ClientID:     "client-1",
+		Issuer:       p.URL(),
+		ClientID:     authtest.ClientID,
 		ClientSecret: "secret-1",
 	}
 	if mutate != nil {
 		mutate(cfg)
 	}
-	s, err := New(context.Background(), cfg, p.server.URL)
+	s, err := New(context.Background(), cfg, p.URL())
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	return s
 }
 
+// doRequest runs Authenticate for a request and returns the recorder. When the
+// request is authorized the recorder carries a 200 so callers can distinguish
+// "passed the middleware" from the rejection statuses.
 func doRequest(s *Service, method, target string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, nil)
 	for k, v := range headers {
@@ -220,10 +56,6 @@ func doRequest(s *Service, method, target string, headers map[string]string) *ht
 	rec.WriteHeader(http.StatusOK)
 	return rec
 }
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
 
 func TestConfig_Validate(t *testing.T) {
 	t.Parallel()
@@ -326,9 +158,9 @@ func TestNew_NilConfigDisablesAuth(t *testing.T) {
 func TestNew_RejectsNonAbsoluteBaseURL(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	_, err := New(context.Background(), &Config{
-		Issuer:       p.server.URL,
+		Issuer:       p.URL(),
 		ClientID:     "cid",
 		ClientSecret: "secret",
 	}, "asgard.example.com")
@@ -373,9 +205,9 @@ func TestNew_ProviderDownAtStartupStillStarts(t *testing.T) {
 func TestAuthenticate_Success(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
-	token := p.sign(t, p.claims(t))
+	token := p.Sign(t, p.Claims())
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -384,7 +216,7 @@ func TestAuthenticate_Success(t *testing.T) {
 func TestAuthenticate_MissingToken(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", nil)
@@ -394,12 +226,12 @@ func TestAuthenticate_MissingToken(t *testing.T) {
 func TestAuthenticate_InvalidToken(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 	// A syntactically valid JWT signed with a different key.
 	other, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	forged := signJWT(t, other, testKID, p.claims(t))
+	forged := authtest.SignWithKey(t, other, p.Claims())
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + forged})
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -408,12 +240,12 @@ func TestAuthenticate_InvalidToken(t *testing.T) {
 func TestAuthenticate_ExpiredTokenIs401WithoutProbing(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
-	claims := p.claims(t)
+	claims := p.Claims()
 	claims["exp"] = time.Now().Add(-time.Minute).Unix()
-	token := p.sign(t, claims)
+	token := p.Sign(t, claims)
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -422,12 +254,12 @@ func TestAuthenticate_ExpiredTokenIs401WithoutProbing(t *testing.T) {
 func TestAuthenticate_WrongAudienceIs401(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
-	claims := p.claims(t)
+	claims := p.Claims()
 	claims["aud"] = "some-other-client"
-	token := p.sign(t, claims)
+	token := p.Sign(t, claims)
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -436,15 +268,15 @@ func TestAuthenticate_WrongAudienceIs401(t *testing.T) {
 func TestAuthenticate_CustomTokenAudience(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.TokenSource = TokenSourceAccessToken
 		c.TokenAudience = "account"
 	})
 
-	claims := p.claims(t)
+	claims := p.Claims()
 	claims["aud"] = "account"
-	token := p.sign(t, claims)
+	token := p.Sign(t, claims)
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -453,14 +285,14 @@ func TestAuthenticate_CustomTokenAudience(t *testing.T) {
 func TestAuthenticate_ProviderDownReturns503(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
-	token := p.sign(t, p.claims(t))
+	token := p.Sign(t, p.Claims())
 
 	// The provider becomes unreachable after discovery succeeded: the JWKS
 	// fetch fails and the probe confirms the outage, so the client must be told
 	// to keep its session (503) rather than to log in again (401).
-	p.server.Close()
+	p.Close()
 
 	rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
@@ -549,7 +381,7 @@ func TestAuthenticate_RoleClaimShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			p := newMockProvider(t)
+			p := authtest.NewProvider(t)
 			required := tc.required
 			claim := tc.claim
 			s := newTestService(t, p, func(c *Config) {
@@ -557,11 +389,11 @@ func TestAuthenticate_RoleClaimShapes(t *testing.T) {
 				c.RequiredRole = required
 			})
 
-			claims := p.claims(t)
+			claims := p.Claims()
 			for k, v := range tc.claims {
 				claims[k] = v
 			}
-			token := p.sign(t, claims)
+			token := p.Sign(t, claims)
 
 			rec := doRequest(s, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
 			assert.Equal(t, tc.want, rec.Code)
@@ -576,9 +408,9 @@ func TestAuthenticate_RoleClaimShapes(t *testing.T) {
 func TestQueryToken_OnlyForSafeMethods(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
-	token := p.sign(t, p.claims(t))
+	token := p.Sign(t, p.Claims())
 
 	t.Run("GET uses the query token", func(t *testing.T) {
 		rec := doRequest(s, http.MethodGet, "/api/sessions/x/events?access_token="+url.QueryEscape(token), nil)
@@ -633,7 +465,7 @@ func TestBearerToken_Parsing(t *testing.T) {
 func TestState_Lifecycle(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	s.addState("abc", "/dashboard")
@@ -653,7 +485,7 @@ func TestState_Lifecycle(t *testing.T) {
 func TestState_Expired(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	s.statesMu.Lock()
@@ -667,7 +499,7 @@ func TestState_Expired(t *testing.T) {
 func TestState_EvictsOldestWhenFull(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	first := "state-0000"
@@ -746,7 +578,7 @@ func beginLogin(t *testing.T, s *Service, redirect string) (state string, cookie
 func TestLogin_RedirectsToProvider(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.AuthCodeOptions = map[string]string{"access_type": "offline", "prompt": "consent"}
 	})
@@ -759,14 +591,14 @@ func TestLogin_RedirectsToProvider(t *testing.T) {
 
 	location, err := url.Parse(rec.Header().Get("Location"))
 	require.NoError(t, err)
-	assert.Equal(t, p.server.URL+"/authorize", location.Scheme+"://"+location.Host+location.Path)
+	assert.Equal(t, p.URL()+"/authorize", location.Scheme+"://"+location.Host+location.Path)
 	assert.Equal(t, "client-1", location.Query().Get("client_id"))
 	assert.Equal(t, "code", location.Query().Get("response_type"))
 	assert.Contains(t, location.Query().Get("scope"), "openid")
 	assert.Contains(t, location.Query().Get("scope"), "offline_access")
 	assert.Equal(t, "offline", location.Query().Get("access_type"))
 	assert.Equal(t, "consent", location.Query().Get("prompt"))
-	assert.Equal(t, p.server.URL+"/auth/callback", location.Query().Get("redirect_uri"))
+	assert.Equal(t, p.URL()+"/auth/callback", location.Query().Get("redirect_uri"))
 	assert.NotEmpty(t, location.Query().Get("state"))
 	assert.NotEqual(t, state, location.Query().Get("state"))
 
@@ -777,7 +609,7 @@ func TestLogin_RedirectsToProvider(t *testing.T) {
 func TestCallback_Success(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	state, cookie := beginLogin(t, s, "/dashboard")
@@ -806,7 +638,7 @@ func TestCallback_Success(t *testing.T) {
 func TestCallback_StateMismatch(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	_, cookie := beginLogin(t, s, "/")
@@ -838,7 +670,7 @@ func TestCallback_StateMismatch(t *testing.T) {
 func TestCallback_StateIsSingleUse(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	state, cookie := beginLogin(t, s, "/")
@@ -859,7 +691,7 @@ func TestCallback_StateIsSingleUse(t *testing.T) {
 func TestCallback_ProviderError(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?error=access_denied", nil)
@@ -871,8 +703,8 @@ func TestCallback_ProviderError(t *testing.T) {
 func TestCallback_ExchangeFailure(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
-	p.setTokenStatus(http.StatusBadRequest)
+	p := authtest.NewProvider(t)
+	p.SetTokenStatus(http.StatusBadRequest)
 	s := newTestService(t, p, nil)
 
 	state, cookie := beginLogin(t, s, "/")
@@ -886,12 +718,13 @@ func TestCallback_ExchangeFailure(t *testing.T) {
 func TestCallback_RoleMissingRendersDenied(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.RequiredRole = "asgard-user"
 	})
 
-	// The default token response signs p.claims, which carries no roles claim.
+	// The default token response signs the provider claims, which carry no
+	// roles claim.
 	state, cookie := beginLogin(t, s, "/")
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=abc&state="+state, nil)
 	req.AddCookie(cookie)
@@ -906,11 +739,11 @@ func TestCallback_RoleMissingRendersDenied(t *testing.T) {
 func TestCallback_RolePresentSucceeds(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
-	claims := p.claims(t)
+	p := authtest.NewProvider(t)
+	claims := p.Claims()
 	claims["roles"] = "asgard-user"
-	tok := p.sign(t, claims)
-	p.setTokenResponse(map[string]any{
+	tok := p.Sign(t, claims)
+	p.SetTokenResponse(map[string]any{
 		"access_token":  tok,
 		"id_token":      tok,
 		"refresh_token": "refresh-1",
@@ -935,26 +768,24 @@ func TestCallback_RolePresentSucceeds(t *testing.T) {
 func TestRefresh_Success(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
-	before := p.tokenCallCount()
+	before := p.TokenCalls()
 	body := strings.NewReader(`{"refresh_token":"refresh-1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", body)
 	rec := httptest.NewRecorder()
 	s.handleRefresh(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, before+1, p.tokenCallCount())
+	assert.Equal(t, before+1, p.TokenCalls())
 	var resp tokenResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.NotEmpty(t, resp.AccessToken)
 	assert.Equal(t, "refresh-1", resp.RefreshToken)
 	assert.Positive(t, resp.ExpiresIn)
 
-	p.mu.Lock()
-	form := p.lastTokenForm
-	p.mu.Unlock()
+	form := p.LastTokenForm()
 	assert.Equal(t, "refresh_token", form.Get("grant_type"))
 	assert.Equal(t, "refresh-1", form.Get("refresh_token"))
 }
@@ -962,7 +793,7 @@ func TestRefresh_Success(t *testing.T) {
 func TestRefresh_MissingToken(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	for _, payload := range []string{`{}`, `{"refresh_token":""}`, `not json`} {
@@ -976,8 +807,8 @@ func TestRefresh_MissingToken(t *testing.T) {
 func TestRefresh_InvalidGrantIs401(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
-	p.setTokenStatus(http.StatusBadRequest)
+	p := authtest.NewProvider(t)
+	p.SetTokenStatus(http.StatusBadRequest)
 	s := newTestService(t, p, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refresh_token":"stale"}`))
@@ -989,12 +820,12 @@ func TestRefresh_InvalidGrantIs401(t *testing.T) {
 func TestRefresh_ProviderOutageIs503(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	// A closed server: the token endpoint is unreachable, so the client should
 	// keep its session rather than be logged out.
-	p.server.Close()
+	p.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refresh_token":"refresh-1"}`))
 	rec := httptest.NewRecorder()
@@ -1009,15 +840,15 @@ func TestRefresh_ProviderOutageIs503(t *testing.T) {
 func TestIDTokenMode_UsesIDTokenAsBearer(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.TokenSource = TokenSourceIDToken
 	})
 
-	claims := p.claims(t)
-	idToken := p.sign(t, claims)
+	claims := p.Claims()
+	idToken := p.Sign(t, claims)
 	// The access token is deliberately not a usable JWT (opaque), as with Google.
-	p.setTokenResponse(map[string]any{
+	p.SetTokenResponse(map[string]any{
 		"access_token":  "opaque-access-token",
 		"id_token":      idToken,
 		"refresh_token": "refresh-1",
@@ -1053,13 +884,13 @@ func TestIDTokenMode_UsesIDTokenAsBearer(t *testing.T) {
 func TestIDTokenMode_RefreshWithoutIDTokenIs401(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.TokenSource = TokenSourceIDToken
 	})
 
 	// A refresh response that lacks an id_token cannot extend the session.
-	p.setTokenResponse(map[string]any{
+	p.SetTokenResponse(map[string]any{
 		"access_token":  "opaque-access-token",
 		"refresh_token": "refresh-2",
 		"token_type":    "Bearer",
@@ -1075,14 +906,14 @@ func TestIDTokenMode_RefreshWithoutIDTokenIs401(t *testing.T) {
 func TestIDTokenMode_RefreshWithNewIDTokenSucceeds(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, func(c *Config) {
 		c.TokenSource = TokenSourceIDToken
 	})
 
-	claims := p.claims(t)
-	idToken := p.sign(t, claims)
-	p.setTokenResponse(map[string]any{
+	claims := p.Claims()
+	idToken := p.Sign(t, claims)
+	p.SetTokenResponse(map[string]any{
 		"access_token":  "opaque-access-token",
 		"id_token":      idToken,
 		"refresh_token": "refresh-2",
@@ -1107,11 +938,11 @@ func TestIDTokenMode_RefreshWithNewIDTokenSucceeds(t *testing.T) {
 func TestProviderReachable_NegativeCacheBoundsProbes(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
-	base := p.jwksCallCount()
+	base := p.JWKSCalls()
 
-	p.setJWKSStatus(http.StatusInternalServerError)
+	p.SetJWKSStatus(http.StatusInternalServerError)
 
 	// Drive the probe through the public path a few times.
 	for i := 0; i < 5; i++ {
@@ -1119,16 +950,16 @@ func TestProviderReachable_NegativeCacheBoundsProbes(t *testing.T) {
 	}
 	// The failure is cached, so an outage costs one JWKS round trip, not one
 	// per rejected request.
-	assert.Equal(t, base+1, p.jwksCallCount())
+	assert.Equal(t, base+1, p.JWKSCalls())
 }
 
 func TestProviderReachable_RecoversAfterSuccess(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
-	p.setJWKSStatus(http.StatusInternalServerError)
+	p.SetJWKSStatus(http.StatusInternalServerError)
 	assert.False(t, s.providerReachable())
 
 	// The provider recovers; the failure cache must expire.
@@ -1136,7 +967,7 @@ func TestProviderReachable_RecoversAfterSuccess(t *testing.T) {
 	s.probeAt = time.Now().Add(-probeFailureTTL - time.Second)
 	s.probeMu.Unlock()
 
-	p.setJWKSStatus(0)
+	p.SetJWKSStatus(0)
 	assert.True(t, s.providerReachable())
 }
 
@@ -1147,7 +978,7 @@ func TestProviderReachable_RecoversAfterSuccess(t *testing.T) {
 func TestRegisterRoutes(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 	mux := http.NewServeMux()
 	s.RegisterRoutes(mux)
@@ -1163,7 +994,7 @@ func TestRegisterRoutes(t *testing.T) {
 func TestCallbackScriptServed(t *testing.T) {
 	t.Parallel()
 
-	p := newMockProvider(t)
+	p := authtest.NewProvider(t)
 	s := newTestService(t, p, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback.js", nil)
