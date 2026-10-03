@@ -149,22 +149,30 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		return text + "\n\n" + status
 	}
 
+	// errorResult reports a tool-level failure (pi 8562bcf66 isError
+	// semantics): the command output stays as Content and the structured
+	// Details survive, instead of collapsing into a Go error that discards
+	// both.
+	errorResult := func(status string) *types.ToolResult {
+		return &types.ToolResult{
+			Content: []types.AssistantContent{types.TextContent{
+				Type: types.TypeText,
+				Text: appendStatus(status),
+			}},
+			Details: details,
+			IsError: true,
+		}
+	}
+
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("%s", appendStatus("Command aborted"))
+		return errorResult("Command aborted"), nil
 	}
 	if timedOut {
 		timeoutDisplay := ""
 		if in.Timeout != nil {
 			timeoutDisplay = strconv.FormatFloat(*in.Timeout, 'f', -1, 64)
 		}
-		return &types.ToolResult{
-			Content: []types.AssistantContent{types.TextContent{
-				Type: types.TypeText,
-				Text: appendStatus(fmt.Sprintf("Command timed out after %s seconds", timeoutDisplay)),
-			}},
-			Details: details,
-			IsError: true,
-		}, nil
+		return errorResult(fmt.Sprintf("Command timed out after %s seconds", timeoutDisplay)), nil
 	}
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -172,17 +180,8 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				exitCode = 128 + int(status.Signal())
 			}
-			// Non-zero exit is a tool-level failure, not an execution crash:
-			// keep the command output as content and the structured details,
-			// and mark the result as an error (pi 8562bcf66 isError semantics).
-			return &types.ToolResult{
-				Content: []types.AssistantContent{types.TextContent{
-					Type: types.TypeText,
-					Text: appendStatus(fmt.Sprintf("Command exited with code %d", exitCode)),
-				}},
-				Details: details,
-				IsError: true,
-			}, nil
+			// Non-zero exit is a tool-level failure, not an execution crash.
+			return errorResult(fmt.Sprintf("Command exited with code %d", exitCode)), nil
 		}
 		return nil, runErr
 	}
