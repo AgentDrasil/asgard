@@ -316,3 +316,44 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 	// The session tmp directory should have been automatically created before os.Stat
 	assert.DirExists(t, sessionTmpDir)
 }
+
+// TestSingleAgentExecutor_Execute_NoStoredSession covers executing against a
+// chatID that has no session row. The stored-model override check must skip
+// entirely in that case instead of dereferencing a nil session.
+func TestSingleAgentExecutor_Execute_NoStoredSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+
+	repo := dbmodels.NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:      "test-agent-no-session",
+			Name:    "Test Agent No Session",
+			RunDirs: []string{"tmp"},
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "gemini-3.7-flash-high"},
+			},
+		},
+	}
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, nil, nil)
+
+	chatID := "test-chat-no-session"
+	// No session is saved, so GetSession returns nil. Execute must not panic,
+	// even with an explicitly requested model that would otherwise be compared
+	// against the stored one.
+	require.NotPanics(t, func() {
+		_, _ = executor.Execute(context.Background(), SingleAgentRunParams{
+			ChatID: chatID,
+			Prompt: "no stored session",
+			RunDir: "tmp",
+			Model:  "gemini-3.7-flash-low",
+		})
+	})
+}

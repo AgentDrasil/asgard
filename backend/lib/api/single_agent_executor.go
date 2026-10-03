@@ -108,9 +108,12 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	// An existing session's stored model overrides an explicitly requested one
 	// to keep the underlying CLI session valid. Surface the override instead of
 	// silently ignoring the request, so it shows up when debugging a session.
-	if stored := storedAgentModel(session, e.agent.Config); stored != "" && configuredModel(e.agent.Config, stored) {
-		if requested := requestedModel(params); requested != "" && requested != stored {
-			e.recordModelOverride(chatID, requested, stored)
+	// A missing session has no stored model, so the check is skipped entirely.
+	if session != nil {
+		if stored := storedAgentModel(session, e.agent.Config); stored != "" && configuredModel(e.agent.Config, stored) {
+			if requested := requestedModel(params); requested != "" && requested != stored {
+				e.recordModelOverride(chatID, requested, stored)
+			}
 		}
 	}
 
