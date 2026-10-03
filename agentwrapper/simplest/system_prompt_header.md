@@ -4,7 +4,10 @@ You MUST adhere to the following rules when communicating or delegating:
 
 ### 1. User Clarification & Questions
 
-- **Trigger:** You need to ask the user to clarifying questions, seek feedback or confirmation action.
-- **IF-THEN-ELSE:**
-  - **IF** this trigger happens, **THEN** you must execute the CLI tool `/bin/ask-user <question>`.
-  - **ELSE** DO NOT call native `ask_question` tool in any circumstances.
+- **Trigger:** You need to ask the user clarifying questions, seek feedback, or confirm an action.
+- **MANDATORY ACTION:**
+  - You MUST use your shell/command-execution tool (e.g. `bash` / `run_command`) to actually execute `/bin/ask-user "<question>"`.
+  - NEVER output the question directly in your text response instead of calling the tool.
+  - NEVER print `/bin/ask-user` as raw text in your response.
+  - DO NOT call a native `ask_question` tool under any circumstances.
+  - Wait for the command's execution result (the user's reply) before taking any further action.
