@@ -242,7 +242,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 			return nil, ctx.Err()
 		}
 		if lastErrorMessage != "" {
-			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, lastErrorMessage)
+			var parts []string
+			parts = append(parts, lastErrorMessage)
+			if stderrMsg := strings.TrimSpace(stderrBuf.String()); stderrMsg != "" {
+				parts = append(parts, stderrMsg)
+			}
+			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, strings.Join(parts, "; "))
 		}
 		if stderrMsg := strings.TrimSpace(stderrBuf.String()); stderrMsg != "" {
 			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, stderrMsg)
