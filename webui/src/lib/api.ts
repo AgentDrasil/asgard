@@ -16,6 +16,7 @@ import type {
   KeybindingsApiResponse,
   KeybindingsOverrides,
   QueuedMessage,
+  StoredTokens,
   SystemLogEntry,
   SystemLogsResponse,
   SystemStatusResponse,
@@ -25,15 +26,224 @@ import type {
   WorkspaceFileContent,
 } from "../types";
 
-// Centralized fetch wrapper that handles 401 Unauthorized by redirecting for SSO refresh
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
-  if (response.status === 401) {
-    console.log("apiFetch: 401 received, redirecting to refresh session via SSO...");
-    const url = new URL(window.location.href);
-    url.searchParams.set("_auth_refresh", Date.now().toString());
-    window.location.href = url.toString();
+// ---------------------------------------------------------------------------
+// Authentication (stateless OIDC)
+//
+// Tokens live in localStorage and are attached to API requests as a Bearer
+// header. When the backend reports that auth is disabled the app keeps its
+// historical behaviour: a 401 reloads the page so an external reverse-proxy
+// SSO can re-authenticate.
+// ---------------------------------------------------------------------------
+
+const AUTH_STORAGE_KEY = "asgard_auth";
+const REFRESH_LOCK = "asgard_auth_refresh";
+const AUTH_PROBE_TIMEOUT_MS = 5000;
+
+// authEnabled is null until initAuth() has probed the backend.
+let authEnabled: boolean | null = null;
+
+// isAuthEnabled reports whether the backend runs OIDC auth. It is false until
+// the capability probe succeeds, so a failed probe degrades to the external-SSO
+// path rather than locking the user out.
+export function isAuthEnabled(): boolean {
+  return authEnabled === true;
+}
+
+// initAuth probes the public capability endpoint and must complete before the
+// first business request (see main.ts). The probe is always anonymous: it runs
+// before a token can possibly exist.
+export async function initAuth(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/auth/status", {
+      signal: AbortSignal.timeout(AUTH_PROBE_TIMEOUT_MS),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { enabled?: boolean };
+      authEnabled = body.enabled === true;
+    }
+  } catch {
+    // Probe failed (timeout, offline, older backend): keep authEnabled null so
+    // the app falls back to the existing behaviour.
   }
+  return authEnabled === true;
+}
+
+export function getStoredTokens(): StoredTokens | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredTokens) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredTokens(tokens: StoredTokens): void {
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
+  } catch {
+    // localStorage can be unavailable (private mode); nothing to persist then.
+  }
+}
+
+// logout drops the local session and returns to the app. It does not perform
+// provider-side logout.
+export function logout(): void {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+  window.location.href = "/";
+}
+
+type RefreshResult = "ok" | "expired" | "unavailable";
+
+// refreshTokens exchanges the stored refresh token for a fresh session via the
+// backend, which holds the client secret.
+async function refreshTokens(): Promise<RefreshResult> {
+  const tokens = getStoredTokens();
+  if (!tokens?.refresh_token) return "expired";
+
+  let response: Response;
+  try {
+    response = await fetch("/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: tokens.refresh_token }),
+    });
+  } catch {
+    // Network failure: the tokens may still be valid, so keep the session.
+    return "unavailable";
+  }
+
+  if (response.ok) {
+    setStoredTokens((await response.json()) as StoredTokens);
+    return "ok";
+  }
+  if (response.status === 400 || response.status === 401) {
+    return "expired";
+  }
+  // Provider outage (5xx/429): do not log the user out.
+  return "unavailable";
+}
+
+// refreshing deduplicates refreshes within this tab for browsers without the
+// Web Locks API (old Safari, WebViews, insecure origins).
+let refreshing: Promise<RefreshResult> | null = null;
+
+// refreshOnce deduplicates refreshes across every tab. Rotation invalidates the
+// previous refresh token, so two tabs refreshing in parallel would make the
+// second attempt look like a replay attack and log the user out.
+function refreshOnce(): Promise<RefreshResult> {
+  const used = getStoredTokens()?.refresh_token;
+
+  const run = async (): Promise<RefreshResult> => {
+    // Another tab may have refreshed while we waited for the lock.
+    const current = getStoredTokens()?.refresh_token;
+    if (used && current && current !== used) return "ok";
+    return refreshTokens();
+  };
+
+  const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+  if (locks) {
+    return locks.request(REFRESH_LOCK, run);
+  }
+
+  refreshing ??= run().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
+function redirectToLogin(): void {
+  const current = new URL(window.location.href);
+  window.location.href = `/auth/login?redirect=${encodeURIComponent(current.pathname + current.search)}`;
+}
+
+// redirectToDenied goes to the denial page for a session that is authenticated
+// but not authorized. Logging in again cannot help, so it must not loop through
+// the OAuth flow.
+function redirectToDenied(): void {
+  window.location.href = "/auth/denied";
+}
+
+// reloadForExternalSSO is the historical fallback: reloading lets a reverse
+// proxy sitting in front of Asgard re-authenticate the user.
+function reloadForExternalSSO(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("_auth_refresh", Date.now().toString());
+  window.location.href = url.toString();
+}
+
+// recoverSession is used by channels that cannot go through apiFetch (the SSE
+// stream). It attempts a single refresh and tells the caller what to do next.
+export async function recoverSession(): Promise<"recovered" | "login" | "retry"> {
+  const result = await refreshOnce();
+  if (result === "ok") return "recovered";
+  if (result === "expired") {
+    redirectToLogin();
+    return "login";
+  }
+  return "retry";
+}
+
+// appendAccessToken attaches the bearer token to a URL for channels that cannot
+// set headers: EventSource, WebSocket upgrades and resource loads such as
+// <img>/<iframe>/<a href>. It is a no-op while auth is disabled so those URLs
+// stay untouched in external-SSO deployments.
+export function appendAccessToken(url: string): string {
+  if (!isAuthEnabled()) return url;
+  const token = getStoredTokens()?.access_token;
+  if (!token) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}access_token=${encodeURIComponent(token)}`;
+}
+
+// Centralized fetch wrapper.
+//
+// With auth disabled it keeps the original behaviour (a 401 triggers the
+// external-SSO reload). With auth enabled it injects the bearer token, silently
+// refreshes once on 401 and redirects to the denial page on 403.
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // applyAuth returns init unchanged (including undefined) when there is nothing
+  // to add, so callers observe the same fetch() arguments as before auth existed.
+  const applyAuth = (options?: RequestInit): RequestInit | undefined => {
+    if (!isAuthEnabled()) return options;
+    const token = getStoredTokens()?.access_token;
+    if (!token) return options;
+    const headers = new Headers(options?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return { ...options, headers };
+  };
+
+  let response = await fetch(input, applyAuth(init));
+
+  if (!isAuthEnabled()) {
+    if (response.status === 401) {
+      console.log("apiFetch: 401 received, redirecting to refresh session via SSO...");
+      reloadForExternalSSO();
+    }
+    return response;
+  }
+
+  if (response.status === 403) {
+    redirectToDenied();
+    // Return an unresolved promise so callers neither retry nor start an
+    // endless fetch loop while the browser navigates away.
+    return new Promise<Response>(() => {});
+  }
+
+  if (response.status === 401) {
+    const result = await refreshOnce();
+    if (result === "ok") {
+      response = await fetch(input, applyAuth(init));
+    } else if (result === "expired") {
+      redirectToLogin();
+      return new Promise<Response>(() => {});
+    }
+    // "unavailable": keep the session and surface the response to the caller.
+  }
+
   return response;
 }
 
@@ -526,7 +736,9 @@ export async function uploadAttachment(sessionId: string, file: File): Promise<A
 }
 
 export function getAttachmentUrl(sessionId: string, filename: string): string {
-  return `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(filename)}`;
+  return appendAccessToken(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(filename)}`,
+  );
 }
 
 export async function triggerAgentMessage(
@@ -713,11 +925,19 @@ export async function searchFiles(
 }
 
 export function getRawFileContentUrl(sessionId: string, path: string): string {
-  return `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`;
+  return appendAccessToken(
+    `/api/files/content?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`,
+  );
 }
 
+// getRawWorkspaceFileUrl returns a URL usable directly as an <img>/<iframe> src,
+// so the bearer token travels in the query string (headers are not available on
+// resource loads). Note the token is a snapshot: a refresh will not update an
+// URL that is already rendered.
 export function getRawWorkspaceFileUrl(sessionId: string, path: string): string {
-  return `/api/v1/workspace/file?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`;
+  return appendAccessToken(
+    `/api/v1/workspace/file?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&raw=1`,
+  );
 }
 
 export async function getVoiceToken(): Promise<VoiceTokenResponse> {

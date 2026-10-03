@@ -136,10 +136,28 @@ export interface FirebaseWebpushWebConfig {
 export interface SessionEvent {
   eventId: number;
   chatId: string;
-  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "auth_expired" | "queue";
+  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "queue";
   message?: ChatMessage;
   payload?: Record<string, any>;
   timestamp: number;
+}
+
+// StoredTokens is the session credential persisted in localStorage under
+// "asgard_auth". It is only present when the backend runs OIDC auth.
+export interface StoredTokens {
+  // access_token is what every API request sends as "Authorization: Bearer".
+  // The backend normalises it: it is the provider access token, or the ID token
+  // when the server verifies id_token.
+  access_token: string;
+  refresh_token: string;
+  id_token: string;
+  expires_in: number;
+  token_type: string;
+}
+
+// AuthStatusResponse is the body of the public GET /api/auth/status probe.
+export interface AuthStatusResponse {
+  enabled: boolean;
 }
 
 export interface TriggerAgentMessageParams {

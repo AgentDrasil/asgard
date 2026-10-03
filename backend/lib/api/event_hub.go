@@ -12,21 +12,20 @@ const (
 	defaultTopicIdleDuration  = 10 * time.Minute
 	defaultGCPollInterval     = 1 * time.Minute
 
-	EventTypeMessage     = "message"
-	EventTypeStatus      = "status"
-	EventTypeTitle       = "title"
-	EventTypeArtifact    = "artifact"
-	EventTypeDone        = "done"
-	EventTypeResync      = "resync"
-	EventTypeAuthExpired = "auth_expired"
-	EventTypeQueue       = "queue"
+	EventTypeMessage  = "message"
+	EventTypeStatus   = "status"
+	EventTypeTitle    = "title"
+	EventTypeArtifact = "artifact"
+	EventTypeDone     = "done"
+	EventTypeResync   = "resync"
+	EventTypeQueue    = "queue"
 )
 
 // SessionEvent is the unified event structure broadcasted via EventHub and SSE.
 type SessionEvent struct {
 	EventID   int64                 `json:"eventId"`
 	ChatID    string                `json:"chatId"`
-	Type      string                `json:"type"` // message | status | title | artifact | done | resync | auth_expired
+	Type      string                `json:"type"` // message | status | title | artifact | done | resync | queue
 	Message   *dbmodels.ChatMessage `json:"message,omitempty"`
 	Payload   map[string]any        `json:"payload,omitempty"`
 	Timestamp int64                 `json:"timestamp"`

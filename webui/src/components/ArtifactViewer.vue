@@ -6,7 +6,7 @@ import { useI18n } from "vue-i18n";
 import { useShiki } from "../composables/useShiki";
 import { useInPageFind } from "../composables/useInPageFind";
 import { getFileIcon, resolveViewerCategory, isCsvFile } from "../utils/fileUtils";
-import { getRawWorkspaceFileUrl } from "../lib/api";
+import { getRawWorkspaceFileUrl, apiFetch } from "../lib/api";
 import MarkdownContent from "./MarkdownContent.vue";
 import FindBar from "./FindBar.vue";
 import MediaViewer from "./common/MediaViewer.vue";
@@ -128,7 +128,7 @@ async function fetchFile(path: string) {
   errorMsg.value = null;
 
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/workspace/file?session_id=${encodeURIComponent(props.sessionId)}&path=${encodeURIComponent(path)}`,
     );
     if (!res.ok) {

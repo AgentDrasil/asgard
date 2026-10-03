@@ -5,6 +5,7 @@ import type { ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { appendAccessToken } from "../lib/api";
 
 const props = defineProps<{
   sessionId: string;
@@ -43,7 +44,9 @@ const wsUrl = () => {
   const key =
     props.terminalType === "sidebar" || !props.sessionId ? "sidebar" : `agent-${props.sessionId}`;
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/api/ttyd/${key}/ws`;
+  // A WebSocket upgrade cannot carry an Authorization header, so the bearer
+  // token goes in the query string while auth is enabled.
+  return appendAccessToken(`${proto}//${window.location.host}/api/ttyd/${key}/ws`);
 };
 
 const send = (cmdByte: number, payload: Uint8Array | string) => {
