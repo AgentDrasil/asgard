@@ -105,6 +105,14 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	}
 
 	modelOpt := resolveModel(params, session, e.agent.Config)
+	// An existing session's stored model overrides an explicitly requested one
+	// to keep the underlying CLI session valid. Surface the override instead of
+	// silently ignoring the request, so it shows up when debugging a session.
+	if stored := storedAgentModel(session, e.agent.Config); stored != "" && configuredModel(e.agent.Config, stored) {
+		if requested := requestedModel(params); requested != "" && requested != stored {
+			e.recordModelOverride(chatID, requested, stored)
+		}
+	}
 
 	// Validate run_dir allowlist and existence BEFORE any DB writes or title generation
 	if runDirOpt.IsSome() {
@@ -559,6 +567,50 @@ func configuredModel(cfg agentspec.AgentConfig, model string) bool {
 		}
 	}
 	return false
+}
+
+// requestedModel returns the model explicitly requested for this run: the
+// run parameter first, then metadata.
+func requestedModel(params SingleAgentRunParams) string {
+	if params.Model != "" {
+		return params.Model
+	}
+	if params.Metadata != nil {
+		if m, ok := params.Metadata["model"].(string); ok {
+			return m
+		}
+	}
+	return ""
+}
+
+// recordModelOverride appends and broadcasts an activity marker when a valid
+// stored session model overrides an explicitly requested model.
+func (e *SingleAgentExecutor) recordModelOverride(chatID, requested, stored string) {
+	log.Info().
+		Str("chat_id", chatID).
+		Str("agent", e.agent.Config.ID).
+		Str("requested_model", requested).
+		Str("effective_model", stored).
+		Msg("requested model ignored; session keeps stored model")
+	if e.repo == nil {
+		return
+	}
+	msg := dbmodels.ChatMessage{
+		ID:           fmt.Sprintf("model-override-%s-%s", chatID, uuid.NewV7().String()),
+		Role:         "activity",
+		ActivityType: "MODEL_OVERRIDE",
+		Content:      fmt.Sprintf("requested model %q ignored; session pinned to %q", requested, stored),
+		AgentName:    e.agent.Config.Name,
+		Model:        stored,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	if err := e.repo.AppendMessage(chatID, msg); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append model override activity")
+		return
+	}
+	if e.server != nil {
+		e.server.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &msg})
+	}
 }
 
 // resolveModel determines the model to run. When an existing session already has

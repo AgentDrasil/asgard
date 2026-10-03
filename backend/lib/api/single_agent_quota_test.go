@@ -79,6 +79,48 @@ func TestResolveModel(t *testing.T) {
 		session := &dbmodels.Session{Messages: []dbmodels.ChatMessage{{Role: "assistant", Model: "model-one"}}}
 		assert.True(t, resolveModel(SingleAgentRunParams{}, session, cfg).IsNone())
 	})
+
+	t.Run("session without stored model for this agent falls back to param", func(t *testing.T) {
+		session := &dbmodels.Session{Agents: []dbmodels.Agent{}}
+		assert.Equal(t, "model-one", resolveModel(SingleAgentRunParams{Model: "model-one"}, session, cfg).Unwrap())
+	})
+
+	t.Run("requestedModel prefers param then metadata", func(t *testing.T) {
+		assert.Equal(t, "model-one", requestedModel(SingleAgentRunParams{Model: "model-one"}))
+		assert.Equal(t, "meta-model", requestedModel(SingleAgentRunParams{Metadata: map[string]any{"model": "meta-model"}}))
+		assert.Equal(t, "", requestedModel(SingleAgentRunParams{}))
+	})
+}
+
+func TestSingleAgentExecutor_ModelOverrideRecordedAsActivity(t *testing.T) {
+	repo := newQuotaTestRepo(t)
+	server := newQuotaTestServer(t, repo)
+
+	chatID := "test-chat-model-override"
+	cfg := quotaTestConfig()
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{
+		ChatID:       chatID,
+		CurrentAgent: cfg.ID,
+		Agents:       []dbmodels.Agent{{Name: cfg.ID, Model: "model-two"}},
+	}))
+
+	agent := &agentspec.Agent{Config: cfg}
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, server, nil)
+
+	executor.recordModelOverride(chatID, "model-one", "model-two")
+
+	session, err := repo.GetSession(chatID)
+	require.NoError(t, err)
+	var recorded bool
+	for _, m := range session.Messages {
+		if m.Role == "activity" && m.ActivityType == "MODEL_OVERRIDE" {
+			recorded = true
+			assert.Contains(t, m.Content, "model-one")
+			assert.Contains(t, m.Content, "model-two")
+			assert.Equal(t, "model-two", m.Model)
+		}
+	}
+	assert.True(t, recorded, "model override should be recorded as an activity message")
 }
 
 func TestSingleAgentExecutor_QuotaSuspensionCancel(t *testing.T) {
