@@ -592,14 +592,13 @@ export async function getQueuedMessages(sessionId: string): Promise<QueuedMessag
 export async function enqueueMessage(
   sessionId: string,
   prompt: string,
-  model?: string,
 ): Promise<QueuedMessage | null> {
   if (!sessionId) return null;
   try {
     const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, model }),
+      body: JSON.stringify({ prompt }),
     });
     if (res.ok) {
       return await res.json();

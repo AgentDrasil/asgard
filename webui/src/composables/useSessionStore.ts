@@ -435,7 +435,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         pushErrorMessage(`排队消息已达上限（最多 ${MAX_QUEUED_MESSAGES} 条）`);
         return;
       }
-      const queued = await enqueueMessage(currentThreadId, text, opts?.selectedModel);
+      const queued = await enqueueMessage(currentThreadId, text);
       if (queued) {
         if (!queuedMessages.value.some((m) => m.id === queued.id)) {
           queuedMessages.value = [...queuedMessages.value, queued];

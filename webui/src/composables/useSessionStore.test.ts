@@ -1037,11 +1037,7 @@ describe("useSessionStore", () => {
 
       await store.sendMessage("Second question", { selectedModel: "model-x" });
 
-      expect(enqueueSpy).toHaveBeenCalledWith(
-        "session-running-enqueue",
-        "Second question",
-        "model-x",
-      );
+      expect(enqueueSpy).toHaveBeenCalledWith("session-running-enqueue", "Second question");
       expect(triggerSpy).not.toHaveBeenCalled();
       // Crucial: No optimistic message in rawMessages/messages
       expect(store.messages.value.some((m) => m.content === "Second question")).toBe(false);
@@ -1161,11 +1157,7 @@ describe("useSessionStore", () => {
 
       // 2. Sending text should enqueue, not trigger regular send or insert optimistic user message
       await store.sendMessage("Second queued message while paused");
-      expect(enqueueSpy).toHaveBeenCalledWith(
-        "session-ask-user-queued",
-        "Second queued message while paused",
-        undefined,
-      );
+      expect(enqueueSpy).toHaveBeenCalledWith("session-ask-user-queued", "Second queued message while paused");
       expect(triggerSpy).not.toHaveBeenCalled();
       expect(
         store.messages.value.some(
