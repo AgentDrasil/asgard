@@ -50,3 +50,39 @@ firebase_webpush_web:
 #       real_secret: "Bearer sk-real-key"
 #       dummy_secret: "Bearer dummy-token"
 #       env: "OPENAI_API_KEY"
+
+# OAuth / OIDC authentication (optional).
+#
+# Omit this whole section to keep the API unauthenticated — the default, and the
+# right choice when an external reverse proxy already handles SSO.
+#
+# When enabled, `host` above must be the externally reachable absolute URL: the
+# OAuth redirect URI is derived from it as {host}/auth/callback, which must be
+# registered at the provider.
+#
+# The design is stateless (no user/session/token tables), so a deployment must
+# run a single replica: the CSRF state map lives in process memory.
+# auth:
+#   issuer: "https://auth.example.com/application/o/asgard/"
+#   client_id: "asgard-client-id"
+#   client_secret: "asgard-client-secret"
+#
+#   # Credential the API verifies: "access_token" (default) or "id_token".
+#   # access_token survives refreshes (the ID token usually is not re-issued);
+#   # use id_token when the provider's access token is not a signed JWT (Google).
+#   token_source: "access_token"
+#
+#   # Expected "aud" for access_token mode; defaults to client_id. Providers that
+#   # use another audience (e.g. Keycloak's "account") must set it.
+#   token_audience: "asgard-client-id"
+#
+#   # Role claim (dot path) and the role a user must carry. The claim may be a
+#   # space/comma separated string or an array. Omit required_role to skip role
+#   # validation entirely.
+#   role_claim: "roles"
+#   required_role: "asgard-user"
+#
+#   # Extra authorization-request parameters, for provider-specific needs such
+#   # as Google requiring access_type=offline to hand out a refresh token:
+#   auth_code_options:
+#     access_type: "offline"

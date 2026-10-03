@@ -219,6 +219,100 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **Record Metrics** (`POST /api/compression-metrics`, internal loopback server only): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
 *   **Read Metrics** (`GET /api/compression-metrics`): Returns the aggregated counters rendered by the WebUI compression statistics page: Jev and compass calls, tokens and per-call token averages, compressed outputs, truncations, and `show-output` calls with the raw bytes retrieved. It also derives the **retrieval rate** (show-output calls over compressed outputs), the headline quality signal — the agent calls `show-output` because the summary or classification dropped detail it needed, so a rising rate points at the classifier or summarizer prompt.
 
+## Authentication (optional OIDC)
+
+Asgard ships **unauthenticated by default**. Adding an `auth` section to
+`config.yaml` turns on OIDC/OAuth 2.0 sign-in for the API and the WebUI; leaving
+it out keeps the previous behaviour, including deployments where an external
+reverse proxy already handles SSO.
+
+The implementation is **stateless**: there is no user table, no session table
+and no token store. Tokens live in the browser's `localStorage`, are verified
+against the provider's JWKS on every request, and the only server-side state is
+a short-lived in-memory CSRF `state` map. This means the `state` map is
+per-process, so a deployment must run a single replica (or use sticky sessions).
+
+### Configuration
+
+```yaml
+# host is the externally reachable base URL. It becomes the OAuth redirect base
+# ({host}/auth/callback), and must be an absolute URL when auth is enabled.
+host: "https://asgard.example.com"
+
+auth:
+  issuer: "https://auth.example.com/application/o/asgard/"
+  client_id: "asgard-client-id"
+  client_secret: "asgard-client-secret"
+
+  # Which credential the API verifies: "access_token" (default) or "id_token".
+  # access_token keeps sessions alive across refreshes (the access token is
+  # re-issued, the ID token usually is not); use id_token when the provider's
+  # access token is not a signed JWT (e.g. Google).
+  token_source: "access_token"
+
+  # Expected "aud" for access_token mode. Defaults to client_id. Providers whose
+  # access tokens use another audience (e.g. Keycloak's "account") must set it.
+  token_audience: "asgard-client-id"
+
+  # Dot path of the role claim, and the role a user must carry. Both optional:
+  # omit required_role to skip role validation entirely.
+  role_claim: "roles"
+  required_role: "asgard-user"
+
+  # Extra authorization-request parameters for provider-specific requirements,
+  # e.g. Google needs these to hand out a refresh token.
+  # auth_code_options:
+  #   access_type: "offline"
+  #   prompt: "consent"
+```
+
+Register `{host}/auth/callback` as the redirect URI at the provider.
+
+### Provider notes
+
+This table lists what must be configured for sign-in to work — it is not a
+zero-configuration checklist. With `token_source: access_token`, a provider
+whose access tokens do not carry `aud=client_id` needs either `token_audience`
+or an audience mapper.
+
+| Provider | `token_source` | `token_audience` | `role_claim` | Provider-side setup |
+|---|---|---|---|---|
+| **Authentik** | `access_token` | default | `roles` (space separated) or `groups` (array) | Add a `roles`/`groups` scope mapping; allow refresh |
+| **Authelia** | `access_token` | default | `groups` (array) | Request the `groups` scope and allow it in the policy |
+| **Keycloak** | `access_token` | `account`, or add an audience mapper and keep the default | `realm_access.roles` (array) | Audience mapper is recommended; enable `offline_access` for refresh |
+| **Dex** | `access_token` | default | `groups` (array) | Configure the `groups` claim |
+| **Auth0** | `access_token` | your API identifier | namespaced custom claim | Create an API to define the audience; inject roles via a Rule/Action |
+| **Google** | `id_token` | n/a (opaque access token) | none | Nothing; note the ID token is not renewed on refresh, so the session cannot be extended |
+
+### How the API is protected
+
+*   `/api/*`, `/team` and the metrics endpoint require a bearer token. `/api/*`
+    requests send it as `Authorization: Bearer <token>`.
+*   Channels that cannot set headers — the SSE stream, the TTYD WebSocket
+    upgrade and resource loads such as `<img>`/`<iframe>`/`<a href>` — pass
+    `?access_token=<token>` instead. Only `GET`/`HEAD` may authenticate this way,
+    so a leaked URL cannot be used to mutate state.
+*   The WebUI and its assets stay public, as does `GET /api/auth/status`, which
+    the frontend uses to discover whether auth is enabled.
+*   Status codes distinguish the failure modes: **401** means log in again,
+    **403** means the account lacks `required_role` (logging in again cannot
+    help), and **503** means the provider is unreachable and the client should
+    keep its session and retry.
+*   Agent-to-agent calls (`find-peer`, `call-peer`) reach `/team` and
+    `/api/agents/{id}/message` over the internal loopback listener, so they are
+    unaffected by the public middleware.
+
+### Security trade-offs
+
+The refresh token is stored in `localStorage`, and the access token is passed in
+the URL for header-less channels. Both are deliberate consequences of the
+stateless design: any XSS can read the session, and URLs can leak into proxy
+logs, browser history and the `Referer` header. Mitigations applied here are
+short-lived access tokens with a rotating refresh token and a `Referer-Policy`
+style hardening pass. Running behind an authenticating reverse proxy, or moving
+to a session-cookie/BFF design, remains the stronger option if the threat model
+requires it.
+
 ## SSH Agent Integration
 
 Asgard uses standard `ssh-agent` Socket passthrough to allow agents to perform SSH operations (e.g., `git clone`, `git push`) without exposing private keys (`/home/user/.ssh`) inside the sandboxes.
