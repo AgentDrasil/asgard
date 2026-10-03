@@ -2,6 +2,7 @@
 set -euo pipefail
 
 TARGET_DIR="/usr/local/bin"
+REQUESTED_VERSION=""
 
 # Parse arguments
 while [ "$#" -gt 0 ]; do
@@ -10,19 +11,140 @@ while [ "$#" -gt 0 ]; do
             TARGET_DIR="$2"
             shift
             ;;
+        -v|--version)
+            REQUESTED_VERSION="$2"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [-d|--dir <directory>] [-v|--version <version>]"
+            exit 0
+            ;;
+        *)
+            echo "Warning: Unknown option '$1'" >&2
+            ;;
     esac
     shift
 done
 
-URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz"
+# Detect OS
+raw_os=$(uname -s)
+os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]')
+case "$raw_os" in
+    Darwin*) os="darwin" ;;
+    Linux*) os="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+esac
 
-echo "Downloading package..."
-curl -fsSL "$URL" -o /tmp/opencode.tar.gz || wget -q "$URL" -O /tmp/opencode.tar.gz
+# Detect Architecture
+arch=$(uname -m)
+case "$arch" in
+    x86_64) arch="x64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *)
+        echo "Error: Unsupported architecture: $arch" >&2
+        exit 1
+        ;;
+esac
+
+# Check for AVX2 support on x64
+needs_baseline=false
+if [ "$arch" = "x64" ]; then
+    if [ "$os" = "linux" ] && ! grep -qwi avx2 /proc/cpuinfo 2>/dev/null; then
+        needs_baseline=true
+    elif [ "$os" = "darwin" ]; then
+        avx2=$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)
+        if [ "$avx2" != "1" ]; then
+            needs_baseline=true
+        fi
+    fi
+fi
+
+# Check for musl libc on Linux
+is_musl=false
+if [ "$os" = "linux" ]; then
+    if [ -f /etc/alpine-release ]; then
+        is_musl=true
+    elif command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
+        is_musl=true
+    fi
+fi
+
+target="$os-$arch"
+if [ "$needs_baseline" = "true" ]; then
+    target="$target-baseline"
+fi
+if [ "$is_musl" = "true" ]; then
+    target="$target-musl"
+fi
+
+package_scope="@opencode"
+if [ -z "$REQUESTED_VERSION" ]; then
+    echo "Fetching latest version metadata..."
+    metadata=$(curl -fsSL https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || wget -q -O - https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || true)
+    specific_version=$(echo "$metadata" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    package=$(echo "$metadata" | sed -n 's/.*"package"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+
+    if [ -z "$specific_version" ] || [ -z "$package" ]; then
+        echo "Error: Failed to fetch version information from metadata API" >&2
+        exit 1
+    fi
+    package_scope="${package%/cli}"
+else
+    # Strip leading 'v' if present
+    REQUESTED_VERSION="${REQUESTED_VERSION#v}"
+    specific_version="$REQUESTED_VERSION"
+fi
+
+package_name="$package_scope/cli-$target"
+filename="cli-$target-$specific_version.tgz"
+url="https://registry.npmjs.org/$package_name/-/$filename"
+
+# Test URL availability and fallback to legacy scope if needed
+http_status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
+if [ "$http_status" = "404" ] && [ -n "$REQUESTED_VERSION" ]; then
+    package_name="@opencode-ai/cli-$target"
+    url="https://registry.npmjs.org/$package_name/-/$filename"
+    http_status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
+fi
+
+if [ "$http_status" = "404" ]; then
+    echo "Error: Version ${specific_version} is not available for target ${target}" >&2
+    exit 1
+elif [ "$http_status" != "200" ] && [ "$http_status" != "000" ]; then
+    echo "Warning: Received HTTP $http_status checking $url, attempting download anyway..." >&2
+fi
+
+echo "Downloading OpenCode CLI ($specific_version for $target)..."
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+curl -fsSL "$url" -o "$TMP_DIR/$filename" || wget -q "$url" -O "$TMP_DIR/$filename"
 
 echo "Extracting binary..."
 mkdir -p "$TARGET_DIR"
-tar -xzf /tmp/opencode.tar.gz -C "$TARGET_DIR" opencode
-chmod +x "$TARGET_DIR/opencode"
+tar -xzf "$TMP_DIR/$filename" -C "$TMP_DIR"
 
-rm -f /tmp/opencode.tar.gz
-echo "OpenCode CLI installed successfully to $TARGET_DIR/opencode"
+binary_name="opencode"
+if [ "$os" = "windows" ]; then
+    binary_name="opencode.exe"
+fi
+
+mv "$TMP_DIR/package/bin/$binary_name" "$TARGET_DIR/$binary_name"
+chmod 755 "$TARGET_DIR/$binary_name"
+
+# Install legacy shim for backwards compatibility
+if [ "$os" = "windows" ]; then
+    cat > "$TARGET_DIR/opencode2.cmd" <<'EOF'
+@echo off
+"%~dp0opencode.exe" %*
+exit /b %errorlevel%
+EOF
+else
+    cat > "$TARGET_DIR/opencode2" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$0")/opencode" "$@"
+EOF
+    chmod 755 "$TARGET_DIR/opencode2"
+fi
+
+echo "OpenCode CLI ($specific_version) installed successfully to $TARGET_DIR/$binary_name"
