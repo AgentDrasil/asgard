@@ -150,4 +150,6 @@ func appendToolAccessPermissions(sb *strings.Builder, contract *common.Contract)
 	}
 	sb.WriteString("  bash:\n")
 	sb.WriteString("    " + common.YAMLQuote("*") + ": deny\n")
+	sb.WriteString("  shell:\n")
+	sb.WriteString("    " + common.YAMLQuote("*") + ": deny\n")
 }

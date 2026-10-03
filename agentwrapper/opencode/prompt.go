@@ -15,7 +15,11 @@ import (
 type opencodeLine struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
-	Part      struct {
+	Error     *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Part struct {
 		Type      string `json:"type"`
 		Text      string `json:"text"`
 		Reason    string `json:"reason"`
@@ -76,9 +80,10 @@ func buildPromptArgv(prompt string, opts types.PromptOptions, agentName string) 
 	}
 	if opts.Model != "" {
 		baseModel, variant := SplitModelVariant(opts.Model)
-		argv = append(argv, "--model", baseModel)
 		if variant != "" {
-			argv = append(argv, "--variant", variant)
+			argv = append(argv, "--model", baseModel+"#"+variant)
+		} else {
+			argv = append(argv, "--model", baseModel)
 		}
 	}
 	argv = append(argv, "--", prompt)
@@ -123,6 +128,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	var totalTokens int
 	var targetMessageID string
 	var lastToolOutput string
+	var lastErrorMessage string
 	stepIndex := 0
 
 	// Map to accumulate text contents by messageID
@@ -145,6 +151,10 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		var opl opencodeLine
 		if err := json.Unmarshal([]byte(trimmed), &opl); err != nil {
 			continue
+		}
+
+		if opl.Type == "error" && opl.Error != nil && opl.Error.Message != "" {
+			lastErrorMessage = opl.Error.Message
 		}
 
 		if opl.SessionID != "" {
@@ -230,6 +240,9 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if lastErrorMessage != "" {
+			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, lastErrorMessage)
 		}
 		if stderrMsg := strings.TrimSpace(stderrBuf.String()); stderrMsg != "" {
 			return nil, fmt.Errorf("running opencode prompt: %w: %s", err, stderrMsg)

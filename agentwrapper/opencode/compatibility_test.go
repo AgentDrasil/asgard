@@ -40,7 +40,20 @@ func TestCompatibility_StreamParserGoVersion(t *testing.T) {
 	}
 
 	prompt := "what is the go version in path, and go version in current project"
+	var modelToUse string
+	if envModel := os.Getenv("OPENCODE_MODEL"); envModel != "" {
+		modelToUse = envModel
+	} else if usageList, err := Usage(ctx, types.UsageOptions{}); err == nil {
+		for _, entry := range usageList {
+			if strings.HasPrefix(entry.Model, "zai-coding-plan/") || strings.HasPrefix(entry.Model, "deepseek/") || strings.HasPrefix(entry.Model, "opencode/") {
+				modelToUse = entry.Model
+				break
+			}
+		}
+	}
+
 	res, err := Prompt(ctx, prompt, types.PromptOptions{
+		Model:          modelToUse,
 		ReportCallback: cb,
 	})
 	require.NoError(t, err)

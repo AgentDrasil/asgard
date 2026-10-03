@@ -6,7 +6,7 @@ You MUST adhere to the following rules when communicating or delegating:
 
 - **Trigger:** You need to ask the user clarifying questions, seek feedback, or confirm an action.
 - **MANDATORY ACTION:**
-  - You MUST use your shell/command-execution tool (e.g. `bash` / `run_command`) to actually execute `/bin/ask-user "<question>"`.
+  - You MUST use your shell/command-execution tool (e.g. `shell` / `bash`) to actually execute `/bin/ask-user "<question>"`.
   - NEVER output the question directly in your text response instead of calling the tool.
   - NEVER print `/bin/ask-user` as raw text in your response.
   - DO NOT call a native `question` or `ask_question` tool under any circumstances.

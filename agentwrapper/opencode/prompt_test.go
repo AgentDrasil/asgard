@@ -213,8 +213,7 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 			wantArgv: []string{
 				"run", "--format", "json", "--auto",
 				"--session", "ses_abc",
-				"--model", "zai-coding-plan/glm-5.3",
-				"--variant", "low",
+				"--model", "zai-coding-plan/glm-5.3#low",
 				"--", "run query",
 			},
 		},

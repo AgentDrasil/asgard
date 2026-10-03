@@ -113,6 +113,7 @@ func TestPrepareAgent_DocOnlyNoTeam(t *testing.T) {
 	assert.NotContains(t, content, "call-peer")
 	// Doc-only for opencode only disables shell execution; editing stays.
 	assert.Contains(t, content, "bash:\n    \"*\": deny")
+	assert.Contains(t, content, "shell:\n    \"*\": deny")
 	assert.NotContains(t, content, "edit:")
 	assert.Contains(t, content, "Analyze only.")
 }
