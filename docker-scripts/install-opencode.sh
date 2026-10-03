@@ -132,19 +132,4 @@ fi
 mv "$TMP_DIR/package/bin/$binary_name" "$TARGET_DIR/$binary_name"
 chmod 755 "$TARGET_DIR/$binary_name"
 
-# Install legacy shim for backwards compatibility
-if [ "$os" = "windows" ]; then
-    cat > "$TARGET_DIR/opencode2.cmd" <<'EOF'
-@echo off
-"%~dp0opencode.exe" %*
-exit /b %errorlevel%
-EOF
-else
-    cat > "$TARGET_DIR/opencode2" <<'EOF'
-#!/bin/sh
-exec "$(dirname "$0")/opencode" "$@"
-EOF
-    chmod 755 "$TARGET_DIR/opencode2"
-fi
-
 echo "OpenCode CLI ($specific_version) installed successfully to $TARGET_DIR/$binary_name"
