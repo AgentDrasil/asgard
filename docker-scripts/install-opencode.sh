@@ -2,7 +2,6 @@
 set -euo pipefail
 
 TARGET_DIR="/usr/local/bin"
-REQUESTED_VERSION=""
 
 # Parse arguments
 while [ "$#" -gt 0 ]; do
@@ -11,16 +10,13 @@ while [ "$#" -gt 0 ]; do
             TARGET_DIR="$2"
             shift
             ;;
-        -v|--version)
-            REQUESTED_VERSION="$2"
-            shift
-            ;;
         -h|--help)
-            echo "Usage: $0 [-d|--dir <directory>] [-v|--version <version>]"
+            echo "Usage: $0 [-d|--dir <directory>]"
             exit 0
             ;;
         *)
-            echo "Warning: Unknown option '$1'" >&2
+            echo "Error: Unknown option '$1'" >&2
+            exit 1
             ;;
     esac
     shift
@@ -77,40 +73,24 @@ if [ "$is_musl" = "true" ]; then
     target="$target-musl"
 fi
 
-package_scope="@opencode"
-if [ -z "$REQUESTED_VERSION" ]; then
-    echo "Fetching latest version metadata..."
-    metadata=$(curl -fsSL https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || wget -q -O - https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || true)
-    specific_version=$(echo "$metadata" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-    package=$(echo "$metadata" | sed -n 's/.*"package"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+echo "Fetching latest version metadata..."
+metadata=$(curl -fsSL https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || wget -q -O - https://opencode.ai/update/api/latest/cli/npm 2>/dev/null || true)
+specific_version=$(echo "$metadata" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+package=$(echo "$metadata" | sed -n 's/.*"package"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
-    if [ -z "$specific_version" ] || [ -z "$package" ]; then
-        echo "Error: Failed to fetch version information from metadata API" >&2
-        exit 1
-    fi
-    package_scope="${package%/cli}"
-else
-    # Strip leading 'v' if present
-    REQUESTED_VERSION="${REQUESTED_VERSION#v}"
-    specific_version="$REQUESTED_VERSION"
+if [ -z "$specific_version" ] || [ -z "$package" ]; then
+    echo "Error: Failed to fetch version information from metadata API" >&2
+    exit 1
 fi
+package_scope="${package%/cli}"
 
 package_name="$package_scope/cli-$target"
 filename="cli-$target-$specific_version.tgz"
 url="https://registry.npmjs.org/$package_name/-/$filename"
 
-# Test URL availability and fallback to legacy scope if needed
-http_status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
-if [ "$http_status" = "404" ] && [ -n "$REQUESTED_VERSION" ]; then
-    package_name="@opencode-ai/cli-$target"
-    url="https://registry.npmjs.org/$package_name/-/$filename"
-    http_status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
-fi
-
-if [ "$http_status" = "404" ]; then
-    echo "Error: Version ${specific_version} is not available for target ${target}" >&2
-    exit 1
-elif [ "$http_status" != "200" ] && [ "$http_status" != "000" ]; then
+# Check availability with a HEAD request (a GET would download the tarball twice)
+http_status=$(curl -fsSI -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo 000)
+if [ "$http_status" != "200" ] && [ "$http_status" != "000" ]; then
     echo "Warning: Received HTTP $http_status checking $url, attempting download anyway..." >&2
 fi
 
@@ -129,6 +109,10 @@ if [ "$os" = "windows" ]; then
     binary_name="opencode.exe"
 fi
 
+if [ ! -f "$TMP_DIR/package/bin/$binary_name" ]; then
+    echo "Error: unexpected package layout: $TMP_DIR/package/bin/$binary_name not found" >&2
+    exit 1
+fi
 mv "$TMP_DIR/package/bin/$binary_name" "$TARGET_DIR/$binary_name"
 chmod 755 "$TARGET_DIR/$binary_name"
 
