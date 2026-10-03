@@ -561,24 +561,25 @@ func configuredModel(cfg agentspec.AgentConfig, model string) bool {
 	return false
 }
 
-// resolveModel determines the model to run. An explicit request (the run
-// parameter, then metadata) wins; otherwise it falls back to the model this
-// agent last used in the session. The stored model is only honoured while it
-// is still configured: a model removed or renamed in config must not pin the
-// session to a target run.RunWithCandidates would reject as unknown (a hard
-// error the quota-decision loop cannot recover from). Other agents' stored
-// models and assistant-message models are never inherited.
+// resolveModel determines the model to run. When an existing session already has
+// a valid model configured and used for this agent, that model is preserved to
+// maintain conversation context and avoid cross-CLI session invalidation.
+// Otherwise, an explicit request (the run parameter, then metadata) is used.
+// The stored model is only honoured while it is still configured: a model removed
+// or renamed in config must not pin the session to a target run.RunWithCandidates
+// would reject as unknown (a hard error the quota-decision loop cannot recover from).
+// Other agents' stored models and assistant-message models are never inherited.
 func resolveModel(params SingleAgentRunParams, session *dbmodels.Session, cfg agentspec.AgentConfig) optional.Option[string] {
+	if session != nil {
+		if m := storedAgentModel(session, cfg); m != "" && configuredModel(cfg, m) {
+			return optional.Some(m)
+		}
+	}
 	if params.Model != "" {
 		return optional.Some(params.Model)
 	}
 	if params.Metadata != nil {
 		if m, ok := params.Metadata["model"].(string); ok && m != "" {
-			return optional.Some(m)
-		}
-	}
-	if session != nil {
-		if m := storedAgentModel(session, cfg); m != "" && configuredModel(cfg, m) {
 			return optional.Some(m)
 		}
 	}

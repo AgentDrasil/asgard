@@ -46,13 +46,18 @@ func newQuotaTestServer(t *testing.T, repo *dbmodels.SessionRepository) *Server 
 func TestResolveModel(t *testing.T) {
 	cfg := quotaTestConfig()
 
-	t.Run("explicit param wins", func(t *testing.T) {
-		assert.Equal(t, "requested", resolveModel(SingleAgentRunParams{Model: "requested"}, nil, cfg).Unwrap())
+	t.Run("explicit param wins for new session", func(t *testing.T) {
+		assert.Equal(t, "model-one", resolveModel(SingleAgentRunParams{Model: "model-one"}, nil, cfg).Unwrap())
 	})
 
-	t.Run("metadata model used when no param", func(t *testing.T) {
-		m := resolveModel(SingleAgentRunParams{Metadata: map[string]any{"model": "meta-model"}}, nil, cfg)
-		assert.Equal(t, "meta-model", m.Unwrap())
+	t.Run("per-agent stored model takes precedence over param for existing session", func(t *testing.T) {
+		session := &dbmodels.Session{Agents: []dbmodels.Agent{{Name: cfg.ID, Model: "model-two"}}}
+		assert.Equal(t, "model-two", resolveModel(SingleAgentRunParams{Model: "model-one"}, session, cfg).Unwrap())
+	})
+
+	t.Run("metadata model used when no param and no stored model", func(t *testing.T) {
+		m := resolveModel(SingleAgentRunParams{Metadata: map[string]any{"model": "model-one"}}, nil, cfg)
+		assert.Equal(t, "model-one", m.Unwrap())
 	})
 
 	t.Run("per-agent stored model is inherited", func(t *testing.T) {
@@ -65,9 +70,9 @@ func TestResolveModel(t *testing.T) {
 		assert.True(t, resolveModel(SingleAgentRunParams{}, session, cfg).IsNone())
 	})
 
-	t.Run("model removed from config is ignored", func(t *testing.T) {
+	t.Run("model removed from config is ignored and falls back to param", func(t *testing.T) {
 		session := &dbmodels.Session{Agents: []dbmodels.Agent{{Name: cfg.ID, Model: "retired-model"}}}
-		assert.True(t, resolveModel(SingleAgentRunParams{}, session, cfg).IsNone())
+		assert.Equal(t, "model-one", resolveModel(SingleAgentRunParams{Model: "model-one"}, session, cfg).Unwrap())
 	})
 
 	t.Run("assistant message model is never inherited", func(t *testing.T) {

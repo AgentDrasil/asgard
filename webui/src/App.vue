@@ -354,6 +354,7 @@ const handleStartWelcomeChat = (files?: File[]) => {
       allowCrossSession: allowCrossSession.value,
       pendingFiles: files,
     });
+    selectedModel.value = "";
   }
 };
 
@@ -361,7 +362,6 @@ const handleSendMessage = (text: string, attachments?: Attachment[]) => {
   sendMessage(text, {
     selectedAgentId: selectedAgentId.value,
     selectedDir: selectedDir.value,
-    selectedModel: selectedModel.value,
     attachments,
   });
 };
@@ -373,7 +373,6 @@ const handleRetryLastUserMessage = () => {
       sendMessage(m.content, {
         selectedAgentId: selectedAgentId.value,
         selectedDir: selectedDir.value,
-        selectedModel: selectedModel.value,
         attachments: m.attachments,
       });
       break;
