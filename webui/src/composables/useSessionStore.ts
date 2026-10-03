@@ -22,6 +22,7 @@ import {
 } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
+import { t } from "../i18n";
 
 export interface SessionStoreOptions {
   agents?: Ref<AgentInfo[]>;
@@ -428,11 +429,11 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         (opts?.attachments && opts.attachments.length > 0) ||
         (opts?.pendingFiles && opts.pendingFiles.length > 0)
       ) {
-        pushErrorMessage("排队消息仅支持纯文本，暂不支持上传附件");
+        pushErrorMessage(t("chat.queueTextOnly"));
         return;
       }
       if (queuedMessages.value.length >= MAX_QUEUED_MESSAGES) {
-        pushErrorMessage(`排队消息已达上限（最多 ${MAX_QUEUED_MESSAGES} 条）`);
+        pushErrorMessage(t("chat.queueLimitPlaceholder", { max: MAX_QUEUED_MESSAGES }));
         return;
       }
       const queued = await enqueueMessage(currentThreadId, text);
@@ -441,7 +442,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
           queuedMessages.value = [...queuedMessages.value, queued];
         }
       } else {
-        pushErrorMessage("Failed to enqueue message. Please try again.");
+        pushErrorMessage(t("chat.queueEnqueueFailed"));
       }
       return;
     }
@@ -492,7 +493,9 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
               uploadedAttachments.push(att);
             } catch (err: any) {
               console.error(`Failed to upload attachment ${file.name}:`, err);
-              pushErrorMessage(`Failed to upload ${file.name}: ${err?.message || err}`);
+              pushErrorMessage(
+                t("chat.failedToUpload", { name: file.name, error: err?.message || err }),
+              );
             }
           }
           const combined = [...(opts?.attachments || []), ...uploadedAttachments];
@@ -507,7 +510,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
         loading.value = false;
         isRunning.value = false;
-        pushErrorMessage("Failed to create session. Please try again.");
+        pushErrorMessage(t("chat.createSessionFailed"));
         return;
       }
     }
@@ -546,7 +549,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
       loading.value = false;
       isRunning.value = false;
-      pushErrorMessage("Session is already running a task. Please wait.");
+      pushErrorMessage(t("chat.sessionAlreadyRunning"));
     } else if (res?.queued) {
       // Server queued the message (local running state was stale): drop the
       // optimistic bubble. The SSE queue snapshot owns queue display, and the
@@ -557,7 +560,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
       loading.value = false;
       isRunning.value = false;
-      pushErrorMessage("Failed to trigger agent execution. Please try again.");
+      pushErrorMessage(t("chat.triggerFailed"));
     }
   };
 

@@ -61,7 +61,7 @@ const isInputDisabled = computed(() => {
 
 const placeholderText = computed(() => {
   if (isQueueFull.value) {
-    return t("chat.queueLimitPlaceholder");
+    return t("chat.queueLimitPlaceholder", { max: MAX_QUEUED_MESSAGES });
   }
   if (isQueueMode.value) {
     return t("chat.enqueueTip");
@@ -378,7 +378,7 @@ const handleDrop = (e: DragEvent) => {
       >
         <div class="flex items-center gap-2">
           <Icon icon="material-symbols:warning-rounded" class="w-4 h-4 shrink-0" />
-          <span>{{ $t("chat.queueLimitAlert") }}</span>
+          <span>{{ $t("chat.queueLimitAlert", { max: MAX_QUEUED_MESSAGES }) }}</span>
         </div>
       </div>
 
@@ -517,7 +517,7 @@ const handleDrop = (e: DragEvent) => {
             @paste="handlePaste"
             :placeholder="
               isQueueFull
-                ? $t('chat.queueLimitPlaceholder')
+                ? $t('chat.queueLimitPlaceholder', { max: MAX_QUEUED_MESSAGES })
                 : isQueueMode
                   ? $t('chat.enqueueTip')
                   : $t('chat.promptMultilinePlaceholder', { shortcut: sendShortcut })

@@ -483,7 +483,7 @@ describe("useSessionStore", () => {
     // Should push error message for failed file
     expect(
       store.messages.value.some(
-        (m) => m.role === "error" && m.content.includes("Failed to upload fail.txt"),
+        (m) => m.role === "error" && m.content.includes('Failed to upload "fail.txt"'),
       ),
     ).toBe(true);
 
@@ -1070,7 +1070,8 @@ describe("useSessionStore", () => {
       expect(store.queuedMessages.value.length).toBe(0);
       expect(
         store.messages.value.some(
-          (m) => m.role === "error" && m.content.includes("排队消息仅支持纯文本，暂不支持上传附件"),
+          (m) =>
+            m.role === "error" && m.content.includes("Queued messages only support plain text"),
         ),
       ).toBe(true);
     });
@@ -1103,7 +1104,8 @@ describe("useSessionStore", () => {
       expect(enqueueSpy).not.toHaveBeenCalled();
       expect(
         store.messages.value.some(
-          (m) => m.role === "error" && m.content.includes("排队消息已达上限（最多 3 条）"),
+          (m) =>
+            m.role === "error" && m.content.includes("Queue limit reached (maximum 3 messages)"),
         ),
       ).toBe(true);
     });
@@ -1151,13 +1153,17 @@ describe("useSessionStore", () => {
       expect(triggerSpy).not.toHaveBeenCalled();
       expect(
         store.messages.value.some(
-          (m) => m.role === "error" && m.content.includes("排队消息仅支持纯文本，暂不支持上传附件"),
+          (m) =>
+            m.role === "error" && m.content.includes("Queued messages only support plain text"),
         ),
       ).toBe(true);
 
       // 2. Sending text should enqueue, not trigger regular send or insert optimistic user message
       await store.sendMessage("Second queued message while paused");
-      expect(enqueueSpy).toHaveBeenCalledWith("session-ask-user-queued", "Second queued message while paused");
+      expect(enqueueSpy).toHaveBeenCalledWith(
+        "session-ask-user-queued",
+        "Second queued message while paused",
+      );
       expect(triggerSpy).not.toHaveBeenCalled();
       expect(
         store.messages.value.some(
