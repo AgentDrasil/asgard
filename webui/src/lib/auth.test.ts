@@ -206,7 +206,9 @@ describe("auth capability discovery", () => {
       expect(res.status).toBe(200);
       expect(getStoredTokens()?.access_token).toBe("access-2");
 
-      const refreshes = fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]) === "/auth/refresh");
+      const refreshes = fetchMock.mock.calls.filter(
+        (call: unknown[]) => String(call[0]) === "/auth/refresh",
+      );
       expect(refreshes).toHaveLength(1);
       expect(navigations).toHaveLength(0);
     });
@@ -246,7 +248,9 @@ describe("auth capability discovery", () => {
 
       await vi.waitFor(() => expect(navigations).toHaveLength(1));
       expect(navigations[0]).toBe("/auth/denied");
-      const refreshes = fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]) === "/auth/refresh");
+      const refreshes = fetchMock.mock.calls.filter(
+        (call: unknown[]) => String(call[0]) === "/auth/refresh",
+      );
       expect(refreshes).toHaveLength(0);
     });
 
@@ -267,7 +271,9 @@ describe("auth capability discovery", () => {
       expect(a.status).toBe(200);
       expect(b.status).toBe(200);
 
-      const refreshes = fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]) === "/auth/refresh");
+      const refreshes = fetchMock.mock.calls.filter(
+        (call: unknown[]) => String(call[0]) === "/auth/refresh",
+      );
       expect(refreshes).toHaveLength(1);
     });
 

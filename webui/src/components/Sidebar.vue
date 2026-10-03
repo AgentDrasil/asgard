@@ -6,6 +6,7 @@ import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import SessionList from "./sidebar/SessionList.vue";
 import { useShortcuts } from "../composables/useShortcuts";
+import { isAuthEnabled, logout } from "../lib/api";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -35,6 +36,12 @@ const emit = defineEmits<{
   (e: "open-quota"): void;
   (e: "open-session-search"): void;
 }>();
+
+// authEnabled is resolved once during setup: initAuth() has already completed
+// by the time the app mounts.
+const authEnabled = isAuthEnabled();
+
+const handleLogout = () => logout();
 
 const navigateToDashboard = () => {
   if (typeof window !== "undefined" && window.innerWidth < 768 && props.isOpen) {
@@ -290,6 +297,18 @@ onUnmounted(() => {
         :title="t('sidebar.settings')"
       >
         <Icon icon="mynaui:cog" class="h-5 w-5 fill-current shrink-0" />
+      </button>
+
+      <button
+        v-if="authEnabled"
+        @click="handleLogout"
+        :class="[
+          'flex items-center justify-center rounded-lg cursor-pointer transition-all duration-200 text-sm font-medium text-base-content/85 hover:bg-base-200',
+          isOpen ? 'flex-1 py-2 gap-1.5' : 'w-10 h-10 p-0',
+        ]"
+        :title="t('sidebar.logout')"
+      >
+        <Icon icon="mynaui:logout" class="h-5 w-5 fill-current shrink-0" />
       </button>
     </div>
   </aside>

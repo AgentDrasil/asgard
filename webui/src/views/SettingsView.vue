@@ -6,7 +6,7 @@ import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
 import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
-import { reloadAgents, reloadProxyConfig, getSystemLogs } from "../lib/api";
+import { reloadAgents, reloadProxyConfig, getSystemLogs, isAuthEnabled, logout } from "../lib/api";
 import { useToast } from "../composables/useToast";
 import { useRestartFlow } from "../composables/useRestartFlow";
 
@@ -28,6 +28,11 @@ const isReloadingProxy = ref(false);
 const isQuotaModalOpen = ref(false);
 const backendErrorCount = ref(0);
 const backendWarnCount = ref(0);
+
+// Authentication is opt-in: the section only appears when the backend runs
+// OIDC, so a logout button never shows up in an unauthenticated deployment.
+const authEnabled = isAuthEnabled();
+const handleLogout = () => logout();
 
 const fetchBackendLogCounts = async () => {
   try {
@@ -185,6 +190,30 @@ const navigateBack = () => {
             </div>
             <ThemeSelector />
           </div>
+        </div>
+      </section>
+
+      <!-- Section: Authentication (only when the backend runs OIDC) -->
+      <section v-if="authEnabled" class="space-y-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
+          {{ t("settings.authentication") }}
+        </h2>
+        <div
+          class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
+        >
+          <div class="space-y-1">
+            <div class="font-medium text-base-content flex items-center gap-2">
+              <Icon icon="mynaui:shield-check" class="w-5 h-5 text-primary" />
+              <span>{{ t("settings.authSignedIn") }}</span>
+            </div>
+            <p class="text-xs text-base-content/70">
+              {{ t("settings.authSignedInDesc") }}
+            </p>
+          </div>
+          <button class="btn btn-outline btn-sm gap-1.5 shrink-0" @click="handleLogout">
+            <Icon icon="mynaui:logout" class="h-4 w-4" />
+            <span>{{ t("settings.signOut") }}</span>
+          </button>
         </div>
       </section>
 

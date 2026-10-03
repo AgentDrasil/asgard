@@ -115,4 +115,59 @@ describe("SettingsView.vue", () => {
 
     app.unmount();
   });
+
+  it("shows the authentication section only when the backend requires auth", async () => {
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    expect(root.textContent).toContain("Authentication");
+    expect(root.textContent).toContain("Signed in via OIDC");
+
+    app.unmount();
+  });
+
+  it("hides the authentication section when the backend has no auth", async () => {
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(false);
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    expect(root.textContent).not.toContain("Authentication");
+    expect(root.textContent).not.toContain("Signed in via OIDC");
+
+    app.unmount();
+  });
+
+  it("logs out from the authentication section", async () => {
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    const logoutSpy = vi.spyOn(api, "logout").mockImplementation(() => {});
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const buttons = Array.from(root.querySelectorAll("button"));
+    const signOut = buttons.find((b) => b.textContent?.includes("Sign out"));
+    expect(signOut).toBeDefined();
+    signOut!.click();
+
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
 });
