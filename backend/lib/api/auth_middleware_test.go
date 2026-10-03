@@ -277,3 +277,47 @@ func TestWithAuthServiceOption(t *testing.T) {
 	WithAuthService(svc)(srv)
 	require.Same(t, svc, srv.AuthService())
 }
+
+func TestSecurityHeaders(t *testing.T) {
+	srv := &Server{conf: &config.Config{}}
+	srv.mux = srv.buildMuxLocked()
+
+	rec := serve(srv, http.MethodGet, "/api/agents", nil)
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+
+	// Assets and API responses are not documents, so they carry no CSP.
+	assert.Empty(t, rec.Header().Get("Content-Security-Policy"))
+}
+
+func TestDocumentCSP(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>app"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "assets"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("console.log(1)"), 0o644))
+
+	srv := &Server{conf: &config.Config{WebUIPath: dir}}
+	srv.mux = srv.buildMuxLocked()
+
+	t.Run("SPA fallback serves the shell with the policy", func(t *testing.T) {
+		rec := serve(srv, http.MethodGet, "/dashboard", nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		csp := rec.Header().Get("Content-Security-Policy")
+		require.NotEmpty(t, csp)
+		// Inline scripts stay forbidden; they are the whole point of the policy.
+		assert.Contains(t, csp, "script-src 'self'")
+		assert.NotContains(t, csp, "script-src 'self' 'unsafe-inline'")
+		assert.Contains(t, csp, "frame-ancestors 'none'")
+		assert.Contains(t, csp, "object-src 'none'")
+		assert.Contains(t, csp, "base-uri 'self'")
+		assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+	})
+
+	t.Run("static assets get no policy", func(t *testing.T) {
+		rec := serve(srv, http.MethodGet, "/assets/app.js", nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Empty(t, rec.Header().Get("Content-Security-Policy"))
+	})
+}

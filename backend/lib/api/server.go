@@ -397,6 +397,30 @@ func (s *Server) recoverOrphanQueuedSessions() {
 // credentials: the client asks before it can possibly hold a token.
 const authStatusPath = "/api/auth/status"
 
+// documentCSP is the Content-Security-Policy applied to the SPA document.
+//
+// The only relaxation is style-src 'unsafe-inline', which is required by
+// xterm.js (it injects a <style> element for the theme) and by Mermaid/Shiki,
+// which render inline styles in their output. The security-critical directive,
+// script-src, stays restricted to same-origin files: index.html loads the theme
+// bootstrap as an external script precisely so no inline script is needed.
+const documentCSP = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; " +
+	"font-src 'self' data:; " +
+	"media-src 'self' blob:; " +
+	// 'self' covers the same-origin API, SSE and WSS endpoints; the explicit
+	// origin is the Gemini Live WebSocket used by voice input.
+	"connect-src 'self' wss://generativelanguage.googleapis.com; " +
+	// The audio worklet and the in-app downloads use blob: URLs.
+	"worker-src 'self' blob:; " +
+	"frame-src 'self'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"object-src 'none'"
+
 // isProtectedPath reports whether a request path requires authentication. The
 // public prefixes are matched before the /api/ fallback so the capability probe
 // and the auth endpoints are never guarded.
@@ -415,6 +439,7 @@ func isProtectedPath(path string) bool {
 
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.setSecurityHeaders(w)
 	s.setCORSHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
@@ -436,6 +461,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux := s.mux
 	s.mu.RUnlock()
 	mux.ServeHTTP(w, r)
+}
+
+// setSecurityHeaders applies response headers that hold for every route. The
+// Content-Security-Policy is added separately by the static handler, which is
+// the only place that can tell a document response from an asset.
+func (s *Server) setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Prevents the bearer token carried in a URL from leaking through the
+	// Referer header to third-party origins.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Frame-Options", "DENY")
 }
 
 // setCORSHeaders applies the CORS response headers. When auth is enabled the
@@ -532,9 +568,17 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 			path := filepath.Join(s.conf.WebUIPath, filepath.Clean(r.URL.Path))
 			info, err := os.Stat(path)
 			if err == nil && !info.IsDir() {
+				if strings.HasSuffix(path, ".html") {
+					w.Header().Set("Content-Security-Policy", documentCSP)
+					// The shell references content-hashed assets, so a stale cached
+					// copy would keep loading the previous build (and its CSP).
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 				fs.ServeHTTP(w, r)
 				return
 			}
+			w.Header().Set("Content-Security-Policy", documentCSP)
+			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(s.conf.WebUIPath, "index.html"))
 		})
 		log.Info().Msgf("Registered static Web UI hosting from %s at /", s.conf.WebUIPath)
