@@ -6,6 +6,16 @@ import (
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
+// QueueMode controls how many messages a poll/peek returns.
+type QueueMode string
+
+const (
+	// QueueOneAtATime delivers exactly one FIFO message per poll (default).
+	QueueOneAtATime QueueMode = "one-at-a-time"
+	// QueueAll drains every pending message per poll.
+	QueueAll QueueMode = "all"
+)
+
 // Queue is a mutex-guarded FIFO for steering and follow-up messages.
 //
 // The library polls GetSteeringMessages/GetFollowUpMessages from the loop
@@ -18,10 +28,22 @@ import (
 type Queue struct {
 	mu   sync.Mutex
 	msgs []types.Message
+	mode QueueMode
 }
 
-// NewQueue returns an empty message queue.
-func NewQueue() *Queue { return &Queue{} }
+// NewQueue returns an empty message queue. With no mode (or an empty mode) it
+// defaults to QueueOneAtATime, matching upstream steering/follow-up semantics.
+// Pass QueueAll to drain every pending message per poll. Unknown modes fall
+// back to the default.
+func NewQueue(modes ...QueueMode) *Queue {
+	mode := QueueOneAtATime
+	if len(modes) > 0 && modes[0] != "" {
+		if modes[0] == QueueAll {
+			mode = QueueAll
+		}
+	}
+	return &Queue{mode: mode}
+}
 
 // Push appends messages. Safe from any goroutine. The messages must not be
 // mutated after this call (see ownership rule above).
@@ -41,25 +63,44 @@ func (q *Queue) Len() int {
 	return len(q.msgs)
 }
 
-// Poll drains and returns all pending messages (possibly nil). This is the
-// shape expected by Request.GetSteeringMessages / GetFollowUpMessages.
+// Poll returns pending messages according to the queue mode: exactly one FIFO
+// message for QueueOneAtATime, or all messages for QueueAll. It returns nil
+// when empty. This is the shape expected by Request.GetSteeringMessages /
+// GetFollowUpMessages.
 func (q *Queue) Poll() []types.Message {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	out := q.msgs
-	q.msgs = nil
+	if len(q.msgs) == 0 {
+		return nil
+	}
+	if q.mode == QueueAll {
+		out := q.msgs
+		q.msgs = nil
+		return out
+	}
+	out := []types.Message{q.msgs[0]}
+	q.msgs = q.msgs[1:]
+	if len(q.msgs) == 0 {
+		q.msgs = nil
+	}
 	return out
 }
 
-// Peek returns a copy of pending messages without removing them from the queue.
+// Peek returns a copy of the next pending messages without removing them: one
+// item for QueueOneAtATime, or all items for QueueAll. It returns nil when
+// empty. Mutating the returned slice does not affect the queue.
 func (q *Queue) Peek() []types.Message {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if len(q.msgs) == 0 {
 		return nil
 	}
-	out := make([]types.Message, len(q.msgs))
-	copy(out, q.msgs)
+	n := 1
+	if q.mode == QueueAll {
+		n = len(q.msgs)
+	}
+	out := make([]types.Message, n)
+	copy(out, q.msgs[:n])
 	return out
 }
 

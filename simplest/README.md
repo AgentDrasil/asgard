@@ -362,6 +362,10 @@ followUp := agent.NewQueue()
 steer.Push(&types.UserMessage{Content: types.TextOnly("use dry-run"), Timestamp: ...})
 ```
 
+`NewQueue()` defaults to **one-at-a-time** delivery: each poll returns one FIFO
+message and leaves the rest queued. Pass `agent.QueueAll` to drain every queued
+message per poll.
+
 **Ownership rule:** a message belongs to the loop once pushed. Do not mutate
 it afterwards — the loop serializes it to the provider and persists it into
 the session concurrently, so mutating a pushed `*UserMessage` is a data race.
@@ -370,9 +374,9 @@ that instead. A buffered channel with a non-blocking drain also satisfies the
 contract; whatever you use must be safe for concurrent write during polling.
 
 Both `Peek()` (aliased as `PeekQueuedMessages()`) let you preview queued
-messages non-destructively — they return a copy of the pending items without
-removing them from the queue, useful for inspecting what will be delivered on
-the next poll.
+messages non-destructively — they return a copy of the items the next poll would
+deliver (one by default, all with `QueueAll`) without removing them from the
+queue.
 
 Timing rules:
 

@@ -78,6 +78,13 @@ const (
 	FinishTurnContinue = agent.FinishTurnContinue
 )
 
+type QueueMode = agent.QueueMode
+
+const (
+	QueueOneAtATime = agent.QueueOneAtATime
+	QueueAll        = agent.QueueAll
+)
+
 var (
 	// Run starts the agent loop and streams events until the run completes.
 	Run      = agent.Run
