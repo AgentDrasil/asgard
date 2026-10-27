@@ -1167,6 +1167,49 @@ loop:
 	assert.Equal(t, "final", finishedText.Text)
 }
 
+// Port of pi 87f9a3641: a tool call with malformed final arguments
+// (ArgumentsError set by the provider) must not execute the tool; validation
+// reports the raw arguments text back to the model and the run continues.
+func TestAgentArgumentsErrorSkipsExecutionAndReports(t *testing.T) {
+	t.Parallel()
+
+	bad := toolCallMsg(call("c1", "read", `{}`))
+	bad.Content[0] = types.ToolCall{
+		Type: "toolCall", ID: "c1", Name: "read",
+		Arguments:      json.RawMessage(`{}`),
+		ArgumentsError: "unexpected end of JSON input\n\nReceived arguments:\n{\"comm",
+	}
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{bad, textMsg("recovered")}}
+	_, end := collect(t, Run(context.Background(), baseRequest(fp, tool)))
+
+	// The tool must not run; the run continues to the follow-up model turn.
+	assert.Empty(t, tool.executions)
+	assert.Equal(t, 2, fp.calls)
+	require.Len(t, end.Messages, 3) // assistant + error tool result + assistant
+
+	trm, ok := end.Messages[1].(*types.ToolResultMessage)
+	require.True(t, ok, "second message must be the tool result, got %T", end.Messages[1])
+	assert.True(t, trm.IsError)
+	blocks, err := types.DecodeToolResultContent(trm.Content)
+	require.NoError(t, err)
+	text := types.StringContentOf(blocks)
+	assert.True(t, strings.HasPrefix(text, `Invalid arguments for tool "read":`),
+		"error text must match upstream wording, got %q", text)
+	assert.Contains(t, text, "Received arguments:")
+	assert.Contains(t, text, `{"comm`)
+
+	// The follow-up turn must see the error tool result in context.
+	require.NotEmpty(t, fp.contexts[1].Messages)
+	var sawToolResult bool
+	for _, m := range fp.contexts[1].Messages {
+		if t2, ok := m.(*types.ToolResultMessage); ok && t2.IsError {
+			sawToolResult = true
+		}
+	}
+	assert.True(t, sawToolResult, "error tool result must be in the follow-up context")
+}
+
 // A failed session write must terminate the run with a synthetic error
 // assistant message and a well-formed, balanced terminal sequence instead of
 // silently continuing with model context the session does not have.

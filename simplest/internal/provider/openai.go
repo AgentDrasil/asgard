@@ -396,6 +396,122 @@ func parseStreamingJSON(s string) json.RawMessage {
 	return nil
 }
 
+// isHex4 reports whether s is exactly four hex digits (the valid tail of a
+// JSON \u escape).
+func isHex4(s string) bool {
+	if len(s) != 4 {
+		return false
+	}
+	for i := 0; i < 4; i++ {
+		c := s[i]
+		isDigit := c >= '0' && c <= '9'
+		isLower := c >= 'a' && c <= 'f'
+		isUpper := c >= 'A' && c <= 'F'
+		if !isDigit && !isLower && !isUpper {
+			return false
+		}
+	}
+	return true
+}
+
+// repairJSON repairs malformed JSON string literals by escaping raw control
+// characters inside strings and doubling backslashes before invalid escape
+// sequences (an invalid \u escape is `\u` not followed by four hex digits).
+// Text outside strings is copied through unchanged. Port of pi 4b994d5e5.
+func repairJSON(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !inString {
+			b.WriteByte(c)
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+		switch {
+		case c == '"':
+			b.WriteByte(c)
+			inString = false
+		case c == '\\':
+			if i+1 >= len(s) {
+				b.WriteString(`\\`)
+				continue
+			}
+			next := s[i+1]
+			if next == 'u' && i+6 <= len(s) && isHex4(s[i+2:i+6]) {
+				b.WriteString(s[i : i+6])
+				i += 5
+				continue
+			}
+			switch next {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+				b.WriteByte('\\')
+				b.WriteByte(next)
+				i++
+			default:
+				b.WriteString(`\\`)
+			}
+		case c < 0x20:
+			// Raw control character inside a string: escape it.
+			switch c {
+			case '\b':
+				b.WriteString(`\b`)
+			case '\f':
+				b.WriteString(`\f`)
+			case '\n':
+				b.WriteString(`\n`)
+			case '\r':
+				b.WriteString(`\r`)
+			case '\t':
+				b.WriteString(`\t`)
+			default:
+				fmt.Fprintf(&b, `\u%04x`, c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// parseToolCallArguments parses the model's complete arguments text of a
+// finished tool call. Unlike parseStreamingJSON it never keeps a partially
+// parsed prefix: once the call is finished, text that is not a valid JSON
+// object means the model sent malformed arguments. In that case arguments is
+// `{}` and the returned error string describes the problem including the raw
+// text, so tool validation can report it back to the model. Port of pi
+// 87f9a3641.
+func parseToolCallArguments(raw string) (json.RawMessage, string) {
+	if strings.TrimSpace(raw) == "" {
+		return json.RawMessage("{}"), ""
+	}
+	fail := func(err error) (json.RawMessage, string) {
+		return json.RawMessage("{}"), fmt.Sprintf("%s\n\nReceived arguments:\n%s", err, raw)
+	}
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		// Targeted repair before giving up: escape raw control characters in
+		// strings and fix invalid \u escapes (pi 4b994d5e5).
+		repaired := repairJSON(raw)
+		if repaired != raw {
+			var rv any
+			if rerr := json.Unmarshal([]byte(repaired), &rv); rerr == nil {
+				if _, ok := rv.(map[string]any); ok {
+					return json.RawMessage(repaired), ""
+				}
+			}
+		}
+		return fail(err)
+	}
+	if m, ok := v.(map[string]any); ok && m != nil {
+		return json.RawMessage(strings.TrimSpace(raw)), ""
+	}
+	return fail(fmt.Errorf("tool arguments must be a JSON object"))
+}
+
 // Stream implements types.Provider.
 func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
 	ch := make(chan types.AssistantMessageEvent, eventBuffer)
@@ -525,39 +641,21 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 
 		for _, acc := range tools {
 			tc := em.out.Content[acc.contentIdx].(types.ToolCall)
-			if final := parseStreamingJSON(acc.partialArgs); final != nil {
-				tc.Arguments = final
-				em.out.Content[acc.contentIdx] = tc
-			}
-			if tc.Arguments == nil {
-				tc.Arguments = json.RawMessage("{}")
-				em.out.Content[acc.contentIdx] = tc
-			}
+			// Port of pi 87f9a3641: a finished tool call whose final arguments
+			// are not a valid JSON object keeps the call with `Arguments == {}`
+			// and `ArgumentsError` describing the problem (including the raw
+			// text) so tool validation can report it back to the model. The
+			// streaming heuristic is only for in-flight display, never the
+			// final result.
+			tc.Arguments, tc.ArgumentsError = parseToolCallArguments(acc.partialArgs)
+			em.out.Content[acc.contentIdx] = tc
 			em.toolCallEnd(acc.contentIdx)
 		}
 
-		// Port of pi 1b2aa0ca0: a tool-use response with a tool call whose
-		// arguments never formed valid JSON may carry cut-off or mixed-up
-		// arguments (e.g. servers that omit the tool_calls index and splice
-		// parallel calls together). Refuse to hand those calls to the agent
-		// loop instead of running them with fabricated `{}` arguments.
-		if scanErr == nil || scanErr == errDone {
-			if em.out.StopReason == types.StopToolUse {
-				for _, acc := range tools {
-					if !json.Valid([]byte(acc.partialArgs)) {
-						name, id := acc.name, acc.id
-						if name == "" {
-							name = "<unknown>"
-						}
-						if id == "" {
-							id = "<unknown>"
-						}
-						em.fail(ctx, fmt.Errorf("openai-compat: stream completed with an unfinished tool call: %s (%s)", name, id))
-						return
-					}
-				}
-			}
-		}
+		// Note: pi 1b2aa0ca0 (stream fails on an unfinished tool call) is a
+		// Responses-adapter behavior. For chat completions, a finished
+		// tool_calls array with malformed arguments surfaces as
+		// ArgumentsError above instead of a stream error.
 
 		if scanErr != nil && scanErr != errDone {
 			em.fail(ctx, scanErr)

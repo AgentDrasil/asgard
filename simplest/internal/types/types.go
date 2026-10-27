@@ -93,6 +93,11 @@ type ToolCall struct {
 	// Signature carries the provider's opaque thought signature (Gemini 3
 	// thoughtSignature) that must be echoed back with the tool call.
 	Signature string `json:"signature,omitempty"`
+	// ArgumentsError is set when a finished tool call's arguments were not a
+	// valid JSON object: Arguments is then `{}` and this field carries the
+	// parse error plus the raw arguments text so tool validation can report
+	// it back to the model (pi 87f9a3641).
+	ArgumentsError string `json:"argumentsError,omitempty"`
 }
 
 const (

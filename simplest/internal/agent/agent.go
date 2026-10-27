@@ -711,6 +711,14 @@ func (l *loop) prepare(msg *types.AssistantMessage, tc types.ToolCall) (*prepare
 	if tool == nil {
 		return nil, &immediateOutcome{result: errorToolResult("Tool " + tc.Name + " not found"), isError: true}
 	}
+	// Port of pi 87f9a3641: malformed final arguments never reach validation
+	// or execution; the raw text is reported back to the model instead.
+	if tc.ArgumentsError != "" {
+		return nil, &immediateOutcome{
+			result:  errorToolResult(fmt.Sprintf("Invalid arguments for tool %q: %s", tc.Name, tc.ArgumentsError)),
+			isError: true,
+		}
+	}
 	var validated map[string]any
 	if l.req.Validate != nil {
 		if err := l.req.Validate(tc.Arguments, tool.Parameters()); err != nil {

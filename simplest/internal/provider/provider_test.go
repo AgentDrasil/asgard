@@ -1305,9 +1305,11 @@ func TestGoogleGemini_MetadataExtraction(t *testing.T) {
 	}
 }
 
-// Port of pi 1b2aa0ca0: a tool_calls-finished stream whose arguments never
-// became valid JSON must fail instead of running fabricated arguments.
-func TestOpenAIStreamUnfinishedToolCallFails(t *testing.T) {
+// Port of pi 87f9a3641: a finished tool_calls stream whose final arguments
+// never became valid JSON must NOT kill the stream — the old 1b2aa0ca0 strict
+// abort is Responses-adapter behavior, not chat completions. The call
+// survives with Arguments == {} and ArgumentsError carrying the raw text.
+func TestOpenAIStreamMalformedToolCallArguments(t *testing.T) {
 	chunks := []string{
 		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"bash","arguments":"{\"comm"}}]}}]}`,
 		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
@@ -1319,13 +1321,81 @@ func TestOpenAIStreamUnfinishedToolCallFails(t *testing.T) {
 	defer srv.Close()
 
 	p := NewOpenAICompat("sk-test")
-	_, _, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
-	if errEv == nil {
-		t.Fatalf("expected error event for unfinished tool call")
+	_, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopToolUse, done.Reason)
+
+	var toolCall types.ToolCall
+	for _, blk := range done.Message.Content {
+		if tc, ok := blk.(types.ToolCall); ok {
+			toolCall = tc
+		}
 	}
-	if got := errEv.Message.ErrorMessage; !strings.Contains(got, "unfinished tool call") || !strings.Contains(got, "bash") {
-		t.Fatalf("unexpected error message: %q", got)
+	require.Equal(t, "bash", toolCall.Name)
+	assert.JSONEq(t, `{}`, string(toolCall.Arguments))
+	assert.Contains(t, toolCall.ArgumentsError, "Received arguments:")
+	assert.Contains(t, toolCall.ArgumentsError, `{"comm`)
+}
+
+// Port of pi 4b994d5e5: invalid \u escapes in tool-call arguments are repaired
+// (the backslash is doubled) instead of failing the call.
+func TestOpenAIToolCallArgumentsUnicodeEscapeRepair(t *testing.T) {
+	// The arguments text (after SSE/JSON decoding) is
+	// {"text":"\usepackage{x}"} — "\u" not followed by four hex digits.
+	chunks := []string{
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_u","function":{"name":"tex","arguments":"{\"text\":\"\\usepackage{x}\"}"}}]}}]}`,
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
 	}
+	var captured map[string]any
+	var hdr http.Header
+	srv := sseServer(t, chunks, &captured, &hdr, "/chat/completions")
+	defer srv.Close()
+
+	p := NewOpenAICompat("sk-test")
+	_, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+
+	var toolCall types.ToolCall
+	for _, blk := range done.Message.Content {
+		if tc, ok := blk.(types.ToolCall); ok {
+			toolCall = tc
+		}
+	}
+	require.Equal(t, "tex", toolCall.Name)
+	assert.Empty(t, toolCall.ArgumentsError)
+	var args map[string]any
+	require.NoError(t, json.Unmarshal(toolCall.Arguments, &args))
+	assert.Equal(t, `\usepackage{x}`, args["text"])
+}
+
+// Control: well-formed arguments are passed through verbatim, no error.
+func TestOpenAIToolCallArgumentsValidControl(t *testing.T) {
+	chunks := []string{
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_ok","function":{"name":"bash","arguments":"{\"cmd\":\"ls\"}"}}]}}]}`,
+		`{"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	}
+	var captured map[string]any
+	var hdr http.Header
+	srv := sseServer(t, chunks, &captured, &hdr, "/chat/completions")
+	defer srv.Close()
+
+	p := NewOpenAICompat("sk-test")
+	_, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+
+	var toolCall types.ToolCall
+	for _, blk := range done.Message.Content {
+		if tc, ok := blk.(types.ToolCall); ok {
+			toolCall = tc
+		}
+	}
+	assert.JSONEq(t, `{"cmd":"ls"}`, string(toolCall.Arguments))
+	assert.Empty(t, toolCall.ArgumentsError)
 }
 
 // Port of pi 4dd2b149d: whitespace-only tool output must be treated as empty.
