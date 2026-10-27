@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -228,6 +230,33 @@ func TestGrepToolLimitSemantics(t *testing.T) {
 		assert.Equal(t, 5, strings.Count(out, "many.txt:"))
 		assert.NotContains(t, out, "limit reached")
 	})
+}
+
+func TestGrepToolCanceledContext(t *testing.T) {
+	t.Parallel()
+	dir := grepSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewGrepTool(dir).Execute(ctx, "test-call-id", json.RawMessage(`{"pattern":"needle"}`), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operation aborted")
+}
+
+func TestGrepToolCanceledDuringLargeFileScan(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 8192; i++ {
+		b.WriteString("filler line with no match\n")
+	}
+	b.WriteString("needle\n")
+	writeFile(t, dir, "big.txt", b.String())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewGrepTool(dir).Execute(ctx, "test-call-id", json.RawMessage(`{"pattern":"needle","path":"big.txt"}`), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operation aborted")
 }
 
 func TestGrepToolNoMatchesAndBadPath(t *testing.T) {

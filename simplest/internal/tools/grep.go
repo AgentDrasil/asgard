@@ -140,8 +140,11 @@ func (t *GrepTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		root = filepath.Dir(searchPath)
 	}
 
-	fileMatches := func(absFile string, budget int) []int {
+	fileMatches := func(ctx context.Context, absFile string, budget int) []int {
 		if budget <= 0 {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
 			return nil
 		}
 		f, err := os.Open(absFile)
@@ -155,6 +158,11 @@ func (t *GrepTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		lineNum := 0
 		for sc.Scan() {
 			lineNum++
+			if lineNum%256 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil
+				}
+			}
 			if re.MatchString(sc.Text()) {
 				hitLines = append(hitLines, lineNum)
 				if len(hitLines) >= budget {
@@ -180,7 +188,7 @@ func (t *GrepTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 				return nil
 			}
 		}
-		for _, ln := range fileMatches(absPath, effectiveLimit-len(matches)) {
+		for _, ln := range fileMatches(ctx, absPath, effectiveLimit-len(matches)) {
 			matches = append(matches, match{filePath: absPath, lineNum: ln})
 			if len(matches) >= effectiveLimit {
 				matchLimitReached = true
@@ -191,7 +199,7 @@ func (t *GrepTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	}
 
 	if isDirectory {
-		_ = walkWithGitignore(root, collect)
+		_ = walkWithGitignore(ctx, root, collect)
 	} else {
 		_ = collect(searchPath, filepath.Base(searchPath), false)
 	}

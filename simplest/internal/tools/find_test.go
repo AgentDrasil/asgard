@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -161,6 +163,16 @@ func TestFindToolGitignoreRespected(t *testing.T) {
 	if !strings.Contains(out, "README.md") || !strings.Contains(out, "src/main.go") {
 		t.Errorf("expected tracked files in results:\n%s", out)
 	}
+}
+
+func TestFindToolCanceledContext(t *testing.T) {
+	t.Parallel()
+	dir := findSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewFindTool(dir).Execute(ctx, "test-call-id", json.RawMessage(`{"pattern":"*"}`), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operation aborted")
 }
 
 func TestFindToolBadPath(t *testing.T) {

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -99,8 +100,12 @@ func (s ignoreStack) ignored(rel string, isDir bool) bool {
 // --hidden flag). Directories are pruned when ignored, matching git semantics
 // where negation cannot re-include inside an excluded directory. Entries are
 // visited in sorted order for determinism. When root is a file, fn runs once
-// for it.
-func walker(root string, fn func(absPath, rel string, d fs.DirEntry) error) error {
+// for it. The walk aborts promptly with the context's error when ctx is
+// canceled.
+func walker(ctx context.Context, root string, fn func(absPath, rel string, d fs.DirEntry) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	info, err := os.Stat(root)
 	if err != nil {
 		return err
@@ -114,12 +119,18 @@ func walker(root string, fn func(absPath, rel string, d fs.DirEntry) error) erro
 	}
 	var visit func(dirAbs, dirRel string, curStack ignoreStack) error
 	visit = func(dirAbs, dirRel string, curStack ignoreStack) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		entries, err := os.ReadDir(dirAbs)
 		if err != nil {
 			return nil // unreadable directories are skipped
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 		for _, e := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			name := e.Name()
 			childRel := name
 			if dirRel != "" {
@@ -159,8 +170,8 @@ var errStopWalk = errors.New("stop walk")
 
 // walkWithGitignore runs the gitignore-aware walker, stopping early when fn
 // returns errStopWalk.
-func walkWithGitignore(root string, fn func(absPath, rel string, isDir bool) error) error {
-	return walker(root, func(absPath, rel string, d fs.DirEntry) error {
+func walkWithGitignore(ctx context.Context, root string, fn func(absPath, rel string, isDir bool) error) error {
+	return walker(ctx, root, func(absPath, rel string, d fs.DirEntry) error {
 		return fn(absPath, rel, d.IsDir())
 	})
 }

@@ -86,7 +86,7 @@ func (t *FindTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 
 	var results []string
 	resultLimitReached := false
-	err := walkWithGitignore(searchPath, func(absPath, rel string, isDir bool) error {
+	err := walkWithGitignore(ctx, searchPath, func(absPath, rel string, isDir bool) error {
 		if effectiveLimit == 0 {
 			return errStopWalk
 		}
