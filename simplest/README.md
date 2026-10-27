@@ -218,7 +218,10 @@ req.Validate = func(args, parameters json.RawMessage) error {
 ## 4. Sessions
 
 Sessions are append-only trees stored as JSONL v3 under
-`<baseDir>/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.
+`<baseDir>/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. Before each
+append the store repairs a crash-truncated last line (a partial JSON fragment
+without a trailing newline) so the next entry lands on its own line instead of
+being glued to — and lost with — the fragment.
 
 ```go
 mgr := session.New(session.DefaultBaseDir()) // ~/.simplest

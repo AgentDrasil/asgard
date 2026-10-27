@@ -685,6 +685,9 @@ func (sf *SessionFile) persistLocked(entry *Entry) error {
 	if !sf.flushed {
 		return sf.rewriteLocked()
 	}
+	if err := repairTruncatedTail(sf.path); err != nil {
+		return fmt.Errorf("session: persist %s: %w", sf.path, err)
+	}
 	f, err := os.OpenFile(sf.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("session: persist %s: %w", sf.path, err)
@@ -694,6 +697,50 @@ func (sf *SessionFile) persistLocked(entry *Entry) error {
 		return fmt.Errorf("session: persist %s: %w", sf.path, err)
 	}
 	return nil
+}
+
+// repairTruncatedTail ensures the session file ends with a newline before an
+// append. A crash can leave a partial JSON fragment without a trailing
+// newline; appending to it would glue the next entry onto the fragment, and
+// LoadFile would skip the combined line, losing the new entry too. Mirrors
+// upstream v0.99.2's repair (session-manager.ts:668) but at append time so
+// LoadFile stays read-only. Missing and empty files need no repair. The
+// caller must hold the session lock (mutex and companion flock).
+func repairTruncatedTail(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // first write creates the file
+		}
+		return err
+	}
+	if info.Size() == 0 {
+		return nil // empty file needs no separator
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if last[0] == '\n' {
+		return nil // already terminated; no extra blank line
+	}
+	// Torn tail: terminate the fragment so the next entry starts on its own
+	// line (the fragment itself stays skipped as a malformed line).
+	a, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	_, err = a.Write([]byte{'\n'})
+	return err
 }
 
 func writeEntryLine(f *os.File, v any) error {

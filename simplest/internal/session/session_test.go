@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -1498,4 +1499,133 @@ func TestSession_Reconcile_DanglingUser(t *testing.T) {
 	reopenedCtx, err := reopened.BuildContext("")
 	require.NoError(t, err)
 	require.Len(t, reopenedCtx.Messages, 1)
+}
+
+// A crash-truncated last line (partial JSON without a trailing newline) must
+// be repaired before the next append: the fragment is terminated so the new
+// entry lands on its own line instead of being glued to — and lost with — the
+// fragment. Mirrors upstream v0.99.2 load-repair semantics (kept read-only in
+// LoadFile; repair happens at append time).
+func TestSession_AppendRepairsTruncatedTail(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tail string // appended after the valid message line, without "\n"
+		// entries present after Open (a parseable tail line still loads)
+		wantEntriesAfterOpen int
+	}{
+		{
+			name:                 "torn partial JSON fragment",
+			tail:                 `{"type":"message","id":"msg-torn","timestamp":"2026-09-26T00:00:02Z","message":{"role":"assistant","conte`,
+			wantEntriesAfterOpen: 1,
+		},
+		{
+			name:                 "valid JSON line without trailing newline",
+			tail:                 `{"type":"message","id":"msg-complete","timestamp":"2026-09-26T00:00:03Z","message":{"role":"assistant","content":"complete"}}`,
+			wantEntriesAfterOpen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			filePath := filepath.Join(tempDir, "session.jsonl")
+			content := `{"type":"session","version":3,"id":"sess-torn-append","timestamp":"2026-09-26T00:00:00Z","cwd":"/proj"}` + "\n" +
+				`{"type":"message","id":"msg-1","timestamp":"2026-09-26T00:00:01Z","message":{"role":"user","content":"hello"}}` + "\n" +
+				tt.tail
+			require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+
+			mgr := New(tempDir)
+			sf, err := mgr.Open(filePath)
+			require.NoError(t, err)
+			defer func() { _ = sf.Close() }()
+			_, entries, err := LoadFile(filePath)
+			require.NoError(t, err)
+			require.Len(t, entries, tt.wantEntriesAfterOpen)
+
+			_, err = sf.AppendMessage(testUser("after crash"))
+			require.NoError(t, err)
+
+			// The repaired file must end with a newline.
+			data, err := os.ReadFile(filePath)
+			require.NoError(t, err)
+			assert.True(t, bytes.HasSuffix(data, []byte{'\n'}), "file must end with a newline after append")
+			assert.NotContains(t, string(data), "\n\n", "repair must not insert blank lines")
+
+			// The new entry must be loadable as its own line.
+			_, entries, err = LoadFile(filePath)
+			require.NoError(t, err)
+			require.Len(t, entries, tt.wantEntriesAfterOpen+1)
+			msg, err := entries[len(entries)-1].DecodeMessage()
+			require.NoError(t, err)
+			userMsg, ok := msg.(*types.UserMessage)
+			require.True(t, ok)
+			blocks, err := types.DecodeUserContent(userMsg.Content)
+			require.NoError(t, err)
+			assert.Equal(t, "after crash", types.StringContentOf(blocks))
+
+			// A second append still works: no blank-line corruption, and the
+			// already-newline-terminated tail is left alone.
+			_, err = sf.AppendMessage(testUser("second append"))
+			require.NoError(t, err)
+			data, err = os.ReadFile(filePath)
+			require.NoError(t, err)
+			assert.True(t, bytes.HasSuffix(data, []byte{'\n'}))
+			assert.NotContains(t, string(data), "\n\n")
+			_, entries, err = LoadFile(filePath)
+			require.NoError(t, err)
+			require.Len(t, entries, tt.wantEntriesAfterOpen+2)
+			msg, err = entries[len(entries)-1].DecodeMessage()
+			require.NoError(t, err)
+			userMsg, ok = msg.(*types.UserMessage)
+			require.True(t, ok)
+			blocks, err = types.DecodeUserContent(userMsg.Content)
+			require.NoError(t, err)
+			assert.Equal(t, "second append", types.StringContentOf(blocks))
+		})
+	}
+}
+
+// Direct coverage of the repair helper's edge cases.
+func TestSession_RepairTruncatedTail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing file is a no-op", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, repairTruncatedTail(filepath.Join(t.TempDir(), "absent.jsonl")))
+	})
+
+	t.Run("empty file is a no-op", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "empty.jsonl")
+		require.NoError(t, os.WriteFile(path, nil, 0o644))
+		require.NoError(t, repairTruncatedTail(path))
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Empty(t, data)
+	})
+
+	t.Run("newline-terminated file is left unchanged", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "clean.jsonl")
+		want := []byte("{\"a\":1}\n")
+		require.NoError(t, os.WriteFile(path, want, 0o644))
+		require.NoError(t, repairTruncatedTail(path))
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, string(want), string(data))
+	})
+
+	t.Run("torn fragment gains a trailing newline", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "torn.jsonl")
+		require.NoError(t, os.WriteFile(path, []byte("{\"a\":1}\n{\"b\":"), 0o644))
+		require.NoError(t, repairTruncatedTail(path))
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, "{\"a\":1}\n{\"b\":\n", string(data))
+	})
 }
