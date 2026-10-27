@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -2082,4 +2083,290 @@ func TestOpenAIConvertMessagesGroupsToolResultImages(t *testing.T) {
 		assert.Equal(t, "first", msgs[2].Content)
 		assert.Equal(t, "second", msgs[3].Content)
 	})
+}
+
+// --- sampling params (U6/B33) ---
+
+func TestOpenAISamplingParamsPrecedence(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+	defer srv.Close()
+
+	m := oaModel(srv.URL)
+	m.SamplingParams = types.ModelSamplingParams{
+		"temperature":           0.1,
+		"top_p":                 0.2,
+		"seed":                  1,
+		"max_completion_tokens": 777,
+		"custom_key":            "model",
+	}
+	m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+		types.ThinkingMedium: {"temperature": 0.3, "seed": 2, "top_k": 20},
+	}
+	temp := 0.9
+	maxTokens := int64(1234)
+	opts := &types.StreamOptions{
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+		ThinkingLevel: types.ThinkingMedium,
+		SamplingParams: types.ModelSamplingParams{
+			"temperature":       0.4,
+			"frequency_penalty": 0.5,
+		},
+	}
+
+	p := NewOpenAICompat("k")
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+
+	assert.Equal(t, 0.4, captured["temperature"], "per-request overrides model and level")
+	assert.Equal(t, 0.2, captured["top_p"], "model default survives")
+	assert.EqualValues(t, 20, captured["top_k"], "per-level override applies")
+	assert.EqualValues(t, 2, captured["seed"], "per-level overrides model")
+	assert.EqualValues(t, 777, captured["max_completion_tokens"], "sampling params override struct fields")
+	assert.Equal(t, "model", captured["custom_key"], "arbitrary keys pass through")
+	assert.Equal(t, 0.5, captured["frequency_penalty"])
+	assert.NotContains(t, captured, "samplingParams")
+}
+
+func TestOpenAISamplingParamsEffectiveOff(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+	defer srv.Close()
+
+	m := oaModel(srv.URL)
+	m.SamplingParams = types.ModelSamplingParams{"seed": 1}
+	m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+		types.ThinkingOff: {"seed": 9},
+	}
+
+	p := NewOpenAICompat("k")
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+	require.Nil(t, errEv)
+	assert.EqualValues(t, 9, captured["seed"], "empty thinking level uses the off mapping")
+}
+
+func TestOpenAISamplingParamsAbsentLeavesBodyUnchanged(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+	defer srv.Close()
+
+	p := NewOpenAICompat("k")
+	_, _, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+
+	assert.NotContains(t, captured, "top_p")
+	assert.NotContains(t, captured, "custom_key")
+	assert.NotContains(t, captured, "samplingParams")
+}
+
+func TestGeminiSamplingParamsMapping(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{
+		`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`,
+	}, &captured, nil, "")
+	defer srv.Close()
+
+	m := gModel(srv.URL)
+	m.SamplingParams = types.ModelSamplingParams{
+		"temperature":       0.1,
+		"top_p":             0.2,
+		"topK":              30,
+		"seed":              1,
+		"presence_penalty":  0.3,
+		"frequencyPenalty":  0.4,
+		"candidate_count":   uint64(2),
+		"max_output_tokens": uint64(111),
+		"unknown_key":       "ignored",
+	}
+
+	p := NewGemini("g-key")
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), &types.StreamOptions{}))
+	require.Nil(t, errEv)
+
+	gc, ok := captured["generationConfig"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 0.1, gc["temperature"])
+	assert.Equal(t, 0.2, gc["topP"])
+	assert.EqualValues(t, 30, gc["topK"])
+	assert.EqualValues(t, 1, gc["seed"])
+	assert.Equal(t, 0.3, gc["presencePenalty"])
+	assert.Equal(t, 0.4, gc["frequencyPenalty"])
+	assert.EqualValues(t, 2, gc["candidateCount"])
+	assert.EqualValues(t, 111, gc["maxOutputTokens"])
+	assert.NotContains(t, gc, "unknown_key", "unknown Gemini sampling keys are ignored")
+}
+
+func TestGeminiSamplingParamsPrecedence(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{
+		`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`,
+	}, &captured, nil, "")
+	defer srv.Close()
+
+	m := gModel(srv.URL)
+	m.SamplingParams = types.ModelSamplingParams{
+		"temperature":       0.1,
+		"top_p":             0.2,
+		"max_output_tokens": 111,
+	}
+	m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+		types.ThinkingHigh: {"temperature": 0.3, "top_k": 10},
+	}
+	temp := 0.9
+	maxTokens := int64(1234)
+	opts := &types.StreamOptions{
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+		ThinkingLevel: types.ThinkingHigh,
+		SamplingParams: types.ModelSamplingParams{
+			"temperature":      0.4,
+			"presence_penalty": 0.5,
+		},
+	}
+
+	p := NewGemini("g-key")
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv)
+
+	gc, ok := captured["generationConfig"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 0.4, gc["temperature"], "per-request overrides model and level")
+	assert.Equal(t, 0.2, gc["topP"], "model default survives")
+	assert.EqualValues(t, 10, gc["topK"], "per-level override applies")
+	assert.EqualValues(t, 111, gc["maxOutputTokens"], "sampling params override struct fields")
+	assert.Equal(t, 0.5, gc["presencePenalty"])
+}
+
+func TestSamplingParamsClampedThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-reasoning model clamps high to off", func(t *testing.T) {
+		t.Parallel()
+
+		m := oaModel("http://unused")
+		m.Reasoning = false
+		m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+			types.ThinkingOff:  {"seed": 1},
+			types.ThinkingHigh: {"seed": 9},
+		}
+		got := mergeSamplingParams(m, &types.StreamOptions{ThinkingLevel: types.ThinkingHigh})
+		assert.EqualValues(t, 1, got["seed"], "unsupported high must clamp downward to off")
+	})
+
+	t.Run("unsupported level clamps upward first", func(t *testing.T) {
+		t.Parallel()
+
+		m := oaModel("http://unused")
+		m.ReasoningEffort = []string{"low", "high"}
+		m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+			types.ThinkingHigh: {"seed": 2},
+			types.ThinkingLow:  {"seed": 3},
+		}
+		got := mergeSamplingParams(m, &types.StreamOptions{ThinkingLevel: types.ThinkingMedium})
+		assert.EqualValues(t, 2, got["seed"], "medium must clamp upward to high")
+	})
+
+	t.Run("unknown level resolves deterministically", func(t *testing.T) {
+		t.Parallel()
+
+		m := oaModel("http://unused")
+		m.ReasoningEffort = []string{"low", "high"}
+		m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+			types.ThinkingLow:  {"seed": 3},
+			types.ThinkingHigh: {"seed": 2},
+		}
+		got := mergeSamplingParams(m, &types.StreamOptions{ThinkingLevel: types.ThinkingLevel("bogus")})
+		assert.EqualValues(t, 3, got["seed"], "unknown levels start from off and search upward")
+	})
+
+	t.Run("case and mapped levels", func(t *testing.T) {
+		t.Parallel()
+
+		high := "high"
+		m := oaModel("http://unused")
+		m.ThinkingLevelMap = types.ThinkingLevelMap{types.ThinkingHigh: &high}
+		m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+			types.ThinkingHigh: {"seed": 7},
+		}
+		got := mergeSamplingParams(m, &types.StreamOptions{ThinkingLevel: types.ThinkingLevel("HIGH")})
+		assert.EqualValues(t, 7, got["seed"], "case normalization must find the mapped high level")
+	})
+}
+
+func TestGeminiSamplingAliasPrecedence(t *testing.T) {
+	t.Parallel()
+
+	p := NewGemini("k")
+	m := gModel("http://unused")
+	m.SamplingParams = types.ModelSamplingParams{"top_k": 10}
+	m.SamplingParamsByThinkingLevel = map[types.ThinkingLevel]types.ModelSamplingParams{
+		types.ThinkingHigh: {"topK": 20},
+	}
+
+	_, cfg, err := p.buildRequest(m, simpleContext(), &types.StreamOptions{ThinkingLevel: types.ThinkingHigh})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.TopK)
+	assert.Equal(t, float32(20), *cfg.TopK, "level spelling topK overrides model top_k")
+
+	_, cfg, err = p.buildRequest(m, simpleContext(), &types.StreamOptions{
+		ThinkingLevel:  types.ThinkingHigh,
+		SamplingParams: types.ModelSamplingParams{"top_k": 30},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.TopK)
+	assert.Equal(t, float32(30), *cfg.TopK, "per-request top_k wins over mixed-spelling layers")
+
+	// Both spellings in the same layer resolve deterministically (canonical key wins).
+	m.SamplingParams = types.ModelSamplingParams{"top_k": 10, "topK": 11}
+	_, cfg, err = p.buildRequest(m, simpleContext(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.TopK)
+	assert.Equal(t, float32(11), *cfg.TopK)
+}
+
+func TestSamplingNumericValidation(t *testing.T) {
+	t.Parallel()
+
+	intValid := []any{3, int64(4), int32(5), uint64(9), float64(6), "7", json.Number("8")}
+	for _, v := range intValid {
+		n, ok := samplingInt32(v)
+		assert.True(t, ok, "valid int %v", v)
+		assert.NotZero(t, n)
+	}
+	intInvalid := []any{
+		1.5,
+		float64(1 << 40),
+		"NaN",
+		math.Inf(1),
+		math.NaN(),
+		"1.5",
+		"1e40",
+	}
+	for _, v := range intInvalid {
+		_, ok := samplingInt32(v)
+		assert.False(t, ok, "invalid int %v", v)
+	}
+
+	floatValid := []any{0.5, float32(0.25), 2, int64(3), "4.5", json.Number("6.5")}
+	for _, v := range floatValid {
+		f, ok := samplingFloat32(v)
+		assert.True(t, ok, "valid float %v", v)
+		assert.NotZero(t, f)
+	}
+	floatInvalid := []any{math.NaN(), math.Inf(1), math.Inf(-1), "NaN", "Inf", 1e39, 1e-50}
+	for _, v := range floatInvalid {
+		_, ok := samplingFloat32(v)
+		assert.False(t, ok, "invalid float %v", v)
+	}
 }

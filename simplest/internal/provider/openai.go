@@ -837,5 +837,9 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 		t.Function.Parameters = params
 		req.Tools = append(req.Tools, t)
 	}
-	return json.Marshal(req)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return mergeSamplingJSON(body, mergeSamplingParams(model, opts))
 }

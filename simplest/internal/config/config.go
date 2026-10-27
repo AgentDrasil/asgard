@@ -38,23 +38,24 @@ type ProviderConfig struct {
 // ModelConfig defines configuration for a specific model endpoint.
 // The API wire protocol is defined once on the referenced ProviderConfig.
 type ModelConfig struct {
-	ID               string                  `yaml:"id" json:"id"`
-	Model            string                  `yaml:"model,omitempty" json:"model,omitempty"`
-	Name             string                  `yaml:"name,omitempty" json:"name,omitempty"`
-	Type             string                  `yaml:"type,omitempty" json:"type,omitempty"`
-	Provider         string                  `yaml:"provider" json:"provider"`
-	BaseURL          string                  `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
-	ContextWindow    int64                   `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
-	MaxTokens        int64                   `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
-	Reasoning        bool                    `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
-	ReasoningEffort  []string                `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
-	ThinkingLevelMap map[string]*string      `yaml:"thinkingLevelMap,omitempty" json:"thinkingLevelMap,omitempty"`
-	Cost             types.ModelCost         `yaml:"cost,omitempty" json:"cost,omitempty"`
-	PromptCache      *types.ModelPromptCache `yaml:"promptCache,omitempty" json:"promptCache,omitempty"`
-	SamplingParams   map[string]any          `yaml:"samplingParams,omitempty" json:"samplingParams,omitempty"`
-	InputLimits      *types.ModelInputLimits `yaml:"inputLimits,omitempty" json:"inputLimits,omitempty"`
-	Input            []string                `yaml:"input,omitempty" json:"input,omitempty"`
-	Headers          map[string]string       `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ID                            string                    `yaml:"id" json:"id"`
+	Model                         string                    `yaml:"model,omitempty" json:"model,omitempty"`
+	Name                          string                    `yaml:"name,omitempty" json:"name,omitempty"`
+	Type                          string                    `yaml:"type,omitempty" json:"type,omitempty"`
+	Provider                      string                    `yaml:"provider" json:"provider"`
+	BaseURL                       string                    `yaml:"baseUrl,omitempty" json:"baseUrl,omitempty"`
+	ContextWindow                 int64                     `yaml:"contextWindow,omitempty" json:"contextWindow,omitempty"`
+	MaxTokens                     int64                     `yaml:"maxTokens,omitempty" json:"maxTokens,omitempty"`
+	Reasoning                     bool                      `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
+	ReasoningEffort               []string                  `yaml:"reasoningEffort,omitempty" json:"reasoningEffort,omitempty"`
+	ThinkingLevelMap              map[string]*string        `yaml:"thinkingLevelMap,omitempty" json:"thinkingLevelMap,omitempty"`
+	Cost                          types.ModelCost           `yaml:"cost,omitempty" json:"cost,omitempty"`
+	PromptCache                   *types.ModelPromptCache   `yaml:"promptCache,omitempty" json:"promptCache,omitempty"`
+	SamplingParams                map[string]any            `yaml:"samplingParams,omitempty" json:"samplingParams,omitempty"`
+	SamplingParamsByThinkingLevel map[string]map[string]any `yaml:"samplingParamsByThinkingLevel,omitempty" json:"samplingParamsByThinkingLevel,omitempty"`
+	InputLimits                   *types.ModelInputLimits   `yaml:"inputLimits,omitempty" json:"inputLimits,omitempty"`
+	Input                         []string                  `yaml:"input,omitempty" json:"input,omitempty"`
+	Headers                       map[string]string         `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
 // RawModelConfig is a type alias to ModelConfig used to prevent infinite recursion during UnmarshalYAML.
@@ -486,26 +487,45 @@ func (c *Config) GetAvailableModels() []*types.Model {
 		if mc.SamplingParams != nil {
 			samplingParams = types.ModelSamplingParams(mc.SamplingParams)
 		}
+		var samplingByLevel map[types.ThinkingLevel]types.ModelSamplingParams
+		if mc.SamplingParamsByThinkingLevel != nil {
+			samplingByLevel = make(map[types.ThinkingLevel]types.ModelSamplingParams, len(mc.SamplingParamsByThinkingLevel))
+			for k, v := range mc.SamplingParamsByThinkingLevel {
+				normK := strings.ToLower(k)
+				isStandard := false
+				for _, lvl := range types.OrderedThinkingLevels {
+					if string(lvl) == normK {
+						isStandard = true
+						break
+					}
+				}
+				if !isStandard {
+					fmt.Fprintf(os.Stderr, "Warning: model %q specifies unknown samplingParamsByThinkingLevel key %q; canonical levels are: %v\n", mc.ID, k, types.OrderedThinkingLevels)
+				}
+				samplingByLevel[types.ThinkingLevel(normK)] = types.ModelSamplingParams(v)
+			}
+		}
 
 		m := &types.Model{
-			ID:               mc.ID,
-			Model:            mc.Model,
-			Name:             mc.Name,
-			Type:             modelType,
-			API:              api,
-			Provider:         mc.Provider,
-			BaseURL:          baseURL,
-			Reasoning:        mc.Reasoning,
-			ReasoningEffort:  mc.ReasoningEffort,
-			ThinkingLevelMap: thinkingLevelMap,
-			Input:            mc.Input,
-			Cost:             mc.Cost,
-			PromptCache:      mc.PromptCache,
-			SamplingParams:   samplingParams,
-			InputLimits:      mc.InputLimits,
-			ContextWindow:    mc.ContextWindow,
-			MaxTokens:        mc.MaxTokens,
-			Headers:          mergedHeaders,
+			ID:                            mc.ID,
+			Model:                         mc.Model,
+			Name:                          mc.Name,
+			Type:                          modelType,
+			API:                           api,
+			Provider:                      mc.Provider,
+			BaseURL:                       baseURL,
+			Reasoning:                     mc.Reasoning,
+			ReasoningEffort:               mc.ReasoningEffort,
+			ThinkingLevelMap:              thinkingLevelMap,
+			Input:                         mc.Input,
+			Cost:                          mc.Cost,
+			PromptCache:                   mc.PromptCache,
+			SamplingParams:                samplingParams,
+			SamplingParamsByThinkingLevel: samplingByLevel,
+			InputLimits:                   mc.InputLimits,
+			ContextWindow:                 mc.ContextWindow,
+			MaxTokens:                     mc.MaxTokens,
+			Headers:                       mergedHeaders,
 		}
 		res = append(res, m)
 	}

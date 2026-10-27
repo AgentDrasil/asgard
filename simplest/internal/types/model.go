@@ -101,10 +101,13 @@ type Model struct {
 	Cost             ModelCost           `json:"cost"`
 	PromptCache      *ModelPromptCache   `json:"promptCache,omitempty"`
 	SamplingParams   ModelSamplingParams `json:"samplingParams,omitempty"`
-	InputLimits      *ModelInputLimits   `json:"inputLimits,omitempty"`
-	ContextWindow    int64               `json:"contextWindow"`
-	MaxTokens        int64               `json:"maxTokens"`
-	Headers          map[string]string   `json:"headers,omitempty"`
+	// SamplingParamsByThinkingLevel overrides SamplingParams per requested
+	// thinking level.
+	SamplingParamsByThinkingLevel map[ThinkingLevel]ModelSamplingParams `json:"samplingParamsByThinkingLevel,omitempty"`
+	InputLimits                   *ModelInputLimits                     `json:"inputLimits,omitempty"`
+	ContextWindow                 int64                                 `json:"contextWindow"`
+	MaxTokens                     int64                                 `json:"maxTokens"`
+	Headers                       map[string]string                     `json:"headers,omitempty"`
 }
 
 // WireID returns the model identifier placed in the API request: Model when
@@ -250,6 +253,8 @@ type StreamOptions struct {
 	Temperature   *float64      `json:"temperature,omitempty"`
 	MaxTokens     *int64        `json:"maxTokens,omitempty"`
 	ThinkingLevel ThinkingLevel `json:"thinkingLevel,omitempty"`
+	// SamplingParams overrides model sampling parameters for this request.
+	SamplingParams ModelSamplingParams `json:"samplingParams,omitempty"`
 	// APIKey overrides the provider's configured key for this call.
 	APIKey string `json:"-"`
 	// RetryPolicy controls request retry behavior. A nil value defaults to DefaultRetryPolicy().

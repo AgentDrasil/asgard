@@ -596,5 +596,6 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 		}
 		config.Tools = []*genai.Tool{{FunctionDeclarations: decls}}
 	}
+	applyGeminiSamplingParams(config, mergeGeminiSamplingParams(model, opts))
 	return contents, config, nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -370,6 +371,13 @@ models:
     samplingParams:
       temperature: 0.7
       top_p: 0.95
+    samplingParamsByThinkingLevel:
+      low:
+        temperature: 0.3
+      HIGH:
+        top_k: 40
+      bogus:
+        seed: 1
     inputLimits:
       maxRequestBytes: 10485760
       images:
@@ -432,6 +440,15 @@ models:
 	require.NotNil(t, m.SamplingParams)
 	assert.Equal(t, 0.7, m.SamplingParams["temperature"])
 	assert.Equal(t, 0.95, m.SamplingParams["top_p"])
+
+	// SamplingParamsByThinkingLevel: canonicalized keys, unknown retained
+	require.NotNil(t, m.SamplingParamsByThinkingLevel)
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingLow])
+	assert.Equal(t, 0.3, m.SamplingParamsByThinkingLevel[types.ThinkingLow]["temperature"])
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingHigh])
+	assert.EqualValues(t, 40, m.SamplingParamsByThinkingLevel[types.ThinkingHigh]["top_k"])
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")])
+	assert.EqualValues(t, 1, m.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")]["seed"])
 
 	// InputLimits
 	require.NotNil(t, m.InputLimits)
@@ -635,4 +652,69 @@ models:
 	require.Error(t, err)
 	assert.Nil(t, cfg)
 	assert.Contains(t, err.Error(), "models must be defined in models.yaml")
+}
+
+func TestConfig_SamplingParamsByThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	keyFile := filepath.Join(tempDir, "key.yaml")
+	providersFile := filepath.Join(tempDir, "providers.yaml")
+	modelsFile := filepath.Join(tempDir, "models.yaml")
+
+	require.NoError(t, os.WriteFile(keyFile, []byte(`
+providers:
+  custom-provider:
+    apiKey: "dummy-key"
+`), 0o600))
+	require.NoError(t, os.WriteFile(providersFile, []byte(`
+providers:
+  custom-provider:
+    api: openai-compat
+`), 0o600))
+	require.NoError(t, os.WriteFile(modelsFile, []byte(`
+models:
+  - id: sampling-model
+    name: "Sampling Model"
+    provider: custom-provider
+    reasoning: true
+    samplingParams:
+      temperature: 0.5
+    samplingParamsByThinkingLevel:
+      LOW:
+        temperature: 0.3
+      high:
+        top_k: 20
+      bogus:
+        seed: 2
+`), 0o600))
+
+	cfg, err := LoadFrom(keyFile)
+	require.NoError(t, err)
+	models := cfg.GetAvailableModels()
+	require.Len(t, models, 1)
+	m := models[0]
+
+	require.NotNil(t, m.SamplingParams)
+	assert.Equal(t, 0.5, m.SamplingParams["temperature"])
+
+	require.NotNil(t, m.SamplingParamsByThinkingLevel)
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingLow])
+	assert.Equal(t, 0.3, m.SamplingParamsByThinkingLevel[types.ThinkingLow]["temperature"],
+		"LOW must normalize to the canonical low level")
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingHigh])
+	assert.EqualValues(t, 20, m.SamplingParamsByThinkingLevel[types.ThinkingHigh]["top_k"])
+	require.NotNil(t, m.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")],
+		"unknown levels are retained after warning")
+	assert.EqualValues(t, 2, m.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")]["seed"])
+
+	// JSON round-trip keeps every normalized/unknown level.
+	raw, err := json.Marshal(m)
+	require.NoError(t, err)
+	var back types.Model
+	require.NoError(t, json.Unmarshal(raw, &back))
+	require.NotNil(t, back.SamplingParamsByThinkingLevel)
+	assert.Equal(t, 0.3, back.SamplingParamsByThinkingLevel[types.ThinkingLow]["temperature"])
+	assert.EqualValues(t, 20, back.SamplingParamsByThinkingLevel[types.ThinkingHigh]["top_k"])
+	assert.EqualValues(t, 2, back.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")]["seed"])
 }
