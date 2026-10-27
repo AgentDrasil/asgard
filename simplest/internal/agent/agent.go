@@ -527,15 +527,26 @@ func snapshotEvent(e types.Partial) (*types.AssistantMessage, *types.AssistantMe
 func (l *loop) streamAssistant() *types.AssistantMessage {
 	llmMessages := l.messages
 	if l.req.ConvertToLlm != nil {
-		converted, err := l.req.ConvertToLlm(l.messages)
-		if err != nil {
+		var (
+			converted []types.Message
+			cerr      error
+			recovered any
+		)
+		func() {
+			defer func() { recovered = recover() }()
+			converted, cerr = l.req.ConvertToLlm(l.messages)
+		}()
+		if recovered != nil {
+			cerr = fmt.Errorf("ConvertToLlm panicked: %v", recovered)
+		}
+		if cerr != nil {
 			final := &types.AssistantMessage{
 				Content:       []types.AssistantContent{},
 				API:           l.req.Model.API,
 				Provider:      l.req.Model.Provider,
 				Model:         l.req.Model.ID,
 				StopReason:    types.StopError,
-				ErrorMessage:  err.Error(),
+				ErrorMessage:  cerr.Error(),
 				ThinkingLevel: l.thinkingLevel(),
 				Timestamp:     time.Now().UnixMilli(),
 			}
@@ -658,16 +669,32 @@ func (l *loop) emitAssistant(m *types.AssistantMessage, emitStart bool) {
 	l.emit(types.AgentEvent{Kind: types.MessageEnd, Message: m})
 }
 
+const emptyToolParameters = `{"type":"object","properties":{}}`
+
 func toolDefs(tools []types.AgentTool) []types.ToolDef {
 	defs := make([]types.ToolDef, 0, len(tools))
 	for _, t := range tools {
-		params := t.Parameters()
-		if len(params) == 0 {
-			params = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		defs = append(defs, types.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: params})
+		defs = append(defs, types.ToolDef{
+			Name: t.Name(), Description: t.Description(), Parameters: safeToolParameters(t),
+		})
 	}
 	return defs
+}
+
+// safeToolParameters guards the tool list build: a panicking Parameters()
+// implementation must not kill the host before prepare's recover can run. The
+// tool stays listed with an empty-object schema.
+func safeToolParameters(t types.AgentTool) (params json.RawMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			params = json.RawMessage(emptyToolParameters)
+		}
+	}()
+	params = t.Parameters()
+	if len(params) == 0 {
+		params = json.RawMessage(emptyToolParameters)
+	}
+	return params
 }
 
 func errorToolResult(message string) *types.ToolResult {
@@ -698,14 +725,25 @@ func (l *loop) failTruncatedToolCalls(msg *types.AssistantMessage, calls []types
 // always invoked from the loop goroutine so overrides stay serialized.
 func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool, durationMs *int64) *types.ToolResultMessage {
 	if l.req.AfterToolCall != nil {
-		override := l.req.AfterToolCall(AfterToolCallInput{
-			Context:          l.ctx,
-			AssistantMessage: msg,
-			ToolCall:         tc,
-			Result:           result,
-			IsError:          isError,
-		})
-		if override != nil {
+		var override *AfterToolCallOverride
+		var recovered any
+		func() {
+			defer func() { recovered = recover() }()
+			override = l.req.AfterToolCall(AfterToolCallInput{
+				Context:          l.ctx,
+				AssistantMessage: msg,
+				ToolCall:         tc,
+				Result:           result,
+				IsError:          isError,
+			})
+		}()
+		if recovered != nil {
+			// Port of upstream finalizeExecutedToolCall: a panicking hook
+			// replaces the result with an error but keeps the run and the
+			// tool's measured duration.
+			result = errorToolResult(fmt.Sprintf("afterToolCall panicked: %v", recovered))
+			isError = true
+		} else if override != nil {
 			if override.Content != nil {
 				result.Content = override.Content
 			}
@@ -761,7 +799,20 @@ func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, re
 
 // prepare validates args and runs the BeforeToolCall hook. Returns either a
 // prepared execution or an immediate (failed/blocked) outcome.
-func (l *loop) prepare(msg *types.AssistantMessage, tc types.ToolCall) (*preparedCall, *immediateOutcome) {
+func (l *loop) prepare(msg *types.AssistantMessage, tc types.ToolCall) (prepared *preparedCall, immediate *immediateOutcome) {
+	// A panicking Validate or BeforeToolCall hook must not kill the host
+	// process or run the tool. Mirror upstream prepareToolCall: convert the
+	// panic into an immediate error result.
+	defer func() {
+		if r := recover(); r != nil {
+			prepared = nil
+			immediate = &immediateOutcome{
+				result:  errorToolResult(fmt.Sprintf("tool preparation panicked: %v", r)),
+				isError: true,
+			}
+		}
+	}()
+
 	tool := l.toolsByName[tc.Name]
 	if tool == nil {
 		return nil, &immediateOutcome{result: errorToolResult("Tool " + tc.Name + " not found"), isError: true}
@@ -817,7 +868,7 @@ type immediateOutcome struct {
 	isError bool
 }
 
-func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool, *int64) {
+func (l *loop) executePrepared(p *preparedCall) (result *types.ToolResult, isError bool, durationMs *int64) {
 	if l.ctx.Err() != nil {
 		// Upstream v0.99.2: every deferred thunk re-checks the abort signal
 		// before running the tool, so cancellation cannot start prepared work.
@@ -825,6 +876,18 @@ func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool, *int64
 		return errorToolResult("Operation aborted"), true, nil
 	}
 	start := time.Now()
+	// A panicking Execute (or its onUpdate callback) becomes a normal tool
+	// error. The tool did run, so the duration stays non-nil. Mirror upstream
+	// executePreparedToolCall.
+	defer func() {
+		if r := recover(); r != nil {
+			d := time.Since(start).Milliseconds()
+			result = errorToolResult(fmt.Sprintf("tool execution panicked: %v", r))
+			isError = true
+			durationMs = &d
+		}
+	}()
+
 	result, err := p.tool.Execute(l.ctx, p.tc.ID, p.tc.Arguments, func(partial *types.ToolResult) {
 		l.emit(types.AgentEvent{
 			Kind: types.ToolExecutionUpdate, ToolCallID: p.tc.ID, ToolName: p.tc.Name,

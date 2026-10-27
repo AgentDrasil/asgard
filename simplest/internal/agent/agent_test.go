@@ -87,14 +87,16 @@ func call(id, name, argsJSON string) types.ToolCall {
 
 // recordingTool executes and records invocations.
 type recordingTool struct {
-	name       string
-	mode       types.ToolExecutionMode
-	output     string
-	err        error
-	onStart    func()
-	executions []string // tool call ids in completion order
-	started    chan string
-	nilResult  bool
+	name            string
+	mode            types.ToolExecutionMode
+	output          string
+	err             error
+	onStart         func()
+	executions      []string // tool call ids in completion order
+	started         chan string
+	nilResult       bool
+	panicValue      any
+	panicParameters any
 }
 
 func newRecordingTool(name string) *recordingTool {
@@ -105,6 +107,9 @@ func (t *recordingTool) Name() string        { return t.name }
 func (t *recordingTool) Description() string { return "desc" }
 func (t *recordingTool) Label() string       { return t.name }
 func (t *recordingTool) Parameters() json.RawMessage {
+	if t.panicParameters != nil {
+		panic(t.panicParameters)
+	}
 	return json.RawMessage(`{"type":"object","properties":{"x":{"type":"string"}}}`)
 }
 func (t *recordingTool) PromptSnippet() string                  { return "" }
@@ -113,6 +118,9 @@ func (t *recordingTool) ExecutionMode() types.ToolExecutionMode { return t.mode 
 
 func (t *recordingTool) Execute(ctx context.Context, id string, args json.RawMessage, onUpdate types.UpdateFunc) (*types.ToolResult, error) {
 	t.started <- id
+	if t.panicValue != nil {
+		panic(t.panicValue)
+	}
 	if t.onStart != nil {
 		t.onStart()
 	}
@@ -2095,4 +2103,205 @@ func TestParallelToolDurationsIndependent(t *testing.T) {
 	}
 	assert.NotSame(t, durations["c1"], durations["c2"],
 		"parallel calls must not share one duration value")
+}
+
+// --- panic recovery (B2) ---
+
+func toolEndEvent(t *testing.T, evs []types.AgentEvent, callID string) *types.AgentEvent {
+	t.Helper()
+	for i := range evs {
+		if evs[i].Kind == types.ToolExecutionEnd && evs[i].ToolCallID == callID {
+			return &evs[i]
+		}
+	}
+	t.Fatalf("tool_execution_end for %s not found", callID)
+	return nil
+}
+
+func toolResultMessage(t *testing.T, msgs []types.Message, callID string) *types.ToolResultMessage {
+	t.Helper()
+	for _, m := range msgs {
+		if trm, ok := m.(*types.ToolResultMessage); ok && trm.ToolCallID == callID {
+			return trm
+		}
+	}
+	t.Fatalf("tool result message for %s not found", callID)
+	return nil
+}
+
+func toolResultText(t *testing.T, trm *types.ToolResultMessage) string {
+	t.Helper()
+	blocks, err := types.DecodeToolResultContent(trm.Content)
+	require.NoError(t, err)
+	return types.StringContentOf(blocks)
+}
+
+func TestToolExecutePanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	tool.panicValue = "execute boom"
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("recovered"),
+	}}
+
+	evs, end := collect(t, Run(context.Background(), baseRequest(fp, tool)))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "run must continue after a tool panic")
+
+	endEv := toolEndEvent(t, evs, "c1")
+	assert.True(t, endEv.IsError)
+	require.NotNil(t, endEv.DurationMs, "a tool that ran and panicked still has a duration")
+
+	trm := toolResultMessage(t, end.Messages, "c1")
+	assert.True(t, trm.IsError)
+	require.NotNil(t, trm.DurationMs)
+	text := toolResultText(t, trm)
+	assert.Contains(t, text, "tool execution panicked:")
+	assert.Contains(t, text, "execute boom")
+}
+
+func TestBeforeToolCallPanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("recovered"),
+	}}
+	req := baseRequest(fp, tool)
+	req.BeforeToolCall = func(in BeforeToolCallInput) *BeforeToolCallDecision {
+		panic("before boom")
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "run must continue after a beforeToolCall panic")
+	assert.Empty(t, tool.executions, "panicking preparation must not execute the tool")
+
+	endEv := toolEndEvent(t, evs, "c1")
+	assert.True(t, endEv.IsError)
+	assert.Nil(t, endEv.DurationMs, "the tool never ran")
+
+	trm := toolResultMessage(t, end.Messages, "c1")
+	assert.True(t, trm.IsError)
+	assert.Nil(t, trm.DurationMs)
+	text := toolResultText(t, trm)
+	assert.Contains(t, text, "tool preparation panicked:")
+	assert.Contains(t, text, "before boom")
+}
+
+func TestAfterToolCallPanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("recovered"),
+	}}
+	req := baseRequest(fp, tool)
+	req.AfterToolCall = func(in AfterToolCallInput) *AfterToolCallOverride {
+		panic("after boom")
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "run must continue after an afterToolCall panic")
+	assert.Equal(t, []string{"c1"}, tool.executions, "the tool ran before the hook panicked")
+
+	endEv := toolEndEvent(t, evs, "c1")
+	assert.True(t, endEv.IsError)
+	require.NotNil(t, endEv.DurationMs, "the tool ran, so its duration is kept")
+
+	trm := toolResultMessage(t, end.Messages, "c1")
+	assert.True(t, trm.IsError)
+	require.NotNil(t, trm.DurationMs)
+	assert.Equal(t, *endEv.DurationMs, *trm.DurationMs)
+	text := toolResultText(t, trm)
+	assert.Contains(t, text, "afterToolCall panicked:")
+	assert.Contains(t, text, "after boom")
+}
+
+func TestValidatePanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("recovered"),
+	}}
+	req := baseRequest(fp, tool)
+	req.Validate = func(args, parameters json.RawMessage) error {
+		panic("validate boom")
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "run must continue after a Validate panic")
+	assert.Empty(t, tool.executions, "panicking validation must not execute the tool")
+
+	endEv := toolEndEvent(t, evs, "c1")
+	assert.True(t, endEv.IsError)
+	assert.Nil(t, endEv.DurationMs, "the tool never ran")
+
+	trm := toolResultMessage(t, end.Messages, "c1")
+	assert.True(t, trm.IsError)
+	assert.Nil(t, trm.DurationMs)
+	text := toolResultText(t, trm)
+	assert.Contains(t, text, "tool preparation panicked:")
+	assert.Contains(t, text, "validate boom")
+}
+
+func TestConvertToLlmPanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("never")}}
+	req := baseRequest(fp)
+	req.ThinkingLevel = types.ThinkingMedium
+	req.ConvertToLlm = func(msgs []types.Message) ([]types.Message, error) {
+		panic("convert boom")
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 0, fp.calls, "a panicking ConvertToLlm must not reach the provider")
+	require.Len(t, end.Messages, 1)
+
+	am, ok := end.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopError, am.StopReason)
+	assert.Contains(t, am.ErrorMessage, "ConvertToLlm panicked:")
+	assert.Contains(t, am.ErrorMessage, "convert boom")
+	assert.Equal(t, types.ThinkingMedium, am.ThinkingLevel)
+	assert.Nil(t, am.DurationMs, "no provider request happened")
+}
+
+func TestToolParametersPanicRecovered(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	tool.panicParameters = "params boom"
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+	req := baseRequest(fp, tool)
+	req.ThinkingLevel = types.ThinkingHigh
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 1, fp.calls, "a panicking Parameters() must not abort the provider request")
+
+	require.Len(t, fp.contexts, 1)
+	require.Len(t, fp.contexts[0].Tools, 1, "the tool must remain listed")
+	def := fp.contexts[0].Tools[0]
+	assert.Equal(t, "read", def.Name)
+	assert.Equal(t, "desc", def.Description)
+	assert.JSONEq(t, `{"type":"object","properties":{}}`, string(def.Parameters),
+		"panicking Parameters() must fall back to the empty-object schema")
+
+	require.NotEmpty(t, evs)
+	assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
+	require.Len(t, end.Messages, 1)
+	am, ok := end.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopStop, am.StopReason, "the turn must complete normally")
 }
