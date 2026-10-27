@@ -506,34 +506,148 @@ func (sf *SessionFile) AppendSessionInfo(name string) (string, error) {
 	return sf.appendAutoParentLocked(&Entry{Type: TypeSessionInfo, Name: name})
 }
 
-// AppendUsage records out-of-band model usage (e.g. cache warm-up, separate
-// accounting). The entry is parented to the current leaf entry and advances
-// the leaf, mirroring upstream appendUsage semantics.
-func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, error) {
+// AppendUsageEntry records out-of-band model usage (e.g. cache warm-up,
+// separate accounting) using the upstream entry shape: kind/provider/model,
+// usage, and an optional note. The entry is parented to the current leaf entry
+// and advances the leaf, mirroring upstream appendUsage semantics.
+func (sf *SessionFile) AppendUsageEntry(kind, provider, model string, usage *types.Usage, note string) (string, error) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.appendAutoParentLocked(&Entry{
-		Type:      TypeUsage,
-		Usage:     usage,
-		UsageNote: note,
+		Type:          TypeUsage,
+		UsageKind:     kind,
+		Provider:      provider,
+		UsageProvider: provider,
+		UsageModel:    model,
+		Usage:         usage,
+		UsageNote:     note,
 	})
+}
+
+// AppendUsage records usage without kind/provider/model. It is a compatibility
+// wrapper around AppendUsageEntry; upstream-compatible callers should pass the
+// entry metadata via AppendUsageEntry.
+func (sf *SessionFile) AppendUsage(usage *types.Usage, note string) (string, error) {
+	return sf.AppendUsageEntry("", "", "", usage, note)
 }
 
 // AppendContextEdit records an append-only modification to an earlier entry in
 // LLM context projection. A nil replacement omits the target entry from context;
-// a non-nil replacement replaces its content with plain text. Contract notes:
-// empty or dangling targetIDs are silently ignored during projection; editing an
-// assistant message containing tool calls would orphan its tool results, so callers
-// should avoid replacing such messages (or preserve the ToolCall blocks when
-// replacing).
+// a non-nil replacement replaces its content with plain text. The replacement is
+// stored in the upstream object shape {"content":"<text>"}.
 func (sf *SessionFile) AppendContextEdit(targetID string, replacement *string) (string, error) {
+	if replacement == nil {
+		sf.mu.Lock()
+		defer sf.mu.Unlock()
+		if err := sf.validateContextEditTargetLocked(targetID); err != nil {
+			return "", err
+		}
+		return sf.appendAutoParentLocked(&Entry{Type: TypeContextEdit, TargetID: targetID})
+	}
+	content, err := json.Marshal(*replacement)
+	if err != nil {
+		return "", err
+	}
+	return sf.AppendContextEditContent(targetID, content)
+}
+
+// AppendContextEditContent records a context edit with upstream replacement
+// content. content may be a JSON string, a content-block array, or a full
+// replacement object {"content": ...}; it is stored as {"content": <value>}.
+// The target must exist, be on the active branch, and contribute editable model
+// content (message user/assistant/toolResult or custom_message).
+func (sf *SessionFile) AppendContextEditContent(targetID string, content json.RawMessage) (string, error) {
+	normalized, err := normalizeContextEditContent(content)
+	if err != nil {
+		return "", err
+	}
+	replacement, err := json.Marshal(struct {
+		Content json.RawMessage `json:"content"`
+	}{Content: normalized})
+	if err != nil {
+		return "", err
+	}
+
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
+	if err := sf.validateContextEditTargetLocked(targetID); err != nil {
+		return "", err
+	}
 	return sf.appendAutoParentLocked(&Entry{
 		Type:        TypeContextEdit,
 		TargetID:    targetID,
-		Replacement: replacement,
+		Replacement: json.RawMessage(replacement),
 	})
+}
+
+// normalizeContextEditContent validates and unwraps replacement content.
+func normalizeContextEditContent(content json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(content)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("session: context edit content is required")
+	}
+	if trimmed[0] == '{' {
+		var obj struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return nil, fmt.Errorf("session: invalid context edit content: %w", err)
+		}
+		trimmed = bytes.TrimSpace(obj.Content)
+		if len(trimmed) == 0 {
+			return nil, fmt.Errorf("session: context edit replacement must contain content")
+		}
+	}
+	switch trimmed[0] {
+	case '"':
+		var text string
+		if err := json.Unmarshal(trimmed, &text); err != nil {
+			return nil, fmt.Errorf("session: invalid context edit string content: %w", err)
+		}
+	case '[':
+		var blocks []json.RawMessage
+		if err := json.Unmarshal(trimmed, &blocks); err != nil {
+			return nil, fmt.Errorf("session: invalid context edit content blocks: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("session: context edit replacement must contain string/array content")
+	}
+	return append(json.RawMessage(nil), trimmed...), nil
+}
+
+// validateContextEditTargetLocked enforces upstream append-time target rules.
+// Callers must hold sf.mu.
+func (sf *SessionFile) validateContextEditTargetLocked(targetID string) error {
+	target := sf.byID[targetID]
+	if target == nil {
+		return fmt.Errorf("session: context edit target %s not found", targetID)
+	}
+	onBranch := false
+	for _, e := range buildPath(sf.entries, sf.byID, sf.leafID) {
+		if e.ID == targetID {
+			onBranch = true
+			break
+		}
+	}
+	if !onBranch {
+		return fmt.Errorf("session: context edit target %s is not on the active branch", targetID)
+	}
+
+	editable := target.Type == TypeCustomMessage
+	if target.Type == TypeMessage {
+		msg, err := target.DecodeMessage()
+		if err != nil {
+			return fmt.Errorf("session: context edit target %s is not a valid message: %w", targetID, err)
+		}
+		switch msg.MessageRole() {
+		case types.RoleUser, types.RoleAssistant, types.RoleToolResult:
+			editable = true
+		}
+	}
+	if !editable {
+		return fmt.Errorf("session: context edit target %s does not contribute editable model content", targetID)
+	}
+	return nil
 }
 
 // SessionName returns the latest session_info display name, if any.

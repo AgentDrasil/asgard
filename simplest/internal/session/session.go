@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -84,12 +85,45 @@ type Entry struct {
 	TargetID string `json:"targetId,omitempty"`
 	// TypeLabel. Label nil means "cleared".
 	Label *string `json:"label,omitempty"`
-	// TypeContextEdit. Replacement nil means "omit".
-	Replacement *string `json:"replacement,omitempty"`
+	// TypeContextEdit. Replacement is the upstream object shape
+	// {"content": <string | content blocks>}, a JSON null (omit), or a legacy
+	// bare string. Empty/null means "omit".
+	Replacement json.RawMessage `json:"replacement,omitempty"`
 	// TypeSessionInfo.
 	Name string `json:"name,omitempty"`
-	// TypeUsage.
-	UsageNote string `json:"usageNote,omitempty"`
+	// TypeUsage. Provider is the upstream "provider" field; because Entry is a
+	// flat union it shares the Provider field above with model_change.
+	UsageKind     string `json:"kind,omitempty"`
+	UsageProvider string `json:"-"`
+	UsageModel    string `json:"model,omitempty"`
+	UsageNote     string `json:"note,omitempty"`
+}
+
+// entryWire avoids Entry's custom (un)marshaling. UsageProvider shares the
+// upstream "provider" key with model_change, so it travels through the flat
+// Provider field on the wire and is synced in the methods below.
+type entryWire Entry
+
+// UnmarshalJSON keeps the shared "provider" key working for usage entries.
+func (e *Entry) UnmarshalJSON(data []byte) error {
+	var w entryWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	*e = Entry(w)
+	if e.Type == TypeUsage {
+		e.UsageProvider = e.Provider
+	}
+	return nil
+}
+
+// MarshalJSON writes usage providers through the shared "provider" key.
+func (e Entry) MarshalJSON() ([]byte, error) {
+	w := entryWire(e)
+	if e.Type == TypeUsage && e.UsageProvider != "" {
+		w.Provider = e.UsageProvider
+	}
+	return json.Marshal(w)
 }
 
 // DecodeMessage decodes the entry's role-enveloped message payload.
@@ -278,7 +312,7 @@ func buildContextEntriesFromPath(path []*Entry) ([]*Entry, map[string]*Entry) {
 		if e.Type == TypeContextEdit {
 			continue
 		}
-		if edit, ok := edits[e.ID]; ok && edit.Replacement == nil {
+		if edit, ok := edits[e.ID]; ok && contextEditOmits(edit.Replacement) {
 			continue
 		}
 		out = append(out, e)
@@ -383,29 +417,107 @@ func collectPathEdits(path []*Entry) map[string]*Entry {
 	return edits
 }
 
-func applyMessageReplacement(msg types.Message, text string) types.Message {
-	switch m := msg.(type) {
-	case *types.UserMessage:
-		return &types.UserMessage{
-			Content:   types.TextOnly(text),
-			Timestamp: m.Timestamp,
+// contextEditOmits reports whether a context_edit replacement means "omit the
+// target". Upstream writes JSON null; local writers omit the field entirely.
+func contextEditOmits(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
+}
+
+// contextEditContent extracts the inner replacement content from a context_edit
+// replacement: the upstream object {"content": <value>}, or a legacy bare
+// string. It accepts string and content-block array values only.
+func contextEditContent(raw json.RawMessage) (json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, false
+	}
+	if trimmed[0] == '{' {
+		var obj struct {
+			Content json.RawMessage `json:"content"`
 		}
-	case *types.AssistantMessage:
-		clone := *m
-		clone.Content = []types.AssistantContent{
-			types.TextContent{Type: types.TypeText, Text: text},
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return nil, false
 		}
-		return &clone
-	case *types.ToolResultMessage:
-		clone := *m
-		blocks, err := types.MarshalBlocks([]types.AssistantContent{
-			types.TextContent{Type: types.TypeText, Text: text},
-		})
-		if err != nil {
+		trimmed = bytes.TrimSpace(obj.Content)
+		if len(trimmed) == 0 {
+			return nil, false
+		}
+	}
+	if trimmed[0] != '"' && trimmed[0] != '[' {
+		return nil, false
+	}
+	return trimmed, true
+}
+
+// applyMessageReplacement replaces a message's content with a context_edit
+// value. A JSON string becomes plain text (user content stays a bare string;
+// assistant/toolResult content becomes one text block). A JSON array replaces
+// the content blocks directly. Invalid values leave the message unchanged.
+func applyMessageReplacement(msg types.Message, content json.RawMessage) types.Message {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 {
+		return msg
+	}
+	switch content[0] {
+	case '"':
+		var text string
+		if err := json.Unmarshal(content, &text); err != nil {
 			return msg
 		}
-		clone.Content = blocks
-		return &clone
+		switch m := msg.(type) {
+		case *types.UserMessage:
+			return &types.UserMessage{
+				Content:   types.TextOnly(text),
+				Timestamp: m.Timestamp,
+			}
+		case *types.AssistantMessage:
+			clone := *m
+			clone.Content = []types.AssistantContent{
+				types.TextContent{Type: types.TypeText, Text: text},
+			}
+			return &clone
+		case *types.ToolResultMessage:
+			clone := *m
+			blocks, err := types.MarshalBlocks([]types.AssistantContent{
+				types.TextContent{Type: types.TypeText, Text: text},
+			})
+			if err != nil {
+				return msg
+			}
+			clone.Content = blocks
+			return &clone
+		default:
+			return msg
+		}
+	case '[':
+		switch m := msg.(type) {
+		case *types.UserMessage:
+			if _, err := types.DecodeUserContent(content); err != nil {
+				return msg
+			}
+			return &types.UserMessage{
+				Content:   append(json.RawMessage(nil), content...),
+				Timestamp: m.Timestamp,
+			}
+		case *types.AssistantMessage:
+			blocks, err := types.DecodeAssistantContent(content)
+			if err != nil {
+				return msg
+			}
+			clone := *m
+			clone.Content = blocks
+			return &clone
+		case *types.ToolResultMessage:
+			if _, err := types.DecodeToolResultContent(content); err != nil {
+				return msg
+			}
+			clone := *m
+			clone.Content = append(json.RawMessage(nil), content...)
+			return &clone
+		default:
+			return msg
+		}
 	default:
 		return msg
 	}
@@ -431,9 +543,11 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 		if len(msgs) == 0 {
 			continue
 		}
-		if edit, ok := edits[e.ID]; ok && edit.Replacement != nil {
-			for i, m := range msgs {
-				msgs[i] = applyMessageReplacement(m, *edit.Replacement)
+		if edit, ok := edits[e.ID]; ok && !contextEditOmits(edit.Replacement) {
+			if content, ok := contextEditContent(edit.Replacement); ok {
+				for i, m := range msgs {
+					msgs[i] = applyMessageReplacement(m, content)
+				}
 			}
 		}
 

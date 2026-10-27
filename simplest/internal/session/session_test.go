@@ -950,7 +950,7 @@ func TestSession_ContextEdit_WithCompaction(t *testing.T) {
 		assert.Equal(t, "kept-user", keptText)
 	})
 
-	t.Run("edit targeting compaction summary entry", func(t *testing.T) {
+	t.Run("editing compaction entry is rejected", func(t *testing.T) {
 		t.Parallel()
 
 		mgr, _ := newTestManager(t)
@@ -964,34 +964,19 @@ func TestSession_ContextEdit_WithCompaction(t *testing.T) {
 		compID, err := sf.AppendCompaction("original summary", uKept, 500, nil, false)
 		require.NoError(t, err)
 
-		// Pin behavior: a replacement edit on the compaction entry replaces its
-		// projected summary text with the given plain text.
+		// Compaction entries do not contribute editable model content.
 		replaced := "edited summary"
 		_, err = sf.AppendContextEdit(compID, &replaced)
-		require.NoError(t, err)
+		require.Error(t, err)
+		_, err = sf.AppendContextEdit(compID, nil)
+		require.Error(t, err)
 
 		ctx, err := sf.BuildContext("")
 		require.NoError(t, err)
 		require.Len(t, ctx.Messages, 2)
 		sumText := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
-		assert.Equal(t, replaced, sumText)
-
-		// Omit edit on the compaction entry removes the summary from context.
-		sf2, err := mgr.Create(t.TempDir(), nil)
-		require.NoError(t, err)
-		_, err = sf2.AppendMessage(testUser("user-1"))
-		require.NoError(t, err)
-		uKept2, err := sf2.AppendMessage(testUser("user-2"))
-		require.NoError(t, err)
-		compID2, err := sf2.AppendCompaction("original summary 2", uKept2, 500, nil, false)
-		require.NoError(t, err)
-		_, err = sf2.AppendContextEdit(compID2, nil)
-		require.NoError(t, err)
-
-		ctx2, err := sf2.BuildContext("")
-		require.NoError(t, err)
-		require.Len(t, ctx2.Messages, 1)
-		assert.Equal(t, "user-2", types.StringContentOf(mustDecode(t, ctx2.Messages[0].(*types.UserMessage).Content)))
+		assert.Contains(t, sumText, "original summary")
+		assert.NotContains(t, sumText, replaced)
 	})
 }
 
@@ -1681,4 +1666,337 @@ func TestSession_RoundTripRunMetadata(t *testing.T) {
 	assert.Equal(t, "c1", trm.ToolCallID)
 	require.NotNil(t, trm.DurationMs, "tool-result durationMs must survive LoadFile")
 	assert.Equal(t, toolMs, *trm.DurationMs)
+}
+
+// writeSessionJSONL writes raw JSONL lines (header first) and returns the path.
+func writeSessionJSONL(t *testing.T, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+	return path
+}
+
+const editFormatHeader = `{"type":"session","version":3,"id":"sess-edit-formats","timestamp":"2026-10-27T00:00:00Z","cwd":"/proj"}`
+const editFormatUser = `{"type":"message","id":"msg-1","parentId":null,"timestamp":"2026-10-27T00:00:01Z","message":{"role":"user","content":"original"}}`
+const editFormatAssistant = `{"type":"message","id":"msg-2","parentId":"msg-1","timestamp":"2026-10-27T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"original reply"}]}}`
+
+// pi writes context_edit.replacement as {"content": ...}; legacy Go files used a
+// bare string, and null means omit. None of these may drop the entry on load.
+func TestSession_ContextEdit_LoadFormats(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		replacement  string
+		wantMessages int
+		wantText     string
+	}{
+		{
+			name:         "pi object with content blocks",
+			replacement:  `{"content":[{"type":"text","text":"edited reply"}]}`,
+			wantMessages: 2,
+			wantText:     "edited reply",
+		},
+		{
+			name:         "legacy bare string",
+			replacement:  `"legacy reply"`,
+			wantMessages: 2,
+			wantText:     "legacy reply",
+		},
+		{
+			name:         "null omits target",
+			replacement:  `null`,
+			wantMessages: 1,
+			wantText:     "original",
+		},
+		{
+			name:         "invalid object leaves target unchanged",
+			replacement:  `{"foo":"bar"}`,
+			wantMessages: 2,
+			wantText:     "original reply",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			editLine := `{"type":"context_edit","id":"edit-1","parentId":"msg-2",` +
+				`"timestamp":"2026-10-27T00:00:03Z","targetId":"msg-2","replacement":` + tt.replacement + `}`
+			path := writeSessionJSONL(t, editFormatHeader, editFormatUser, editFormatAssistant, editLine)
+
+			_, entries, err := LoadFile(path)
+			require.NoError(t, err)
+			require.Len(t, entries, 3, "context_edit entry must not be dropped on load")
+
+			ctx, err := BuildContext(entries, nil)
+			require.NoError(t, err)
+			require.Len(t, ctx.Messages, tt.wantMessages)
+			if tt.wantMessages == 2 {
+				am, ok := ctx.Messages[1].(*types.AssistantMessage)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantText, types.StringContentOf(am.Content))
+			} else {
+				u, ok := ctx.Messages[0].(*types.UserMessage)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantText, types.StringContentOf(mustDecode(t, u.Content)))
+			}
+		})
+	}
+}
+
+func TestSession_ContextEdit_AppendFormats(t *testing.T) {
+	t.Parallel()
+
+	t.Run("string wrapper stores upstream object shape", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		u1, err := sf.AppendMessage(testUser("original"))
+		require.NoError(t, err)
+		replacement := "wrapped text"
+		_, err = sf.AppendContextEdit(u1, &replacement)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(sf.Path())
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"replacement":{"content":"wrapped text"}`)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		require.Len(t, ctx.Messages, 1)
+		assert.Equal(t, replacement, types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content)))
+	})
+
+	t.Run("block array content", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		u1, err := sf.AppendMessage(testUser("original"))
+		require.NoError(t, err)
+		_, err = sf.AppendContextEditContent(u1, json.RawMessage(`[{"type":"text","text":"block text"}]`))
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(sf.Path())
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"replacement":{"content":[{"type":"text","text":"block text"}]}`)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		require.Len(t, ctx.Messages, 1)
+		assert.Equal(t, "block text", types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content)))
+	})
+
+	t.Run("full replacement object content", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		u1, err := sf.AppendMessage(testUser("original"))
+		require.NoError(t, err)
+		_, err = sf.AppendContextEditContent(u1, json.RawMessage(`{"content":"object text"}`))
+		require.NoError(t, err)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		require.Len(t, ctx.Messages, 1)
+		assert.Equal(t, "object text", types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content)))
+	})
+
+	t.Run("nil replacement omits", func(t *testing.T) {
+		t.Parallel()
+
+		mgr, _ := newTestManager(t)
+		sf, err := mgr.Create(t.TempDir(), nil)
+		require.NoError(t, err)
+
+		u1, err := sf.AppendMessage(testUser("original"))
+		require.NoError(t, err)
+		_, err = sf.AppendContextEdit(u1, nil)
+		require.NoError(t, err)
+
+		ctx, err := sf.BuildContext("")
+		require.NoError(t, err)
+		assert.Empty(t, ctx.Messages)
+
+		_, loaded, err := LoadFile(sf.Path())
+		require.NoError(t, err)
+		loadedCtx, err := BuildContext(loaded, nil)
+		require.NoError(t, err)
+		assert.Empty(t, loadedCtx.Messages)
+	})
+}
+
+func TestSession_AppendContextEdit_Validation(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	u1, err := sf.AppendMessage(testUser("base"))
+	require.NoError(t, err)
+	asst, err := sf.AppendMessage(testAssistant("reply"))
+	require.NoError(t, err)
+
+	text := "replacement"
+
+	// Missing target.
+	_, err = sf.AppendContextEdit("does-not-exist", &text)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Off-branch target: fork from u1 so asst is no longer on the active branch.
+	require.NoError(t, sf.Branch(u1))
+	branchB, err := sf.AppendMessage(testUser("branch B"))
+	require.NoError(t, err)
+	_, err = sf.AppendContextEdit(asst, &text)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "active branch")
+
+	// Non-editable roles on the active branch.
+	compID, err := sf.AppendCompaction("summary", branchB, 10, nil, false)
+	require.NoError(t, err)
+	_, err = sf.AppendContextEdit(compID, &text)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "editable")
+
+	customID, err := sf.AppendCustom("extension", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	_, err = sf.AppendContextEdit(customID, &text)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "editable")
+
+	// Invalid content shapes are rejected at append time.
+	for _, bad := range []json.RawMessage{
+		nil,
+		json.RawMessage(``),
+		json.RawMessage(`{`),
+		json.RawMessage(`123`),
+		json.RawMessage(`true`),
+		json.RawMessage(`{"foo":"bar"}`),
+		json.RawMessage(`{"content":{"text":"x"}}`),
+	} {
+		_, err = sf.AppendContextEditContent(u1, bad)
+		require.Error(t, err, "content %s must be rejected", string(bad))
+	}
+
+	// A valid editable target still works after the failures.
+	_, err = sf.AppendContextEditContent(u1, json.RawMessage(`"ok"`))
+	require.NoError(t, err)
+
+	// A custom_message target is editable.
+	cmID, err := sf.AppendCustomMessage("ext", types.TextOnly("custom"), true, nil)
+	require.NoError(t, err)
+	_, err = sf.AppendContextEditContent(cmID, json.RawMessage(`"edited custom"`))
+	require.NoError(t, err)
+}
+
+const usageFormatHeader = `{"type":"session","version":3,"id":"sess-usage","timestamp":"2026-10-27T00:00:00Z","cwd":"/proj"}`
+const usageFormatMessage = `{"type":"message","id":"msg-1","parentId":null,"timestamp":"2026-10-27T00:00:01Z","message":{"role":"user","content":"hello"}}`
+
+func TestSession_UsageEntry_UpstreamShape(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("hello"))
+	require.NoError(t, err)
+
+	usageData := &types.Usage{
+		Input:       120,
+		Output:      60,
+		CacheWrite:  25,
+		CacheRead:   15,
+		TotalTokens: 180,
+	}
+	usageID, err := sf.AppendUsageEntry("cache_warm", "anthropic", "claude-sonnet-4", usageData, "cache warm-up")
+	require.NoError(t, err)
+	require.NotEmpty(t, usageID)
+
+	data, err := os.ReadFile(sf.Path())
+	require.NoError(t, err)
+	var usageLine string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"type":"usage"`) {
+			usageLine = line
+		}
+	}
+	require.NotEmpty(t, usageLine, "usage entry not found in session file")
+	assert.NotContains(t, usageLine, "usageNote", "upstream uses note, not usageNote")
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(usageLine), &raw))
+	assert.Equal(t, "cache_warm", raw["kind"])
+	assert.Equal(t, "anthropic", raw["provider"])
+	assert.Equal(t, "claude-sonnet-4", raw["model"])
+	assert.Equal(t, "cache warm-up", raw["note"])
+	rawUsage, ok := raw["usage"].(map[string]any)
+	require.True(t, ok)
+	assert.EqualValues(t, 120, rawUsage["input"])
+	assert.EqualValues(t, 180, rawUsage["totalTokens"])
+
+	_, loadedEntries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	require.Len(t, loadedEntries, 2)
+	loaded := loadedEntries[1]
+	assert.Equal(t, TypeUsage, loaded.Type)
+	assert.Equal(t, "cache_warm", loaded.UsageKind)
+	assert.Equal(t, "anthropic", loaded.UsageProvider)
+	assert.Equal(t, "anthropic", loaded.Provider)
+	assert.Equal(t, "claude-sonnet-4", loaded.UsageModel)
+	assert.Equal(t, "cache warm-up", loaded.UsageNote)
+	require.NotNil(t, loaded.Usage)
+	assert.Equal(t, int64(120), loaded.Usage.Input)
+	assert.Equal(t, int64(180), loaded.Usage.TotalTokens)
+
+	ctx, err := BuildContext(loadedEntries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 1)
+	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
+}
+
+func TestSession_UsageEntry_PiShapeLoad(t *testing.T) {
+	t.Parallel()
+
+	usageLine := `{"type":"usage","id":"usage-1","parentId":"msg-1","timestamp":"2026-10-27T00:00:02Z",` +
+		`"kind":"cache_warm","provider":"openai","model":"gpt-5",` +
+		`"usage":{"input":10,"output":2,"cacheRead":1,"cacheWrite":0,"totalTokens":12},` +
+		`"note":"warm cache"}`
+	path := writeSessionJSONL(t, usageFormatHeader, usageFormatMessage, usageLine)
+
+	_, entries, err := LoadFile(path)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	usage := entries[1]
+	assert.Equal(t, TypeUsage, usage.Type)
+	assert.Equal(t, "cache_warm", usage.UsageKind)
+	assert.Equal(t, "openai", usage.UsageProvider)
+	assert.Equal(t, "openai", usage.Provider)
+	assert.Equal(t, "gpt-5", usage.UsageModel)
+	assert.Equal(t, "warm cache", usage.UsageNote)
+	require.NotNil(t, usage.Usage)
+	assert.Equal(t, int64(10), usage.Usage.Input)
+	assert.Equal(t, int64(2), usage.Usage.Output)
+	assert.Equal(t, int64(12), usage.Usage.TotalTokens)
+
+	msgs, err := SessionEntryToContextMessages(usage)
+	require.NoError(t, err)
+	assert.Nil(t, msgs, "usage entries do not contribute LLM messages")
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 1)
+	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
 }
