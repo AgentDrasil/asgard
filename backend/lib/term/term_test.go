@@ -80,7 +80,8 @@ func TestRunCommand_Top(t *testing.T) {
 	require.NoError(t, err)
 
 	select {
-	case <-done:
+	case runErr := <-done:
+		require.NoError(t, runErr)
 	case <-ctx.Done():
 		t.Fatal("timed out")
 	}
@@ -227,7 +228,8 @@ func TestConcurrentTermInstances(t *testing.T) {
 			require.NoError(t, err)
 
 			select {
-			case <-done:
+			case runErr := <-done:
+				require.NoError(t, runErr)
 			case <-ctx.Done():
 				t.Fatal("timed out")
 			}
@@ -243,7 +245,8 @@ func TestConcurrentTermInstances(t *testing.T) {
 
 			_ = tr.SendString("q")
 			select {
-			case <-done:
+			case exitErr := <-done:
+				_ = exitErr
 			case <-ctx.Done():
 			}
 		})

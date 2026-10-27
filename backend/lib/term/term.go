@@ -126,6 +126,7 @@ func (t *Term) readLoop(done chan<- error) {
 			break
 		}
 	}
+	defer close(done)
 	done <- t.cmd.Wait()
 }
 
