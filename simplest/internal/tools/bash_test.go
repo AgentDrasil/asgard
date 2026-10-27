@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBashToolEchoOutput(t *testing.T) {
@@ -226,4 +228,29 @@ func TestBashTool_SignalExitCode(t *testing.T) {
 			t.Errorf("%s: content %q should not contain 'code -1'", tc.cmd, text)
 		}
 	}
+}
+
+func TestAppendTruncationFooterLastLinePartialUsesLastLineSize(t *testing.T) {
+	t.Parallel()
+
+	const (
+		outputBytes   = 500
+		totalBytes    = 100_000
+		lastLineBytes = 3000
+	)
+	var (
+		lastLineSuffix = FormatSize(lastLineBytes)
+		totalSuffix    = FormatSize(totalBytes)
+	)
+	tr := &TruncationResult{
+		LastLinePartial: true,
+		OutputBytes:     outputBytes,
+		TotalBytes:      totalBytes,
+		TotalLines:      100,
+		OutputLines:     1,
+	}
+	got := appendTruncationFooter("output", tr, "/tmp/full.txt", lastLineBytes)
+
+	assert.Contains(t, got, "line is "+lastLineSuffix)
+	assert.NotContains(t, got, "line is "+totalSuffix)
 }

@@ -5,6 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestAccumulator(maxLines, maxBytes int) *outputAccumulator {
@@ -214,4 +217,56 @@ func TestOutputAccumulatorTrailingNewlineLineCount(t *testing.T) {
 		t.Errorf("TotalLines = %d, want 2 (open line)", tr.TotalLines)
 	}
 	acc.Close(false)
+}
+
+func TestOutputAccumulatorLastLineBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single line without newline", func(t *testing.T) {
+		t.Parallel()
+		acc := newTestAccumulator(0, 0)
+		defer acc.Close(false)
+		_, err := acc.Write([]byte("hello world"))
+		require.NoError(t, err)
+		assert.Equal(t, len("hello world"), acc.LastLineBytes())
+	})
+
+	t.Run("multi-line single write", func(t *testing.T) {
+		t.Parallel()
+		acc := newTestAccumulator(0, 0)
+		defer acc.Close(false)
+		_, err := acc.Write([]byte("first\nsecond\nthird"))
+		require.NoError(t, err)
+		assert.Equal(t, len("third"), acc.LastLineBytes())
+	})
+
+	t.Run("multiple writes accumulate the partial line", func(t *testing.T) {
+		t.Parallel()
+		acc := newTestAccumulator(0, 0)
+		defer acc.Close(false)
+		for _, p := range [][]byte{[]byte("ab"), []byte("cd\nef"), []byte("gh"), []byte("ij")} {
+			_, err := acc.Write(p)
+			require.NoError(t, err)
+		}
+		assert.Equal(t, len("efghij"), acc.LastLineBytes())
+	})
+
+	t.Run("trailing newline resets to zero", func(t *testing.T) {
+		t.Parallel()
+		acc := newTestAccumulator(0, 0)
+		defer acc.Close(false)
+		_, err := acc.Write([]byte("line\n"))
+		require.NoError(t, err)
+		assert.Equal(t, 0, acc.LastLineBytes())
+	})
+
+	t.Run("huge single line", func(t *testing.T) {
+		t.Parallel()
+		acc := newTestAccumulator(0, 0)
+		defer acc.Close(false)
+		line := strings.Repeat("x", 3*DefaultMaxBytes)
+		_, err := acc.Write([]byte(line))
+		require.NoError(t, err)
+		assert.Equal(t, len(line), acc.LastLineBytes())
+	})
 }

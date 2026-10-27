@@ -33,6 +33,10 @@ type outputAccumulator struct {
 	lastByte     byte
 	sawByte      bool
 
+	// currentLineBytes counts bytes written since the last newline, i.e.
+	// the byte size of the in-progress (last) line.
+	currentLineBytes int
+
 	chunks [][]byte // raw copies held only until the spill file starts
 
 	spillFile   *os.File
@@ -66,6 +70,14 @@ func (a *outputAccumulator) Write(p []byte) (int, error) {
 	a.newlineCount += bytes.Count(p, []byte{'\n'})
 	a.lastByte = p[n-1]
 	a.sawByte = true
+
+	// Track the size of the current (last) line: bytes since the last
+	// newline. The bytes are sanitized UTF-8, so byte length is correct.
+	if idx := bytes.LastIndexByte(p, '\n'); idx >= 0 {
+		a.currentLineBytes = n - idx - 1
+	} else {
+		a.currentLineBytes += n
+	}
 
 	// Keep raw chunks only until truncation is first detected.
 	if a.spillFile == nil && !a.spillFailed {
@@ -195,6 +207,14 @@ func (a *outputAccumulator) Snapshot() TruncationResult {
 		}
 	}
 	return tr
+}
+
+// LastLineBytes returns the byte size of the last (possibly partial) line
+// written so far. It is safe for concurrent use.
+func (a *outputAccumulator) LastLineBytes() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.currentLineBytes
 }
 
 // SpillPath returns the temp file holding the full output, or "" when no

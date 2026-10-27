@@ -180,12 +180,13 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	// produced before a timeout/abort/non-zero exit is still returned.
 	sw.Flush()
 	truncation := acc.Snapshot()
+	lastLineBytes := acc.LastLineBytes()
 	text := truncation.Content
 	details := &BashToolDetails{}
 	if truncation.Truncated {
 		details.Truncation = &truncation
 		details.FullOutputPath = acc.SpillPath()
-		text = appendTruncationFooter(text, &truncation, details.FullOutputPath)
+		text = appendTruncationFooter(text, &truncation, details.FullOutputPath, lastLineBytes)
 	}
 	acc.Close(truncation.Truncated)
 
@@ -247,13 +248,13 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	return result, nil
 }
 
-func appendTruncationFooter(text string, tr *TruncationResult, fullPath string) string {
+func appendTruncationFooter(text string, tr *TruncationResult, fullPath string, lastLineBytes int) string {
 	startLine := tr.TotalLines - tr.OutputLines + 1
 	endLine := tr.TotalLines
 	var footer string
 	if tr.LastLinePartial {
 		footer = fmt.Sprintf("[Showing last %s of line %d (line is %s). Full output: %s]",
-			FormatSize(tr.OutputBytes), endLine, FormatSize(tr.TotalBytes), fullPath)
+			FormatSize(tr.OutputBytes), endLine, FormatSize(lastLineBytes), fullPath)
 	} else if tr.TruncatedBy == "lines" {
 		footer = fmt.Sprintf("[Showing lines %d-%d of %d. Full output: %s]",
 			startLine, endLine, tr.TotalLines, fullPath)
