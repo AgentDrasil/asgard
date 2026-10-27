@@ -38,6 +38,10 @@ type Request struct {
 	// PrepareRequest runs immediately before each provider stream request (including the first),
 	// allowing dynamic adjustment of request parameters without polling queues.
 	// Returning nil means no change; returning a new *Request replaces the active configuration.
+	// A non-nil Messages on the returned Request replaces l.messages immediately, so it
+	// applies to this and every subsequent provider request until replaced again (an
+	// empty non-nil slice clears the transcript); nil Messages leaves it unchanged.
+	// l.newMsgs/agent_end.Messages are not affected.
 	PrepareRequest func(*Request) *Request
 
 	// Persist is called incrementally whenever a completed message (user steering/follow-up/compaction-summary,
@@ -57,10 +61,11 @@ type Request struct {
 	FinishTurn func(TurnSummary) *FinishTurnDecision
 
 	// PrepareNextTurn runs ONLY when the loop is confirmed to start another assistant turn.
-	// It does not run on final/terminating turns. Optional returned messages are appended.
-	// turnIndex is the 1-based index of the upcoming turn. Returned messages are
-	// appended to the transcript immediately — before this iteration's steering
-	// messages, which are drained at the top of the next loop iteration.
+	// It does not run on final/terminating turns. Optional returned messages are appended
+	// to the transcript and persisted immediately, but are emitted after the next
+	// turn_start and before that turn's steering messages. On terminal paths
+	// (cancellation or persist failure) they may be persisted without being emitted.
+	// turnIndex is the 0-based index of the upcoming turn.
 	PrepareNextTurn func(turnIndex int) ([]types.Message, error)
 
 	// Hooks.
@@ -183,6 +188,7 @@ type loop struct {
 	req         *Request
 	messages    []types.Message
 	newMsgs     []types.Message
+	prepared    []types.Message // prepared next-turn messages awaiting emission
 	toolsByName map[string]types.AgentTool
 	ch          chan types.AgentEvent
 	endSent     bool
@@ -316,6 +322,13 @@ outer:
 				}
 			}
 
+			// Prepared next-turn messages were appended/persisted by
+			// runPrepareNextTurn; emit them first, then this turn's steering.
+			for _, m := range l.prepared {
+				l.emitUserish(m)
+			}
+			l.prepared = nil
+
 			for _, m := range pending {
 				l.emitUserish(m)
 				l.messages = append(l.messages, m)
@@ -328,6 +341,11 @@ outer:
 			if l.req.PrepareRequest != nil {
 				if nextReq := l.req.PrepareRequest(l.req); nextReq != nil {
 					l.req = nextReq
+					if nextReq.Messages != nil {
+						// Non-nil Messages replaces the provider-facing transcript
+						// for this request; newMsgs is untouched.
+						l.messages = append([]types.Message{}, nextReq.Messages...)
+					}
 					l.toolsByName = toolIndex(nextReq.Tools)
 					injectModel(nextReq.Tools, nextReq.Model)
 				}
@@ -405,6 +423,12 @@ outer:
 				if !l.runPrepareNextTurn(turnIndex) {
 					return
 				}
+				// A slow hook can let the user queue steering. Only re-poll when
+				// the earlier drain returned nothing, preserving one-at-a-time
+				// steering delivery.
+				if len(pending) == 0 {
+					pending = l.drain(l.req.GetSteeringMessages)
+				}
 			}
 		}
 
@@ -413,6 +437,13 @@ outer:
 			pending = followUps
 			if !l.runPrepareNextTurn(turnIndex) {
 				return
+			}
+			// The inner loop only exits here when the earlier steering drain was
+			// empty, so re-poll once for steering queued during the hook and put
+			// it before follow-ups (prepared -> steering -> follow-up). One
+			// poll keeps one-at-a-time steering delivery.
+			if steering := l.drain(l.req.GetSteeringMessages); len(steering) > 0 {
+				pending = append(append([]types.Message{}, steering...), followUps...)
 			}
 			continue outer
 		}
@@ -461,12 +492,12 @@ func (l *loop) runPrepareNextTurn(turnIndex int) bool {
 		return false
 	}
 	for _, m := range extraMsgs {
-		l.emitUserish(m)
 		l.messages = append(l.messages, m)
 		if err := l.appendNewMsg(m); err != nil {
 			l.failPersist(err)
 			return false
 		}
+		l.prepared = append(l.prepared, m)
 	}
 	return true
 }

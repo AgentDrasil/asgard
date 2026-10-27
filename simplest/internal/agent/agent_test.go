@@ -2305,3 +2305,356 @@ func TestToolParametersPanicRecovered(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, types.StopStop, am.StopReason, "the turn must complete normally")
 }
+
+// --- steering / prepared-message timing (B7) ---
+
+func userTextOf(t *testing.T, m types.Message) string {
+	t.Helper()
+	u, ok := m.(*types.UserMessage)
+	require.True(t, ok, "expected user message, got %T", m)
+	return types.StringContentOf(mustDecodeUser(u.Content))
+}
+
+func userMessageIndex(t *testing.T, msgs []types.Message, text string) int {
+	t.Helper()
+	for i, m := range msgs {
+		if u, ok := m.(*types.UserMessage); ok && types.StringContentOf(mustDecodeUser(u.Content)) == text {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestAgent_PreparedMessagesEmittedAfterTurnStart(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("final"),
+	}}
+	req := baseRequest(fp, tool)
+
+	preparedMsg := &types.UserMessage{Content: types.TextOnly("prepared hint"), Timestamp: 42}
+	steerMsg := &types.UserMessage{Content: types.TextOnly("steering"), Timestamp: 43}
+
+	steeringCalls := 0
+	req.GetSteeringMessages = func() []types.Message {
+		steeringCalls++
+		if steeringCalls == 2 {
+			return []types.Message{steerMsg}
+		}
+		return nil
+	}
+	req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+		return []types.Message{preparedMsg}, nil
+	}
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		persisted = append(persisted, m)
+		return nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls)
+
+	// assistant, tool result, prepared, steering, final assistant. The prepared
+	// message is persisted when the hook runs, not again when it is emitted.
+	require.Len(t, persisted, 5)
+	preparedPersists := 0
+	for _, m := range persisted {
+		if m == preparedMsg {
+			preparedPersists++
+		}
+	}
+	assert.Equal(t, 1, preparedPersists, "prepared message must be persisted exactly once")
+
+	turnEnd := -1
+	for i, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEnd = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, turnEnd, 0)
+	require.GreaterOrEqual(t, len(evs), turnEnd+6)
+
+	assert.Equal(t, types.TurnStart, evs[turnEnd+1].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+2].Kind)
+	assert.Same(t, preparedMsg, evs[turnEnd+2].UserMsg, "prepared message must be emitted first")
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+3].Kind)
+	assert.Same(t, preparedMsg, evs[turnEnd+3].UserMsg)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+4].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+4].UserMsg, "steering follows prepared messages")
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+5].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+5].UserMsg)
+
+	// The earlier steering drain already returned a message, so the hook's
+	// post-run poll must be skipped (one-at-a-time), and the final drain runs
+	// after the second turn.
+	assert.Equal(t, 3, steeringCalls)
+
+	require.Len(t, fp.contexts, 2)
+	ctxMsgs := fp.contexts[1].Messages
+	preparedIdx := userMessageIndex(t, ctxMsgs, "prepared hint")
+	steerIdx := userMessageIndex(t, ctxMsgs, "steering")
+	require.NotEqual(t, -1, preparedIdx, "prepared message missing from next context")
+	require.NotEqual(t, -1, steerIdx, "steering message missing from next context")
+	assert.Less(t, preparedIdx, steerIdx, "prepared messages precede steering in the next request")
+}
+
+func TestAgent_SteeringQueuedDuringPrepareNextTurn(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("final"),
+	}}
+	req := baseRequest(fp, tool)
+
+	steerMsg := &types.UserMessage{Content: types.TextOnly("queued during hook"), Timestamp: 44}
+	queued := false
+	steeringCalls := 0
+	req.GetSteeringMessages = func() []types.Message {
+		steeringCalls++
+		if queued {
+			queued = false
+			return []types.Message{steerMsg}
+		}
+		return nil
+	}
+	req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+		queued = true
+		return nil, nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "steering queued during the hook must not wait an extra turn")
+
+	turnEnd := -1
+	for i, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEnd = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, turnEnd, 0)
+	require.GreaterOrEqual(t, len(evs), turnEnd+4)
+	assert.Equal(t, types.TurnStart, evs[turnEnd+1].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+2].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+2].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+3].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+3].UserMsg)
+
+	// initial, post-turn, post-hook, post-second-turn.
+	assert.Equal(t, 4, steeringCalls)
+
+	require.Len(t, fp.contexts, 2)
+	require.NotEqual(t, -1, userMessageIndex(t, fp.contexts[1].Messages, "queued during hook"),
+		"steering queued during PrepareNextTurn must be in the next request")
+}
+
+func TestAgent_PreparedMessagesAfterFollowUpTurnStart(t *testing.T) {
+	t.Parallel()
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		textMsg("one"),
+		textMsg("two"),
+	}}
+	req := baseRequest(fp)
+
+	preparedMsg := &types.UserMessage{Content: types.TextOnly("prepared hint"), Timestamp: 45}
+	followUpMsg := &types.UserMessage{Content: types.TextOnly("follow up"), Timestamp: 46}
+	followUpCalls := 0
+	req.GetFollowUpMessages = func() []types.Message {
+		followUpCalls++
+		if followUpCalls == 1 {
+			return []types.Message{followUpMsg}
+		}
+		return nil
+	}
+	req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+		return []types.Message{preparedMsg}, nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls)
+
+	turnEnd := -1
+	for i, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEnd = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, turnEnd, 0)
+	require.GreaterOrEqual(t, len(evs), turnEnd+6)
+	assert.Equal(t, types.TurnStart, evs[turnEnd+1].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+2].Kind)
+	assert.Same(t, preparedMsg, evs[turnEnd+2].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+3].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+4].Kind)
+	assert.Same(t, followUpMsg, evs[turnEnd+4].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+5].Kind)
+
+	require.Len(t, fp.contexts, 2)
+	ctxMsgs := fp.contexts[1].Messages
+	preparedIdx := userMessageIndex(t, ctxMsgs, "prepared hint")
+	followUpIdx := userMessageIndex(t, ctxMsgs, "follow up")
+	require.NotEqual(t, -1, preparedIdx)
+	require.NotEqual(t, -1, followUpIdx)
+	assert.Less(t, preparedIdx, followUpIdx)
+}
+
+// --- PrepareRequest context replacement (B8) ---
+
+func TestAgent_PrepareRequest_ReplacesMessages(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-nil replacement", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+		req := baseRequest(fp)
+		replacement := &types.UserMessage{Content: types.TextOnly("replacement transcript"), Timestamp: 9}
+
+		req.PrepareRequest = func(r *Request) *Request {
+			cloned := *r
+			cloned.Messages = []types.Message{replacement}
+			cloned.SystemPrompt = "replacement system"
+			return &cloned
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		require.Len(t, fp.contexts, 1)
+		require.Len(t, fp.contexts[0].Messages, 1)
+		assert.Equal(t, "replacement transcript", userTextOf(t, fp.contexts[0].Messages[0]))
+		assert.Equal(t, "replacement system", fp.contexts[0].SystemPrompt)
+
+		// agent_end only carries messages produced by this run.
+		require.Len(t, end.Messages, 1)
+		assert.Equal(t, types.RoleAssistant, end.Messages[0].MessageRole())
+		assert.Equal(t, "done", types.StringContentOf(end.Messages[0].(*types.AssistantMessage).Content))
+	})
+
+	t.Run("nil Messages leaves transcript unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+		req := baseRequest(fp)
+
+		req.PrepareRequest = func(r *Request) *Request {
+			cloned := *r
+			cloned.Messages = nil
+			return &cloned
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		require.Len(t, fp.contexts, 1)
+		require.Len(t, fp.contexts[0].Messages, 1)
+		assert.Equal(t, "go", userTextOf(t, fp.contexts[0].Messages[0]))
+	})
+
+	t.Run("empty non-nil clears transcript", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+		req := baseRequest(fp)
+
+		req.PrepareRequest = func(r *Request) *Request {
+			cloned := *r
+			cloned.Messages = []types.Message{}
+			return &cloned
+		}
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+		require.Len(t, fp.contexts, 1)
+		assert.Empty(t, fp.contexts[0].Messages)
+	})
+}
+
+// Steering queued during a slow PrepareNextTurn hook on the follow-up path must
+// be picked up before the follow-up and without an extra provider turn.
+func TestAgent_SteeringQueuedDuringFollowUpPrepareNextTurn(t *testing.T) {
+	t.Parallel()
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		textMsg("one"),
+		textMsg("two"),
+	}}
+	req := baseRequest(fp)
+
+	preparedMsg := &types.UserMessage{Content: types.TextOnly("prepared hint"), Timestamp: 47}
+	steerMsg := &types.UserMessage{Content: types.TextOnly("steering during hook"), Timestamp: 48}
+	followUpMsg := &types.UserMessage{Content: types.TextOnly("follow up"), Timestamp: 49}
+
+	queued := false
+	steeringCalls := 0
+	req.GetSteeringMessages = func() []types.Message {
+		steeringCalls++
+		if queued {
+			queued = false
+			return []types.Message{steerMsg}
+		}
+		return nil
+	}
+	followUpCalls := 0
+	req.GetFollowUpMessages = func() []types.Message {
+		followUpCalls++
+		if followUpCalls == 1 {
+			return []types.Message{followUpMsg}
+		}
+		return nil
+	}
+	req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+		queued = true
+		return []types.Message{preparedMsg}, nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls, "steering queued during the follow-up hook must not add a turn")
+
+	turnEnd := -1
+	for i, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEnd = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, turnEnd, 0)
+	require.GreaterOrEqual(t, len(evs), turnEnd+8)
+
+	// previous turn_end -> turn_start -> prepared -> steering -> follow-up.
+	assert.Equal(t, types.TurnStart, evs[turnEnd+1].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+2].Kind)
+	assert.Same(t, preparedMsg, evs[turnEnd+2].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+3].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+4].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+4].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+5].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+6].Kind)
+	assert.Same(t, followUpMsg, evs[turnEnd+6].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+7].Kind)
+
+	// initial drain, post-turn drain, post-hook re-poll, post-second-turn drain.
+	assert.Equal(t, 4, steeringCalls)
+
+	require.Len(t, fp.contexts, 2)
+	ctxMsgs := fp.contexts[1].Messages
+	preparedIdx := userMessageIndex(t, ctxMsgs, "prepared hint")
+	steerIdx := userMessageIndex(t, ctxMsgs, "steering during hook")
+	followUpIdx := userMessageIndex(t, ctxMsgs, "follow up")
+	require.NotEqual(t, -1, preparedIdx, "prepared message missing from next context")
+	require.NotEqual(t, -1, steerIdx, "steering message missing from next context")
+	require.NotEqual(t, -1, followUpIdx, "follow-up message missing from next context")
+	assert.Less(t, preparedIdx, steerIdx, "prepared precedes steering")
+	assert.Less(t, steerIdx, followUpIdx, "steering precedes follow-up")
+}
