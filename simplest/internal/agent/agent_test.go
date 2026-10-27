@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/simplest/internal/provider"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -3487,4 +3488,476 @@ func TestAutoCompactLegacyWithHook(t *testing.T) {
 	assert.Contains(t, types.StringContentOf(mustDecodeUser(l.messages[0].(*types.UserMessage).Content)), "legacy summary")
 	assert.Empty(t, l.newMsgs)
 	assert.Zero(t, persisted, "hook mode must not persist the summary")
+}
+
+// --- context overflow detection & compact-and-retry recovery (pi 73f8de80b) ---
+
+// overflowProvider returns a context-overflow StreamError on its first call
+// (and on every call when alwaysOverflow is set), then a normal DoneEvent.
+type overflowProvider struct {
+	mu             sync.Mutex
+	calls          int
+	contexts       []*types.Context
+	alwaysOverflow bool
+}
+
+func (p *overflowProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	p.mu.Lock()
+	i := p.calls
+	p.calls++
+	p.contexts = append(p.contexts, cx)
+	p.mu.Unlock()
+
+	ch := make(chan types.AssistantMessageEvent, 8)
+	go func() {
+		defer close(ch)
+		start := time.Now().UnixMilli()
+		if i == 0 || p.alwaysOverflow {
+			msg := &types.AssistantMessage{
+				Content:      []types.AssistantContent{},
+				StopReason:   types.StopError,
+				ErrorMessage: "prompt is too long: 200000 tokens > 100000 maximum",
+				Timestamp:    start,
+			}
+			ch <- types.Partial{Kind: types.EvStart, Partial: msg}
+			ch <- types.StreamErrorEvent{Kind: types.EvStreamError, Reason: types.StopError, Message: msg}
+			return
+		}
+		final := &types.AssistantMessage{
+			Content:    []types.AssistantContent{types.TextContent{Type: "text", Text: "ok:recovered"}},
+			StopReason: types.StopStop,
+			Timestamp:  start,
+		}
+		ch <- types.Partial{Kind: types.EvStart, Partial: &types.AssistantMessage{Timestamp: start}}
+		ch <- types.DoneEvent{Kind: types.EvDone, Reason: types.StopStop, Message: final}
+	}()
+	return ch
+}
+
+// overflowTranscript builds a transcript with a compactable prefix: two long
+// user messages plus the current user prompt. The forced retention cut keeps
+// u2 and the current message (keepRecent defaults to 20000 tokens; u2 alone
+// crosses it), so the retried stream still sees the current prompt.
+func overflowTranscript() []types.Message {
+	return []types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("a ", 25000)), Timestamp: 1}, // 50k chars
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("b ", 45000)), Timestamp: 2}, // 90k chars
+		&types.UserMessage{Content: types.TextOnly("answer me"), Timestamp: 3},
+	}
+}
+
+func currentUserMsg() *types.UserMessage {
+	return &types.UserMessage{Content: types.TextOnly("answer me"), Timestamp: 3}
+}
+
+func overflowRequest(p types.Provider, summarize func(ctx context.Context, msgs []types.Message) (string, error)) Request {
+	req := Request{
+		Messages: overflowTranscript(),
+		Model:    &types.Model{ID: "m", API: types.APIOpenAICompat, Provider: "p", ContextWindow: 100000},
+		Provider: p,
+	}
+	if summarize != nil {
+		req.AutoCompact = &AutoCompactConfig{ThresholdFrac: 0.8, Summarize: summarize}
+	}
+	return req
+}
+
+func assertEventsBalanced(t *testing.T, evs []types.AgentEvent) {
+	t.Helper()
+	starts, ends, turnStarts, turnEnds := 0, 0, 0, 0
+	for _, ev := range evs {
+		switch ev.Kind {
+		case types.MessageStart:
+			starts++
+		case types.MessageEnd:
+			ends++
+		case types.TurnStart:
+			turnStarts++
+		case types.TurnEnd:
+			turnEnds++
+		}
+	}
+	assert.Equal(t, starts, ends, "message_start/message_end must be balanced")
+	assert.Equal(t, turnStarts, turnEnds, "turn_start/turn_end must be balanced")
+}
+
+func TestContextOverflowCompactsAndRetriesOnce(t *testing.T) {
+	p := &overflowProvider{}
+	var (
+		mu         sync.Mutex
+		persisted  []types.Message
+		summarizes int
+	)
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		mu.Lock()
+		summarizes++
+		mu.Unlock()
+		return "compact summary", nil
+	})
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		persisted = append(persisted, m)
+		mu.Unlock()
+		return nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+
+	// Exactly one compaction and two provider calls (failed stream + retry).
+	assert.Equal(t, 1, summarizes, "exactly one forced compaction")
+	assert.Equal(t, 2, p.calls, "overflow stream plus one retry")
+
+	// The run completes normally with the retried assistant message.
+	require.NotEmpty(t, end.Messages)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.NotNil(t, final)
+	assert.Equal(t, types.StopStop, final.StopReason)
+	assert.Equal(t, "ok:recovered", assistantText(final))
+
+	// Persisted messages: only the compaction summary and the final assistant.
+	mu.Lock()
+	require.Len(t, persisted, 2, "only summary and final assistant are persisted: %+v", persisted)
+	mu.Unlock()
+	_, isUser := persisted[0].(*types.UserMessage)
+	assert.True(t, isUser, "first persisted message is the compaction summary")
+	summaryBlocks, _ := types.DecodeUserContent(persisted[0].(*types.UserMessage).Content)
+	assert.Contains(t, types.StringContentOf(summaryBlocks), "compact summary")
+	fa, isAssistant := persisted[1].(*types.AssistantMessage)
+	require.True(t, isAssistant)
+	assert.Equal(t, types.StopStop, fa.StopReason)
+
+	// The retried request sees the summary followed by the kept suffix ending
+	// in the current user message — the failed assistant message is gone and
+	// the current prompt survived the forced compaction.
+	require.Len(t, p.contexts, 2)
+	require.Len(t, p.contexts[1].Messages, 3)
+	_, isSummaryUser := p.contexts[1].Messages[0].(*types.UserMessage)
+	assert.True(t, isSummaryUser, "retry context should start with the summary")
+	retryText := ""
+	for _, m := range p.contexts[1].Messages[1:] {
+		u := m.(*types.UserMessage)
+		blocks, _ := types.DecodeUserContent(u.Content)
+		retryText += types.StringContentOf(blocks) + "|"
+	}
+	assert.Contains(t, retryText, "b", "kept suffix retained")
+	assert.Contains(t, retryText, "answer me", "the current user message must survive forced compaction")
+
+	assertEventsBalanced(t, evs)
+	assert.Equal(t, 2, len(end.Messages), "agent_end carries summary + final assistant")
+}
+
+func TestContextOverflowWithoutAutoCompactIsTerminal(t *testing.T) {
+	p := &overflowProvider{}
+	evs, end := collect(t, Run(context.Background(), overflowRequest(p, nil)))
+	require.NotNil(t, end)
+	require.NotEmpty(t, end.Messages)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.NotNil(t, final)
+	assert.Equal(t, types.StopError, final.StopReason)
+	assert.Contains(t, final.ErrorMessage, "prompt is too long")
+	assert.Equal(t, 1, p.calls, "no retry without AutoCompact")
+	assertEventsBalanced(t, evs)
+}
+
+func TestContextOverflowTwiceCompactsOnceThenTerminal(t *testing.T) {
+	p := &overflowProvider{alwaysOverflow: true}
+	var (
+		mu         sync.Mutex
+		persisted  []types.Message
+		summarizes int
+	)
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		mu.Lock()
+		summarizes++
+		mu.Unlock()
+		return "compact summary", nil
+	})
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		persisted = append(persisted, m)
+		mu.Unlock()
+		return nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+
+	assert.Equal(t, 1, summarizes, "only one compact-and-retry attempt per run")
+	assert.Equal(t, 2, p.calls, "failed stream plus one retry only")
+
+	require.NotEmpty(t, end.Messages)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.NotNil(t, final)
+	assert.Equal(t, types.StopError, final.StopReason)
+	assert.Contains(t, final.ErrorMessage, "prompt is too long")
+
+	// The first (dropped) overflow message is not persisted; the retried one
+	// follows the normal terminal path and is.
+	mu.Lock()
+	require.Len(t, persisted, 2, "summary plus retried failed assistant: %+v", persisted)
+	mu.Unlock()
+	fa, ok := persisted[1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopError, fa.StopReason)
+
+	assertEventsBalanced(t, evs)
+}
+
+func TestContextOverflowRecoveryFailsWhenSummarizeErrors(t *testing.T) {
+	p := &overflowProvider{}
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		return "", errors.New("summarizer down")
+	})
+	var mu sync.Mutex
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		persisted = append(persisted, m)
+		mu.Unlock()
+		return nil
+	}
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	require.NotEmpty(t, end.Messages)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.NotNil(t, final)
+	assert.Equal(t, types.StopError, final.StopReason)
+	assert.Contains(t, final.ErrorMessage, "context overflow recovery")
+	assert.Contains(t, final.ErrorMessage, "summarizer down")
+	assert.Equal(t, 1, p.calls, "no retry when force compaction fails")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, persisted, "the failed assistant message must not be persisted")
+	assertEventsBalanced(t, evs)
+}
+
+// assistantText extracts the concatenated text blocks of an assistant message.
+func assistantText(m *types.AssistantMessage) string {
+	out := ""
+	for _, blk := range m.Content {
+		if tc, ok := blk.(types.TextContent); ok {
+			out += tc.Text
+		}
+	}
+	return out
+}
+
+// Regression (B31 review): with the legacy compaction config
+// (ReserveTokens <= 0) the forced recovery must still keep a recent suffix —
+// the retried stream must contain the summary AND the current user message,
+// never a summary-only transcript.
+func TestContextOverflowLegacyConfigKeepsCurrentMessage(t *testing.T) {
+	p := &overflowProvider{}
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		return "compact summary", nil
+	})
+	require.NotNil(t, req.AutoCompact)
+	assert.EqualValues(t, 0, req.AutoCompact.ReserveTokens, "test targets the legacy config")
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, types.StopStop, end.Messages[len(end.Messages)-1].(*types.AssistantMessage).StopReason)
+
+	require.Len(t, p.contexts, 2)
+	retry := p.contexts[1].Messages
+	require.GreaterOrEqual(t, len(retry), 2)
+	blocks, _ := types.DecodeUserContent(retry[0].(*types.UserMessage).Content)
+	assert.Contains(t, types.StringContentOf(blocks), "compact summary", "summary first")
+	texts := make([]string, 0, len(retry)-1)
+	for _, m := range retry[1:] {
+		u := m.(*types.UserMessage)
+		b, _ := types.DecodeUserContent(u.Content)
+		texts = append(texts, types.StringContentOf(b))
+	}
+	assert.Contains(t, strings.Join(texts, "|"), "answer me",
+		"the current user message was passed to the retried stream")
+}
+
+// A forced recovery with nothing safely compactable must terminate with a
+// clear error and must not persist the failed assistant message.
+func TestContextOverflowNothingCompactableFailsCleanly(t *testing.T) {
+	p := &overflowProvider{}
+	req := Request{
+		Messages: []types.Message{currentUserMsg()},
+		Model:    &types.Model{ID: "m", API: types.APIOpenAICompat, Provider: "p", ContextWindow: 100000},
+		Provider: p,
+		AutoCompact: &AutoCompactConfig{ThresholdFrac: 0.8, Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			t.Error("summarize must not be called when nothing is safely compactable")
+			return "unused", nil
+		}},
+	}
+	var mu sync.Mutex
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		persisted = append(persisted, m)
+		mu.Unlock()
+		return nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	assert.Equal(t, types.StopError, final.StopReason)
+	assert.Contains(t, final.ErrorMessage, "nothing safely compactable")
+	assert.Equal(t, 1, p.calls, "no retry when nothing is compactable")
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, persisted, "the failed assistant message must not be persisted")
+	assertEventsBalanced(t, evs)
+}
+
+// Cancellation during forced compaction wins over any compaction error and
+// ends the run aborted — no retry stream is issued.
+func TestContextOverflowCancelDuringCompaction(t *testing.T) {
+	p := &overflowProvider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		cancel()
+		return "compact summary", nil
+	})
+	evs, end := collect(t, Run(ctx, req))
+	require.NotNil(t, end)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	assert.Equal(t, types.StopAborted, final.StopReason, "cancellation during forced compaction must abort, not report a compaction error")
+	assert.NotContains(t, final.ErrorMessage, "compaction:")
+	assert.Equal(t, 1, p.calls, "no retry stream after cancellation")
+	assertEventsBalanced(t, evs)
+}
+
+// A no-body HTTP 413 reaches the agent boundary as the HTTPStatusError
+// sentinel text; recovery must still compact and retry (pi 73f8de80b).
+func TestContextOverflowHTTP413NoBodyRecovers(t *testing.T) {
+	p := &http413Provider{}
+	var mu sync.Mutex
+	summarizes := 0
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		mu.Lock()
+		summarizes++
+		mu.Unlock()
+		return "compact summary", nil
+	})
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	final := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	assert.Equal(t, types.StopStop, final.StopReason)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, summarizes, "forced compaction ran")
+	assert.Equal(t, 2, p.calls, "overflow stream plus one retry")
+	assertEventsBalanced(t, evs)
+}
+
+// http413Provider returns the empty-body HTTP 413 sentinel error text first,
+// then a normal response.
+type http413Provider struct {
+	mu          sync.Mutex
+	calls       int
+	contexts413 []*types.Context
+}
+
+func (p *http413Provider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	p.mu.Lock()
+	i := p.calls
+	p.calls++
+	p.contexts413 = append(p.contexts413, cx)
+	p.mu.Unlock()
+	ch := make(chan types.AssistantMessageEvent, 8)
+	go func() {
+		defer close(ch)
+		start := time.Now().UnixMilli()
+		if i == 0 {
+			msg := &types.AssistantMessage{
+				Content:      []types.AssistantContent{},
+				StopReason:   types.StopError,
+				ErrorMessage: (&provider.HTTPStatusError{StatusCode: 413}).Error(),
+				Timestamp:    start,
+			}
+			ch <- types.Partial{Kind: types.EvStart, Partial: msg}
+			ch <- types.StreamErrorEvent{Kind: types.EvStreamError, Reason: types.StopError, Message: msg}
+			return
+		}
+		final := &types.AssistantMessage{
+			Content:    []types.AssistantContent{types.TextContent{Type: "text", Text: "ok:413-recovered"}},
+			StopReason: types.StopStop,
+			Timestamp:  start,
+		}
+		ch <- types.Partial{Kind: types.EvStart, Partial: &types.AssistantMessage{Timestamp: start}}
+		ch <- types.DoneEvent{Kind: types.EvDone, Reason: types.StopStop, Message: final}
+	}()
+	return ch
+}
+
+// OnCompacted fires during forced recovery and owns summary persistence.
+func TestContextOverflowForcedCompactionOnCompacted(t *testing.T) {
+	p := &overflowProvider{}
+	var (
+		mu         sync.Mutex
+		persisted  []types.Message
+		infos      []CompactionInfo
+		summarizes int
+	)
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		mu.Lock()
+		summarizes++
+		mu.Unlock()
+		return "hook summary", nil
+	})
+	req.AutoCompact.OnCompacted = func(info CompactionInfo) error {
+		mu.Lock()
+		infos = append(infos, info)
+		mu.Unlock()
+		return nil
+	}
+	req.Persist = func(m types.Message) error {
+		mu.Lock()
+		persisted = append(persisted, m)
+		mu.Unlock()
+		return nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, types.StopStop, end.Messages[len(end.Messages)-1].(*types.AssistantMessage).StopReason)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, infos, 1, "OnCompacted ran during forced recovery")
+	assert.Equal(t, "hook summary", infos[0].Summary)
+	for _, m := range persisted {
+		_, isUser := m.(*types.UserMessage)
+		assert.False(t, isUser, "OnCompacted owns summary persistence; Persist must not see it")
+	}
+	assert.Equal(t, 2, p.calls)
+}
+
+// PrepareRequest is re-applied after forced compaction, so the retried
+// stream reflects the hook's replacement (here: a system-level transcript
+// swap that prepends a marker user message).
+func TestContextOverflowReappliesPrepareRequestOnRetry(t *testing.T) {
+	p := &overflowProvider{}
+	var prepareCalls int
+	req := overflowRequest(p, func(ctx context.Context, msgs []types.Message) (string, error) {
+		return "compact summary", nil
+	})
+	req.PrepareRequest = func(r *Request) *Request {
+		prepareCalls++
+		replaced := append([]types.Message{currentUserMsg()}, r.Messages...)
+		next := *r
+		next.Messages = replaced
+		return &next
+	}
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, types.StopStop, end.Messages[len(end.Messages)-1].(*types.AssistantMessage).StopReason)
+	assert.GreaterOrEqual(t, prepareCalls, 2, "PrepareRequest ran for the original stream and the retry")
+
+	require.Len(t, p.contexts, 2)
+	retry := p.contexts[1].Messages
+	require.NotEmpty(t, retry)
+	first := retry[0].(*types.UserMessage)
+	blocks, _ := types.DecodeUserContent(first.Content)
+	assert.Contains(t, types.StringContentOf(blocks), "answer me",
+		"retried context reflects the hook's replacement")
 }

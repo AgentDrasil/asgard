@@ -102,6 +102,10 @@ var (
 	NewGemini       = provider.NewGemini
 	NewOpenAICompat = provider.NewOpenAICompat
 	CalculateCost   = provider.CalculateCost
+
+	// Context-overflow detection (pi 73f8de80b).
+	IsContextOverflowError   = provider.IsContextOverflowError
+	IsContextOverflowMessage = provider.IsContextOverflowMessage
 )
 
 // ---- tools ----

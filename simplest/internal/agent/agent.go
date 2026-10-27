@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AgentDrasil/asgard/simplest/internal/provider"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -251,6 +252,9 @@ type loop struct {
 	ch          chan types.AgentEvent
 	endSent     bool
 	turnOpen    bool // a turn_start is currently unmatched by a turn_end
+	// overflowRetried marks the one bounded compact-and-retry attempt for
+	// context overflow (pi 73f8de80b): at most one per run.
+	overflowRetried bool
 }
 
 // appendNewMsg records a message for persistence. Callers must only invoke
@@ -450,18 +454,7 @@ outer:
 				}
 			}
 
-			if l.req.PrepareRequest != nil {
-				if nextReq := l.req.PrepareRequest(l.req); nextReq != nil {
-					l.req = nextReq
-					if nextReq.Messages != nil {
-						// Non-nil Messages replaces the provider-facing transcript
-						// for this request; newMsgs is untouched.
-						l.messages = append([]types.Message{}, nextReq.Messages...)
-					}
-					l.toolsByName = toolIndex(nextReq.Tools)
-					injectModel(nextReq.Tools, nextReq.Model)
-				}
-			}
+			l.applyPrepareRequest()
 
 			msg := l.streamAssistant()
 			if msg == nil {
@@ -470,6 +463,45 @@ outer:
 				}
 				return
 			}
+
+			// Context-overflow recovery (pi 73f8de80b): with auto-compaction
+			// enabled, one compact-and-retry attempt is made per run. The
+			// failed assistant message is dropped before compaction so it is
+			// neither summarized nor persisted; a second overflow falls
+			// through to the normal terminal StopError path below.
+			if ac := l.req.AutoCompact; ac != nil && ac.Summarize != nil && !l.overflowRetried &&
+				provider.IsContextOverflowMessage(msg, l.req.Model.ContextWindow) {
+				l.overflowRetried = true
+				l.dropTrailingMessage(msg)
+				compactionErr := l.forceCompact()
+				// Like the normal compaction path, cancellation during forced
+				// compaction wins over any compaction error and ends the run
+				// as aborted (no retry stream is issued).
+				if l.ctx.Err() != nil {
+					l.failAborted(l.abortReason())
+					return
+				}
+				if compactionErr != nil {
+					var persistErr *compactPersistError
+					if errors.As(compactionErr, &persistErr) {
+						l.failPersist(persistErr.err)
+					} else {
+						l.failCompact(fmt.Errorf("context overflow recovery: %w", compactionErr))
+					}
+					return
+				}
+				// Re-apply PrepareRequest for the retried stream; steering and
+				// prepared messages are not re-emitted and no new turn opens.
+				l.applyPrepareRequest()
+				msg = l.streamAssistant()
+				if msg == nil {
+					if l.ctx.Err() != nil {
+						l.failAborted(l.abortReason())
+					}
+					return
+				}
+			}
+
 			if err := l.appendNewMsg(msg); err != nil {
 				l.failPersist(err)
 				return
@@ -729,6 +761,41 @@ func snapshotEvent(e types.Partial) (*types.AssistantMessage, *types.AssistantMe
 	}
 	var ev types.AssistantMessageEvent = e
 	return msg, &ev
+}
+
+// applyPrepareRequest runs the caller's PrepareRequest hook immediately
+// before a provider stream request (including the first). Factored from the
+// main loop so the context-overflow compact-and-retry can re-apply it after
+// compaction (pi 73f8de80b).
+func (l *loop) applyPrepareRequest() {
+	if l.req.PrepareRequest != nil {
+		if nextReq := l.req.PrepareRequest(l.req); nextReq != nil {
+			l.req = nextReq
+			if nextReq.Messages != nil {
+				// Non-nil Messages replaces the provider-facing transcript
+				// for this request; newMsgs is untouched.
+				l.messages = append([]types.Message{}, nextReq.Messages...)
+			}
+			l.toolsByName = toolIndex(nextReq.Tools)
+			injectModel(nextReq.Tools, nextReq.Model)
+		}
+	}
+}
+
+// dropTrailingMessage removes m from the end of the active transcript. Used
+// by overflow recovery so the failed streamed assistant message is neither
+// summarized nor persisted (pi 73f8de80b).
+func (l *loop) dropTrailingMessage(m *types.AssistantMessage) {
+	if n := len(l.messages); n > 0 && l.messages[n-1] == types.Message(m) {
+		l.messages = l.messages[:n-1]
+	}
+}
+
+// forceCompact compacts the transcript regardless of the configured
+// threshold, propagating summarize/empty-summary/nothing-compactable
+// failures as errors. Used only by context-overflow recovery.
+func (l *loop) forceCompact() error {
+	return l.maybeCompactForce(true)
 }
 
 // streamAssistant runs one provider stream, forwarding protocol events as
@@ -1240,13 +1307,32 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 // next turn retries); persistence failures and OnCompacted errors terminate the
 // run with distinct error labels.
 func (l *loop) maybeCompact() error {
+	return l.maybeCompactForce(false)
+}
+
+// maybeCompactForce is maybeCompact with a force flag: when force is true
+// (context-overflow recovery, pi 73f8de80b) the threshold check is skipped
+// and summarize/empty-summary failures become errors instead of being
+// silently ignored. Forced recovery always uses the retention cut so the
+// current user message survives compaction (the legacy summary-only
+// replacement would leave the retried stream with nothing but the summary).
+func (l *loop) maybeCompactForce(force bool) error {
 	cfg := l.req.AutoCompact
-	if cfg == nil || cfg.Summarize == nil || l.req.Model.ContextWindow <= 0 {
+	if cfg == nil || cfg.Summarize == nil {
+		if force {
+			return errors.New("cannot compact without an AutoCompact Summarize hook")
+		}
+		return nil
+	}
+	if l.req.Model.ContextWindow <= 0 {
+		if force {
+			return errors.New("cannot compact without a context window")
+		}
 		return nil
 	}
 	reserve, keep, retention := compactSettings(cfg)
-	if retention {
-		return l.compactWithRetention(cfg, reserve, keep)
+	if force || retention {
+		return l.compactWithRetention(cfg, force, reserve, keep)
 	}
 	return l.compactLegacy(cfg)
 }
@@ -1272,7 +1358,8 @@ func compactSettings(cfg *AutoCompactConfig) (reserve, keep int64, retention boo
 
 // compactLegacy preserves the pre-retention behavior: chars/4 over the whole
 // transcript, ThresholdFrac trigger, and a summary-only replacement persisted
-// as a normal message (unless OnCompacted owns persistence).
+// as a normal message (unless OnCompacted owns persistence). Never used on
+// the forced overflow-recovery path (see maybeCompactForce).
 func (l *loop) compactLegacy(cfg *AutoCompactConfig) error {
 	total := 0
 	for _, m := range l.messages {
@@ -1314,24 +1401,37 @@ func (l *loop) compactLegacy(cfg *AutoCompactConfig) error {
 }
 
 // compactWithRetention triggers on window-reserve, keeps a recent suffix at a
-// user boundary, and summarizes a thinking-free prefix.
-func (l *loop) compactWithRetention(cfg *AutoCompactConfig, reserve, keep int64) error {
+// user boundary, and summarizes a thinking-free prefix. With force, the
+// threshold check is skipped and failures return errors (overflow recovery).
+func (l *loop) compactWithRetention(cfg *AutoCompactConfig, force bool, reserve, keep int64) error {
 	threshold := l.req.Model.ContextWindow - reserve
 	if threshold < 1 {
 		threshold = 1
 	}
 	estimated, usage := estimateContextTokens(l.messages)
-	if estimated <= threshold {
+	if !force && estimated <= threshold {
 		return nil
 	}
 	cut := compactionCut(l.messages, keep)
 	if cut <= 0 {
 		// Nothing safely summarizable without dropping the entire transcript.
+		if force {
+			return errors.New("nothing safely compactable in the transcript")
+		}
 		return nil
 	}
 	summaryInput := messagesWithoutThinking(l.messages[:cut])
 	summary, err := cfg.Summarize(l.ctx, summaryInput)
-	if err != nil || strings.TrimSpace(summary) == "" {
+	if err != nil {
+		if force {
+			return fmt.Errorf("summarize failed: %w", err)
+		}
+		return nil
+	}
+	if strings.TrimSpace(summary) == "" {
+		if force {
+			return errors.New("summarize produced an empty summary")
+		}
 		return nil
 	}
 	kept := append([]types.Message{}, l.messages[cut:]...)
