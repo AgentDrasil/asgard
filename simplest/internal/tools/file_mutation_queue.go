@@ -9,10 +9,12 @@ import (
 // Port of pi 74a46fc7e: serialize mutations to the same path while allowing
 // different paths in parallel.
 //
-// write/write_doc do not declare ExecutionSequential, so a parallel write can
-// race an edit's read-modify-write on the same file. Every low-level mutator
-// wraps its critical section in acquireFileMutation; doc tools are covered
-// automatically because they delegate to write/edit.
+// All low-level mutators (write/write_doc/edit/edit_doc) wrap their critical
+// section in acquireFileMutation, so same-path mutations serialize and
+// different paths run in parallel. edit/edit_doc do not declare
+// ExecutionSequential either: they rely on this queue and may join parallel
+// tool batches. Doc tools are covered automatically because they delegate to
+// write/edit.
 //
 // The queue key is the symlink-resolved absolute path when the target exists,
 // or the plain absolute path otherwise. This means concurrent creates of a

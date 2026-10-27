@@ -18,6 +18,14 @@ func editArgsJSON(path string, edits [][2]string) string {
 	return fmt.Sprintf(`{"path":%q,"edits":[%s]}`, path, strings.Join(parts, ","))
 }
 
+// edit relies on the per-path file mutation queue (file_mutation_queue.go)
+// for same-path safety and must not force the whole batch sequential.
+func TestEditToolExecutionModeInheritsRunDefault(t *testing.T) {
+	if got := NewEditTool(t.TempDir()).ExecutionMode(); got != "" {
+		t.Errorf("ExecutionMode() = %q, want \"\" (inherit run default)", got)
+	}
+}
+
 func TestEditToolUniqueReplacement(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "f.txt", "hello world\n")

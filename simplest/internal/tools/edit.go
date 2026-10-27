@@ -66,7 +66,10 @@ func (t *EditTool) PromptGuidelines() []string {
 	}
 }
 func (t *EditTool) ExecutionMode() types.ToolExecutionMode {
-	return types.ExecutionSequential
+	// Inherit the run default so edit can join parallel tool batches. Same-path
+	// safety is guaranteed by the per-path file mutation queue, not by batch
+	// sequencing.
+	return ""
 }
 
 func (t *EditTool) Description() string {

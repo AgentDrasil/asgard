@@ -77,6 +77,14 @@ func TestEditDocToolSymlinkPiercingBlocked(t *testing.T) {
 	}
 }
 
+// edit_doc relies on the per-path file mutation queue (file_mutation_queue.go)
+// for same-path safety and must not force the whole batch sequential.
+func TestEditDocToolExecutionModeInheritsRunDefault(t *testing.T) {
+	if got := NewEditDocTool(t.TempDir(), DocToolOptions{}).ExecutionMode(); got != "" {
+		t.Errorf("ExecutionMode() = %q, want \"\" (inherit run default)", got)
+	}
+}
+
 func TestEditDocToolIdentity(t *testing.T) {
 	tool := NewEditDocTool(t.TempDir(), DocToolOptions{})
 	if tool.Name() != "edit_doc" {
