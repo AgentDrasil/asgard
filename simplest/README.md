@@ -56,7 +56,7 @@ func main() {
 		Provider:      "gemini",
 		BaseURL:       "", // "" = official endpoint; must include version path if custom
 		ContextWindow: 1_000_000,
-		MaxTokens:     8192,
+		MaxTokens:     8192, // metadata; set Request.MaxTokens to send a cap
 		Input:         []string{"text", "image"},
 		Cost:          s.ModelCostRates{Input: 0.3, Output: 2.5},
 	}
@@ -171,6 +171,12 @@ Both providers parse SSE streams into the same protocol: `start`, block
 deltas (`text_*`, `thinking_*`, `toolcall_*`), then `done` or `error`.
 Usage and cost accounting is filled automatically from the model's rates.
 
+`Model.MaxTokens` is model metadata. To cap a run's output, set
+`Request.MaxTokens`; an explicit cap is clamped to the remaining context
+window (`ContextWindow - estimated context - 4096`, minimum 1), so a nearly
+full transcript cannot ask for more output than fits. `simplest` deliberately
+does not send `Model.MaxTokens` as an implicit cap.
+
 ## 3. Tools
 
 ### Built-ins
@@ -182,6 +188,17 @@ names := reg.Names()                   // ["read","bash","edit","write","find","
 
 Fuzzy edit matching, 2000-line/50KB truncation,
 gitignore-aware find/grep, unified diff rendering.
+
+`read` detects images by content (PNG, JPEG, GIF, WebP, BMP) instead of by
+file extension, and falls back to text when the bytes are not a supported
+image (including APNG and invalid BMP). `bash` exposes `PI_SESSION_ID`,
+`PI_SESSION_FILE`, `PI_PROVIDER`, `PI_MODEL`, and `PI_REASONING_LEVEL` to
+commands, sourced from `Request.SessionID`/`SessionFile` and the active
+model/thinking level; stale inherited `PI_*` values are removed.
+
+`edit` and `edit_doc` participate in parallel tool batches. The per-path
+mutation queue serializes concurrent mutations of the same path, including
+`write` and `write_doc`.
 
 ### Registering your own tool (Go func)
 
@@ -276,6 +293,9 @@ Files are flushed lazily on the first assistant message; call
 contextFiles := prompt.LoadProjectContextFiles(cwd, "~/.simplest")
 // collects AGENTS.override.md > AGENTS.md > AGENTS.MD > CLAUDE.md > CLAUDE.MD
 // from ~/.simplest first, then walking cwd up to root (root-most first)
+// In a linked worktree nested inside its main repo, the main repo's same-named
+// file is shadowed by the worktree's own file, even when that file is a symlink
+// to the main repo copy, so instructions are not applied twice.
 
 sysPrompt := prompt.BuildSystemPrompt(prompt.Options{
 	CWD:                cwd,
@@ -358,8 +378,11 @@ events := agent.Run(ctx, agent.Request{
 })
 ```
 
-In usage-based mode the last assistant usage plus a chars/4 estimate of the
-messages after it drives the trigger; the kept suffix is retained verbatim and
+In usage-based mode the last valid assistant usage (preferring the provider's
+`totalTokens` and skipping aborted/error turns) plus per-message chars/4
+estimates of the messages after it drives the trigger; images count as 4800
+chars and tool calls include their name and JSON arguments. The kept suffix is
+retained verbatim and
 the summarized prefix drops thinking blocks. With `OnCompacted` nil the summary
 is persisted as a normal user message appended at the tail while the summarized
 prefix stays in the session; hosts that need a faithful compaction entry should
@@ -367,6 +390,13 @@ set `OnCompacted`. An `OnCompacted` error terminates the run with a synthetic
 `StopReason == error` turn. Legacy mode (`ReserveTokens <= 0`) keeps the old
 `ThresholdFrac` trigger and summary-only replacement; `CompactionInfo.Kept` is
 nil there and `SummaryInput` is the whole thinking-free transcript.
+
+Optional run identity: `Request.SessionID` and `Request.SessionFile` are
+exposed to bash as `PI_SESSION_ID`/`PI_SESSION_FILE` (with `PI_PROVIDER`,
+`PI_MODEL`, and `PI_REASONING_LEVEL` from the active model/thinking level).
+`Request.MaxTokens` is an optional explicit output cap; it is clamped to the
+remaining context window as described in §2. Both are additive and safe to
+leave unset.
 
 Loop shape per turn: `maybeCompact` → inject pending steering → provider
 stream forwarded as `message_*` events → on `toolUse`, execute the batch
@@ -483,3 +513,7 @@ both are gitignored, machine-local):
   changing projection/reconciliation semantics requires updating
   `agentwrapper` (`prompt.go`, `contract_test.go`) and, when relevant,
   `backend`.
+- **Run identity and output caps**: `Request.SessionID`/`SessionFile` feed the
+  bash `PI_*` environment, and `Request.MaxTokens` is clamped to the context
+  window. Both are additive; hosts that want bash scripts to see session
+  identity must populate the session fields.
