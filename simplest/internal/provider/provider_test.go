@@ -1327,3 +1327,153 @@ func TestOpenAIStreamUnfinishedToolCallFails(t *testing.T) {
 		t.Fatalf("unexpected error message: %q", got)
 	}
 }
+
+// Port of pi 4dd2b149d: whitespace-only tool output must be treated as empty.
+// Some OpenAI-compatible providers reject blank tool messages with HTTP 400,
+// and the failure repeats for the rest of the session. Non-whitespace text
+// must be preserved verbatim (only the emptiness test trims).
+func TestWhitespaceOnlyToolOutputTreatedAsEmpty(t *testing.T) {
+	t.Parallel()
+
+	b64Data := "ZmFrZS1wbmctZGF0YQ=="
+	newToolContext := func(t *testing.T, resultContent []types.AssistantContent) *types.Context {
+		t.Helper()
+		content, err := json.Marshal(resultContent)
+		require.NoError(t, err)
+		return &types.Context{
+			Messages: []types.Message{
+				&types.UserMessage{Content: types.TextOnly("go"), Timestamp: 1},
+				&types.AssistantMessage{
+					Content: []types.AssistantContent{
+						types.ToolCall{Type: "toolCall", ID: "tc1", Name: "read", Arguments: json.RawMessage(`{"path":"a"}`)},
+					},
+					Provider: "openai", API: types.APIOpenAICompat, Model: "gpt-test",
+				},
+				&types.ToolResultMessage{ToolCallID: "tc1", ToolName: "read", Content: content},
+			},
+		}
+	}
+
+	t.Run("openai-compat", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name              string
+			resultContent     []types.AssistantContent
+			wantToolContent   string
+			wantAttachedImage bool
+		}{
+			{
+				name:            "whitespace-only text without images becomes (no tool output)",
+				resultContent:   []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "\r\n"}},
+				wantToolContent: "(no tool output)",
+			},
+			{
+				name: "whitespace-only text with image becomes (see attached image)",
+				resultContent: []types.AssistantContent{
+					types.TextContent{Type: types.TypeText, Text: "  \r\n"},
+					types.ImageContent{Type: types.TypeImage, Data: b64Data, MimeType: "image/png"},
+				},
+				wantToolContent:   "(see attached image)",
+				wantAttachedImage: true,
+			},
+			{
+				name:            "non-whitespace text is preserved verbatim",
+				resultContent:   []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "  kept \n"}},
+				wantToolContent: "  kept \n",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				p := NewOpenAICompat("k")
+				msgs, err := p.ConvertMessages(oaModel("http://unused"), newToolContext(t, tt.resultContent))
+				require.NoError(t, err)
+
+				// user, assistant, tool[, user(attached image)]
+				wantLen := 3
+				if tt.wantAttachedImage {
+					wantLen = 4
+				}
+				require.Len(t, msgs, wantLen)
+
+				toolMsg := msgs[2]
+				require.Equal(t, "tool", toolMsg.Role)
+				require.Equal(t, "tc1", toolMsg.ToolCallID)
+				assert.Equal(t, tt.wantToolContent, toolMsg.Content)
+
+				if tt.wantAttachedImage {
+					imgMsg := msgs[3]
+					require.Equal(t, "user", imgMsg.Role)
+					parts, ok := imgMsg.Content.([]oaPart)
+					require.True(t, ok, "expected []oaPart content, got %T", imgMsg.Content)
+					require.Len(t, parts, 2)
+					assert.Equal(t, "image_url", parts[1].Type)
+					assert.Equal(t, "data:image/png;base64,"+b64Data, parts[1].ImageURL.URL)
+				}
+			})
+		}
+	})
+
+	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name              string
+			resultContent     []types.AssistantContent
+			wantOutput        string
+			wantAttachedImage bool
+		}{
+			{
+				name:          "whitespace-only text without images becomes empty output",
+				resultContent: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "\r\n"}},
+				wantOutput:    "",
+			},
+			{
+				name: "whitespace-only text with image becomes (see attached image)",
+				resultContent: []types.AssistantContent{
+					types.TextContent{Type: types.TypeText, Text: "\r\n"},
+					types.ImageContent{Type: types.TypeImage, Data: b64Data, MimeType: "image/png"},
+				},
+				wantOutput:        "(see attached image)",
+				wantAttachedImage: true,
+			},
+			{
+				name:          "non-whitespace text is preserved verbatim",
+				resultContent: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "  kept \n"}},
+				wantOutput:    "  kept \n",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				p := NewGemini("k")
+				contents, err := p.ConvertMessages(gModel("http://unused"), newToolContext(t, tt.resultContent))
+				require.NoError(t, err)
+				require.NotEmpty(t, contents)
+
+				// user, model(functionCall), user(functionResponse[, image parts])
+				last := contents[len(contents)-1]
+				wantParts := 1
+				if tt.wantAttachedImage {
+					// gemini>=3 appends "Tool result image:" + inline data to
+					// the same content as the function response.
+					wantParts = 3
+				}
+				require.Len(t, last.Parts, wantParts)
+
+				fr := last.Parts[0].FunctionResponse
+				require.NotNil(t, fr)
+				assert.Equal(t, tt.wantOutput, fr.Response["output"])
+
+				if tt.wantAttachedImage {
+					assert.Equal(t, "Tool result image:", last.Parts[1].Text)
+					require.NotNil(t, last.Parts[2].InlineData)
+					assert.Equal(t, "image/png", last.Parts[2].InlineData.MIMEType)
+				}
+			})
+		}
+	})
+}

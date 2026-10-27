@@ -217,7 +217,7 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 			}
 			text, images := toolResultTextAndImages(blocks)
 			content := text
-			if content == "" {
+			if strings.TrimSpace(content) == "" {
 				if len(images) > 0 {
 					content = "(see attached image)"
 				} else {

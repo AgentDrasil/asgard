@@ -292,8 +292,14 @@ func geminiToolResultBlocks(blocks []types.AssistantContent) (string, []types.Im
 		}
 	}
 	text := strings.Join(lines, "\n")
-	if text == "" && len(images) > 0 {
-		text = "(see attached image)"
+	if strings.TrimSpace(text) == "" {
+		// Whitespace-only output is treated as empty; some providers reject
+		// blank function responses on the wire. Non-empty text is kept as-is.
+		if len(images) > 0 {
+			text = "(see attached image)"
+		} else {
+			text = ""
+		}
 	}
 	return text, images
 }
