@@ -67,11 +67,15 @@ type Entry struct {
 	Provider string `json:"provider,omitempty"`
 	ModelID  string `json:"modelId,omitempty"`
 	// TypeCompaction / TypeBranchSummary.
-	Summary          string       `json:"summary,omitempty"`
-	FirstKeptEntryID string       `json:"firstKeptEntryId,omitempty"`
-	TokensBefore     int64        `json:"tokensBefore,omitempty"`
-	Usage            *types.Usage `json:"usage,omitempty"`
-	FromHook         bool         `json:"fromHook,omitempty"`
+	Summary          string `json:"summary,omitempty"`
+	FirstKeptEntryID string `json:"firstKeptEntryId,omitempty"`
+	// FirstKeptEntryIndex is a legacy v1 compaction field only read during
+	// migration; the v1 index included the header at index 0. Cleared when a
+	// v1 file is migrated to v2 (see migrateEntries).
+	FirstKeptEntryIndex *int         `json:"firstKeptEntryIndex,omitempty"`
+	TokensBefore        int64        `json:"tokensBefore,omitempty"`
+	Usage               *types.Usage `json:"usage,omitempty"`
+	FromHook            bool         `json:"fromHook,omitempty"`
 	// TypeCompaction only: complete prompt/tool state at the compaction
 	// boundary. Round-tripped for upstream compatibility but not projected into
 	// model context yet (providers do not support mid-conversation system
@@ -197,7 +201,12 @@ func LoadFile(path string) (*Header, []*Entry, error) {
 			continue // skip malformed lines
 		}
 		if e.ID == "" {
-			continue
+			// Legacy v1/v2 entries carry no id; keep them so migration
+			// (migrateEntries) can assign fresh ids. Current-version files
+			// still skip id-less lines.
+			if header == nil || header.Version >= CurrentVersion {
+				continue
+			}
 		}
 		entries = append(entries, &e)
 	}

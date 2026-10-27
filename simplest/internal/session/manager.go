@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
@@ -208,6 +208,17 @@ func (m *Manager) Open(path string) (*SessionFile, error) {
 	sf.flushed = true
 	if err := sf.acquireLock(); err != nil {
 		return nil, err
+	}
+	// Migrate legacy v1/v2 sessions to the current v3 format (mirrors
+	// upstream migrateToCurrentVersion) and persist the upgrade immediately so
+	// ids, parent chains, role rewrites and the header version are durable.
+	if migrateEntries(&sf.header, sf.entries) {
+		if err := sf.rewriteLocked(); err != nil {
+			_ = sf.Close()
+			return nil, fmt.Errorf("session: migrate %s: %w", path, err)
+		}
+		// Rewritten entries may carry fresh ids; rebuild the index.
+		sf.buildIndex()
 	}
 	return sf, nil
 }
@@ -747,12 +758,14 @@ func (sf *SessionFile) acquireLock() error {
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	locked, err := lockFileExclusive(f)
+	if err != nil {
 		_ = f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return ErrSessionLocked
-		}
 		return err
+	}
+	if !locked {
+		_ = f.Close()
+		return ErrSessionLocked
 	}
 	sf.lockFile = f
 	return nil
@@ -776,7 +789,7 @@ func (sf *SessionFile) Close() error {
 		return flushErr
 	}
 
-	unlockErr := syscall.Flock(int(sf.lockFile.Fd()), syscall.LOCK_UN)
+	unlockErr := unlockFile(sf.lockFile)
 	closeErr := sf.lockFile.Close()
 	sf.lockFile = nil
 
@@ -899,6 +912,21 @@ func (sf *SessionFile) rewriteLocked() error {
 		}
 	}()
 
+	// os.CreateTemp modes the temp file 0600; an atomic rename would silently
+	// strip an existing session file's permission bits. Preserve the target's
+	// mode (0644 for a new file, matching the append path and upstream's
+	// default open) before the rename.
+	perm := os.FileMode(0o644)
+	if info, err := os.Stat(sf.path); err == nil {
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("session: rewrite %s: %w", sf.path, err)
+	}
+	if err := tmpFile.Chmod(perm); err != nil && runtime.GOOS != "windows" {
+		// chmod perm bits are a no-op on Windows; ignore failures there.
+		return err
+	}
+
 	var buf bytes.Buffer
 	hb, err := json.Marshal(sf.header)
 	if err != nil {
@@ -953,7 +981,10 @@ func FindMostRecent(dir, cwd string) (string, error) {
 			continue
 		}
 		path := filepath.Join(dir, de.Name())
-		header, _, err := LoadFile(path)
+		// Bounded discovery: read only the file head instead of parsing the
+		// whole body (mirrors pi's readSessionHeaderForDiscovery,
+		// session-manager.ts v0.99.2).
+		header, err := readSessionHeader(path)
 		if err != nil || header == nil {
 			continue
 		}
