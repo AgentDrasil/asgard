@@ -402,9 +402,6 @@ func getSessionContextSettings(path []*Entry) (types.ThinkingLevel, *ModelRef) {
 		case TypeModelChange:
 			model = &ModelRef{Provider: e.Provider, ModelID: e.ModelID}
 		case TypeMessage:
-			if model != nil {
-				continue
-			}
 			msg, err := e.DecodeMessage()
 			if err != nil || msg.MessageRole() != types.RoleAssistant {
 				continue

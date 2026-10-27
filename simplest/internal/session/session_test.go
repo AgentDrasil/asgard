@@ -2439,3 +2439,130 @@ func TestSession_RoundTripPiMessageMetadata(t *testing.T) {
 	require.True(t, ok)
 	assert.JSONEq(t, string(nestedCalls), string(rewrittenTRM.NestedCalls))
 }
+
+func testAssistantWithModel(provider, modelID, text string) *types.AssistantMessage {
+	am := testAssistant(text)
+	am.Provider = provider
+	am.Model = modelID
+	return am
+}
+
+func TestContextSettingsLastAssistantWins(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/p")
+	for _, step := range []func() (string, error){
+		func() (string, error) { return sf.AppendModelChange("prov-a", "model-a") },
+		func() (string, error) {
+			return sf.AppendMessage(testAssistantWithModel("prov-b", "model-b", "reply-b"))
+		},
+		func() (string, error) { return sf.AppendModelChange("prov-c", "model-c") },
+		func() (string, error) {
+			return sf.AppendMessage(testAssistantWithModel("prov-d", "model-d", "reply-d"))
+		},
+	} {
+		if _, err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.NotNil(t, ctx.Model)
+	assert.Equal(t, "prov-d", ctx.Model.Provider)
+	assert.Equal(t, "model-d", ctx.Model.ModelID)
+}
+
+func TestContextSettingsModelChangeAfterLastAssistantWins(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/p")
+	for _, step := range []func() (string, error){
+		func() (string, error) { return sf.AppendMessage(testAssistantWithModel("prov-a", "model-a", "reply")) },
+		func() (string, error) { return sf.AppendModelChange("prov-z", "model-z") },
+	} {
+		if _, err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.NotNil(t, ctx.Model)
+	assert.Equal(t, "prov-z", ctx.Model.Provider)
+	assert.Equal(t, "model-z", ctx.Model.ModelID)
+}
+
+func TestContextSettingsLastModelChangeWithoutAssistant(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/p")
+	for _, step := range []func() (string, error){
+		func() (string, error) { return sf.AppendModelChange("prov-a", "model-a") },
+		func() (string, error) { return sf.AppendModelChange("prov-b", "model-b") },
+		func() (string, error) { return sf.AppendModelChange("prov-c", "model-c") },
+	} {
+		if _, err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.NotNil(t, ctx.Model)
+	assert.Equal(t, "prov-c", ctx.Model.Provider)
+	assert.Equal(t, "model-c", ctx.Model.ModelID)
+}
+
+func TestContextSettingsThinkingLevelFollowsLastChange(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/p")
+	for _, step := range []func() (string, error){
+		func() (string, error) { return sf.AppendThinkingLevelChange(types.ThinkingHigh) },
+		func() (string, error) { return sf.AppendModelChange("prov-a", "model-a") },
+		func() (string, error) { return sf.AppendMessage(testAssistantWithModel("prov-b", "model-b", "reply")) },
+		func() (string, error) { return sf.AppendThinkingLevelChange(types.ThinkingOff) },
+		func() (string, error) { return sf.AppendModelChange("prov-c", "model-c") },
+	} {
+		if _, err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	assert.Equal(t, types.ThinkingOff, ctx.ThinkingLevel)
+	require.NotNil(t, ctx.Model)
+	assert.Equal(t, "prov-c", ctx.Model.Provider)
+}
+
+func TestContextSettingsUndecodableOrForeignMessagesSkipped(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/p")
+	if _, err := sf.AppendModelChange("prov-a", "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.AppendMessage(testAssistantWithModel("prov-b", "model-b", "reply")); err != nil {
+		t.Fatal(err)
+	}
+	// Build the path directly: an undecodable message entry and a user
+	// (non-assistant) message must not override the last assistant.
+	path := append([]*Entry{}, sf.Entries()...)
+	undecodable := &Entry{Type: TypeMessage, Message: json.RawMessage(`"garbage"`)}
+	undecodable.ID = "undecodable"
+	path = append(path, undecodable)
+	user := &Entry{Type: TypeMessage, Message: mustMarshalMessage(t, testUser("hello"))}
+	user.ID = "user-after"
+	path = append(path, user)
+
+	level, model := getSessionContextSettings(path)
+	require.NotNil(t, model)
+	assert.Equal(t, types.ThinkingOff, level)
+	assert.Equal(t, "prov-b", model.Provider)
+	assert.Equal(t, "model-b", model.ModelID)
+}
+
+func mustMarshalMessage(t *testing.T, msg types.Message) json.RawMessage {
+	t.Helper()
+	raw, err := types.MarshalMessage(msg)
+	require.NoError(t, err)
+	return raw
+}
