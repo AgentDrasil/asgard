@@ -29,6 +29,10 @@ func TestMessageCodecRoundTrip(t *testing.T) {
 			IsError:    true,
 			Timestamp:  3,
 		},
+		&ForeignMessage{
+			Role: "system",
+			Raw:  json.RawMessage(`{"role":"system","content":"be nice","timestamp":4}`),
+		},
 	}
 	for _, m := range msgs {
 		raw, err := MarshalMessage(m)
@@ -76,10 +80,39 @@ func TestUnmarshalNullContent(t *testing.T) {
 	}
 }
 
-func TestUnmarshalUnknownRole(t *testing.T) {
-	if _, err := UnmarshalMessage(json.RawMessage(`{"role":"weird"}`)); err == nil {
-		t.Fatal("expected error for unknown role")
+func TestUnmarshalForeignRole(t *testing.T) {
+	raw := json.RawMessage(`{"role":"bashExecution","content":null,"exitCode":0,"timestamp":5}`)
+	m, err := UnmarshalMessage(raw)
+	if err != nil {
+		t.Fatal(err)
 	}
+	fm, ok := m.(*ForeignMessage)
+	if !ok {
+		t.Fatalf("want *ForeignMessage, got %T", m)
+	}
+	if fm.MessageRole() != Role("bashExecution") {
+		t.Fatalf("role lost: %q", fm.MessageRole())
+	}
+	if string(fm.Raw) != string(raw) {
+		t.Fatalf("raw JSON changed:\n got %s\nwant %s", fm.Raw, raw)
+	}
+
+	out, err := MarshalMessage(fm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Fatalf("marshal round trip changed bytes:\n got %s\nwant %s", out, raw)
+	}
+	// MarshalMessage must return a copy, not alias the foreign raw buffer.
+	out[0] = 'X'
+	if string(fm.Raw) != string(raw) {
+		t.Fatal("MarshalMessage must copy the raw JSON")
+	}
+	if _, err := MarshalMessage(&ForeignMessage{Role: "custom"}); err == nil {
+		t.Fatal("expected error for empty foreign raw JSON")
+	}
+
 	var head MessageHead
 	if err := json.Unmarshal([]byte(`{"role":"user","x":1}`), &head); err != nil || head.Role != RoleUser {
 		t.Fatalf("MessageHead decode failed: %+v %v", head, err)

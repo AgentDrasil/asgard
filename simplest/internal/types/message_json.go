@@ -15,6 +15,11 @@ func MarshalMessage(m Message) (json.RawMessage, error) {
 		return marshalEnveloped(RoleAssistant, t)
 	case *ToolResultMessage:
 		return marshalEnveloped(RoleToolResult, t)
+	case *ForeignMessage:
+		if t == nil || len(t.Raw) == 0 {
+			return nil, fmt.Errorf("foreign message has no raw JSON")
+		}
+		return json.RawMessage(append([]byte(nil), t.Raw...)), nil
 	default:
 		return nil, fmt.Errorf("unknown message role %T", m)
 	}
@@ -55,8 +60,10 @@ type MessageHead struct {
 }
 
 // UnmarshalMessage decodes a role-enveloped message produced by MarshalMessage
-// or other writers of the same format. Unknown roles yield an error; null content is
-// normalized to an empty block list.
+// or other writers of the same format. Roles this package does not model are
+// preserved as *ForeignMessage so foreign session files still load; callers
+// that build provider context should skip them. Null content is normalized to
+// an empty block list for the known roles.
 func UnmarshalMessage(raw json.RawMessage) (Message, error) {
 	var head MessageHead
 	if err := json.Unmarshal(raw, &head); err != nil {
@@ -125,6 +132,6 @@ func UnmarshalMessage(raw json.RawMessage) (Message, error) {
 		}
 		return &m, nil
 	default:
-		return nil, fmt.Errorf("unknown message role %q", string(head.Role))
+		return &ForeignMessage{Role: head.Role, Raw: json.RawMessage(append([]byte(nil), raw...))}, nil
 	}
 }

@@ -2000,3 +2000,123 @@ func TestSession_UsageEntry_PiShapeLoad(t *testing.T) {
 	require.Len(t, ctx.Messages, 1)
 	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
 }
+
+const foreignHeader = `{"type":"session","version":3,"id":"sess-foreign","timestamp":"2026-10-27T00:00:00Z","cwd":"/proj"}`
+
+// Foreign pi message roles must load, survive round-trips, and be skipped by
+// context projection instead of failing BuildContext (B15).
+func TestSession_ForeignMessages_LoadAndProject(t *testing.T) {
+	t.Parallel()
+
+	normalUser := `{"type":"message","id":"msg-1","parentId":null,"timestamp":"2026-10-27T00:00:01Z",` +
+		`"message":{"role":"user","content":"hello","timestamp":1}}`
+	normalAssistant := `{"type":"message","id":"msg-2","parentId":"msg-1","timestamp":"2026-10-27T00:00:02Z",` +
+		`"message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"stopReason":"stop","timestamp":2}}`
+	foreignLines := []string{
+		`{"type":"message","id":"f-system","parentId":"msg-2","timestamp":"2026-10-27T00:00:03Z",` +
+			`"message":{"role":"system","content":"system prompt","timestamp":3}}`,
+		`{"type":"message","id":"f-custom","parentId":"f-system","timestamp":"2026-10-27T00:00:04Z",` +
+			`"message":{"role":"custom","customType":"ext","content":[{"type":"text","text":"custom"}],"display":true,"timestamp":4}}`,
+		`{"type":"message","id":"f-bash","parentId":"f-custom","timestamp":"2026-10-27T00:00:05Z",` +
+			`"message":{"role":"bashExecution","command":"ls","output":"a","exitCode":0,"content":null,"timestamp":5}}`,
+		`{"type":"message","id":"f-branch","parentId":"f-bash","timestamp":"2026-10-27T00:00:06Z",` +
+			`"message":{"role":"branchSummary","summary":"old branch","fromId":"x","timestamp":6}}`,
+		`{"type":"message","id":"f-comp","parentId":"f-branch","timestamp":"2026-10-27T00:00:07Z",` +
+			`"message":{"role":"compactionSummary","summary":"old summary","tokensBefore":10,"timestamp":7}}`,
+	}
+
+	lines := append([]string{foreignHeader, normalUser, normalAssistant}, foreignLines...)
+	path := writeSessionJSONL(t, lines...)
+
+	_, entries, err := LoadFile(path)
+	require.NoError(t, err)
+	require.Len(t, entries, 2+len(foreignLines), "foreign message entries must not be dropped")
+
+	byID := make(map[string]*Entry, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e
+	}
+	wantRoles := map[string]types.Role{
+		"f-system": "system",
+		"f-custom": "custom",
+		"f-bash":   "bashExecution",
+		"f-branch": "branchSummary",
+		"f-comp":   "compactionSummary",
+	}
+	for id, wantRole := range wantRoles {
+		e := byID[id]
+		require.NotNil(t, e, "entry %s missing", id)
+		msg, err := e.DecodeMessage()
+		require.NoError(t, err)
+		fm, ok := msg.(*types.ForeignMessage)
+		require.True(t, ok, "entry %s should decode as *types.ForeignMessage, got %T", id, msg)
+		assert.Equal(t, wantRole, fm.MessageRole())
+		assert.Equal(t, string(e.Message), string(fm.Raw), "foreign raw JSON must be preserved")
+
+		msgs, err := SessionEntryToContextMessages(e)
+		require.NoError(t, err)
+		assert.Nil(t, msgs, "foreign role %q must not reach provider context", wantRole)
+	}
+
+	// BuildContext succeeds, contains only the normal messages, and does not
+	// synthesize orphan tool results for the foreign entries.
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+	assert.Equal(t, types.RoleUser, ctx.Messages[0].MessageRole())
+	assert.Equal(t, "hello", types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content)))
+	assert.Equal(t, types.RoleAssistant, ctx.Messages[1].MessageRole())
+
+	// Entry-level rewrite keeps the raw message JSON and role.
+	bashEntry := byID["f-bash"]
+	encoded, err := json.Marshal(bashEntry)
+	require.NoError(t, err)
+	var reloaded Entry
+	require.NoError(t, json.Unmarshal(encoded, &reloaded))
+	msg, err := reloaded.DecodeMessage()
+	require.NoError(t, err)
+	fm, ok := msg.(*types.ForeignMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.Role("bashExecution"), fm.MessageRole())
+	assert.Equal(t, string(bashEntry.Message), string(fm.Raw))
+}
+
+// null content for known roles must still project as empty content, not error.
+func TestSession_NullContentMessages(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		foreignHeader,
+		`{"type":"message","id":"m1","parentId":null,"timestamp":"2026-10-27T00:00:01Z",` +
+			`"message":{"role":"user","content":null,"timestamp":1}}`,
+		`{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-10-27T00:00:02Z",` +
+			`"message":{"role":"assistant","content":null,"stopReason":"stop","timestamp":2}}`,
+		`{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-10-27T00:00:03Z",` +
+			`"message":{"role":"toolResult","toolCallId":"c1","toolName":"x","content":null,"isError":false,"timestamp":3}}`,
+	}
+	path := writeSessionJSONL(t, lines...)
+
+	_, entries, err := LoadFile(path)
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 3)
+
+	user, ok := ctx.Messages[0].(*types.UserMessage)
+	require.True(t, ok)
+	userBlocks, err := types.DecodeUserContent(user.Content)
+	require.NoError(t, err)
+	assert.Empty(t, userBlocks)
+
+	assistant, ok := ctx.Messages[1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Empty(t, assistant.Content)
+
+	toolResult, ok := ctx.Messages[2].(*types.ToolResultMessage)
+	require.True(t, ok)
+	toolBlocks, err := types.DecodeToolResultContent(toolResult.Content)
+	require.NoError(t, err)
+	assert.Empty(t, toolBlocks)
+}

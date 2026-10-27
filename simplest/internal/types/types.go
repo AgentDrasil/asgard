@@ -161,6 +161,18 @@ type ToolResultMessage struct {
 
 func (m *ToolResultMessage) MessageRole() Role { return RoleToolResult }
 
+// ForeignMessage preserves a role-enveloped message whose role this package does
+// not model (e.g. system, custom, bashExecution, branchSummary,
+// compactionSummary). It round-trips the original JSON untouched. Session
+// projection skips it: providers do not support these roles in the middle of a
+// conversation yet.
+type ForeignMessage struct {
+	Role Role
+	Raw  json.RawMessage // original role-enveloped JSON
+}
+
+func (m *ForeignMessage) MessageRole() Role { return m.Role }
+
 // AssistantContent is a content block inside an AssistantMessage.
 type AssistantContent interface {
 	BlockType() string

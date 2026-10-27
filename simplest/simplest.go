@@ -176,6 +176,7 @@ type (
 	Message          = types.Message
 	UserMessage      = types.UserMessage
 	AssistantMessage = types.AssistantMessage
+	ForeignMessage   = types.ForeignMessage
 	AssistantContent = types.AssistantContent
 	TextContent      = types.TextContent
 	ThinkingContent  = types.ThinkingContent

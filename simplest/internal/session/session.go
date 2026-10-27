@@ -354,6 +354,13 @@ func SessionEntryToContextMessages(e *Entry) ([]types.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Foreign roles (system/custom/bashExecution/branchSummary/
+		// compactionSummary) are preserved in the session but omitted from LLM
+		// context: providers do not support mid-conversation messages with
+		// these roles yet (B15). They also never contribute pending tool calls.
+		if _, ok := msg.(*types.ForeignMessage); ok {
+			return nil, nil
+		}
 		return []types.Message{msg}, nil
 	case TypeCustomMessage:
 		content := e.Content
