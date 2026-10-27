@@ -28,7 +28,7 @@ func loadAuthToken() string {
 		dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
 		db, err := sql.Open("sqlite", dsn)
 		if err == nil {
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			var rawVal string
 			query := `SELECT value FROM credential WHERE integration_id = 'zai-coding-plan' AND (active = 1 OR active IS NULL) ORDER BY time_updated DESC LIMIT 1`
 			if err := db.QueryRow(query).Scan(&rawVal); err == nil {

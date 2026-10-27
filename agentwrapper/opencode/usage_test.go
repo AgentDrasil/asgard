@@ -75,7 +75,7 @@ func TestLoadAuthToken(t *testing.T) {
 
 	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec(`CREATE TABLE credential (
 		id text PRIMARY KEY,
