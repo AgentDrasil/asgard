@@ -1361,11 +1361,11 @@ func compactSettings(cfg *AutoCompactConfig) (reserve, keep int64, retention boo
 // as a normal message (unless OnCompacted owns persistence). Never used on
 // the forced overflow-recovery path (see maybeCompactForce).
 func (l *loop) compactLegacy(cfg *AutoCompactConfig) error {
-	total := 0
+	total := int64(0)
 	for _, m := range l.messages {
-		total += messageCharLen(m)
+		total += estimateMessageTokens(m)
 	}
-	estimated := int64(total / 4)
+	estimated := total
 	frac := cfg.ThresholdFrac
 	if frac <= 0 {
 		frac = 0.8
@@ -1471,31 +1471,111 @@ func compactionSummaryMessage(summary string) *types.UserMessage {
 	return &types.UserMessage{Content: raw, Timestamp: time.Now().UnixMilli()}
 }
 
-// estimateContextTokens uses the last assistant usage plus chars/4 for the
-// messages after it. Without usable usage it estimates the whole transcript.
-// The system prompt is not available here, so it is not counted.
+// assistantUsage returns the assistant's usage when it is trustworthy: the
+// stop reason is neither aborted nor error and the calculated total is > 0.
+// Port of pi 005af57d8: getAssistantUsage in core/compaction/compaction.ts.
+func assistantUsage(m types.Message) (types.Usage, bool) {
+	am, ok := m.(*types.AssistantMessage)
+	if !ok {
+		return types.Usage{}, false
+	}
+	if am.StopReason == types.StopAborted || am.StopReason == types.StopError {
+		return types.Usage{}, false
+	}
+	if calculateContextTokens(am.Usage) <= 0 {
+		return types.Usage{}, false
+	}
+	return am.Usage, true
+}
+
+// calculateContextTokens prefers the provider-reported TotalTokens and falls
+// back to the component sum. Port of pi 005af57d8: calculateContextTokens.
+func calculateContextTokens(u types.Usage) int64 {
+	if u.TotalTokens != 0 {
+		return u.TotalTokens
+	}
+	return u.Input + u.Output + u.CacheRead + u.CacheWrite
+}
+
+// estimateMessageTokens estimates one message's tokens with the chars/4
+// heuristic, ceiling per message. Images count as 4800 chars each; assistant
+// tool calls contribute their name length plus the JSON-encoded arguments.
+// Port of pi 005af57d8: estimateTokens in core/compaction/compaction.ts.
+func estimateMessageTokens(m types.Message) int64 {
+	var chars int
+	switch t := m.(type) {
+	case *types.UserMessage:
+		chars = textAndImageCharLen(t.Content, types.DecodeUserContent)
+	case *types.ToolResultMessage:
+		chars = textAndImageCharLen(t.Content, types.DecodeToolResultContent)
+	case *types.AssistantMessage:
+		for _, blk := range t.Content {
+			switch b := blk.(type) {
+			case types.TextContent:
+				chars += len(b.Text)
+			case *types.TextContent:
+				chars += len(b.Text)
+			case types.ThinkingContent:
+				chars += len(b.Thinking)
+			case *types.ThinkingContent:
+				chars += len(b.Thinking)
+			case types.ToolCall:
+				chars += len(b.Name) + len(b.Arguments)
+			case *types.ToolCall:
+				chars += len(b.Name) + len(b.Arguments)
+			}
+		}
+	}
+	return int64((chars + 3) / 4)
+}
+
+// textAndImageCharLen decodes raw content blocks and counts text length plus
+// 4800 chars per image block. Port of pi 005af57d8:
+// estimateTextAndImageContentChars / ESTIMATED_IMAGE_CHARS.
+func textAndImageCharLen(raw json.RawMessage, decode func(json.RawMessage) ([]types.AssistantContent, error)) int {
+	blocks, err := decode(raw)
+	if err != nil {
+		return 0
+	}
+	chars := 0
+	for _, blk := range blocks {
+		switch b := blk.(type) {
+		case types.TextContent:
+			chars += len(b.Text)
+		case *types.TextContent:
+			chars += len(b.Text)
+		case types.ImageContent:
+			chars += 4800
+		case *types.ImageContent:
+			chars += 4800
+		}
+	}
+	return chars
+}
+
+// estimateContextTokens uses the last assistant with valid usage (not
+// aborted/error, calculated tokens > 0), preferring TotalTokens, plus
+// per-message estimates for the messages after it. Without usable usage it
+// estimates the whole transcript. The system prompt is not available here, so
+// it is not counted.
 func estimateContextTokens(messages []types.Message) (int64, *types.Usage) {
 	lastAssistant := -1
 	var usage *types.Usage
 	for i := len(messages) - 1; i >= 0; i-- {
-		am, ok := messages[i].(*types.AssistantMessage)
-		if !ok {
-			continue
+		if u, ok := assistantUsage(messages[i]); ok {
+			usage = cloneUsage(u)
+			lastAssistant = i
+			break
 		}
-		lastAssistant = i
-		if total := am.Usage.Input + am.Usage.Output + am.Usage.CacheRead + am.Usage.CacheWrite; total > 0 {
-			usage = cloneUsage(am.Usage)
-		}
-		break
 	}
 	var tokens int64
 	start := 0
 	if usage != nil {
-		tokens = usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+		tokens = calculateContextTokens(*usage)
 		start = lastAssistant + 1
 	}
 	for _, m := range messages[start:] {
-		tokens += int64(messageCharLen(m)) / 4
+		tokens += estimateMessageTokens(m)
 	}
 	return tokens, usage
 }
@@ -1516,11 +1596,11 @@ func compactionCut(messages []types.Message, keepRecent int64) int {
 		keepRecent = 20000
 	}
 	cut := 0
-	var chars int64
+	var tokens int64
 	for i := len(messages) - 1; i >= 0; i-- {
-		chars += int64(messageCharLen(messages[i]))
+		tokens += estimateMessageTokens(messages[i])
 		cut = i
-		if chars/4 >= keepRecent {
+		if tokens >= keepRecent {
 			break
 		}
 	}
@@ -1555,37 +1635,6 @@ func messagesWithoutThinking(messages []types.Message) []types.Message {
 		out[i] = &clone
 	}
 	return out
-}
-
-func messageCharLen(m types.Message) int {
-	switch t := m.(type) {
-	case *types.UserMessage:
-		blocks, err := types.DecodeUserContent(t.Content)
-		if err != nil {
-			return 0
-		}
-		return len(types.StringContentOf(blocks))
-	case *types.AssistantMessage:
-		n := 0
-		for _, blk := range t.Content {
-			switch b := blk.(type) {
-			case types.TextContent:
-				n += len(b.Text)
-			case types.ThinkingContent:
-				n += len(b.Thinking)
-			case types.ToolCall:
-				n += len(b.Arguments)
-			}
-		}
-		return n
-	case *types.ToolResultMessage:
-		blocks, err := types.DecodeToolResultContent(t.Content)
-		if err != nil {
-			return 0
-		}
-		return len(types.StringContentOf(blocks))
-	}
-	return 0
 }
 
 func orStr(s, def string) string {
