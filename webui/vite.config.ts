@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -20,5 +20,12 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  test: {
+    // Node >= 22.4 exposes an experimental global `localStorage` getter that
+    // emits an ExperimentalWarning once per worker when the jsdom environment
+    // initializes. Silence just that warning class in test workers.
+    execArgv: ["--disable-warning=ExperimentalWarning"],
+    setupFiles: ["./src/test/setup.ts"],
   },
 });
