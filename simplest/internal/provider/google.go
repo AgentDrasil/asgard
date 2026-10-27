@@ -515,7 +515,6 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			}
 		}
 		em.out.RawStopReason = string(finishReason)
-		em.out.Timestamp = time.Now().UnixMilli()
 		em.done(stop)
 	}()
 	return ch

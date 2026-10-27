@@ -108,6 +108,12 @@ the full event union:
 assistant message, not the provider's live, still-mutating one, so consumers
 can store and inspect events safely.
 
+Assistant messages (including synthetic terminal errors) carry the requested
+`thinkingLevel`, while `durationMs` is recorded only for actual provider
+responses. Tool-result messages and `tool_execution_end` events carry
+`durationMs` for the `Execute` call only (hooks excluded, absent when the tool
+did not run).
+
 ## 2. Models & providers
 
 Configure models programmatically; there are no config files or env lookups.

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
@@ -151,7 +152,15 @@ type emitter struct {
 }
 
 func newEmitter(ch chan types.AssistantMessageEvent) *emitter {
-	return &emitter{ch: ch, out: &types.AssistantMessage{}, open: -1}
+	// Timestamp is stamped at message creation (request start), not at stream
+	// end, so terminal metadata and dedupe rules can reason about when the
+	// response was requested. The agent loop relies on this to decide whether
+	// it may attach its own duration (pi 36a686ee8).
+	return &emitter{
+		ch:   ch,
+		out:  &types.AssistantMessage{Timestamp: time.Now().UnixMilli()},
+		open: -1,
+	}
 }
 
 func (em *emitter) send(ev types.AssistantMessageEvent) { em.ch <- ev }

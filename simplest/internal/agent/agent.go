@@ -212,13 +212,14 @@ func (l *loop) appendNewMsg(m types.Message) error {
 // turns, tool executions, or terminal events.
 func (l *loop) failPersist(perr error) {
 	final := &types.AssistantMessage{
-		Content:      []types.AssistantContent{},
-		API:          l.req.Model.API,
-		Provider:     l.req.Model.Provider,
-		Model:        l.req.Model.ID,
-		StopReason:   types.StopError,
-		ErrorMessage: fmt.Sprintf("session persist: %v", perr),
-		Timestamp:    time.Now().UnixMilli(),
+		Content:       []types.AssistantContent{},
+		API:           l.req.Model.API,
+		Provider:      l.req.Model.Provider,
+		Model:         l.req.Model.ID,
+		StopReason:    types.StopError,
+		ErrorMessage:  fmt.Sprintf("session persist: %v", perr),
+		ThinkingLevel: l.thinkingLevel(),
+		Timestamp:     time.Now().UnixMilli(),
 	}
 	l.messages = append(l.messages, final)
 	l.newMsgs = append(l.newMsgs, final)
@@ -441,13 +442,14 @@ func (l *loop) runPrepareNextTurn(turnIndex int) bool {
 	extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
 	if err != nil {
 		final := &types.AssistantMessage{
-			Content:      []types.AssistantContent{},
-			API:          l.req.Model.API,
-			Provider:     l.req.Model.Provider,
-			Model:        l.req.Model.ID,
-			StopReason:   types.StopError,
-			ErrorMessage: err.Error(),
-			Timestamp:    time.Now().UnixMilli(),
+			Content:       []types.AssistantContent{},
+			API:           l.req.Model.API,
+			Provider:      l.req.Model.Provider,
+			Model:         l.req.Model.ID,
+			StopReason:    types.StopError,
+			ErrorMessage:  err.Error(),
+			ThinkingLevel: l.thinkingLevel(),
+			Timestamp:     time.Now().UnixMilli(),
 		}
 		l.messages = append(l.messages, final)
 		// Fold a persist failure of this terminal message into the same error
@@ -528,13 +530,14 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 		converted, err := l.req.ConvertToLlm(l.messages)
 		if err != nil {
 			final := &types.AssistantMessage{
-				Content:      []types.AssistantContent{},
-				API:          l.req.Model.API,
-				Provider:     l.req.Model.Provider,
-				Model:        l.req.Model.ID,
-				StopReason:   types.StopError,
-				ErrorMessage: err.Error(),
-				Timestamp:    time.Now().UnixMilli(),
+				Content:       []types.AssistantContent{},
+				API:           l.req.Model.API,
+				Provider:      l.req.Model.Provider,
+				Model:         l.req.Model.ID,
+				StopReason:    types.StopError,
+				ErrorMessage:  err.Error(),
+				ThinkingLevel: l.thinkingLevel(),
+				Timestamp:     time.Now().UnixMilli(),
 			}
 			l.emitAssistant(final, true)
 			return final
@@ -553,6 +556,7 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 		APIKey:        l.req.APIKey,
 	}
 
+	startTime := time.Now()
 	events := l.req.Provider.Stream(l.ctx, l.req.Model, cx, opts)
 	var partial *types.AssistantMessage
 	started := false
@@ -579,6 +583,7 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 			if final == nil {
 				final = partial
 			}
+			l.markAssistantRunMeta(final, startTime)
 			started = l.replaceOrAppendPartial(started, final)
 			l.emitAssistant(final, !started)
 			return final
@@ -587,6 +592,7 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 			if final == nil {
 				final = partial
 			}
+			l.markAssistantRunMeta(final, startTime)
 			started = l.replaceOrAppendPartial(started, final)
 			l.emitAssistant(final, !started)
 			return final
@@ -598,9 +604,38 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 	}
 	partial.StopReason = types.StopError
 	partial.ErrorMessage = "provider stream ended without a terminal event"
+	l.markAssistantRunMeta(partial, startTime)
 	started = l.replaceOrAppendPartial(started, partial)
 	l.emitAssistant(partial, !started)
 	return partial
+}
+
+// thinkingLevel normalizes the requested thinking level for a turn: an empty
+// request means ThinkingOff.
+func (l *loop) thinkingLevel() types.ThinkingLevel {
+	if l.req.ThinkingLevel == "" {
+		return types.ThinkingOff
+	}
+	return l.req.ThinkingLevel
+}
+
+// markAssistantRunMeta records the requested thinking level (empty becomes
+// ThinkingOff) and, when appropriate, the elapsed provider request duration on
+// the provider-owned final assistant message. ThinkingLevel is always written
+// (B10). DurationMs is only filled in when the provider did not supply one and
+// the response was timestamped at or after this request started, so a stale or
+// reused response never gets a misleading duration. It mutates the final
+// message in place; the loop owns that message once the stream terminates.
+// Port of upstream B10 + pi 36a686ee8.
+func (l *loop) markAssistantRunMeta(final *types.AssistantMessage, start time.Time) {
+	if final == nil {
+		return
+	}
+	final.ThinkingLevel = l.thinkingLevel()
+	if final.DurationMs == nil && final.Timestamp >= start.UnixMilli() {
+		ms := time.Since(start).Milliseconds()
+		final.DurationMs = &ms
+	}
 }
 
 // replaceOrAppendPartial swaps the in-flight partial for the final message,
@@ -651,17 +686,17 @@ func (l *loop) failTruncatedToolCalls(msg *types.AssistantMessage, calls []types
 		l.emit(types.AgentEvent{Kind: types.ToolExecutionStart, ToolCallID: tc.ID, ToolName: tc.Name, Args: tc.Arguments})
 		result := errorToolResult(fmt.Sprintf(
 			"Tool call %q was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.", tc.Name))
-		out = append(out, l.finishToolCall(msg, tc, result, true))
+		out = append(out, l.finishToolCall(msg, tc, result, true, nil))
 	}
 	return out, false
 }
 
-// finalizeToolCall applies the AfterToolCall hook and emits ToolExecutionEnd,
-// building the ToolResultMessage. It does not emit the tool-result
-// message_start/message_end pair; call emitToolResultMessage for that
-// (finishToolCall does both). The hook is always invoked from the loop
-// goroutine so overrides stay serialized.
-func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool) *types.ToolResultMessage {
+// finalizeToolCall applies the AfterToolCall hook and emits ToolExecutionEnd
+// (carrying durationMs when the tool ran), building the ToolResultMessage. It
+// does not emit the tool-result message_start/message_end pair; call
+// emitToolResultMessage for that (finishToolCall does both). The hook is
+// always invoked from the loop goroutine so overrides stay serialized.
+func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool, durationMs *int64) *types.ToolResultMessage {
 	if l.req.AfterToolCall != nil {
 		override := l.req.AfterToolCall(AfterToolCallInput{
 			Context:          l.ctx,
@@ -691,7 +726,7 @@ func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, 
 
 	l.emit(types.AgentEvent{
 		Kind: types.ToolExecutionEnd, ToolCallID: tc.ID, ToolName: tc.Name,
-		Result: result, IsError: isError,
+		Result: result, IsError: isError, DurationMs: durationMs,
 	})
 
 	contentRaw, _ := types.MarshalBlocks(result.Content)
@@ -703,6 +738,7 @@ func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, 
 		Details:    detailsRaw,
 		Usage:      result.Usage,
 		IsError:    isError,
+		DurationMs: durationMs,
 		Timestamp:  time.Now().UnixMilli(),
 	}
 	return trm
@@ -717,8 +753,8 @@ func (l *loop) emitToolResultMessage(trm *types.ToolResultMessage) {
 // finishToolCall finalizes one tool call and immediately emits its tool-result
 // messages. Used by sequential execution and failTruncatedToolCalls, whose
 // event order is naturally source order.
-func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool) *types.ToolResultMessage {
-	trm := l.finalizeToolCall(msg, tc, result, isError)
+func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool, durationMs *int64) *types.ToolResultMessage {
+	trm := l.finalizeToolCall(msg, tc, result, isError, durationMs)
 	l.emitToolResultMessage(trm)
 	return trm
 }
@@ -781,29 +817,32 @@ type immediateOutcome struct {
 	isError bool
 }
 
-func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool) {
+func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool, *int64) {
 	if l.ctx.Err() != nil {
 		// Upstream v0.99.2: every deferred thunk re-checks the abort signal
 		// before running the tool, so cancellation cannot start prepared work.
-		return errorToolResult("Operation aborted"), true
+		// The tool did not run: no duration.
+		return errorToolResult("Operation aborted"), true, nil
 	}
+	start := time.Now()
 	result, err := p.tool.Execute(l.ctx, p.tc.ID, p.tc.Arguments, func(partial *types.ToolResult) {
 		l.emit(types.AgentEvent{
 			Kind: types.ToolExecutionUpdate, ToolCallID: p.tc.ID, ToolName: p.tc.Name,
 			Args: p.tc.Arguments, PartialResult: partial,
 		})
 	})
+	duration := time.Since(start).Milliseconds()
 	if err != nil {
 		msg := err.Error()
 		if msg == "" {
 			msg = "tool execution failed"
 		}
-		return errorToolResult(msg), true
+		return errorToolResult(msg), true, &duration
 	}
 	if result == nil {
-		return errorToolResult("tool returned no result"), true
+		return errorToolResult("tool returned no result"), true, &duration
 	}
-	return result, result.IsError
+	return result, result.IsError, &duration
 }
 
 func (l *loop) executeToolCalls(msg *types.AssistantMessage, calls []types.ToolCall) ([]*types.ToolResultMessage, bool) {
@@ -828,12 +867,13 @@ func (l *loop) executeSequential(msg *types.AssistantMessage, calls []types.Tool
 		prepared, immediate := l.prepare(msg, tc)
 		var result *types.ToolResult
 		var isErr bool
+		var duration *int64
 		if immediate != nil {
 			result, isErr = immediate.result, immediate.isError
 		} else {
-			result, isErr = l.executePrepared(prepared)
+			result, isErr, duration = l.executePrepared(prepared)
 		}
-		trm := l.finishToolCall(msg, tc, result, isErr)
+		trm := l.finishToolCall(msg, tc, result, isErr, duration)
 		out = append(out, trm)
 		sawAny = true
 		if !result.Terminate {
@@ -867,7 +907,7 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 		s.prepared = prepared
 		if immediate != nil {
 			s.result = immediate.result
-			s.trm = l.finalizeToolCall(msg, tc, immediate.result, immediate.isError)
+			s.trm = l.finalizeToolCall(msg, tc, immediate.result, immediate.isError, nil)
 		}
 		slots[i] = s
 	}
@@ -877,9 +917,10 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 	// order) as each completion lands on the loop goroutine. The channel is
 	// buffered so a tool that ignores ctx cannot leak its goroutine.
 	type completion struct {
-		index   int
-		result  *types.ToolResult
-		isError bool
+		index    int
+		result   *types.ToolResult
+		isError  bool
+		duration *int64
 	}
 	pending := 0
 	completions := make(chan completion, len(slots))
@@ -889,15 +930,15 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 		}
 		pending++
 		go func(index int, p *preparedCall) {
-			result, isErr := l.executePrepared(p)
-			completions <- completion{index: index, result: result, isError: isErr}
+			result, isErr, duration := l.executePrepared(p)
+			completions <- completion{index: index, result: result, isError: isErr, duration: duration}
 		}(i, s.prepared)
 	}
 	for i := 0; i < pending; i++ {
 		c := <-completions
 		s := slots[c.index]
 		s.result = c.result
-		s.trm = l.finalizeToolCall(msg, s.tc, c.result, c.isError)
+		s.trm = l.finalizeToolCall(msg, s.tc, c.result, c.isError, c.duration)
 	}
 
 	// Emit the tool-result messages in assistant source order.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
@@ -748,7 +747,6 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			em.fail(ctx, fmt.Errorf("Stream ended without finish_reason"))
 			return
 		}
-		em.out.Timestamp = time.Now().UnixMilli()
 		em.done(em.out.StopReason)
 	}()
 	return ch

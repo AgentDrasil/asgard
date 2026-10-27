@@ -1629,3 +1629,56 @@ func TestSession_RepairTruncatedTail(t *testing.T) {
 		assert.Equal(t, "{\"a\":1}\n{\"b\":\n", string(data))
 	})
 }
+
+// Assistant thinkingLevel/durationMs and tool-result durationMs must survive a
+// session write and reload (pi 36a686ee8 / B10).
+func TestSession_RoundTripRunMetadata(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("go"))
+	require.NoError(t, err)
+
+	assistantMs := int64(123)
+	assistant := testAssistant("done")
+	assistant.ThinkingLevel = types.ThinkingHigh
+	assistant.DurationMs = &assistantMs
+	_, err = sf.AppendMessage(assistant)
+	require.NoError(t, err)
+
+	toolMs := int64(7)
+	toolResult := &types.ToolResultMessage{
+		ToolCallID: "c1",
+		ToolName:   "read",
+		Content:    json.RawMessage(`[{"type":"text","text":"out"}]`),
+		IsError:    false,
+		DurationMs: &toolMs,
+		Timestamp:  3000,
+	}
+	_, err = sf.AppendMessage(toolResult)
+	require.NoError(t, err)
+
+	header, entries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.Len(t, entries, 3)
+
+	loadedAssistant, err := entries[1].DecodeMessage()
+	require.NoError(t, err)
+	am, ok := loadedAssistant.(*types.AssistantMessage)
+	require.True(t, ok, "entry 1 must decode as an assistant message")
+	assert.Equal(t, types.ThinkingHigh, am.ThinkingLevel)
+	require.NotNil(t, am.DurationMs, "assistant durationMs must survive LoadFile")
+	assert.Equal(t, assistantMs, *am.DurationMs)
+
+	loadedTool, err := entries[2].DecodeMessage()
+	require.NoError(t, err)
+	trm, ok := loadedTool.(*types.ToolResultMessage)
+	require.True(t, ok, "entry 2 must decode as a tool-result message")
+	assert.Equal(t, "c1", trm.ToolCallID)
+	require.NotNil(t, trm.DurationMs, "tool-result durationMs must survive LoadFile")
+	assert.Equal(t, toolMs, *trm.DurationMs)
+}

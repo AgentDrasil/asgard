@@ -91,4 +91,7 @@ type AgentEvent struct {
 	PartialResult *ToolResult `json:"-"`
 	Result        *ToolResult `json:"-"`
 	IsError       bool        `json:"isError,omitempty"`
+	// DurationMs is the tool Execute duration in milliseconds on
+	// tool_execution_end; nil when the tool did not run.
+	DurationMs *int64 `json:"durationMs,omitempty"`
 }

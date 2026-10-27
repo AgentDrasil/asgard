@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -35,16 +36,23 @@ func (f *fakeProvider) Stream(ctx context.Context, model *types.Model, cx *types
 	f.mu.Unlock()
 
 	ch := make(chan types.AssistantMessageEvent, 8)
+	requestStart := time.Now().UnixMilli()
 	go func() {
 		defer close(ch)
-		partial := &types.AssistantMessage{}
+		partial := &types.AssistantMessage{Timestamp: requestStart}
 		ch <- types.Partial{Kind: types.EvStart, Partial: partial}
 		if i >= len(f.responses) || f.responses[i] == nil {
-			errMsg := &types.AssistantMessage{Content: []types.AssistantContent{}, StopReason: types.StopError, ErrorMessage: "no scripted response"}
+			errMsg := &types.AssistantMessage{
+				Content: []types.AssistantContent{}, StopReason: types.StopError,
+				ErrorMessage: "no scripted response", Timestamp: requestStart,
+			}
 			ch <- types.StreamErrorEvent{Kind: types.EvStreamError, Reason: types.StopError, Message: errMsg}
 			return
 		}
 		resp := f.responses[i]
+		// Real providers stamp the response at request start; the agent loop
+		// uses that to decide whether it may attach a duration.
+		resp.Timestamp = requestStart
 		if len(resp.Content) > 0 {
 			ch <- types.Partial{Kind: types.EvTextDelta, ContentIndex: 0, Delta: "x", Partial: partial}
 		}
@@ -86,6 +94,7 @@ type recordingTool struct {
 	onStart    func()
 	executions []string // tool call ids in completion order
 	started    chan string
+	nilResult  bool
 }
 
 func newRecordingTool(name string) *recordingTool {
@@ -113,6 +122,9 @@ func (t *recordingTool) Execute(ctx context.Context, id string, args json.RawMes
 	t.executions = append(t.executions, id)
 	if t.err != nil {
 		return nil, t.err
+	}
+	if t.nilResult {
+		return nil, nil
 	}
 	return &types.ToolResult{
 		Content: []types.AssistantContent{types.TextContent{Type: "text", Text: t.output}},
@@ -606,6 +618,29 @@ func TestConvertToLlmAppliedAtBoundary(t *testing.T) {
 	}
 }
 
+func TestConvertToLlmErrorSyntheticMetadata(t *testing.T) {
+	t.Parallel()
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("never")}}
+	req := baseRequest(fp)
+	req.ThinkingLevel = types.ThinkingHigh
+	req.ConvertToLlm = func(msgs []types.Message) ([]types.Message, error) {
+		return nil, fmt.Errorf("convert failed")
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	require.Len(t, end.Messages, 1, "only the synthetic error message is produced")
+	am, ok := end.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopError, am.StopReason)
+	assert.Equal(t, "convert failed", am.ErrorMessage)
+	assert.Equal(t, types.ThinkingHigh, am.ThinkingLevel,
+		"synthetic terminal errors still record the requested thinking level")
+	assert.Nil(t, am.DurationMs, "no provider request happened, so there is no duration")
+	assert.Equal(t, 0, fp.calls)
+}
+
 func TestAutoCompactTriggersSummary(t *testing.T) {
 	tool := newRecordingTool("read")
 	fp := &fakeProvider{responses: []*types.AssistantMessage{
@@ -859,6 +894,7 @@ func TestAgent_PrepareNextTurn_OnlyOnContinuation(t *testing.T) {
 			textMsg("should never run"),
 		}}
 		req := baseRequest(fp, tool)
+		req.ThinkingLevel = types.ThinkingHigh
 
 		req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
 			return nil, fmt.Errorf("injected prepare error")
@@ -880,6 +916,9 @@ func TestAgent_PrepareNextTurn_OnlyOnContinuation(t *testing.T) {
 		require.NotNil(t, lastMsg)
 		assert.Equal(t, types.StopError, lastMsg.StopReason)
 		assert.Equal(t, "injected prepare error", lastMsg.ErrorMessage)
+		assert.Equal(t, types.ThinkingHigh, lastMsg.ThinkingLevel,
+			"synthetic hook-error turn must record the requested thinking level")
+		assert.Nil(t, lastMsg.DurationMs, "synthetic hook-error turn has no provider request")
 	})
 }
 
@@ -1334,6 +1373,7 @@ func TestPersistErrorTerminatesRunWithErrorTurn(t *testing.T) {
 				tools = tt.tools()
 			}
 			req := baseRequest(fp, tools...)
+			req.ThinkingLevel = types.ThinkingHigh
 			if tt.longInput {
 				req.Messages = []types.Message{
 					&types.UserMessage{Content: types.TextOnly(strings.Repeat("filler ", 60)), Timestamp: 1},
@@ -1414,6 +1454,9 @@ func TestPersistErrorTerminatesRunWithErrorTurn(t *testing.T) {
 			assert.Equal(t, req.Model.API, synthetic.API)
 			assert.Equal(t, req.Model.Provider, synthetic.Provider)
 			assert.Equal(t, req.Model.ID, synthetic.Model)
+			assert.Equal(t, types.ThinkingHigh, synthetic.ThinkingLevel,
+				"synthetic persist-error turn must record the requested thinking level")
+			assert.Nil(t, synthetic.DurationMs, "synthetic persist-error turn has no provider request")
 
 			// The synthetic message is the payload of the final
 			// message_start/message_end/turn_end (agent_end via Messages).
@@ -1590,9 +1633,10 @@ func TestExecutePreparedAbortedBeforeExecute(t *testing.T) {
 	tool := newRecordingTool("read")
 	p := &preparedCall{tc: call("c1", "read", `{}`), tool: tool}
 
-	result, isErr := l.executePrepared(p)
+	result, isErr, duration := l.executePrepared(p)
 
 	assert.True(t, isErr)
+	assert.Nil(t, duration, "a tool that never ran must not report a duration")
 	require.NotNil(t, result)
 	blocks, err := types.DecodeToolResultContent(func() json.RawMessage {
 		raw, _ := types.MarshalBlocks(result.Content)
@@ -1630,4 +1674,425 @@ func TestHooksReceiveRunContext(t *testing.T) {
 
 	assert.Same(t, runCtx, beforeCtx, "BeforeToolCall must receive the run context")
 	assert.Same(t, runCtx, afterCtx, "AfterToolCall must receive the run context")
+}
+
+// --- run metadata: thinking level and durations (pi 36a686ee8 / B10) ---
+
+// finalAssistantMessages returns every assistant message in agent_end.Messages.
+func finalAssistantMessages(msgs []types.Message) []*types.AssistantMessage {
+	var out []*types.AssistantMessage
+	for _, m := range msgs {
+		if am, ok := m.(*types.AssistantMessage); ok {
+			out = append(out, am)
+		}
+	}
+	return out
+}
+
+func TestAssistantMessageRecordsThinkingLevelAndDuration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("requested level", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+		req := baseRequest(fp)
+		req.ThinkingLevel = types.ThinkingHigh
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+
+		assistants := finalAssistantMessages(end.Messages)
+		require.Len(t, assistants, 1)
+		final := assistants[0]
+		assert.Equal(t, types.ThinkingHigh, final.ThinkingLevel,
+			"final assistant must record the requested thinking level")
+		require.NotNil(t, final.DurationMs, "final assistant must record a request duration")
+		assert.GreaterOrEqual(t, *final.DurationMs, int64(0))
+	})
+
+	t.Run("default level is off", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+		_, end := collect(t, Run(context.Background(), baseRequest(fp)))
+		require.NotNil(t, end)
+
+		assistants := finalAssistantMessages(end.Messages)
+		require.Len(t, assistants, 1)
+		final := assistants[0]
+		assert.Equal(t, types.ThinkingOff, final.ThinkingLevel,
+			"an empty request level must be recorded as off")
+		require.NotNil(t, final.DurationMs)
+		assert.GreaterOrEqual(t, *final.DurationMs, int64(0))
+	})
+
+	t.Run("error turn", func(t *testing.T) {
+		t.Parallel()
+
+		fp := &fakeProvider{responses: []*types.AssistantMessage{
+			{Content: []types.AssistantContent{}, StopReason: types.StopError, ErrorMessage: "boom"},
+		}}
+		req := baseRequest(fp)
+		req.ThinkingLevel = types.ThinkingLow
+
+		_, end := collect(t, Run(context.Background(), req))
+		require.NotNil(t, end)
+
+		assistants := finalAssistantMessages(end.Messages)
+		require.Len(t, assistants, 1)
+		assert.Equal(t, types.ThinkingLow, assistants[0].ThinkingLevel)
+		require.NotNil(t, assistants[0].DurationMs)
+		assert.GreaterOrEqual(t, *assistants[0].DurationMs, int64(0))
+	})
+}
+
+func TestToolResultRecordsExecuteDuration(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("done"),
+	}}
+	evs, end := collect(t, Run(context.Background(), baseRequest(fp, tool)))
+
+	var endEv *types.AgentEvent
+	for i := range evs {
+		if evs[i].Kind == types.ToolExecutionEnd && evs[i].ToolCallID == "c1" {
+			endEv = &evs[i]
+		}
+	}
+	require.NotNil(t, endEv, "missing tool_execution_end for c1")
+	require.NotNil(t, endEv.DurationMs, "tool_execution_end must carry durationMs")
+	assert.GreaterOrEqual(t, *endEv.DurationMs, int64(0))
+
+	var trm *types.ToolResultMessage
+	for _, m := range end.Messages {
+		if r, ok := m.(*types.ToolResultMessage); ok && r.ToolCallID == "c1" {
+			trm = r
+		}
+	}
+	require.NotNil(t, trm, "missing tool-result message for c1")
+	require.NotNil(t, trm.DurationMs, "tool-result message must carry durationMs")
+	assert.Equal(t, *endEv.DurationMs, *trm.DurationMs,
+		"end event and message must report the same duration")
+}
+
+func TestToolExecuteErrorStillRecordsDuration(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	tool.err = errors.New("boom")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("done"),
+	}}
+	evs, end := collect(t, Run(context.Background(), baseRequest(fp, tool)))
+
+	var endEv *types.AgentEvent
+	for i := range evs {
+		if evs[i].Kind == types.ToolExecutionEnd && evs[i].ToolCallID == "c1" {
+			endEv = &evs[i]
+		}
+	}
+	require.NotNil(t, endEv)
+	assert.True(t, endEv.IsError)
+	require.NotNil(t, endEv.DurationMs, "a failed Execute call still ran and must report a duration")
+
+	var trm *types.ToolResultMessage
+	for _, m := range end.Messages {
+		if r, ok := m.(*types.ToolResultMessage); ok && r.ToolCallID == "c1" {
+			trm = r
+		}
+	}
+	require.NotNil(t, trm)
+	require.NotNil(t, trm.DurationMs)
+}
+
+func TestImmediateToolResultsHaveNoDuration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (*fakeProvider, Request, *recordingTool)
+	}{
+		{
+			name: "unknown tool",
+			build: func(t *testing.T) (*fakeProvider, Request, *recordingTool) {
+				t.Helper()
+				fp := &fakeProvider{responses: []*types.AssistantMessage{
+					toolCallMsg(call("c1", "nope", `{}`)),
+					textMsg("recovered"),
+				}}
+				return fp, baseRequest(fp), nil
+			},
+		},
+		{
+			name: "validation failure (sequential)",
+			build: func(t *testing.T) (*fakeProvider, Request, *recordingTool) {
+				t.Helper()
+				tool := newRecordingTool("read")
+				tool.mode = types.ExecutionSequential
+				fp := &fakeProvider{responses: []*types.AssistantMessage{
+					toolCallMsg(call("c1", "read", `{}`)),
+					textMsg("recovered"),
+				}}
+				req := baseRequest(fp, tool)
+				req.Validate = func(args, parameters json.RawMessage) error {
+					return errors.New("bad args")
+				}
+				return fp, req, tool
+			},
+		},
+		{
+			name: "blocked before execute",
+			build: func(t *testing.T) (*fakeProvider, Request, *recordingTool) {
+				t.Helper()
+				tool := newRecordingTool("bash")
+				fp := &fakeProvider{responses: []*types.AssistantMessage{
+					toolCallMsg(call("c1", "bash", `{}`)),
+					textMsg("recovered"),
+				}}
+				req := baseRequest(fp, tool)
+				req.BeforeToolCall = func(in BeforeToolCallInput) *BeforeToolCallDecision {
+					return &BeforeToolCallDecision{Block: true, Reason: "not allowed"}
+				}
+				return fp, req, tool
+			},
+		},
+		{
+			name: "length stop",
+			build: func(t *testing.T) (*fakeProvider, Request, *recordingTool) {
+				t.Helper()
+				tool := newRecordingTool("write")
+				msg := toolCallMsg(call("c1", "write", `{`), call("c2", "write", `{}`))
+				msg.StopReason = types.StopLength
+				fp := &fakeProvider{responses: []*types.AssistantMessage{msg, textMsg("retry")}}
+				return fp, baseRequest(fp, tool), tool
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, req, tool := tc.build(t)
+			evs, end := collect(t, Run(context.Background(), req))
+			require.NotNil(t, end)
+
+			var ends []*types.AgentEvent
+			for i := range evs {
+				if evs[i].Kind == types.ToolExecutionEnd {
+					ends = append(ends, &evs[i])
+				}
+			}
+			require.NotEmpty(t, ends, "expected at least one tool_execution_end")
+			for _, ev := range ends {
+				assert.Nil(t, ev.DurationMs,
+					"tool %q did not run, so tool_execution_end must omit durationMs", ev.ToolName)
+			}
+
+			var trms []*types.ToolResultMessage
+			for _, m := range end.Messages {
+				if trm, ok := m.(*types.ToolResultMessage); ok {
+					trms = append(trms, trm)
+				}
+			}
+			require.NotEmpty(t, trms, "expected at least one tool-result message")
+			for _, trm := range trms {
+				assert.Nil(t, trm.DurationMs,
+					"tool %q did not run, so its result message must omit durationMs", trm.ToolName)
+			}
+
+			if tool != nil {
+				assert.Empty(t, tool.executions, "tool must not execute")
+			}
+		})
+	}
+}
+
+// staleProvider returns a prebuilt response whose timestamp predates the
+// request, simulating a cached/reused message.
+type staleProvider struct{ msg *types.AssistantMessage }
+
+func (p *staleProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	ch := make(chan types.AssistantMessageEvent, 2)
+	ch <- types.Partial{Kind: types.EvStart, Partial: &types.AssistantMessage{Timestamp: p.msg.Timestamp}}
+	ch <- types.DoneEvent{Kind: types.EvDone, Reason: p.msg.StopReason, Message: p.msg}
+	close(ch)
+	return ch
+}
+
+// closedProvider emits message_start and then closes the stream without any
+// terminal event. The message is timestamped when Stream starts (not before
+// Run), matching real providers so the agent's duration guard is deterministic.
+type closedProvider struct{}
+
+func (p *closedProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	ch := make(chan types.AssistantMessageEvent, 1)
+	ch <- types.Partial{Kind: types.EvStart, Partial: &types.AssistantMessage{Timestamp: time.Now().UnixMilli()}}
+	close(ch)
+	return ch
+}
+
+func TestAssistantDurationPreservedFromProvider(t *testing.T) {
+	t.Parallel()
+
+	provided := int64(77)
+	resp := textMsg("done")
+	resp.DurationMs = &provided
+	fp := &fakeProvider{responses: []*types.AssistantMessage{resp}}
+	req := baseRequest(fp)
+	req.ThinkingLevel = types.ThinkingHigh
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assistants := finalAssistantMessages(end.Messages)
+	require.Len(t, assistants, 1)
+	require.NotNil(t, assistants[0].DurationMs)
+	assert.Equal(t, provided, *assistants[0].DurationMs,
+		"a provider-supplied duration must not be overwritten")
+	assert.Equal(t, types.ThinkingHigh, assistants[0].ThinkingLevel,
+		"thinking level is recorded even when the provider supplied a duration")
+}
+
+func TestAssistantDurationAbsentForStaleResponse(t *testing.T) {
+	t.Parallel()
+
+	p := &staleProvider{msg: &types.AssistantMessage{
+		Content:    []types.AssistantContent{types.TextContent{Type: "text", Text: "cached"}},
+		StopReason: types.StopStop,
+		Timestamp:  time.Now().Add(-time.Hour).UnixMilli(),
+	}}
+	req := baseRequest(p)
+	req.ThinkingLevel = types.ThinkingMinimal
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assistants := finalAssistantMessages(end.Messages)
+	require.Len(t, assistants, 1)
+	assert.Nil(t, assistants[0].DurationMs,
+		"a response timestamped before the request must not get a duration")
+	assert.Equal(t, types.ThinkingMinimal, assistants[0].ThinkingLevel)
+}
+
+func TestStreamErrorAssistantMetadata(t *testing.T) {
+	t.Parallel()
+
+	// No scripted responses: fakeProvider emits a StreamError with a start
+	// timestamp.
+	fp := &fakeProvider{}
+	req := baseRequest(fp)
+	req.ThinkingLevel = types.ThinkingMedium
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assistants := finalAssistantMessages(end.Messages)
+	require.Len(t, assistants, 1)
+	assert.Equal(t, types.StopError, assistants[0].StopReason)
+	assert.Equal(t, types.ThinkingMedium, assistants[0].ThinkingLevel)
+	require.NotNil(t, assistants[0].DurationMs,
+		"a provider StreamError still came from a request and must carry a duration")
+	assert.GreaterOrEqual(t, *assistants[0].DurationMs, int64(0))
+}
+
+func TestClosedStreamAssistantMetadata(t *testing.T) {
+	t.Parallel()
+
+	req := baseRequest(&closedProvider{})
+	req.ThinkingLevel = types.ThinkingLow
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assistants := finalAssistantMessages(end.Messages)
+	require.Len(t, assistants, 1)
+	assert.Equal(t, types.StopError, assistants[0].StopReason)
+	assert.Contains(t, assistants[0].ErrorMessage, "without a terminal event")
+	assert.Equal(t, types.ThinkingLow, assistants[0].ThinkingLevel)
+	require.NotNil(t, assistants[0].DurationMs)
+	assert.GreaterOrEqual(t, *assistants[0].DurationMs, int64(0))
+}
+
+func TestToolNilResultStillRecordsDuration(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("read")
+	tool.nilResult = true
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("done"),
+	}}
+	evs, end := collect(t, Run(context.Background(), baseRequest(fp, tool)))
+
+	var endEv *types.AgentEvent
+	for i := range evs {
+		if evs[i].Kind == types.ToolExecutionEnd && evs[i].ToolCallID == "c1" {
+			endEv = &evs[i]
+		}
+	}
+	require.NotNil(t, endEv)
+	assert.True(t, endEv.IsError)
+	require.NotNil(t, endEv.DurationMs, "Execute ran even though it returned nil")
+
+	var trm *types.ToolResultMessage
+	for _, m := range end.Messages {
+		if r, ok := m.(*types.ToolResultMessage); ok && r.ToolCallID == "c1" {
+			trm = r
+		}
+	}
+	require.NotNil(t, trm)
+	require.NotNil(t, trm.DurationMs)
+	blocks, err := types.DecodeToolResultContent(trm.Content)
+	require.NoError(t, err)
+	assert.Equal(t, "tool returned no result", types.StringContentOf(blocks))
+}
+
+func TestParallelToolDurationsIndependent(t *testing.T) {
+	t.Parallel()
+
+	executed := make(chan string, 2)
+	a := newGatedTool("a", nil, executed)
+	b := newGatedTool("b", nil, executed)
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "a", `{}`), call("c2", "b", `{}`)),
+		textMsg("done"),
+	}}
+	evCh := Run(context.Background(), baseRequest(fp, a, b))
+
+	// Release both tools once each has entered Execute. No sleeps: the
+	// channel sends make the overlap ordering deterministic.
+	go func() {
+		<-executed
+		<-executed
+		close(a.gate)
+		close(b.gate)
+	}()
+
+	evs, end := collect(t, evCh)
+	durations := map[string]*int64{}
+	for i := range evs {
+		if evs[i].Kind != types.ToolExecutionEnd {
+			continue
+		}
+		require.NotNil(t, evs[i].DurationMs, "tool %s must report its own duration", evs[i].ToolCallID)
+		assert.GreaterOrEqual(t, *evs[i].DurationMs, int64(0))
+		durations[evs[i].ToolCallID] = evs[i].DurationMs
+	}
+	require.Len(t, durations, 2)
+
+	for _, m := range end.Messages {
+		trm, ok := m.(*types.ToolResultMessage)
+		if !ok {
+			continue
+		}
+		require.NotNil(t, trm.DurationMs)
+		require.Contains(t, durations, trm.ToolCallID)
+		assert.Equal(t, *durations[trm.ToolCallID], *trm.DurationMs,
+			"each result message must carry its own call's duration")
+	}
+	assert.NotSame(t, durations["c1"], durations["c2"],
+		"parallel calls must not share one duration value")
 }

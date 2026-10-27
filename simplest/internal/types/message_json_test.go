@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,92 @@ func TestModelSupportsImage(t *testing.T) {
 	mWithImage := &Model{ID: "vision-model", Input: []string{"text", "image"}}
 	if !mWithImage.SupportsImage() {
 		t.Error("model with image in Input must support image")
+	}
+}
+
+func TestMessageCodecRoundTripRunMetadata(t *testing.T) {
+	assistantMs := int64(1234)
+	toolMs := int64(56)
+
+	rawAssistant, err := MarshalMessage(&AssistantMessage{
+		Content:       []AssistantContent{TextContent{Type: TypeText, Text: "hi"}},
+		API:           APIOpenAICompat,
+		Provider:      "p",
+		Model:         "m",
+		StopReason:    StopStop,
+		ThinkingLevel: ThinkingHigh,
+		DurationMs:    &assistantMs,
+		Timestamp:     2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawAssistant), `"thinkingLevel":"high"`) {
+		t.Fatalf("assistant thinkingLevel missing from wire form: %s", rawAssistant)
+	}
+	if !strings.Contains(string(rawAssistant), `"durationMs":1234`) {
+		t.Fatalf("assistant durationMs missing from wire form: %s", rawAssistant)
+	}
+
+	back, err := UnmarshalMessage(rawAssistant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	am := back.(*AssistantMessage)
+	if am.ThinkingLevel != ThinkingHigh {
+		t.Fatalf("thinkingLevel lost in round trip: %q", am.ThinkingLevel)
+	}
+	if am.DurationMs == nil || *am.DurationMs != assistantMs {
+		t.Fatalf("assistant durationMs lost in round trip: %v", am.DurationMs)
+	}
+
+	rawTool, err := MarshalMessage(&ToolResultMessage{
+		ToolCallID: "c1",
+		ToolName:   "bash",
+		Content:    json.RawMessage(`[{"type":"text","text":"out"}]`),
+		IsError:    false,
+		DurationMs: &toolMs,
+		Timestamp:  3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawTool), `"durationMs":56`) {
+		t.Fatalf("tool durationMs missing from wire form: %s", rawTool)
+	}
+	toolBack, err := UnmarshalMessage(rawTool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trm := toolBack.(*ToolResultMessage)
+	if trm.DurationMs == nil || *trm.DurationMs != toolMs {
+		t.Fatalf("tool durationMs lost in round trip: %v", trm.DurationMs)
+	}
+
+	// Absent metadata stays absent (omitempty).
+	rawPlain, err := MarshalMessage(&AssistantMessage{
+		Content:    []AssistantContent{},
+		StopReason: StopStop,
+		Timestamp:  4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawPlain), "thinkingLevel") || strings.Contains(string(rawPlain), "durationMs") {
+		t.Fatalf("unset metadata must be omitted: %s", rawPlain)
+	}
+
+	// Symmetric omission for a tool result without a duration.
+	rawPlainTool, err := MarshalMessage(&ToolResultMessage{
+		ToolCallID: "c1",
+		ToolName:   "bash",
+		Content:    json.RawMessage(`[]`),
+		Timestamp:  5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawPlainTool), "durationMs") {
+		t.Fatalf("unset tool durationMs must be omitted: %s", rawPlainTool)
 	}
 }

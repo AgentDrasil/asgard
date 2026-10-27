@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -412,6 +413,9 @@ func TestOpenAIMissingFinishReasonFails(t *testing.T) {
 	if errEv == nil || !strings.Contains(errEv.Message.ErrorMessage, "finish_reason") {
 		t.Fatalf("expected finish_reason error, got %+v", errEv)
 	}
+	if errEv.Message.Timestamp == 0 {
+		t.Fatal("error message must keep the creation timestamp")
+	}
 }
 
 func TestOpenAIReasoningDelta(t *testing.T) {
@@ -539,6 +543,113 @@ func TestOpenAIReasoningEffortThinkingLevelMap(t *testing.T) {
 	assert.Contains(t, errEv.Message.ErrorMessage, "unsupported reasoning effort \"minimal\"")
 }
 
+// gatedSSEServer sends first, flushes, then blocks until the returned release
+// func is called before sending the remaining payloads. This lets a test
+// observe the EvStart partial before the provider can reach stream end.
+func gatedSSEServer(t *testing.T, first string, rest []string, pathContains string) (*httptest.Server, func()) {
+	t.Helper()
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pathContains != "" && !strings.Contains(r.URL.Path, pathContains) {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		f := w.(http.Flusher)
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", first)
+		f.Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		for _, e := range rest {
+			_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", e)
+			f.Flush()
+		}
+	}))
+	t.Cleanup(func() {
+		unblock()
+		srv.Close()
+	})
+	return srv, unblock
+}
+
+// Timestamp must be stamped once when the assistant message is created
+// (request start), not replaced at stream end. The test blocks the HTTP
+// response after the first chunk so it can read EvStart before the provider
+// reaches the end-of-stream assignment.
+func TestProvidersStampTimestampAtStreamStart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("openai-compat", func(t *testing.T) {
+		t.Parallel()
+		srv, release := gatedSSEServer(t, `{"choices":[{"index":0,"delta":{"content":"x"}}]}`, []string{
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"[DONE]",
+		}, "/chat/completions")
+		defer release()
+
+		ch := NewOpenAICompat("k").Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil)
+		var start int64
+		var done *types.DoneEvent
+		var errEv *types.StreamErrorEvent
+		for ev := range ch {
+			switch e := ev.(type) {
+			case types.Partial:
+				if e.Kind == types.EvStart {
+					require.NotNil(t, e.Partial)
+					start = e.Partial.Timestamp
+					release()
+				}
+			case types.DoneEvent:
+				done = &e
+			case types.StreamErrorEvent:
+				errEv = &e
+			}
+		}
+		require.Nil(t, errEv)
+		require.NotNil(t, done)
+		assert.NotZero(t, start, "Timestamp must be set when the message is created")
+		assert.Equal(t, start, done.Message.Timestamp,
+			"the final message must keep the creation timestamp")
+	})
+
+	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
+		srv, release := gatedSSEServer(t, `{"candidates":[{"content":{"parts":[{"text":"x"}]}}]}`, []string{
+			`{"candidates":[{"content":{"parts":[{"text":"y"}]},"finishReason":"STOP"}]}`,
+		}, ":streamGenerateContent")
+		defer release()
+
+		ch := NewGemini("g-key").Stream(context.Background(), gModel(srv.URL), simpleContext(), nil)
+		var start int64
+		var done *types.DoneEvent
+		var errEv *types.StreamErrorEvent
+		for ev := range ch {
+			switch e := ev.(type) {
+			case types.Partial:
+				if e.Kind == types.EvStart {
+					require.NotNil(t, e.Partial)
+					start = e.Partial.Timestamp
+					release()
+				}
+			case types.DoneEvent:
+				done = &e
+			case types.StreamErrorEvent:
+				errEv = &e
+			}
+		}
+		require.Nil(t, errEv)
+		require.NotNil(t, done)
+		assert.NotZero(t, start, "Timestamp must be set when the message is created")
+		assert.Equal(t, start, done.Message.Timestamp,
+			"the final message must keep the creation timestamp")
+	})
+}
+
 // --- Google Generative AI ---
 
 func gChunks(events ...string) []string { return events }
@@ -634,6 +745,9 @@ func TestGeminiNoFinishReasonFails(t *testing.T) {
 	_, _, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv == nil || !strings.Contains(errEv.Message.ErrorMessage, "without a finish reason") {
 		t.Fatalf("expected no-finish-reason error, got %+v", errEv)
+	}
+	if errEv.Message.Timestamp == 0 {
+		t.Fatal("error message must keep the creation timestamp")
 	}
 }
 

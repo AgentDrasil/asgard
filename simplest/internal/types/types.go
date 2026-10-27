@@ -134,7 +134,13 @@ type AssistantMessage struct {
 	ErrorMessage  string             `json:"errorMessage,omitempty"`
 	RawStopReason string             `json:"rawStopReason,omitempty"`
 	EndTurn       *bool              `json:"endTurn,omitempty"`
-	Timestamp     int64              `json:"timestamp"` // unix millis
+	// ThinkingLevel records the thinking level requested for this response
+	// (ThinkingOff when none was requested).
+	ThinkingLevel ThinkingLevel `json:"thinkingLevel,omitempty"`
+	// DurationMs is the provider request duration in milliseconds (pi
+	// 36a686ee8).
+	DurationMs *int64 `json:"durationMs,omitempty"`
+	Timestamp  int64  `json:"timestamp"` // unix millis
 }
 
 func (m *AssistantMessage) MessageRole() Role { return RoleAssistant }
@@ -147,7 +153,10 @@ type ToolResultMessage struct {
 	Details    json.RawMessage `json:"details,omitempty"`
 	Usage      *Usage          `json:"usage,omitempty"`
 	IsError    bool            `json:"isError"`
-	Timestamp  int64           `json:"timestamp"` // unix millis
+	// DurationMs is the tool Execute duration in milliseconds, excluding
+	// hooks; nil when the tool did not run (pi 36a686ee8).
+	DurationMs *int64 `json:"durationMs,omitempty"`
+	Timestamp  int64  `json:"timestamp"` // unix millis
 }
 
 func (m *ToolResultMessage) MessageRole() Role { return RoleToolResult }
