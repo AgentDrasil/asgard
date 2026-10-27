@@ -294,6 +294,18 @@ func TestCompactionContext(t *testing.T) {
 	if text != want {
 		t.Fatalf("summary framing mismatch:\n%q\n%q", text, want)
 	}
+	var allTexts []string
+	for _, m := range ctx.Messages {
+		switch v := m.(type) {
+		case *types.UserMessage:
+			allTexts = append(allTexts, types.StringContentOf(mustDecode(t, v.Content)))
+		case *types.AssistantMessage:
+			allTexts = append(allTexts, types.StringContentOf(v.Content))
+		}
+	}
+	if n := strings.Count(strings.Join(allTexts, "\n"), CompactionSummaryPrefix); n != 1 {
+		t.Fatalf("single compaction must emit exactly one summary, got %d", n)
+	}
 	mid := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
 	if mid != "kept" {
 		t.Fatalf("kept user lost, got %q", mid)
@@ -2119,4 +2131,193 @@ func TestSession_NullContentMessages(t *testing.T) {
 	toolBlocks, err := types.DecodeToolResultContent(toolResult.Content)
 	require.NoError(t, err)
 	assert.Empty(t, toolBlocks)
+}
+
+// Only the newest compaction contributes a summary; older compaction entries
+// retained inside its kept range project to zero messages (upstream
+// buildSessionProjection).
+func TestSession_Compaction_OnlyNewestProjects(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/proj")
+
+	u1, err := sf.AppendMessage(testUser("u1"))
+	require.NoError(t, err)
+	c1, err := sf.AppendCompaction("summary one", u1, 100, nil, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, c1)
+	_, err = sf.AppendMessage(testUser("u2"))
+	require.NoError(t, err)
+
+	// c2's kept range reaches back before c1, so c1 survives in the kept range.
+	c2, err := sf.AppendCompaction("summary two", u1, 200, nil, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, c2)
+	_, err = sf.AppendMessage(testUser("u3"))
+	require.NoError(t, err)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 4, "want [newest summary, u1, u2, u3]")
+
+	var texts []string
+	for _, m := range ctx.Messages {
+		u, ok := m.(*types.UserMessage)
+		require.True(t, ok, "expected user messages, got %T", m)
+		texts = append(texts, types.StringContentOf(mustDecode(t, u.Content)))
+	}
+
+	all := strings.Join(texts, "\n")
+	assert.Equal(t, 1, strings.Count(all, CompactionSummaryPrefix),
+		"exactly one compaction summary must be projected")
+	assert.Contains(t, texts[0], "summary two")
+	assert.NotContains(t, texts[0], "summary one")
+	assert.Equal(t, []string{"u1", "u2", "u3"}, texts[1:])
+}
+
+// A kept-range system-role message (foreign role) stays out of provider
+// context without breaking projection.
+func TestSession_Compaction_KeptSystemMessageSkipped(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf := mgr.InMemory("/proj")
+
+	u1, err := sf.AppendMessage(testUser("u1"))
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(&types.ForeignMessage{
+		Role: "system",
+		Raw:  json.RawMessage(`{"role":"system","content":"SYSTEM-BOUNDARY-MARKER"}`),
+	})
+	require.NoError(t, err)
+	_, err = sf.AppendCompaction("summary", u1, 10, nil, false)
+	require.NoError(t, err)
+	_, err = sf.AppendMessage(testUser("u2"))
+	require.NoError(t, err)
+
+	ctx, err := sf.BuildContext("")
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 3)
+
+	var texts []string
+	for _, m := range ctx.Messages {
+		u, ok := m.(*types.UserMessage)
+		require.True(t, ok)
+		texts = append(texts, types.StringContentOf(mustDecode(t, u.Content)))
+	}
+	assert.Contains(t, texts[0], "summary")
+	assert.Equal(t, []string{"u1", "u2"}, texts[1:])
+	assert.NotContains(t, strings.Join(texts, "\n"), "SYSTEM-BOUNDARY-MARKER")
+}
+
+// Compaction systemMessage/details round-trip through append, load, and a full
+// session rewrite; the system message is not projected into model context yet.
+func TestSession_CompactionEntry_ExtrasRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("old"))
+	require.NoError(t, err)
+
+	usage := &types.Usage{Input: 5, Output: 2, TotalTokens: 7}
+	systemMessage := json.RawMessage(`{"role":"system","api":"openai-completions","provider":"p","model":"m","content":[{"type":"text","text":"SYSTEM-BOUNDARY-MARKER"}]}`)
+	details := json.RawMessage(`{"kind":"structured","version":2}`)
+
+	compID, err := sf.AppendCompactionEntry("summary of old", "", 42, usage, true, systemMessage, details)
+	require.NoError(t, err)
+	require.NotEmpty(t, compID)
+	_, err = sf.AppendMessage(testUser("after"))
+	require.NoError(t, err)
+
+	assertCompactionExtras := func(t *testing.T, e *Entry) {
+		t.Helper()
+		require.NotNil(t, e)
+		assert.Equal(t, TypeCompaction, e.Type)
+		assert.Equal(t, int64(42), e.TokensBefore)
+		assert.True(t, e.FromHook)
+		require.NotNil(t, e.Usage)
+		assert.Equal(t, int64(5), e.Usage.Input)
+		assert.JSONEq(t, string(systemMessage), string(e.SystemMessage))
+		assert.JSONEq(t, string(details), string(e.Details))
+	}
+
+	assertCompactionExtras(t, sf.GetEntry(compID))
+
+	// Raw file contains both extra fields.
+	data, err := os.ReadFile(sf.Path())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"systemMessage":`)
+	assert.Contains(t, string(data), `"details":`)
+
+	// LoadFile preserves them.
+	_, loaded, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	var loadedComp *Entry
+	for _, e := range loaded {
+		if e.ID == compID {
+			loadedComp = e
+		}
+	}
+	assertCompactionExtras(t, loadedComp)
+
+	// A full rewrite followed by reload preserves them too.
+	sf.mu.Lock()
+	err = sf.rewriteLocked()
+	sf.mu.Unlock()
+	require.NoError(t, err)
+
+	_, rewritten, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	var rewrittenComp *Entry
+	for _, e := range rewritten {
+		if e.ID == compID {
+			rewrittenComp = e
+		}
+	}
+	assertCompactionExtras(t, rewrittenComp)
+
+	// The summary is projected; the systemMessage is not.
+	ctx, err := BuildContext(rewritten, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+	summary := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
+	assert.Contains(t, summary, "summary of old")
+	assert.NotContains(t, summary, "SYSTEM-BOUNDARY-MARKER")
+	after := types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content))
+	assert.Equal(t, "after", after)
+}
+
+// A pi-written compaction entry with systemMessage/details loads intact.
+func TestSession_CompactionEntry_PiShapeLoad(t *testing.T) {
+	t.Parallel()
+
+	compLine := `{"type":"compaction","id":"comp-1","parentId":"msg-1","timestamp":"2026-10-27T00:00:02Z",` +
+		`"summary":"pi summary","firstKeptEntryId":"msg-1","tokensBefore":99,"fromHook":true,` +
+		`"systemMessage":{"role":"system","content":[{"type":"text","text":"PI-SYSTEM-MARKER"}]},` +
+		`"details":{"artifact":{"idx":1}}}`
+	path := writeSessionJSONL(t, usageFormatHeader, usageFormatMessage, compLine)
+
+	_, entries, err := LoadFile(path)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	comp := entries[1]
+	assert.Equal(t, TypeCompaction, comp.Type)
+	assert.Equal(t, "pi summary", comp.Summary)
+	assert.Equal(t, "msg-1", comp.FirstKeptEntryID)
+	assert.Equal(t, int64(99), comp.TokensBefore)
+	assert.True(t, comp.FromHook)
+	assert.JSONEq(t, `{"role":"system","content":[{"type":"text","text":"PI-SYSTEM-MARKER"}]}`, string(comp.SystemMessage))
+	assert.JSONEq(t, `{"artifact":{"idx":1}}`, string(comp.Details))
+
+	ctx, err := BuildContext(entries, nil)
+	require.NoError(t, err)
+	require.Len(t, ctx.Messages, 2)
+	summary := types.StringContentOf(mustDecode(t, ctx.Messages[0].(*types.UserMessage).Content))
+	assert.Contains(t, summary, "pi summary")
+	assert.NotContains(t, summary, "PI-SYSTEM-MARKER")
+	assert.Equal(t, "hello", types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content)))
 }

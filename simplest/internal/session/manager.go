@@ -428,8 +428,18 @@ func (sf *SessionFile) AppendModelChange(provider, modelID string) (string, erro
 }
 
 // AppendCompaction records a compaction covering everything before
-// firstKeptEntryID.
+// firstKeptEntryID. It is a compatibility wrapper around AppendCompactionEntry;
+// callers with boundary system state or extension details should use
+// AppendCompactionEntry.
 func (sf *SessionFile) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int64, usage *types.Usage, fromHook bool) (string, error) {
+	return sf.AppendCompactionEntry(summary, firstKeptEntryID, tokensBefore, usage, fromHook, nil, nil)
+}
+
+// AppendCompactionEntry records a compaction with the upstream systemMessage
+// (complete prompt/tool state at the boundary) and details (extension data).
+// Both are round-tripped but systemMessage is not projected into model context
+// yet.
+func (sf *SessionFile) AppendCompactionEntry(summary, firstKeptEntryID string, tokensBefore int64, usage *types.Usage, fromHook bool, systemMessage, details json.RawMessage) (string, error) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.appendAutoParentLocked(&Entry{
@@ -439,6 +449,8 @@ func (sf *SessionFile) AppendCompaction(summary, firstKeptEntryID string, tokens
 		TokensBefore:     tokensBefore,
 		Usage:            usage,
 		FromHook:         fromHook,
+		SystemMessage:    systemMessage,
+		Details:          details,
 	})
 }
 

@@ -72,6 +72,11 @@ type Entry struct {
 	TokensBefore     int64        `json:"tokensBefore,omitempty"`
 	Usage            *types.Usage `json:"usage,omitempty"`
 	FromHook         bool         `json:"fromHook,omitempty"`
+	// TypeCompaction only: complete prompt/tool state at the compaction
+	// boundary. Round-tripped for upstream compatibility but not projected into
+	// model context yet (providers do not support mid-conversation system
+	// messages).
+	SystemMessage json.RawMessage `json:"systemMessage,omitempty"`
 	// TypeBranchSummary only.
 	FromID string `json:"fromId,omitempty"`
 	// TypeCustom / TypeCustomMessage.
@@ -374,6 +379,10 @@ func SessionEntryToContextMessages(e *Entry) ([]types.Message, error) {
 		}
 		return []types.Message{summaryUserMessage(BranchSummaryPrefix+e.Summary+BranchSummarySuffix, e.Timestamp)}, nil
 	case TypeCompaction:
+		// Only the summary contributes model context. Entry.SystemMessage is
+		// round-tripped for upstream compatibility but intentionally not
+		// projected: providers do not support mid-conversation system messages
+		// yet (B16).
 		return []types.Message{summaryUserMessage(CompactionSummaryPrefix+e.Summary+CompactionSummarySuffix, e.Timestamp)}, nil
 	case TypeUsage, TypeContextEdit:
 		return nil, nil
@@ -542,7 +551,15 @@ func buildContextFromEntries(entries []*Entry, byID map[string]*Entry, leafID *s
 	// now keeps it sensible when no assistant message exists on the path.
 	lastAssistantTS := time.Now().UnixMilli()
 
-	for _, e := range selected {
+	for i, e := range selected {
+		// The newest compaction is always first in selected. Older compaction
+		// entries can remain inside its kept range; upstream projects only the
+		// newest one (buildSessionProjection), so they contribute no messages.
+		if i > 0 && e.Type == TypeCompaction {
+			continue
+		}
+		// System-role messages (and all other foreign roles) are skipped by
+		// SessionEntryToContextMessages; they never reach provider context.
 		msgs, err := SessionEntryToContextMessages(e)
 		if err != nil {
 			return Context{}, err
