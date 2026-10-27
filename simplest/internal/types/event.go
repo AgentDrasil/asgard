@@ -22,7 +22,11 @@ const (
 	EvStreamError   AssistantMessageEventKind = "error"
 )
 
-// Partial is embedded in every non-terminal assistant stream event.
+// Partial is embedded in every non-terminal assistant stream event. For
+// toolcall_delta events, ToolCall.Arguments is a best-effort snapshot that
+// may lag Delta (partial parses are throttled for large arguments); the
+// toolcall_end partial and the final DoneEvent message carry the exact,
+// strict-parsed arguments.
 type Partial struct {
 	Kind         AssistantMessageEventKind `json:"type"`
 	ContentIndex int                       `json:"contentIndex"`

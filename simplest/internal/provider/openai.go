@@ -346,11 +346,83 @@ func mapFinishReason(reason string) (types.StopReason, string) {
 
 // toolAccum tracks one in-flight tool call block.
 type toolAccum struct {
-	contentIdx  int
-	id          string
-	name        string
-	partialArgs string
+	contentIdx int
+	id         string
+	name       string
+	args       toolArgAccumulator
 }
+
+// throttleBytes is the minimum accumulated growth between throttled reparses
+// of partial tool-call arguments.
+const throttleBytes = 1024
+
+// toolArgAccumulator accumulates tool-call argument text and throttles
+// re-parsing of the partial JSON. Parsing the whole accumulated string on
+// every SSE delta is quadratic in CPU and allocation for large arguments
+// (pi f715a15c1); instead a reparse happens only when no parse has happened
+// yet, when the accumulated bytes since the last parse reach throttleBytes,
+// or when the delta contains a shape-changing byte. Shape detection is
+// incremental and string-aware: bytes inside JSON string values (braces,
+// colons, commas — the bulk of real `write`-style arguments) are content,
+// not triggers; only unescaped quotes and structural bytes outside strings
+// trigger. Escape state (esc, inStr) carries across delta boundaries so a
+// split `\` escape cannot desync. The cached parse is best-effort and may lag
+// between reparses; the final toolcall_end/Done arguments come from the
+// strict parser (parseToolCallArguments) and are exact.
+type toolArgAccumulator struct {
+	b            strings.Builder
+	cached       json.RawMessage
+	lastParseLen int
+	parseCount   int
+	inStr        bool // inside a JSON string value
+	esc          bool // previous byte was a backslash inside a string
+}
+
+// append adds a delta and returns the (possibly stale) cached partial parse
+// plus whether a reparse happened. Empty deltas never parse.
+func (a *toolArgAccumulator) append(delta string) (json.RawMessage, bool) {
+	if delta == "" {
+		return a.cached, false
+	}
+	a.b.WriteString(delta)
+	structural := false
+	for i := 0; i < len(delta); i++ {
+		c := delta[i]
+		switch {
+		case a.esc:
+			// The escaped byte cannot change shape.
+			a.esc = false
+		case a.inStr:
+			switch c {
+			case '\\':
+				a.esc = true
+			case '"':
+				a.inStr = false
+				structural = true
+			}
+		default:
+			switch c {
+			case '"':
+				a.inStr = true
+				structural = true
+			case '{', '}', '[', ']', ',', ':':
+				structural = true
+			}
+		}
+	}
+	reparse := a.parseCount == 0 || structural || a.b.Len()-a.lastParseLen >= throttleBytes
+	if !reparse {
+		return a.cached, false
+	}
+	a.cached = parseStreamingJSON(a.b.String())
+	a.lastParseLen = a.b.Len()
+	a.parseCount++
+	return a.cached, true
+}
+
+// rawString returns the accumulated arguments text for final strict parsing.
+// strings.Builder.String is O(1), so materialization is not an extra copy.
+func (a *toolArgAccumulator) rawString() string { return a.b.String() }
 
 // parseStreamingJSON best-effort parses a possibly-truncated JSON object by
 // appending missing closers so partial arguments can still be displayed
@@ -628,11 +700,14 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 						em.out.Content[acc.contentIdx] = tc
 					}
 					if tcd.Function.Arguments != "" {
-						acc.partialArgs += tcd.Function.Arguments
+						// argsSoFar is best-effort and may lag between throttled
+						// reparses (pi f715a15c1); the event still carries the raw
+						// delta, and final toolcall_end/Done args are exact.
+						args, _ := acc.args.append(tcd.Function.Arguments)
 						tc := em.out.Content[acc.contentIdx].(types.ToolCall)
-						tc.Arguments = parseStreamingJSON(acc.partialArgs)
+						tc.Arguments = args
 						em.out.Content[acc.contentIdx] = tc
-						em.toolCallDelta(acc.contentIdx, tcd.Function.Arguments, tc.Arguments)
+						em.toolCallDelta(acc.contentIdx, tcd.Function.Arguments, args)
 					}
 				}
 			}
@@ -647,7 +722,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			// text) so tool validation can report it back to the model. The
 			// streaming heuristic is only for in-flight display, never the
 			// final result.
-			tc.Arguments, tc.ArgumentsError = parseToolCallArguments(acc.partialArgs)
+			tc.Arguments, tc.ArgumentsError = parseToolCallArguments(acc.args.rawString())
 			em.out.Content[acc.contentIdx] = tc
 			em.toolCallEnd(acc.contentIdx)
 		}

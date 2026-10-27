@@ -774,6 +774,237 @@ func TestParseStreamingJSONRepairsTruncation(t *testing.T) {
 	}
 }
 
+// codeLine returns one line of realistic Go code — braces, colons, commas,
+// and quotes that arrive JSON-escaped inside a string argument value, the
+// shape of real `write`-style tool calls.
+func codeLine(i int) string {
+	return fmt.Sprintf("func f%d() { m := map[string]int{\"a\": %d, \"b\": 2 } } // {},:\n", i, i)
+}
+
+// envelopeEscape JSON-encodes s for embedding as a JSON string value (e.g.
+// an SSE arguments fragment), without the surrounding quotes.
+func envelopeEscape(s string) string {
+	enc, err := json.Marshal(s)
+	if err != nil {
+		return s
+	}
+	out := string(enc)
+	// Strip exactly the two surrounding quotes json.Marshal added. Trim with
+	// a `"` cutset would also eat quote characters belonging to escaped
+	// sequences (e.g. a piece ending in `\"`), corrupting the payload.
+	out = strings.TrimPrefix(out, `"`)
+	out = strings.TrimSuffix(out, `"`)
+	return out
+}
+
+// Port of pi f715a15c1: partial tool-call arguments must not be re-parsed on
+// every SSE delta (quadratic for large writes); reparses are throttled to the
+// first delta, large accumulated growth, or shape-changing deltas. Bytes that
+// merely look structural inside JSON string values must not trigger.
+func TestToolArgAccumulatorThrottlesParsing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("first delta always parses", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		args, reparsed := acc.append(`{"cmd":"ls"`)
+		require.True(t, reparsed)
+		assert.Equal(t, 1, acc.parseCount)
+		require.NotNil(t, args)
+		assert.JSONEq(t, `{"cmd":"ls"}`, string(args))
+	})
+
+	t.Run("empty delta never parses", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		_, reparsed := acc.append("")
+		assert.False(t, reparsed)
+		assert.Equal(t, 0, acc.parseCount)
+	})
+
+	t.Run("structural deltas outside strings force a reparse", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		acc.append(`{"a":`)            // first parse (nil: no value yet)
+		_, reparsed := acc.append("1") // no structural byte -> cached, no parse
+		require.False(t, reparsed)
+		assert.Equal(t, 1, acc.parseCount)
+
+		args, reparsed := acc.append(`,"b":2}`) // structural -> reparse
+		require.True(t, reparsed)
+		assert.Equal(t, 2, acc.parseCount)
+		assert.JSONEq(t, `{"a":1,"b":2}`, string(args))
+	})
+
+	t.Run("structural bytes inside a string value do not trigger", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		head, mid, tail := `{"code":"`, `{},{::,[[}}`, `"}`
+		acc.append(head) // first parse
+		// Pure look-structural content inside the string value: under a naive
+		// ContainsAny trigger this would reparse.
+		_, reparsed := acc.append(mid)
+		assert.False(t, reparsed, "content inside a string must not trigger a reparse")
+		assert.Equal(t, 1, acc.parseCount)
+
+		args, reparsed := acc.append(tail) // closing quote + object close
+		require.True(t, reparsed)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(args, &decoded))
+		assert.Equal(t, mid, decoded["code"])
+	})
+
+	t.Run("escaped quote inside a string does not end it", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		acc.append(`{"s":"a\"`)           // first parse; trailing \" leaves esc set
+		_, reparsed := acc.append(`b"`)   // esc carried: b content, quote closes
+		require.True(t, reparsed)         // closing quote is a trigger
+		args, reparsed := acc.append(`}`) // object close
+		require.True(t, reparsed)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(args, &decoded))
+		assert.Equal(t, `a"b`, decoded["s"])
+	})
+	t.Run("split backslash escape across delta boundary", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		head, d2, d3 := `{"a":"x\`, `"{`, `"}`
+		acc.append(head) // first parse; esc set by trailing backslash
+		// The leading quote of d2 is escaped (the string stays open), so the
+		// braces inside the value are content: no reparse.
+		_, reparsed := acc.append(d2)
+		assert.False(t, reparsed, `escaped \" must not end the string; { inside string must not trigger`)
+		assert.Equal(t, 1, acc.parseCount)
+
+		args, reparsed := acc.append(d3) // quote ends string, then object close
+		require.True(t, reparsed)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(args, &decoded))
+		assert.Equal(t, `x"{`, decoded["a"])
+	})
+
+	t.Run("code-like content is throttled to growth thresholds", func(t *testing.T) {
+		t.Parallel()
+
+		var acc toolArgAccumulator
+		const lines = 512
+		var content strings.Builder // raw text the arguments decode to
+		var wire strings.Builder    // escaped text as it travels in the deltas
+		args, _ := acc.append(`{"path":"main.go","content":"`)
+		require.NotNil(t, args)
+		for i := 0; i < lines; i++ {
+			line := codeLine(i)
+			content.WriteString(line)
+			enc, err := json.Marshal(line) // JSON-escaped wire form
+			require.NoError(t, err)
+			escaped := strings.TrimSuffix(strings.TrimPrefix(string(enc), `"`), `"`)
+			wire.WriteString(escaped)
+			acc.append(escaped) // escaped quotes/newlines: no shape change
+		}
+		args, _ = acc.append(`"}`) // structural close -> final reparse
+
+		// Bound with slack: initial + final + one reparse per throttleBytes of
+		// growth. Content lines must not add a single reparse.
+		maxParses := 3 + wire.Len()/throttleBytes
+		assert.LessOrEqual(t, acc.parseCount, maxParses)
+		assert.Less(t, acc.parseCount, lines/4, "throttle must beat per-delta parsing")
+		assert.GreaterOrEqual(t, acc.parseCount, 2, "initial and final parses must have happened")
+
+		require.NotNil(t, args)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(args, &decoded))
+		assert.Equal(t, "main.go", decoded["path"])
+		assert.Equal(t, content.String(), decoded["content"])
+	})
+}
+
+// Port of pi f715a15c1 (correctness side): large code-like tool-call
+// arguments streamed in many chunks must produce exact final arguments with
+// no argumentsError, and every delta must still be emitted. Chunks split the
+// full arguments text at arbitrary byte boundaries (including mid-escape),
+// envelope-escaped like a real server would.
+func TestOpenAIStreamLargeToolCallArgumentsExact(t *testing.T) {
+	t.Parallel()
+
+	const chunkCount = 512
+	var content strings.Builder // raw text the arguments decode to
+	var wire strings.Builder    // escaped text as it travels in the deltas
+	for i := 0; i < chunkCount; i++ {
+		line := codeLine(i)
+		content.WriteString(line)
+		enc, err := json.Marshal(line) // JSON-escaped wire form
+		require.NoError(t, err)
+		wire.WriteString(strings.TrimSuffix(strings.TrimPrefix(string(enc), `"`), `"`))
+	}
+	// The finished arguments text: a valid JSON object whose content value
+	// carries the escaped code lines.
+	argsText := `{"path":"main.go","content":"` + wire.String() + `"}`
+
+	// Split the finished arguments text into ~64-byte pieces at arbitrary
+	// boundaries — escape sequences and all — like a real provider stream.
+	var pieces []string
+	for i := 0; i < len(argsText); i += 64 {
+		end := i + 64
+		if end > len(argsText) {
+			end = len(argsText)
+		}
+		pieces = append(pieces, argsText[i:end])
+	}
+
+	chunks := []string{
+		`{"id":"chatcmpl-big","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_big","function":{"name":"write","arguments":"` + envelopeEscape(pieces[0]) + `"}}]}}]}`,
+	}
+	for _, piece := range pieces[1:] {
+		chunks = append(chunks, `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"`+envelopeEscape(piece)+`"}}]}}]}`)
+	}
+	chunks = append(chunks,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	)
+	var captured map[string]any
+	srv := sseServer(t, chunks, &captured, nil, "/chat/completions")
+	t.Cleanup(srv.Close)
+
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	assert.Equal(t, types.StopToolUse, done.Reason)
+
+	var toolCall types.ToolCall
+	deltaCount := 0
+	for _, ev := range evs {
+		if pEv, ok := ev.(types.Partial); ok {
+			switch pEv.Kind {
+			case types.EvToolcallDelta:
+				deltaCount++
+			case types.EvToolcallEnd:
+				// The final toolcall_end partial must already carry the exact
+				// (strict-parsed) arguments.
+				require.NotNil(t, pEv.Partial)
+				for _, blk := range pEv.Partial.Content {
+					if tc, ok := blk.(types.ToolCall); ok && tc.ID == "call_big" {
+						toolCall = tc
+					}
+				}
+			}
+		}
+	}
+	// One delta per argument-bearing SSE chunk.
+	assert.Equal(t, len(pieces), deltaCount)
+
+	require.Equal(t, "write", toolCall.Name)
+	assert.Empty(t, toolCall.ArgumentsError)
+	assert.Equal(t, argsText, string(toolCall.Arguments))
+}
+
 func TestOpenAI_BeforeProviderRequest_PerAttempt(t *testing.T) {
 	t.Parallel()
 
