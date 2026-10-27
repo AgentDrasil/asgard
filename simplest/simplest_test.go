@@ -1,6 +1,10 @@
 package simplest_test
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,4 +70,44 @@ func TestModelCompatAliasIsPublicSurface(t *testing.T) {
 	if m.Compat == nil || m.Compat.MaxTokensField != "max_tokens" {
 		t.Fatalf("compat alias broken: %+v", m.Compat)
 	}
+}
+
+// TestSetClientUserAgent_PublicSurface locks the public identity surface:
+// an embedder can set the default client User-Agent via the facade setter,
+// and provider requests then carry it.
+func TestSetClientUserAgent_PublicSurface(t *testing.T) {
+	// Serial: mutates the package-level UA override.
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", `{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+		_, _ = fmt.Fprintf(w, "data: %s\r\n\r\n", "[DONE]")
+	}))
+	defer srv.Close()
+
+	simplest.SetClientUserAgent("test-agent/1")
+	t.Cleanup(func() { simplest.SetClientUserAgent("") })
+
+	p := simplest.NewOpenAICompat("sk-test")
+	m := &simplest.Model{
+		ID: "m", Name: "M", API: simplest.APIOpenAICompat, Provider: "p",
+		BaseURL: srv.URL, ContextWindow: 128000, MaxTokens: 4096,
+		Cost: simplest.ModelCost{ModelCostRates: simplest.ModelCostRates{Input: 1, Output: 1}},
+	}
+	cx := &simplest.Context{
+		Messages: []simplest.Message{
+			&simplest.UserMessage{Content: simplest.TextOnly("hi"), Timestamp: 1},
+		},
+	}
+	for ev := range p.Stream(context.Background(), m, cx, nil) {
+		if _, isErr := ev.(simplest.StreamErrorEvent); isErr {
+			t.Fatalf("stream error: %+v", ev)
+		}
+	}
+	require.Equal(t, "test-agent/1", gotUA)
 }

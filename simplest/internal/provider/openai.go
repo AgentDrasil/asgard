@@ -693,9 +693,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 		}
 		url := strings.TrimRight(base, "/") + "/chat/completions"
 		headers := map[string]string{"Authorization": "Bearer " + key}
-		for k, v := range model.Headers {
-			headers[k] = v
-		}
+		applyUserAgent(headers, model.Headers)
 		var policy *types.RetryPolicy
 		var beforeReq func(req *http.Request, body []byte) ([]byte, error)
 		var onStreamEvent func(rawEvent string, rawData []byte)

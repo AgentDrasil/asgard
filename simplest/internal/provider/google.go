@@ -357,9 +357,10 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			return
 		}
 		cc := &genai.ClientConfig{
-			APIKey:     key,
-			Backend:    genai.BackendGeminiAPI,
-			HTTPClient: p.client(),
+			APIKey:      key,
+			Backend:     genai.BackendGeminiAPI,
+			HTTPClient:  p.client(),
+			HTTPOptions: genai.HTTPOptions{Headers: genaiHeaders(model.Headers)},
 		}
 		if model.BaseURL != "" {
 			cc.HTTPOptions.BaseURL = model.BaseURL

@@ -106,6 +106,9 @@ var (
 	// Context-overflow detection (pi 73f8de80b).
 	IsContextOverflowError   = provider.IsContextOverflowError
 	IsContextOverflowMessage = provider.IsContextOverflowMessage
+
+	// Default client identity (pi adc5fa9f8).
+	SetClientUserAgent = provider.SetClientUserAgent
 )
 
 // ---- tools ----
