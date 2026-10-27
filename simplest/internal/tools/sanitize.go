@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"io"
 	"regexp"
 	"strings"
@@ -26,12 +27,21 @@ var ansiSequenceRe = regexp.MustCompile(
 // are preserved.
 var controlRe = regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\r\x{FFF9}-\x{FFFB}]`)
 
+// utf8BOM is the UTF-8 encoding of U+FEFF.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// Port of pi 005af57d8: TextDecoder strips one leading BOM; i.e. exactly one
+// leading U+FEFF at the very start of the decoded stream is removed, before
+// ANSI/control sanitization. A BOM after any other decoded byte (text or an
+// ANSI escape) is kept, and a BOM split across writes is still recognized.
+
 // sanitizingWriter is an io.Writer that strips ANSI escape sequences, control
 // bytes, and carriage returns from command output before it reaches the
 // accumulator, handling escape sequences and UTF-8 runes split across writes.
 type sanitizingWriter struct {
 	dst     io.Writer
 	pending []byte // held-back incomplete UTF-8 tail + incomplete ANSI sequence
+	started bool   // whether any non-BOM bytes have been decoded from the stream
 }
 
 func newSanitizingWriter(dst io.Writer) *sanitizingWriter {
@@ -48,6 +58,19 @@ func (w *sanitizingWriter) Write(p []byte) (int, error) {
 	buf := append(make([]byte, 0, len(w.pending)+len(p)), w.pending...)
 	buf = append(buf, p...)
 	w.pending = w.pending[:0]
+
+	// Strip a single leading BOM from the first decoded bytes. A combined
+	// buffer that is still a proper BOM prefix (held back below as an
+	// incomplete rune) waits for the next write. Once anything other than a
+	// BOM prefix has been decoded, the stream is "started" and BOMs are kept.
+	if !w.started {
+		if bytes.HasPrefix(buf, utf8BOM) {
+			buf = buf[len(utf8BOM):]
+			w.started = true
+		} else if !bytes.HasPrefix(utf8BOM, buf) {
+			w.started = true
+		}
+	}
 
 	// Streaming UTF-8 decode: hold back a trailing incomplete rune, decode
 	// invalid bytes as U+FFFD (TextDecoder semantics).

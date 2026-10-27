@@ -135,6 +135,34 @@ func TestSanitizeSplitMultibyteRune(t *testing.T) {
 	}
 }
 
+func TestSanitizeLeadingBOM(t *testing.T) {
+	// Port of pi 005af57d8: TextDecoder strips exactly one leading U+FEFF
+	// from the decoded stream; a BOM later in the stream is kept.
+	bom := "\xef\xbb\xbf"
+	tests := []struct {
+		name   string
+		chunks []string
+		want   string
+	}{
+		{"leading BOM stripped", []string{bom + "hello"}, "hello"},
+		{"BOM split 2+1", []string{"\xef\xbb", "\xbfhello"}, "hello"},
+		{"BOM split 1+2", []string{"\xef", "\xbb\xbfhello"}, "hello"},
+		{"BOM only yields empty", []string{bom}, ""},
+		{"empty first write then BOM", []string{"", bom + "hi"}, "hi"},
+		{"BOM after text preserved", []string{"hi" + bom + "x"}, "hi" + bom + "x"},
+		{"BOM after ANSI preserved", []string{"\x1b[31m", bom + "x"}, bom + "x"},
+		{"leading BOM then ANSI stripped", []string{bom + "\x1b[31mred\x1b[0m"}, "red"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sanitizeAll(t, tt.chunks); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeCombinedChunkWithSplitANSIAndRune(t *testing.T) {
 	// Sequence split and rune split in the same write pair, with output
 	// between them.

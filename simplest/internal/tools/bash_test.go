@@ -166,6 +166,17 @@ func TestBashToolSanitizesANSIAndBinaryOutput(t *testing.T) {
 			command: `printf '1%%\r2%%\r3%%\n'`,
 			wantSub: []string{"3%"},
 		},
+		{
+			// Port of pi 005af57d8: a single leading BOM is stripped.
+			name:    "leading BOM stripped",
+			command: `printf '\357\273\277hello'`,
+			want:    "hello",
+		},
+		{
+			name:    "BOM only means no output",
+			command: `printf '\357\273\277'`,
+			want:    "(no output)",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
