@@ -2479,3 +2479,212 @@ func TestOpenAIDropsCrossModelThinkingToolOnly(t *testing.T) {
 	assert.Empty(t, msgs[0].ReasoningContent)
 	require.Len(t, msgs[0].ToolCalls, 1)
 }
+
+// --- B25: OpenAI-compat request options (pi 005af57d8) ---
+
+func TestOpenAICompatMaxTokensField(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		compat   *types.ModelCompat
+		wantKey  string
+		otherKey string
+	}{
+		{name: "default uses max_completion_tokens", compat: nil, wantKey: "max_completion_tokens", otherKey: "max_tokens"},
+		{name: "max_tokens field", compat: &types.ModelCompat{MaxTokensField: "max_tokens"}, wantKey: "max_tokens", otherKey: "max_completion_tokens"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var captured map[string]any
+			srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+			defer srv.Close()
+			m := oaModel(srv.URL)
+			m.Compat = tc.compat
+			mt := int64(777)
+			p := NewOpenAICompat("k")
+			_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), &types.StreamOptions{MaxTokens: &mt}))
+			if errEv != nil {
+				t.Fatal(errEv.Message.ErrorMessage)
+			}
+			if captured[tc.wantKey] != float64(777) {
+				t.Fatalf("expected %s=777, got %v", tc.wantKey, captured[tc.wantKey])
+			}
+			if _, ok := captured[tc.otherKey]; ok {
+				t.Fatalf("unexpected field %s in request: %v", tc.otherKey, captured)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatSamplingParamsOverrideTokenField(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+	defer srv.Close()
+	m := oaModel(srv.URL)
+	m.Compat = &types.ModelCompat{MaxTokensField: "max_tokens"}
+	m.SamplingParams = types.ModelSamplingParams{"max_tokens": float64(31337)}
+	mt := int64(777)
+	p := NewOpenAICompat("k")
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), &types.StreamOptions{MaxTokens: &mt}))
+	if errEv != nil {
+		t.Fatal(errEv.Message.ErrorMessage)
+	}
+	if captured["max_tokens"] != float64(31337) {
+		t.Fatalf("model sampling params must override max_tokens, got %v", captured["max_tokens"])
+	}
+	if _, ok := captured["max_completion_tokens"]; ok {
+		t.Fatalf("max_completion_tokens must be absent, got %v", captured)
+	}
+}
+
+func TestOpenAICompatStreamOptions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		compat       *types.ModelCompat
+		wantStreamOp bool
+	}{
+		{name: "default includes stream_options", compat: nil, wantStreamOp: true},
+		{name: "explicit true includes stream_options", compat: &types.ModelCompat{SupportsUsageInStreaming: boolPtr(true)}, wantStreamOp: true},
+		{name: "explicit false omits stream_options", compat: &types.ModelCompat{SupportsUsageInStreaming: boolPtr(false)}, wantStreamOp: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var captured map[string]any
+			srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+			defer srv.Close()
+			m := oaModel(srv.URL)
+			m.Compat = tc.compat
+			p := NewOpenAICompat("k")
+			_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+			if errEv != nil {
+				t.Fatal(errEv.Message.ErrorMessage)
+			}
+			_, got := captured["stream_options"]
+			if got != tc.wantStreamOp {
+				t.Fatalf("stream_options present = %v, want %v: %v", got, tc.wantStreamOp, captured)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatMissingFinishReason(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		compat   *types.ModelCompat
+		events   []string
+		wantErr  bool
+		wantStop types.StopReason
+	}{
+		{
+			name:     "text stream infers stop",
+			compat:   &types.ModelCompat{SupportsFinishReason: boolPtr(false)},
+			events:   []string{`{"choices":[{"delta":{"content":"hi"}}]}`, "[DONE]"},
+			wantStop: types.StopStop,
+		},
+		{
+			name:     "tool call stream infers tool_use",
+			compat:   &types.ModelCompat{SupportsFinishReason: boolPtr(false)},
+			events:   []string{`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"ls","arguments":"{}"}}]}}]}`, "[DONE]"},
+			wantStop: types.StopToolUse,
+		},
+		{
+			name:    "explicit true still errors on missing finish",
+			compat:  &types.ModelCompat{SupportsFinishReason: boolPtr(true)},
+			events:  []string{`{"choices":[{"delta":{"content":"hi"}}]}`, "[DONE]"},
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := sseServer(t, tc.events, nil, nil, "")
+			defer srv.Close()
+			m := oaModel(srv.URL)
+			m.Compat = tc.compat
+			p := NewOpenAICompat("k")
+			_, done, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+			if tc.wantErr {
+				if errEv == nil || !strings.Contains(errEv.Message.ErrorMessage, "finish_reason") {
+					t.Fatalf("expected finish_reason error, got %+v", errEv)
+				}
+				return
+			}
+			if errEv != nil {
+				t.Fatal(errEv.Message.ErrorMessage)
+			}
+			if done.Message.StopReason != tc.wantStop {
+				t.Fatalf("stop reason = %q, want %q", done.Message.StopReason, tc.wantStop)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatDeveloperRole(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		reasoning bool
+		compat    *types.ModelCompat
+		wantRole  string
+	}{
+		{name: "default uses system", compat: nil, reasoning: true, wantRole: "system"},
+		{name: "developer role requires reasoning model", compat: &types.ModelCompat{SupportsDeveloperRole: boolPtr(true)}, reasoning: false, wantRole: "system"},
+		{name: "explicit false uses system", compat: &types.ModelCompat{SupportsDeveloperRole: boolPtr(false)}, reasoning: true, wantRole: "system"},
+		{name: "reasoning plus enabled uses developer", compat: &types.ModelCompat{SupportsDeveloperRole: boolPtr(true)}, reasoning: true, wantRole: "developer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var captured map[string]any
+			srv := sseServer(t, []string{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, "[DONE]"}, &captured, nil, "")
+			defer srv.Close()
+			m := oaModel(srv.URL)
+			m.Reasoning = tc.reasoning
+			m.Compat = tc.compat
+			p := NewOpenAICompat("k")
+			_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), nil))
+			if errEv != nil {
+				t.Fatal(errEv.Message.ErrorMessage)
+			}
+			msgs := captured["messages"].([]any)
+			sys := msgs[0].(map[string]any)
+			if sys["role"] != tc.wantRole {
+				t.Fatalf("instruction role = %q, want %q: %v", sys["role"], tc.wantRole, sys)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestOpenAICompatMissingFinishWithToolsButNoToolCalls(t *testing.T) {
+	t.Parallel()
+
+	// Tools are declared on the context but the stream emits no tool-call
+	// deltas, so the inferred stop must be StopStop, not StopToolUse: the
+	// inference keys off observed tool calls in the stream, not declared tools.
+	srv := sseServer(t, []string{`{"choices":[{"delta":{"content":"hi"}}]}`, "[DONE]"}, nil, nil, "")
+	defer srv.Close()
+	m := oaModel(srv.URL)
+	m.Compat = &types.ModelCompat{SupportsFinishReason: boolPtr(false)}
+	cx := simpleContext()
+	cx.Tools = []types.ToolDef{{Name: "bash", Description: "run shell", Parameters: json.RawMessage(`{"type":"object"}`)}}
+	p := NewOpenAICompat("k")
+	_, done, errEv := drain(p.Stream(context.Background(), m, cx, nil))
+	if errEv != nil {
+		t.Fatal(errEv.Message.ErrorMessage)
+	}
+	if done.Message.StopReason != types.StopStop {
+		t.Fatalf("stop reason = %q, want stop (no observed tool calls)", done.Message.StopReason)
+	}
+}

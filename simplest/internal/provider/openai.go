@@ -81,7 +81,11 @@ type oaRequest struct {
 	StreamOptions *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options,omitempty"`
-	Temperature         *float64 `json:"temperature,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	// MaxTokens is the legacy "max_tokens" wire field, used only when
+	// model.Compat.MaxTokensField == "max_tokens" (pi's params.max_tokens vs
+	// max_completion_tokens compat branch).
+	MaxTokens           *int64   `json:"max_tokens,omitempty"`
 	MaxCompletionTokens *int64   `json:"max_completion_tokens,omitempty"`
 	Tools               []oaTool `json:"tools,omitempty"`
 	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
@@ -136,11 +140,38 @@ func (u *oaUsage) toUsage(m *types.Model) types.Usage {
 
 const imageOmittedPlaceholder = "(image omitted: model does not support images)"
 
+// compatFlag reads a *bool compat pointer; nil (unset) yields false. Callers
+// invert the flag for defaults-true fields like SupportsFinishReason.
+func compatFlag(model *types.Model, get func(c *types.ModelCompat) *bool) bool {
+	if model == nil || model.Compat == nil {
+		return false
+	}
+	if p := get(model.Compat); p != nil {
+		return *p
+	}
+	return false
+}
+
+// finishReasonOptional reports whether a stream ending without finish_reason
+// should be tolerated (pi's supportsFinishReason compat, default true).
+func finishReasonOptional(model *types.Model) bool {
+	if model == nil || model.Compat == nil || model.Compat.SupportsFinishReason == nil {
+		return false
+	}
+	return !*model.Compat.SupportsFinishReason
+}
+
 // ConvertMessages renders a Context into OpenAI chat-completions messages.
 func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([]oaMessage, error) {
 	msgs := []oaMessage{}
 	if cx.SystemPrompt != "" {
-		msgs = append(msgs, oaMessage{Role: "system", Content: cx.SystemPrompt})
+		// pi's instructionRole: a reasoning model whose compat explicitly
+		// enables it gets the "developer" role; everything else stays "system".
+		role := "system"
+		if model != nil && model.Reasoning && compatFlag(model, func(c *types.ModelCompat) *bool { return c.SupportsDeveloperRole }) {
+			role = "developer"
+		}
+		msgs = append(msgs, oaMessage{Role: role, Content: cx.SystemPrompt})
 	}
 	for i := 0; i < len(cx.Messages); i++ {
 		switch msg := cx.Messages[i].(type) {
@@ -769,6 +800,18 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			return
 		}
 		if !hasFinish {
+			// pi's supportsFinishReason compat: when explicitly disabled,
+			// servers may close the stream without a finish_reason; infer the
+			// stop reason instead of failing (tool-use wins when the stream
+			// produced any tool calls).
+			if finishReasonOptional(model) {
+				stop := types.StopStop
+				if len(tools) > 0 {
+					stop = types.StopToolUse
+				}
+				em.done(stop)
+				return
+			}
 			em.fail(ctx, fmt.Errorf("Stream ended without finish_reason"))
 			return
 		}
@@ -799,9 +842,15 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 		Messages: msgs,
 		Stream:   true,
 	}
-	req.StreamOptions = &struct {
-		IncludeUsage bool `json:"include_usage"`
-	}{IncludeUsage: true}
+	// pi's stream_options compat: include usage only when supported. Default
+	// (unset) keeps the historical include_usage:true behavior.
+	disableUsage := model != nil && model.Compat != nil &&
+		model.Compat.SupportsUsageInStreaming != nil && !*model.Compat.SupportsUsageInStreaming
+	if !disableUsage {
+		req.StreamOptions = &struct {
+			IncludeUsage bool `json:"include_usage"`
+		}{IncludeUsage: true}
+	}
 	if opts != nil {
 		if opts.Temperature != nil {
 			t := *opts.Temperature
@@ -809,7 +858,13 @@ func (p *OpenAICompat) buildRequest(model *types.Model, cx *types.Context, opts 
 		}
 		if opts.MaxTokens != nil {
 			mx := *opts.MaxTokens
-			req.MaxCompletionTokens = &mx
+			// Exactly one token-limit field is sent; "max_tokens" only when
+			// the compat explicitly selects it (pi's params.max_tokens branch).
+			if model != nil && model.Compat != nil && model.Compat.MaxTokensField == "max_tokens" {
+				req.MaxTokens = &mx
+			} else {
+				req.MaxCompletionTokens = &mx
+			}
 		}
 		level := opts.ThinkingLevel
 		if model.Reasoning && level != "" {

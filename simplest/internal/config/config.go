@@ -56,6 +56,8 @@ type ModelConfig struct {
 	InputLimits                   *types.ModelInputLimits   `yaml:"inputLimits,omitempty" json:"inputLimits,omitempty"`
 	Input                         []string                  `yaml:"input,omitempty" json:"input,omitempty"`
 	Headers                       map[string]string         `yaml:"headers,omitempty" json:"headers,omitempty"`
+	// Compat carries optional OpenAI-compat wire overrides; see types.ModelCompat.
+	Compat *types.ModelCompat `yaml:"compat,omitempty" json:"compat,omitempty"`
 }
 
 // RawModelConfig is a type alias to ModelConfig used to prevent infinite recursion during UnmarshalYAML.
@@ -526,6 +528,7 @@ func (c *Config) GetAvailableModels() []*types.Model {
 			ContextWindow:                 mc.ContextWindow,
 			MaxTokens:                     mc.MaxTokens,
 			Headers:                       mergedHeaders,
+			Compat:                        mc.Compat,
 		}
 		res = append(res, m)
 	}

@@ -55,3 +55,15 @@ func TestSession_ExportedContextEdit(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, string(userMsg.Content), rep)
 }
+
+func TestModelCompatAliasIsPublicSurface(t *testing.T) {
+	// Proves external callers can build Model.Compat without importing
+	// internal/types (compile-level assertion of the ModelCompat alias).
+	m := simplest.Model{
+		ID: "m1", Name: "M1", API: simplest.APIOpenAICompat, Provider: "p",
+		Compat: &simplest.ModelCompat{MaxTokensField: "max_tokens"},
+	}
+	if m.Compat == nil || m.Compat.MaxTokensField != "max_tokens" {
+		t.Fatalf("compat alias broken: %+v", m.Compat)
+	}
+}

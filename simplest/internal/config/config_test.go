@@ -718,3 +718,68 @@ models:
 	assert.EqualValues(t, 20, back.SamplingParamsByThinkingLevel[types.ThinkingHigh]["top_k"])
 	assert.EqualValues(t, 2, back.SamplingParamsByThinkingLevel[types.ThinkingLevel("bogus")]["seed"])
 }
+
+func TestConfig_ModelCompatRoundTrip(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "sk-secret-12345")
+	t.Setenv("TEST_BASE_URL", "https://api.openai.com/v1")
+
+	tempDir := t.TempDir()
+	keyContent := `
+providers:
+  custom-openai:
+    apiKey: ${TEST_API_KEY}
+`
+	providersContent := `
+providers:
+  custom-openai:
+    api: openai-compat
+    baseUrl: ${TEST_BASE_URL}
+`
+	modelsContent := `
+models:
+  - id: compat-model
+    name: "Compat Model"
+    provider: custom-openai
+    contextWindow: 65536
+    maxTokens: 4096
+    compat:
+      maxTokensField: max_tokens
+      supportsUsageInStreaming: false
+      supportsFinishReason: false
+      supportsDeveloperRole: true
+  - id: plain-model
+    name: "Plain Model"
+    provider: custom-openai
+    contextWindow: 65536
+    maxTokens: 4096
+`
+	keyPath := filepath.Join(tempDir, "key.yaml")
+	providersPath := filepath.Join(tempDir, "providers.yaml")
+	modelsPath := filepath.Join(tempDir, "models.yaml")
+	require.NoError(t, os.WriteFile(keyPath, []byte(keyContent), 0o600))
+	require.NoError(t, os.WriteFile(providersPath, []byte(providersContent), 0o600))
+	require.NoError(t, os.WriteFile(modelsPath, []byte(modelsContent), 0o600))
+
+	cfg, err := LoadFrom(keyPath)
+	require.NoError(t, err)
+
+	models := cfg.GetAvailableModels()
+	require.Len(t, models, 2)
+
+	byID := map[string]*types.Model{}
+	for _, m := range models {
+		byID[m.ID] = m
+	}
+
+	compat := byID["compat-model"].Compat
+	require.NotNil(t, compat)
+	require.Equal(t, "max_tokens", compat.MaxTokensField)
+	require.NotNil(t, compat.SupportsUsageInStreaming)
+	require.False(t, *compat.SupportsUsageInStreaming)
+	require.NotNil(t, compat.SupportsFinishReason)
+	require.False(t, *compat.SupportsFinishReason)
+	require.NotNil(t, compat.SupportsDeveloperRole)
+	require.True(t, *compat.SupportsDeveloperRole)
+
+	assert.Nil(t, byID["plain-model"].Compat, "absent compat must stay nil")
+}

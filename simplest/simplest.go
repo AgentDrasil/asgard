@@ -210,6 +210,7 @@ type (
 	ModelType               = types.ModelType
 	ThinkingLevelMap        = types.ThinkingLevelMap
 	ModelPromptCache        = types.ModelPromptCache
+	ModelCompat             = types.ModelCompat
 	ModelSamplingParams     = types.ModelSamplingParams
 	ModelImageResizeOptions = types.ModelImageResizeOptions
 	ModelImageInputLimits   = types.ModelImageInputLimits

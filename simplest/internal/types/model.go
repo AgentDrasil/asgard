@@ -78,6 +78,29 @@ type ModelCost struct {
 	Tiers          []ModelCostTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
 }
 
+// ModelCompat carries optional OpenAI-compat wire compatibility overrides
+// (port of pi's openai-completions `compat` handling, 005af57d8). All fields
+// are optional: nil/empty values preserve the library defaults
+// (max_completion_tokens, usage stream options on, finish_reason required,
+// system instruction role).
+type ModelCompat struct {
+	// MaxTokensField selects the wire field carrying the token limit:
+	// "max_tokens" for older/simpler OpenAI-compatible servers, or
+	// "max_completion_tokens" (default) for the modern OpenAI field.
+	MaxTokensField string `json:"maxTokensField,omitempty" yaml:"maxTokensField,omitempty"`
+	// SupportsUsageInStreaming: when explicitly false, stream_options is
+	// omitted from requests (some servers reject the field).
+	SupportsUsageInStreaming *bool `json:"supportsUsageInStreaming,omitempty" yaml:"supportsUsageInStreaming,omitempty"`
+	// SupportsFinishReason: when explicitly false, a stream ending without a
+	// finish_reason is tolerated instead of failing; the stop reason is
+	// inferred (tool-use if any tool calls were produced, else stop).
+	SupportsFinishReason *bool `json:"supportsFinishReason,omitempty" yaml:"supportsFinishReason,omitempty"`
+	// SupportsDeveloperRole: when explicitly true, the leading instruction
+	// message uses the "developer" role instead of "system" — but only for
+	// reasoning models, matching pi's instructionRole behavior.
+	SupportsDeveloperRole *bool `json:"supportsDeveloperRole,omitempty" yaml:"supportsDeveloperRole,omitempty"`
+}
+
 // Model describes one callable model endpoint. Configured programmatically.
 type Model struct {
 	// ID is the stable identifier used for config matching, sessions, and
@@ -108,6 +131,8 @@ type Model struct {
 	ContextWindow                 int64                                 `json:"contextWindow"`
 	MaxTokens                     int64                                 `json:"maxTokens"`
 	Headers                       map[string]string                     `json:"headers,omitempty"`
+	// Compat holds optional OpenAI-compat wire overrides. Nil keeps defaults.
+	Compat *ModelCompat `json:"compat,omitempty" yaml:"compat,omitempty"`
 }
 
 // WireID returns the model identifier placed in the API request: Model when
