@@ -110,8 +110,10 @@ type Options struct {
 	// ContextFiles overrides loading; when nil, callers usually pass
 	// LoadProjectContextFiles output explicitly.
 	ContextFiles []ContextFile
-	// Documentation paths shown in the prompt. These cannot be resolved
-	// from an installed package, so they default to repo-relative names.
+	// Documentation paths rendered in a "Documentation" section of the
+	// prompt: ReadmePath as "Main documentation", DocsPath as "Additional
+	// docs", and ExamplesPath as "Examples". Empty paths are omitted; when
+	// all three are empty the whole section is omitted.
 	ReadmePath   string
 	DocsPath     string
 	ExamplesPath string
@@ -193,11 +195,34 @@ func BuildSystemPrompt(opts Options) string {
 
 	b.WriteString(identity + "\n\nAvailable tools:\n" + toolsList + "\n\nGuidelines:\n" + strings.Join(guidelines, "\n"))
 
+	// Port of pi 005af57d8: render the documentation section from configured paths.
+	if docs := documentationSection(opts); docs != "" {
+		b.WriteString(docs)
+	}
+
 	b.WriteString(appendSection)
 	b.WriteString(projectContextSection(contextFiles))
 	b.WriteString("\nCurrent working directory: " + promptCwd)
 
 	return b.String()
+}
+
+func documentationSection(opts Options) string {
+	if opts.ReadmePath == "" && opts.DocsPath == "" && opts.ExamplesPath == "" {
+		return ""
+	}
+	var lines []string
+	if opts.ReadmePath != "" {
+		lines = append(lines, "- Main documentation: "+opts.ReadmePath)
+	}
+	if opts.DocsPath != "" {
+		lines = append(lines, "- Additional docs: "+opts.DocsPath)
+	}
+	if opts.ExamplesPath != "" {
+		lines = append(lines, "- Examples: "+opts.ExamplesPath)
+	}
+	return "\n\nDocumentation (read only when the user asks about the harness itself, its SDK, or its tools):\n" +
+		strings.Join(lines, "\n")
 }
 
 func projectContextSection(files []ContextFile) string {

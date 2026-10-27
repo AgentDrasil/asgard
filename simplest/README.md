@@ -284,12 +284,22 @@ sysPrompt := prompt.BuildSystemPrompt(prompt.Options{
 	PromptGuidelines:   []string{"Always run tests after edits"},
 	AppendSystemPrompt: extraRules,
 	ContextFiles:       contextFiles,
+	ReadmePath:         "/opt/simplest/README.md", // docs section bullets
+	DocsPath:           "/opt/simplest/docs",
+	ExamplesPath:       "/opt/simplest/examples",
 })
 ```
 
 Only tools with a `Snippet` appear in "Available tools"; guidelines filter by
 active tools (e.g., the bash-only guideline drops when grep/find/ls exist).
 Custom tools contribute snippets via `tools.Func.Snippet`.
+
+When any of `ReadmePath`, `DocsPath`, or `ExamplesPath` is set, a
+"Documentation" section is rendered after the guidelines (before
+`AppendSystemPrompt` and project context), listing each configured path as
+`- Main documentation: <ReadmePath>`, `- Additional docs: <DocsPath>`, or
+`- Examples: <ExamplesPath>`. Empty paths are omitted; when all three are
+empty the whole section is omitted.
 
 ## 6. The agent loop: hooks, queues, compaction
 
@@ -451,8 +461,9 @@ go vet ./... && go test ./...
 ## Roadmap
 
 Provider-specific capabilities are intentionally not implemented yet. Before
-onboarding the relevant endpoints, revisit the iteration plan
-(`tmp/docs/pi-core-iteration-plan.md`):
+onboarding the relevant endpoints, revisit the local runbook docs
+(`tmp/PI-SYNC.md` and the current audit `tmp/2026-10-27-pi-update-audit.md`;
+both are gitignored, machine-local):
 
 - **Anthropic Messages only**: `cache_control` breakpoints, signed thinking
   replay, per-turn effort markers.

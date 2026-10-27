@@ -92,6 +92,63 @@ func TestAppendAndProjectContext(t *testing.T) {
 	}
 }
 
+func TestDocumentationSectionAllPaths(t *testing.T) {
+	got := BuildSystemPrompt(Options{
+		CWD:          "/p",
+		ReadmePath:   "/opt/harness/README.md",
+		DocsPath:     "/opt/harness/docs",
+		ExamplesPath: "/opt/harness/examples",
+	})
+	if !strings.Contains(got, "Documentation (read only when the user asks about the harness itself, its SDK, or its tools):\n"+
+		"- Main documentation: /opt/harness/README.md\n"+
+		"- Additional docs: /opt/harness/docs\n"+
+		"- Examples: /opt/harness/examples") {
+		t.Fatalf("documentation section missing or malformed:\n%s", got)
+	}
+}
+
+func TestDocumentationSectionPartialPaths(t *testing.T) {
+	got := BuildSystemPrompt(Options{
+		CWD:          "/p",
+		DocsPath:     "/opt/harness/docs",
+		ExamplesPath: "/opt/harness/examples",
+	})
+	if !strings.Contains(got, "- Additional docs: /opt/harness/docs") {
+		t.Fatalf("docs line missing:\n%s", got)
+	}
+	if !strings.Contains(got, "- Examples: /opt/harness/examples") {
+		t.Fatalf("examples line missing:\n%s", got)
+	}
+	if strings.Contains(got, "Main documentation") {
+		t.Fatalf("empty ReadmePath must not render a line:\n%s", got)
+	}
+}
+
+func TestDocumentationSectionOmittedWhenEmpty(t *testing.T) {
+	got := BuildSystemPrompt(Options{CWD: "/p"})
+	if strings.Contains(got, "Documentation") {
+		t.Fatalf("empty paths must omit the documentation section:\n%s", got)
+	}
+}
+
+func TestDocumentationSectionOrdering(t *testing.T) {
+	got := BuildSystemPrompt(Options{
+		CWD:                "/p",
+		ReadmePath:         "/opt/harness/README.md",
+		AppendSystemPrompt: "APPEND",
+		ContextFiles:       []ContextFile{{Path: "/p/AGENTS.md", Content: "ctx"}},
+	})
+	wantOrder := []string{"Guidelines:", "Documentation (read only", "APPEND", "<project_context>", "Current working directory: /p"}
+	last := -1
+	for _, w := range wantOrder {
+		i := strings.Index(got, w)
+		if i < 0 || i < last {
+			t.Fatalf("ordering broken around %q:\n%s", w, got)
+		}
+		last = i
+	}
+}
+
 func TestCustomPromptPath(t *testing.T) {
 	got := BuildSystemPrompt(Options{
 		CustomPrompt:       "You are custom.",
