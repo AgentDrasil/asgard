@@ -159,6 +159,7 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 				msgs = append(msgs, oaMessage{Role: "user", Content: parts})
 			}
 		case *types.AssistantMessage:
+			same := sameModel(msg, model)
 			text := ""
 			reasoningField := ""
 			var thinking []string
@@ -169,6 +170,11 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 						text += b.Text
 					}
 				case types.ThinkingContent:
+					// Cross-model thinking is not replayable; drop it so it
+					// cannot influence content or reasoning fields (upstream #10995).
+					if !same {
+						continue
+					}
 					if strings.TrimSpace(b.Thinking) != "" {
 						thinking = append(thinking, b.Thinking)
 						switch b.Signature {
@@ -685,11 +691,13 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 				hasFinish = true
 			}
 			d := choice.Delta
-			if d.Content != nil && *d.Content != "" {
-				em.textDelta(*d.Content)
-			}
+			// Reasoning first: a chunk can carry both fields, and upstream
+			// emits the thinking block before the text block (63035734f).
 			if v := firstReasoning(d); v != "" {
 				em.thinkingDelta(v, "")
+			}
+			if d.Content != nil && *d.Content != "" {
+				em.textDelta(*d.Content)
 			}
 			for _, tcd := range d.ToolCalls {
 				idx := 0

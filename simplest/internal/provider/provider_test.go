@@ -2370,3 +2370,112 @@ func TestSamplingNumericValidation(t *testing.T) {
 		assert.False(t, ok, "invalid float %v", v)
 	}
 }
+
+// A single chunk carrying both reasoning and text must emit the thinking block
+// before the text block (upstream 63035734f).
+func TestOpenAIReasoningBeforeTextInSameChunk(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(t, []string{
+		`{"choices":[{"delta":{"reasoning_content":"think","content":"answer"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"[DONE]",
+	}, nil, nil, "")
+	defer srv.Close()
+
+	p := NewOpenAICompat("k")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+
+	assert.Equal(t,
+		"start,thinking_start,thinking_delta,thinking_end,text_start,text_delta,text_end,done",
+		strings.Join(eventKinds(evs), ","))
+
+	require.Len(t, done.Message.Content, 2)
+	thinking, ok := done.Message.Content[0].(types.ThinkingContent)
+	require.True(t, ok)
+	assert.Equal(t, "think", thinking.Thinking)
+	text, ok := done.Message.Content[1].(types.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "answer", text.Text)
+}
+
+func TestOpenAIReplaysSameModelThinking(t *testing.T) {
+	t.Parallel()
+
+	model := oaModel("http://unused")
+	cx := &types.Context{Messages: []types.Message{
+		&types.AssistantMessage{
+			Content: []types.AssistantContent{
+				types.ThinkingContent{Type: types.TypeThinking, Thinking: "chain", Signature: "reasoning_content"},
+				types.TextContent{Type: types.TypeText, Text: "answer"},
+			},
+			Provider: model.Provider,
+			API:      model.API,
+			Model:    model.ID,
+		},
+	}}
+
+	p := NewOpenAICompat("k")
+	msgs, err := p.ConvertMessages(model, cx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "chain", msgs[0].ReasoningContent)
+	assert.Equal(t, "answer", msgs[0].Content)
+}
+
+func TestOpenAIDropsCrossModelThinking(t *testing.T) {
+	t.Parallel()
+
+	model := oaModel("http://unused")
+	cx := &types.Context{Messages: []types.Message{
+		&types.AssistantMessage{
+			Content: []types.AssistantContent{
+				types.ThinkingContent{Type: types.TypeThinking, Thinking: "old chain", Signature: "reasoning_content"},
+				types.TextContent{Type: types.TypeText, Text: "answer"},
+				types.ToolCall{Type: types.TypeToolCall, ID: "c1", Name: "read", Arguments: json.RawMessage(`{}`)},
+			},
+			Provider: "other-provider",
+			API:      types.APIGemini,
+			Model:    "old-model",
+		},
+	}}
+
+	p := NewOpenAICompat("k")
+	msgs, err := p.ConvertMessages(model, cx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	assert.Empty(t, msgs[0].ReasoningContent)
+	assert.Empty(t, msgs[0].Reasoning)
+	assert.Empty(t, msgs[0].ReasoningText)
+	assert.Equal(t, "answer", msgs[0].Content, "text must be preserved, not emptied by dropped thinking")
+	require.Len(t, msgs[0].ToolCalls, 1)
+	assert.Equal(t, "c1", msgs[0].ToolCalls[0].ID)
+}
+
+func TestOpenAIDropsCrossModelThinkingToolOnly(t *testing.T) {
+	t.Parallel()
+
+	model := oaModel("http://unused")
+	cx := &types.Context{Messages: []types.Message{
+		&types.AssistantMessage{
+			Content: []types.AssistantContent{
+				types.ThinkingContent{Type: types.TypeThinking, Thinking: "old chain", Signature: "reasoning_content"},
+				types.ToolCall{Type: types.TypeToolCall, ID: "c1", Name: "read", Arguments: json.RawMessage(`{}`)},
+			},
+			Provider: model.Provider,
+			API:      model.API,
+			Model:    "different-model",
+		},
+	}}
+
+	p := NewOpenAICompat("k")
+	msgs, err := p.ConvertMessages(model, cx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1, "tool call keeps an otherwise reasoning-only message")
+	assert.Nil(t, msgs[0].Content, "no thinking-derived empty content")
+	assert.Empty(t, msgs[0].ReasoningContent)
+	require.Len(t, msgs[0].ToolCalls, 1)
+}
