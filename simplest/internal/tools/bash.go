@@ -96,9 +96,11 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	acc := newOutputAccumulator(TruncationOptions{})
-	// Same writer for both streams makes os/exec interleave them on one pipe.
-	cmd.Stdout = acc
-	cmd.Stderr = acc
+	// Same sanitizing writer for both streams: os/exec interleaves them on
+	// one pipe, and the accumulator only ever sees clean text.
+	sw := newSanitizingWriter(acc)
+	cmd.Stdout = sw
+	cmd.Stderr = sw
 
 	if onUpdate != nil {
 		onUpdate(&types.ToolResult{Content: []types.AssistantContent{}})
@@ -124,6 +126,9 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		runErr = <-done
 	}
 
+	// Flush held-back bytes/escape sequences (pi flushOutput) so output
+	// produced before a timeout/abort/non-zero exit is still returned.
+	sw.Flush()
 	truncation := acc.Snapshot()
 	text := truncation.Content
 	details := &BashToolDetails{}

@@ -133,6 +133,59 @@ func TestBashToolWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestBashToolSanitizesANSIAndBinaryOutput(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		command string
+		want    string
+		wantSub []string
+	}{
+		{
+			name:    "ANSI colors and CR dropped",
+			command: `printf '\033[31mred\033[0m\r\n'`,
+			want:    "red\n",
+		},
+		{
+			name:    "binary control bytes dropped",
+			command: `printf 'a\0b\001c'`,
+			want:    "abc",
+		},
+		{
+			name:    "OSC title stripped",
+			command: `printf '\033]0;title\007hello\n'`,
+			want:    "hello\n",
+		},
+		{
+			name:    "only ANSI codes means no output",
+			command: `printf '\033[31m\033[0m'`,
+			want:    "(no output)",
+		},
+		{
+			name:    "progress CR updates collapse",
+			command: `printf '1%%\r2%%\r3%%\n'`,
+			wantSub: []string{"3%"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := mustExec(t, NewBashTool(dir), fmt.Sprintf(`{"command":%q}`, tt.command))
+			got := textOf(t, res)
+			if tt.want != "" && got != tt.want {
+				t.Errorf("output = %q, want %q", got, tt.want)
+			}
+			for _, sub := range tt.wantSub {
+				if !strings.Contains(got, sub) {
+					t.Errorf("output %q missing %q", got, sub)
+				}
+			}
+			if strings.ContainsRune(got, '\r') || strings.ContainsRune(got, '\x1b') {
+				t.Errorf("output %q still contains CR/ESC bytes", got)
+			}
+		})
+	}
+}
+
 func TestBashTool_SignalExitCode(t *testing.T) {
 	// Not running t.Parallel() to avoid cross-test signal interference.
 	dir := t.TempDir()
