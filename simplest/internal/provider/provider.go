@@ -57,6 +57,11 @@ type HTTPStatusError struct {
 	StatusCode int
 	Body       string
 	RetryAfter string
+	// ShouldRetry mirrors the x-should-retry response header: "true" forces a
+	// retry, "false" suppresses it regardless of status.
+	ShouldRetry string
+	// RetryAfterMs mirrors the retry-after-ms response header (milliseconds).
+	RetryAfterMs string
 }
 
 func (e *HTTPStatusError) Error() string {
@@ -99,6 +104,8 @@ func postSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		retryAfter := resp.Header.Get("Retry-After")
+		shouldRetry := resp.Header.Get("x-should-retry")
+		retryAfterMs := resp.Header.Get("retry-after-ms")
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		snippet := string(bytes.TrimSpace(b))
@@ -106,9 +113,11 @@ func postSSE(ctx context.Context, client *http.Client, url string, headers map[s
 			snippet = snippet[:4000]
 		}
 		return nil, &HTTPStatusError{
-			StatusCode: resp.StatusCode,
-			Body:       snippet,
-			RetryAfter: retryAfter,
+			StatusCode:   resp.StatusCode,
+			Body:         snippet,
+			RetryAfter:   retryAfter,
+			ShouldRetry:  shouldRetry,
+			RetryAfterMs: retryAfterMs,
 		}
 	}
 	return resp, nil
