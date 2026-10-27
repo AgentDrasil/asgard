@@ -1440,3 +1440,194 @@ func TestPersistErrorTerminatesRunWithErrorTurn(t *testing.T) {
 		})
 	}
 }
+
+// gatedTool blocks in Execute until its gate closes, recording whether a
+// precondition channel was already closed at entry.
+type gatedTool struct {
+	name         string
+	preflight    <-chan struct{} // observed (non-blocking) at Execute entry
+	gate         chan struct{}   // closed to let Execute finish
+	sawPreflight bool
+	executed     chan string
+}
+
+func newGatedTool(name string, preflight <-chan struct{}, executed chan string) *gatedTool {
+	return &gatedTool{name: name, preflight: preflight, gate: make(chan struct{}), executed: executed}
+}
+
+func (g *gatedTool) Name() string                           { return g.name }
+func (g *gatedTool) Label() string                          { return g.name }
+func (g *gatedTool) Description() string                    { return "gated" }
+func (g *gatedTool) Parameters() json.RawMessage            { return json.RawMessage(`{"type":"object"}`) }
+func (g *gatedTool) PromptSnippet() string                  { return "" }
+func (g *gatedTool) PromptGuidelines() []string             { return nil }
+func (g *gatedTool) ExecutionMode() types.ToolExecutionMode { return types.ExecutionParallel }
+func (g *gatedTool) Execute(ctx context.Context, id string, args json.RawMessage, onUpdate types.UpdateFunc) (*types.ToolResult, error) {
+	select {
+	case <-g.preflight:
+		g.sawPreflight = true
+	default:
+	}
+	if g.executed != nil {
+		g.executed <- g.name
+	}
+	select {
+	case <-g.gate:
+	case <-ctx.Done():
+	}
+	return &types.ToolResult{
+		Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "ok:" + g.name}},
+	}, nil
+}
+
+// Port of upstream v0.99.2 (agent-loop.ts): parallel tool_execution_end
+// events are emitted in completion order, while the tool-result message_start
+// events stay in assistant source order.
+func TestParallelEndEventsInCompletionOrder(t *testing.T) {
+	t.Parallel()
+
+	executed := make(chan string, 2)
+	slow := newGatedTool("slow", nil, executed)
+	fast := newGatedTool("fast", nil, executed)
+	close(fast.gate) // fast finishes immediately
+
+	// Assistant order: c1=slow, c2=fast.
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "slow", `{}`), call("c2", "fast", `{}`)),
+		textMsg("done"),
+	}}
+	req := baseRequest(fp, slow, fast)
+
+	releaseOnce := new(sync.Once)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(slow.gate) }) })
+
+	evCh := Run(context.Background(), req)
+	var endOrder, msgStartOrder []string
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+loop:
+	for {
+		select {
+		case ev, ok := <-evCh:
+			if !ok {
+				break loop
+			}
+			switch ev.Kind {
+			case types.ToolExecutionEnd:
+				endOrder = append(endOrder, ev.ToolName)
+				if ev.ToolName == "fast" {
+					// The slow tool may now finish; the fast end must already
+					// have been emitted.
+					releaseOnce.Do(func() { close(slow.gate) })
+				}
+			case types.MessageStart:
+				if ev.ToolMsg != nil {
+					msgStartOrder = append(msgStartOrder, ev.ToolMsg.ToolCallID)
+				}
+			case types.AgentEnd:
+				break loop
+			}
+		case <-timeout.C:
+			t.Fatalf("timed out waiting for events: ends=%v msgStarts=%v", endOrder, msgStartOrder)
+		}
+	}
+
+	assert.Equal(t, []string{"fast", "slow"}, endOrder, "tool_execution_end must follow completion order")
+	assert.Equal(t, []string{"c1", "c2"}, msgStartOrder, "tool-result message_start must stay in assistant source order")
+}
+
+// Port of upstream v0.99.2 (agent-loop.ts): every prepared call is preflighted
+// (before hook + validation) before any prepared tool starts executing.
+func TestPreflightBeforeParallelExecution(t *testing.T) {
+	t.Parallel()
+
+	preflightDone := make(chan struct{})
+	executed := make(chan string, 2)
+	a := newGatedTool("a", preflightDone, executed)
+	b := newGatedTool("b", nil, executed)
+	close(b.gate)
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "a", `{}`), call("c2", "b", `{}`)),
+		textMsg("done"),
+	}}
+	req := baseRequest(fp, a, b)
+	var closeOnce sync.Once
+	req.BeforeToolCall = func(in BeforeToolCallInput) *BeforeToolCallDecision {
+		if in.ToolCall.Name == "b" {
+			closeOnce.Do(func() { close(preflightDone) })
+		}
+		return nil
+	}
+
+	// Consume events while the tools run: once both tools have entered
+	// Execute (their entry sends), verify the snapshot and open the gates so
+	// the run completes.
+	evCh := Run(context.Background(), req)
+	go func() {
+		<-executed
+		<-executed
+		assert.True(t, a.sawPreflight, "tool a must observe tool b's preflight completed before its Execute began")
+		close(a.gate) // b.gate is already closed; only a needs releasing
+	}()
+	evs, _ := collect(t, evCh)
+	assert.True(t, a.sawPreflight, "tool a must observe tool b's preflight completed before its Execute began")
+	_ = evs
+}
+
+// executePrepared must re-check the abort signal and never call the tool when
+// the run context is already canceled.
+func TestExecutePreparedAbortedBeforeExecute(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	l := &loop{
+		ctx: ctx,
+		ch:  make(chan types.AgentEvent, 8),
+		req: &Request{},
+	}
+	tool := newRecordingTool("read")
+	p := &preparedCall{tc: call("c1", "read", `{}`), tool: tool}
+
+	result, isErr := l.executePrepared(p)
+
+	assert.True(t, isErr)
+	require.NotNil(t, result)
+	blocks, err := types.DecodeToolResultContent(func() json.RawMessage {
+		raw, _ := types.MarshalBlocks(result.Content)
+		return raw
+	}())
+	require.NoError(t, err)
+	assert.Equal(t, "Operation aborted", types.StringContentOf(blocks))
+	assert.Empty(t, tool.executions, "canceled context must prevent tool execution")
+}
+
+// The tool hooks receive the run context.
+func TestHooksReceiveRunContext(t *testing.T) {
+	t.Parallel()
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tool := newRecordingTool("read")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "read", `{}`)),
+		textMsg("done"),
+	}}
+	req := baseRequest(fp, tool)
+	var beforeCtx, afterCtx context.Context
+	req.BeforeToolCall = func(in BeforeToolCallInput) *BeforeToolCallDecision {
+		beforeCtx = in.Context
+		return nil
+	}
+	req.AfterToolCall = func(in AfterToolCallInput) *AfterToolCallOverride {
+		afterCtx = in.Context
+		return nil
+	}
+
+	collect(t, Run(runCtx, req))
+
+	assert.Same(t, runCtx, beforeCtx, "BeforeToolCall must receive the run context")
+	assert.Same(t, runCtx, afterCtx, "AfterToolCall must receive the run context")
+}

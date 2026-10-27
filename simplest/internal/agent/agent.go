@@ -108,6 +108,7 @@ type FinishTurnDecision struct {
 
 // BeforeToolCallInput is passed to the BeforeToolCall hook.
 type BeforeToolCallInput struct {
+	Context          context.Context
 	AssistantMessage *types.AssistantMessage
 	ToolCall         types.ToolCall
 	ValidatedArgs    map[string]any
@@ -122,6 +123,7 @@ type BeforeToolCallDecision struct {
 
 // AfterToolCallInput is passed to the AfterToolCall hook.
 type AfterToolCallInput struct {
+	Context          context.Context
 	AssistantMessage *types.AssistantMessage
 	ToolCall         types.ToolCall
 	Result           *types.ToolResult
@@ -654,11 +656,15 @@ func (l *loop) failTruncatedToolCalls(msg *types.AssistantMessage, calls []types
 	return out, false
 }
 
-// finishToolCall applies the AfterToolCall hook and emits the terminal events
-// for one finalized tool call.
-func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool) *types.ToolResultMessage {
+// finalizeToolCall applies the AfterToolCall hook and emits ToolExecutionEnd,
+// building the ToolResultMessage. It does not emit the tool-result
+// message_start/message_end pair; call emitToolResultMessage for that
+// (finishToolCall does both). The hook is always invoked from the loop
+// goroutine so overrides stay serialized.
+func (l *loop) finalizeToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool) *types.ToolResultMessage {
 	if l.req.AfterToolCall != nil {
 		override := l.req.AfterToolCall(AfterToolCallInput{
+			Context:          l.ctx,
 			AssistantMessage: msg,
 			ToolCall:         tc,
 			Result:           result,
@@ -699,8 +705,21 @@ func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, re
 		IsError:    isError,
 		Timestamp:  time.Now().UnixMilli(),
 	}
+	return trm
+}
+
+// emitToolResultMessage emits the tool-result message_start/message_end pair.
+func (l *loop) emitToolResultMessage(trm *types.ToolResultMessage) {
 	l.emit(types.AgentEvent{Kind: types.MessageStart, ToolMsg: trm})
 	l.emit(types.AgentEvent{Kind: types.MessageEnd, ToolMsg: trm})
+}
+
+// finishToolCall finalizes one tool call and immediately emits its tool-result
+// messages. Used by sequential execution and failTruncatedToolCalls, whose
+// event order is naturally source order.
+func (l *loop) finishToolCall(msg *types.AssistantMessage, tc types.ToolCall, result *types.ToolResult, isError bool) *types.ToolResultMessage {
+	trm := l.finalizeToolCall(msg, tc, result, isError)
+	l.emitToolResultMessage(trm)
 	return trm
 }
 
@@ -733,6 +752,7 @@ func (l *loop) prepare(msg *types.AssistantMessage, tc types.ToolCall) (*prepare
 	}
 	if l.req.BeforeToolCall != nil {
 		decision := l.req.BeforeToolCall(BeforeToolCallInput{
+			Context:          l.ctx,
 			AssistantMessage: msg,
 			ToolCall:         tc,
 			ValidatedArgs:    validated,
@@ -762,6 +782,11 @@ type immediateOutcome struct {
 }
 
 func (l *loop) executePrepared(p *preparedCall) (*types.ToolResult, bool) {
+	if l.ctx.Err() != nil {
+		// Upstream v0.99.2: every deferred thunk re-checks the abort signal
+		// before running the tool, so cancellation cannot start prepared work.
+		return errorToolResult("Operation aborted"), true
+	}
 	result, err := p.tool.Execute(l.ctx, p.tc.ID, p.tc.Arguments, func(partial *types.ToolResult) {
 		l.emit(types.AgentEvent{
 			Kind: types.ToolExecutionUpdate, ToolCallID: p.tc.ID, ToolName: p.tc.Name,
@@ -823,46 +848,65 @@ func (l *loop) executeSequential(msg *types.AssistantMessage, calls []types.Tool
 
 func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCall) ([]*types.ToolResultMessage, bool) {
 	type slot struct {
+		tc        types.ToolCall
 		immediate *immediateOutcome
 		prepared  *preparedCall
-		done      chan struct{}
 		result    *types.ToolResult
-		isError   bool
+		trm       *types.ToolResultMessage
 	}
+	// Preflight (upstream v0.99.2): emit every tool_execution_start and
+	// prepare every call BEFORE launching any prepared tool. Immediate
+	// outcomes are finalized right away (their tool_execution_end emits
+	// immediately); prepared calls become deferred thunks.
 	slots := make([]*slot, len(calls))
 	for i, tc := range calls {
 		l.emit(types.AgentEvent{Kind: types.ToolExecutionStart, ToolCallID: tc.ID, ToolName: tc.Name, Args: tc.Arguments})
-		s := &slot{}
+		s := &slot{tc: tc}
 		prepared, immediate := l.prepare(msg, tc)
 		s.immediate = immediate
 		s.prepared = prepared
-		slots[i] = s
-		if immediate == nil {
-			s.done = make(chan struct{})
-			go func(s *slot, p *preparedCall) {
-				defer close(s.done)
-				s.result, s.isError = l.executePrepared(p)
-			}(s, prepared)
+		if immediate != nil {
+			s.result = immediate.result
+			s.trm = l.finalizeToolCall(msg, tc, immediate.result, immediate.isError)
 		}
+		slots[i] = s
 	}
 
+	// Execute all prepared thunks concurrently. Results are finalized (the
+	// serialized AfterToolCall hook plus tool_execution_end, in completion
+	// order) as each completion lands on the loop goroutine. The channel is
+	// buffered so a tool that ignores ctx cannot leak its goroutine.
+	type completion struct {
+		index   int
+		result  *types.ToolResult
+		isError bool
+	}
+	pending := 0
+	completions := make(chan completion, len(slots))
+	for i, s := range slots {
+		if s.immediate != nil {
+			continue
+		}
+		pending++
+		go func(index int, p *preparedCall) {
+			result, isErr := l.executePrepared(p)
+			completions <- completion{index: index, result: result, isError: isErr}
+		}(i, s.prepared)
+	}
+	for i := 0; i < pending; i++ {
+		c := <-completions
+		s := slots[c.index]
+		s.result = c.result
+		s.trm = l.finalizeToolCall(msg, s.tc, c.result, c.isError)
+	}
+
+	// Emit the tool-result messages in assistant source order.
 	allTerminated := len(calls) > 0
 	out := make([]*types.ToolResultMessage, 0, len(calls))
-	for i, tc := range calls {
-		s := slots[i]
-		if s.done != nil {
-			<-s.done
-		}
-		var result *types.ToolResult
-		var isErr bool
-		if s.immediate != nil {
-			result, isErr = s.immediate.result, s.immediate.isError
-		} else {
-			result, isErr = s.result, s.isError
-		}
-		trm := l.finishToolCall(msg, tc, result, isErr)
-		out = append(out, trm)
-		if !result.Terminate {
+	for _, s := range slots {
+		l.emitToolResultMessage(s.trm)
+		out = append(out, s.trm)
+		if !s.result.Terminate {
 			allTerminated = false
 		}
 	}
