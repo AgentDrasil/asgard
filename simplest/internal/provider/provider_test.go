@@ -1304,30 +1304,66 @@ func TestCalculateCost_Tiers(t *testing.T) {
 			wantTotalCost: 0.3225,
 		},
 		{
-			name: "hits tier 1 threshold (>= 128000)",
+			name: "exactly at tier 1 threshold uses base rates (exclusive)",
+			usage: types.Usage{
+				Input:      118000,
+				Output:     1000,
+				CacheRead:  5000,
+				CacheWrite: 5000, // total input: 128,000 == threshold, tier not applied
+			},
+			// Base rates: input=3.0, output=15.0, cacheRead=0.75, cacheWrite=3.0
+			// inputCost = 3.0 / 1e6 * 118000 = 0.354
+			// outputCost = 15.0 / 1e6 * 1000 = 0.015
+			// cacheReadCost = 0.75 / 1e6 * 5000 = 0.00375
+			// cacheWriteCost = 3.0 / 1e6 * 5000 = 0.015
+			// total = 0.354 + 0.015 + 0.00375 + 0.015 = 0.38775
+			wantInputCost: 0.354,
+			wantOutCost:   0.015,
+			wantTotalCost: 0.38775,
+		},
+		{
+			name: "exactly at tier 2 threshold uses tier 1 rates (exclusive)",
+			usage: types.Usage{
+				Input:      246000,
+				Output:     2000,
+				CacheRead:  5000,
+				CacheWrite: 5000, // total input: 256,000 == tier 2 threshold -> tier 1
+			},
+			// Tier 1 rates: input=6.0, output=30.0, cacheRead=1.5, cacheWrite=6.0
+			// inputCost = 6.0 / 1e6 * 246000 = 1.476
+			// outputCost = 30.0 / 1e6 * 2000 = 0.06
+			// cacheReadCost = 1.5 / 1e6 * 5000 = 0.0075
+			// cacheWriteCost = 6.0 / 1e6 * 5000 = 0.03
+			// total = 1.476 + 0.06 + 0.0075 + 0.03 = 1.5735
+			wantInputCost: 1.476,
+			wantOutCost:   0.06,
+			wantTotalCost: 1.5735,
+		},
+		{
+			name: "one above tier 1 threshold uses tier 1 rates",
 			usage: types.Usage{
 				Input:      100000,
 				Output:     1000,
 				CacheRead:  20000,
-				CacheWrite: 10000, // total input: 130,000 >= 128,000 but < 256,000
+				CacheWrite: 10001, // total input: 130,001 > 128,000, < 256,000
 			},
 			// Tier 1 rates: input=6.0, output=30.0, cacheRead=1.5, cacheWrite=6.0
 			// inputCost = 6.0 / 1e6 * 100000 = 0.6
 			// outputCost = 30.0 / 1e6 * 1000 = 0.03
 			// cacheReadCost = 1.5 / 1e6 * 20000 = 0.03
-			// cacheWriteCost = 6.0 / 1e6 * 10000 = 0.06
-			// total = 0.6 + 0.03 + 0.03 + 0.06 = 0.72
+			// cacheWriteCost = 6.0 / 1e6 * 10001 = 0.060006
+			// total = 0.6 + 0.03 + 0.03 + 0.060006 = 0.720006
 			wantInputCost: 0.6,
 			wantOutCost:   0.03,
-			wantTotalCost: 0.72,
+			wantTotalCost: 0.720006,
 		},
 		{
-			name: "hits tier 2 threshold (>= 256000)",
+			name: "above tier 2 threshold uses tier 2 rates",
 			usage: types.Usage{
 				Input:      200000,
 				Output:     2000,
 				CacheRead:  50000,
-				CacheWrite: 10000, // total input: 260,000 >= 256,000
+				CacheWrite: 10000, // total input: 260,000 > 256,000
 			},
 			// Tier 2 rates: input=10.0, output=50.0, cacheRead=2.5, cacheWrite=10.0
 			// inputCost = 10.0 / 1e6 * 200000 = 2.0
@@ -1351,6 +1387,77 @@ func TestCalculateCost_Tiers(t *testing.T) {
 			assert.InDelta(t, tt.wantInputCost, u.Cost.Input, 1e-9)
 			assert.InDelta(t, tt.wantOutCost, u.Cost.Output, 1e-9)
 			assert.InDelta(t, tt.wantTotalCost, u.Cost.Total, 1e-9)
+		})
+	}
+}
+
+// Port of pi 005af57d8: tier thresholds are exclusive.
+func TestCalculateCost_Tiers_Unsorted(t *testing.T) {
+	t.Parallel()
+
+	// Same tiers as TestCalculateCost_Tiers but declared out of order: the
+	// highest strictly-exceeded threshold must win regardless of slice order.
+	model := &types.Model{
+		ID: "tiered-model-unsorted",
+		Cost: types.ModelCost{
+			ModelCostRates: types.ModelCostRates{
+				Input:  3.0,
+				Output: 15.0,
+			},
+			Tiers: []types.ModelCostTier{
+				{
+					InputTokensAbove: 256000,
+					ModelCostRates: types.ModelCostRates{
+						Input:  10.0,
+						Output: 50.0,
+					},
+				},
+				{
+					InputTokensAbove: 128000,
+					ModelCostRates: types.ModelCostRates{
+						Input:  6.0,
+						Output: 30.0,
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		input         int64
+		wantInputCost float64
+	}{
+		{
+			name:          "exactly at higher threshold skips that tier, uses lower tier",
+			input:         256000,
+			wantInputCost: 6.0 / 1e6 * 256000,
+		},
+		{
+			name:          "one above higher threshold uses highest tier",
+			input:         256001,
+			wantInputCost: 10.0 / 1e6 * 256001,
+		},
+		{
+			name:          "above lower threshold only uses lower tier",
+			input:         128001,
+			wantInputCost: 6.0 / 1e6 * 128001,
+		},
+		{
+			name:          "at lower threshold exactly uses base rates",
+			input:         128000,
+			wantInputCost: 3.0 / 1e6 * 128000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := types.Usage{Input: tt.input}
+			CalculateCost(model, &u)
+
+			assert.InDelta(t, tt.wantInputCost, u.Cost.Input, 1e-9)
 		})
 	}
 }

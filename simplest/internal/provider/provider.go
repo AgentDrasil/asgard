@@ -22,8 +22,9 @@ const eventBuffer = 64
 
 // CalculateCost fills u.Cost from the model's $/MTok rates.
 // If tiered pricing is configured, it selects the tier matching the total input tokens
-// (Input + CacheRead + CacheWrite) with the highest InputTokensAbove threshold,
-// falling back to base rates otherwise.
+// (Input + CacheRead + CacheWrite) with the highest InputTokensAbove threshold
+// strictly exceeded, falling back to base rates otherwise.
+// Port of pi 005af57d8: tier thresholds are exclusive.
 func CalculateCost(m *types.Model, u *types.Usage) {
 	if m == nil || u == nil {
 		return
@@ -34,7 +35,7 @@ func CalculateCost(m *types.Model, u *types.Usage) {
 		var matchedTier *types.ModelCostTier
 		for i := range m.Cost.Tiers {
 			tier := &m.Cost.Tiers[i]
-			if totalInput >= tier.InputTokensAbove {
+			if totalInput > tier.InputTokensAbove {
 				if matchedTier == nil || tier.InputTokensAbove > matchedTier.InputTokensAbove {
 					matchedTier = tier
 				}
