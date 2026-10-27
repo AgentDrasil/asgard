@@ -216,3 +216,84 @@ func TestReadTool_VisionModel_LargeImageResized(t *testing.T) {
 	assert.LessOrEqual(t, cfg.Width, 50)
 	assert.LessOrEqual(t, cfg.Height, 50)
 }
+
+func TestReadToolImageDetectionByContent(t *testing.T) {
+	t.Parallel()
+
+	pngData := createTestPNG(t, 8, 8)
+
+	t.Run("png bytes in .txt file are read as image", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "image.txt", string(pngData))
+		res := mustExec(t, NewReadTool(dir), `{"path":"image.txt"}`)
+		require.Len(t, res.Content, 2)
+		tc, ok := res.Content[0].(types.TextContent)
+		require.True(t, ok)
+		assert.True(t, strings.HasPrefix(tc.Text, "Read image file [image/png]"), "note = %q", tc.Text)
+		_, ok = res.Content[1].(types.ImageContent)
+		require.True(t, ok)
+	})
+
+	t.Run("text in .png file is read as text", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "not-an-image.png", "hello")
+		res := mustExec(t, NewReadTool(dir), `{"path":"not-an-image.png"}`)
+		require.Len(t, res.Content, 1)
+		tc, ok := res.Content[0].(types.TextContent)
+		require.True(t, ok)
+		assert.Equal(t, "hello", tc.Text)
+	})
+
+	t.Run("truncated png degrades to text", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "broken.png", string(pngData[:20]))
+		res, err := execTool(t, NewReadTool(dir), `{"path":"broken.png"}`)
+		require.NoError(t, err)
+		require.Len(t, res.Content, 1)
+		tc, ok := res.Content[0].(types.TextContent)
+		require.True(t, ok)
+		assert.True(t, strings.HasPrefix(tc.Text, "Read image file [image/png]"), "note = %q", tc.Text)
+	})
+
+	t.Run("apng falls back to text", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		anim := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+		anim = append(anim, 0, 0, 0, 13, 'I', 'H', 'D', 'R')
+		anim = append(anim, make([]byte, 13)...)
+		anim = append(anim, 0, 0, 0, 0)
+		anim = append(anim, 0, 0, 0, 8, 'a', 'c', 'T', 'L')
+		anim = append(anim, make([]byte, 8)...)
+		anim = append(anim, 0, 0, 0, 0)
+		writeFile(t, dir, "anim.png", string(anim))
+		res := mustExec(t, NewReadTool(dir), `{"path":"anim.png"}`)
+		require.Len(t, res.Content, 1)
+		_, ok := res.Content[0].(types.TextContent)
+		require.True(t, ok)
+	})
+
+	t.Run("note format uses newlines not comma-joined list", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "photo.png", string(pngData))
+		tool := NewReadTool(dir)
+		tool.SetModel(&types.Model{
+			ID:    "vision-model",
+			Input: []string{"text", "image"},
+			InputLimits: &types.ModelInputLimits{
+				Images: &types.ModelImageInputLimits{
+					Resize: &types.ModelImageResizeOptions{MaxWidth: 4, MaxHeight: 4},
+				},
+			},
+		})
+		res := mustExec(t, tool, `{"path":"photo.png"}`)
+		require.Len(t, res.Content, 2)
+		tc, ok := res.Content[0].(types.TextContent)
+		require.True(t, ok)
+		assert.True(t, strings.HasPrefix(tc.Text, "Read image file ["), "note = %q", tc.Text)
+		assert.NotContains(t, tc.Text, "image/png,", "notes must not be comma-joined into the bracket list")
+	})
+}

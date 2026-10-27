@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -27,16 +26,6 @@ const readSchemaJSON = `{
 // ReadToolDetails carries truncation metadata for UI rendering.
 type ReadToolDetails struct {
 	Truncation *TruncationResult `json:"truncation,omitempty"`
-}
-
-// imageExts maps supported image extensions to MIME types.
-var imageExts = map[string]string{
-	".jpg":  "image/jpeg",
-	".jpeg": "image/jpeg",
-	".png":  "image/png",
-	".gif":  "image/gif",
-	".webp": "image/webp",
-	".bmp":  "image/bmp",
 }
 
 // ReadTool reads file contents, with head truncation and image support.
@@ -89,8 +78,15 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	}
 	absolutePath := resolveToCwd(in.Path, t.cwd)
 
-	ext := strings.ToLower(filepath.Ext(absolutePath))
-	if mime, ok := imageExts[ext]; ok {
+	data, err := os.ReadFile(absolutePath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Port of pi 005af57d8: detect images by content, not file extension, and
+	// degrade gracefully: unrecognized content falls through to the text path.
+	mime := images.DetectMimeType(data)
+	if mime != "" {
 		if t.model != nil && !t.model.SupportsImage() {
 			modelID := t.model.ID
 			if modelID == "" {
@@ -104,19 +100,23 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 			}, nil
 		}
 
-		data, err := os.ReadFile(absolutePath)
-		if err != nil {
-			return nil, err
-		}
-
 		limits := t.model.GetImageLimits()
 		processed, err := images.ProcessImage(data, mime, limits)
 		if err != nil {
-			return nil, err
+			// Port of pi 005af57d8: graceful fallback — a decode failure
+			// yields a text result describing the error, not a tool error.
+			note := fmt.Sprintf("Read image file [%s]\n%s", mime, err.Error())
+			return &types.ToolResult{
+				Content: []types.AssistantContent{
+					types.TextContent{Type: types.TypeText, Text: note},
+				},
+			}, nil
 		}
 
-		noteParts := append([]string{processed.MimeType}, processed.Notes...)
-		note := fmt.Sprintf("Read image file [%s]", strings.Join(noteParts, ", "))
+		note := fmt.Sprintf("Read image file [%s]", processed.MimeType)
+		for _, hint := range processed.Notes {
+			note += "\n" + hint
+		}
 
 		return &types.ToolResult{
 			Content: []types.AssistantContent{
@@ -126,10 +126,6 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		}, nil
 	}
 
-	data, err := os.ReadFile(absolutePath)
-	if err != nil {
-		return nil, err
-	}
 	textContent := string(data)
 	allLines := strings.Split(textContent, "\n")
 	totalFileLines := len(allLines)
