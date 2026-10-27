@@ -46,11 +46,110 @@ func loadContextFileFromDir(dir string) *ContextFile {
 	return nil
 }
 
+// gitPaths holds the git metadata discovered by findGitPaths.
+type gitPaths struct {
+	repoDir      string
+	commonGitDir string
+}
+
+// Port of pi 005af57d8: findGitPaths by walking up from cwd. Handles both
+// regular git repos (.git is a directory) and linked worktrees (.git is a
+// file pointing at <main>/.git/worktrees/<name>).
+func findGitPaths(cwd string) *gitPaths {
+	dir, err := filepath.Abs(cwd)
+	if err != nil {
+		dir = cwd
+	}
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if info, err := os.Stat(gitPath); err == nil {
+			if info.Mode().IsRegular() {
+				data, err := os.ReadFile(gitPath)
+				if err != nil {
+					return nil
+				}
+				content := strings.TrimSpace(string(data))
+				if gitdir, ok := strings.CutPrefix(content, "gitdir: "); ok {
+					gitDir := gitdir
+					if !filepath.IsAbs(gitDir) {
+						gitDir = filepath.Join(dir, gitDir)
+					}
+					if _, err := os.Stat(filepath.Join(gitDir, "HEAD")); err != nil {
+						return nil
+					}
+					commonGitDir := gitDir
+					if cd, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+						rel := strings.TrimSpace(string(cd))
+						if !filepath.IsAbs(rel) {
+							rel = filepath.Join(gitDir, rel)
+						}
+						commonGitDir = rel
+					}
+					return &gitPaths{repoDir: dir, commonGitDir: commonGitDir}
+				}
+				// Malformed .git file: keep walking up.
+			} else if info.IsDir() {
+				if _, err := os.Stat(filepath.Join(gitPath, "HEAD")); err != nil {
+					return nil
+				}
+				return &gitPaths{repoDir: dir, commonGitDir: gitPath}
+			}
+			// Neither file nor dir: keep walking up.
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+}
+
+// canonicalizePath resolves symlinks, falling back to the raw path when the
+// target does not exist (or resolution fails).
+func canonicalizePath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
+}
+
+// Port of pi 005af57d8: findShadowedContextFile detects when cwd sits inside a
+// nested linked worktree whose main repo root carries a context file of the
+// same name. Returns the canonicalized main-repo file path that must be
+// shadowed, or "" when nothing is shadowed.
+func findShadowedContextFile(cwd string) string {
+	paths := findGitPaths(cwd)
+	if paths == nil {
+		return ""
+	}
+	commonGitDir := canonicalizePath(paths.commonGitDir)
+	worktreeRoot := canonicalizePath(paths.repoDir)
+	mainRepoRoot := filepath.Dir(commonGitDir)
+	// False for an ordinary repo, where the two are the same dir, and for a
+	// sibling worktree (`git worktree add ../feat`), whose main repo is not an
+	// ancestor.
+	if !strings.HasPrefix(worktreeRoot, mainRepoRoot+string(os.PathSeparator)) {
+		return ""
+	}
+	// dirname of the common git dir is the main worktree root only when that
+	// dir is itself checked out from the same repo. Excludes bare layouts
+	// (`proj/.bare` + `proj/main`) and submodules.
+	if canonicalizePath(filepath.Join(mainRepoRoot, ".git")) != commonGitDir {
+		return ""
+	}
+	worktreeContextFile := loadContextFileFromDir(worktreeRoot)
+	if worktreeContextFile == nil {
+		return ""
+	}
+	return filepath.Join(mainRepoRoot, filepath.Base(worktreeContextFile.Path))
+}
+
 // LoadProjectContextFiles collects instruction files: the global one from
 // agentDir first, then one per directory walking from cwd up to the root,
 // ordered root-most first (nearest directory last). Missing files are skipped;
-// read errors are ignored on a best-effort basis. The git-worktree
-// shadowing rule is not implemented (linked-worktree setups only).
+// read errors are ignored on a best-effort basis. When cwd is inside a nested
+// linked worktree, a same-named context file at the main repo root is
+// shadowed by the worktree's own copy and skipped.
 func LoadProjectContextFiles(cwd, agentDir string) []ContextFile {
 	resolvedCwd, err := filepath.Abs(cwd)
 	if err != nil {
@@ -70,12 +169,22 @@ func LoadProjectContextFiles(cwd, agentDir string) []ContextFile {
 
 	add(loadContextFileFromDir(agentDir))
 
+	shadowed := findShadowedContextFile(resolvedCwd)
+
 	var ancestors []ContextFile
 	dir := resolvedCwd
 	for {
 		if cf := loadContextFileFromDir(dir); cf != nil && !seen[cf.Path] {
-			seen[cf.Path] = true
-			ancestors = append(ancestors, *cf)
+			// Port of pi f1b2e77f5: compare the directory's real path plus the
+			// file's basename, not the file's real path — a worktree AGENTS.md
+			// symlinked to the main repo's file must still load exactly once
+			// (the worktree copy), while the main-repo copy is shadowed.
+			isShadowed := shadowed != "" &&
+				filepath.Join(canonicalizePath(dir), filepath.Base(cf.Path)) == shadowed
+			if !isShadowed {
+				seen[cf.Path] = true
+				ancestors = append(ancestors, *cf)
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
