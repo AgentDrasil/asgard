@@ -335,7 +335,10 @@ stream forwarded as `message_*` events → on `toolUse`, execute the batch
 append tool results → `turn_end` → drain steering → repeat. With no pending
 work the follow-up queue is checked before `agent_end` closes the channel.
 A `length` stop fails all of that message's tool calls (arguments may be
-truncated) so the model can re-issue them.
+truncated) so the model can re-issue them. A `Persist` error ends the run
+immediately with a synthetic error assistant message (`StopReason == error`)
+that is emitted to the event stream but not persisted, instead of continuing
+without the failed session write.
 
 ### Sending messages: steer vs follow-up vs new Run
 

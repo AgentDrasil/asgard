@@ -41,7 +41,12 @@ type Request struct {
 	PrepareRequest func(*Request) *Request
 
 	// Persist is called incrementally whenever a completed message (user steering/follow-up/compaction-summary,
-	// assistant, or tool result) is added to the active message log.
+	// assistant, or tool result) is added to the active message log. A non-nil
+	// error terminates the run with a synthetic StopError assistant turn that
+	// is event-only — it is emitted to the event stream but NOT written to the
+	// session. agent_end.Messages may include the message whose persist failed
+	// (it is still recorded there), but no further provider requests or tool
+	// executions happen after the failure.
 	Persist func(types.Message) error
 
 	// FinishTurn hook runs after an assistant turn (and all its tool executions)
@@ -179,16 +184,57 @@ type loop struct {
 	toolsByName map[string]types.AgentTool
 	ch          chan types.AgentEvent
 	endSent     bool
+	turnOpen    bool // a turn_start is currently unmatched by a turn_end
 }
 
 // appendNewMsg records a message for persistence. Callers must only invoke
 // it once a message is final and complete: it pairs the transcript append with
 // an immediate Persist call, so partially-built messages must not be passed.
-func (l *loop) appendNewMsg(m types.Message) {
+// The message is recorded in l.newMsgs exactly once, before Persist runs; a
+// Persist failure is returned so the caller can terminate the run instead of
+// continuing with model context the session does not have.
+func (l *loop) appendNewMsg(m types.Message) error {
 	l.newMsgs = append(l.newMsgs, m)
 	if l.req.Persist != nil {
-		_ = l.req.Persist(m)
+		return l.req.Persist(m)
 	}
+	return nil
+}
+
+// failPersist terminates the run after a session persist failure. It
+// synthesizes a terminal StopError assistant message and appends it to the
+// transcript and agent_end messages (without calling Persist on it — the
+// session is already failing, and retrying here could only fail again), then
+// emits the closing terminal turn. Synthetic terminal turns bypass FinishTurn:
+// the hook is not run for them. The caller must unwind immediately: no further
+// turns, tool executions, or terminal events.
+func (l *loop) failPersist(perr error) {
+	final := &types.AssistantMessage{
+		Content:      []types.AssistantContent{},
+		API:          l.req.Model.API,
+		Provider:     l.req.Model.Provider,
+		Model:        l.req.Model.ID,
+		StopReason:   types.StopError,
+		ErrorMessage: fmt.Sprintf("session persist: %v", perr),
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	l.messages = append(l.messages, final)
+	l.newMsgs = append(l.newMsgs, final)
+	l.emitTerminalErrorTurn(final)
+}
+
+// emitTerminalErrorTurn closes the run with a synthetic StopError assistant
+// message: message_start/message_end/turn_end/agent_end. Failures can surface
+// after the previous turn_end (between turns), so if no turn is currently
+// open, exactly one turn_start is emitted first to keep the stream balanced.
+// FinishTurn is intentionally bypassed (see failPersist).
+func (l *loop) emitTerminalErrorTurn(final *types.AssistantMessage) {
+	if !l.turnOpen {
+		l.emitTurnStart()
+	}
+	l.emitAssistant(final, true)
+	l.emitTurnEnd(types.AgentEvent{Message: final})
+	l.end()
 }
 
 // end delivers the terminal agent_end event exactly once. It bypasses the
@@ -213,9 +259,26 @@ func (l *loop) emit(ev types.AgentEvent) bool {
 	}
 }
 
+// emitTurnStart opens a turn, keeping turnOpen in sync so terminal failure
+// paths can tell whether a turn is still open and emit a balanced sequence.
+func (l *loop) emitTurnStart() bool {
+	if !l.emit(types.AgentEvent{Kind: types.TurnStart}) {
+		return false
+	}
+	l.turnOpen = true
+	return true
+}
+
+// emitTurnEnd closes the current turn; see emitTurnStart.
+func (l *loop) emitTurnEnd(ev types.AgentEvent) {
+	ev.Kind = types.TurnEnd
+	l.turnOpen = false
+	l.emit(ev)
+}
+
 func (l *loop) run() {
 	l.emit(types.AgentEvent{Kind: types.AgentStart})
-	l.emit(types.AgentEvent{Kind: types.TurnStart})
+	l.emitTurnStart()
 
 	pending := l.drain(l.req.GetSteeringMessages)
 	firstTurn := true
@@ -231,7 +294,7 @@ outer:
 				return
 			}
 			if !firstTurn {
-				if !l.emit(types.AgentEvent{Kind: types.TurnStart}) {
+				if !l.emitTurnStart() {
 					return
 				}
 			} else {
@@ -239,7 +302,12 @@ outer:
 			}
 
 			if l.req.AutoCompact != nil {
-				l.maybeCompact()
+				if err := l.maybeCompact(); err != nil {
+					// Terminal path: drained steering/pending messages are
+					// dropped — the run ends here.
+					l.failPersist(err)
+					return
+				}
 				if l.ctx.Err() != nil {
 					return
 				}
@@ -248,7 +316,10 @@ outer:
 			for _, m := range pending {
 				l.emitUserish(m)
 				l.messages = append(l.messages, m)
-				l.appendNewMsg(m)
+				if err := l.appendNewMsg(m); err != nil {
+					l.failPersist(err)
+					return
+				}
 			}
 
 			if l.req.PrepareRequest != nil {
@@ -263,13 +334,16 @@ outer:
 			if msg == nil {
 				return // stream aborted/emitted failure already
 			}
-			l.appendNewMsg(msg)
+			if err := l.appendNewMsg(msg); err != nil {
+				l.failPersist(err)
+				return
+			}
 
 			if msg.StopReason == types.StopError || msg.StopReason == types.StopAborted {
 				if l.req.FinishTurn != nil {
 					l.req.FinishTurn(TurnSummary{Message: msg})
 				}
-				l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: msg})
+				l.emitTurnEnd(types.AgentEvent{Message: msg})
 				l.end()
 				return
 			}
@@ -295,7 +369,10 @@ outer:
 				hasMoreToolCalls = len(toolCalls) > 0 && !terminate
 				for _, r := range batch {
 					l.messages = append(l.messages, r)
-					l.appendNewMsg(r)
+					if err := l.appendNewMsg(r); err != nil {
+						l.failPersist(err)
+						return
+					}
 				}
 			}
 
@@ -304,7 +381,7 @@ outer:
 				decision = l.req.FinishTurn(TurnSummary{Message: msg, ToolResults: toolResults})
 			}
 
-			l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: msg, ToolResults: toolResults})
+			l.emitTurnEnd(types.AgentEvent{Message: msg, ToolResults: toolResults})
 
 			if decision != nil {
 				if decision.Action == FinishTurnEnd {
@@ -351,8 +428,10 @@ func (l *loop) drain(fn func() []types.Message) []types.Message {
 
 // runPrepareNextTurn invokes the PrepareNextTurn hook (if set) for the given
 // upcoming turn index. On hook error it synthesizes a terminal StopError
-// assistant message, emits it, ends the run and returns false; otherwise it
-// appends any returned messages and returns true.
+// assistant message (folding in a persist failure of that terminal message,
+// if any) in a single balanced error turn, ends the run and returns false;
+// otherwise it appends any returned messages (terminating the run on a
+// persist failure) and returns true.
 func (l *loop) runPrepareNextTurn(turnIndex int) bool {
 	if l.req.PrepareNextTurn == nil {
 		return true
@@ -369,16 +448,21 @@ func (l *loop) runPrepareNextTurn(turnIndex int) bool {
 			Timestamp:    time.Now().UnixMilli(),
 		}
 		l.messages = append(l.messages, final)
-		l.appendNewMsg(final)
-		l.emitAssistant(final, true)
-		l.emit(types.AgentEvent{Kind: types.TurnEnd, Message: final})
-		l.end()
+		// Fold a persist failure of this terminal message into the same error
+		// turn instead of emitting a second one.
+		if perr := l.appendNewMsg(final); perr != nil {
+			final.ErrorMessage = fmt.Sprintf("%v; session persist: %v", err, perr)
+		}
+		l.emitTerminalErrorTurn(final)
 		return false
 	}
 	for _, m := range extraMsgs {
 		l.emitUserish(m)
 		l.messages = append(l.messages, m)
-		l.appendNewMsg(m)
+		if err := l.appendNewMsg(m); err != nil {
+			l.failPersist(err)
+			return false
+		}
 	}
 	return true
 }
@@ -779,12 +863,13 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 
 // maybeCompact summarizes the transcript when the chars/4 estimate crosses
 // ThresholdFrac of the model context window. On success the working context
-// becomes just the summary user message; failures are ignored (next turn
-// retries).
-func (l *loop) maybeCompact() {
+// becomes just the summary user message. Summarize failures are ignored (the
+// next turn retries); a summary that cannot be persisted is returned as an
+// error so the run stops instead of continuing without the session write.
+func (l *loop) maybeCompact() error {
 	cfg := l.req.AutoCompact
 	if cfg == nil || cfg.Summarize == nil || l.req.Model.ContextWindow <= 0 {
-		return
+		return nil
 	}
 	total := 0
 	for _, m := range l.messages {
@@ -796,18 +881,18 @@ func (l *loop) maybeCompact() {
 		frac = 0.8
 	}
 	if int64(estimated) < int64(float64(l.req.Model.ContextWindow)*frac) {
-		return
+		return nil
 	}
 	summary, err := cfg.Summarize(l.ctx, l.messages)
 	if err != nil || strings.TrimSpace(summary) == "" {
-		return
+		return nil
 	}
 	raw, _ := types.MarshalBlocks([]types.AssistantContent{
 		types.TextContent{Type: types.TypeText, Text: compactionPrefix + summary + compactionSuffix},
 	})
 	sum := &types.UserMessage{Content: raw, Timestamp: time.Now().UnixMilli()}
 	l.messages = []types.Message{sum}
-	l.appendNewMsg(sum)
+	return l.appendNewMsg(sum)
 }
 
 func messageCharLen(m types.Message) int {

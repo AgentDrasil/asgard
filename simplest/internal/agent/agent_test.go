@@ -1166,3 +1166,234 @@ loop:
 	require.True(t, ok)
 	assert.Equal(t, "final", finishedText.Text)
 }
+
+// A failed session write must terminate the run with a synthetic error
+// assistant message and a well-formed, balanced terminal sequence instead of
+// silently continuing with model context the session does not have.
+func TestPersistErrorTerminatesRunWithErrorTurn(t *testing.T) {
+	t.Parallel()
+
+	persistErr := fmt.Errorf("disk on fire")
+	hookErr := fmt.Errorf("hook blew up")
+
+	tests := []struct {
+		name          string
+		tools         func() []types.AgentTool
+		responses     []*types.AssistantMessage
+		persist       func(m types.Message) error
+		prepareNext   func(turnIndex int) ([]types.Message, error)
+		finishTurn    bool // FinishTurn returns Continue so the loop wants another turn
+		autoCompact   bool // tiny context window so every turn compacts
+		longInput     bool // long initial user message (needed for autoCompact)
+		wantCalls     int
+		wantPersisted int    // messages handed to Persist (incl. the failing one)
+		wantEndMsgs   int    // agent_end.Messages length
+		wantTurns     int    // count(turn_start) == count(turn_end)
+		wantTail      string // trailing event kinds
+		wantErrParts  []string
+		// whether the synthetic terminal message is itself handed to Persist
+		// (only the hook-error path folds its persist failure into one turn)
+		wantSyntheticPersisted bool
+	}{
+		{
+			name:      "assistant persist failure ends run before next turn",
+			responses: []*types.AssistantMessage{textMsg("first"), textMsg("never")},
+			persist:   func(m types.Message) error { return persistErr },
+			// The loop would start another turn; the persist failure must win.
+			finishTurn: true,
+			wantCalls:  1, wantPersisted: 1, wantEndMsgs: 2,
+			wantTurns:    1,
+			wantTail:     "message_start,message_end,turn_end,agent_end",
+			wantErrParts: []string{"session persist:", "disk on fire"},
+		},
+		{
+			name:      "tool result persist failure ends run without another turn",
+			tools:     func() []types.AgentTool { return []types.AgentTool{newRecordingTool("read")} },
+			responses: []*types.AssistantMessage{toolCallMsg(call("c1", "read", `{}`)), textMsg("never")},
+			persist: func(m types.Message) error {
+				if _, ok := m.(*types.ToolResultMessage); ok {
+					return persistErr
+				}
+				return nil
+			},
+			wantCalls: 1, wantPersisted: 2, wantEndMsgs: 3,
+			wantTurns:    1,
+			wantTail:     "message_start,message_end,turn_end,agent_end",
+			wantErrParts: []string{"session persist:", "disk on fire"},
+		},
+		{
+			name:      "prepared message persist failure stops before next provider call",
+			responses: []*types.AssistantMessage{textMsg("one"), textMsg("never")},
+			persist: func(m types.Message) error {
+				if _, ok := m.(*types.UserMessage); ok {
+					return persistErr
+				}
+				return nil
+			},
+			prepareNext: func(turnIndex int) ([]types.Message, error) {
+				return []types.Message{&types.UserMessage{Content: types.TextOnly("hint"), Timestamp: 2}}, nil
+			},
+			finishTurn: true,
+			wantCalls:  1, wantPersisted: 2, wantEndMsgs: 3, // assistant + hint + synthetic
+			wantTurns:    2,
+			wantTail:     "message_start,message_end,turn_end,agent_end",
+			wantErrParts: []string{"session persist:", "disk on fire"},
+		},
+		{
+			name:      "hook-error terminal persist failure folds both errors into one turn",
+			responses: []*types.AssistantMessage{textMsg("one"), textMsg("never")},
+			persist: func(m types.Message) error {
+				am, ok := m.(*types.AssistantMessage)
+				if ok && am.StopReason == types.StopError {
+					return persistErr // the synthetic hook-error terminal
+				}
+				return nil
+			},
+			prepareNext: func(turnIndex int) ([]types.Message, error) {
+				return nil, hookErr
+			},
+			finishTurn: true,
+			wantCalls:  1, wantPersisted: 2, wantEndMsgs: 2, // assistant + folded terminal
+			wantTurns:    2,
+			wantTail:     "turn_start,message_start,message_end,turn_end,agent_end",
+			wantErrParts: []string{"hook blew up", "session persist:", "disk on fire"},
+			// The terminal message is recorded and its persist failure is
+			// folded into its own ErrorMessage.
+			wantSyntheticPersisted: true,
+		},
+		{
+			name:        "compaction summary persist failure ends run before any provider call",
+			responses:   []*types.AssistantMessage{textMsg("never")},
+			persist:     func(m types.Message) error { return persistErr },
+			autoCompact: true,
+			longInput:   true,
+			wantCalls:   0, wantPersisted: 1, wantEndMsgs: 2, // summary + synthetic
+			wantTurns:    1,
+			wantTail:     "message_start,message_end,turn_end,agent_end",
+			wantErrParts: []string{"session persist:", "disk on fire"},
+		},
+		{
+			name:      "nil persist keeps normal flow",
+			responses: []*types.AssistantMessage{textMsg("done")},
+			persist:   nil,
+			wantCalls: 1, wantPersisted: 0, wantEndMsgs: 1,
+			wantTurns: 1,
+			wantTail:  "turn_end,agent_end",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fp := &fakeProvider{responses: tt.responses}
+			var tools []types.AgentTool
+			if tt.tools != nil {
+				tools = tt.tools()
+			}
+			req := baseRequest(fp, tools...)
+			if tt.longInput {
+				req.Messages = []types.Message{
+					&types.UserMessage{Content: types.TextOnly(strings.Repeat("filler ", 60)), Timestamp: 1},
+				}
+			}
+			if tt.autoCompact {
+				// Tiny window so the long input always crosses the threshold.
+				req.Model.ContextWindow = 10
+				req.AutoCompact = &AutoCompactConfig{
+					ThresholdFrac: 0.5,
+					Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+						return "the summary", nil
+					},
+				}
+			}
+			if tt.finishTurn {
+				req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+					return &FinishTurnDecision{Action: FinishTurnContinue}
+				}
+			}
+			if tt.prepareNext != nil {
+				req.PrepareNextTurn = tt.prepareNext
+			}
+			var persisted []types.Message
+			if tt.persist != nil {
+				req.Persist = func(m types.Message) error {
+					err := tt.persist(m)
+					persisted = append(persisted, m)
+					return err
+				}
+			}
+
+			evs, end := collect(t, Run(context.Background(), req))
+
+			assert.Equal(t, tt.wantCalls, fp.calls, "provider must not be called again after a persist failure")
+			assert.Len(t, persisted, tt.wantPersisted, "messages handed to Persist")
+
+			// Terminal stream is well-formed and balanced: exactly one
+			// agent_end (the last event) and matching turn_start/turn_end.
+			agentEnds, turnStarts, turnEnds := 0, 0, 0
+			for _, ev := range evs {
+				switch ev.Kind {
+				case types.AgentEnd:
+					agentEnds++
+				case types.TurnStart:
+					turnStarts++
+				case types.TurnEnd:
+					turnEnds++
+				}
+			}
+			assert.Equal(t, 1, agentEnds, "exactly one agent_end")
+			assert.Equal(t, tt.wantTurns, turnStarts, "turn_start count")
+			assert.Equal(t, tt.wantTurns, turnEnds, "turn_end count")
+			require.NotEmpty(t, evs)
+			assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
+			assert.True(t, strings.HasSuffix(kinds(evs), tt.wantTail),
+				"event tail:\n got %s\nwant suffix %s", kinds(evs), tt.wantTail)
+
+			if tt.persist == nil {
+				// Normal flow: no synthetic error turn anywhere.
+				for _, m := range end.Messages {
+					if am, ok := m.(*types.AssistantMessage); ok {
+						assert.NotEqual(t, types.StopError, am.StopReason)
+					}
+				}
+				return
+			}
+
+			// The synthetic error message closes agent_end.Messages.
+			require.Len(t, end.Messages, tt.wantEndMsgs)
+			synthetic, ok := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+			require.True(t, ok, "last message must be the synthetic error assistant, got %T", end.Messages[len(end.Messages)-1])
+			assert.Equal(t, types.StopError, synthetic.StopReason)
+			for _, part := range tt.wantErrParts {
+				assert.Contains(t, synthetic.ErrorMessage, part)
+			}
+			assert.Empty(t, synthetic.Content)
+			assert.Equal(t, req.Model.API, synthetic.API)
+			assert.Equal(t, req.Model.Provider, synthetic.Provider)
+			assert.Equal(t, req.Model.ID, synthetic.Model)
+
+			// The synthetic message is the payload of the final
+			// message_start/message_end/turn_end (agent_end via Messages).
+			n := len(evs)
+			require.GreaterOrEqual(t, n, 4)
+			assert.Same(t, synthetic, evs[n-4].Message)
+			assert.Same(t, synthetic, evs[n-3].Message)
+			assert.Same(t, synthetic, evs[n-2].Message)
+
+			if tt.wantSyntheticPersisted {
+				handed := false
+				for _, m := range persisted {
+					if m == types.Message(synthetic) {
+						handed = true
+					}
+				}
+				assert.True(t, handed, "folded hook-error terminal must be handed to Persist")
+			} else {
+				// failPersist paths never hand the synthetic message to Persist.
+				for _, m := range persisted {
+					assert.NotSame(t, synthetic, m)
+				}
+			}
+		})
+	}
+}
