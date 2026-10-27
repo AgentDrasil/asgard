@@ -142,8 +142,8 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 	if cx.SystemPrompt != "" {
 		msgs = append(msgs, oaMessage{Role: "system", Content: cx.SystemPrompt})
 	}
-	for _, m := range cx.Messages {
-		switch msg := m.(type) {
+	for i := 0; i < len(cx.Messages); i++ {
+		switch msg := cx.Messages[i].(type) {
 		case *types.UserMessage:
 			blocks, err := types.DecodeUserContent(msg.Content)
 			if err != nil {
@@ -210,28 +210,45 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 			}
 			msgs = append(msgs, out)
 		case *types.ToolResultMessage:
-			blocks, err := types.DecodeToolResultContent(msg.Content)
-			if err != nil {
-				return nil, fmt.Errorf("tool result content: %w", err)
-			}
-			text, images := toolResultTextAndImages(blocks)
-			content := text
-			if strings.TrimSpace(content) == "" {
-				if len(images) > 0 {
-					content = "(see attached image)"
-				} else {
-					content = "(no tool output)"
+			// OpenAI requires every tool message to directly follow the
+			// assistant tool_calls. Handle the whole consecutive tool-result
+			// run here: emit one tool message per result, then a single user
+			// message with all images collected across the run.
+			var runImages []oaPart
+			runEnd := i
+			for runEnd < len(cx.Messages) {
+				tr, ok := cx.Messages[runEnd].(*types.ToolResultMessage)
+				if !ok {
+					break
 				}
+				blocks, err := types.DecodeToolResultContent(tr.Content)
+				if err != nil {
+					return nil, fmt.Errorf("tool result content: %w", err)
+				}
+				text, images := toolResultTextAndImages(blocks)
+				content := text
+				if strings.TrimSpace(content) == "" {
+					if len(images) > 0 {
+						content = "(see attached image)"
+					} else {
+						content = "(no tool output)"
+					}
+				}
+				msgs = append(msgs, oaMessage{
+					Role: "tool", Content: content,
+					ToolCallID: tr.ToolCallID,
+				})
+				if len(images) > 0 && model.SupportsImage() {
+					runImages = append(runImages, images...)
+				}
+				runEnd++
 			}
-			msgs = append(msgs, oaMessage{
-				Role: "tool", Content: content,
-				ToolCallID: msg.ToolCallID,
-			})
-			if len(images) > 0 && model.SupportsImage() {
+			if len(runImages) > 0 {
 				parts := []oaPart{{Type: "text", Text: "Attached image(s) from tool result:"}}
-				parts = append(parts, images...)
+				parts = append(parts, runImages...)
 				msgs = append(msgs, oaMessage{Role: "user", Content: parts})
 			}
+			i = runEnd - 1
 		}
 	}
 	return msgs, nil

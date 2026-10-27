@@ -1925,3 +1925,161 @@ func TestWhitespaceOnlyToolOutputTreatedAsEmpty(t *testing.T) {
 		}
 	})
 }
+
+// Consecutive tool results must produce one tool message each followed by a
+// single combined image user message (OpenAI rejects a user message between
+// tool messages).
+func TestOpenAIConvertMessagesGroupsToolResultImages(t *testing.T) {
+	t.Parallel()
+
+	p := NewOpenAICompat("k")
+	const (
+		img1 = "aW1nLW9uZQ=="
+		img2 = "aW1nLXR3bw=="
+		img3 = "aW1nLXRocmVl"
+	)
+	text := func(s string) types.AssistantContent {
+		return types.TextContent{Type: types.TypeText, Text: s}
+	}
+	image := func(data string) types.AssistantContent {
+		return types.ImageContent{Type: types.TypeImage, Data: data, MimeType: "image/png"}
+	}
+
+	newContext := func(t *testing.T, results ...[]types.AssistantContent) *types.Context {
+		t.Helper()
+		assistant := &types.AssistantMessage{
+			Provider: "openai", API: types.APIOpenAICompat, Model: "gpt-test",
+		}
+		msgs := []types.Message{
+			&types.UserMessage{Content: types.TextOnly("go"), Timestamp: 1},
+		}
+		var toolResults []types.Message
+		for i, r := range results {
+			id := fmt.Sprintf("tc%d", i+1)
+			assistant.Content = append(assistant.Content, types.ToolCall{
+				Type: types.TypeToolCall, ID: id, Name: "read",
+				Arguments: json.RawMessage(`{"path":"a"}`),
+			})
+			raw, err := json.Marshal(r)
+			require.NoError(t, err)
+			toolResults = append(toolResults, &types.ToolResultMessage{
+				ToolCallID: id, ToolName: "read", Content: raw,
+			})
+		}
+		msgs = append(msgs, assistant)
+		msgs = append(msgs, toolResults...)
+		return &types.Context{Messages: msgs}
+	}
+
+	attachedURLs := func(t *testing.T, m oaMessage) []string {
+		t.Helper()
+		parts, ok := m.Content.([]oaPart)
+		require.True(t, ok, "expected []oaPart content, got %T", m.Content)
+		require.NotEmpty(t, parts)
+		assert.Equal(t, "Attached image(s) from tool result:", parts[0].Text)
+		var urls []string
+		for _, part := range parts[1:] {
+			require.NotNil(t, part.ImageURL)
+			urls = append(urls, part.ImageURL.URL)
+		}
+		return urls
+	}
+
+	t.Run("two consecutive image tool results share one user message", func(t *testing.T) {
+		t.Parallel()
+
+		cx := newContext(t,
+			[]types.AssistantContent{text("first"), image(img1)},
+			[]types.AssistantContent{text("second"), image(img2)},
+		)
+		msgs, err := p.ConvertMessages(oaModel("http://unused"), cx)
+		require.NoError(t, err)
+
+		require.Len(t, msgs, 5)
+		assert.Equal(t, []string{"user", "assistant", "tool", "tool", "user"},
+			[]string{msgs[0].Role, msgs[1].Role, msgs[2].Role, msgs[3].Role, msgs[4].Role})
+		assert.Equal(t, "tc1", msgs[2].ToolCallID)
+		assert.Equal(t, "tc2", msgs[3].ToolCallID)
+		urls := attachedURLs(t, msgs[4])
+		assert.Equal(t, []string{
+			"data:image/png;base64," + img1,
+			"data:image/png;base64," + img2,
+		}, urls)
+	})
+
+	t.Run("text-only then image tool result", func(t *testing.T) {
+		t.Parallel()
+
+		cx := newContext(t,
+			[]types.AssistantContent{text("plain output")},
+			[]types.AssistantContent{text("with image"), image(img1)},
+		)
+		msgs, err := p.ConvertMessages(oaModel("http://unused"), cx)
+		require.NoError(t, err)
+
+		require.Len(t, msgs, 5)
+		assert.Equal(t, "tool", msgs[2].Role)
+		assert.Equal(t, "plain output", msgs[2].Content)
+		assert.Equal(t, "tool", msgs[3].Role)
+		assert.Equal(t, "user", msgs[4].Role)
+		assert.Equal(t, []string{
+			"data:image/png;base64," + img1,
+		}, attachedURLs(t, msgs[4]))
+	})
+
+	t.Run("single image tool result still produces tool then user", func(t *testing.T) {
+		t.Parallel()
+
+		cx := newContext(t, []types.AssistantContent{text("one"), image(img1)})
+		msgs, err := p.ConvertMessages(oaModel("http://unused"), cx)
+		require.NoError(t, err)
+
+		require.Len(t, msgs, 4)
+		assert.Equal(t, []string{"user", "assistant", "tool", "user"},
+			[]string{msgs[0].Role, msgs[1].Role, msgs[2].Role, msgs[3].Role})
+		assert.Equal(t, []string{
+			"data:image/png;base64," + img1,
+		}, attachedURLs(t, msgs[3]))
+	})
+
+	t.Run("run of three with only the middle image", func(t *testing.T) {
+		t.Parallel()
+
+		cx := newContext(t,
+			[]types.AssistantContent{text("one")},
+			[]types.AssistantContent{text("two"), image(img3)},
+			[]types.AssistantContent{text("three")},
+		)
+		msgs, err := p.ConvertMessages(oaModel("http://unused"), cx)
+		require.NoError(t, err)
+
+		require.Len(t, msgs, 6)
+		assert.Equal(t, []string{"user", "assistant", "tool", "tool", "tool", "user"},
+			[]string{msgs[0].Role, msgs[1].Role, msgs[2].Role, msgs[3].Role, msgs[4].Role, msgs[5].Role})
+		for i, id := range []string{"tc1", "tc2", "tc3"} {
+			assert.Equal(t, id, msgs[2+i].ToolCallID)
+		}
+		assert.Equal(t, []string{
+			"data:image/png;base64," + img3,
+		}, attachedURLs(t, msgs[5]))
+	})
+
+	t.Run("non-image model keeps tools and omits the user image message", func(t *testing.T) {
+		t.Parallel()
+
+		cx := newContext(t,
+			[]types.AssistantContent{text("first"), image(img1)},
+			[]types.AssistantContent{text("second"), image(img2)},
+		)
+		model := oaModel("http://unused")
+		model.Input = []string{"text"}
+		msgs, err := p.ConvertMessages(model, cx)
+		require.NoError(t, err)
+
+		require.Len(t, msgs, 4)
+		assert.Equal(t, []string{"user", "assistant", "tool", "tool"},
+			[]string{msgs[0].Role, msgs[1].Role, msgs[2].Role, msgs[3].Role})
+		assert.Equal(t, "first", msgs[2].Content)
+		assert.Equal(t, "second", msgs[3].Content)
+	})
+}
