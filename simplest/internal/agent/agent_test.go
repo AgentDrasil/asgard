@@ -3063,3 +3063,428 @@ func TestRunClosedStreamCanceledIsAborted(t *testing.T) {
 	assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
 	assert.Equal(t, turnStarts, turnEnds)
 }
+
+// --- auto-compaction retention/hook (U8/U9/B32) ---
+
+func compactionLoop(msgs []types.Message, window int64, cfg *AutoCompactConfig) *loop {
+	return &loop{
+		ctx:      context.Background(),
+		req:      &Request{Model: &types.Model{ID: "m", ContextWindow: window}, AutoCompact: cfg},
+		messages: msgs,
+		newMsgs:  []types.Message{},
+	}
+}
+
+func TestAutoCompactUsageThreshold(t *testing.T) {
+	t.Parallel()
+
+	build := func(usage types.Usage) []types.Message {
+		return []types.Message{
+			&types.UserMessage{Content: types.TextOnly(strings.Repeat("a", 400))}, // ~100 tokens
+			&types.AssistantMessage{Usage: usage},
+			&types.UserMessage{Content: types.TextOnly(strings.Repeat("b", 400))}, // ~100 tokens
+		}
+	}
+
+	summarized := 0
+	cfg := &AutoCompactConfig{
+		ReserveTokens:    100,
+		KeepRecentTokens: 50,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			summarized++
+			return "summary", nil
+		},
+		OnCompacted: func(info CompactionInfo) error { return nil },
+	}
+
+	// usage 800 + trailing 100 == window(1000)-reserve(100): not above.
+	below := compactionLoop(build(types.Usage{Input: 700, Output: 100}), 1000, cfg)
+	require.NoError(t, below.maybeCompact())
+	assert.Zero(t, summarized, "estimated == threshold must not compact")
+
+	// usage 850 + trailing 100 > 900: compact.
+	above := compactionLoop(build(types.Usage{Input: 750, Output: 100}), 1000, cfg)
+	require.NoError(t, above.maybeCompact())
+	assert.Equal(t, 1, summarized, "estimated above threshold must compact")
+}
+
+func TestAutoCompactLegacyThresholdFrac(t *testing.T) {
+	t.Parallel()
+
+	persisted := 0
+	cfg := &AutoCompactConfig{
+		ThresholdFrac: 0.5,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			return "legacy summary", nil
+		},
+	}
+
+	// 1000 chars ~= 250 tokens < 50? no: window 100*0.5=50, so it triggers.
+	l := compactionLoop([]types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("x", 1000))},
+	}, 100, cfg)
+	l.req.Persist = func(m types.Message) error { persisted++; return nil }
+	require.NoError(t, l.maybeCompact())
+	require.Len(t, l.messages, 1)
+	assert.Contains(t, types.StringContentOf(mustDecodeUser(l.messages[0].(*types.UserMessage).Content)), "legacy summary")
+	require.Len(t, l.newMsgs, 1, "legacy mode persists the summary as a message")
+	assert.Equal(t, 1, persisted)
+
+	// 100 chars ~= 25 tokens < 50: no compaction.
+	small := compactionLoop([]types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("x", 100))},
+	}, 100, cfg)
+	require.NoError(t, small.maybeCompact())
+	assert.Len(t, small.messages, 1)
+	assert.Empty(t, small.newMsgs)
+}
+
+func TestAutoCompactKeepRecentCutAndThinkingFreeInput(t *testing.T) {
+	t.Parallel()
+
+	u0 := &types.UserMessage{Content: types.TextOnly("prefix user"), Timestamp: 1}
+	a0 := &types.AssistantMessage{
+		Content: []types.AssistantContent{
+			types.ThinkingContent{Type: types.TypeThinking, Thinking: "SECRET THOUGHTS"},
+			types.TextContent{Type: types.TypeText, Text: strings.Repeat("z", 400)},
+		},
+	}
+	u1 := &types.UserMessage{Content: types.TextOnly("boundary user"), Timestamp: 2}
+	a1 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("a", 200)}}}
+	u2 := &types.UserMessage{Content: types.TextOnly("kept user B"), Timestamp: 3}
+	a2 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "tail"}}}
+	msgs := []types.Message{u0, a0, u1, a1, u2, a2}
+
+	var summaryInput []types.Message
+	var info *CompactionInfo
+	cfg := &AutoCompactConfig{
+		ReserveTokens:    10,
+		KeepRecentTokens: 20,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			summaryInput = msgs
+			return "summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			info = &ci
+			return nil
+		},
+	}
+	l := compactionLoop(msgs, 100, cfg)
+	l.req.Persist = func(m types.Message) error { t.Fatal("hook mode must not persist the summary"); return nil }
+
+	require.NoError(t, l.maybeCompact())
+
+	require.Len(t, summaryInput, 2, "summarize only the prefix before the cut")
+	assert.Same(t, u0, summaryInput[0])
+	summaryAssistant, ok := summaryInput[1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.NotSame(t, a0, summaryAssistant)
+	for _, blk := range summaryAssistant.Content {
+		_, isThinking := blk.(types.ThinkingContent)
+		assert.False(t, isThinking, "summary input must omit thinking blocks")
+	}
+	// Original message is untouched.
+	assert.Len(t, a0.Content, 2)
+	_, originalThinking := a0.Content[0].(types.ThinkingContent)
+	assert.True(t, originalThinking, "original thinking must not be mutated")
+
+	require.NotNil(t, info)
+	assert.Equal(t, "summary", info.Summary)
+	assert.Greater(t, info.TokensBefore, int64(90))
+	require.Len(t, info.SummaryInput, 2)
+	require.Len(t, info.Kept, 4)
+	assert.Same(t, u1, info.Kept[0])
+	assert.Same(t, a1, info.Kept[1])
+	assert.Same(t, u2, info.Kept[2])
+	assert.Same(t, a2, info.Kept[3])
+
+	require.Len(t, l.messages, 5, "[summary] + kept suffix")
+	assert.Contains(t, types.StringContentOf(mustDecodeUser(l.messages[0].(*types.UserMessage).Content)), "summary")
+	assert.Same(t, u1, l.messages[1])
+	assert.Same(t, a2, l.messages[4])
+	assert.Empty(t, l.newMsgs, "hook mode must not record the summary as a run message")
+}
+
+func TestAutoCompactNilHookPersistsSummary(t *testing.T) {
+	t.Parallel()
+
+	u0 := &types.UserMessage{Content: types.TextOnly("prefix user")}
+	a0 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("z", 400)}}}
+	u1 := &types.UserMessage{Content: types.TextOnly("boundary user")}
+	a1 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("a", 200)}}}
+	u2 := &types.UserMessage{Content: types.TextOnly("tail")}
+
+	persisted := []types.Message{}
+	cfg := &AutoCompactConfig{
+		ReserveTokens:    10,
+		KeepRecentTokens: 20,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			return "summary", nil
+		},
+	}
+	l := compactionLoop([]types.Message{u0, a0, u1, a1, u2}, 100, cfg)
+	l.req.Persist = func(m types.Message) error {
+		persisted = append(persisted, m)
+		return nil
+	}
+
+	require.NoError(t, l.maybeCompact())
+	require.Len(t, persisted, 1, "summary is persisted exactly once")
+	assert.Same(t, l.messages[0], persisted[0])
+	require.Len(t, l.newMsgs, 1)
+	assert.Same(t, l.messages[0], l.newMsgs[0])
+	require.Len(t, l.messages, 4, "[summary] + kept suffix")
+}
+
+func TestAutoCompactOnCompactedRunLevel(t *testing.T) {
+	t.Parallel()
+
+	u0 := &types.UserMessage{Content: types.TextOnly("prefix user")}
+	a0 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("z", 4000)}}}
+	u1 := &types.UserMessage{Content: types.TextOnly("boundary user")}
+	a1 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("a", 4000)}}}
+	u2 := &types.UserMessage{Content: types.TextOnly("tail")}
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+	req := Request{
+		Messages: []types.Message{u0, a0, u1, a1, u2},
+		Model:    &types.Model{ID: "m", API: types.APIOpenAICompat, Provider: "p", ContextWindow: 1500},
+		Provider: fp,
+	}
+	var info *CompactionInfo
+	req.AutoCompact = &AutoCompactConfig{
+		ReserveTokens:    100,
+		KeepRecentTokens: 10,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			return "compact summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			info = &ci
+			return nil
+		},
+	}
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		persisted = append(persisted, m)
+		return nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	require.NotNil(t, info)
+	require.Len(t, info.Kept, 3)
+	assert.Same(t, u1, info.Kept[0])
+	encoded, err := json.Marshal(*info)
+	require.NoError(t, err, "host must be able to serialize CompactionInfo")
+	assert.Contains(t, string(encoded), "compact summary")
+
+	require.Len(t, fp.contexts, 1)
+	ctxMsgs := fp.contexts[0].Messages
+	require.Len(t, ctxMsgs, 4, "[summary, u1, a1, u2]")
+	assert.Contains(t, types.StringContentOf(mustDecodeUser(ctxMsgs[0].(*types.UserMessage).Content)), "compact summary")
+
+	// The summary is host-owned: not persisted and not in agent_end messages.
+	require.Len(t, persisted, 1, "only the produced assistant message is persisted")
+	assert.Equal(t, types.RoleAssistant, persisted[0].MessageRole())
+	require.Len(t, end.Messages, 1)
+	for _, m := range end.Messages {
+		if u, ok := m.(*types.UserMessage); ok {
+			assert.NotContains(t, types.StringContentOf(mustDecodeUser(u.Content)), "compact summary")
+		}
+	}
+}
+
+func TestAutoCompactOnCompactedErrorTerminatesRun(t *testing.T) {
+	t.Parallel()
+
+	u0 := &types.UserMessage{Content: types.TextOnly("prefix user")}
+	a0 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("z", 4000)}}}
+	u1 := &types.UserMessage{Content: types.TextOnly("boundary user")}
+	a1 := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("a", 200)}}}
+	u2 := &types.UserMessage{Content: types.TextOnly("tail")}
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("never")}}
+	req := Request{
+		Messages: []types.Message{u0, a0, u1, a1, u2},
+		Model:    &types.Model{ID: "m", API: types.APIOpenAICompat, Provider: "p", ContextWindow: 1000},
+		Provider: fp,
+	}
+	var summaryInput []types.Message
+	req.AutoCompact = &AutoCompactConfig{
+		ReserveTokens:    100,
+		KeepRecentTokens: 10,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			summaryInput = msgs
+			return "summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			return fmt.Errorf("hook boom")
+		},
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 0, fp.calls, "hook error must terminate before the provider call")
+	require.NotEmpty(t, end.Messages)
+	synthetic, ok := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopError, synthetic.StopReason)
+	assert.Contains(t, synthetic.ErrorMessage, "compaction:")
+	assert.Contains(t, synthetic.ErrorMessage, "hook boom")
+	assert.NotContains(t, synthetic.ErrorMessage, "session persist")
+	require.Len(t, summaryInput, 2, "hook must run with a non-empty prefix")
+}
+
+func TestAutoCompactCutZeroDoesNotSummarize(t *testing.T) {
+	t.Parallel()
+
+	u := &types.UserMessage{Content: types.TextOnly(strings.Repeat("x", 400))} // ~100 tokens
+	a := &types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "ok"}}}
+	msgs := []types.Message{u, a}
+
+	summarizeCalls, hookCalls := 0, 0
+	cfg := &AutoCompactConfig{
+		ReserveTokens: 10, // threshold 90 tokens; estimate ~101
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			summarizeCalls++
+			return "summary", nil
+		},
+		OnCompacted: func(info CompactionInfo) error {
+			hookCalls++
+			return nil
+		},
+	}
+	l := compactionLoop(msgs, 100, cfg)
+	original := l.messages
+	require.NoError(t, l.maybeCompact())
+
+	assert.Zero(t, summarizeCalls, "no prefix below keep-recent must not be summarized")
+	assert.Zero(t, hookCalls)
+	require.Len(t, l.messages, len(original))
+	for i := range original {
+		assert.Same(t, original[i], l.messages[i])
+	}
+	assert.Same(t, &original[0], &l.messages[0], "transcript slice must be untouched")
+	assert.Empty(t, l.newMsgs)
+}
+
+func TestAutoCompactUsageDeepCopyAndNil(t *testing.T) {
+	t.Parallel()
+
+	reasoning := int64(42)
+	var info *CompactionInfo
+	cfg := &AutoCompactConfig{
+		ReserveTokens:    100,
+		KeepRecentTokens: 50,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			return "summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			info = &ci
+			return nil
+		},
+	}
+
+	lastAssistant := &types.AssistantMessage{Usage: types.Usage{Input: 750, Output: 100, Reasoning: &reasoning}}
+	l := compactionLoop([]types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("a", 400))},
+		lastAssistant,
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("b", 400))},
+	}, 1000, cfg)
+	require.NoError(t, l.maybeCompact())
+	require.NotNil(t, info)
+	require.NotNil(t, info.Usage)
+	require.NotNil(t, info.Usage.Reasoning)
+	assert.NotSame(t, lastAssistant.Usage.Reasoning, info.Usage.Reasoning, "usage copy must not alias Reasoning")
+	assert.Equal(t, int64(42), *info.Usage.Reasoning)
+
+	// No usage on the last assistant -> nil Usage in CompactionInfo.
+	info = nil
+	l = compactionLoop([]types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("a", 400))},
+		&types.AssistantMessage{Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: strings.Repeat("z", 400)}}},
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("b", 400))},
+	}, 100, &AutoCompactConfig{
+		ReserveTokens:    10,
+		KeepRecentTokens: 50,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			return "summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			info = &ci
+			return nil
+		},
+	})
+	require.NoError(t, l.maybeCompact())
+	require.NotNil(t, info)
+	assert.Nil(t, info.Usage)
+}
+
+func TestCompactSettingsDefaults(t *testing.T) {
+	t.Parallel()
+
+	reserve, keep, retention := compactSettings(&AutoCompactConfig{})
+	assert.Equal(t, int64(16384), reserve)
+	assert.Equal(t, int64(20000), keep)
+	assert.False(t, retention, "ReserveTokens==0 selects the legacy path")
+
+	reserve, keep, retention = compactSettings(&AutoCompactConfig{ReserveTokens: 100})
+	assert.Equal(t, int64(100), reserve)
+	assert.Equal(t, int64(20000), keep)
+	assert.True(t, retention)
+
+	reserve, keep, retention = compactSettings(&AutoCompactConfig{ReserveTokens: 100, KeepRecentTokens: 5})
+	assert.Equal(t, int64(100), reserve)
+	assert.Equal(t, int64(5), keep)
+	assert.True(t, retention)
+}
+
+func TestAutoCompactLegacyWithHook(t *testing.T) {
+	t.Parallel()
+
+	a := &types.AssistantMessage{
+		Content: []types.AssistantContent{
+			types.ThinkingContent{Type: types.TypeThinking, Thinking: "SECRET"},
+			types.TextContent{Type: types.TypeText, Text: "old answer"},
+		},
+	}
+	msgs := []types.Message{
+		&types.UserMessage{Content: types.TextOnly(strings.Repeat("x", 1000))},
+		a,
+	}
+	var info *CompactionInfo
+	var summarizeInput []types.Message
+	cfg := &AutoCompactConfig{
+		ThresholdFrac: 0.5,
+		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
+			summarizeInput = msgs
+			return "legacy summary", nil
+		},
+		OnCompacted: func(ci CompactionInfo) error {
+			info = &ci
+			return nil
+		},
+	}
+	l := compactionLoop(msgs, 100, cfg)
+	persisted := 0
+	l.req.Persist = func(m types.Message) error { persisted++; return nil }
+
+	require.NoError(t, l.maybeCompact())
+	require.NotNil(t, info)
+	assert.Equal(t, "legacy summary", info.Summary)
+	assert.Nil(t, info.Kept, "legacy mode has no retained suffix")
+	require.Len(t, info.SummaryInput, 2, "legacy summary input is the whole transcript")
+	require.Len(t, summarizeInput, 2)
+	for i := range summarizeInput {
+		assert.Same(t, summarizeInput[i], info.SummaryInput[i])
+	}
+	summaryAssistant := info.SummaryInput[1].(*types.AssistantMessage)
+	for _, blk := range summaryAssistant.Content {
+		_, thinking := blk.(types.ThinkingContent)
+		assert.False(t, thinking)
+	}
+	require.Len(t, l.messages, 1)
+	assert.Contains(t, types.StringContentOf(mustDecodeUser(l.messages[0].(*types.UserMessage).Content)), "legacy summary")
+	assert.Empty(t, l.newMsgs)
+	assert.Zero(t, persisted, "hook mode must not persist the summary")
+}

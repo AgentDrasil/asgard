@@ -328,15 +328,35 @@ events := agent.Run(ctx, agent.Request{
 		return nil
 	},
 
-	// Opt-in context compaction (chars/4 estimate vs context window)
+	// Opt-in context compaction.
 	AutoCompact: &agent.AutoCompactConfig{
-		ThresholdFrac: 0.8,
+		// Usage-based trigger when ReserveTokens > 0: compact above
+		// ContextWindow-ReserveTokens.
+		ReserveTokens: 16384,
+		// Retain roughly this many recent tokens, cut at a user boundary.
+		KeepRecentTokens: 20000,
+		// Legacy trigger when ReserveTokens <= 0 (ThresholdFrac default 0.8).
 		Summarize: func(ctx context.Context, msgs []types.Message) (string, error) {
-			return summarize(ctx, model, msgs) // your own LLM call
+			return summarize(ctx, model, msgs) // summary input omits thinking
+		},
+		// Optional: the host owns the compaction entry. When set, the summary
+		// is NOT persisted as a normal message or included in agent_end.Messages.
+		OnCompacted: func(info agent.CompactionInfo) error {
+			return saveCompaction(info.Summary, info.Kept, info.TokensBefore, info.Usage)
 		},
 	},
 })
 ```
+
+In usage-based mode the last assistant usage plus a chars/4 estimate of the
+messages after it drives the trigger; the kept suffix is retained verbatim and
+the summarized prefix drops thinking blocks. With `OnCompacted` nil the summary
+is persisted as a normal user message appended at the tail while the summarized
+prefix stays in the session; hosts that need a faithful compaction entry should
+set `OnCompacted`. An `OnCompacted` error terminates the run with a synthetic
+`StopReason == error` turn. Legacy mode (`ReserveTokens <= 0`) keeps the old
+`ThresholdFrac` trigger and summary-only replacement; `CompactionInfo.Kept` is
+nil there and `SummaryInput` is the whole thinking-free transcript.
 
 Loop shape per turn: `maybeCompact` → inject pending steering → provider
 stream forwarded as `message_*` events → on `toolUse`, execute the batch

@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -93,12 +94,35 @@ type Request struct {
 	AutoCompact *AutoCompactConfig
 }
 
-// AutoCompactConfig estimates context size as chars/4 and compacts through the
-// caller-provided Summarize function before crossing ThresholdFrac of the
-// model's context window.
+// AutoCompactConfig enables opt-in compaction through the caller-provided
+// Summarize function. ReserveTokens > 0 selects usage-based triggering with a
+// retained recent suffix; values <= 0 keep the legacy chars/4 ThresholdFrac
+// trigger and summary-only replacement.
 type AutoCompactConfig struct {
+	// ThresholdFrac is the legacy trigger: compact when chars/4 exceeds
+	// ContextWindow*ThresholdFrac. Used only when ReserveTokens is <= 0.
 	ThresholdFrac float64
-	Summarize     func(ctx context.Context, msgs []types.Message) (string, error)
+	// ReserveTokens enables usage-based triggering when > 0: compact when the
+	// estimated context exceeds ContextWindow-ReserveTokens. Values <= 0 select
+	// the legacy ThresholdFrac path.
+	ReserveTokens int64
+	// KeepRecentTokens is the approximate recent suffix retained verbatim.
+	// Defaults to 20000 when <= 0 (usage-based mode only).
+	KeepRecentTokens int64
+	// Summarize produces the compaction summary from thinking-free messages.
+	Summarize func(ctx context.Context, msgs []types.Message) (string, error)
+	// OnCompacted, when set, receives compaction details and owns persistence of
+	// the compaction entry. The summary is not persisted as a normal message.
+	OnCompacted func(CompactionInfo) error
+}
+
+// CompactionInfo describes one auto-compaction.
+type CompactionInfo struct {
+	Summary      string
+	TokensBefore int64
+	Kept         []types.Message
+	SummaryInput []types.Message
+	Usage        *types.Usage
 }
 
 // TurnSummary describes a completed turn.
@@ -251,13 +275,24 @@ func (l *loop) appendNewMsg(m types.Message) error {
 // the hook is not run for them. The caller must unwind immediately: no further
 // turns, tool executions, or terminal events.
 func (l *loop) failPersist(perr error) {
+	l.failTerminal(fmt.Sprintf("session persist: %v", perr))
+}
+
+// failCompact terminates the run with a compaction-labelled terminal error.
+func (l *loop) failCompact(err error) {
+	l.failTerminal(fmt.Sprintf("compaction: %v", err))
+}
+
+// failTerminal records an event-only StopError assistant message and closes the
+// run with a balanced terminal turn.
+func (l *loop) failTerminal(message string) {
 	final := &types.AssistantMessage{
 		Content:       []types.AssistantContent{},
 		API:           l.req.Model.API,
 		Provider:      l.req.Model.Provider,
 		Model:         l.req.Model.ID,
 		StopReason:    types.StopError,
-		ErrorMessage:  fmt.Sprintf("session persist: %v", perr),
+		ErrorMessage:  message,
 		ThinkingLevel: l.thinkingLevel(),
 		Timestamp:     time.Now().UnixMilli(),
 	}
@@ -385,7 +420,12 @@ outer:
 				if err := l.maybeCompact(); err != nil {
 					// Terminal path: drained steering/pending messages are
 					// dropped — the run ends here.
-					l.failPersist(err)
+					var persistErr *compactPersistError
+					if errors.As(err, &persistErr) {
+						l.failPersist(persistErr.err)
+					} else {
+						l.failCompact(err)
+					}
 					return
 				}
 				if l.ctx.Err() != nil {
@@ -1192,38 +1232,229 @@ func (l *loop) executeParallel(msg *types.AssistantMessage, calls []types.ToolCa
 	return out, allTerminated
 }
 
-// maybeCompact summarizes the transcript when the chars/4 estimate crosses
-// ThresholdFrac of the model context window. On success the working context
-// becomes just the summary user message. Summarize failures are ignored (the
-// next turn retries); a summary that cannot be persisted is returned as an
-// error so the run stops instead of continuing without the session write.
+// maybeCompact compacts when configured. ReserveTokens > 0 uses usage-based
+// estimation (last assistant usage plus trailing chars/4) and triggers above
+// ContextWindow-ReserveTokens, retaining KeepRecentTokens at a user boundary.
+// ReserveTokens <= 0 keeps the legacy whole-transcript chars/4 ThresholdFrac
+// trigger and summary-only replacement. Summarize failures are ignored (the
+// next turn retries); persistence failures and OnCompacted errors terminate the
+// run with distinct error labels.
 func (l *loop) maybeCompact() error {
 	cfg := l.req.AutoCompact
 	if cfg == nil || cfg.Summarize == nil || l.req.Model.ContextWindow <= 0 {
 		return nil
 	}
+	reserve, keep, retention := compactSettings(cfg)
+	if retention {
+		return l.compactWithRetention(cfg, reserve, keep)
+	}
+	return l.compactLegacy(cfg)
+}
+
+const (
+	defaultCompactReserveTokens    int64 = 16384
+	defaultCompactKeepRecentTokens int64 = 20000
+)
+
+// compactSettings resolves the retention defaults. retention is false for the
+// legacy ThresholdFrac path; keep is still resolved for tests/inspection.
+func compactSettings(cfg *AutoCompactConfig) (reserve, keep int64, retention bool) {
+	reserve = cfg.ReserveTokens
+	if reserve <= 0 {
+		reserve = defaultCompactReserveTokens
+	}
+	keep = cfg.KeepRecentTokens
+	if keep <= 0 {
+		keep = defaultCompactKeepRecentTokens
+	}
+	return reserve, keep, cfg.ReserveTokens > 0
+}
+
+// compactLegacy preserves the pre-retention behavior: chars/4 over the whole
+// transcript, ThresholdFrac trigger, and a summary-only replacement persisted
+// as a normal message (unless OnCompacted owns persistence).
+func (l *loop) compactLegacy(cfg *AutoCompactConfig) error {
 	total := 0
 	for _, m := range l.messages {
 		total += messageCharLen(m)
 	}
-	estimated := total / 4
+	estimated := int64(total / 4)
 	frac := cfg.ThresholdFrac
 	if frac <= 0 {
 		frac = 0.8
 	}
-	if int64(estimated) < int64(float64(l.req.Model.ContextWindow)*frac) {
+	if estimated < int64(float64(l.req.Model.ContextWindow)*frac) {
 		return nil
 	}
-	summary, err := cfg.Summarize(l.ctx, l.messages)
+	_, usage := estimateContextTokens(l.messages)
+	summaryInput := messagesWithoutThinking(l.messages)
+	summary, err := cfg.Summarize(l.ctx, summaryInput)
 	if err != nil || strings.TrimSpace(summary) == "" {
 		return nil
 	}
+	sum := compactionSummaryMessage(summary)
+	info := CompactionInfo{
+		Summary:      summary,
+		TokensBefore: estimated,
+		SummaryInput: summaryInput,
+		Usage:        usage,
+	}
+	if cfg.OnCompacted != nil {
+		if err := cfg.OnCompacted(info); err != nil {
+			return err
+		}
+		l.messages = []types.Message{sum}
+		return nil
+	}
+	l.messages = []types.Message{sum}
+	if err := l.appendNewMsg(sum); err != nil {
+		return &compactPersistError{err: err}
+	}
+	return nil
+}
+
+// compactWithRetention triggers on window-reserve, keeps a recent suffix at a
+// user boundary, and summarizes a thinking-free prefix.
+func (l *loop) compactWithRetention(cfg *AutoCompactConfig, reserve, keep int64) error {
+	threshold := l.req.Model.ContextWindow - reserve
+	if threshold < 1 {
+		threshold = 1
+	}
+	estimated, usage := estimateContextTokens(l.messages)
+	if estimated <= threshold {
+		return nil
+	}
+	cut := compactionCut(l.messages, keep)
+	if cut <= 0 {
+		// Nothing safely summarizable without dropping the entire transcript.
+		return nil
+	}
+	summaryInput := messagesWithoutThinking(l.messages[:cut])
+	summary, err := cfg.Summarize(l.ctx, summaryInput)
+	if err != nil || strings.TrimSpace(summary) == "" {
+		return nil
+	}
+	kept := append([]types.Message{}, l.messages[cut:]...)
+	sum := compactionSummaryMessage(summary)
+	info := CompactionInfo{
+		Summary:      summary,
+		TokensBefore: estimated,
+		Kept:         kept,
+		SummaryInput: summaryInput,
+		Usage:        usage,
+	}
+	if cfg.OnCompacted != nil {
+		if err := cfg.OnCompacted(info); err != nil {
+			return err
+		}
+		l.messages = append([]types.Message{sum}, kept...)
+		return nil
+	}
+	l.messages = append([]types.Message{sum}, kept...)
+	if err := l.appendNewMsg(sum); err != nil {
+		return &compactPersistError{err: err}
+	}
+	return nil
+}
+
+// compactPersistError marks a summary persistence failure so the run reports it
+// as a session-persist error rather than a compaction/hook error.
+type compactPersistError struct{ err error }
+
+func (e *compactPersistError) Error() string { return e.err.Error() }
+func (e *compactPersistError) Unwrap() error { return e.err }
+
+func compactionSummaryMessage(summary string) *types.UserMessage {
 	raw, _ := types.MarshalBlocks([]types.AssistantContent{
 		types.TextContent{Type: types.TypeText, Text: compactionPrefix + summary + compactionSuffix},
 	})
-	sum := &types.UserMessage{Content: raw, Timestamp: time.Now().UnixMilli()}
-	l.messages = []types.Message{sum}
-	return l.appendNewMsg(sum)
+	return &types.UserMessage{Content: raw, Timestamp: time.Now().UnixMilli()}
+}
+
+// estimateContextTokens uses the last assistant usage plus chars/4 for the
+// messages after it. Without usable usage it estimates the whole transcript.
+// The system prompt is not available here, so it is not counted.
+func estimateContextTokens(messages []types.Message) (int64, *types.Usage) {
+	lastAssistant := -1
+	var usage *types.Usage
+	for i := len(messages) - 1; i >= 0; i-- {
+		am, ok := messages[i].(*types.AssistantMessage)
+		if !ok {
+			continue
+		}
+		lastAssistant = i
+		if total := am.Usage.Input + am.Usage.Output + am.Usage.CacheRead + am.Usage.CacheWrite; total > 0 {
+			usage = cloneUsage(am.Usage)
+		}
+		break
+	}
+	var tokens int64
+	start := 0
+	if usage != nil {
+		tokens = usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+		start = lastAssistant + 1
+	}
+	for _, m := range messages[start:] {
+		tokens += int64(messageCharLen(m)) / 4
+	}
+	return tokens, usage
+}
+
+// compactionCut returns the start index of the kept suffix: walk back until
+// keepRecent approximates the suffix, then move to the nearest user boundary.
+func cloneUsage(u types.Usage) *types.Usage {
+	cp := u
+	if u.Reasoning != nil {
+		r := *u.Reasoning
+		cp.Reasoning = &r
+	}
+	return &cp
+}
+
+func compactionCut(messages []types.Message, keepRecent int64) int {
+	if keepRecent <= 0 {
+		keepRecent = 20000
+	}
+	cut := 0
+	var chars int64
+	for i := len(messages) - 1; i >= 0; i-- {
+		chars += int64(messageCharLen(messages[i]))
+		cut = i
+		if chars/4 >= keepRecent {
+			break
+		}
+	}
+	for cut > 0 {
+		if _, ok := messages[cut].(*types.UserMessage); ok {
+			break
+		}
+		cut--
+	}
+	return cut
+}
+
+// messagesWithoutThinking copies messages, dropping ThinkingContent blocks from
+// assistant copies for summary input. Originals are never mutated.
+func messagesWithoutThinking(messages []types.Message) []types.Message {
+	out := make([]types.Message, len(messages))
+	copy(out, messages)
+	for i, m := range out {
+		am, ok := m.(*types.AssistantMessage)
+		if !ok {
+			continue
+		}
+		clone := *am
+		clone.Content = make([]types.AssistantContent, 0, len(am.Content))
+		for _, blk := range am.Content {
+			switch blk.(type) {
+			case types.ThinkingContent, *types.ThinkingContent:
+				continue
+			}
+			clone.Content = append(clone.Content, blk)
+		}
+		out[i] = &clone
+	}
+	return out
 }
 
 func messageCharLen(m types.Message) int {
