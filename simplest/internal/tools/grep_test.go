@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -166,6 +169,65 @@ func TestGrepToolLongLineTruncatedFlag(t *testing.T) {
 	if len([]rune(strings.TrimPrefix(matchLine, "longline.txt:1: "))) > GrepMaxLineLength+len("... [truncated]") {
 		t.Error("matched line was not truncated to 500 chars")
 	}
+}
+
+func TestGrepToolLimitSemantics(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "many.txt", "hit1\nhit2\nhit3\nhit4\nhit5\n")
+
+	t.Run("limit 0 clamps to 1 match", func(t *testing.T) {
+		t.Parallel()
+		res, out := grepExec(t, dir, `{"pattern":"hit","limit":0,"path":"many.txt"}`)
+		lines := strings.Split(out, "\n")
+		require.Len(t, lines, 3) // 1 match + blank line + notice
+		assert.Contains(t, out, "many.txt:1:")
+		assert.NotContains(t, out, "many.txt:2:")
+		assert.Contains(t, out, "[1 matches limit reached. Use limit=2 for more, or refine pattern]")
+		assert.Equal(t, 1, res.Details.(*GrepToolDetails).MatchLimitReached)
+	})
+
+	t.Run("negative limit clamps to 1 match", func(t *testing.T) {
+		t.Parallel()
+		_, out := grepExec(t, dir, `{"pattern":"hit","limit":-5,"path":"many.txt"}`)
+		assert.Contains(t, out, "many.txt:1:")
+		assert.NotContains(t, out, "many.txt:2:")
+	})
+
+	t.Run("fractional limit rounds up", func(t *testing.T) {
+		t.Parallel()
+		_, out := grepExec(t, dir, `{"pattern":"hit","limit":1.5,"path":"many.txt"}`)
+		assert.Contains(t, out, "many.txt:1:")
+		assert.Contains(t, out, "many.txt:2:")
+		assert.NotContains(t, out, "many.txt:3:")
+	})
+
+	t.Run("whole float limit stays as is", func(t *testing.T) {
+		t.Parallel()
+		_, out := grepExec(t, dir, `{"pattern":"hit","limit":1.0,"path":"many.txt"}`)
+		assert.Contains(t, out, "many.txt:1:")
+		assert.NotContains(t, out, "many.txt:2:")
+	})
+
+	t.Run("omitted limit defaults to 100", func(t *testing.T) {
+		t.Parallel()
+		res, out := grepExec(t, dir, `{"pattern":"hit","path":"many.txt"}`)
+		assert.Equal(t, 5, strings.Count(out, "many.txt:"))
+		assert.Equal(t, 0, res.Details.(*GrepToolDetails).MatchLimitReached)
+	})
+
+	t.Run("huge limit does not overflow", func(t *testing.T) {
+		t.Parallel()
+		_, out := grepExec(t, dir, `{"pattern":"hit","limit":1e300,"path":"many.txt"}`)
+		assert.Equal(t, 5, strings.Count(out, "many.txt:"))
+		assert.NotContains(t, out, "limit reached")
+	})
+
+	t.Run("32-bit overflow class limit", func(t *testing.T) {
+		t.Parallel()
+		_, out := grepExec(t, dir, `{"pattern":"hit","limit":1e10,"path":"many.txt"}`)
+		assert.Equal(t, 5, strings.Count(out, "many.txt:"))
+		assert.NotContains(t, out, "limit reached")
+	})
 }
 
 func TestGrepToolNoMatchesAndBadPath(t *testing.T) {

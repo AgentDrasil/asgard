@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,8 +74,8 @@ func (t *LsTool) Execute(ctx context.Context, toolCallID string, args json.RawMe
 
 	dirPath := resolveToCwd(orDefault(in.Path, "."), t.cwd)
 	effectiveLimit := lsDefaultLimit
-	if in.Limit != nil && *in.Limit >= 1 {
-		effectiveLimit = int(*in.Limit)
+	if in.Limit != nil {
+		effectiveLimit = maxInt(0, saturatingFloatToInt(math.Ceil(*in.Limit)))
 	}
 
 	info, err := os.Stat(dirPath)
@@ -90,7 +91,7 @@ func (t *LsTool) Execute(ctx context.Context, toolCallID string, args json.RawMe
 		return nil, fmt.Errorf("cannot read directory: %v", err)
 	}
 
-	sort.Slice(dirEntries, func(i, j int) bool {
+	sort.SliceStable(dirEntries, func(i, j int) bool {
 		return strings.ToLower(dirEntries[i].Name()) < strings.ToLower(dirEntries[j].Name())
 	})
 

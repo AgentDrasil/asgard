@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -113,8 +114,8 @@ func (t *GrepTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		contextValue = int(*in.Context)
 	}
 	effectiveLimit := grepDefaultLimit
-	if in.Limit != nil && *in.Limit >= 1 {
-		effectiveLimit = int(*in.Limit)
+	if in.Limit != nil {
+		effectiveLimit = maxInt(1, saturatingFloatToInt(math.Ceil(*in.Limit)))
 	}
 
 	formatPath := func(filePath string) string {

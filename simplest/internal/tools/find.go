@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -79,13 +80,16 @@ func (t *FindTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		return nil, fmt.Errorf("path not found or not a directory: %s", searchPath)
 	}
 	effectiveLimit := findDefaultLimit
-	if in.Limit != nil && *in.Limit >= 1 {
-		effectiveLimit = int(*in.Limit)
+	if in.Limit != nil {
+		effectiveLimit = maxInt(0, saturatingFloatToInt(math.Floor(*in.Limit)))
 	}
 
 	var results []string
 	resultLimitReached := false
 	err := walkWithGitignore(searchPath, func(absPath, rel string, isDir bool) error {
+		if effectiveLimit == 0 {
+			return errStopWalk
+		}
 		ok, gerr := matchGlob(in.Pattern, rel, false)
 		if gerr != nil || !ok {
 			return nil

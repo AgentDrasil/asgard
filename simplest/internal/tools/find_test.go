@@ -3,6 +3,9 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func findSetup(t *testing.T) string {
@@ -89,6 +92,56 @@ func TestFindToolLimitNotice(t *testing.T) {
 	if details.ResultLimitReached != 2 {
 		t.Errorf("ResultLimitReached = %d, want 2", details.ResultLimitReached)
 	}
+}
+
+func TestFindToolLimitSemantics(t *testing.T) {
+	dir := findSetup(t)
+
+	t.Run("limit 0 returns no results", func(t *testing.T) {
+		t.Parallel()
+		out := textOf(t, mustExec(t, NewFindTool(dir), `{"pattern":"*.go","limit":0}`))
+		require.Equal(t, "No files found matching pattern", out)
+	})
+
+	t.Run("negative limit returns no results", func(t *testing.T) {
+		t.Parallel()
+		out := textOf(t, mustExec(t, NewFindTool(dir), `{"pattern":"*.go","limit":-5}`))
+		require.Equal(t, "No files found matching pattern", out)
+	})
+
+	t.Run("fractional limit floors", func(t *testing.T) {
+		t.Parallel()
+		res := mustExec(t, NewFindTool(dir), `{"pattern":"*.go","limit":1.5}`)
+		full := textOf(t, res)
+		out := strings.Split(full, "\n\n")[0]
+		assert.Equal(t, "src/main.go", out, "floor(1.5)=1 should return exactly one result")
+		assert.Contains(t, full, "[1 results limit reached. Use limit=2 for more]")
+		assert.Equal(t, 1, res.Details.(*FindToolDetails).ResultLimitReached)
+	})
+
+	t.Run("omitted limit defaults to 1000", func(t *testing.T) {
+		t.Parallel()
+		out := textOf(t, mustExec(t, NewFindTool(dir), `{"pattern":"*.go"}`))
+		assert.Contains(t, out, "src/main.go")
+		assert.Contains(t, out, "src/util/helper.go")
+		assert.Contains(t, out, "src/util/deep/nested.go")
+	})
+
+	t.Run("huge limit does not overflow", func(t *testing.T) {
+		t.Parallel()
+		out := textOf(t, mustExec(t, NewFindTool(dir), `{"pattern":"*.go","limit":1e300}`))
+		assert.Contains(t, out, "src/main.go")
+		assert.Contains(t, out, "src/util/helper.go")
+		assert.Contains(t, out, "src/util/deep/nested.go")
+		assert.NotContains(t, out, "limit reached")
+	})
+
+	t.Run("32-bit overflow class limit", func(t *testing.T) {
+		t.Parallel()
+		out := textOf(t, mustExec(t, NewFindTool(dir), `{"pattern":"*.go","limit":1e10}`))
+		assert.Contains(t, out, "src/util/deep/nested.go")
+		assert.NotContains(t, out, "limit reached")
+	})
 }
 
 func TestFindToolNoFilesFound(t *testing.T) {
