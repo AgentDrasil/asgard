@@ -178,7 +178,7 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 			prompt: "hello world",
 			opts:   types.PromptOptions{},
 			wantArgv: []string{
-				"run", "--format", "json", "--auto", "--", "hello world",
+				"run", "--format", "json", "--auto", "--standalone", "--", "hello world",
 			},
 		},
 		{
@@ -186,7 +186,7 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 			prompt: "- first item\n- second item",
 			opts:   types.PromptOptions{},
 			wantArgv: []string{
-				"run", "--format", "json", "--auto", "--", "- first item\n- second item",
+				"run", "--format", "json", "--auto", "--standalone", "--", "- first item\n- second item",
 			},
 		},
 		{
@@ -197,7 +197,7 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 				Model:     "deepseek-chat",
 			},
 			wantArgv: []string{
-				"run", "--format", "json", "--auto",
+				"run", "--format", "json", "--auto", "--standalone",
 				"--session", "ses_123456",
 				"--model", "deepseek-chat",
 				"--", "continue task",
@@ -211,7 +211,7 @@ func TestBuildPromptArgv_TableDriven(t *testing.T) {
 				Model:     "zai-coding-plan/glm-5.3/low",
 			},
 			wantArgv: []string{
-				"run", "--format", "json", "--auto",
+				"run", "--format", "json", "--auto", "--standalone",
 				"--session", "ses_abc",
 				"--model", "zai-coding-plan/glm-5.3#low",
 				"--", "run query",
@@ -233,7 +233,7 @@ func TestBuildPromptArgv_WithAgent(t *testing.T) {
 	t.Parallel()
 
 	argv := buildPromptArgv("do it", types.PromptOptions{Model: "m"}, "intend")
-	assert.Equal(t, []string{"run", "--format", "json", "--auto", "--agent", "intend", "--model", "m", "--", "do it"}, argv)
+	assert.Equal(t, []string{"run", "--format", "json", "--auto", "--standalone", "--agent", "intend", "--model", "m", "--", "do it"}, argv)
 }
 
 func TestPrompt_DynamicMaxTokens(t *testing.T) {

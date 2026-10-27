@@ -71,10 +71,10 @@ func TestValidateOpencodeSetup(t *testing.T) {
 		homeDirFn = origHomeDirFn
 	})
 
-	// 1. Missing auth.json
+	// 1. Missing opencode.db
 	err := ValidateOpencodeSetup()
 	if err == nil {
-		t.Fatal("expected error when auth.json is missing, got nil")
+		t.Fatal("expected error when opencode.db is missing, got nil")
 	}
 
 	// Create opencode directory
@@ -83,16 +83,15 @@ func TestValidateOpencodeSetup(t *testing.T) {
 		t.Fatalf("failed to create temp directory: %v", err)
 	}
 
-	// Create auth.json
-	authPath := filepath.Join(opencodeDir, "auth.json")
-	if err := os.WriteFile(authPath, []byte("test-auth"), 0600); err != nil {
-		t.Fatalf("failed to write auth: %v", err)
+	// 2. Success with opencode.db
+	dbPath := filepath.Join(opencodeDir, "opencode.db")
+	if err := os.WriteFile(dbPath, []byte("test-db"), 0600); err != nil {
+		t.Fatalf("failed to write db: %v", err)
 	}
 
-	// 2. Success
 	err = ValidateOpencodeSetup()
 	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+		t.Fatalf("expected no error with opencode.db, got: %v", err)
 	}
 }
 

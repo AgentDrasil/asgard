@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,8 +71,28 @@ func TestLoadAuthToken(t *testing.T) {
 
 	opencodeDir := filepath.Join(tempHome, ".local", "share", "opencode")
 	require.NoError(t, os.MkdirAll(opencodeDir, 0755))
-	authJSON := `{"zai-coding-plan":{"key":"test-key"}}`
-	require.NoError(t, os.WriteFile(filepath.Join(opencodeDir, "auth.json"), []byte(authJSON), 0600))
+	dbPath := filepath.Join(opencodeDir, "opencode.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE credential (
+		id text PRIMARY KEY,
+		integration_id text,
+		label text NOT NULL,
+		value text NOT NULL,
+		connector_id text,
+		method_id text,
+		active integer,
+		time_created integer NOT NULL,
+		time_updated integer NOT NULL
+	)`)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated)
+		VALUES ('cred_1', 'zai-coding-plan', 'API key', '{"type":"key","key":"test-key"}', 1, 1000, 1000)`)
+	require.NoError(t, err)
 
 	assert.Equal(t, "test-key", loadAuthToken())
 }

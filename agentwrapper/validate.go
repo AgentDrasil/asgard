@@ -33,22 +33,22 @@ func ValidateAgySetup() error {
 }
 
 // ValidateOpencodeSetup verifies that opencode is correctly set up on the user's system.
-// It checks that ~/.local/share/opencode/auth.json exists.
+// It checks that ~/.local/share/opencode/opencode.db exists.
 func ValidateOpencodeSetup() error {
 	home, err := homeDirFn()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	authPath := filepath.Join(home, ".local", "share", "opencode", "auth.json")
-	if fi, err := os.Stat(authPath); err != nil {
+	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+	if fi, err := os.Stat(dbPath); err != nil {
 		if os.IsNotExist(err) {
 			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
-			return fmt.Errorf("opencode setup validation failed: auth file does not exist at %s. Please run 'docker exec -it <container_name> opencode auth login' to log in (find the container name via 'docker ps').", authPath)
+			return fmt.Errorf("opencode setup validation failed: auth file does not exist at %s. Please run 'docker exec -it <container_name> opencode auth login' to log in (find the container name via 'docker ps').", dbPath)
 		}
 		return fmt.Errorf("failed to check auth file: %w", err)
 	} else if fi.IsDir() {
-		return fmt.Errorf("opencode setup validation failed: auth path %s is a directory", authPath)
+		return fmt.Errorf("opencode setup validation failed: auth path %s is a directory", dbPath)
 	}
 
 	return nil

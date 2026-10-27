@@ -71,7 +71,7 @@ func SplitModelVariant(model string) (string, string) {
 // selected via --agent; empty means opencode runs with its native default
 // agent.
 func buildPromptArgv(prompt string, opts types.PromptOptions, agentName string) []string {
-	argv := []string{"run", "--format", "json", "--auto"}
+	argv := []string{"run", "--format", "json", "--auto", "--standalone"}
 	if agentName != "" {
 		argv = append(argv, "--agent", agentName)
 	}

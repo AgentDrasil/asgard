@@ -3,6 +3,7 @@ package opencode
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
+	_ "modernc.org/sqlite"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/llms/zai"
@@ -21,21 +23,25 @@ func loadAuthToken() string {
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(home, ".local", "share", "opencode", "auth.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
+	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+	if _, err := os.Stat(dbPath); err == nil {
+		dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
+		db, err := sql.Open("sqlite", dsn)
+		if err == nil {
+			defer db.Close()
+			var rawVal string
+			query := `SELECT value FROM credential WHERE integration_id = 'zai-coding-plan' AND (active = 1 OR active IS NULL) ORDER BY time_updated DESC LIMIT 1`
+			if err := db.QueryRow(query).Scan(&rawVal); err == nil {
+				var cred struct {
+					Key string `json:"key"`
+				}
+				if err := json.Unmarshal([]byte(rawVal), &cred); err == nil && cred.Key != "" {
+					return cred.Key
+				}
+			}
+		}
 	}
-
-	var auth struct {
-		ZaiCodingPlan struct {
-			Key string `json:"key"`
-		} `json:"zai-coding-plan"`
-	}
-	if err := json.Unmarshal(data, &auth); err != nil {
-		return ""
-	}
-	return auth.ZaiCodingPlan.Key
+	return ""
 }
 
 func isZaiCodingPlan(model string) bool {
