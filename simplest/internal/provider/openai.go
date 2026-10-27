@@ -403,6 +403,11 @@ type toolAccum struct {
 	id         string
 	name       string
 	args       toolArgAccumulator
+	// streamIdx/hasStreamIdx record the explicit stream index the block was
+	// created at or bound to (pi 6b271842e). Once set they are never changed,
+	// so an id-only delta can never steal an index slot.
+	streamIdx    int
+	hasStreamIdx bool
 }
 
 // throttleBytes is the minimum accumulated growth between throttled reparses
@@ -679,7 +684,28 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 		}
 
 		em.start(model.API, model.Provider, model.ID)
+		// Port of pi 6b271842e: match tool-call deltas by id when the server
+		// omits index. Some OpenAI-compat servers send the index only on the
+		// first delta of each tool call and identify subsequent deltas by id
+		// alone; keying solely by index splices parallel calls into one
+		// accumulator. Matching rules:
+		//   1. An explicit stream index wins: look up (and bind) the block at
+		//      tools[idx]. A block matched by id at an explicit index adopts
+		//      that index only if it has no explicit stream index yet; an
+		//      explicit index slot is never stolen or overwritten.
+		//   2. Otherwise match by id via toolsByID.
+		//   3. Legacy default-0 grouping applies only when a delta has
+		//      neither index nor id, or (without an index) targets the
+		//      still-unidentified index-0 block — so a later id-bearing delta
+		//      can complete a block whose id arrives after its arguments, and
+		//      an identified delta never merges into a differently identified
+		//      block.
+		// Creation registers tools[idx] only for explicit-index deltas or
+		// id-less deltas; id-bearing blocks register in toolsByID and are
+		// appended to toolOrder, which drives one-time finalization.
 		tools := map[int]*toolAccum{}
+		toolsByID := map[string]*toolAccum{}
+		toolOrder := []*toolAccum{}
 		hasFinish := false
 
 		scanErr := scanSSE(resp, func(payload string) error {
@@ -732,14 +758,50 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			}
 			for _, tcd := range d.ToolCalls {
 				idx := 0
+				var acc *toolAccum
 				if tcd.Index != nil {
 					idx = *tcd.Index
+					acc = tools[idx]
 				}
-				acc := tools[idx]
+				if acc == nil && tcd.ID != "" {
+					acc = toolsByID[tcd.ID]
+				}
+				if acc == nil && tcd.Index == nil {
+					// Legacy grouping: a delta with neither index nor id
+					// splices into the default index-0 accumulator. As a
+					// lenient extension, an id-only delta may also claim the
+					// index-0 block while it is still unidentified (id-less),
+					// so an id that arrives after the arguments completes the
+					// existing block instead of creating a duplicate. An
+					// identified delta never merges into an identified,
+					// different block.
+					if slot := tools[idx]; slot != nil && (tcd.ID == "" || slot.id == "") {
+						acc = slot
+					}
+				}
 				if acc == nil {
 					acc = &toolAccum{}
 					acc.contentIdx = em.appendToolCall(types.ToolCall{Type: types.TypeToolCall})
-					tools[idx] = acc
+					toolOrder = append(toolOrder, acc)
+					if tcd.Index != nil || tcd.ID == "" {
+						tools[idx] = acc
+						if tcd.Index != nil {
+							acc.streamIdx = idx
+							acc.hasStreamIdx = true
+						}
+					}
+				}
+				if tcd.ID != "" {
+					toolsByID[tcd.ID] = acc
+					if tcd.Index != nil && !acc.hasStreamIdx {
+						// The block was matched by id and the delta carries
+						// an explicit index; bind that index to the block
+						// unless it already has one (an index slot is never
+						// stolen or overwritten).
+						acc.streamIdx = idx
+						acc.hasStreamIdx = true
+						tools[idx] = acc
+					}
 				}
 				if tcd.ID != "" && acc.id == "" {
 					acc.id = tcd.ID
@@ -769,7 +831,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			return nil
 		})
 
-		for _, acc := range tools {
+		for _, acc := range toolOrder {
 			tc := em.out.Content[acc.contentIdx].(types.ToolCall)
 			// Port of pi 87f9a3641: a finished tool call whose final arguments
 			// are not a valid JSON object keeps the call with `Arguments == {}`
@@ -806,7 +868,7 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			// produced any tool calls).
 			if finishReasonOptional(model) {
 				stop := types.StopStop
-				if len(tools) > 0 {
+				if len(toolOrder) > 0 {
 					stop = types.StopToolUse
 				}
 				em.done(stop)

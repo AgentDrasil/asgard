@@ -2688,3 +2688,204 @@ func TestOpenAICompatMissingFinishWithToolsButNoToolCalls(t *testing.T) {
 		t.Fatalf("stop reason = %q, want stop (no observed tool calls)", done.Message.StopReason)
 	}
 }
+
+// --- B26: tool-call delta matching by id when index is omitted ---
+
+func chunkWithToolCalls(callsJSON string, index any, finish string) string {
+	idxPart := ""
+	if index != nil {
+		idxPart = fmt.Sprintf(`"index":%v,`, index)
+	}
+	finPart := ""
+	if finish != "" {
+		finPart = fmt.Sprintf(`,"finish_reason":%q`, finish)
+	}
+	callsPart := ""
+	if callsJSON != "" {
+		callsPart = fmt.Sprintf(`"tool_calls":[{%s}]`, idxPart+callsJSON)
+	}
+	return fmt.Sprintf(`{"id":"chatcmpl-b26","model":"gpt-test","choices":[{"index":0%s,"delta":{%s}}]}`,
+		finPart, callsPart)
+}
+
+func TestOpenAIToolCallDeltaOmitsIndexAfterFirst(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		chunkWithToolCalls(`"id":"call_a","function":{"name":"read","arguments":""}`, 0, ""),
+		chunkWithToolCalls(`"function":{"arguments":"{\"path\":\"x\"}"}`, nil, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	require.Equal(t, "start,toolcall_start,toolcall_delta,toolcall_end,done", strings.Join(kinds, ","))
+	require.Len(t, done.Message.Content, 1)
+	tc := done.Message.Content[0].(types.ToolCall)
+	assert.Equal(t, "call_a", tc.ID)
+	assert.Equal(t, "read", tc.Name)
+	assert.JSONEq(t, `{"path":"x"}`, string(tc.Arguments))
+	assert.Equal(t, types.StopToolUse, done.Message.StopReason)
+}
+
+func TestOpenAIToolCallParallelOmittingIndex(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		chunkWithToolCalls(`"id":"call_a","function":{"name":"read","arguments":""}`, 0, ""),
+		chunkWithToolCalls(`"id":"call_b","function":{"name":"write","arguments":""}`, 1, ""),
+		chunkWithToolCalls(`"id":"call_a","function":{"arguments":"{\"path\":\"x\"}"}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_b","function":{"arguments":"{\"path\":\"y\"}"}`, nil, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	require.Equal(t, "start,toolcall_start,toolcall_start,toolcall_delta,toolcall_delta,toolcall_end,toolcall_end,done",
+		strings.Join(kinds, ","))
+	require.Len(t, done.Message.Content, 2)
+	tcA := done.Message.Content[0].(types.ToolCall)
+	tcB := done.Message.Content[1].(types.ToolCall)
+	assert.Equal(t, "call_a", tcA.ID)
+	assert.Equal(t, "read", tcA.Name)
+	assert.JSONEq(t, `{"path":"x"}`, string(tcA.Arguments))
+	assert.Equal(t, "call_b", tcB.ID)
+	assert.Equal(t, "write", tcB.Name)
+	assert.JSONEq(t, `{"path":"y"}`, string(tcB.Arguments))
+}
+
+func TestOpenAIToolCallSameIDDifferentIndex(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		chunkWithToolCalls(`"id":"call_a","function":{"name":"read","arguments":""}`, 0, ""),
+		chunkWithToolCalls(`"id":"call_a","function":{"arguments":"{\"path\":\"x\"}"}`, 7, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	require.Equal(t, "start,toolcall_start,toolcall_delta,toolcall_end,done", strings.Join(kinds, ","))
+	require.Len(t, done.Message.Content, 1)
+	tc := done.Message.Content[0].(types.ToolCall)
+	assert.Equal(t, "call_a", tc.ID)
+	assert.Equal(t, "read", tc.Name)
+	assert.JSONEq(t, `{"path":"x"}`, string(tc.Arguments))
+}
+
+func TestOpenAIToolCallNoIndexNoIDLegacyDefaultZero(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		chunkWithToolCalls(`"id":"call_a","function":{"name":"read","arguments":""}`, 0, ""),
+		chunkWithToolCalls(`"function":{"arguments":"{\"path\":\"x\"}"}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_b","function":{"name":"write","arguments":"{}"}`, 1, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	require.Equal(t, "start,toolcall_start,toolcall_delta,toolcall_start,toolcall_delta,toolcall_end,toolcall_end,done",
+		strings.Join(kinds, ","))
+	require.Len(t, done.Message.Content, 2)
+	// Index-less delta without id must keep splicing into the index-0 call.
+	tcA := done.Message.Content[0].(types.ToolCall)
+	tcB := done.Message.Content[1].(types.ToolCall)
+	assert.Equal(t, "call_a", tcA.ID)
+	assert.Equal(t, "read", tcA.Name)
+	assert.JSONEq(t, `{"path":"x"}`, string(tcA.Arguments))
+	assert.Equal(t, "call_b", tcB.ID)
+	assert.Equal(t, "write", tcB.Name)
+}
+
+func TestOpenAIToolCallIDSuppliedLater(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		chunkWithToolCalls(`"function":{"name":"read","arguments":""}`, 0, ""),
+		chunkWithToolCalls(`"id":"call_a","function":{"arguments":"{\"path\":\"x\"}"}`, nil, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	require.Equal(t, "start,toolcall_start,toolcall_delta,toolcall_end,done", strings.Join(kinds, ","))
+	require.Len(t, done.Message.Content, 1)
+	tc := done.Message.Content[0].(types.ToolCall)
+	assert.Equal(t, "call_a", tc.ID)
+	assert.Equal(t, "read", tc.Name)
+	assert.JSONEq(t, `{"path":"x"}`, string(tc.Arguments))
+}
+
+func TestOpenAIToolCallMixedIndexedAndIDOnlyDeltas(t *testing.T) {
+	t.Parallel()
+	chunks := []string{
+		// Four calls in one chunk: two with explicit indexes, two id-only.
+		chunkWithToolCalls(`"index":0,"id":"call_r","function":{"name":"read","arguments":""}`, nil, ""),
+		chunkWithToolCalls(`"index":1,"id":"call_g","function":{"name":"grep","arguments":""}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_l","function":{"name":"list","arguments":""}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_w","function":{"name":"write","arguments":""}`, nil, ""),
+		// Continuations: read by explicit index, list/write by id only.
+		chunkWithToolCalls(`"index":0,"id":"call_r","function":{"arguments":"{\"path\":\"r\"}"}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_l","function":{"arguments":"{\"path\":\"l\"}"}`, nil, ""),
+		chunkWithToolCalls(`"id":"call_w","function":{"arguments":"{\"path\":\"w\"}"}`, nil, ""),
+		chunkWithToolCalls("", nil, "tool_calls"),
+		"[DONE]",
+	}
+	srv := sseServer(t, chunks, nil, nil, "/chat/completions")
+	defer srv.Close()
+	p := NewOpenAICompat("sk-test")
+	evs, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+	kinds := eventKinds(evs)
+	count := func(kind string) int {
+		n := 0
+		for _, k := range kinds {
+			if k == kind {
+				n++
+			}
+		}
+		return n
+	}
+	assert.Equal(t, 4, count("toolcall_start"))
+	assert.Equal(t, 3, count("toolcall_delta"))
+	assert.Equal(t, 4, count("toolcall_end"))
+	require.Len(t, done.Message.Content, 4)
+	want := []struct{ id, name, path string }{
+		{"call_r", "read", "r"},
+		{"call_g", "grep", ""},
+		{"call_l", "list", "l"},
+		{"call_w", "write", "w"},
+	}
+	for i, w := range want {
+		tc := done.Message.Content[i].(types.ToolCall)
+		assert.Equal(t, w.id, tc.ID, "call %d id", i)
+		assert.Equal(t, w.name, tc.Name, "call %d name", i)
+		if w.path == "" {
+			assert.JSONEq(t, `{}`, string(tc.Arguments), "call %d arguments", i)
+		} else {
+			assert.JSONEq(t, fmt.Sprintf(`{"path":%q}`, w.path), string(tc.Arguments), "call %d arguments", i)
+		}
+	}
+}
