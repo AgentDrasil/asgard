@@ -2898,3 +2898,168 @@ func TestAgent_PrepareNextTurnContext_ErrorTerminalTurn(t *testing.T) {
 	assert.Equal(t, types.StopError, synthetic.StopReason)
 	assert.Contains(t, synthetic.ErrorMessage, "context hook boom")
 }
+
+// --- cancellation terminal turn (B18) ---
+
+// cancelingCloseProvider starts a stream, cancels the run, then closes the
+// channel without a terminal event.
+type cancelingCloseProvider struct {
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (p *cancelingCloseProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	p.calls++
+	ch := make(chan types.AssistantMessageEvent, 2)
+	ch <- types.Partial{
+		Kind:    types.EvStart,
+		Partial: &types.AssistantMessage{Timestamp: time.Now().UnixMilli()},
+	}
+	p.cancel()
+	close(ch)
+	return ch
+}
+
+func TestRunCancellationAfterTurnEmitsAbortedTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("done")}}
+	req := baseRequest(fp)
+	req.FinishTurn = func(s TurnSummary) *FinishTurnDecision {
+		cancel()
+		return nil
+	}
+
+	evs, end := collect(t, Run(ctx, req))
+	require.NotNil(t, end)
+	assert.Equal(t, 1, fp.calls)
+
+	require.NotEmpty(t, end.Messages)
+	aborted, ok := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopAborted, aborted.StopReason)
+	assert.NotEmpty(t, aborted.ErrorMessage)
+	assert.Nil(t, aborted.DurationMs)
+
+	agentEnds, turnStarts, turnEnds := 0, 0, 0
+	for _, ev := range evs {
+		switch ev.Kind {
+		case types.AgentEnd:
+			agentEnds++
+		case types.TurnStart:
+			turnStarts++
+		case types.TurnEnd:
+			turnEnds++
+		}
+	}
+	assert.Equal(t, 1, agentEnds, "exactly one agent_end")
+	require.NotEmpty(t, evs)
+	assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
+	assert.Equal(t, turnStarts, turnEnds, "turn_start/turn_end must be balanced")
+	assert.GreaterOrEqual(t, turnStarts, 1)
+
+	var abortedStarts, abortedEnds, abortedTurns int
+	for _, ev := range evs {
+		if ev.Message != aborted {
+			continue
+		}
+		switch ev.Kind {
+		case types.MessageStart:
+			abortedStarts++
+		case types.MessageEnd:
+			abortedEnds++
+		case types.TurnEnd:
+			abortedTurns++
+		}
+	}
+	assert.Equal(t, 1, abortedStarts)
+	assert.Equal(t, 1, abortedEnds)
+	assert.Equal(t, 1, abortedTurns)
+}
+
+func TestRunPreCanceledEmitsAbortedTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before Run
+
+	fp := &fakeProvider{responses: []*types.AssistantMessage{textMsg("never")}}
+	evs, end := collect(t, Run(ctx, baseRequest(fp)))
+	require.NotNil(t, end)
+	assert.Equal(t, 0, fp.calls, "a canceled run must not call the provider")
+
+	require.Len(t, end.Messages, 1)
+	aborted, ok := end.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopAborted, aborted.StopReason)
+	assert.NotEmpty(t, aborted.ErrorMessage)
+
+	agentEnds, turnStarts, turnEnds := 0, 0, 0
+	var abortedStarts, abortedEnds, abortedTurns int
+	for _, ev := range evs {
+		switch ev.Kind {
+		case types.AgentEnd:
+			agentEnds++
+		case types.TurnStart:
+			turnStarts++
+		case types.TurnEnd:
+			turnEnds++
+		}
+		if ev.Message == aborted {
+			switch ev.Kind {
+			case types.MessageStart:
+				abortedStarts++
+			case types.MessageEnd:
+				abortedEnds++
+			case types.TurnEnd:
+				abortedTurns++
+			}
+		}
+	}
+	assert.Equal(t, 1, agentEnds)
+	require.NotEmpty(t, evs)
+	assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
+	assert.Equal(t, 1, turnStarts)
+	assert.Equal(t, 1, turnEnds)
+	assert.Equal(t, 1, abortedStarts)
+	assert.Equal(t, 1, abortedEnds)
+	assert.Equal(t, 1, abortedTurns)
+}
+
+func TestRunClosedStreamCanceledIsAborted(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p := &cancelingCloseProvider{cancel: cancel}
+	evs, end := collect(t, Run(ctx, baseRequest(p)))
+	require.NotNil(t, end)
+	assert.Equal(t, 1, p.calls)
+
+	require.Len(t, end.Messages, 1)
+	aborted, ok := end.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopAborted, aborted.StopReason)
+	assert.NotEqual(t, types.StopError, aborted.StopReason)
+	assert.Contains(t, aborted.ErrorMessage, "context canceled")
+
+	agentEnds, turnStarts, turnEnds := 0, 0, 0
+	for _, ev := range evs {
+		switch ev.Kind {
+		case types.AgentEnd:
+			agentEnds++
+		case types.TurnStart:
+			turnStarts++
+		case types.TurnEnd:
+			turnEnds++
+		}
+	}
+	assert.Equal(t, 1, agentEnds)
+	require.NotEmpty(t, evs)
+	assert.Equal(t, types.AgentEnd, evs[len(evs)-1].Kind)
+	assert.Equal(t, turnStarts, turnEnds)
+}

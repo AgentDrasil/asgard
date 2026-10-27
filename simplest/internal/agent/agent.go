@@ -263,20 +263,55 @@ func (l *loop) failPersist(perr error) {
 	}
 	l.messages = append(l.messages, final)
 	l.newMsgs = append(l.newMsgs, final)
-	l.emitTerminalErrorTurn(final)
+	l.emitTerminalTurn(final)
 }
 
-// emitTerminalErrorTurn closes the run with a synthetic StopError assistant
-// message: message_start/message_end/turn_end/agent_end. Failures can surface
-// after the previous turn_end (between turns), so if no turn is currently
-// open, exactly one turn_start is emitted first to keep the stream balanced.
-// FinishTurn is intentionally bypassed (see failPersist).
-func (l *loop) emitTerminalErrorTurn(final *types.AssistantMessage) {
-	if !l.turnOpen {
-		l.emitTurnStart()
+// failAborted synthesizes an event-only StopAborted assistant message and
+// closes the run with a balanced terminal turn. The message is recorded in the
+// transcript and agent_end messages but never persisted. FinishTurn is
+// intentionally bypassed for synthetic abort turns.
+func (l *loop) failAborted(reason string) {
+	if reason == "" {
+		reason = "run aborted"
 	}
-	l.emitAssistant(final, true)
-	l.emitTurnEnd(types.AgentEvent{Message: final})
+	final := &types.AssistantMessage{
+		Content:       []types.AssistantContent{},
+		API:           l.req.Model.API,
+		Provider:      l.req.Model.Provider,
+		Model:         l.req.Model.ID,
+		StopReason:    types.StopAborted,
+		ErrorMessage:  reason,
+		ThinkingLevel: l.thinkingLevel(),
+		Timestamp:     time.Now().UnixMilli(),
+	}
+	l.messages = append(l.messages, final)
+	l.newMsgs = append(l.newMsgs, final)
+	l.emitTerminalTurn(final)
+}
+
+// abortReason reports the cancellation cause for an aborted terminal turn.
+func (l *loop) abortReason() string {
+	if err := l.ctx.Err(); err != nil {
+		return err.Error()
+	}
+	return "run aborted"
+}
+
+// emitTerminalTurn closes the run with a synthetic terminal assistant message:
+// message_start/message_end/turn_end/agent_end. Failures can surface after the
+// previous turn_end (between turns), so if no turn is currently open, exactly
+// one turn_start is emitted first to keep the stream balanced. Terminal events
+// bypass the cancellation guard so a canceled run still yields a well-formed
+// stream. FinishTurn is intentionally bypassed (see failPersist/failAborted).
+func (l *loop) emitTerminalTurn(final *types.AssistantMessage) {
+	if !l.turnOpen {
+		l.ch <- types.AgentEvent{Kind: types.TurnStart}
+		l.turnOpen = true
+	}
+	l.ch <- types.AgentEvent{Kind: types.MessageStart, Message: final}
+	l.ch <- types.AgentEvent{Kind: types.MessageEnd, Message: final}
+	l.ch <- types.AgentEvent{Kind: types.TurnEnd, Message: final}
+	l.turnOpen = false
 	l.end()
 }
 
@@ -316,7 +351,9 @@ func (l *loop) emitTurnStart() bool {
 func (l *loop) emitTurnEnd(ev types.AgentEvent) {
 	ev.Kind = types.TurnEnd
 	l.turnOpen = false
-	l.emit(ev)
+	// Terminal event: bypass the cancellation guard so consumers can always
+	// close the turn.
+	l.ch <- ev
 }
 
 func (l *loop) run() {
@@ -332,12 +369,12 @@ outer:
 		hasMoreToolCalls := true
 		for hasMoreToolCalls || len(pending) > 0 {
 			if l.ctx.Err() != nil {
-				// Cancelled between turns: stop cleanly.
-				l.end()
+				l.failAborted(l.abortReason())
 				return
 			}
 			if !firstTurn {
 				if !l.emitTurnStart() {
+					l.failAborted(l.abortReason())
 					return
 				}
 			} else {
@@ -352,6 +389,7 @@ outer:
 					return
 				}
 				if l.ctx.Err() != nil {
+					l.failAborted(l.abortReason())
 					return
 				}
 			}
@@ -387,7 +425,10 @@ outer:
 
 			msg := l.streamAssistant()
 			if msg == nil {
-				return // stream aborted/emitted failure already
+				if l.ctx.Err() != nil {
+					l.failAborted(l.abortReason())
+				}
+				return
 			}
 			if err := l.appendNewMsg(msg); err != nil {
 				l.failPersist(err)
@@ -434,6 +475,13 @@ outer:
 			var decision *FinishTurnDecision
 			if l.req.FinishTurn != nil {
 				decision = l.req.FinishTurn(TurnSummary{Message: msg, ToolResults: toolResults})
+			}
+
+			// FinishTurn may cancel the run. Close the open turn with a
+			// synthetic StopAborted message instead of ending bare.
+			if l.ctx.Err() != nil {
+				l.failAborted(l.abortReason())
+				return
 			}
 
 			l.emitTurnEnd(types.AgentEvent{Message: msg, ToolResults: toolResults})
@@ -484,6 +532,10 @@ outer:
 		break
 	}
 
+	if l.ctx.Err() != nil {
+		l.failAborted(l.abortReason())
+		return
+	}
 	l.end()
 }
 
@@ -586,7 +638,7 @@ func (l *loop) failPrepareNextTurn(err error) {
 	if perr := l.appendNewMsg(final); perr != nil {
 		final.ErrorMessage = fmt.Sprintf("%v; session persist: %v", err, perr)
 	}
-	l.emitTerminalErrorTurn(final)
+	l.emitTerminalTurn(final)
 }
 
 func (l *loop) emitUserish(m types.Message) {
@@ -731,8 +783,13 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 	if partial == nil {
 		return nil
 	}
-	partial.StopReason = types.StopError
-	partial.ErrorMessage = "provider stream ended without a terminal event"
+	if l.ctx.Err() != nil {
+		partial.StopReason = types.StopAborted
+		partial.ErrorMessage = l.abortReason()
+	} else {
+		partial.StopReason = types.StopError
+		partial.ErrorMessage = "provider stream ended without a terminal event"
+	}
 	l.markAssistantRunMeta(partial, startTime)
 	started = l.replaceOrAppendPartial(started, partial)
 	l.emitAssistant(partial, !started)
