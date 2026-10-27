@@ -64,8 +64,40 @@ func TestIsGemma4Model(t *testing.T) {
 	}
 }
 
+func TestIsGemini4Plus(t *testing.T) {
+	yes := []string{
+		"gemini-4",
+		"gemini-4-argon",
+		"gemini-4.1-pro",
+		"gemini-4-flash",
+		"gemini-5-flash",
+		"gemini-9-pro",
+		"gemini-10-pro",
+	}
+	for _, id := range yes {
+		if !isGemini4Plus(id) {
+			t.Errorf("isGemini4Plus(%q) = false", id)
+		}
+	}
+	no := []string{
+		"gemini-3-pro",
+		"gemini-3.7-flash",
+		"gemini-2.5-flash",
+		"gemma-4-31b-it",
+		"gpt-4o",
+	}
+	for _, id := range no {
+		if isGemini4Plus(id) {
+			t.Errorf("isGemini4Plus(%q) = true", id)
+		}
+	}
+}
+
 func TestSupportedModel(t *testing.T) {
-	for _, id := range []string{"gemini-3.7-flash", "gemini-3.1-pro-preview", "gemma-4-31b-it"} {
+	for _, id := range []string{
+		"gemini-3.7-flash", "gemini-3.1-pro-preview", "gemma-4-31b-it",
+		"gemini-4-argon", "gemini-4.1-pro", "gemini-5-flash", "gemini-10-pro",
+	} {
 		if !supportedModel(id) {
 			t.Errorf("supportedModel(%q) = false", id)
 		}
@@ -78,8 +110,13 @@ func TestSupportedModel(t *testing.T) {
 }
 
 func TestRequiresToolCallID(t *testing.T) {
-	if !requiresToolCallID("gemini-3.7-flash") || !requiresToolCallID("gemini-3.1-pro-preview") {
-		t.Error("gemini 3 models must echo tool call ids")
+	for _, id := range []string{
+		"gemini-3.7-flash", "gemini-3.1-pro-preview",
+		"gemini-4-argon", "gemini-4.1-pro", "gemini-5-flash", "gemini-10-pro",
+	} {
+		if !requiresToolCallID(id) {
+			t.Errorf("%s must echo tool call ids", id)
+		}
 	}
 	if requiresToolCallID("gemini-2.5-flash") || requiresToolCallID("gemma-4-31b-it") {
 		t.Error("unexpected tool call id requirement")
@@ -513,4 +550,73 @@ func TestGemini_BeforeProviderRequest_NoOp(t *testing.T) {
 		}
 	}
 	assert.Equal(t, "hello gemini", text)
+}
+
+func TestGoogleThinkingConfigGemini4Plus(t *testing.T) {
+	t.Parallel()
+
+	id := "gemini-4-argon"
+	tests := []struct {
+		level types.ThinkingLevel
+		want  genai.ThinkingLevel
+	}{
+		{level: types.ThinkingOff, want: genai.ThinkingLevelLow},
+		{level: types.ThinkingLow, want: genai.ThinkingLevelLow},
+		{level: types.ThinkingMedium, want: genai.ThinkingLevelMedium},
+		{level: types.ThinkingHigh, want: genai.ThinkingLevelHigh},
+		{level: types.ThinkingMinimal, want: genai.ThinkingLevelLow},
+	}
+	for _, tt := range tests {
+		tc := googleThinkingConfig(tt.level, id, nil)
+		require.NotNil(t, tc, "gemini 4+ must get a discrete thinking config")
+		assert.True(t, tc.IncludeThoughts)
+		assert.Equal(t, tt.want, tc.ThinkingLevel, "level %q", tt.level)
+	}
+
+	for _, modelID := range []string{"gemini-4.1-pro", "gemini-5-flash", "gemini-10-pro"} {
+		tc := googleThinkingConfig(types.ThinkingHigh, modelID, nil)
+		require.NotNil(t, tc)
+		assert.Equal(t, genai.ThinkingLevelHigh, tc.ThinkingLevel)
+	}
+
+	// Explicit per-model map wins over the family default.
+	highMapped := "minimal"
+	tlMap := types.ThinkingLevelMap{types.ThinkingHigh: &highMapped}
+	tc := googleThinkingConfig(types.ThinkingHigh, id, tlMap)
+	require.NotNil(t, tc)
+	assert.Equal(t, genai.ThinkingLevelMinimal, tc.ThinkingLevel)
+
+	// The map also works for unknown families.
+	tc = googleThinkingConfig(types.ThinkingMedium, "custom-model", types.ThinkingLevelMap{
+		types.ThinkingMedium: &highMapped,
+	})
+	require.NotNil(t, tc)
+	assert.Equal(t, genai.ThinkingLevelMinimal, tc.ThinkingLevel)
+
+	// Gemma 4 remains without a thinking control even with a map.
+	assert.Nil(t, googleThinkingConfig(types.ThinkingHigh, "gemma-4-31b-it", tlMap))
+}
+
+func TestGemini4StreamSendsThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	var captured map[string]any
+	srv := sseServer(t, []string{
+		`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`,
+	}, &captured, nil, "")
+	defer srv.Close()
+
+	p := NewGemini("g-key")
+	m := gModel(srv.URL)
+	m.ID = "gemini-4-argon"
+	opts := &types.StreamOptions{ThinkingLevel: types.ThinkingMedium}
+	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
+	require.Nil(t, errEv, "gemini-4 must pass the supported-model check")
+
+	gc, ok := captured["generationConfig"].(map[string]any)
+	require.True(t, ok, "generationConfig missing: %v", captured)
+	thinking, ok := gc["thinkingConfig"].(map[string]any)
+	require.True(t, ok, "thinkingConfig missing: %v", gc)
+	assert.Equal(t, "MEDIUM", thinking["thinkingLevel"])
+	assert.Nil(t, thinking["thinkingBudget"], "gemini 4+ must use thinkingLevel, not thinkingBudget")
 }

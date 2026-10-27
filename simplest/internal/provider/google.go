@@ -16,7 +16,7 @@ import (
 )
 
 // Gemini streams over the Google Generative AI protocol via the official
-// google.golang.org/genai SDK. Only Gemini 3 series and Gemma 4 models are
+// google.golang.org/genai SDK. Gemini 3+, Gemini 4+ and Gemma 4 models are
 // supported; any other model ID fails the stream.
 type Gemini struct {
 	Client *http.Client
@@ -42,6 +42,7 @@ var (
 	gemini3ProRe   = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?pro(-(preview|latest))?$`)
 	gemini3LiteRe  = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?flash-lite(-(preview|latest))?$|^gemini-flash-lite-latest$`)
 	gemini3FlashRe = regexp.MustCompile(`^gemini-(3(\.\d+)?-)?flash(-(preview|latest))?$|^gemini-flash-latest$`)
+	gemini4PlusRe  = regexp.MustCompile(`^gemini-([4-9]|[1-9]\d)([.-]|$)`)
 	gemma4Re       = regexp.MustCompile(`^gemma-4-(\d+b(-a\d+b)?)-it$`)
 )
 
@@ -62,17 +63,27 @@ func gemini3Family(modelID string) string {
 
 func isGemma4Model(modelID string) bool { return gemma4Re.MatchString(modelID) }
 
+// isGemini4Plus reports whether modelID is a Gemini 4+ family (4..9, 10+),
+// including prefixed forms such as gemini-4-argon and gemini-4.1-pro.
+func isGemini4Plus(modelID string) bool { return gemini4PlusRe.MatchString(modelID) }
+
+// isGemini3Plus reports whether the model uses Gemini 3+ behavior (discrete
+// thinking levels, tool-call ids, merged multimodal function responses).
+func isGemini3Plus(modelID string) bool {
+	return gemini3Family(modelID) != "" || isGemini4Plus(modelID)
+}
+
 // supportedModel reports whether the model ID belongs to a supported family
-// (Gemini 3 series or Gemma 4).
+// (Gemini 3+, Gemini 4+, or Gemma 4).
 func supportedModel(modelID string) bool {
-	return gemini3Family(modelID) != "" || isGemma4Model(modelID)
+	return isGemini3Plus(modelID) || isGemma4Model(modelID)
 }
 
 // requiresToolCallID reports whether the model echoes tool call ids in
 // functionCall/functionResponse parts.
 func requiresToolCallID(modelID string) bool {
 	return strings.HasPrefix(modelID, "claude-") || strings.HasPrefix(modelID, "gpt-oss-") ||
-		gemini3Family(modelID) != ""
+		isGemini3Plus(modelID)
 }
 
 func sameModel(am *types.AssistantMessage, model *types.Model) bool {
@@ -100,16 +111,25 @@ func parseGenaiThinkingLevel(s string) (genai.ThinkingLevel, bool) {
 // the requested level and model family. Gemma 4 supports no thinking config;
 // unknown families are rejected by the caller.
 func googleThinkingConfig(level types.ThinkingLevel, modelID string, tlMap types.ThinkingLevelMap) *genai.ThinkingConfig {
-	family := gemini3Family(modelID)
-	if family == "" {
+	if isGemma4Model(modelID) {
 		return nil // gemma: no thinking control
 	}
+	// Explicit per-model mappings win for Gemini 3+, Gemini 4+, and unknown
+	// families.
 	if tlMap != nil {
 		if mapped, ok := tlMap[level]; ok && mapped != nil {
 			if gl, ok := parseGenaiThinkingLevel(*mapped); ok {
 				return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: gl}
 			}
 		}
+	}
+	family := gemini3Family(modelID)
+	if family == "" {
+		if !isGemini4Plus(modelID) {
+			return nil
+		}
+		// Gemini 4+ defaults to flash-like discrete levels.
+		family = "flash"
 	}
 	switch family {
 	case "pro":
@@ -259,7 +279,7 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 					}
 					imgParts = append(imgParts, &genai.Part{InlineData: &genai.Blob{MIMEType: im.MimeType, Data: data}})
 				}
-				if gemini3Family(model.WireID()) != "" {
+				if isGemini3Plus(model.WireID()) {
 					last := len(contents) - 1
 					contents[last].Parts = append(contents[last].Parts, imgParts...)
 				} else {
@@ -328,7 +348,7 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			return
 		}
 		if !supportedModel(model.WireID()) {
-			em.fail(ctx, fmt.Errorf("gemini: unsupported model %q (only gemini-3 series and gemma-4 are supported)", model.WireID()))
+			em.fail(ctx, fmt.Errorf("gemini: unsupported model %q (only gemini-3+, gemini-4+, and gemma-4 are supported)", model.WireID()))
 			return
 		}
 		contents, config, err := p.buildRequest(model, cx, opts)
