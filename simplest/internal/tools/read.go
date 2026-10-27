@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -140,9 +141,23 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		limit = *in.Limit
 	}
 
+	// Guard float->int overflow and negative slices; JS Array.slice degrades gracefully (pi 005af57d8).
 	startLine := 0
 	if offsetSet && offset > 0 {
-		startLine = int(offset) - 1
+		// Saturating conversion: 1e300 overflows int and would wrap negative,
+		// letting startLine pass the bounds check before the slice panics.
+		// Clamp like upstream Math.max(0, offset - 1) so fractional offsets
+		// such as 0.5 never yield a negative startLine.
+		offsetInt := saturatingFloatToInt(offset)
+		if offsetInt > len(allLines) {
+			// Too large to represent or past EOF: report "beyond end of file".
+			startLine = len(allLines)
+		} else {
+			startLine = offsetInt - 1
+			if startLine < 0 {
+				startLine = 0
+			}
+		}
 	}
 	startLineDisplay := startLine + 1
 	if startLine >= len(allLines) {
@@ -153,13 +168,18 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	var userLimitedLines int
 	userLimited := false
 	if limitSet {
-		endLine := startLine + int(limit)
-		if endLine > len(allLines) {
-			endLine = len(allLines)
+		endLine := startLine
+		if limit > 0 {
+			// Clamp to [startLine, len(allLines)]; JS slice ignores excess.
+			if limitInt := saturatingFloatToInt(limit); limitInt < len(allLines)-startLine {
+				endLine = startLine + limitInt
+			} else {
+				endLine = len(allLines)
+			}
 		}
 		selectedContent = strings.Join(allLines[startLine:endLine], "\n")
 		userLimitedLines = endLine - startLine
-		userLimited = true
+		userLimited = limit > 0
 	} else {
 		selectedContent = strings.Join(allLines[startLine:], "\n")
 	}
@@ -187,8 +207,12 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	} else if userLimited && startLine+userLimitedLines < totalFileLines {
 		remaining := totalFileLines - (startLine + userLimitedLines)
 		nextOffset := startLine + userLimitedLines + 1
-		outputText = fmt.Sprintf("%s\n\n[%d more lines in file. Use offset=%d to continue.]",
-			truncation.Content, remaining, nextOffset)
+		outputText = truncation.Content
+		if outputText != "" {
+			outputText += "\n\n"
+		}
+		outputText += fmt.Sprintf("[%d more lines in file. Use offset=%d to continue.]",
+			remaining, nextOffset)
 	} else {
 		outputText = truncation.Content
 	}
@@ -200,6 +224,25 @@ func (t *ReadTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		result.Details = details
 	}
 	return result, nil
+}
+
+// saturatingFloatToInt converts a float to int with arch-independent clamping
+// to the range of int, instead of relying on the undefined (platform-specific)
+// float->int conversion for out-of-range values. Genuine negative values are
+// preserved; NaN maps to 0; ±Inf saturates to min/max int.
+func saturatingFloatToInt(v float64) int {
+	maxInt := int(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	if math.IsNaN(v) {
+		return 0
+	}
+	if v >= float64(maxInt) {
+		return maxInt
+	}
+	if v <= float64(minInt) {
+		return minInt
+	}
+	return int(v)
 }
 
 func formatNumber(v *float64) string {
