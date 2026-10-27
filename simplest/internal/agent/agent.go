@@ -839,7 +839,7 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 	}
 	opts := &types.StreamOptions{
 		Temperature:   l.req.Temperature,
-		MaxTokens:     l.req.MaxTokens,
+		MaxTokens:     clampRequestMaxTokens(l.req, llmMessages, cx.SystemPrompt, cx.Tools),
 		ThinkingLevel: l.req.ThinkingLevel,
 		APIKey:        l.req.APIKey,
 	}
@@ -1502,6 +1502,14 @@ func calculateContextTokens(u types.Usage) int64 {
 // tool calls contribute their name length plus the JSON-encoded arguments.
 // Port of pi 005af57d8: estimateTokens in core/compaction/compaction.ts.
 func estimateMessageTokens(m types.Message) int64 {
+	return (int64(messageCharLen(m)) + 3) / 4
+}
+
+// messageCharLen returns one message's estimated character count: text and
+// thinking text, tool-call name plus raw JSON arguments, and 4800 chars per
+// image block. Shared by the compaction estimator (chars/4) and the request
+// max-tokens estimator (chars/3.5).
+func messageCharLen(m types.Message) int {
 	var chars int
 	switch t := m.(type) {
 	case *types.UserMessage:
@@ -1526,7 +1534,127 @@ func estimateMessageTokens(m types.Message) int64 {
 			}
 		}
 	}
-	return int64((chars + 3) / 4)
+	return chars
+}
+
+// estimateTokensFromChars35 applies the chars/3.5 heuristic with Math.ceil,
+// matching pi's estimateTokens in utils/estimate.ts at v1.4.0 (Port of pi
+// 27075fe07). ceil(chars/3.5) == ceil(2*chars/7).
+func estimateTokensFromChars35(chars int) int64 {
+	return int64((2*chars + 6) / 7)
+}
+
+// requestCharsPerToken context: pi's estimate.ts uses 3.5 chars per token for
+// request-level context estimation, while compaction keeps chars/4. The two
+// estimators are intentionally independent.
+const (
+	// contextSafetyTokens is the headroom always left between the estimated
+	// context and the clamped output cap. Port of pi 27075fe07:
+	// CONTEXT_SAFETY_TOKENS in api/simple-options.ts.
+	contextSafetyTokens int64 = 4096
+	// minMaxTokens is the floor for a clamped output cap. Port of pi
+	// 27075fe07: MIN_MAX_TOKENS in api/simple-options.ts.
+	minMaxTokens int64 = 1
+)
+
+// clampRequestMaxTokens caps an explicitly set Request.MaxTokens to the
+// remaining context window. Port of pi 27075fe07: clampMaxTokensToContext in
+// api/simple-options.ts, with a deliberate divergence: upstream falls back to
+// Model.MaxTokens (options.maxTokens ?? model.maxTokens); here Model.MaxTokens
+// is NOT used as a default cap. Only an explicit positive Request.MaxTokens is
+// clamped; when the pointer is nil or <= 0 the existing value is kept exactly
+// (nil stays nil), preserving the previous behavior. A non-positive
+// Model.ContextWindow also disables clamping.
+//
+// available = ContextWindow - estimatedContextTokens - 4096
+// clamped   = min(requested, max(1, available))
+func clampRequestMaxTokens(req *Request, messages []types.Message, systemPrompt string, tools []types.ToolDef) *int64 {
+	if req.MaxTokens == nil || *req.MaxTokens <= 0 {
+		return req.MaxTokens
+	}
+	if req.Model == nil || req.Model.ContextWindow <= 0 {
+		return req.MaxTokens
+	}
+	estimated := estimateRequestContextTokens(messages, systemPrompt, tools)
+	available := req.Model.ContextWindow - estimated - contextSafetyTokens
+	if available < minMaxTokens {
+		available = minMaxTokens
+	}
+	requested := *req.MaxTokens
+	if requested <= available {
+		return req.MaxTokens
+	}
+	clamped := available
+	return &clamped
+}
+
+// estimateRequestContextTokens estimates the tokens a provider request will
+// occupy, using the chars/3.5 heuristic with Math.ceil per message (Port of pi
+// 27075fe07: estimateContextTokens in utils/estimate.ts at v1.4.0). Unlike the
+// compaction estimator (chars/4), the system prompt and wire tool definitions
+// are counted when no usable assistant usage exists: upstream normalizeContext
+// prepends them as a single system message. With usable usage, the usage
+// tokens already include the system prompt and tools, so only messages after
+// the qualifying assistant are estimated.
+//
+// Usable-usage rule (this estimator only): forward scan tracking the maximum
+// timestamp of all preceding messages; an assistant qualifies only if its
+// Timestamp is >= that max (rejecting usage from before a later-inserted
+// prefix message such as a compaction summary), its stop reason is neither
+// aborted nor error, and calculateContextTokens(usage) > 0. The last
+// qualifying assistant wins.
+func estimateRequestContextTokens(messages []types.Message, systemPrompt string, tools []types.ToolDef) int64 {
+	var maxTs int64
+	lastAssistant := -1
+	var usage *types.Usage
+	for i, m := range messages {
+		if am, ok := m.(*types.AssistantMessage); ok && am.Timestamp >= maxTs {
+			if u, ok := assistantUsage(m); ok {
+				usage = cloneUsage(u)
+				lastAssistant = i
+			}
+		}
+		if ts := messageTimestamp(m); ts > maxTs {
+			maxTs = ts
+		}
+	}
+	var tokens int64
+	start := 0
+	if usage != nil {
+		tokens = calculateContextTokens(*usage)
+		start = lastAssistant + 1
+	} else {
+		tokens = estimateTokensFromChars35(systemAndToolChars(systemPrompt, tools))
+	}
+	for _, m := range messages[start:] {
+		tokens += estimateTokensFromChars35(messageCharLen(m))
+	}
+	return tokens
+}
+
+// systemAndToolChars counts the system prompt plus the wire tool definitions:
+// name, description, and JSON-encoded parameters per tool, mirroring the
+// system message upstream normalizeContext prepends.
+func systemAndToolChars(systemPrompt string, tools []types.ToolDef) int {
+	chars := len(systemPrompt)
+	for _, t := range tools {
+		chars += len(t.Name) + len(t.Description) + len(t.Parameters)
+	}
+	return chars
+}
+
+// messageTimestamp returns a message's unix-millis timestamp, 0 for unknown
+// implementations.
+func messageTimestamp(m types.Message) int64 {
+	switch t := m.(type) {
+	case *types.UserMessage:
+		return t.Timestamp
+	case *types.AssistantMessage:
+		return t.Timestamp
+	case *types.ToolResultMessage:
+		return t.Timestamp
+	}
+	return 0
 }
 
 // textAndImageCharLen decodes raw content blocks and counts text length plus
