@@ -588,6 +588,7 @@ func (p *Gemini) buildRequest(model *types.Model, cx *types.Context, opts *types
 			if err := json.Unmarshal(params, &schema); err != nil {
 				return nil, nil, fmt.Errorf("tool %s parameters: %w", td.Name, err)
 			}
+			schema = rewriteConstAsEnum(schema).(map[string]any)
 			decls = append(decls, &genai.FunctionDeclaration{
 				Name:                 td.Name,
 				Description:          td.Description,
