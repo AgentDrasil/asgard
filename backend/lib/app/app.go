@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/goccy/go-yaml"
+	"github.com/elmhuangyu/configs/pkg/configlib"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
@@ -32,12 +35,28 @@ type Option func(*Options)
 type Options struct {
 	Config              *config.Config
 	ConfigPath          string
+	TreeManager         *configlib.ConfigManager[config.AsgardTreeConfig]
+	EtcdClient          *clientv3.Client
 	DB                  *gorm.DB
 	FunctionRegistry    *workflow.FunctionRegistry
 	Functions           map[string]workflow.WorkflowFunction
 	CustomRunners       []workflow.NodeRunner
 	SkipAgentValidation bool
 	SkipSSHSetup        bool
+}
+
+// WithTreeManager injects a pre-configured ConfigManager for AsgardTreeConfig (useful for tests or custom sources).
+func WithTreeManager(mgr *configlib.ConfigManager[config.AsgardTreeConfig]) Option {
+	return func(o *Options) {
+		o.TreeManager = mgr
+	}
+}
+
+// WithEtcdClient injects a pre-configured etcd client.
+func WithEtcdClient(client *clientv3.Client) Option {
+	return func(o *Options) {
+		o.EtcdClient = client
+	}
 }
 
 // WithConfig injects a pre-loaded Config instance.
@@ -118,38 +137,14 @@ func WithSkipSSHSetup(skip bool) Option {
 // App encapsulates the Asgard runtime environment and lifecycle.
 type App struct {
 	conf         *config.Config
+	treeManager  *configlib.ConfigManager[config.AsgardTreeConfig]
+	etcdClient   *clientv3.Client
 	db           *gorm.DB
 	server       *api.Server
 	scheduler    *cleanup.Scheduler
 	proxyManager *proxy.ProxyManager
 	stopOnce     sync.Once
 	stopErr      error
-}
-
-func salvageConfig(path string) *config.Config {
-	cfg := &config.Config{
-		Port:         8080,
-		InternalPort: 8081,
-		AgentDir:     paths.AgentsRoot(),
-	}
-	data, err := os.ReadFile(path)
-	if err == nil {
-		_ = yaml.Unmarshal(data, cfg)
-	}
-	if cfg.Port <= 0 {
-		cfg.Port = 8080
-	}
-	if cfg.InternalPort <= 0 {
-		cfg.InternalPort = 8081
-	}
-	if cfg.WebUIPath == "" {
-		if info, err := os.Stat("/opt/asgard/webui"); err == nil && info.IsDir() {
-			cfg.WebUIPath = "/opt/asgard/webui"
-		} else if info, err := os.Stat("webui/dist"); err == nil && info.IsDir() {
-			cfg.WebUIPath = "webui/dist"
-		}
-	}
-	return cfg
 }
 
 // loggerOnce serializes the process-global logging configuration below.
@@ -186,25 +181,81 @@ func New(opts ...Option) (*App, error) {
 
 	// 1. Resolve configuration
 	conf := options.Config
-	configLoaded := conf != nil
-	resolvedConfigPath := options.ConfigPath
-	if resolvedConfigPath == "" {
-		resolvedConfigPath = paths.ConfigFile()
-	}
-	if conf == nil {
-		var err error
-		conf, err = config.LoadConfig(resolvedConfigPath)
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to load config, entering degraded salvage mode")
-			diagnostics.AddError("config", err.Error())
-			conf = salvageConfig(resolvedConfigPath)
-		} else {
-			configLoaded = true
+	treeMgr := options.TreeManager
+	etcdClient := options.EtcdClient
+	var proxyHolder atomic.Pointer[proxy.ProxyManager]
+	var resolvedConfigPath string
+
+	if conf != nil {
+		// Direct injection (e.g. unit tests)
+		resolvedConfigPath = options.ConfigPath
+		if resolvedConfigPath == "" {
+			resolvedConfigPath = paths.ConfigFile()
+		}
+		if conf.ConfigPath == "" {
+			conf.ConfigPath = resolvedConfigPath
+		}
+	} else {
+		if treeMgr == nil {
+			var mgrErr error
+			treeMgr, etcdClient, mgrErr = config.NewEtcdConfigManager(context.Background())
+			if mgrErr != nil {
+				return nil, fmt.Errorf("failed to initialize etcd configuration: %w", mgrErr)
+			}
+		}
+
+		// If treeMgr has not yet been started, register OnError and OnChange before Start
+		if treeMgr.Get() == nil {
+			treeMgr.OnError(func(err error) {
+				log.Error().Err(err).Msg("etcd configuration manager reload/fetch error")
+				if diagnostics != nil {
+					diagnostics.AddError("config", err.Error())
+				}
+			})
+			treeMgr.OnChange(func(oldTree, newTree *config.AsgardTreeConfig) {
+				if newTree == nil {
+					return
+				}
+				log.Info().Msg("etcd configuration update detected, reloading proxy and main config")
+				newProxy := newTree.Asgard.Proxy
+				conf.SetProxy(&newProxy)
+				if pm := proxyHolder.Load(); pm != nil {
+					if err := pm.Reload(&newProxy); err != nil {
+						log.Error().Err(err).Msg("failed to live-reload proxy configuration from etcd")
+						if diagnostics != nil {
+							diagnostics.AddError("proxy", err.Error())
+						}
+					} else {
+						log.Info().Msg("proxy configuration live-reloaded successfully from etcd")
+						if diagnostics != nil {
+							diagnostics.ResetSource("proxy")
+						}
+					}
+				}
+			})
+			if startErr := treeMgr.Start(context.Background()); startErr != nil {
+				if etcdClient != nil {
+					_ = etcdClient.Close()
+				}
+				return nil, fmt.Errorf("failed to start etcd config manager: %w", startErr)
+			}
+		}
+
+		treeCfg := treeMgr.Get()
+		if treeCfg == nil {
+			return nil, fmt.Errorf("etcd configuration snapshot is nil")
+		}
+		mainCfg := treeCfg.Asgard.Config.Clone()
+		conf = mainCfg
+		if treeCfg.Asgard.Proxy.Enable || len(treeCfg.Asgard.Proxy.Rules) > 0 {
+			proxyCfg := treeCfg.Asgard.Proxy
+			conf.SetProxy(&proxyCfg)
+		}
+		if err := conf.ApplyDefaultsAndValidate(); err != nil {
+			return nil, fmt.Errorf("invalid configuration from etcd: %w", err)
 		}
 	}
-	if conf != nil && conf.ConfigPath == "" {
-		conf.ConfigPath = resolvedConfigPath
-	}
+	configLoaded := true
 
 	// 2. Validate CLI agent setups (unless skipped or config failed to load)
 	if !options.SkipAgentValidation && configLoaded {
@@ -283,6 +334,9 @@ func New(opts ...Option) (*App, error) {
 			proxyMgr = nil
 		}
 	}
+	if proxyMgr != nil {
+		proxyHolder.Store(proxyMgr)
+	}
 
 	// 8. Assemble API Server with options
 	apiOpts := []api.ServerOption{
@@ -308,11 +362,16 @@ func New(opts ...Option) (*App, error) {
 		if scheduler != nil {
 			_ = scheduler.Shutdown()
 		}
+		if etcdClient != nil {
+			_ = etcdClient.Close()
+		}
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
 
 	return &App{
 		conf:         conf,
+		treeManager:  treeMgr,
+		etcdClient:   etcdClient,
 		db:           database,
 		server:       srv,
 		scheduler:    scheduler,
@@ -393,6 +452,9 @@ func (a *App) Stop(ctx context.Context) error {
 			if err := a.scheduler.Shutdown(); err != nil {
 				errs = append(errs, fmt.Errorf("scheduler shutdown failed: %w", err))
 			}
+		}
+		if a.etcdClient != nil {
+			_ = a.etcdClient.Close()
 		}
 		a.stopErr = errors.Join(errs...)
 	})

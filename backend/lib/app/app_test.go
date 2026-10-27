@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elmhuangyu/configs/pkg/configlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -303,72 +304,25 @@ func TestApp_New_DegradedModeOnMissingAgentFather(t *testing.T) {
 	})
 }
 
-func TestApp_New_DegradedModeOnCorruptedConfig_SalvagePort(t *testing.T) {
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	corruptedYAML := `
+func TestApp_New_DegradedModeOnCorruptedConfig_FailsFast(t *testing.T) {
+	kvs := configlib.FlattenKVs{
+		"asgard/config.yaml": []byte(`
+host: "https://asgard.example.com"
 port: 7000
 db: "invalid_db"
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(corruptedYAML), 0644))
+`),
+	}
+	src := configlib.NewMemSource(kvs)
+	mgr := configlib.NewManager[config.AsgardTreeConfig](src)
 
 	appInstance, err := New(
-		WithConfigPath(configPath),
+		WithTreeManager(mgr),
 		WithSkipAgentValidation(true),
 		WithSkipSSHSetup(true),
 	)
-	require.NoError(t, err)
-	require.NotNil(t, appInstance)
-	assert.Equal(t, 7000, appInstance.Config().Port)
-
-	snap := appInstance.Server().Diagnostics().Snapshot()
-	assert.Equal(t, "degraded", snap.Status)
-	assert.NotEmpty(t, snap.Errors)
-
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = appInstance.Stop(ctx)
-	})
-}
-
-func TestApp_New_DegradedModeOnCorruptedConfig_SkipsAgentValidation(t *testing.T) {
-	// When config fails to load and enters salvage mode, agent validation should be skipped
-	// even when WithSkipAgentValidation(false) is configured.
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("SIMPLEST_CONFIG_PATH", "")
-	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "")
-
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	corruptedYAML := `
-port: 7000
-db: "invalid_db"
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(corruptedYAML), 0644))
-
-	appInstance, err := New(
-		WithConfigPath(configPath),
-		WithSkipAgentValidation(false),
-		WithSkipSSHSetup(true),
-	)
-	require.NoError(t, err)
-	require.NotNil(t, appInstance)
-
-	snap := appInstance.Server().Diagnostics().Snapshot()
-	assert.Equal(t, "degraded", snap.Status)
-	assert.NotEmpty(t, snap.Errors)
-	// Confirm no cli_auth errors were recorded because agent validation was skipped
-	for _, errStr := range snap.Errors {
-		assert.NotContains(t, errStr, "agent setup validation failed")
-	}
-
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = appInstance.Stop(ctx)
-	})
+	require.Error(t, err)
+	assert.Nil(t, appInstance)
+	assert.Contains(t, err.Error(), "invalid db: invalid_db")
 }
 
 func TestApp_New_SelectiveValidation_SimplestOnly(t *testing.T) {
@@ -607,4 +561,148 @@ func TestApp_ProxyPortCollision_Degraded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start did not exit within timeout after Stop")
 	}
+}
+
+func TestApp_New_FailFastWithoutEtcd(t *testing.T) {
+	t.Setenv("ETCD_ENDPOINTS", "")
+
+	// When neither Config nor TreeManager is injected and ETCD_ENDPOINTS is missing, New must fail-fast
+	appInstance, err := New(
+		WithSkipAgentValidation(true),
+		WithSkipSSHSetup(true),
+	)
+	require.Error(t, err)
+	assert.Nil(t, appInstance)
+	assert.ErrorIs(t, err, config.ErrMissingEtcdEndpoints)
+}
+
+func TestApp_New_WithTreeManager(t *testing.T) {
+	kvs := configlib.FlattenKVs{
+		"asgard/config.yaml": []byte(`
+debug: true
+host: https://asgard.example.com
+port: 7000
+internal_port: 8081
+db: sqlite
+gemini_api_key: test-gemini-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+`),
+		"asgard/proxy.yaml": []byte(`
+enable: true
+server:
+  addr: 127.0.0.1:8082
+rules:
+  - host: api.x.ai
+    header_key: Authorization
+    dummy_secret: Bearer dummy
+    real_secret: Bearer real
+`),
+		"aw/config.yaml":                      []byte("agents: []\n"),
+		"simplest/key.yaml":                   []byte("providers: {}\n"),
+		"simplest/models.yaml":                []byte("models: []\n"),
+		"simplest/providers.yaml":             []byte("providers: {}\n"),
+		"credentials/auth.json":               []byte("{}"),
+		"credentials/antigravity-oauth-token": []byte("tok"),
+		"credentials/gemini-api-key":          []byte("key"),
+		"credentials/xai-api-key":             []byte("xkey"),
+		"credentials/ssh/key":                 []byte("ssh-key"),
+		"credentials/ssh/key.pub":             []byte("ssh-pub"),
+		"credentials/ssh/config":              []byte("ssh-config"),
+	}
+
+	src := configlib.NewMemSource(kvs)
+	mgr := configlib.NewManager[config.AsgardTreeConfig](src)
+
+	appInstance, err := New(
+		WithTreeManager(mgr),
+		WithSkipAgentValidation(true),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+	assert.Equal(t, 7000, appInstance.Config().Port)
+	assert.True(t, appInstance.Config().IsProxyEnabled())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = appInstance.Stop(ctx)
+}
+
+func TestApp_LiveReloadProxyFromEtcdSource(t *testing.T) {
+	kvs := configlib.FlattenKVs{
+		"asgard/config.yaml": []byte(`
+debug: true
+host: https://asgard.example.com
+port: 7000
+internal_port: 8081
+db: sqlite
+gemini_api_key: test-gemini-key
+gemini_model_for_chat_title: gemini-3.1-flash-lite
+`),
+		"asgard/proxy.yaml": []byte(`
+enable: true
+server:
+  addr: 127.0.0.1:0
+rules:
+  - host: api.x.ai
+    header_key: Authorization
+    dummy_secret: Bearer dummy
+    real_secret: Bearer initial-secret
+`),
+		"aw/config.yaml":                      []byte("agents: []\n"),
+		"simplest/key.yaml":                   []byte("providers: {}\n"),
+		"simplest/models.yaml":                []byte("models: []\n"),
+		"simplest/providers.yaml":             []byte("providers: {}\n"),
+		"credentials/auth.json":               []byte("{}"),
+		"credentials/antigravity-oauth-token": []byte("tok"),
+		"credentials/gemini-api-key":          []byte("key"),
+		"credentials/xai-api-key":             []byte("xkey"),
+		"credentials/ssh/key":                 []byte("ssh-key"),
+		"credentials/ssh/key.pub":             []byte("ssh-pub"),
+		"credentials/ssh/config":              []byte("ssh-config"),
+	}
+
+	src := configlib.NewMemSource(kvs)
+	mgr := configlib.NewManager[config.AsgardTreeConfig](src)
+
+	appInstance, err := New(
+		WithTreeManager(mgr),
+		WithSkipAgentValidation(true),
+		WithSkipSSHSetup(true),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, appInstance)
+	require.NotNil(t, appInstance.ProxyManager())
+
+	// Verify initial proxy rules
+	rules := appInstance.ProxyManager().GetMaskedRules()
+	require.Len(t, rules, 1)
+	assert.Equal(t, "api.x.ai", rules[0].Host)
+
+	// Now update source with new proxy rule
+	updatedKVs := make(configlib.FlattenKVs)
+	for k, v := range kvs {
+		updatedKVs[k] = v
+	}
+	updatedKVs["asgard/proxy.yaml"] = []byte(`
+enable: true
+server:
+  addr: 127.0.0.1:0
+rules:
+  - host: api.openai.com
+    header_key: Authorization
+    dummy_secret: Bearer dummy-openai
+    real_secret: Bearer updated-secret
+`)
+	src.Set(updatedKVs)
+
+	// Wait up to 2 seconds for OnChange callback to fire and reload ProxyManager
+	assert.Eventually(t, func() bool {
+		r := appInstance.ProxyManager().GetMaskedRules()
+		return len(r) == 1 && r[0].Host == "api.openai.com"
+	}, 2*time.Second, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = appInstance.Stop(ctx)
 }

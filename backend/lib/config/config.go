@@ -354,66 +354,15 @@ func (c *Config) validate() error {
 }
 
 // ParseAndValidate unmarshals configuration YAML data, applies defaults, and validates contents.
+// ParseAndValidate unmarshals configuration YAML data, applies defaults, and validates contents.
 func ParseAndValidate(data []byte) (*Config, error) {
 	cfg := &Config{}
-	err := yaml.Unmarshal(data, cfg)
-	if err != nil {
+	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
-
-	if cfg.Port <= 0 {
-		cfg.Port = 8080
-	}
-
-	if cfg.InternalPort <= 0 {
-		cfg.InternalPort = 8081
-	}
-
-	if cfg.ChatLang == "" {
-		cfg.ChatLang = DefaultLanguage
-	}
-
-	if cfg.DocLang == "" {
-		cfg.DocLang = DefaultLanguage
-	}
-
-	if cfg.CommentLang == "" {
-		cfg.CommentLang = DefaultLanguage
-	}
-
-	if cfg.UILang == "" {
-		cfg.UILang = "en"
-	}
-
-	if cfg.AgentDir == "" {
-		cfg.AgentDir = paths.AgentsRoot()
-	}
-
-	if len(cfg.Providers) == 0 {
-		cfg.Providers = append([]string(nil), SupportedProviders...)
-	} else {
-		seen := make(map[string]bool, len(cfg.Providers))
-		deduped := make([]string, 0, len(cfg.Providers))
-		for _, p := range cfg.Providers {
-			if !seen[p] {
-				seen[p] = true
-				deduped = append(deduped, p)
-			}
-		}
-		cfg.Providers = deduped
-	}
-
-	if cfg.Proxy != nil {
-		cfg.Proxy.ApplyDefaults()
-		if err := cfg.Proxy.Validate(); err != nil {
-			return nil, fmt.Errorf("proxy config error: %w", err)
-		}
-	}
-
-	if err := cfg.validate(); err != nil {
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
 		return nil, err
 	}
-
 	return cfg, nil
 }
 
