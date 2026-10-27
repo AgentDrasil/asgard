@@ -437,6 +437,11 @@ func isProtectedPath(path string) bool {
 	}
 }
 
+// isAdminPath reports whether a request path requires the "admin" role.
+func isAdminPath(path string) bool {
+	return strings.HasPrefix(path, "/api/manage/")
+}
+
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.setSecurityHeaders(w)
@@ -454,6 +459,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.auth != nil && isProtectedPath(r.URL.Path) {
 		if !s.auth.Authenticate(w, r) {
 			return // Authenticate already wrote the 401/403/503 response
+		}
+		if isAdminPath(r.URL.Path) && !auth.HasRole(r.Context(), auth.AdminRole) {
+			writeJSONError(w, http.StatusForbidden, "admin role required")
+			return
 		}
 	}
 

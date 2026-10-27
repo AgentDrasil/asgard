@@ -264,7 +264,7 @@ func (s *Service) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	status, err := s.verifyToken(r.Context(), token)
+	status, user, err := s.verifyToken(r.Context(), token)
 	if err != nil {
 		log.Warn().Err(err).Msg("auth: token verification unavailable")
 		writeJSONError(w, http.StatusServiceUnavailable, "auth provider unavailable")
@@ -272,6 +272,9 @@ func (s *Service) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 	}
 	switch status {
 	case tokenValid:
+		if user != nil {
+			*r = *r.WithContext(WithUser(r.Context(), user))
+		}
 		return true
 	case tokenForbidden:
 		writeJSONError(w, http.StatusForbidden, "insufficient role")
@@ -282,13 +285,13 @@ func (s *Service) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 	}
 }
 
-// verifyToken validates raw and maps the outcome onto a tokenStatus. A non-nil
-// error means the provider could not be reached, which callers translate to 503
+// verifyToken validates raw and maps the outcome onto a tokenStatus and extracted User.
+// A non-nil error means the provider could not be reached, which callers translate to 503
 // so clients keep their session instead of being logged out.
-func (s *Service) verifyToken(ctx context.Context, raw string) (tokenStatus, error) {
+func (s *Service) verifyToken(ctx context.Context, raw string) (tokenStatus, *User, error) {
 	p, err := s.ensureProvider(ctx)
 	if err != nil {
-		return tokenInvalid, err
+		return tokenInvalid, nil, err
 	}
 
 	idToken, err := p.verifier.Verify(ctx, raw)
@@ -296,7 +299,7 @@ func (s *Service) verifyToken(ctx context.Context, raw string) (tokenStatus, err
 		var expired *oidc.TokenExpiredError
 		if errors.As(err, &expired) {
 			// Deterministic: the token is genuinely expired, no probe needed.
-			return tokenInvalid, nil
+			return tokenInvalid, nil, nil
 		}
 		// Ambiguous. A signature failure may mean the token is bogus, or that
 		// the JWKS could not be fetched because the provider is down. go-oidc
@@ -304,27 +307,34 @@ func (s *Service) verifyToken(ctx context.Context, raw string) (tokenStatus, err
 		// them (the inner %w is dropped by an outer %v), so the provider is
 		// probed directly. Reachable => bad token (401); unreachable => 503.
 		if s.providerReachable() {
-			return tokenInvalid, nil
+			return tokenInvalid, nil, nil
 		}
-		return tokenInvalid, fmt.Errorf("verify token: provider unreachable: %w", err)
+		return tokenInvalid, nil, fmt.Errorf("verify token: provider unreachable: %w", err)
 	}
 
 	requiredRole := s.cfg.RequiredRoleTrimmed()
-	if requiredRole == "" {
-		return tokenValid, nil
-	}
 
 	var claims map[string]any
 	if err := idToken.Claims(&claims); err != nil {
 		log.Warn().Err(err).Msg("auth: failed to decode token claims")
-		return tokenForbidden, nil
+		if requiredRole == "" {
+			return tokenValid, nil, nil
+		}
+		return tokenForbidden, nil, nil
 	}
-	if !containsRole(extractRoles(claims, s.cfg.Claim()), requiredRole) {
+
+	roles := extractRoles(claims, s.cfg.Claim())
+	user := &User{
+		Subject: idToken.Subject,
+		Roles:   roles,
+	}
+
+	if requiredRole != "" && !containsRole(roles, requiredRole) {
 		log.Warn().Str("role_claim", s.cfg.Claim()).Str("required_role", requiredRole).
 			Msg("auth: token does not carry the required role")
-		return tokenForbidden, nil
+		return tokenForbidden, nil, nil
 	}
-	return tokenValid, nil
+	return tokenValid, user, nil
 }
 
 // providerReachable reports whether the provider's JWKS endpoint is currently
@@ -513,7 +523,7 @@ func (s *Service) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// requirement: handing out tokens anyway would only make every API call fail
 	// and bounce the browser through the login flow again.
 	if s.cfg.RequiredRoleTrimmed() != "" {
-		status, err := s.verifyToken(r.Context(), s.bearerCredential(token))
+		status, _, err := s.verifyToken(r.Context(), s.bearerCredential(token))
 		if err != nil {
 			log.Error().Err(err).Msg("auth: token verification unavailable at callback")
 			http.Error(w, "auth provider unavailable", http.StatusServiceUnavailable)

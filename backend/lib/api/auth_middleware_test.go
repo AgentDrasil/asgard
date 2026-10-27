@@ -278,6 +278,87 @@ func TestWithAuthServiceOption(t *testing.T) {
 	require.Same(t, svc, srv.AuthService())
 }
 
+func TestAdminRoutesRequireAdminRole(t *testing.T) {
+	p := authtest.NewProvider(t)
+	srv := newAuthServer(t, p, func(c *auth.Config) {
+		c.RoleClaim = "roles"
+		c.RequiredRole = "ai"
+	})
+
+	adminPaths := []string{
+		"/api/manage/config",
+		"/api/manage/proxy",
+		"/api/manage/keybindings",
+	}
+
+	t.Run("token without admin role is forbidden on admin routes", func(t *testing.T) {
+		claims := p.Claims()
+		claims["roles"] = "ai" // has required base role "ai", but lacks "admin"
+		token := p.Sign(t, claims)
+
+		for _, path := range adminPaths {
+			rec := serve(srv, http.MethodGet, path, map[string]string{"Authorization": "Bearer " + token})
+			assert.Equal(t, http.StatusForbidden, rec.Code, "GET %s should require admin role", path)
+			var resp map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Equal(t, "admin role required", resp["error"])
+		}
+
+		// Non-admin route under /api/ should succeed with "ai" role
+		nonAdminRec := serve(srv, http.MethodGet, "/api/agents", map[string]string{"Authorization": "Bearer " + token})
+		assert.Equal(t, http.StatusOK, nonAdminRec.Code)
+	})
+
+	t.Run("mutating admin route without admin role is forbidden", func(t *testing.T) {
+		claims := p.Claims()
+		claims["roles"] = "ai"
+		token := p.Sign(t, claims)
+
+		rec := serve(srv, http.MethodPost, "/api/manage/reload", map[string]string{"Authorization": "Bearer " + token})
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		var resp map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "admin role required", resp["error"])
+	})
+
+	t.Run("token lacking base required role yields insufficient role, not admin role required", func(t *testing.T) {
+		claims := p.Claims()
+		claims["roles"] = "other" // lacks base role "ai"
+		token := p.Sign(t, claims)
+
+		rec := serve(srv, http.MethodGet, "/api/manage/config", map[string]string{"Authorization": "Bearer " + token})
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		var resp map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "insufficient role", resp["error"])
+	})
+
+	t.Run("token with space-separated roles containing admin succeeds", func(t *testing.T) {
+		claims := p.Claims()
+		claims["roles"] = "ai admin" // space-separated
+		token := p.Sign(t, claims)
+
+		for _, path := range adminPaths {
+			rec := serve(srv, http.MethodGet, path, map[string]string{"Authorization": "Bearer " + token})
+			// Since route is allowed past auth and admin guard, status will not be 401 or 403
+			assert.NotEqual(t, http.StatusUnauthorized, rec.Code)
+			assert.NotEqual(t, http.StatusForbidden, rec.Code, "GET %s should be accessible with admin role", path)
+		}
+	})
+
+	t.Run("token with array-shaped roles containing admin succeeds", func(t *testing.T) {
+		claims := p.Claims()
+		claims["roles"] = []any{"ai", "admin"}
+		token := p.Sign(t, claims)
+
+		for _, path := range adminPaths {
+			rec := serve(srv, http.MethodGet, path, map[string]string{"Authorization": "Bearer " + token})
+			assert.NotEqual(t, http.StatusUnauthorized, rec.Code)
+			assert.NotEqual(t, http.StatusForbidden, rec.Code, "GET %s should be accessible with admin role in array", path)
+		}
+	})
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	srv := &Server{conf: &config.Config{}}
 	srv.mux = srv.buildMuxLocked()

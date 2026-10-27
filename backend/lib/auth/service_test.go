@@ -1006,6 +1006,37 @@ func TestCallbackScriptServed(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "asgard_auth")
 }
 
+func TestAuthenticate_ContextAndRoles(t *testing.T) {
+	t.Parallel()
+
+	p := authtest.NewProvider(t)
+	s := newTestService(t, p, func(c *Config) {
+		c.RoleClaim = "roles"
+		c.RequiredRole = "ai"
+	})
+
+	claims := p.Claims()
+	claims["roles"] = "ai admin"
+	claims["sub"] = "user-42"
+	token := p.Sign(t, claims)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	ok := s.Authenticate(rec, req)
+	require.True(t, ok)
+
+	user, found := UserFromContext(req.Context())
+	require.True(t, found)
+	require.NotNil(t, user)
+	assert.Equal(t, "user-42", user.Subject)
+	assert.ElementsMatch(t, []string{"ai", "admin"}, user.Roles)
+	assert.True(t, HasRole(req.Context(), "admin"))
+	assert.True(t, HasRole(req.Context(), "ai"))
+	assert.False(t, HasRole(req.Context(), "superuser"))
+}
+
 // htmlUnescape undoes the HTML escaping that html/template applies to the
 // data-tokens attribute so the embedded JSON can be parsed back.
 func htmlUnescape(s string) string {
