@@ -99,6 +99,11 @@ type ModelCompat struct {
 	// message uses the "developer" role instead of "system" — but only for
 	// reasoning models, matching pi's instructionRole behavior.
 	SupportsDeveloperRole *bool `json:"supportsDeveloperRole,omitempty" yaml:"supportsDeveloperRole,omitempty"`
+	// RequiresReasoningContentOnAssistantMessages: when explicitly true, a
+	// reasoning model's replayed assistant messages always carry a
+	// `reasoning_content` field (an empty string when there is no reasoning),
+	// matching pi's DeepSeek-style compat handling.
+	RequiresReasoningContentOnAssistantMessages *bool `json:"requiresReasoningContentOnAssistantMessages,omitempty" yaml:"requiresReasoningContentOnAssistantMessages,omitempty"`
 }
 
 // Model describes one callable model endpoint. Configured programmatically.

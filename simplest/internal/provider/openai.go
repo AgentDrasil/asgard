@@ -56,9 +56,13 @@ type oaPart struct {
 }
 
 type oaMessage struct {
-	Role             string           `json:"role"`
-	Content          any              `json:"content"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+	// ReasoningContent is a pointer so an explicit empty string marshals as
+	// `"reasoning_content":""` (nil + omitempty omits it entirely). pi's
+	// DeepSeek-style compat requires the key to be present on replayed
+	// assistant messages even without reasoning (9b103e5e4).
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
 	Reasoning        string           `json:"reasoning,omitempty"`
 	ReasoningText    string           `json:"reasoning_text,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
@@ -236,11 +240,22 @@ func (p *OpenAICompat) ConvertMessages(model *types.Model, cx *types.Context) ([
 			}
 			if text != "" {
 				out.Content = text
-			} else if len(thinking) > 0 && reasoningField == "" {
+			} else if len(thinking) > 0 {
+				// Reasoning-only replay: send content:"" (the pre-existing Go
+				// shape) so the turn and its reasoning survive instead of
+				// being skipped as an empty assistant turn. Upstream leaves
+				// content null for thinking-only turns and skips them.
 				out.Content = ""
 			}
 			if reasoningField != "" {
 				setReasoning(&out, reasoningField, strings.Join(thinking, "\n"))
+			}
+			// pi 9b103e5e4: DeepSeek-style compat requires every replayed
+			// assistant message to carry `reasoning_content`, even when empty
+			// (or when the reasoning replayed under a different field name).
+			if reasoningField != "reasoning_content" && requiresReasoningContent(model) {
+				empty := ""
+				out.ReasoningContent = &empty
 			}
 			if out.Content == nil && !hasToolCalls {
 				continue // skip empty assistant turns (aborted responses)
@@ -298,8 +313,17 @@ func setReasoning(m *oaMessage, field, value string) {
 	case "reasoning_text":
 		m.ReasoningText = value
 	default:
-		m.ReasoningContent = value
+		v := value
+		m.ReasoningContent = &v
 	}
+}
+
+// requiresReasoningContent reports whether replayed assistant messages must
+// always carry a `reasoning_content` field (pi 9b103e5e4): only for reasoning
+// models whose compat explicitly enables it.
+func requiresReasoningContent(model *types.Model) bool {
+	return model != nil && model.Reasoning &&
+		compatFlag(model, func(c *types.ModelCompat) *bool { return c.RequiresReasoningContentOnAssistantMessages })
 }
 
 func userParts(blocks []types.AssistantContent, allowImages bool) (parts []oaPart, hasImage bool) {
@@ -356,17 +380,22 @@ type oaDelta struct {
 	} `json:"tool_calls"`
 }
 
-// firstReasoning returns the first non-empty reasoning field value, trying
-// ["reasoning_content", "reasoning", "reasoning_text"] in that order.
-func firstReasoning(d oaDelta) string {
+// firstReasoningField returns the first non-empty reasoning field value and
+// the wire name it came from, trying ["reasoning_content", "reasoning",
+// "reasoning_text"] in that order. The wire name becomes the thinking block's
+// signature so replay re-emits the reasoning in the same field (pi
+// 9b103e5e4); only the first non-empty field is used, so a server echoing the
+// same text in several fields never duplicates it.
+func firstReasoningField(d oaDelta) (value, field string) {
 	switch {
 	case d.ReasoningContent != "":
-		return d.ReasoningContent
+		return d.ReasoningContent, "reasoning_content"
 	case d.Reasoning != "":
-		return d.Reasoning
-	default:
-		return d.ReasoningText
+		return d.Reasoning, "reasoning"
+	case d.ReasoningText != "":
+		return d.ReasoningText, "reasoning_text"
 	}
+	return "", ""
 }
 
 type oaChunk struct {
@@ -750,8 +779,8 @@ func (p *OpenAICompat) Stream(ctx context.Context, model *types.Model, cx *types
 			d := choice.Delta
 			// Reasoning first: a chunk can carry both fields, and upstream
 			// emits the thinking block before the text block (63035734f).
-			if v := firstReasoning(d); v != "" {
-				em.thinkingDelta(v, "")
+			if v, field := firstReasoningField(d); v != "" {
+				em.thinkingDelta(v, field)
 			}
 			if d.Content != nil && *d.Content != "" {
 				em.textDelta(*d.Content)

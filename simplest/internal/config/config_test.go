@@ -747,6 +747,7 @@ models:
       supportsUsageInStreaming: false
       supportsFinishReason: false
       supportsDeveloperRole: true
+      requiresReasoningContentOnAssistantMessages: true
   - id: plain-model
     name: "Plain Model"
     provider: custom-openai
@@ -780,6 +781,8 @@ models:
 	require.False(t, *compat.SupportsFinishReason)
 	require.NotNil(t, compat.SupportsDeveloperRole)
 	require.True(t, *compat.SupportsDeveloperRole)
+	require.NotNil(t, compat.RequiresReasoningContentOnAssistantMessages)
+	require.True(t, *compat.RequiresReasoningContentOnAssistantMessages)
 
 	assert.Nil(t, byID["plain-model"].Compat, "absent compat must stay nil")
 }

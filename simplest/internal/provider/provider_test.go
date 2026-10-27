@@ -2421,7 +2421,8 @@ func TestOpenAIReplaysSameModelThinking(t *testing.T) {
 	msgs, err := p.ConvertMessages(model, cx)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
-	assert.Equal(t, "chain", msgs[0].ReasoningContent)
+	require.NotNil(t, msgs[0].ReasoningContent)
+	assert.Equal(t, "chain", *msgs[0].ReasoningContent)
 	assert.Equal(t, "answer", msgs[0].Content)
 }
 
@@ -2447,7 +2448,7 @@ func TestOpenAIDropsCrossModelThinking(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 
-	assert.Empty(t, msgs[0].ReasoningContent)
+	assert.Nil(t, msgs[0].ReasoningContent)
 	assert.Empty(t, msgs[0].Reasoning)
 	assert.Empty(t, msgs[0].ReasoningText)
 	assert.Equal(t, "answer", msgs[0].Content, "text must be preserved, not emptied by dropped thinking")
@@ -2476,8 +2477,182 @@ func TestOpenAIDropsCrossModelThinkingToolOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "tool call keeps an otherwise reasoning-only message")
 	assert.Nil(t, msgs[0].Content, "no thinking-derived empty content")
-	assert.Empty(t, msgs[0].ReasoningContent)
+	assert.Nil(t, msgs[0].ReasoningContent)
 	require.Len(t, msgs[0].ToolCalls, 1)
+}
+
+// --- B27: reasoning replay signature / required reasoning_content (pi 9b103e5e4) ---
+
+func TestOpenAIReasoningSignatureReplay(t *testing.T) {
+	t.Parallel()
+
+	for _, field := range []string{"reasoning_content", "reasoning", "reasoning_text"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(t, []string{
+				`{"choices":[{"delta":{"` + field + `":"think"}}]}`,
+				`{"choices":[{"delta":{"` + field + `":" more"}}]}`,
+				`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+				"[DONE]",
+			}, nil, nil, "")
+			defer srv.Close()
+
+			model := oaModel(srv.URL)
+			p := NewOpenAICompat("k")
+			_, done, errEv := drain(p.Stream(context.Background(), model, simpleContext(), nil))
+			require.Nil(t, errEv)
+			require.NotNil(t, done)
+			require.Len(t, done.Message.Content, 1)
+			th, ok := done.Message.Content[0].(types.ThinkingContent)
+			require.True(t, ok)
+			assert.Equal(t, "think more", th.Thinking)
+			assert.Equal(t, field, th.Signature, "signature must record the wire field the reasoning came from")
+
+			// Replaying the finished message re-emits the reasoning in the
+			// same wire field.
+			cx := &types.Context{Messages: []types.Message{done.Message}}
+			msgs, err := p.ConvertMessages(model, cx)
+			require.NoError(t, err)
+			require.Len(t, msgs, 1)
+			var wire map[string]any
+			require.NoError(t, json.Unmarshal(mustMarshalMsg(t, msgs[0]), &wire))
+			assert.Equal(t, "think more", wire[field], "reasoning must replay in its original wire field")
+		})
+	}
+}
+
+func TestOpenAIReasoningFirstFieldWins(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(t, []string{
+		`{"choices":[{"delta":{"reasoning_content":"think","reasoning":"think"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"[DONE]",
+	}, nil, nil, "")
+	defer srv.Close()
+
+	p := NewOpenAICompat("k")
+	_, done, errEv := drain(p.Stream(context.Background(), oaModel(srv.URL), simpleContext(), nil))
+	require.Nil(t, errEv)
+	require.NotNil(t, done)
+
+	th, ok := done.Message.Content[0].(types.ThinkingContent)
+	require.True(t, ok)
+	assert.Equal(t, "think", th.Thinking, "duplicate reasoning in multiple fields must not be duplicated")
+	assert.Equal(t, "reasoning_content", th.Signature, "the first non-empty field wins")
+}
+
+// mustMarshalMsg marshals one wire message for request-shape assertions.
+func mustMarshalMsg(t *testing.T, m oaMessage) []byte {
+	t.Helper()
+	raw, err := json.Marshal(m)
+	require.NoError(t, err)
+	return raw
+}
+
+func TestOpenAICompatRequiresReasoningContent(t *testing.T) {
+	t.Parallel()
+
+	assistantWithText := func(model *types.Model) *types.AssistantMessage {
+		return &types.AssistantMessage{
+			Content:  []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "answer"}},
+			Provider: model.Provider, API: model.API, Model: model.ID,
+		}
+	}
+	assistantWithToolCall := func(model *types.Model) *types.AssistantMessage {
+		return &types.AssistantMessage{
+			Content: []types.AssistantContent{
+				types.ToolCall{Type: types.TypeToolCall, ID: "c1", Name: "read", Arguments: json.RawMessage(`{}`)},
+			},
+			Provider: model.Provider, API: model.API, Model: model.ID,
+		}
+	}
+
+	cases := []struct {
+		name     string
+		compat   *types.ModelCompat
+		hasKey   bool
+		rawValue string
+	}{
+		{name: "flag true injects empty field", compat: &types.ModelCompat{RequiresReasoningContentOnAssistantMessages: boolPtr(true)}, hasKey: true, rawValue: `""`},
+		{name: "flag nil omits field", compat: nil},
+		{name: "flag false omits field", compat: &types.ModelCompat{RequiresReasoningContentOnAssistantMessages: boolPtr(false)}},
+	}
+	for _, tc := range cases {
+		for _, build := range []func(*types.Model) *types.AssistantMessage{assistantWithText, assistantWithToolCall} {
+			t.Run(tc.name+"/assistant", func(t *testing.T) {
+				t.Parallel()
+
+				model := oaModel("http://unused")
+				model.Compat = tc.compat
+				cx := &types.Context{Messages: []types.Message{build(model)}}
+
+				p := NewOpenAICompat("k")
+				msgs, err := p.ConvertMessages(model, cx)
+				require.NoError(t, err)
+				require.Len(t, msgs, 1)
+
+				var wire map[string]any
+				require.NoError(t, json.Unmarshal(mustMarshalMsg(t, msgs[0]), &wire))
+				rc, ok := wire["reasoning_content"]
+				if tc.hasKey {
+					require.True(t, ok, "reasoning_content key must be present")
+					assert.Equal(t, "", rc)
+				} else {
+					require.False(t, ok, "reasoning_content key must be absent")
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAICompatRequiresReasoningContentKeepsReplay(t *testing.T) {
+	t.Parallel()
+
+	// With the flag on, actual reasoning replayed under reasoning_content is
+	// preserved verbatim, not replaced by the empty placeholder; and a
+	// non-reasoning model never gets the empty field.
+	t.Run("reasoned message keeps content", func(t *testing.T) {
+		t.Parallel()
+
+		model := oaModel("http://unused")
+		model.Compat = &types.ModelCompat{RequiresReasoningContentOnAssistantMessages: boolPtr(true)}
+		cx := &types.Context{Messages: []types.Message{
+			&types.AssistantMessage{
+				Content: []types.AssistantContent{
+					types.ThinkingContent{Type: types.TypeThinking, Thinking: "chain", Signature: "reasoning_content"},
+					types.TextContent{Type: types.TypeText, Text: "answer"},
+				},
+				Provider: model.Provider, API: model.API, Model: model.ID,
+			},
+		}}
+		p := NewOpenAICompat("k")
+		msgs, err := p.ConvertMessages(model, cx)
+		require.NoError(t, err)
+		require.Len(t, msgs, 1)
+		require.NotNil(t, msgs[0].ReasoningContent)
+		assert.Equal(t, "chain", *msgs[0].ReasoningContent)
+	})
+
+	t.Run("non-reasoning model never injects", func(t *testing.T) {
+		t.Parallel()
+
+		model := oaModel("http://unused")
+		model.Reasoning = false
+		model.Compat = &types.ModelCompat{RequiresReasoningContentOnAssistantMessages: boolPtr(true)}
+		cx := &types.Context{Messages: []types.Message{
+			&types.AssistantMessage{
+				Content:  []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "answer"}},
+				Provider: model.Provider, API: model.API, Model: model.ID,
+			},
+		}}
+		p := NewOpenAICompat("k")
+		msgs, err := p.ConvertMessages(model, cx)
+		require.NoError(t, err)
+		require.Len(t, msgs, 1)
+		assert.Nil(t, msgs[0].ReasoningContent)
+	})
 }
 
 // --- B25: OpenAI-compat request options (pi 005af57d8) ---
