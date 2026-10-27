@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -96,10 +95,10 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 	cmd.Env = os.Environ()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	var buf bytes.Buffer
+	acc := newOutputAccumulator(TruncationOptions{})
 	// Same writer for both streams makes os/exec interleave them on one pipe.
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	cmd.Stdout = acc
+	cmd.Stderr = acc
 
 	if onUpdate != nil {
 		onUpdate(&types.ToolResult{Content: []types.AssistantContent{}})
@@ -125,17 +124,15 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		runErr = <-done
 	}
 
-	content := buf.String()
-	truncation := TruncateTail(content, TruncationOptions{})
+	truncation := acc.Snapshot()
 	text := truncation.Content
 	details := &BashToolDetails{}
 	if truncation.Truncated {
-		if fullPath, saveErr := saveFullOutput(content); saveErr == nil {
-			details.FullOutputPath = fullPath
-		}
 		details.Truncation = &truncation
+		details.FullOutputPath = acc.SpillPath()
 		text = appendTruncationFooter(text, &truncation, details.FullOutputPath)
 	}
+	acc.Close(truncation.Truncated)
 
 	outputText := text
 	if outputText == "" && !truncation.Truncated {
@@ -213,21 +210,4 @@ func appendTruncationFooter(text string, tr *TruncationResult, fullPath string) 
 		return footer
 	}
 	return text + "\n\n" + footer
-}
-
-func saveFullOutput(content string) (string, error) {
-	f, err := os.CreateTemp("", "simplest-bash-*.txt")
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.WriteString(content); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
 }

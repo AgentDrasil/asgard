@@ -89,6 +89,36 @@ func TestBashToolTailTruncationSavesFullOutput(t *testing.T) {
 	}
 }
 
+func TestBashToolLargeOutputStreamedToSpillFile(t *testing.T) {
+	dir := t.TempDir()
+	res := mustExec(t, NewBashTool(dir), `{"command":"seq 1 100000"}`)
+	out := textOf(t, res)
+
+	if !strings.Contains(out, "\n\n[Showing lines ") {
+		t.Errorf("output missing truncation footer; tail: %q", out[maxInt(0, len(out)-100):])
+	}
+
+	details, ok := res.Details.(*BashToolDetails)
+	if !ok || details.Truncation == nil || !details.Truncation.Truncated {
+		t.Fatalf("expected truncated *BashToolDetails, got %T %+v", res.Details, res.Details)
+	}
+	if details.Truncation.TotalLines != 100000 {
+		t.Errorf("TotalLines = %d, want 100000", details.Truncation.TotalLines)
+	}
+	full, err := os.ReadFile(details.FullOutputPath)
+	if err != nil {
+		t.Fatalf("full output file unreadable: %v", err)
+	}
+	// "1\n".."9\n".."100000\n": sum of line digits + newlines = 588895.
+	if len(full) != 588895 {
+		t.Errorf("full output = %d bytes, want %d", len(full), 588895)
+	}
+	if !strings.Contains(out, "99999\n100000\n\n[Showing lines 98001-100000 of 100000.") {
+		t.Errorf("returned output should keep tail lines with global totals, got tail %q", out[maxInt(0, len(out)-120):])
+	}
+	_ = os.Remove(details.FullOutputPath)
+}
+
 func TestBashToolWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "marker.txt", "x")
