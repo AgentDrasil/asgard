@@ -188,6 +188,14 @@ func (t *EditTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 		return nil, err
 	}
 	absolutePath := resolveToCwd(in.Path, t.cwd)
+	// Hold the per-path lock across the whole read-modify-write critical
+	// section. edit_doc delegates here, so it inherits the lock; wrapping it
+	// too would deadlock.
+	release, err := acquireFileMutation(ctx, absolutePath)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	rawContent, err := os.ReadFile(absolutePath)
 	if err != nil {

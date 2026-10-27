@@ -60,6 +60,13 @@ func (t *WriteTool) Execute(ctx context.Context, toolCallID string, args json.Ra
 		return nil, err
 	}
 	absolutePath := resolveToCwd(in.Path, t.cwd)
+	// Serialize against edit and other writes to the same file. write_doc
+	// delegates here, so it inherits the lock; wrapping it too would deadlock.
+	release, err := acquireFileMutation(ctx, absolutePath)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := os.MkdirAll(filepath.Dir(absolutePath), 0o755); err != nil {
 		return nil, err
 	}
