@@ -233,9 +233,25 @@ func TestParseStream_ToolFormatting(t *testing.T) {
 }
 
 func TestExtractTargetFiles(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "main.go", types.RemapSandboxPath("main.go"))
 	assert.Equal(t, "/tmp/test.md", types.RemapSandboxPath("/tmp/test.md"))
 
+	// Native agy tools (write_file, edit_file) use "Path" parameter.
+	infoWriteFile := &streamToolInfo{
+		Name:       "write_file",
+		Parameters: map[string]any{"Path": "/tmp/new_doc.md"},
+	}
+	assert.Equal(t, []string{"/tmp/new_doc.md"}, extractTargetFiles("write_file", infoWriteFile))
+
+	infoEditFile := &streamToolInfo{
+		Name:       "edit_file",
+		Parameters: map[string]any{"Path": "src/index.ts"},
+	}
+	assert.Equal(t, []string{"src/index.ts"}, extractTargetFiles("edit_file", infoEditFile))
+
+	// Legacy Cline-style tools use "TargetFile" parameter.
 	infoWrite := &streamToolInfo{
 		Name:       "write_to_file",
 		Parameters: map[string]any{"TargetFile": "/tmp/out.txt"},
@@ -249,5 +265,6 @@ func TestExtractTargetFiles(t *testing.T) {
 	assert.Equal(t, []string{"src/app.ts"}, extractTargetFiles("replace_file_content", infoReplace))
 
 	// Non file-modifying tools are ignored.
+	assert.Nil(t, extractTargetFiles("read_file", &streamToolInfo{Parameters: map[string]any{"Path": "a.go"}}))
 	assert.Nil(t, extractTargetFiles("read", &streamToolInfo{Parameters: map[string]any{"TargetFile": "a.go"}}))
 }

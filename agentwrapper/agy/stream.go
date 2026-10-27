@@ -229,6 +229,9 @@ func formatToolCall(toolName string, info *streamToolInfo) string {
 	if cmd, ok := info.Parameters["CommandLine"].(string); ok && cmd != "" {
 		return "> " + cmd
 	}
+	if path, ok := info.Parameters["Path"].(string); ok && path != "" {
+		return "> " + path
+	}
 	if path, ok := info.Parameters["AbsolutePath"].(string); ok && path != "" {
 		return "> " + path
 	}
@@ -248,6 +251,8 @@ func formatToolCall(toolName string, info *streamToolInfo) string {
 }
 
 var fileModifyingTools = map[string]bool{
+	"write_file":                 true,
+	"edit_file":                  true,
 	"write_to_file":              true,
 	"replace_file_content":       true,
 	"multi_replace_file_content": true,
@@ -255,14 +260,16 @@ var fileModifyingTools = map[string]bool{
 
 // extractTargetFiles resolves the target file path(s) from a file-modifying
 // tool's input payload so the UI can surface them as artifacts. agy's
-// (Cline-style) tools expose the path via the "TargetFile" parameter.
+// native tools expose the path via "Path", while legacy tools expose "TargetFile".
 func extractTargetFiles(toolName string, info *streamToolInfo) []string {
 	if info == nil || len(info.Parameters) == 0 {
 		return nil
 	}
 	if fileModifyingTools[toolName] {
-		if target, ok := info.Parameters["TargetFile"].(string); ok && target != "" {
-			return []string{types.RemapSandboxPath(target)}
+		for _, key := range []string{"Path", "TargetFile"} {
+			if target, ok := info.Parameters[key].(string); ok && strings.TrimSpace(target) != "" {
+				return []string{types.RemapSandboxPath(target)}
+			}
 		}
 	}
 	return nil
