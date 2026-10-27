@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,12 +36,60 @@ type BashToolDetails struct {
 // BashTool executes commands via bash -c in a configured working directory,
 // tail-truncating combined stdout/stderr to configured limits.
 type BashTool struct {
-	cwd string
+	cwd    string
+	runEnv types.RunEnvironment
 }
 
 // NewBashTool creates a bash tool that runs commands in cwd.
 func NewBashTool(cwd string) *BashTool {
 	return &BashTool{cwd: cwd}
+}
+
+// SetRunEnvironment receives per-run metadata (port of pi 005af57d8) that is
+// exposed to executed commands as PI_* environment variables.
+func (t *BashTool) SetRunEnvironment(env types.RunEnvironment) {
+	t.runEnv = env
+}
+
+// piEnvNames are the PI_* variables dropped from the inherited environment
+// (to avoid stale values) and re-exported from the current run metadata.
+var piEnvNames = []string{"PI_SESSION_ID", "PI_SESSION_FILE", "PI_PROVIDER", "PI_MODEL", "PI_REASONING_LEVEL"}
+
+// buildEnv constructs the command environment: the inherited environment
+// minus all PI_* names (always deleted, even when no run metadata is set),
+// then only the non-empty run metadata values appended.
+func buildEnv(environ []string, env types.RunEnvironment) []string {
+	stale := make(map[string]struct{}, len(piEnvNames))
+	for _, name := range piEnvNames {
+		stale[name] = struct{}{}
+	}
+	out := make([]string, 0, len(environ)+len(piEnvNames))
+	for _, kv := range environ {
+		// Comma-ok membership: a missing key yields the zero value
+		// struct{}{}, which would otherwise drop every variable.
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			if _, drop := stale[kv[:i]]; drop {
+				continue
+			}
+		}
+		out = append(out, kv)
+	}
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"PI_SESSION_ID", env.SessionID},
+		{"PI_SESSION_FILE", env.SessionFile},
+		{"PI_PROVIDER", env.Provider},
+		{"PI_MODEL", env.Model},
+		{"PI_REASONING_LEVEL", env.ThinkingLevel},
+	}
+	for _, v := range values {
+		if v.value != "" {
+			out = append(out, v.name+"="+v.value)
+		}
+	}
+	return out
 }
 
 func (t *BashTool) Name() string  { return "bash" }
@@ -92,7 +141,8 @@ func (t *BashTool) Execute(ctx context.Context, toolCallID string, args json.Raw
 
 	cmd := exec.Command("bash", "-c", in.Command)
 	cmd.Dir = t.cwd
-	cmd.Env = os.Environ()
+	// Port of pi 005af57d8: drop stale PI_* values, then expose run metadata.
+	cmd.Env = buildEnv(os.Environ(), t.runEnv)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	acc := newOutputAccumulator(TruncationOptions{})

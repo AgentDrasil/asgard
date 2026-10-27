@@ -53,3 +53,23 @@ type AgentTool interface {
 	// Execute runs the tool. Return an error to produce an error tool result.
 	Execute(ctx context.Context, toolCallID string, args json.RawMessage, onUpdate UpdateFunc) (*ToolResult, error)
 }
+
+// RunEnvironment carries per-run metadata (session identity and the active
+// model configuration) that tools such as bash expose to executed commands as
+// PI_* environment variables. All fields are optional; empty fields are not
+// exported.
+type RunEnvironment struct {
+	Provider      string
+	Model         string
+	ThinkingLevel string
+	SessionID     string
+	SessionFile   string
+}
+
+// RunEnvironmentSetter is implemented by tools that want per-run metadata
+// (model, thinking level, session identity) refreshed before each tool-call
+// batch. The agent calls it with the current run configuration, so
+// PrepareRequest/PrepareNextTurn changes are reflected.
+type RunEnvironmentSetter interface {
+	SetRunEnvironment(RunEnvironment)
+}

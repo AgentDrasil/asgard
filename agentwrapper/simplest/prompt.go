@@ -217,6 +217,10 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		Provider:      prov,
 		Tools:         toolList,
 		ThinkingLevel: thinkingLevel,
+		// Caller-owned session identity, exposed to tools as PI_* env vars
+		// (port of pi 005af57d8).
+		SessionID:   sf.Header().ID,
+		SessionFile: sf.Path(),
 		Persist: func(m simplest.Message) error {
 			if persistErr != nil {
 				return persistErr

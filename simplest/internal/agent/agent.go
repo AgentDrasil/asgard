@@ -29,6 +29,12 @@ type Request struct {
 	MaxTokens     *int64
 	APIKey        string
 
+	// SessionID and SessionFile are caller-owned session identity, optional.
+	// They are exposed to tools (e.g. bash) as PI_SESSION_ID/PI_SESSION_FILE
+	// environment variables; empty values are not exported.
+	SessionID   string
+	SessionFile string
+
 	// ToolExecutionMode forces the batch strategy; "" means parallel unless a
 	// called tool declares ExecutionSequential.
 	ToolExecutionMode types.ToolExecutionMode
@@ -1191,6 +1197,10 @@ func (l *loop) executePrepared(p *preparedCall) (result *types.ToolResult, isErr
 }
 
 func (l *loop) executeToolCalls(msg *types.AssistantMessage, calls []types.ToolCall) ([]*types.ToolResultMessage, bool) {
+	// Port of pi 005af57d8: refresh per-run metadata before each tool-call
+	// batch so PrepareRequest/PrepareNextTurn model/thinking changes are
+	// reflected in tools (e.g. bash PI_* environment variables).
+	l.injectRunEnvironment(l.req)
 	sequential := l.req.ToolExecutionMode == types.ExecutionSequential
 	for _, tc := range calls {
 		if t := l.toolsByName[tc.Name]; t != nil && t.ExecutionMode() == types.ExecutionSequential {
@@ -1201,6 +1211,36 @@ func (l *loop) executeToolCalls(msg *types.AssistantMessage, calls []types.ToolC
 		return l.executeSequential(msg, calls)
 	}
 	return l.executeParallel(msg, calls)
+}
+
+// injectRunEnvironment builds the per-run metadata from the current request
+// and pushes it to every tool implementing types.RunEnvironmentSetter.
+// Port of pi 005af57d8.
+func injectRunEnvironment(tools []types.AgentTool, req *Request) {
+	if req == nil {
+		return
+	}
+	env := types.RunEnvironment{
+		ThinkingLevel: string(req.ThinkingLevel),
+		SessionID:     req.SessionID,
+		SessionFile:   req.SessionFile,
+	}
+	if m := req.Model; m != nil {
+		env.Provider = m.Provider
+		env.Model = m.ID
+		if env.Model == "" {
+			env.Model = m.WireID()
+		}
+	}
+	for _, t := range tools {
+		if setter, ok := t.(types.RunEnvironmentSetter); ok {
+			setter.SetRunEnvironment(env)
+		}
+	}
+}
+
+func (l *loop) injectRunEnvironment(req *Request) {
+	injectRunEnvironment(req.Tools, req)
 }
 
 func (l *loop) executeSequential(msg *types.AssistantMessage, calls []types.ToolCall) ([]*types.ToolResultMessage, bool) {
