@@ -398,6 +398,41 @@ func (l *loop) emitUserish(m types.Message) {
 	l.emit(ev)
 }
 
+// snapshotAssistant returns a copy of m that owns its top-level struct and
+// Content slice. Emitted agent events must carry snapshots: the provider
+// goroutine keeps mutating the live partial message, and consumers reading an
+// aliased struct would observe torn, still-changing state. The copy is
+// shallow beyond that: nested slices and pointers (e.g. ToolCall.Arguments,
+// Usage.Reasoning, EndTurn) are still shared with the live message, so
+// providers must treat block payloads as immutable once the event is emitted.
+// l.messages keeps pointing at the live partial so provider updates and the
+// final replacement still work.
+func snapshotAssistant(m *types.AssistantMessage) *types.AssistantMessage {
+	if m == nil {
+		return nil
+	}
+	cp := *m
+	// append to a non-nil empty slice so an empty Content stays [] not nil.
+	cp.Content = append([]types.AssistantContent{}, m.Content...)
+	return &cp
+}
+
+// snapshotEvent copies a stream Partial so the emitted AgentEvent references
+// only the snapshot message (plus a copied ToolCall). It returns the message
+// snapshot separately so callers can share it between AgentEvent.Message and
+// AssistantEv.Partial instead of copying twice. See snapshotAssistant for the
+// nested-shared-state caveat.
+func snapshotEvent(e types.Partial) (*types.AssistantMessage, *types.AssistantMessageEvent) {
+	msg := snapshotAssistant(e.Partial)
+	e.Partial = msg
+	if e.ToolCall != nil {
+		tc := *e.ToolCall
+		e.ToolCall = &tc
+	}
+	var ev types.AssistantMessageEvent = e
+	return msg, &ev
+}
+
 // streamAssistant runs one provider stream, forwarding protocol events as
 // agent message_* events. Returns the final assistant message, or nil when
 // the run was aborted while emitting.
@@ -443,13 +478,14 @@ func (l *loop) streamAssistant() *types.AssistantMessage {
 			case types.EvStart:
 				started = true
 				l.messages = append(l.messages, partial)
-				var ae types.AssistantMessageEvent = e
-				l.emit(types.AgentEvent{Kind: types.MessageStart, Message: partial, AssistantEv: &ae})
+				// One snapshot shared by Message and AssistantEv.Partial.
+				snap, ae := snapshotEvent(e)
+				l.emit(types.AgentEvent{Kind: types.MessageStart, Message: snap, AssistantEv: ae})
 			default:
 				if started && partial != nil {
 					l.messages[len(l.messages)-1] = partial
-					var ae types.AssistantMessageEvent = e
-					l.emit(types.AgentEvent{Kind: types.MessageUpdate, Message: partial, AssistantEv: &ae})
+					snap, ae := snapshotEvent(e)
+					l.emit(types.AgentEvent{Kind: types.MessageUpdate, Message: snap, AssistantEv: ae})
 				}
 			}
 		case types.DoneEvent:

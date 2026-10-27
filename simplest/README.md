@@ -104,6 +104,10 @@ the full event union:
   `tool_execution_start/update/end`, `turn_end`, `agent_end` (final messages)
 - `DoneEvent` / `StreamErrorEvent` — provider-level per-stream outcomes (never on the agent event channel; agent errors appear as `message_end` with `StopReason == error`)
 
+`message_start`/`message_update` events carry an immutable snapshot of the
+assistant message, not the provider's live, still-mutating one, so consumers
+can store and inspect events safely.
+
 ## 2. Models & providers
 
 Configure models programmatically; there are no config files or env lookups.

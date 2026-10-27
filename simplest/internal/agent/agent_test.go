@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -980,4 +981,188 @@ func TestRun_InjectsModelIntoTools(t *testing.T) {
 	collect(t, Run(context.Background(), req))
 
 	assert.Equal(t, targetModel, tool.model)
+}
+
+// --- emitted-event snapshot isolation ---
+
+func TestSnapshotAssistantCopiesContentSlice(t *testing.T) {
+	t.Parallel()
+
+	m := &types.AssistantMessage{
+		Content:      []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "a"}},
+		API:          types.APIOpenAICompat,
+		Provider:     "p",
+		Model:        "m1",
+		ErrorMessage: "boom",
+		Timestamp:    42,
+		Usage:        types.Usage{Input: 7, Output: 9},
+	}
+	cp := snapshotAssistant(m)
+	require.NotSame(t, m, cp)
+	// Scalar fields must survive the copy; a zeroed struct would fail these.
+	assert.Equal(t, m.API, cp.API)
+	assert.Equal(t, m.Provider, cp.Provider)
+	assert.Equal(t, m.Model, cp.Model)
+	assert.Equal(t, m.ErrorMessage, cp.ErrorMessage)
+	assert.Equal(t, m.Timestamp, cp.Timestamp)
+	assert.Equal(t, m.Usage, cp.Usage)
+
+	// Mutating the copy must not touch the original (slice independence).
+	cp.Content[0] = types.TextContent{Type: types.TypeText, Text: "b"}
+	cp.Content = append(cp.Content, types.TextContent{Type: types.TypeText, Text: "c"})
+	require.Len(t, m.Content, 1)
+	assert.Equal(t, "a", m.Content[0].(types.TextContent).Text)
+
+	// An empty-but-non-nil Content slice stays non-nil (marshals as []).
+	empty := snapshotAssistant(&types.AssistantMessage{Content: []types.AssistantContent{}})
+	assert.NotNil(t, empty.Content)
+	assert.Empty(t, empty.Content)
+
+	assert.Nil(t, snapshotAssistant(nil))
+}
+
+func TestSnapshotEventCopiesToolCallAndPartial(t *testing.T) {
+	t.Parallel()
+
+	tc := call("c1", "read", `{"x":"1"}`)
+	ev := types.Partial{
+		Kind:         types.EvToolcallDelta,
+		ContentIndex: 0,
+		ToolCall:     &tc,
+		Partial:      &types.AssistantMessage{Content: []types.AssistantContent{tc}},
+	}
+	snap, ae := snapshotEvent(ev)
+	copied, ok := (*ae).(types.Partial)
+	require.True(t, ok)
+
+	require.NotSame(t, ev.Partial, snap, "message must be copied")
+	require.Same(t, snap, copied.Partial, "event must embed the same shared snapshot")
+
+	require.NotSame(t, ev.ToolCall, copied.ToolCall, "ToolCall must be copied")
+
+	// Mutating the snapshot must not leak back into the original event.
+	copied.ToolCall.Name = "mutated"
+	copied.Partial.Content[0] = types.TextContent{Type: types.TypeText, Text: "mutated"}
+
+	assert.Equal(t, "read", ev.ToolCall.Name)
+	orig, ok := ev.Partial.Content[0].(types.ToolCall)
+	require.True(t, ok)
+	assert.Equal(t, "c1", orig.ID)
+}
+
+// handshakeProvider keeps the live partial reachable so the test can mutate it
+// after message_start has been observed by the consumer, proving emitted
+// events do not alias the still-mutating message.
+type handshakeProvider struct {
+	mutateNow chan struct{} // closed by the consumer once message_start is stored
+	live      *types.AssistantMessage
+}
+
+func (p *handshakeProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
+	ch := make(chan types.AssistantMessageEvent, 4)
+	go func() {
+		defer close(ch)
+		partial := &types.AssistantMessage{
+			Content: []types.AssistantContent{types.TextContent{Type: types.TypeText, Text: "before"}},
+		}
+		p.live = partial
+		ch <- types.Partial{Kind: types.EvStart, Partial: partial}
+		<-p.mutateNow
+		// Mutate the live partial only after message_start left the loop:
+		// rewrite the text block, append another one, change a field.
+		partial.Content[0] = types.TextContent{Type: types.TypeText, Text: "after"}
+		partial.Content = append(partial.Content, types.TextContent{Type: types.TypeText, Text: "extra"})
+		partial.StopReason = types.StopLength
+		ch <- types.Partial{Kind: types.EvTextDelta, ContentIndex: 0, Delta: "x", Partial: partial}
+		ch <- types.DoneEvent{Kind: types.EvDone, Reason: types.StopStop, Message: textMsg("final")}
+	}()
+	return ch
+}
+
+// Port of the pi event-snapshot fix: message_start/message_update must carry
+// immutable snapshots, not the live partial the provider goroutine keeps
+// mutating. Handshaked with channels; no sleeps. The short timeout below only
+// turns a broken handshake / missing message_start into a fast failure.
+func TestMessageEventsSnapshotLivePartial(t *testing.T) {
+	t.Parallel()
+
+	p := &handshakeProvider{mutateNow: make(chan struct{})}
+	var closeOnce sync.Once
+	signalMutate := func() { closeOnce.Do(func() { close(p.mutateNow) }) }
+	// If message_start never arrives, unblock the provider so the run can
+	// finish (or the timeout below fires) instead of deadlocking.
+	t.Cleanup(signalMutate)
+
+	evCh := Run(context.Background(), baseRequest(p))
+
+	var startEv, updateEv, endEv *types.AgentEvent
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+loop:
+	for {
+		select {
+		case ev, ok := <-evCh:
+			if !ok {
+				break loop
+			}
+			switch ev.Kind {
+			case types.MessageStart:
+				if ev.AssistantEv != nil && startEv == nil {
+					cp := ev
+					startEv = &cp
+					signalMutate() // consumer holds the event; let the provider mutate
+				}
+			case types.MessageUpdate:
+				if ev.AssistantEv != nil && updateEv == nil {
+					cp := ev
+					updateEv = &cp
+				}
+			case types.AgentEnd:
+				cp := ev
+				endEv = &cp
+			}
+			if endEv != nil {
+				break loop
+			}
+		case <-timeout.C:
+			require.Fail(t, "timed out waiting for agent events (message_start never emitted?)")
+		}
+	}
+
+	require.NotNil(t, startEv, "assistant message_start must carry an AssistantEv")
+
+	// The stored event reflects the state at emission time, not after.
+	msg := startEv.Message
+	require.NotNil(t, msg)
+	require.NotSame(t, p.live, msg, "message_start must not alias the live partial")
+	startText, ok := msg.Content[0].(types.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "before", startText.Text)
+	assert.Len(t, msg.Content, 1, "appended block after emission must not leak into the stored event")
+	assert.Equal(t, types.StopReason(""), msg.StopReason, "post-emission StopReason mutation must not leak into the stored event")
+
+	// AssistantEv's Partial must be a stable snapshot too, shared with Message.
+	ae, ok := (*startEv.AssistantEv).(types.Partial)
+	require.True(t, ok)
+	require.NotNil(t, ae.Partial)
+	require.NotSame(t, p.live, ae.Partial)
+	require.Same(t, msg, ae.Partial, "Message and AssistantEv.Partial must share one snapshot")
+	require.Len(t, ae.Partial.Content, 1)
+	aeText, ok := ae.Partial.Content[0].(types.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "before", aeText.Text)
+
+	// Later events still track provider progress: message_update is snapshotted
+	// after the mutation, so it shows both blocks.
+	require.NotNil(t, updateEv)
+	require.Len(t, updateEv.Message.Content, 2)
+
+	// The run still finishes with the canonical final message.
+	require.NotNil(t, endEv)
+	require.Len(t, endEv.Messages, 1)
+	finished, ok := endEv.Messages[0].(*types.AssistantMessage)
+	require.True(t, ok)
+	finishedText, ok := finished.Content[0].(types.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "final", finishedText.Text)
 }
