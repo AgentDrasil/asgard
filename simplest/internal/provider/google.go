@@ -218,10 +218,10 @@ func (p *Gemini) ConvertMessages(model *types.Model, cx *types.Context) ([]*gena
 						call.ID = b.ID
 					}
 					part := &genai.Part{FunctionCall: call}
-					if b.Signature != "" {
+					if b.ThoughtSignature != "" {
 						// Gemini 3 requires thought signatures to be echoed
 						// back on functionCall parts.
-						part.ThoughtSignature = []byte(b.Signature)
+						part.ThoughtSignature = []byte(b.ThoughtSignature)
 					}
 					parts = append(parts, part)
 				}
@@ -474,7 +474,7 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 						}
 						idx := em.appendToolCall(types.ToolCall{
 							Type: types.TypeToolCall, ID: id, Name: fc.Name, Arguments: args,
-							Signature: string(part.ThoughtSignature),
+							ThoughtSignature: string(part.ThoughtSignature),
 						})
 						em.toolCallDelta(idx, string(args), args)
 						em.toolCallEnd(idx)

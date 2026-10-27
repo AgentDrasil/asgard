@@ -2321,3 +2321,121 @@ func TestSession_CompactionEntry_PiShapeLoad(t *testing.T) {
 	assert.NotContains(t, summary, "PI-SYSTEM-MARKER")
 	assert.Equal(t, "hello", types.StringContentOf(mustDecode(t, ctx.Messages[1].(*types.UserMessage).Content)))
 }
+
+// pi's newer assistant/tool-result metadata must survive the session JSONL
+// round trip (B19): preserved, not interpreted.
+func TestSession_RoundTripPiMessageMetadata(t *testing.T) {
+	t.Parallel()
+
+	mgr, _ := newTestManager(t)
+	sf, err := mgr.Create(t.TempDir(), nil)
+	require.NoError(t, err)
+
+	_, err = sf.AppendMessage(testUser("go"))
+	require.NoError(t, err)
+
+	totalFromProvider := true
+	diagnostics := json.RawMessage(`[{"code":"warn"}]`)
+	deferred := json.RawMessage(`{"reason":"limit"}`)
+	assistant := testAssistant("reply")
+	assistant.Content = []types.AssistantContent{
+		types.TextContent{Type: types.TypeText, Text: "reply", TextSignature: "text-sig"},
+		types.ToolCall{
+			Type: types.TypeToolCall, ID: "c1", Name: "read",
+			Arguments:        json.RawMessage(`{"p":"x"}`),
+			ThoughtSignature: "tsig",
+			Namespace:        "ns",
+		},
+	}
+	assistant.StopReason = types.StopToolUse
+	assistant.ProviderThinkingLevel = "provider-high"
+	assistant.Diagnostics = diagnostics
+	assistant.Deferred = deferred
+	assistant.Usage.CacheWrite1h = 9
+	assistant.Usage.Cost.TotalFromProvider = &totalFromProvider
+	assistantID, err := sf.AppendMessage(assistant)
+	require.NoError(t, err)
+
+	nestedCalls := json.RawMessage(`[{"id":"n1","name":"read","arguments":{"p":"x"}}]`)
+	toolResultID, err := sf.AppendMessage(&types.ToolResultMessage{
+		ToolCallID:  "c1",
+		ToolName:    "read",
+		Content:     json.RawMessage(`[{"type":"text","text":"out"}]`),
+		NestedCalls: nestedCalls,
+		Timestamp:   3000,
+	})
+	require.NoError(t, err)
+
+	header, entries, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.Len(t, entries, 3)
+
+	byID := make(map[string]*Entry, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e
+	}
+
+	assistantMsg, err := byID[assistantID].DecodeMessage()
+	require.NoError(t, err)
+	am, ok := assistantMsg.(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, "provider-high", am.ProviderThinkingLevel)
+	assert.JSONEq(t, string(diagnostics), string(am.Diagnostics))
+	assert.JSONEq(t, string(deferred), string(am.Deferred))
+	assert.Equal(t, int64(9), am.Usage.CacheWrite1h)
+	require.NotNil(t, am.Usage.Cost.TotalFromProvider)
+	assert.True(t, *am.Usage.Cost.TotalFromProvider)
+	require.Len(t, am.Content, 2)
+	assert.Equal(t, "text-sig", am.Content[0].(types.TextContent).TextSignature)
+	tc := am.Content[1].(types.ToolCall)
+	assert.Equal(t, "tsig", tc.ThoughtSignature)
+	assert.Equal(t, "ns", tc.Namespace)
+
+	toolMsg, err := byID[toolResultID].DecodeMessage()
+	require.NoError(t, err)
+	trm, ok := toolMsg.(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.JSONEq(t, string(nestedCalls), string(trm.NestedCalls))
+
+	// A full session rewrite must keep the same metadata.
+	sf.mu.Lock()
+	require.NoError(t, sf.rewriteLocked())
+	sf.mu.Unlock()
+
+	_, rewritten, err := LoadFile(sf.Path())
+	require.NoError(t, err)
+	var rewrittenAssistant, rewrittenTool *Entry
+	for _, e := range rewritten {
+		switch e.ID {
+		case assistantID:
+			rewrittenAssistant = e
+		case toolResultID:
+			rewrittenTool = e
+		}
+	}
+	require.NotNil(t, rewrittenAssistant)
+	require.NotNil(t, rewrittenTool)
+
+	rewrittenMsg, err := rewrittenAssistant.DecodeMessage()
+	require.NoError(t, err)
+	rewrittenAM, ok := rewrittenMsg.(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, "provider-high", rewrittenAM.ProviderThinkingLevel)
+	assert.JSONEq(t, string(diagnostics), string(rewrittenAM.Diagnostics))
+	assert.JSONEq(t, string(deferred), string(rewrittenAM.Deferred))
+	assert.Equal(t, int64(9), rewrittenAM.Usage.CacheWrite1h)
+	require.NotNil(t, rewrittenAM.Usage.Cost.TotalFromProvider)
+	assert.True(t, *rewrittenAM.Usage.Cost.TotalFromProvider)
+	require.Len(t, rewrittenAM.Content, 2)
+	assert.Equal(t, "text-sig", rewrittenAM.Content[0].(types.TextContent).TextSignature)
+	rewrittenTC := rewrittenAM.Content[1].(types.ToolCall)
+	assert.Equal(t, "tsig", rewrittenTC.ThoughtSignature)
+	assert.Equal(t, "ns", rewrittenTC.Namespace)
+
+	rewrittenToolMsg, err := rewrittenTool.DecodeMessage()
+	require.NoError(t, err)
+	rewrittenTRM, ok := rewrittenToolMsg.(*types.ToolResultMessage)
+	require.True(t, ok)
+	assert.JSONEq(t, string(nestedCalls), string(rewrittenTRM.NestedCalls))
+}

@@ -94,7 +94,11 @@ func UnmarshalMessage(raw json.RawMessage) (Message, error) {
 			EndTurn       *bool           `json:"endTurn,omitempty"`
 			ThinkingLevel ThinkingLevel   `json:"thinkingLevel,omitempty"`
 			DurationMs    *int64          `json:"durationMs,omitempty"`
-			Timestamp     int64           `json:"timestamp"`
+			// pi's remaining response metadata: preserved, not interpreted.
+			ProviderThinkingLevel string          `json:"providerThinkingLevel,omitempty"`
+			Diagnostics           json.RawMessage `json:"diagnostics,omitempty"`
+			Deferred              json.RawMessage `json:"deferred,omitempty"`
+			Timestamp             int64           `json:"timestamp"`
 		}
 		if err := json.Unmarshal(raw, &probe); err != nil {
 			return nil, err
@@ -107,20 +111,23 @@ func UnmarshalMessage(raw json.RawMessage) (Message, error) {
 			blocks = []AssistantContent{}
 		}
 		return &AssistantMessage{
-			Content:       blocks,
-			API:           probe.API,
-			Provider:      probe.Provider,
-			Model:         probe.Model,
-			ResponseModel: probe.ResponseModel,
-			ResponseID:    probe.ResponseID,
-			Usage:         probe.Usage,
-			StopReason:    probe.StopReason,
-			ErrorMessage:  probe.ErrorMessage,
-			RawStopReason: probe.RawStopReason,
-			EndTurn:       probe.EndTurn,
-			ThinkingLevel: probe.ThinkingLevel,
-			DurationMs:    probe.DurationMs,
-			Timestamp:     probe.Timestamp,
+			Content:               blocks,
+			API:                   probe.API,
+			Provider:              probe.Provider,
+			Model:                 probe.Model,
+			ResponseModel:         probe.ResponseModel,
+			ResponseID:            probe.ResponseID,
+			Usage:                 probe.Usage,
+			StopReason:            probe.StopReason,
+			ErrorMessage:          probe.ErrorMessage,
+			RawStopReason:         probe.RawStopReason,
+			EndTurn:               probe.EndTurn,
+			ThinkingLevel:         probe.ThinkingLevel,
+			DurationMs:            probe.DurationMs,
+			ProviderThinkingLevel: probe.ProviderThinkingLevel,
+			Diagnostics:           probe.Diagnostics,
+			Deferred:              probe.Deferred,
+			Timestamp:             probe.Timestamp,
 		}, nil
 	case RoleToolResult:
 		var m ToolResultMessage

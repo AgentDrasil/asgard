@@ -43,30 +43,33 @@ const (
 
 // Usage holds token accounting for one assistant response.
 type Usage struct {
-	Input       int64  `json:"input"`
-	Output      int64  `json:"output"`
-	CacheRead   int64  `json:"cacheRead"`
-	CacheWrite  int64  `json:"cacheWrite"`
-	Reasoning   *int64 `json:"reasoning,omitempty"`
-	TotalTokens int64  `json:"totalTokens"`
-	Cost        Cost   `json:"cost"`
+	Input        int64  `json:"input"`
+	Output       int64  `json:"output"`
+	CacheRead    int64  `json:"cacheRead"`
+	CacheWrite   int64  `json:"cacheWrite"`
+	CacheWrite1h int64  `json:"cacheWrite1h,omitempty"`
+	Reasoning    *int64 `json:"reasoning,omitempty"`
+	TotalTokens  int64  `json:"totalTokens"`
+	Cost         Cost   `json:"cost"`
 }
 
 // Cost holds dollar accounting derived from Usage.
 type Cost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cacheRead"`
-	CacheWrite float64 `json:"cacheWrite"`
-	Total      float64 `json:"total"`
+	Input             float64 `json:"input"`
+	Output            float64 `json:"output"`
+	CacheRead         float64 `json:"cacheRead"`
+	CacheWrite        float64 `json:"cacheWrite"`
+	Total             float64 `json:"total"`
+	TotalFromProvider *bool   `json:"totalFromProvider,omitempty"`
 }
 
 // Content blocks.
 
 // TextContent is a plain text block.
 type TextContent struct {
-	Type string `json:"type"` // always "text"
-	Text string `json:"text"`
+	Type          string `json:"type"` // always "text"
+	Text          string `json:"text"`
+	TextSignature string `json:"textSignature,omitempty"`
 }
 
 // ThinkingContent is a reasoning block; Signature carries provider replay data.
@@ -90,14 +93,41 @@ type ToolCall struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
-	// Signature carries the provider's opaque thought signature (Gemini 3
-	// thoughtSignature) that must be echoed back with the tool call.
-	Signature string `json:"signature,omitempty"`
+	// ThoughtSignature carries the provider's opaque thought signature
+	// (Gemini 3 thoughtSignature) that must be echoed back with the tool call.
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
+	// Namespace is pi's optional tool-call namespace.
+	Namespace string `json:"namespace,omitempty"`
 	// ArgumentsError is set when a finished tool call's arguments were not a
 	// valid JSON object: Arguments is then `{}` and this field carries the
 	// parse error plus the raw arguments text so tool validation can report
 	// it back to the model (pi 87f9a3641).
 	ArgumentsError string `json:"argumentsError,omitempty"`
+}
+
+// toolCallJSON avoids recursion in ToolCall's JSON methods.
+type toolCallJSON ToolCall
+
+// UnmarshalJSON also accepts the legacy "signature" key used by older Go
+// sessions and folds it into ThoughtSignature.
+func (t *ToolCall) UnmarshalJSON(data []byte) error {
+	var v struct {
+		toolCallJSON
+		LegacySignature string `json:"signature"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*t = ToolCall(v.toolCallJSON)
+	if t.ThoughtSignature == "" {
+		t.ThoughtSignature = v.LegacySignature
+	}
+	return nil
+}
+
+// MarshalJSON writes only thoughtSignature, never the legacy signature key.
+func (t ToolCall) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toolCallJSON(t))
 }
 
 const (
@@ -139,20 +169,24 @@ type AssistantMessage struct {
 	ThinkingLevel ThinkingLevel `json:"thinkingLevel,omitempty"`
 	// DurationMs is the provider request duration in milliseconds (pi
 	// 36a686ee8).
-	DurationMs *int64 `json:"durationMs,omitempty"`
-	Timestamp  int64  `json:"timestamp"` // unix millis
+	DurationMs            *int64          `json:"durationMs,omitempty"`
+	ProviderThinkingLevel string          `json:"providerThinkingLevel,omitempty"`
+	Diagnostics           json.RawMessage `json:"diagnostics,omitempty"`
+	Deferred              json.RawMessage `json:"deferred,omitempty"`
+	Timestamp             int64           `json:"timestamp"` // unix millis
 }
 
 func (m *AssistantMessage) MessageRole() Role { return RoleAssistant }
 
 // ToolResultMessage reports one executed tool call.
 type ToolResultMessage struct {
-	ToolCallID string          `json:"toolCallId"`
-	ToolName   string          `json:"toolName"`
-	Content    json.RawMessage `json:"content"` // []TextContent|ImageContent
-	Details    json.RawMessage `json:"details,omitempty"`
-	Usage      *Usage          `json:"usage,omitempty"`
-	IsError    bool            `json:"isError"`
+	ToolCallID  string          `json:"toolCallId"`
+	ToolName    string          `json:"toolName"`
+	Content     json.RawMessage `json:"content"` // []TextContent|ImageContent
+	Details     json.RawMessage `json:"details,omitempty"`
+	Usage       *Usage          `json:"usage,omitempty"`
+	IsError     bool            `json:"isError"`
+	NestedCalls json.RawMessage `json:"nestedCalls,omitempty"`
 	// DurationMs is the tool Execute duration in milliseconds, excluding
 	// hooks; nil when the tool did not run (pi 36a686ee8).
 	DurationMs *int64 `json:"durationMs,omitempty"`

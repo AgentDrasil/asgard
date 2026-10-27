@@ -332,8 +332,8 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 		t.Fatalf("tool call missing: %+v", done.Message.Content)
 	}
 	// The SDK base64-decodes thoughtSignature into raw bytes.
-	if tc.Signature != "ABCD" {
-		t.Fatalf("signature not captured: %q", tc.Signature)
+	if tc.ThoughtSignature != "ABCD" {
+		t.Fatalf("signature not captured: %q", tc.ThoughtSignature)
 	}
 
 	// Echoing the assistant message back must attach the signature to the

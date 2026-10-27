@@ -1210,6 +1210,39 @@ func TestOpenAI_OnProviderStreamEvent(t *testing.T) {
 	assert.Equal(t, "[DONE]", rawDatas[2])
 }
 
+// New pi usage fields are preserved metadata only and must not change cost
+// math (cacheWrite1h is additive; totalFromProvider is left untouched).
+func TestCalculateCost_IgnoresPreservedUsageMetadata(t *testing.T) {
+	t.Parallel()
+
+	model := &types.Model{
+		Cost: types.ModelCost{ModelCostRates: types.ModelCostRates{
+			Input: 2, Output: 8, CacheRead: 1, CacheWrite: 4,
+		}},
+	}
+	totalFromProvider := true
+	u := &types.Usage{
+		Input:        100,
+		Output:       50,
+		CacheRead:    10,
+		CacheWrite:   5,
+		CacheWrite1h: 999,
+		TotalTokens:  165,
+		Cost:         types.Cost{TotalFromProvider: &totalFromProvider},
+	}
+
+	CalculateCost(model, u)
+
+	assert.InDelta(t, 2.0/1e6*100, u.Cost.Input, 1e-12)
+	assert.InDelta(t, 8.0/1e6*50, u.Cost.Output, 1e-12)
+	assert.InDelta(t, 1.0/1e6*10, u.Cost.CacheRead, 1e-12)
+	assert.InDelta(t, 4.0/1e6*5, u.Cost.CacheWrite, 1e-12)
+	assert.InDelta(t, u.Cost.Input+u.Cost.Output+u.Cost.CacheRead+u.Cost.CacheWrite, u.Cost.Total, 1e-12)
+	assert.Equal(t, int64(999), u.CacheWrite1h)
+	require.NotNil(t, u.Cost.TotalFromProvider)
+	assert.True(t, *u.Cost.TotalFromProvider)
+}
+
 func TestCalculateCost_Tiers(t *testing.T) {
 	t.Parallel()
 
