@@ -2,13 +2,18 @@
 // per-model input limits (maxWidth, maxHeight, maxBytes, animated GIF flattening).
 //
 // Format conversions and transparency trade-offs:
-// When input images exceed maxBytes or are animated GIFs, they are compressed to JPEG
-// with progressive quality downscaling and dimension scaling. Because JPEG does not support
-// an alpha channel (and standard Go does not provide a built-in WebP encoder), converting
-// transparent PNG images to JPEG causes transparent areas to be rendered against a solid
-// background (default black or background fill in JPEG encoding). If an image fits within
-// maxBytes without re-encoding and is a non-animated PNG, the original PNG format and its
-// alpha channel are preserved.
+// When an image must be re-encoded (animated, BMP, exceeding dimension or byte
+// limits), each candidate size first attempts a PNG encoding — which preserves
+// alpha/transparency — and falls back to JPEG with a descending quality ladder
+// only when PNG does not fit within maxBytes. If nothing fits, dimensions are
+// progressively shrunk (x0.75) with the same PNG-then-JPEG strategy, ending in
+// a minimal-quality JPEG fallback. Images that fit within all limits pass
+// through byte-identical, preserving their original format and alpha channel.
+//
+// EXIF orientation: JPEG and WebP inputs carry their EXIF orientation tag
+// through the pass-through path untouched; when an image is re-encoded, the
+// orientation transform is applied to the decoded pixels before resizing so
+// the reported and output dimensions match the visually oriented image.
 package images
 
 import (
@@ -192,6 +197,19 @@ func ProcessImage(data []byte, mimeType string, limits *types.ModelImageInputLim
 		}, nil
 	}
 
+	// The image must be re-encoded; apply the EXIF orientation transform to the
+	// decoded image before computing target dimensions (pass-through images are
+	// never touched, keeping their bytes identical even when orientation != 1).
+	orientation := getExifOrientation(data)
+	if orientation != 1 {
+		origImg = applyOrientation(origImg, orientation)
+		origW = origImg.Bounds().Dx()
+		origH = origImg.Bounds().Dy()
+		// Oriented dims may now exceed the limits even when the raw dims fit;
+		// recompute before calculating target dimensions.
+		exceedsDimensions = origW > maxWidth || origH > maxHeight
+	}
+
 	// Calculate target dimensions
 	targetW := origW
 	targetH := origH
@@ -219,81 +237,55 @@ func ProcessImage(data []byte, mimeType string, limits *types.ModelImageInputLim
 		currentImg = resizeBilinear(origImg, targetW, targetH)
 	}
 
-	// Try encoding to appropriate format
-	var outBytes []byte
-	var outMime string
-
-	// Try original format encoding if not BMP (BMP -> PNG or JPEG) and not animated GIF
-	if !isAnimated && format == "png" && !exceedsBytes {
-		var buf bytes.Buffer
-		if pErr := png.Encode(&buf, currentImg); pErr == nil {
-			if int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes {
-				outBytes = buf.Bytes()
-				outMime = "image/png"
-			}
-		}
-	} else if !isAnimated && format == "jpeg" && !exceedsBytes {
-		var buf bytes.Buffer
-		if jErr := jpeg.Encode(&buf, currentImg, &jpeg.Options{Quality: jpegQuality}); jErr == nil {
-			if int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes {
-				outBytes = buf.Bytes()
-				outMime = "image/jpeg"
-			}
+	// JPEG quality ladder: step down from jpegQuality to >= 40 in steps of 20.
+	qualities := []int{jpegQuality}
+	for q := ((jpegQuality - 1) / 20) * 20; q >= 40; q -= 20 {
+		if q < jpegQuality {
+			qualities = append(qualities, q)
 		}
 	}
 
-	// If outBytes is still nil or exceeds maxBytes, attempt JPEG with decreasing quality and/or scaling down
-	if outBytes == nil || int64(base64.StdEncoding.EncodedLen(len(outBytes))) > maxBytes {
-		// JPEG quality degradation: step down from jpegQuality to 40 by steps of 20
-		qualities := []int{jpegQuality}
-		for q := ((jpegQuality - 1) / 20) * 20; q >= 40; q -= 20 {
-			if q < jpegQuality {
-				qualities = append(qualities, q)
-			}
+	// tryEncode attempts PNG first at this size — preserving alpha/transparency —
+	// then JPEG at each quality, returning the first encoding whose base64
+	// length fits within maxBytes.
+	tryEncode := func(img image.Image) (outBytes []byte, outMime string, ok bool) {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err == nil && int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes {
+			return buf.Bytes(), "image/png", true
 		}
-
-		fits := false
 		for _, q := range qualities {
-			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, currentImg, &jpeg.Options{Quality: q}); err == nil {
-				if int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes {
-					outBytes = buf.Bytes()
-					outMime = "image/jpeg"
-					fits = true
-					break
-				}
+			buf.Reset()
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: q}); err == nil && int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes {
+				return buf.Bytes(), "image/jpeg", true
 			}
 		}
-
-		// If still exceeding maxBytes, iteratively shrink dimensions until it fits
-		curW := targetW
-		curH := targetH
-		for !fits && (curW > 1 || curH > 1) {
-			curW = int(float64(curW) * 0.75)
-			curH = int(float64(curH) * 0.75)
-			if curW < 1 {
-				curW = 1
-			}
-			if curH < 1 {
-				curH = 1
-			}
-			currentImg = resizeBilinear(origImg, curW, curH)
-			targetW = curW
-			targetH = curH
-			wasResized = true
-
-			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, currentImg, &jpeg.Options{Quality: 40}); err == nil {
-				if int64(base64.StdEncoding.EncodedLen(buf.Len())) <= maxBytes || (curW == 1 && curH == 1) {
-					outBytes = buf.Bytes()
-					outMime = "image/jpeg"
-					break
-				}
-			}
-		}
+		return nil, "", false
 	}
 
-	if outBytes == nil {
+	outBytes, outMime, fits := tryEncode(currentImg)
+
+	// If nothing fits, iteratively shrink dimensions until an encoding fits
+	curW := targetW
+	curH := targetH
+	for !fits && (curW > 1 || curH > 1) {
+		curW = int(float64(curW) * 0.75)
+		curH = int(float64(curH) * 0.75)
+		if curW < 1 {
+			curW = 1
+		}
+		if curH < 1 {
+			curH = 1
+		}
+		currentImg = resizeBilinear(origImg, curW, curH)
+		targetW = curW
+		targetH = curH
+		wasResized = true
+
+		outBytes, outMime, fits = tryEncode(currentImg)
+	}
+
+	// Final fallback: JPEG at minimum quality.
+	if !fits {
 		var buf bytes.Buffer
 		_ = jpeg.Encode(&buf, currentImg, &jpeg.Options{Quality: 40})
 		outBytes = buf.Bytes()
