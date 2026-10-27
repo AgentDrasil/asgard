@@ -60,12 +60,21 @@ type Request struct {
 	// For error and aborted turns, the return decision is ignored and the run terminates.
 	FinishTurn func(TurnSummary) *FinishTurnDecision
 
-	// PrepareNextTurn runs ONLY when the loop is confirmed to start another assistant turn.
-	// It does not run on final/terminating turns. Optional returned messages are appended
-	// to the transcript and persisted immediately, but are emitted after the next
+	// PrepareNextTurnContext runs ONLY when the loop is confirmed to start another
+	// assistant turn. It receives the completed turn's context and may replace the
+	// transcript, append messages, switch the model, or change the thinking level.
+	// Append messages are persisted immediately but emitted after the next
 	// turn_start and before that turn's steering messages. On terminal paths
 	// (cancellation or persist failure) they may be persisted without being emitted.
-	// turnIndex is the 0-based index of the upcoming turn.
+	// When set, it takes precedence over PrepareNextTurn.
+	PrepareNextTurnContext func(TurnContext) (*TurnUpdate, error)
+
+	// PrepareNextTurn is the legacy next-turn hook. It runs only when
+	// PrepareNextTurnContext is nil; returned messages are treated as
+	// TurnUpdate.Append. turnIndex is the 0-based index of the upcoming turn.
+	//
+	// Deprecated: use PrepareNextTurnContext for access to the turn context and
+	// the ability to replace messages, model, or thinking level.
 	PrepareNextTurn func(turnIndex int) ([]types.Message, error)
 
 	// Hooks.
@@ -96,6 +105,31 @@ type AutoCompactConfig struct {
 type TurnSummary struct {
 	Message     *types.AssistantMessage
 	ToolResults []*types.ToolResultMessage
+}
+
+// TurnContext describes the turn that just completed. It is passed to
+// Request.PrepareNextTurnContext before the next assistant turn starts.
+type TurnContext struct {
+	Message     *types.AssistantMessage    // last assistant message in the transcript
+	ToolResults []*types.ToolResultMessage // tool results after Message
+	Messages    []types.Message            // copy of the active transcript
+	NewMessages []types.Message            // copy of messages produced by this run
+}
+
+// TurnUpdate is returned by Request.PrepareNextTurnContext to adjust the
+// upcoming turn.
+type TurnUpdate struct {
+	// Messages non-nil replaces the active transcript (nil means unchanged; an
+	// empty non-nil slice clears it).
+	Messages []types.Message
+	// Append messages are added to the transcript, persisted, and emitted after
+	// the next turn_start, like legacy PrepareNextTurn messages.
+	Append []types.Message
+	// Model nil means unchanged; otherwise it replaces the active model and is
+	// re-injected into tools.
+	Model *types.Model
+	// ThinkingLevel nil means unchanged.
+	ThinkingLevel *types.ThinkingLevel
 }
 
 // FinishTurnAction specifies the action to take after finishing a turn.
@@ -460,38 +494,63 @@ func (l *loop) drain(fn func() []types.Message) []types.Message {
 	return fn()
 }
 
-// runPrepareNextTurn invokes the PrepareNextTurn hook (if set) for the given
-// upcoming turn index. On hook error it synthesizes a terminal StopError
-// assistant message (folding in a persist failure of that terminal message,
-// if any) in a single balanced error turn, ends the run and returns false;
-// otherwise it appends any returned messages (terminating the run on a
-// persist failure) and returns true.
+// turnContext snapshots the just-completed turn for PrepareNextTurnContext.
+// The copies are taken before the hook runs, so messages appended by the hook
+// are not visible in the same TurnContext.
+func (l *loop) turnContext() TurnContext {
+	tc := TurnContext{
+		Messages:    append([]types.Message{}, l.messages...),
+		NewMessages: append([]types.Message{}, l.newMsgs...),
+	}
+	for i := len(l.messages) - 1; i >= 0; i-- {
+		am, ok := l.messages[i].(*types.AssistantMessage)
+		if !ok {
+			continue
+		}
+		tc.Message = am
+		for _, m := range l.messages[i+1:] {
+			if tr, ok := m.(*types.ToolResultMessage); ok {
+				tc.ToolResults = append(tc.ToolResults, tr)
+			}
+		}
+		break
+	}
+	return tc
+}
+
+// runPrepareNextTurn invokes the context-rich hook, or its legacy shim, for the
+// upcoming turn. On hook error it synthesizes a terminal StopError assistant
+// message (folding in a persist failure of that terminal message, if any) in a
+// single balanced error turn, ends the run and returns false; otherwise it
+// applies the update (terminating the run on a persist failure) and returns true.
 func (l *loop) runPrepareNextTurn(turnIndex int) bool {
-	if l.req.PrepareNextTurn == nil {
+	var (
+		update *TurnUpdate
+		err    error
+	)
+	switch {
+	case l.req.PrepareNextTurnContext != nil:
+		update, err = l.req.PrepareNextTurnContext(l.turnContext())
+	case l.req.PrepareNextTurn != nil:
+		var msgs []types.Message
+		msgs, err = l.req.PrepareNextTurn(turnIndex)
+		if err == nil {
+			update = &TurnUpdate{Append: msgs}
+		}
+	default:
 		return true
 	}
-	extraMsgs, err := l.req.PrepareNextTurn(turnIndex)
 	if err != nil {
-		final := &types.AssistantMessage{
-			Content:       []types.AssistantContent{},
-			API:           l.req.Model.API,
-			Provider:      l.req.Model.Provider,
-			Model:         l.req.Model.ID,
-			StopReason:    types.StopError,
-			ErrorMessage:  err.Error(),
-			ThinkingLevel: l.thinkingLevel(),
-			Timestamp:     time.Now().UnixMilli(),
-		}
-		l.messages = append(l.messages, final)
-		// Fold a persist failure of this terminal message into the same error
-		// turn instead of emitting a second one.
-		if perr := l.appendNewMsg(final); perr != nil {
-			final.ErrorMessage = fmt.Sprintf("%v; session persist: %v", err, perr)
-		}
-		l.emitTerminalErrorTurn(final)
+		l.failPrepareNextTurn(err)
 		return false
 	}
-	for _, m := range extraMsgs {
+	if update == nil {
+		return true
+	}
+	if update.Messages != nil {
+		l.messages = append([]types.Message{}, update.Messages...)
+	}
+	for _, m := range update.Append {
 		l.messages = append(l.messages, m)
 		if err := l.appendNewMsg(m); err != nil {
 			l.failPersist(err)
@@ -499,7 +558,35 @@ func (l *loop) runPrepareNextTurn(turnIndex int) bool {
 		}
 		l.prepared = append(l.prepared, m)
 	}
+	if update.Model != nil {
+		l.req.Model = update.Model
+		injectModel(l.req.Tools, update.Model)
+	}
+	if update.ThinkingLevel != nil {
+		l.req.ThinkingLevel = *update.ThinkingLevel
+	}
 	return true
+}
+
+// failPrepareNextTurn closes the run with a synthetic terminal error turn.
+func (l *loop) failPrepareNextTurn(err error) {
+	final := &types.AssistantMessage{
+		Content:       []types.AssistantContent{},
+		API:           l.req.Model.API,
+		Provider:      l.req.Model.Provider,
+		Model:         l.req.Model.ID,
+		StopReason:    types.StopError,
+		ErrorMessage:  err.Error(),
+		ThinkingLevel: l.thinkingLevel(),
+		Timestamp:     time.Now().UnixMilli(),
+	}
+	l.messages = append(l.messages, final)
+	// Fold a persist failure of this terminal message into the same error
+	// turn instead of emitting a second one.
+	if perr := l.appendNewMsg(final); perr != nil {
+		final.ErrorMessage = fmt.Sprintf("%v; session persist: %v", err, perr)
+	}
+	l.emitTerminalErrorTurn(final)
 }
 
 func (l *loop) emitUserish(m types.Message) {

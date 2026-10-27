@@ -25,6 +25,7 @@ type fakeProvider struct {
 	calls     int
 	contexts  []*types.Context
 	options   []*types.StreamOptions
+	models    []*types.Model
 }
 
 func (f *fakeProvider) Stream(ctx context.Context, model *types.Model, cx *types.Context, opts *types.StreamOptions) <-chan types.AssistantMessageEvent {
@@ -33,6 +34,7 @@ func (f *fakeProvider) Stream(ctx context.Context, model *types.Model, cx *types
 	f.calls++
 	f.contexts = append(f.contexts, cx)
 	f.options = append(f.options, opts)
+	f.models = append(f.models, model)
 	f.mu.Unlock()
 
 	ch := make(chan types.AssistantMessageEvent, 8)
@@ -2657,4 +2659,242 @@ func TestAgent_SteeringQueuedDuringFollowUpPrepareNextTurn(t *testing.T) {
 	require.NotEqual(t, -1, followUpIdx, "follow-up message missing from next context")
 	assert.Less(t, preparedIdx, steerIdx, "prepared precedes steering")
 	assert.Less(t, steerIdx, followUpIdx, "steering precedes follow-up")
+}
+
+// --- context-rich PrepareNextTurnContext hook (B9) ---
+
+func TestAgent_PrepareNextTurnContext_ReceivesTurnState(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("final"),
+	}}
+	req := baseRequest(fp, tool)
+
+	appended := &types.UserMessage{Content: types.TextOnly("hook append"), Timestamp: 50}
+	var captured TurnContext
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		captured = tc
+		return &TurnUpdate{Append: []types.Message{appended}}, nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+
+	require.NotNil(t, captured.Message)
+	assert.Same(t, fp.responses[0], captured.Message, "TurnContext.Message must be the completed assistant message")
+	require.Len(t, captured.ToolResults, 1)
+	assert.Equal(t, "c1", captured.ToolResults[0].ToolCallID)
+	assert.Same(t, toolResultMessage(t, end.Messages, "c1"), captured.ToolResults[0])
+
+	require.Len(t, captured.Messages, 3, "active transcript: user, assistant, tool result")
+	assert.Equal(t, types.RoleUser, captured.Messages[0].MessageRole())
+	assert.Same(t, captured.Message, captured.Messages[1])
+	assert.Equal(t, types.RoleToolResult, captured.Messages[2].MessageRole())
+
+	require.Len(t, captured.NewMessages, 2, "messages produced by this run before the hook")
+	assert.Same(t, captured.Message, captured.NewMessages[0])
+	assert.Equal(t, types.RoleToolResult, captured.NewMessages[1].MessageRole())
+
+	// Messages appended by the hook are not part of the snapshot it received.
+	assert.NotContains(t, captured.Messages, appended)
+}
+
+func TestAgent_PrepareNextTurnContext_AppendEmissionAndPersistence(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("final"),
+	}}
+	req := baseRequest(fp, tool)
+
+	preparedMsg := &types.UserMessage{Content: types.TextOnly("prepared hint"), Timestamp: 51}
+	steerMsg := &types.UserMessage{Content: types.TextOnly("steering"), Timestamp: 52}
+	steeringCalls := 0
+	req.GetSteeringMessages = func() []types.Message {
+		steeringCalls++
+		if steeringCalls == 2 {
+			return []types.Message{steerMsg}
+		}
+		return nil
+	}
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		return &TurnUpdate{Append: []types.Message{preparedMsg}}, nil
+	}
+	var persisted []types.Message
+	req.Persist = func(m types.Message) error {
+		persisted = append(persisted, m)
+		return nil
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 2, fp.calls)
+
+	turnEnd := -1
+	for i, ev := range evs {
+		if ev.Kind == types.TurnEnd {
+			turnEnd = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, turnEnd, 0)
+	require.GreaterOrEqual(t, len(evs), turnEnd+6)
+	assert.Equal(t, types.TurnStart, evs[turnEnd+1].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+2].Kind)
+	assert.Same(t, preparedMsg, evs[turnEnd+2].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+3].Kind)
+	assert.Equal(t, types.MessageStart, evs[turnEnd+4].Kind)
+	assert.Same(t, steerMsg, evs[turnEnd+4].UserMsg)
+	assert.Equal(t, types.MessageEnd, evs[turnEnd+5].Kind)
+
+	require.Len(t, fp.contexts, 2)
+	ctxMsgs := fp.contexts[1].Messages
+	preparedIdx := userMessageIndex(t, ctxMsgs, "prepared hint")
+	steerIdx := userMessageIndex(t, ctxMsgs, "steering")
+	require.NotEqual(t, -1, preparedIdx)
+	require.NotEqual(t, -1, steerIdx)
+	assert.Less(t, preparedIdx, steerIdx)
+
+	// assistant, tool result, prepared, steering, final assistant; prepared
+	// is persisted once at hook time, not again on emission.
+	require.Len(t, persisted, 5)
+	preparedPersists := 0
+	for _, m := range persisted {
+		if m == preparedMsg {
+			preparedPersists++
+		}
+	}
+	assert.Equal(t, 1, preparedPersists)
+}
+
+func TestAgent_PrepareNextTurnContext_ReplacesMessages(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("final"),
+	}}
+	req := baseRequest(fp, tool)
+
+	replacement := &types.UserMessage{Content: types.TextOnly("compacted transcript"), Timestamp: 53}
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		return &TurnUpdate{Messages: []types.Message{replacement}}, nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	require.Len(t, fp.contexts, 2)
+	require.Len(t, fp.contexts[1].Messages, 1)
+	assert.Equal(t, "compacted transcript", userTextOf(t, fp.contexts[1].Messages[0]))
+	assert.Equal(t, "sys", fp.contexts[1].SystemPrompt)
+
+	// agent_end still contains only the run-produced messages.
+	require.Len(t, end.Messages, 3)
+	for _, m := range end.Messages {
+		if u, ok := m.(*types.UserMessage); ok {
+			assert.NotEqual(t, "compacted transcript", userTextOf(t, u))
+		}
+	}
+}
+
+func TestAgent_PrepareNextTurnContext_ModelAndThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	tool := &modelAwareTool{}
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "aware_tool", `{}`)),
+		textMsg("two"),
+	}}
+	req := baseRequest(fp, tool)
+
+	nextModel := &types.Model{ID: "next-model", API: types.APIOpenAICompat, Provider: "next"}
+	high := types.ThinkingHigh
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		return &TurnUpdate{Model: nextModel, ThinkingLevel: &high}, nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	require.Len(t, fp.models, 2)
+	assert.Same(t, nextModel, fp.models[1], "next provider request must use the updated model")
+	assert.Same(t, nextModel, tool.model, "updated model must be re-injected into tools")
+	require.Len(t, fp.options, 2)
+	assert.Equal(t, types.ThinkingHigh, fp.options[1].ThinkingLevel)
+}
+
+func TestAgent_PrepareNextTurnContext_TakesPrecedenceOverLegacy(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("two"),
+	}}
+	req := baseRequest(fp, tool)
+
+	newMsg := &types.UserMessage{Content: types.TextOnly("new hook"), Timestamp: 54}
+	oldMsg := &types.UserMessage{Content: types.TextOnly("old hook"), Timestamp: 55}
+	oldCalled := false
+	newCalled := false
+	req.PrepareNextTurn = func(turnIndex int) ([]types.Message, error) {
+		oldCalled = true
+		return []types.Message{oldMsg}, nil
+	}
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		newCalled = true
+		return &TurnUpdate{Append: []types.Message{newMsg}}, nil
+	}
+
+	_, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.True(t, newCalled)
+	assert.False(t, oldCalled, "legacy hook must not run when the context hook is set")
+	require.Len(t, fp.contexts, 2)
+	assert.NotEqual(t, -1, userMessageIndex(t, fp.contexts[1].Messages, "new hook"))
+	assert.Equal(t, -1, userMessageIndex(t, fp.contexts[1].Messages, "old hook"))
+}
+
+func TestAgent_PrepareNextTurnContext_ErrorTerminalTurn(t *testing.T) {
+	t.Parallel()
+
+	tool := newRecordingTool("tool1")
+	fp := &fakeProvider{responses: []*types.AssistantMessage{
+		toolCallMsg(call("c1", "tool1", `{}`)),
+		textMsg("never"),
+	}}
+	req := baseRequest(fp, tool)
+	req.PrepareNextTurnContext = func(tc TurnContext) (*TurnUpdate, error) {
+		return nil, fmt.Errorf("context hook boom")
+	}
+
+	evs, end := collect(t, Run(context.Background(), req))
+	require.NotNil(t, end)
+	assert.Equal(t, 1, fp.calls, "hook error must not start another provider request")
+
+	turnStarts, turnEnds, agentEnds := 0, 0, 0
+	for _, ev := range evs {
+		switch ev.Kind {
+		case types.TurnStart:
+			turnStarts++
+		case types.TurnEnd:
+			turnEnds++
+		case types.AgentEnd:
+			agentEnds++
+		}
+	}
+	assert.Equal(t, 1, agentEnds)
+	assert.Equal(t, turnStarts, turnEnds, "terminal error turn must be balanced")
+	assert.Equal(t, 2, turnStarts)
+
+	require.NotEmpty(t, end.Messages)
+	synthetic, ok := end.Messages[len(end.Messages)-1].(*types.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, types.StopError, synthetic.StopReason)
+	assert.Contains(t, synthetic.ErrorMessage, "context hook boom")
 }
