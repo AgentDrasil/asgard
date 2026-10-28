@@ -19,6 +19,7 @@ use (
 	./pkg/metrics
 	./pkg/paths
 	./pkg/pluginsdk
+	./pkg/runnerpb
 	./pkg/version
 	./pkg/workflowspec
 	./plugins/notebook

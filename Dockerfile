@@ -117,6 +117,7 @@ COPY pkg/logger/go.mod pkg/logger/go.sum* ./pkg/logger/
 COPY pkg/metrics/go.mod pkg/metrics/go.sum* ./pkg/metrics/
 COPY pkg/paths/go.mod ./pkg/paths/
 COPY pkg/pluginsdk/go.mod pkg/pluginsdk/go.sum* ./pkg/pluginsdk/
+COPY pkg/runnerpb/go.mod pkg/runnerpb/go.sum* ./pkg/runnerpb/
 COPY pkg/version/go.mod ./pkg/version/
 COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
 COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
@@ -140,6 +141,7 @@ RUN (cd backend && go mod download) && \
     (cd pkg/metrics && go mod download) && \
     (cd pkg/paths && go mod download) && \
     (cd pkg/pluginsdk && go mod download) && \
+    (cd pkg/runnerpb && go mod download) && \
     (cd pkg/version && go mod download) && \
     (cd pkg/workflowspec && go mod download) && \
     (cd plugins/notebook && go mod download) && \

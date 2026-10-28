@@ -1,0 +1,824 @@
+syntax = "proto3";
+
+// Runner/backend split protocol.
+//
+// Transport: the runner dials one mTLS connection to the backend, multiplexed
+// with yamux. The runner is the gRPC client of NodeControlService and
+// AgentCallbackService (both hosted by the backend); the backend is the gRPC
+// client of RunnerService (hosted by the runner on backend-opened streams).
+package asgard.runner.v1;
+
+option go_package = "github.com/AgentDrasil/asgard/pkg/runnerpb";
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+// Target is one (cli, model) execution target.
+message Target {
+  string cli = 1;
+  string model = 2;
+}
+
+// TargetQuota is the quota snapshot of one target.
+message TargetQuota {
+  string cli = 1;
+  string model = 2;
+  // remaining is the fraction of quota left in [0, 1].
+  double remaining = 3;
+  // enabled is false when the provider is disabled on the runner.
+  bool enabled = 4;
+}
+
+// NoQuota mirrors the backend's run.NoQuotaError.
+message NoQuota {
+  string agent_id = 1;
+  string explicit_model = 2;
+  double min_threshold = 3;
+  repeated TargetQuota targets = 4;
+  // pairing_note is set for workflow model-pairing failures.
+  string pairing_note = 5;
+}
+
+// ---------------------------------------------------------------------------
+// NodeControlService: ordered control plane (runner -> backend hosted)
+// ---------------------------------------------------------------------------
+//
+// Reliability model: each process start picks a random boot_id (runner in
+// Register, backend in RegisterResult). Each direction has a monotonically
+// increasing seq counter starting at 1 per boot_id. Register, RegisterResult
+// and Ack are control frames outside the seq space: seq = 0, never deduped,
+// never replayed. Every other message has seq > 0; the receiver drops any such
+// message whose seq is <= the highest seq it already processed (single ordered
+// stream, so "highest processed seq" is enough) and acknowledges with Ack.
+// The sender keeps unacked messages and replays them AFTER RegisterResult has
+// been exchanged on a reconnect. If the peer's boot_id is unchanged the
+// replay resumes from the peer's last acked seq; if it changed, the receiver
+// resets its dedup state (the peer restarted and counts from 1 again).
+//
+// Downstream replay rule: the backend replays unacked BackendMessages only
+// when the runner's boot_id is unchanged. On a changed runner boot_id it drops
+// unacked StartRuns, declares those attempts lost and, if the logical run
+// should continue, re-dispatches as a NEW attempt with a new run_id.
+//
+// Upstream effects are applied idempotently and acked only after they are
+// persisted: RunEvents are keyed by (run_id, event_index), RunResult is
+// finalized at most once per run_id.
+//
+// Size limits: gRPC MaxRecvMsgSize/MaxSendMsgSize is 16 MiB in both
+// directions. Any single control-stream message is capped at 12 MiB as a
+// whole; the sender must split or reject. RunOutputChunk is at most 1 MiB;
+// RunEvent.content, RunEvent.metadata_json and StartRun.prompt are each capped
+// at 4 MiB (their sum fits under 12 MiB); a RunEvent carries at most 1000
+// artifacts (the runner splits across consecutive events). Free-text error
+// fields are truncated to 64 KiB (see the *_truncated flags).
+
+service NodeControlService {
+  // Connect is the long-lived control stream. The first RunnerMessage must be
+  // Register; the backend answers with RegisterResult.
+  rpc Connect(stream RunnerMessage) returns (stream BackendMessage);
+}
+
+// RunnerMessage is runner -> backend.
+message RunnerMessage {
+  // seq is the runner's upstream sequence number (0 for Ack).
+  uint64 seq = 1;
+  oneof payload {
+    Register register = 2;
+    Heartbeat heartbeat = 3;
+    RunEvent run_event = 4;
+    RunResult run_result = 5;
+    Ack ack = 6;
+    RunOutputChunk run_output = 7;
+  }
+}
+
+// BackendMessage is backend -> runner.
+message BackendMessage {
+  // seq is the backend's downstream sequence number (0 for Ack).
+  uint64 seq = 1;
+  oneof payload {
+    RegisterResult register_result = 2;
+    StartRun start_run = 3;
+    CancelRun cancel_run = 4;
+    Ack ack = 5;
+  }
+}
+
+// RunRef identifies one attempt.
+message RunRef {
+  string run_id = 1;
+  string chat_id = 2;
+  uint32 attempt = 3;
+  // workflow_node_id is status_scope.node_id (empty for plain chats).
+  string workflow_node_id = 4;
+  string run_token = 5;
+}
+
+// RunOutputChunk carries part of a run's output (seq'd, ordered before the
+// RunResult). Chunks are at most 1 MiB; offset makes replays idempotent.
+message RunOutputChunk {
+  string run_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Ack acknowledges every message of the peer with seq <= ack_seq.
+message Ack {
+  uint64 ack_seq = 1;
+}
+
+// Register is the first message of every (re)connection.
+message Register {
+  // node_id is the RUNNER id (not a workflow node); it must match the CN of the runner's client certificate.
+  string node_id = 1;
+  // version is the runner build version (pkg/version).
+  string version = 2;
+  // protocol_version is the runner's ProtocolVersion constant.
+  uint32 protocol_version = 3;
+  // supported_clis maps cli name -> models the runner can run.
+  map<string, ModelList> supported_clis = 4;
+  // active_runs are runs still executing on the runner (after a reconnect).
+  // Runs unknown to both lists are considered lost by the backend.
+  repeated RunRef active_runs = 5;
+  // last_acked_backend_seq is the highest backend seq the runner processed
+  // (relative to the backend boot_id it last saw).
+  uint64 last_acked_backend_seq = 6;
+  // runner_boot_id is random per runner process start.
+  string runner_boot_id = 7;
+  // completed_unacked_runs are run ids whose RunResult is still queued for
+  // replay, so the backend does not fail them as lost.
+  repeated RunRef completed_unacked_runs = 8;
+  // last_seen_backend_boot_id is the backend boot_id last_acked_backend_seq
+  // belongs to. The backend honors that seq only if it equals its current
+  // boot id; otherwise it replays from 1.
+  string last_seen_backend_boot_id = 9;
+}
+
+message ModelList {
+  repeated string models = 1;
+}
+
+// Heartbeat is sent periodically with a fresh quota/load snapshot.
+message Heartbeat {
+  repeated TargetQuota quotas = 1;
+  uint32 active_runs = 2;
+  uint32 max_runs = 3;
+}
+
+// RunEvent is a status update of a run; modeled on the backend's
+// AgentStatusUpdate posted to /agent-status.
+message RunEvent {
+  string run_id = 1;
+  string chat_id = 2;
+  string node_id = 3;
+  string run_token = 4;
+  int32 step_index = 5;
+  string source = 6;
+  string entry_type = 7;
+  string content = 8;
+  // metadata_json is the JSON-encoded metadata map (may be empty).
+  bytes metadata_json = 9;
+  // artifacts are the runner-computed artifact files produced so far, so the
+  // backend does not need to stat runner files.
+  repeated Artifact artifacts = 10;
+  // event_index increases from 1 per run_id. The backend applies events
+  // idempotently keyed by (run_id, event_index) and acks only after persisting
+  // their effects.
+  uint64 event_index = 11;
+}
+
+// Artifact is an output file of a run, as computed by the runner with
+// agents.IsArtifact / workflow.ExtractArtifactPaths (git check-ignore, stat).
+// The backend only persists the viewer paths (AppendArtifacts) and, for
+// workflow command nodes, the NodeResult.Artifacts name -> path map.
+message Artifact {
+  // viewer_path is the path form the file API accepts: /tmp/<rel> for the tmp
+  // dir, /session/<rel> for the session dir, otherwise the absolute path.
+  string viewer_path = 1;
+  // name is the logical key for workflow NodeResult.Artifacts (the node's
+  // output_file); empty for agent artifacts.
+  string name = 2;
+  // abs_path is the absolute path on the runner (workflow NodeResult value).
+  string abs_path = 3;
+}
+
+// RunResult is finalized at most once per run_id: the backend records
+// finalized run_ids and ignores repeats, including completed_unacked_runs
+// replays after a backend restart (so the backend must persist finalized
+// run ids).
+message RunResult {
+  string run_id = 1;
+  // output_size is the total size of the RunOutputChunk stream sent before.
+  uint64 output_size = 2;
+  // selected_target is the target the run actually used.
+  Target selected_target = 3;
+  // error is a human-readable failure; empty on success.
+  string error = 4;
+  // error_truncated is set when error was cut to 64 KiB.
+  bool error_truncated = 11;
+  // no_quota is set when the run failed because no target had quota.
+  NoQuota no_quota = 5;
+  // run_dir is the resolved runner-absolute working directory.
+  string run_dir = 6;
+  // run_dir_ref is the same directory in DirRef form.
+  DirRef run_dir_ref = 7;
+  string chat_id = 8;
+  uint32 attempt = 9;
+  // workflow_node_id is status_scope.node_id (empty for plain chats).
+  string workflow_node_id = 10;
+  string run_token = 12;
+}
+
+message RegisterResult {
+  bool accepted = 1;
+  string reject_reason = 2;
+  // protocol_version is the backend's ProtocolVersion constant.
+  uint32 protocol_version = 3;
+  // last_acked_runner_seq is the highest runner seq the backend processed.
+  uint64 last_acked_runner_seq = 4;
+  // backend_boot_id is random per backend process start.
+  string backend_boot_id = 5;
+  bool reject_reason_truncated = 6;
+}
+
+enum AgentSource {
+  AGENT_SOURCE_GLOBAL = 0;
+  // AGENT_SOURCE_RUNNER: the definition lives on the runner itself.
+  AGENT_SOURCE_RUNNER = 1;
+}
+
+// StatusScope carries the identifiers sandboxed tools use to report status.
+message StatusScope {
+  string node_id = 1;
+  string run_token = 2;
+  bool headless = 3;
+  bool allow_cross_session = 4;
+}
+
+// StartRun asks the runner to execute one attempt. run_id is the idempotency
+// key: a replayed StartRun for a known run_id is ignored.
+message StartRun {
+  string run_id = 1;
+  string chat_id = 2;
+  string agent_id = 3;
+  AgentSource agent_source = 4;
+  // agent_hash is the content hash of the agent definition (cache dir key).
+  string agent_hash = 5;
+  // Agent definitions arrive out of band via etcd: the runner resolves
+  // agent_id + agent_source + agent_hash from its own etcd watch and fails the
+  // run if it cannot reach that hash.
+  // candidates are the targets to try, in order.
+  repeated Target candidates = 6;
+  // model is an explicit user-selected model (optional).
+  string model = 7;
+  string prompt = 8;
+  // sessions maps cli -> CLI session id for resume.
+  map<string, string> sessions = 9;
+  // run_dir is the working directory (optional).
+  DirRef run_dir = 10;
+  StatusScope status_scope = 11;
+  repeated string enabled_providers = 12;
+  string lang_rules = 13;
+  // attempt is the attempt counter of the logical run. run_id is per attempt:
+  // every StartRun (retries, quota fallback, corrective retries) uses a fresh
+  // run_id. Logical identity is chat_id + status_scope.node_id/run_token.
+  // CancelRun, active_runs and CallMeta.run_id all refer to attempts.
+  uint32 attempt = 14;
+  // Workflow-effective overlay (resolveEffectiveAgent / resolveWorkflowDirs)
+  // applied by the runner on top of the etcd agent config. Empty = use the
+  // agent config's values.
+  repeated string run_dirs = 15;
+  repeated string mount_dirs_readonly = 16;
+  repeated string mount_dirs_readwrite = 17;
+}
+
+message CancelRun {
+  string run_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// AgentCallbackService: sandbox calls forwarded by the runner (backend hosted)
+// ---------------------------------------------------------------------------
+//
+// Every request carries run_id and call_seq. call_seq is unique and increasing
+// per run_id. The backend keys each call by (run_id, call_seq): a retry with
+// the same key (e.g. after a reconnect while the first attempt is still
+// blocked) attaches to the in-flight call or receives the cached result; it
+// never re-executes. Sandbox status reports are NOT an RPC here: they travel
+// sandbox -> runner -> RunEvent on the ordered Connect stream, so they stay
+// ordered before RunResult.
+
+service AgentCallbackService {
+  // AskUser blocks until the user replies (may take hours).
+  rpc AskUser(AskUserRequest) returns (AskUserResponse);
+  // CallPeer blocks until the peer run finishes (wait=true semantics).
+  rpc CallPeer(CallPeerRequest) returns (CallPeerResponse);
+  rpc FindPeer(FindPeerRequest) returns (FindPeerResponse);
+  rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
+}
+
+message CallMeta {
+  string run_id = 1;
+  uint64 call_seq = 2;
+}
+
+message AskUserRequest {
+  CallMeta meta = 1;
+  string chat_id = 2;
+  string agent_name = 3;
+  string question = 4;
+  // message_id is always set by the runner (deterministic from run_id and
+  // call_seq when the sandbox did not supply one).
+  string message_id = 5;
+  string model = 6;
+}
+message AskUserResponse {
+  string reply = 1;
+  string error = 2;
+  bool error_truncated = 3;
+}
+
+message CallPeerRequest {
+  CallMeta meta = 1;
+  string agent_id = 2;
+  string prompt = 3;
+  string chat_id = 4;
+  DirRef run_dir = 5;
+  string model = 6;
+  bool allow_cross_session = 7;
+  bytes metadata_json = 8;
+}
+message CallPeerResponse {
+  // status is "completed", "waiting_human" or a failure status.
+  string status = 1;
+  string output = 2;
+  string error = 3;
+  bool error_truncated = 4;
+}
+
+message FindPeerRequest {
+  CallMeta meta = 1;
+  string chat_id = 2;
+}
+message FindPeerResponse {
+  // peers are the agent ids on the caller's team.
+  repeated string peers = 1;
+}
+
+// MetricsEvent mirrors pkg/metrics.Event.
+message MetricsEvent {
+  string kind = 1;
+  int64 tokens = 2;
+  int64 bytes = 3;
+}
+message RecordMetricsRequest {
+  CallMeta meta = 1;
+  repeated MetricsEvent events = 2;
+}
+message RecordMetricsResponse {}
+
+// ---------------------------------------------------------------------------
+// RunnerService: backend -> runner (runner hosted)
+// ---------------------------------------------------------------------------
+
+service RunnerService {
+  rpc Tree(TreeRequest) returns (TreeResponse);
+  rpc ReadFile(ReadFileRequest) returns (stream ReadFileChunk);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  // PutAttachment: first message carries the header, then data chunks.
+  rpc PutAttachment(stream PutAttachmentChunk) returns (PutAttachmentResponse);
+  // GetAttachment: first frame is a FileInfo header, then data.
+  rpc GetAttachment(GetAttachmentRequest) returns (stream ReadFileChunk);
+  // GitDiff streams one GitDiffFile per frame.
+  rpc GitDiff(GitDiffRequest) returns (stream GitDiffFile);
+  rpc GitLog(GitLogRequest) returns (GitLogResponse);
+  rpc GitPush(GitSessionRequest) returns (GitOpResponse);
+  rpc GitPull(GitSessionRequest) returns (GitOpResponse);
+  rpc Subdirs(SubdirsRequest) returns (SubdirsResponse);
+  // Ttyd: first client frame is Open; afterwards input/resize. Server frames
+  // are output or exit.
+  rpc Ttyd(stream TtydFrame) returns (stream TtydFrame);
+  // General file ops for backend-driven access to run/tmp/session dirs (workflow
+  // fanout inputs/outputs, human replies, transcript messages.jsonl). Paths
+  // must stay inside the chat's allowed roots; the runner enforces this.
+  rpc Stat(StatRequest) returns (StatResponse);
+  rpc WriteFile(stream WriteFileChunk) returns (WriteFileResponse);
+  rpc AppendFile(AppendFileRequest) returns (AppendFileResponse);
+  rpc Remove(RemoveRequest) returns (RemoveResponse);
+  // RunCommand executes a workflow command node on the runner (optionally in
+  // the bwrap + fakebashd sandbox, which is configured by the runner).
+  rpc RunCommand(RunCommandRequest) returns (stream RunCommandFrame);
+  rpc Cleanup(CleanupRequest) returns (CleanupResponse);
+  rpc QueryQuota(QueryQuotaRequest) returns (QueryQuotaResponse);
+}
+
+// FileScope selects the root a path is relative to.
+enum FileScope {
+  // UNSPECIFIED: auto-disambiguate from the path like the HTTP handlers do.
+  FILE_SCOPE_UNSPECIFIED = 0;
+  FILE_SCOPE_WORKSPACE = 1;
+  FILE_SCOPE_TMP = 2;
+  FILE_SCOPE_SESSION = 3;
+  // ABSOLUTE: a runner-absolute path (e.g. an agent run_dir like /workspace).
+  FILE_SCOPE_ABSOLUTE = 4;
+}
+
+message FileTreeEntry {
+  string name = 1;
+  // path is relative to the session run dir.
+  string path = 2;
+  bool is_dir = 3;
+  int64 size = 4;
+  string ext = 5;
+}
+
+message TreeRequest {
+  string session_id = 1;
+  string path = 2;
+  FileScope scope = 3;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 4;
+  // limit/page_token paginate; limit 0 means the runner default.
+  int32 limit = 5;
+  string page_token = 6;
+}
+message TreeResponse {
+  repeated FileTreeEntry entries = 1;
+  string path = 2;
+  string next_page_token = 3;
+}
+
+message ReadFileRequest {
+  string session_id = 1;
+  string path = 2;
+  FileScope scope = 3;
+  // raw requests the unprocessed bytes (download) instead of the text view.
+  bool raw = 4;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 5;
+  // offset/length select a byte range; length 0 means to the end.
+  int64 offset = 6;
+  int64 length = 7;
+}
+
+// DirRef names a directory without the backend minting runner paths from its
+// own ~/asgard layout. scope is TMP or SESSION for per-chat dirs (the runner
+// resolves them from its own layout and the chat id; rel_or_path is relative
+// to that dir, empty for the dir itself) or ABSOLUTE for runner-absolute paths
+// such as an agent run_dir (rel_or_path is the absolute path).
+message DirRef {
+  FileScope scope = 1;
+  string rel_or_path = 2;
+}
+
+message FileInfo {
+  string path = 1;
+  string name = 2;
+  string ext = 3;
+  int64 size = 4;
+  bool is_binary = 5;
+  // updated_at is unix nanoseconds.
+  int64 updated_at_unix_nano = 6;
+  string mime = 7;
+}
+
+// ReadFileChunk: the first frame is always the FileInfo header (size is the
+// total file size), the rest carry data.
+message ReadFileChunk {
+  oneof payload {
+    FileInfo info = 1;
+    bytes data = 2;
+  }
+}
+
+message SearchRequest {
+  string session_id = 1;
+  string query = 2;
+  int32 limit = 3;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 4;
+}
+message FileSearchResult {
+  string path = 1;
+  string name = 2;
+  string ext = 3;
+  int64 size = 4;
+  FileScope scope = 5;
+}
+message SearchResponse {
+  repeated FileSearchResult files = 1;
+}
+
+message AttachmentHeader {
+  string session_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 4;
+}
+message PutAttachmentChunk {
+  oneof payload {
+    AttachmentHeader header = 1;
+    bytes data = 2;
+  }
+}
+message PutAttachmentResponse {
+  // path is the stored location on the runner.
+  string path = 1;
+  string filename = 2;
+  int64 size = 3;
+}
+
+message GetAttachmentRequest {
+  string session_id = 1;
+  string filename = 2;
+  int64 offset = 3;
+  int64 length = 4;
+}
+
+message GitDiffRequest {
+  string session_id = 1;
+  // commit selects a single commit diff; empty means the working tree.
+  string commit = 2;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 3;
+}
+message GitDiffFile {
+  string old_path = 1;
+  string new_path = 2;
+  // status is "A", "M", "D" or "R".
+  string status = 3;
+  string old_content = 4;
+  string new_content = 5;
+  repeated string hunks = 6;
+  // content_truncated is set when old/new content was cut at 4 MiB each.
+  bool content_truncated = 7;
+  // hunks are capped at 4 MiB in total; hunks_truncated is set when cut.
+  // old/new content (4 MiB each) and hunks (4 MiB) plus paths can reach the
+  // 12 MiB whole-message cap, so the runner trims further when needed and sets
+  // the truncated flags: a frame always fits under 12 MiB.
+  bool hunks_truncated = 8;
+}
+
+message GitLogRequest {
+  string session_id = 1;
+  int32 limit = 2;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 3;
+}
+message GitCommit {
+  string hash = 1;
+  string short_hash = 2;
+  string author = 3;
+  string author_email = 4;
+  string date = 5;
+  string relative_date = 6;
+  string refs = 7;
+  string message = 8;
+}
+message GitLogResponse {
+  repeated GitCommit commits = 1;
+  string current_branch = 2;
+  string tracking_branch = 3;
+  int32 ahead = 4;
+  int32 behind = 5;
+  int32 unstashed_count = 6;
+}
+
+message GitSessionRequest {
+  string session_id = 1;
+  // run_dir is the explicit workspace directory on the runner.
+  DirRef run_dir = 2;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 3;
+}
+message GitOpResponse {
+  bool success = 1;
+  string output = 2;
+  string error = 3;
+  bool error_truncated = 4;
+}
+
+message SubdirsRequest {
+  // dir is an absolute directory on the runner.
+  string dir = 1;
+  int32 limit = 2;
+  string page_token = 3;
+}
+message SubdirsResponse {
+  repeated string subdirs = 1;
+  string git_root = 2;
+  string next_page_token = 3;
+}
+
+message TtydOpen {
+  // session_key is the ttyd session key ("sidebar", "agent-<id>", ...).
+  string session_key = 1;
+  // working_dir is the start directory; empty means the runner default.
+  DirRef working_dir = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+  // chat_id resolves TMP/SESSION DirRefs.
+  string chat_id = 5;
+}
+message TtydResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+message TtydExit {
+  int32 code = 1;
+}
+message TtydFrame {
+  oneof payload {
+    TtydOpen open = 1;
+    bytes input = 2;
+    TtydResize resize = 3;
+    bytes output = 4;
+    TtydExit exit = 5;
+  }
+}
+
+// PathRef addresses a file under a chat's roots.
+message PathRef {
+  string session_id = 1;
+  DirRef run_dir = 2;
+  FileScope scope = 3;
+  // path is relative to the scope root, or absolute inside an allowed root.
+  string path = 4;
+}
+message StatRequest {
+  PathRef ref = 1;
+}
+message StatResponse {
+  bool exists = 1;
+  bool is_dir = 2;
+  int64 size = 3;
+  int64 updated_at_unix_nano = 4;
+}
+message WriteFileHeader {
+  PathRef ref = 1;
+  // mkdir creates missing parent directories.
+  bool mkdir = 2;
+  // mode is the permission bits (0 means 0644).
+  uint32 mode = 3;
+  // atomic writes a temp file in the same dir and renames it over the target
+  // (transcript rewrites).
+  bool atomic = 4;
+  // sync fsyncs before returning. Together with atomic it means: fsync the
+  // temp file, rename, fsync the parent directory (as atomicWriteFile does).
+  bool sync = 5;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 6;
+  // skip_if_unchanged skips the write when the file already has this content.
+  bool skip_if_unchanged = 7;
+}
+// WriteFileChunk: header first (create/truncate), then data chunks.
+message WriteFileChunk {
+  oneof payload {
+    WriteFileHeader header = 1;
+    bytes data = 2;
+  }
+}
+message WriteFileResponse {
+  int64 size = 1;
+}
+// AppendFileRequest is unary; the 12 MiB whole-message cap covers transcript
+// lines (the transcript reader supports lines up to 10 MiB).
+message AppendFileRequest {
+  PathRef ref = 1;
+  bool mkdir = 2;
+  bytes data = 3;
+  // sync fsyncs before returning (transcript line appends).
+  bool sync = 4;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 5;
+}
+message AppendFileResponse {}
+message RemoveRequest {
+  PathRef ref = 1;
+  bool recursive = 2;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 3;
+}
+message RemoveResponse {}
+
+message RunCommandRequest {
+  string chat_id = 1;
+  string command = 2;
+  // working_dir (relative to run_dir, or runner-absolute) is created (mkdir -p) first.
+  string working_dir = 3;
+  DirRef run_dir = 4;
+  // sandbox selects the bwrap sandbox; unset uses the runner default.
+  optional bool sandbox = 5;
+  bool allow_cross_session = 6;
+  // timeout_seconds is the node timeout; 0 means none. Cancelling the RPC also
+  // kills the command.
+  int32 timeout_seconds = 7;
+  // output_file is the node's output_file; tmp is the tmp dir it is relative to.
+  string output_file = 8;
+  DirRef tmp = 9;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 10;
+  // resume_*_offset: on a retry with the same request_id the runner replays
+  // buffered output (kept for the request_id TTL) starting at these offsets.
+  uint64 resume_stdout_offset = 11;
+  uint64 resume_stderr_offset = 12;
+}
+message RunCommandExit {
+  int32 code = 1;
+  // artifacts is computed runner-side like collectArtifact (name = output_file).
+  repeated Artifact artifacts = 2;
+}
+// StreamData is a slice of one output stream; offset is the byte offset of
+// data within that stream.
+message StreamData {
+  uint64 offset = 1;
+  bytes data = 2;
+}
+// RunCommandFrame is stdout/stderr data, then a final exit frame.
+message RunCommandFrame {
+  oneof payload {
+    StreamData stdout = 1;
+    StreamData stderr = 2;
+    RunCommandExit exit = 3;
+  }
+}
+
+// OrphanTmpSweep mirrors dbmodels.CleanOrphanTmpFiles: recursively remove
+// regular files named `.<base>.*.tmp` (leftovers of atomic writes) under dir.
+message OrphanTmpSweep {
+  DirRef dir = 1;
+  string chat_id = 2;
+}
+
+message CleanupRequest {
+  repeated string chat_ids = 1;
+  // cutoff_unix_nano: also remove orphaned chat dirs (not in keep_chat_ids)
+  // whose latest mtime is older than this, mirroring dbmodels
+  // CleanExpiredSessions. 0 disables the sweep.
+  int64 cutoff_unix_nano = 2;
+  // keep_chat_ids are live chats the orphan sweep must not touch.
+  repeated string keep_chat_ids = 3;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 4;
+  // orphan_tmp_sweeps remove dangling atomic-write temp files.
+  repeated OrphanTmpSweep orphan_tmp_sweeps = 5;
+}
+message CleanupFailure {
+  string chat_id = 1;
+  string error = 2;
+  bool error_truncated = 3;
+}
+message CleanupResponse {
+  int32 removed = 1;
+  repeated CleanupFailure failures = 2;
+}
+
+message QueryQuotaRequest {
+  // targets to query; empty means all supported targets.
+  repeated Target targets = 1;
+}
+// QuotaLimit mirrors llms.QuotaLimit.
+message QuotaLimit {
+  string name = 1;
+  double remaining = 2;
+  int64 refresh_date = 3;
+}
+message BalanceInfo {
+  string currency = 1;
+  string total_balance = 2;
+  string granted_balance = 3;
+  string topped_up_balance = 4;
+}
+message AccountBalance {
+  bool is_available = 1;
+  repeated BalanceInfo balance_infos = 2;
+}
+// ModelUsage mirrors llms.ModelUsage for one target.
+message ModelUsage {
+  string cli = 1;
+  string model = 2;
+  double remaining = 3;
+  int64 refresh_date = 4;
+  repeated QuotaLimit limits = 5;
+  AccountBalance balance = 6;
+  bool enabled = 7;
+}
+message QueryQuotaResponse {
+  repeated ModelUsage usages = 1;
+}

@@ -71,6 +71,10 @@ install-agent-validate:
 compile-proto:
     PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative fakebash/pb/fakebash.proto
 
+# Compile protobuf and gRPC definitions for the runner/backend protocol (uses buf; needs protoc-gen-go and protoc-gen-go-grpc in GOPATH/bin)
+compile-runner-proto:
+    cd pkg/runnerpb && PATH=$PATH:$(go env GOPATH)/bin GOWORK=off go run github.com/bufbuild/buf/cmd/buf@v1.50.0 generate
+
 # Build Docker Image
 build-image:
     docker build --build-arg ASGARD_VERSION={{version}} -t ghcr.io/agentdrasil/asgard:main -f Dockerfile .
