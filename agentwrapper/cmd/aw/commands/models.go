@@ -69,6 +69,8 @@ func newAgentModelsCmd(agentName, binary string, dirFlag *string, fetch func(ctx
 	}
 }
 
+var modelsUnfiltered bool
+
 var modelsCmd = &cobra.Command{
 	Use:   "models",
 	Short: "List available models for all supported agents",
@@ -79,7 +81,7 @@ var modelsCmd = &cobra.Command{
 		for agent, models := range allModels {
 			list := make([]string, 0, len(models))
 			for _, m := range models {
-				if GlobalConfig.IsModelAllowed(agent, m) {
+				if modelsUnfiltered || GlobalConfig.IsModelAllowed(agent, m) {
 					list = append(list, m)
 				}
 			}
@@ -96,4 +98,8 @@ var modelsCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func init() {
+	modelsCmd.Flags().BoolVar(&modelsUnfiltered, "unfiltered", false, "Skip the aw config model allow-list")
 }

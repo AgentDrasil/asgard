@@ -32,6 +32,12 @@ var rootCmd = &cobra.Command{
 			zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		}
 
+		// Unfiltered models and single-CLI usage ignore the allow-list, so
+		// a broken config must not stop the host's catalog/quota lookups.
+		if (cmd == modelsCmd && modelsUnfiltered) || (cmd == usageCmd && usageCLI != "") {
+			return nil
+		}
+
 		var err error
 		GlobalConfig, err = config.LoadConfig()
 		if err != nil {
@@ -56,4 +62,5 @@ func init() {
 	rootCmd.AddCommand(opencodeCmd)
 	rootCmd.AddCommand(simplestCmd)
 	rootCmd.AddCommand(modelsCmd)
+	rootCmd.AddCommand(usageCmd)
 }

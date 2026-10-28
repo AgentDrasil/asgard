@@ -14,18 +14,35 @@ type Config struct {
 	Agents []map[string][]string `yaml:"agents"`
 }
 
-// LoadConfig loads the configuration from XDG_CONFIG_HOME/aw/config.yaml or ~/.config/aw/config.yaml.
-// If the config file does not exist, it returns a nil Config and no error.
-func LoadConfig() (*Config, error) {
+// EnvPath names an environment variable that overrides the config file
+// location. The Asgard query sandbox sets it to a fixed mount point so the
+// config is readable regardless of how the host path is laid out.
+const EnvPath = "AW_CONFIG"
+
+// Path returns the location of the aw config file: $AW_CONFIG if set,
+// otherwise XDG_CONFIG_HOME/aw/config.yaml or ~/.config/aw/config.yaml.
+func Path() (string, error) {
+	if p := os.Getenv(EnvPath); p != "" {
+		return p, nil
+	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		configHome = filepath.Join(home, ".config")
 	}
-	path := filepath.Join(configHome, "aw", "config.yaml")
+	return filepath.Join(configHome, "aw", "config.yaml"), nil
+}
+
+// LoadConfig loads the configuration from XDG_CONFIG_HOME/aw/config.yaml or ~/.config/aw/config.yaml.
+// If the config file does not exist, it returns a nil Config and no error.
+func LoadConfig() (*Config, error) {
+	path, err := Path()
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {

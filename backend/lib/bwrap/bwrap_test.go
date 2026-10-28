@@ -1,6 +1,7 @@
 package bwrap
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -659,4 +660,96 @@ func TestCommandForCommandExec_MasksClaudeConfigDir(t *testing.T) {
 	cmd, err := CommandForCommandExec(runDir, "sock", "chat-1", "", false)
 	require.NoError(t, err)
 	assert.Contains(t, strings.Join(cmd.Args, " "), "--tmpfs "+claudeDir)
+}
+
+func TestCommandForQuery_EphemeralSandboxRunsAw(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cmd, cleanup, err := CommandForQuery(context.Background(), "usage", "--cli", "claude")
+	if err != nil {
+		t.Fatalf("CommandForQuery: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	tail := cmd.Args[len(cmd.Args)-4:]
+	if strings.Join(tail, " ") != "aw usage --cli claude" {
+		t.Fatalf("unexpected command tail: %v", tail)
+	}
+}
+
+// TestBuildSandboxArgs_CredentialScope verifies the query sandbox mounts every
+// registered CLI's auth, while an agent sandbox only sees its own CLI's.
+func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runDir := filepath.Join(home, "run")
+	for _, d := range []string{runDir, filepath.Join(home, ".gemini"), filepath.Join(home, ".claude")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bound := func(args []string, dir string) bool {
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == "--bind" && args[i+1] == dir && args[i+2] == dir {
+				return true
+			}
+		}
+		return false
+	}
+
+	all, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-all", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{".gemini", ".claude"} {
+		if !bound(all, filepath.Join(home, d)) {
+			t.Errorf("query sandbox should mount ~/%s", d)
+		}
+	}
+
+	awConfig := filepath.Join(home, ".config", "aw", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(awConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(awConfig, []byte("agents: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	withCfg, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-cfg", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(withCfg, " "), "--ro-bind "+awConfig+" "+queryConfigPath+" --setenv AW_CONFIG "+queryConfigPath) {
+		t.Error("query sandbox should mount the aw config read-only and point AW_CONFIG at it")
+	}
+
+	// A symlinked config is mounted at its resolved path.
+	realCfg := filepath.Join(home, "dotfiles", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(realCfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(awConfig, realCfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realCfg, awConfig); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-link", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(linked, " "), "--ro-bind "+realCfg+" "+queryConfigPath) {
+		t.Error("symlinked aw config should be mounted from its resolved path")
+	}
+
+	one, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "claude"}, false, runDir, "", "q-one", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bound(one, filepath.Join(home, ".claude")) {
+		t.Error("claude sandbox should mount ~/.claude")
+	}
+	if bound(one, filepath.Join(home, ".gemini")) {
+		t.Error("claude sandbox must not mount ~/.gemini")
+	}
 }

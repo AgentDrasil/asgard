@@ -2,6 +2,8 @@ package agentwrapper
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -50,9 +52,76 @@ func registeredClients() map[string]types.CLIClient {
 	return clients
 }
 
+// QueryRunner runs `aw <args...>` somewhere safe (e.g. inside the agent
+// sandbox) and returns its stdout.
+type QueryRunner func(ctx context.Context, args ...string) ([]byte, error)
+
+var (
+	queryRunnerMu sync.RWMutex
+	queryRunner   QueryRunner
+)
+
+// SetQueryRunner makes models and usage queries go through r instead of
+// invoking the vendor CLIs in-process. Vendor CLIs (agy, claude) implement
+// these queries with non-interactive prompts, which can fire their hooks, so
+// the host sets a runner that confines them to the sandbox. Passing nil
+// restores in-process queries.
+func SetQueryRunner(r QueryRunner) {
+	queryRunnerMu.Lock()
+	defer queryRunnerMu.Unlock()
+
+	queryRunner = r
+}
+
+func currentQueryRunner() QueryRunner {
+	queryRunnerMu.RLock()
+	defer queryRunnerMu.RUnlock()
+
+	return queryRunner
+}
+
+// runQuery runs `aw <args...>` through the query runner and decodes its JSON
+// output into out. ok is false when no runner is set.
+func runQuery(ctx context.Context, out any, args ...string) (ok bool, err error) {
+	run := currentQueryRunner()
+	if run == nil {
+		return false, nil
+	}
+	raw, err := run(ctx, args...)
+	if err != nil {
+		return true, err
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return true, fmt.Errorf("parsing aw %v output: %w", args, err)
+	}
+	return true, nil
+}
+
 func GetSupportedCLIsAndModels() map[string][]string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// The sandboxed aw applies its own 10s per-CLI timeout after sandbox setup,
+	// so the host budget must be larger or one slow CLI would discard every
+	// CLI's models. --unfiltered: the host validates against the full catalog,
+	// not the aw config allow-list.
+	qctx, qcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer qcancel()
+	var sandboxed map[string][]string
+	if ok, err := runQuery(qctx, &sandboxed, "models", "--unfiltered"); ok {
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to list models in sandbox")
+			sandboxed = nil
+		}
+		res := make(map[string][]string, len(registeredClients()))
+		for name := range registeredClients() {
+			res[name] = sandboxed[name]
+			if res[name] == nil {
+				res[name] = []string{}
+			}
+		}
+		return res
+	}
 
 	res := make(map[string][]string)
 	var mu sync.Mutex
@@ -79,7 +148,16 @@ func GetSupportedCLIsAndModels() map[string][]string {
 }
 
 func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
-	res := make(map[string][]types.ModelUsage)
+	var res map[string][]types.ModelUsage
+	if ok, err := runQuery(ctx, &res, "usage"); ok {
+		if err != nil {
+			return nil, fmt.Errorf("fetching quota in sandbox: %w", err)
+		}
+		// The query sandbox mounts the aw config, so aw already filtered.
+		return res, nil
+	}
+
+	res = make(map[string][]types.ModelUsage)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -102,6 +180,11 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 
 	wg.Wait()
 
+	return filterQuota(res), nil
+}
+
+// filterQuota drops models the aw config does not allow.
+func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsage {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load aw config for quota filtering")
@@ -117,7 +200,21 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 		res[agentName] = filtered
 	}
 
-	return res, nil
+	return res
+}
+
+// GetCLIQuota returns the top-level quota of a single CLI keyed by its name,
+// without the sandbox query runner. It backs `aw usage --cli`.
+func GetCLIQuota(ctx context.Context, cli string) (map[string][]types.ModelUsage, error) {
+	client, ok := registeredClients()[cli]
+	if !ok {
+		return nil, fmt.Errorf("unknown cli %q", cli)
+	}
+	usages, err := client.Usage(ctx, types.UsageOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return map[string][]types.ModelUsage{cli: usages}, nil
 }
 
 func CheckQuota(cli string, model string) float64 {
@@ -129,7 +226,14 @@ func CheckQuota(cli string, model string) float64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	usages, err := client.Usage(ctx, types.UsageOptions{})
+	var usages []types.ModelUsage
+	var err error
+	all := map[string][]types.ModelUsage{}
+	if ok, qerr := runQuery(ctx, &all, "usage", "--cli", cli); ok {
+		usages, err = all[cli], qerr
+	} else {
+		usages, err = client.Usage(ctx, types.UsageOptions{})
+	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check quota")
 		return 0.0

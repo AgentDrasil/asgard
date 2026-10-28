@@ -1,18 +1,23 @@
 package bwrap
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
+	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -290,6 +295,45 @@ func appendCrossSessionMaskArgs(args []string) []string {
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
 func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
+	args, err := buildSandboxArgs(cfg, agentPath, target, false, runDir, sockDir, chatID, langRules, configPath, proxyOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Target executable and its arguments
+	args = append(args, "aw")
+	args = append(args, target.CLI)
+	// Agent identity: the sandbox-side adapter uses it to materialize
+	// CLI-native agent definitions from the AW_AGENTS.md contract.
+	if cfg != nil && strings.TrimSpace(cfg.ID) != "" {
+		args = append(args, "--agent", cfg.ID)
+	}
+	args = append(args, "--model", target.Model)
+	if spec := agentwrapper.GetSandboxSpec(target.CLI); spec != nil {
+		args = append(args, spec.ExtraArgs()...)
+	}
+	// Only the simplest CLI understands --tool-access, which selects the
+	// agent's tool set (doc-only agents lose bash/edit/write in favor of
+	// write_doc/edit_doc).
+	if target.CLI == "simplest" && cfg != nil && cfg.ToolAccess != "" {
+		args = append(args, "--tool-access", cfg.ToolAccess)
+	}
+	if session.IsSome() {
+		sessVal := session.Unwrap()
+		if sessVal != "" {
+			args = append(args, "--session", sessVal)
+		}
+	}
+	if prompt != "" {
+		args = append(args, "--prompt", prompt)
+	}
+
+	return args, nil
+}
+
+// buildSandboxArgs constructs the bubblewrap arguments up to and including the
+// "--" separator, i.e. everything except the command run inside the sandbox.
+func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -415,21 +459,51 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 
 	spec := agentwrapper.GetSandboxSpec(target.CLI)
 
-	// Target-specific mounts
-	if spec != nil {
-		for _, dir := range spec.MountDirectories(home) {
+	// Target-specific mounts. The metadata-query sandbox (allCLIs) needs the
+	// auth of every registered CLI.
+	specs := []types.SandboxSpec{}
+	if allCLIs {
+		clis := agentwrapper.GetRegisteredCLIs()
+		sort.Strings(clis)
+		for _, cli := range clis {
+			if sp := agentwrapper.GetSandboxSpec(cli); sp != nil {
+				specs = append(specs, sp)
+			}
+		}
+	} else if spec != nil {
+		specs = append(specs, spec)
+	}
+	envs := map[string]string{}
+	for _, sp := range specs {
+		for _, dir := range sp.MountDirectories(home) {
 			if _, err := os.Stat(dir); err == nil {
 				args = append(args, "--bind", dir, dir)
 			}
 		}
-		envs := spec.ExtraEnv(home)
-		keys := make([]string, 0, len(envs))
-		for k := range envs {
-			keys = append(keys, k)
+		for k, v := range sp.ExtraEnv(home) {
+			envs[k] = v
 		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			args = append(args, "--setenv", k, envs[k])
+	}
+	keys := make([]string, 0, len(envs))
+	for k := range envs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--setenv", k, envs[k])
+	}
+
+	// The query sandbox runs `aw models|usage`, which filters by the aw config
+	// allow-list. Mount the resolved file read-only at a fixed path and point
+	// aw at it, so it does not depend on how (or whether) the host path, which
+	// may be a chain of symlinks, resolves inside the sandbox.
+	if allCLIs {
+		if awConfig, err := awconfig.Path(); err == nil {
+			if resolved, err := filepath.EvalSymlinks(awConfig); err == nil {
+				if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() {
+					args = append(args, "--ro-bind", resolved, queryConfigPath, "--setenv", awconfig.EnvPath, queryConfigPath)
+				}
+			}
 		}
 	}
 
@@ -491,34 +565,6 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// End of bubblewrap arguments
 	args = append(args, "--")
 
-	// Target executable and its arguments
-	args = append(args, "aw")
-	args = append(args, target.CLI)
-	// Agent identity: the sandbox-side adapter uses it to materialize
-	// CLI-native agent definitions from the AW_AGENTS.md contract.
-	if cfg != nil && strings.TrimSpace(cfg.ID) != "" {
-		args = append(args, "--agent", cfg.ID)
-	}
-	args = append(args, "--model", target.Model)
-	if spec != nil {
-		args = append(args, spec.ExtraArgs()...)
-	}
-	// Only the simplest CLI understands --tool-access, which selects the
-	// agent's tool set (doc-only agents lose bash/edit/write in favor of
-	// write_doc/edit_doc).
-	if target.CLI == "simplest" && cfg != nil && cfg.ToolAccess != "" {
-		args = append(args, "--tool-access", cfg.ToolAccess)
-	}
-	if session.IsSome() {
-		sessVal := session.Unwrap()
-		if sessVal != "" {
-			args = append(args, "--session", sessVal)
-		}
-	}
-	if prompt != "" {
-		args = append(args, "--prompt", prompt)
-	}
-
 	return args, nil
 }
 
@@ -530,6 +576,56 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 	}
 	cmd := exec.Command("bwrap", bwrapArgs...)
 	return cmd, nil
+}
+
+// queryConfigPath is where the query sandbox mounts the aw config. It lives
+// under the writable /session bind because /etc is read-only, so bwrap could
+// not create a mount point there.
+const queryConfigPath = "/session/aw-config.yaml"
+
+// CommandForQuery creates an exec.Cmd that runs `aw <args...>` inside a
+// dedicated, ephemeral sandbox. It is used for read-only metadata queries
+// (models, usage) that invoke the vendor CLIs non-interactively, which would
+// otherwise run on the host and could trigger the CLIs' hooks. The sandbox
+// mounts the credentials of every registered CLI, since one `aw` call queries
+// them all. The returned cleanup removes the query's throwaway directories.
+func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
+	chatID := fmt.Sprintf("aw-query-%d-%d", os.Getpid(), time.Now().UnixNano())
+	cleanup := func() {
+		_ = os.RemoveAll(paths.SessionDir(chatID))
+		_ = os.RemoveAll(paths.SessionTmpDir(chatID))
+	}
+	runDir, err := setupSessionDir(chatID)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	bwrapArgs, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", chatID, "", "")
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	bwrapArgs = append(bwrapArgs, "aw")
+	bwrapArgs = append(bwrapArgs, args...)
+	return exec.CommandContext(ctx, "bwrap", bwrapArgs...), cleanup, nil
+}
+
+// RunQuery runs `aw <args...>` in a query sandbox and returns its stdout. It
+// satisfies agentwrapper.QueryRunner.
+func RunQuery(ctx context.Context, args ...string) ([]byte, error) {
+	cmd, cleanup, err := CommandForQuery(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("running sandboxed aw %v: %w: %s", args, err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
 }
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.

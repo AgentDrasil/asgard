@@ -2,6 +2,7 @@ package agentwrapper
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -184,6 +185,48 @@ func TestSupportedCLIs_SimplestModelsAndQuota(t *testing.T) {
 		}
 		if u.Remaining != 1.0 {
 			t.Errorf("expected remaining 1.0 for model %q, got %f", u.Model, u.Remaining)
+		}
+	}
+}
+
+func TestQueryRunnerRoutesModelsAndUsage(t *testing.T) {
+	var calls [][]string
+	SetQueryRunner(func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if args[0] == "models" {
+			return []byte(`{"claude":["m1"]}`), nil
+		}
+		return []byte(`{"claude":[{"model":"m1","remaining":0.5}]}`), nil
+	})
+	t.Cleanup(func() { SetQueryRunner(nil) })
+
+	models := GetSupportedCLIsAndModels()
+	if got := models["claude"]; len(got) != 1 || got[0] != "m1" {
+		t.Fatalf("models = %v", models)
+	}
+	if got := CheckQuota("claude", "m1"); got != 0.5 {
+		t.Fatalf("CheckQuota = %v", got)
+	}
+	if len(calls) != 2 || calls[0][0] != "models" || calls[0][1] != "--unfiltered" || calls[1][0] != "usage" || calls[1][2] != "claude" {
+		t.Fatalf("unexpected calls: %v", calls)
+	}
+}
+
+func TestQueryRunnerErrorFailsClosed(t *testing.T) {
+	SetQueryRunner(func(context.Context, ...string) ([]byte, error) {
+		return nil, errors.New("bwrap unavailable")
+	})
+	t.Cleanup(func() { SetQueryRunner(nil) })
+
+	if _, err := GetQuota(context.Background()); err == nil {
+		t.Fatal("GetQuota should fail when the sandbox runner fails")
+	}
+	if got := CheckQuota("claude", "m1"); got != 0 {
+		t.Fatalf("CheckQuota = %v, want 0", got)
+	}
+	for cli, models := range GetSupportedCLIsAndModels() {
+		if len(models) != 0 {
+			t.Fatalf("%s models = %v, want none", cli, models)
 		}
 	}
 }
