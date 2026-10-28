@@ -19,6 +19,7 @@ import (
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
 	"github.com/AgentDrasil/asgard/runner/lib/exec"
 	"github.com/AgentDrasil/asgard/runner/lib/sandbox"
+	"github.com/AgentDrasil/asgard/runner/lib/service"
 )
 
 func main() {
@@ -76,6 +77,7 @@ func run() error {
 	})
 	client = conn.New(conn.Options{
 		Executor:      executor,
+		Service:       service.New(service.Options{Agents: remote.Agents}),
 		Addr:          boot.Backend,
 		NodeID:        nodeID,
 		TLSConfig:     boot.TLSConfig,

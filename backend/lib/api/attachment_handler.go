@@ -1,24 +1,24 @@
 package api
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 )
 
 const (
-	maxAttachmentSingleFileSize = 20 * 1024 * 1024 // 20MB
-	maxAttachmentTotalBodySize  = 50 * 1024 * 1024 // 50MB
-	maxAttachmentDedupeRetries  = 100
+	maxAttachmentSingleFileSize = runnerfs.MaxAttachmentSize // 20MB
+	maxAttachmentTotalBodySize  = 50 * 1024 * 1024           // 50MB
 )
 
 // sanitizeAttachmentFilename cleans an uploaded filename, stripping paths and control characters.
@@ -101,9 +101,9 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	storageDir := paths.AttachmentsDir(sessionID)
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to create storage directory: "+err.Error())
+	fs, ferr := s.chatFS(sessionID)
+	if ferr != nil {
+		writeFSError(w, ferr)
 		return
 	}
 
@@ -112,41 +112,9 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 	for _, fh := range allHeaders {
 		safeName := sanitizeAttachmentFilename(fh.Filename)
 		ext := filepath.Ext(safeName)
-		stem := strings.TrimSuffix(safeName, ext)
-
-		var finalFile *os.File
-		var finalName string
-		var finalPath string
-
-		for attempt := 0; attempt < maxAttachmentDedupeRetries; attempt++ {
-			candidate := safeName
-			if attempt > 0 {
-				candidate = fmt.Sprintf("%s-%d%s", stem, attempt, ext)
-			}
-			candidatePath := filepath.Join(storageDir, candidate)
-			f, openErr := os.OpenFile(candidatePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-			if openErr == nil {
-				finalFile = f
-				finalName = candidate
-				finalPath = candidatePath
-				break
-			}
-			if os.IsExist(openErr) {
-				continue
-			}
-			writeJSONError(w, http.StatusInternalServerError, "failed to create attachment file: "+openErr.Error())
-			return
-		}
-
-		if finalFile == nil {
-			writeJSONError(w, http.StatusInternalServerError, "too many filename collisions")
-			return
-		}
 
 		src, openSrcErr := fh.Open()
 		if openSrcErr != nil {
-			_ = finalFile.Close()
-			_ = os.Remove(finalPath)
 			writeJSONError(w, http.StatusInternalServerError, "failed to open uploaded file: "+openSrcErr.Error())
 			return
 		}
@@ -155,49 +123,25 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 		nSample, readSampleErr := io.ReadFull(src, sampleBuf)
 		if readSampleErr != nil && !errors.Is(readSampleErr, io.EOF) && !errors.Is(readSampleErr, io.ErrUnexpectedEOF) {
 			_ = src.Close()
-			_ = finalFile.Close()
-			_ = os.Remove(finalPath)
 			writeJSONError(w, http.StatusInternalServerError, "failed to read uploaded file: "+readSampleErr.Error())
 			return
 		}
-
 		sample := sampleBuf[:nSample]
-		if nSample > 0 {
-			if _, writeErr := finalFile.Write(sample); writeErr != nil {
-				_ = src.Close()
-				_ = finalFile.Close()
-				_ = os.Remove(finalPath)
-				writeJSONError(w, http.StatusInternalServerError, "failed to write file header: "+writeErr.Error())
-				return
-			}
-		}
 
-		remainingLimit := int64(maxAttachmentSingleFileSize - nSample + 1)
-		limitedReader := io.LimitReader(src, remainingLimit)
-		copied, copyErr := io.Copy(finalFile, limitedReader)
+		// The runner stores the file under a free name; the request id makes a
+		// retried upload attach to the original instead of storing it twice.
+		res, putErr := fs.PutAttachment(r.Context(), newRequestID(), safeName, io.MultiReader(bytes.NewReader(sample), src))
 		_ = src.Close()
-		_ = finalFile.Close()
-
-		totalWritten := int64(nSample) + copied
-		if totalWritten > maxAttachmentSingleFileSize {
-			_ = os.Remove(finalPath)
-			writeJSONError(w, http.StatusRequestEntityTooLarge, "file size exceeds 20MB limit")
+		if putErr != nil {
+			writeFSError(w, putErr)
 			return
 		}
-
-		if copyErr != nil {
-			_ = os.Remove(finalPath)
-			writeJSONError(w, http.StatusInternalServerError, "failed to save attachment: "+copyErr.Error())
-			return
-		}
-
-		mimeType := detectMimeType(ext, sample)
 
 		savedAttachments = append(savedAttachments, dbmodels.Attachment{
-			Name:     finalName,
-			Path:     "/tmp/attachments/" + finalName,
-			Size:     totalWritten,
-			MimeType: mimeType,
+			Name:     res.Name,
+			Path:     "/tmp/attachments/" + res.Name,
+			Size:     res.Size,
+			MimeType: detectMimeType(ext, sample),
 		})
 	}
 
@@ -220,40 +164,35 @@ func (s *Server) handleSessionAttachmentDownload(w http.ResponseWriter, r *http.
 	}
 
 	filename := r.PathValue("filename")
-	if filename == "" || filepath.Base(filename) != filename || strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
+	if !runnerfs.ValidAttachmentName(filename) {
 		writeJSONError(w, http.StatusBadRequest, "invalid filename")
 		return
 	}
 
-	filePath := filepath.Join(paths.AttachmentsDir(sessionID), filename)
-	info, err := os.Stat(filePath)
+	fs, ferr := s.chatFS(sessionID)
+	if ferr != nil {
+		writeFSError(w, ferr)
+		return
+	}
+	f, err := fs.OpenAttachment(r.Context(), filename)
 	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSONError(w, http.StatusNotFound, "attachment not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to stat attachment: "+err.Error())
+		writeFSError(w, err)
 		return
 	}
+	defer func() { _ = f.Close() }()
 
-	if info.IsDir() {
-		writeJSONError(w, http.StatusBadRequest, "requested path is a directory")
-		return
-	}
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to open attachment: "+err.Error())
-		return
-	}
-	defer func() { _ = file.Close() }()
-
-	ext := filepath.Ext(filename)
-	mimeType := detectMimeType(ext, nil)
+	mimeType := detectMimeType(filepath.Ext(filename), nil)
 
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 
-	http.ServeContent(w, r, filename, info.ModTime(), file)
+	http.ServeContent(w, r, filename, f.ModTime, f)
+}
+
+// newRequestID returns a random id for idempotent runner RPCs.
+func newRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

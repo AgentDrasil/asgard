@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 	"uuid"
 
@@ -196,25 +194,4 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 // tmp and session dirs become TMP/SESSION refs (the runner maps them onto its
 // own layout), everything else is passed as an absolute runner path. The
 // backend never sends its own host paths for per-chat dirs.
-func dirRefFor(chatID, dir string) *runnerpb.DirRef {
-	if dir == "" {
-		return nil
-	}
-	if chatID != "" {
-		for _, c := range []struct {
-			scope runnerpb.FileScope
-			base  string
-		}{
-			{runnerpb.FileScope_FILE_SCOPE_TMP, agents.GetSessionTmpBaseDir(chatID)},
-			{runnerpb.FileScope_FILE_SCOPE_SESSION, agents.GetSessionScopedBaseDir("session", chatID)},
-		} {
-			if dir == c.base {
-				return &runnerpb.DirRef{Scope: c.scope}
-			}
-			if rel, ok := strings.CutPrefix(dir, c.base+string(filepath.Separator)); ok {
-				return &runnerpb.DirRef{Scope: c.scope, RelOrPath: rel}
-			}
-		}
-	}
-	return &runnerpb.DirRef{Scope: runnerpb.FileScope_FILE_SCOPE_ABSOLUTE, RelOrPath: dir}
-}
+func dirRefFor(chatID, dir string) *runnerpb.DirRef { return agents.DirRefFor(chatID, dir) }

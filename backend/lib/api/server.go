@@ -23,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
 	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
@@ -75,6 +76,9 @@ type Server struct {
 	proxyManager        *proxy.ProxyManager
 	auth                *auth.Service
 	runners             RunnerRegistry
+	// runnerClient reaches a runner's RunnerService; fsResolver overrides chatFS.
+	runnerClient runnerClientFunc
+	fsResolver   func(chatID string) (runnerfs.FS, error)
 	// dispatcher executes agent runs (the chat's runner in production).
 	dispatcher dispatch.Dispatcher
 	// queueParks (chatID -> queuePark) keeps queues whose consumer gave up from

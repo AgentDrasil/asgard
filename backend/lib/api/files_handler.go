@@ -570,7 +570,14 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 	isRaw := rawParam == "1" || strings.EqualFold(rawParam, "true")
 
 	if isRaw {
-		serveRawMedia(w, r, absTarget, ext, name, info.ModTime())
+		// TODO(runner-split 8b): files tree/content/search still read the local layout.
+		rawFile, openErr := os.Open(absTarget)
+		if openErr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to open file")
+			return
+		}
+		defer func() { _ = rawFile.Close() }()
+		serveRawMedia(w, r, rawFile, ext, name, info.ModTime())
 		return
 	}
 
