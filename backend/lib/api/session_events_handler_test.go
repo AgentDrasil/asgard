@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,82 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 )
+
+// syncRecorder is an httptest.ResponseRecorder safe to poll while the SSE
+// handler goroutine is still writing to it.
+type syncRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func newSyncRecorder() *syncRecorder {
+	return &syncRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *syncRecorder) Write(b []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(b)
+}
+
+func (r *syncRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *syncRecorder) body() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Body.String()
+}
+
+// waitBody polls until the streamed body contains every substring. The stream
+// is asynchronous, so a fixed sleep is not a barrier and flakes under load.
+func (r *syncRecorder) waitBody(t *testing.T, subs ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b := r.body()
+		ok := true
+		for _, sub := range subs {
+			if !strings.Contains(b, sub) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %q in SSE body:\n%s", subs, b)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// waitSubscriber polls until the handler has registered a hub subscription.
+func waitSubscriber(t *testing.T, hub *SessionEventHub, chatID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		hub.topicsMu.Lock()
+		topic := hub.topics[chatID]
+		hub.topicsMu.Unlock()
+		if topic != nil {
+			topic.mu.Lock()
+			n := len(topic.subscribers)
+			topic.mu.Unlock()
+			if n > 0 {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for SSE subscriber")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
 func TestSessionEventsHandler_SSEStream(t *testing.T) {
 	t.Parallel()
@@ -51,7 +129,7 @@ func TestSessionEventsHandler_SSEStream(t *testing.T) {
 	t.Cleanup(cancel)
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/sessions/%s/events", chatID), nil).WithContext(ctx)
-	rr := httptest.NewRecorder()
+	rr := newSyncRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -59,8 +137,8 @@ func TestSessionEventsHandler_SSEStream(t *testing.T) {
 		server.ServeHTTP(rr, req)
 	}()
 
-	// Wait briefly for handler to connect and flush
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the handler to subscribe before publishing
+	waitSubscriber(t, hub, chatID)
 
 	// Publish an event
 	server.PublishSessionEvent(chatID, SessionEvent{
@@ -73,14 +151,14 @@ func TestSessionEventsHandler_SSEStream(t *testing.T) {
 	})
 
 	// Wait for event to be written
-	time.Sleep(50 * time.Millisecond)
+	rr.waitBody(t, "hello SSE")
 	cancel() // Cancel request context to terminate stream handler
 	<-done
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Header().Get("Content-Type"), "text/event-stream")
 
-	body := rr.Body.String()
+	body := rr.body()
 	assert.Contains(t, body, "event: message")
 	assert.Contains(t, body, "hello SSE")
 }
@@ -141,7 +219,7 @@ func TestSessionEventsHandler_LastEventIDReplay(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/sessions/%s/events", chatID), nil).WithContext(ctx)
 	req.Header.Set("Last-Event-ID", fmt.Sprintf("%d", eventIDs[0]))
-	rr := httptest.NewRecorder()
+	rr := newSyncRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -149,11 +227,11 @@ func TestSessionEventsHandler_LastEventIDReplay(t *testing.T) {
 		server.ServeHTTP(rr, req)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	rr.waitBody(t, fmt.Sprintf("id: %d\n", eventIDs[2]))
 	cancel()
 	<-done
 
-	body := rr.Body.String()
+	body := rr.body()
 	// Should contain event 2 and event 3, but not event 1
 	assert.NotContains(t, body, fmt.Sprintf("id: %d\n", eventIDs[0]))
 	assert.Contains(t, body, fmt.Sprintf("id: %d\n", eventIDs[1]))
@@ -203,7 +281,7 @@ func TestSessionEventsHandler_EvictedResync(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/sessions/%s/events", chatID), nil).WithContext(ctx)
 	req.Header.Set("Last-Event-ID", "1") // 1 was evicted (buffered: 4, 5, 6)
-	rr := httptest.NewRecorder()
+	rr := newSyncRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -211,10 +289,10 @@ func TestSessionEventsHandler_EvictedResync(t *testing.T) {
 		server.ServeHTTP(rr, req)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	rr.waitBody(t, "event: resync")
 	cancel()
 	<-done
 
-	body := rr.Body.String()
+	body := rr.body()
 	assert.Contains(t, body, "event: resync")
 }

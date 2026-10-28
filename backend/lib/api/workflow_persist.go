@@ -724,7 +724,9 @@ func (s *Server) tryResumeWorkflow(chatID string, messageID string, replyText st
 		// totalWaiting == 1: targetMessageID is uniquely determined.
 	}
 
+	s.resumeWG.Add(1)
 	go func() {
+		defer s.resumeWG.Done()
 		s.ensureExecutionGuard(chatID, "", true)
 
 		agentName := s.resolveWorkflowAgentKey(chatID, "")

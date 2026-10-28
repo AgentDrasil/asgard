@@ -72,6 +72,11 @@ func newAskReplyTestServer(t *testing.T) (*Server, *workflowRunStore, string) {
 	engine.SetHumanSuspender(s.suspendWorkflowHuman)
 
 	runDir := t.TempDir()
+	// A resumed run marks itself completed in the store before its final
+	// events/transcript writes land; wait for the resume goroutine so those
+	// writes cannot race TempDir removal. Registered after the TempDirs, so it
+	// runs before them (LIFO).
+	t.Cleanup(func() { waitResumeDone(t, s) })
 	return s, store, runDir
 }
 
@@ -103,6 +108,22 @@ func postAskUserReply(t *testing.T, s *Server, chatID, messageID, reply string) 
 	return rec
 }
 
+// waitResumeDone blocks until the background resume goroutine started by an
+// ask-user reply has finished. The re-driven run is marked COMPLETED in the
+// store before its completion summary is appended to the transcript, so polling
+// the store alone is not a barrier for callers that inspect session state or
+// the session directory afterwards.
+func waitResumeDone(t *testing.T, s *Server) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { s.resumeWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("resume goroutine did not finish")
+	}
+}
+
 func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 	s, store, runDir := newAskReplyTestServer(t)
 	chatID := "chat-wf-resume"
@@ -130,6 +151,7 @@ func TestAskUserReplyResumesWorkflowRun(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 
 	// The reply landed in the session-dir artifact and the ask_user message was marked.
 	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
@@ -170,6 +192,7 @@ func TestAskUserReplyMismatchedMessageIDFallsBackToUniqueWaitingRun(t *testing.T
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 
 	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
@@ -577,6 +600,7 @@ func TestAskUserReply_MultipleConcurrentWaitingRunsInSession(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 
 	// Verify run2 is still WAITING_HUMAN
 	r2, err := store.GetRun("run2")
@@ -600,6 +624,7 @@ func TestAskUserReply_MultipleConcurrentWaitingRunsInSession(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 }
 
 func TestAskUserReply_CrossChatSessionHijackDefense(t *testing.T) {
@@ -662,6 +687,7 @@ func TestAskUserReply_EmptyMessageID_SingleRunFallback(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 
 	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
@@ -769,6 +795,7 @@ func TestAskUserReply_StaleRunPollutionDefense(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitResumeDone(t, s)
 
 	feedback, err := os.ReadFile(filepath.Join(runDir, "data", chatID, "user_feedback.md"))
 	require.NoError(t, err)
