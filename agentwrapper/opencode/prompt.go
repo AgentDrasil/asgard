@@ -98,7 +98,7 @@ func buildPromptArgv(prompt string, opts types.PromptOptions, agentName string) 
 // (see PrepareAgent) so the agent identity and tool permissions are enforced
 // by opencode itself instead of arriving as weak ambient instructions.
 func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*types.PromptResult, error) {
-	agentName, cleanupAgent, err := PrepareAgent(opts)
+	agentName, cleanupAgent, err := PrepareAgent()
 	if err != nil {
 		return nil, err
 	}

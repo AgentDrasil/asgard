@@ -93,15 +93,14 @@ translates it into CLI-native form:
     came from the main agent, and they also overwrite the reported
     `input_tokens`, so the figure can flap while subagents run (and end up as a
     subagent's context if one finishes after the parent's last message).
-  - `--agent` is accepted (the sandbox passes it to every CLI) but unused:
-    the identity travels entirely in the appended contract prompt.
 - **agy**: installs the composed prompt into `~/.gemini/GEMINI.md` for the
   duration of the run and restores the previous content afterwards.
 
 To support a new CLI, the adapter only needs a translation step inside `aw`;
-no sandbox mount code changes are required. Pass the agent identity on the
-`aw <cli>` command line with `--agent <agent-id>` (mapped to
-`types.PromptOptions.AgentID`), which complements the contract metadata.
+no sandbox mount code changes are required. `aw` derives the agent identity
+directly from the `AW_AGENTS.md` contract (`/session/AW_AGENTS.md`) without
+requiring an `--agent` flag from the host. For CLIs like `opencode`, `aw`
+constructs and passes `--agent <agent-id>` directly to `opencode run`.
 
 ---
 

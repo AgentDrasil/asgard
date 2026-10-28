@@ -21,7 +21,6 @@ var (
 	claudeSession string
 	claudeUsage   bool
 	claudeModel   string
-	claudeAgent   string
 )
 
 var claudeCmd = &cobra.Command{
@@ -90,7 +89,6 @@ var claudeCmd = &cobra.Command{
 			Dir:            dir,
 			SessionID:      claudeSession,
 			Model:          claudeModel,
-			AgentID:        claudeAgent,
 			ReportCallback: buildHTTPReporter(),
 		})
 		if err != nil {
@@ -113,7 +111,6 @@ func init() {
 	claudeCmd.Flags().StringVarP(&claudeSession, "session", "s", "", "Session ID to resume")
 	claudeCmd.Flags().BoolVar(&claudeUsage, "usage", false, "Print token usage information")
 	claudeCmd.Flags().StringVarP(&claudeModel, "model", "m", "", "Model to select for the session")
-	claudeCmd.Flags().StringVar(&claudeAgent, "agent", "", "Asgard agent ID (drives CLI-native agent adaptation from the AW_AGENTS.md contract)")
 
 	claudeCmd.AddCommand(claudeModelsCmd)
 }

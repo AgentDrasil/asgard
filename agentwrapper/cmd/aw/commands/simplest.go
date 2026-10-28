@@ -19,7 +19,6 @@ var (
 	simplestSession     string
 	simplestUsage       bool
 	simplestModel       string
-	simplestAgent       string
 	simplestAddTmpToDir bool
 )
 
@@ -85,7 +84,6 @@ var simplestCmd = &cobra.Command{
 			Dir:            dir,
 			SessionID:      simplestSession,
 			Model:          simplestModel,
-			AgentID:        simplestAgent,
 			AddTmpToDir:    simplestAddTmpToDir,
 			ReportCallback: buildHTTPReporter(),
 		})
@@ -109,7 +107,6 @@ func init() {
 	simplestCmd.Flags().StringVarP(&simplestSession, "session", "s", "", "Session ID to resume")
 	simplestCmd.Flags().BoolVar(&simplestUsage, "usage", false, "Print token usage information")
 	simplestCmd.Flags().StringVarP(&simplestModel, "model", "m", "", "Model to select for the session")
-	simplestCmd.Flags().StringVar(&simplestAgent, "agent", "", "Asgard agent ID (drives CLI-native agent adaptation from the AW_AGENTS.md contract)")
 	simplestCmd.Flags().BoolVar(&simplestAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent (no-op for simplest)")
 
 	simplestCmd.AddCommand(simplestModelsCmd)

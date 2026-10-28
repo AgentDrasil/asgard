@@ -117,12 +117,6 @@ type PromptOptions struct {
 	// Model is the name of the model to select.
 	Model string
 
-	// AgentID identifies the Asgard agent being run (agentspec.AgentConfig.ID).
-	// The sandbox-side adapter uses it to materialize CLI-native agent
-	// definitions (e.g. an opencode agents/<id>.md file). When empty, the
-	// adapter falls back to the agent_id in the AW_AGENTS.md contract.
-	AgentID string
-
 	// AddTmpToDir adds /tmp as an additional allowed directory for the agent.
 	AddTmpToDir bool
 

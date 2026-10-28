@@ -27,7 +27,6 @@ var (
 	agySession          string
 	agyUsage            bool
 	agyModel            string
-	agyAgent            string
 	agyAddTmpToDir      bool
 	supportedAgyVersion = "1.2.15"
 )
@@ -104,7 +103,6 @@ var agyCmd = &cobra.Command{
 			Dir:            dir,
 			SessionID:      agySession,
 			Model:          agyModel,
-			AgentID:        agyAgent,
 			AddTmpToDir:    agyAddTmpToDir,
 			ReportCallback: buildHTTPReporter(),
 		})
@@ -159,7 +157,6 @@ func init() {
 	agyCmd.Flags().StringVarP(&agySession, "session", "s", "", "Session ID to resume")
 	agyCmd.Flags().BoolVar(&agyUsage, "usage", false, "Print token usage information")
 	agyCmd.Flags().StringVarP(&agyModel, "model", "m", "", "Model to select for the session")
-	agyCmd.Flags().StringVar(&agyAgent, "agent", "", "Asgard agent ID (drives CLI-native agent adaptation from the AW_AGENTS.md contract)")
 	agyCmd.Flags().BoolVar(&agyAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent")
 
 	agyCmd.AddCommand(agyModelsCmd)

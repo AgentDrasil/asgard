@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
-	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
 // agentsDirName is the opencode global config subdirectory that holds
@@ -30,7 +29,7 @@ const globalAgentsMD = "AGENTS.md"
 // When no contract is mounted (plain `aw opencode` usage outside the Asgard
 // sandbox), PrepareAgent returns ("", no-op, nil) and the caller runs opencode
 // with its native defaults.
-func PrepareAgent(opts types.PromptOptions) (string, func(), error) {
+func PrepareAgent() (string, func(), error) {
 	noop := func() {}
 
 	contract, ok := common.Load()
@@ -38,10 +37,7 @@ func PrepareAgent(opts types.PromptOptions) (string, func(), error) {
 		return "", noop, nil
 	}
 
-	agentID := strings.TrimSpace(opts.AgentID)
-	if agentID == "" {
-		agentID = contract.AgentID
-	}
+	agentID := contract.AgentID
 	agentName := common.SanitizeAgentID(agentID)
 
 	home, err := os.UserHomeDir()

@@ -218,8 +218,8 @@ func TestBuildArgs(t *testing.T) {
 	assert.NotContains(t, string(promptContent), "/bin/ask-user")
 	assert.Contains(t, string(promptContent), "agents instructions")
 
-	// Verify ending command structure with --agent, --session and --prompt
-	expectedEnd := "-- aw agy --agent test-agent --model some-model --add-tmp-to-dir --session my-session-id --prompt some prompt"
+	// Verify ending command structure with --session and --prompt
+	expectedEnd := "-- aw agy --model some-model --add-tmp-to-dir --session my-session-id --prompt some prompt"
 	assert.True(t, strings.HasSuffix(argStr, expectedEnd), "expected suffix %q, got: %s", expectedEnd, argStr)
 
 	// Test case 2: opencode CLITarget without team
@@ -270,7 +270,7 @@ func TestBuildArgs(t *testing.T) {
 	assert.NotContains(t, string(opencodePromptContent), "call-peer")
 	assert.Contains(t, string(opencodePromptContent), "agents instructions")
 
-	expectedEndOpencode := "-- aw opencode --agent test-agent-no-team --model another-model --prompt run"
+	expectedEndOpencode := "-- aw opencode --model another-model --prompt run"
 	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 
 	// Test case 3: simplest CLITarget
@@ -299,7 +299,7 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStrSimplest, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "asgard", "data", "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedSimplestSkills)
-	expectedEndSimplest := "-- aw simplest --agent test-agent --model simple-model --prompt run"
+	expectedEndSimplest := "-- aw simplest --model simple-model --prompt run"
 	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
 }
 

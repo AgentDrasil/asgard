@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
-	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
 func writeContract(t *testing.T, home string, contract *common.Contract) {
@@ -33,7 +32,7 @@ func TestPrepareAgent_NoContract(t *testing.T) {
 	home := withSandboxHome(t)
 	t.Setenv(common.EnvVar, filepath.Join(home, "missing.md"))
 
-	name, cleanup, err := PrepareAgent(types.PromptOptions{AgentID: "intend"})
+	name, cleanup, err := PrepareAgent()
 	require.NoError(t, err)
 	assert.Empty(t, name)
 	cleanup() // no-op, must not error
@@ -48,7 +47,7 @@ func TestPrepareAgent_FullAccessTeam(t *testing.T) {
 		Body:      "Build things.\n",
 	})
 
-	name, cleanup, err := PrepareAgent(types.PromptOptions{})
+	name, cleanup, err := PrepareAgent()
 	require.NoError(t, err)
 	assert.Equal(t, "builder", name)
 
@@ -88,19 +87,6 @@ func TestPrepareAgent_FullAccessTeam(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
-func TestPrepareAgent_OptsAgentIDWins(t *testing.T) {
-	home := withSandboxHome(t)
-	writeContract(t, home, &common.Contract{AgentID: "from-contract", Body: "x"})
-
-	name, cleanup, err := PrepareAgent(types.PromptOptions{AgentID: "From CLI"})
-	require.NoError(t, err)
-	assert.Equal(t, "from-cli", name)
-	defer cleanup()
-
-	_, err = os.Stat(filepath.Join(home, ".config", "opencode", "agents", "from-cli.md"))
-	require.NoError(t, err)
-}
-
 func TestPrepareAgent_RestoresPreexistingAmbient(t *testing.T) {
 	home := withSandboxHome(t)
 	writeContract(t, home, &common.Contract{AgentID: "intend", Body: "x"})
@@ -110,7 +96,7 @@ func TestPrepareAgent_RestoresPreexistingAmbient(t *testing.T) {
 	ambient := filepath.Join(opencodeDir, "AGENTS.md")
 	require.NoError(t, os.WriteFile(ambient, []byte("# my own instructions"), 0644))
 
-	_, cleanup, err := PrepareAgent(types.PromptOptions{})
+	_, cleanup, err := PrepareAgent()
 	require.NoError(t, err)
 
 	// During the run the ambient file is neutralized, not merged.
@@ -139,7 +125,7 @@ func TestPrepareAgent_ReadOnlyAmbient(t *testing.T) {
 	ambient := filepath.Join(opencodeDir, "AGENTS.md")
 	require.NoError(t, os.WriteFile(ambient, []byte("# my own instructions"), 0444))
 
-	_, cleanup, err := PrepareAgent(types.PromptOptions{})
+	_, cleanup, err := PrepareAgent()
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(ambient)

@@ -302,11 +302,6 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	// Target executable and its arguments
 	args = append(args, "aw")
 	args = append(args, target.CLI)
-	// Agent identity: the sandbox-side adapter uses it to materialize
-	// CLI-native agent definitions from the AW_AGENTS.md contract.
-	if cfg != nil && strings.TrimSpace(cfg.ID) != "" {
-		args = append(args, "--agent", cfg.ID)
-	}
 	args = append(args, "--model", target.Model)
 	if spec := agentwrapper.GetSandboxSpec(target.CLI); spec != nil {
 		args = append(args, spec.ExtraArgs()...)
