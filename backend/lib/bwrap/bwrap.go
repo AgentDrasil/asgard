@@ -365,6 +365,15 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 
 	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/bash")
 	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/bash")
+	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/sh")
+	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/sh")
+
+	// Mask fish so it is not usable inside the sandbox (only if present on host).
+	for _, p := range []string{"/usr/bin/fish", "/bin/fish"} {
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, "--ro-bind", "/dev/null", p)
+		}
+	}
 
 	// Change working directory to runDir in the sandbox
 	args = append(args, "--chdir", runDir)
