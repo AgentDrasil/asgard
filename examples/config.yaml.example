@@ -15,9 +15,10 @@ typesafe_api_key: [TYPESAFE_API_KEY]
 chat_lang: English (US)
 doc_lang: English (US)
 comment_lang: English (US)
-# Enabled CLI providers (supported: agy, opencode, simplest; default: all enabled)
+# Enabled CLI providers (supported: agy, claude, opencode, simplest; default: all enabled)
 providers:
   - agy
+  - claude
   - opencode
   - simplest
 webui_path: /opt/asgard/webui

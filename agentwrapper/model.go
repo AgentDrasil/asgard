@@ -2,6 +2,7 @@ package agentwrapper
 
 import (
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/agentwrapper/claude"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
@@ -34,6 +35,10 @@ func ModelCandidates(cli, model string) []string {
 	switch cli {
 	case "opencode":
 		if base, variant := opencode.SplitModelVariant(model); variant != "" && base != model {
+			names = append(names, base)
+		}
+	case "claude":
+		if base, variant := claude.SplitModelVariant(model); variant != "" && base != model {
 			names = append(names, base)
 		}
 	case "agy":

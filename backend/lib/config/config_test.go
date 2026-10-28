@@ -427,7 +427,7 @@ host: 127.0.0.1
 gemini_api_key: test-key
 gemini_model_for_chat_title: gemini-3.1-flash-lite
 `,
-			wantProviders: []string{"agy", "opencode", "simplest"},
+			wantProviders: []string{"agy", "claude", "opencode", "simplest"},
 		},
 		{
 			name: "default when explicit empty list",
@@ -441,7 +441,7 @@ gemini_api_key: test-key
 gemini_model_for_chat_title: gemini-3.1-flash-lite
 providers: []
 `,
-			wantProviders: []string{"agy", "opencode", "simplest"},
+			wantProviders: []string{"agy", "claude", "opencode", "simplest"},
 		},
 		{
 			name: "custom subset single provider",
@@ -554,7 +554,7 @@ func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
 		t.Parallel()
 		var cfg *Config
-		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.Equal(t, []string{"agy", "claude", "opencode", "simplest"}, cfg.GetProviders())
 		assert.True(t, cfg.IsProviderEnabled("agy"))
 		assert.True(t, cfg.IsProviderEnabled("opencode"))
 		assert.True(t, cfg.IsProviderEnabled("simplest"))
@@ -564,13 +564,13 @@ func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
 		providers := cfg.GetProviders()
 		providers[0] = "mutated"
 		assert.Equal(t, "agy", SupportedProviders[0])
-		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.Equal(t, []string{"agy", "claude", "opencode", "simplest"}, cfg.GetProviders())
 	})
 
 	t.Run("empty config (no providers set)", func(t *testing.T) {
 		t.Parallel()
 		cfg := &Config{}
-		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.Equal(t, []string{"agy", "claude", "opencode", "simplest"}, cfg.GetProviders())
 		assert.True(t, cfg.IsProviderEnabled("agy"))
 		assert.True(t, cfg.IsProviderEnabled("opencode"))
 		assert.True(t, cfg.IsProviderEnabled("simplest"))
@@ -579,7 +579,7 @@ func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
 		// Check copy isolation
 		providers := cfg.GetProviders()
 		providers[0] = "mutated"
-		assert.Equal(t, []string{"agy", "opencode", "simplest"}, cfg.GetProviders())
+		assert.Equal(t, []string{"agy", "claude", "opencode", "simplest"}, cfg.GetProviders())
 	})
 
 	t.Run("custom providers configured", func(t *testing.T) {

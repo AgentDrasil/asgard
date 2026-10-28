@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/moznion/go-optional"
@@ -411,6 +412,15 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 			if _, err := os.Stat(dir); err == nil {
 				args = append(args, "--bind", dir, dir)
 			}
+		}
+		envs := spec.ExtraEnv(home)
+		keys := make([]string, 0, len(envs))
+		for k := range envs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			args = append(args, "--setenv", k, envs[k])
 		}
 	}
 

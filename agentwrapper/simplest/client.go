@@ -57,6 +57,10 @@ func (c *Client) AuthDirectory(home string) string {
 	return ""
 }
 
+func (c *Client) ExtraEnv(home string) map[string]string {
+	return nil
+}
+
 func (c *Client) AuthFiles(home string) []string {
 	return []string{
 		home + "/.config/simplest/key.yaml",

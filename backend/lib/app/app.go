@@ -266,6 +266,11 @@ func New(opts ...Option) (*App, error) {
 					log.Warn().Err(err).Msg("agy agent setup validation failed")
 					diagnostics.AddError("cli_auth", err.Error())
 				}
+			case "claude":
+				if err := agentwrapper.ValidateClaudeSetup(); err != nil {
+					log.Warn().Err(err).Msg("claude agent setup validation failed")
+					diagnostics.AddError("cli_auth", err.Error())
+				}
 			case "opencode":
 				if err := agentwrapper.ValidateOpencodeSetup(); err != nil {
 					log.Warn().Err(err).Msg("opencode agent setup validation failed")

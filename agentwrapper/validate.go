@@ -32,6 +32,28 @@ func ValidateAgySetup() error {
 	return nil
 }
 
+// ValidateClaudeSetup verifies that claude is correctly set up on the user's system.
+// It checks that ~/.claude/.credentials.json exists.
+func ValidateClaudeSetup() error {
+	home, err := homeDirFn()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	credPath := filepath.Join(home, ".claude", ".credentials.json")
+	if fi, err := os.Stat(credPath); err != nil {
+		if os.IsNotExist(err) {
+			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
+			return fmt.Errorf("claude setup validation failed: credentials file does not exist at %s. Please run 'docker exec -it -e CLAUDE_CONFIG_DIR=%s <container_name> claude' to log in (find the container name via 'docker ps').", credPath, filepath.Join(home, ".claude"))
+		}
+		return fmt.Errorf("failed to check credentials: %w", err)
+	} else if fi.IsDir() {
+		return fmt.Errorf("claude setup validation failed: credentials path %s is a directory", credPath)
+	}
+
+	return nil
+}
+
 // ValidateOpencodeSetup verifies that opencode is correctly set up on the user's system.
 // It checks that ~/.local/share/opencode/opencode.db exists.
 func ValidateOpencodeSetup() error {

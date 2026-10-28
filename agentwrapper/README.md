@@ -1,6 +1,6 @@
 # `agentwrapper` - Agent Wrapper & CLI Abstraction Package
 
-`agentwrapper` provides a unified Go interface (`CLIClient` and `SandboxSpec`) to integrate, manage, and execute external CLI AI coding agents (such as `agy` and `opencode`) within Asgard.
+`agentwrapper` provides a unified Go interface (`CLIClient` and `SandboxSpec`) to integrate, manage, and execute external CLI AI coding agents (such as `agy`, `claude`, and `opencode`) within Asgard.
 
 ---
 
@@ -21,8 +21,8 @@ Here is the breakdown of responsibilities across Asgard:
 
 2. **Outside `agentwrapper` (Where else logic resides)**:
     - **`lib/bwrap/`**: Renders the `AW_AGENTS.md` contract (agent identity metadata + prompt body) and bind-mounts it at the canonical `/session/AW_AGENTS.md` path; consumes `types.SandboxSpec` via `agentwrapper.GetSandboxSpec(cliName)` for skills mounts, directory binds, authentication directories, and extra args.
-    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
-    - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods. Inside the sandbox, `aw` loads the `AW_AGENTS.md` contract (`agentwrapper/common`) and translates it into CLI-native agent definitions (opencode `agents/<id>.md`, simplest custom prompt, agy `GEMINI.md`).
+    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateClaudeSetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
+    - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `claude.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods. Inside the sandbox, `aw` loads the `AW_AGENTS.md` contract (`agentwrapper/common`) and translates it into CLI-native agent definitions (opencode `agents/<id>.md`, simplest custom prompt, agy `GEMINI.md`, claude `--append-system-prompt-file`).
     - **`lib/agents/run/`**: Handles runtime agent execution within Bubblewrap sandboxes and performs quota checks using `agentwrapper.CheckQuota(cli, model)`.
     - **`lib/api/`**: Serves HTTP endpoints (e.g., `/api/quota`) by delegating quota queries to `agentwrapper.GetQuota(ctx)`.
 
@@ -49,6 +49,8 @@ type SandboxSpec interface {
     SkillsMountPath(home string) string
     MountDirectories(home string) []string
     AuthDirectory(home string) string
+    AuthFiles(home string) []string
+    ExtraEnv(home string) map[string]string
     ExtraArgs() []string
 }
 ```
@@ -69,6 +71,34 @@ translates it into CLI-native form:
 - **simplest**: composes the in-process system prompt from the CLI protocol
   headers plus the contract body, and selects/crops the tool set from the
   contract's `tool_access`.
+- **claude**: passes the composed prompt via `--append-system-prompt-file` (a temp file) and
+  derives `--disallowedTools` from the contract (`AskUserQuestion` always,
+  `Task`/`Agent` for team agents, `Bash` for doc-only). Runs
+  `claude --print --verbose --output-format stream-json
+  --dangerously-skip-permissions` (the sandbox must not run as root); a new
+  session gets a generated `--session-id`, a given one uses `--resume`, and a
+  `/low|medium|high|xhigh|max` model suffix maps to `--effort`. Quota comes
+  from parsing the text output of `/usage`.
+
+  The sandbox sets `CLAUDE_CONFIG_DIR=~/.claude` (via `SandboxSpec.ExtraEnv`,
+  also baked into the Docker image) so claude's `.claude.json` lives inside
+  the bound `~/.claude` directory: claude rewrites that file with a rename,
+  which would detach a single-file bind mount. Log in with the same variable
+  set (`docker exec -it -e CLAUDE_CONFIG_DIR=<home>/.claude <container> claude`).
+  `DISABLE_AUTOUPDATER=1` is set too; updates come from rebuilding the image.
+
+  Known limitations of the claude adapter:
+  - Subscription accounts only: quota comes from `/usage`, so API-key, Bedrock
+    and Vertex accounts fail the quota check. Only the `fable`, `opus`,
+    `sonnet` and `haiku` aliases are supported.
+  - Subagent messages (lines with `parent_tool_use_id`) are reported as if they
+    came from the main agent, and they also overwrite the reported
+    `input_tokens`, so the figure can flap while subagents run (and end up as a
+    subagent's context if one finishes after the parent's last message).
+  - `doc-only` only disallows `Bash`; other command-capable tools (e.g.
+    `Monitor`) and source editing stay available. doc-only is being deprecated.
+  - `--agent` is accepted (the sandbox passes it to every CLI) but unused:
+    the identity travels entirely in the appended contract prompt.
 - **agy**: installs the composed prompt into `~/.gemini/GEMINI.md` for the
   duration of the run and restores the previous content afterwards.
 
@@ -152,6 +182,7 @@ import (
 
 var defaultClients = map[string]types.CLIClient{
     "agy":      &agy.Client{},
+    "claude":   &claude.Client{},
     "opencode": &opencode.Client{},
     "myagent":  &myagent.Client{}, // <-- Register here
 }

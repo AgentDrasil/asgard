@@ -77,13 +77,13 @@ Both sandboxes bind-mount per-chat host directories: `~/asgard/data/tmp/<chat-id
 The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/asgard/data/sessions/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
-    *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini` or `~/.config/opencode`) so it can make API calls to LLM providers.
+    *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini`, `~/.claude` or `~/.config/opencode`) so it can make API calls to LLM providers.
     *   System directories (`/bin`, `/usr/bin`, etc.) are mounted read-only.
     *   `/bin/bash` and `/usr/bin/bash` are bind-mounted to [fakebash](fakebash/cmd/fakebash/main.go) to intercept any shell command executions by the agent.
 *   **Command Execution Sandbox**: Runs the [fakebashd](fakebash/cmd/fakebashd/main.go) daemon.
     *   This is where actual shell commands requested by the agent are executed.
     *   It mounts the active `runDir` read-write, allowing commands to read/write workspace files.
-    *   **Credential Masking**: To prevent credential theft, sensitive directories such as `~/.gemini` and `~/.local/share/opencode` are masked with empty `tmpfs` mounts, ensuring that commands executed by the agent cannot read authentication keys.
+    *   **Credential Masking**: To prevent credential theft, sensitive directories such as `~/.gemini`, `~/.claude` and `~/.local/share/opencode` are masked with empty `tmpfs` mounts, ensuring that commands executed by the agent cannot read authentication keys.
 
 ### 2. Communication Protocol (`fakebash` & `fakebashd`)
 

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
+	"github.com/AgentDrasil/asgard/agentwrapper/claude"
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
@@ -16,6 +17,7 @@ import (
 
 var defaultClients = map[string]types.CLIClient{
 	"agy":      &agy.Client{},
+	"claude":   &claude.Client{},
 	"opencode": &opencode.Client{},
 	"simplest": &simplest.Client{},
 }

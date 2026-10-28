@@ -57,6 +57,10 @@ func (c *Client) AuthDirectory(home string) string {
 	return home + "/.local/share/opencode"
 }
 
+func (c *Client) ExtraEnv(home string) map[string]string {
+	return nil
+}
+
 func (c *Client) AuthFiles(home string) []string {
 	return nil
 }

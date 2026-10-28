@@ -42,6 +42,7 @@ doc_lang: "English (US)"
 comment_lang: "English (US)"
 providers:
   - agy
+  - claude
   - opencode
   - simplest
 # Credential Injection Proxy (Optional). The standalone proxy config, CA cert

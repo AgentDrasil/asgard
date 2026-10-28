@@ -623,3 +623,40 @@ func TestCommandForAgent_APIKeyInjection(t *testing.T) {
 	assert.Contains(t, argStr, "--setenv GEMINI_API_KEY my-gemini-key")
 	assert.Contains(t, argStr, "--setenv GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS my-compass-model")
 }
+
+// TestCommandForAgent_ClaudeEnv verifies the claude sandbox relocates its
+// config into the bound ~/.claude directory instead of a single-file bind.
+func TestCommandForAgent_ClaudeEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".claude", ".cache", ".npm", ".ssh"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, subDir), 0755))
+	}
+
+	target := agentspec.CLITarget{CLI: "claude", Model: "sonnet"}
+	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "")
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+	assert.Contains(t, argStr, "--bind "+filepath.Join(tmpDir, ".claude")+" "+filepath.Join(tmpDir, ".claude"))
+	assert.Contains(t, argStr, "--setenv CLAUDE_CONFIG_DIR "+filepath.Join(tmpDir, ".claude"))
+	assert.Contains(t, argStr, "--setenv DISABLE_AUTOUPDATER 1")
+	assert.NotContains(t, argStr, "--bind "+filepath.Join(tmpDir, ".claude.json"))
+}
+
+// TestCommandForCommandExec_MasksClaudeConfigDir verifies the bash sandbox
+// hides ~/.claude, which now also holds .claude.json (account and MCP data).
+func TestCommandForCommandExec_MasksClaudeConfigDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".ssh"), 0755))
+	runDir := filepath.Join(tmpDir, "rundir")
+	require.NoError(t, os.MkdirAll(runDir, 0755))
+
+	cmd, err := CommandForCommandExec(runDir, "sock", "chat-1", "", false)
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(cmd.Args, " "), "--tmpfs "+claudeDir)
+}

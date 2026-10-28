@@ -68,7 +68,7 @@ func (c *Config) AuthConfig() *auth.Config {
 
 var SupportedUILangs = []string{"en", "zh-CN"}
 
-var SupportedProviders = []string{"agy", "opencode", "simplest"}
+var SupportedProviders = []string{"agy", "claude", "opencode", "simplest"}
 
 func isSupportedProvider(name string) bool {
 	for _, p := range SupportedProviders {

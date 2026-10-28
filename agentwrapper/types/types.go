@@ -31,6 +31,8 @@ type SandboxSpec interface {
 	MountDirectories(home string) []string
 	AuthDirectory(home string) string
 	AuthFiles(home string) []string
+	// ExtraEnv returns environment variables the sandbox must set for the CLI.
+	ExtraEnv(home string) map[string]string
 	ExtraArgs() []string
 }
 
@@ -211,6 +213,12 @@ var exactModelContextTable = map[string]int{
 	"gemini-3.8-flash-high":    1048576,
 	"gemini-3.8-flash-low":     1048576,
 	"gemini-3.8-flash-medium":  1048576,
+
+	// claude (aliases)
+	"fable":  1048576,
+	"opus":   1048576,
+	"sonnet": 1048576,
+	"haiku":  1048576,
 
 	// opencode
 	"opencode/big-pickle":                      200000,

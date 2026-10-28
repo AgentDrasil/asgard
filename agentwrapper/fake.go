@@ -85,6 +85,10 @@ func (c *FakeClient) AuthDirectory(home string) string {
 	return ""
 }
 
+func (c *FakeClient) ExtraEnv(home string) map[string]string {
+	return nil
+}
+
 func (c *FakeClient) AuthFiles(home string) []string {
 	if c.AuthFilesFunc != nil {
 		return c.AuthFilesFunc(home)

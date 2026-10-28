@@ -39,6 +39,10 @@ RUN chmod +x /tmp/install-agy.sh && /tmp/install-agy.sh --dir /bin && rm /tmp/in
 COPY docker-scripts/install-opencode.sh /tmp/install-opencode.sh
 RUN chmod +x /tmp/install-opencode.sh && /tmp/install-opencode.sh --dir /bin && rm /tmp/install-opencode.sh
 
+# Install claude (Claude Code)
+COPY docker-scripts/install-claude.sh /tmp/install-claude.sh
+RUN chmod +x /tmp/install-claude.sh && /tmp/install-claude.sh --dir /bin && rm /tmp/install-claude.sh
+
 # Install lightpanda
 COPY docker-scripts/install-lightpanda.sh /tmp/install-lightpanda.sh
 RUN chmod +x /tmp/install-lightpanda.sh && /tmp/install-lightpanda.sh --dir /bin && rm /tmp/install-lightpanda.sh
@@ -181,5 +185,11 @@ COPY --from=webui-builder /webui/dist /opt/asgard/webui
 
 USER user
 WORKDIR /home/user
+
+# Keep claude's config (.claude.json) inside ~/.claude, which the sandbox binds
+# and masks as a directory; claude rewrites the file via rename, which breaks
+# single-file bind mounts. Updates happen by rebuilding the image.
+ENV CLAUDE_CONFIG_DIR=/home/user/.claude
+ENV DISABLE_AUTOUPDATER=1
 
 CMD ["asgard"]
