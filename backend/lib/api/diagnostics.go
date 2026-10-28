@@ -17,6 +17,7 @@ type DiagnosticsSnapshot struct {
 	Status   string   `json:"status"` // "ok" | "degraded"
 	Errors   []string `json:"errors"`
 	Warnings []string `json:"warnings"`
+	Version  string   `json:"version"`
 }
 
 // LogEntry represents an individual system log entry in the diagnostic history.

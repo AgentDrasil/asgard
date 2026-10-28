@@ -27,6 +27,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute build version
+        id: version
+        run: echo "value=$(date -u +%Y-%m-%d-%H-%M-%S):$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata (tags, labels) for main image
         id: meta
         uses: docker/metadata-action@v6
@@ -43,6 +47,8 @@ jobs:
           context: .
           file: Dockerfile
           target: runner
+          build-args: |
+            ASGARD_VERSION=${{ steps.version.outputs.value }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

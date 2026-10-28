@@ -9,6 +9,7 @@ require (
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0
+	github.com/AgentDrasil/asgard/pkg/version v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/creack/pty v1.1.24
@@ -203,6 +204,7 @@ replace (
 	github.com/AgentDrasil/asgard/pkg/metrics => ../pkg/metrics
 	github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
+	github.com/AgentDrasil/asgard/pkg/version => ../pkg/version
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
 	github.com/AgentDrasil/asgard/simplest => ../simplest
 )

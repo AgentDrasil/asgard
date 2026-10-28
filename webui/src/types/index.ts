@@ -224,6 +224,7 @@ export interface SystemStatusResponse {
   status: "ok" | "degraded";
   errors?: string[];
   warnings?: string[];
+  version: string;
 }
 
 export interface ConfigFileResponse {

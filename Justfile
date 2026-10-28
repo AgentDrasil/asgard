@@ -38,9 +38,12 @@ lint:
     golangci-lint run {{module_patterns}}
     cd webui && pnpm run lint
 
+# Build version: UTC build time and short commit
+version := `date -u +%Y-%m-%d-%H-%M-%S` + ":" + `git rev-parse --short=8 HEAD`
+
 # Build backend and webui
 build:
-    mkdir -p build && go build -o build/ {{module_patterns}}
+    mkdir -p build && go build -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version={{version}}" -o build/ {{module_patterns}}
     cd webui && pnpm run build
 
 # Test backend and webui
@@ -54,15 +57,15 @@ e2e-test:
 
 # Install aw binary
 install-aw:
-    go install ./agentwrapper/cmd/aw
+    go install -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version={{version}}" ./agentwrapper/cmd/aw
 
 # Install agystatusline binary
 install-agystatusline:
-    go install ./agystatusline/cmd/agystatusline
+    go install -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version={{version}}" ./agystatusline/cmd/agystatusline
 
 # Install agent-validate binary
 install-agent-validate:
-    go install ./cmd/agent-validate
+    go install -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version={{version}}" ./cmd/agent-validate
 
 # Compile protobuf and gRPC definitions for fakebash
 compile-proto:
@@ -70,4 +73,4 @@ compile-proto:
 
 # Build Docker Image
 build-image:
-    docker build -t ghcr.io/agentdrasil/asgard:main -f Dockerfile .
+    docker build --build-arg ASGARD_VERSION={{version}} -t ghcr.io/agentdrasil/asgard:main -f Dockerfile .

@@ -22,6 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/pkg/version"
 )
 
 type mockClient struct {
@@ -245,6 +246,7 @@ teams:
 	require.NoError(t, err)
 	assert.Equal(t, "ok", snap.Status)
 	assert.Empty(t, snap.Errors)
+	assert.Equal(t, version.Get(), snap.Version)
 
 	// 2. Add error -> "degraded"
 	srv.Diagnostics().AddError("config", "corrupted syntax")

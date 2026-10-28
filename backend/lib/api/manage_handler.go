@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/pkg/version"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -219,6 +220,7 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			Warnings: []string{},
 		}
 	}
+	snap.Version = version.Get()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(snap)
