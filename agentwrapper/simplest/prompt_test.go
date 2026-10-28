@@ -204,9 +204,7 @@ func TestSelectTools(t *testing.T) {
 	dir := t.TempDir()
 	reg := simplest.DefaultRegistry(dir)
 
-	// Default ("" or full): complete tool set.
-	fullTools, fullNames, err := selectTools("", reg.Tools())
-	require.NoError(t, err)
+	fullTools, fullNames := selectTools(reg.Tools())
 	assert.ElementsMatch(t, []string{"read", "bash", "edit", "write", "find", "grep", "ls"}, fullNames)
 	for _, t2 := range fullTools {
 		if t2.Name() != "write" {
@@ -219,17 +217,6 @@ func TestSelectTools(t *testing.T) {
 		require.NoError(t, readErr)
 		require.Equal(t, "x", string(content))
 	}
-
-	// Full tool access explicitly.
-	fullTools2, fullNames2, err := selectTools(types.ToolAccessFull, reg.Tools())
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"read", "bash", "edit", "write", "find", "grep", "ls"}, fullNames2)
-	assert.Len(t, fullTools2, len(fullTools))
-
-	// Unknown mode: fail closed.
-	_, _, err = selectTools("unknown", reg.Tools())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unsupported tool access mode "unknown"`)
 }
 
 func TestAgentIdentityPrompt(t *testing.T) {
@@ -810,8 +797,7 @@ func TestPrompt_CoderAgentKeepsFullTools(t *testing.T) {
 	t.Cleanup(ResetProviderResolver)
 
 	_, err := Prompt(context.Background(), "Implement the parser", types.PromptOptions{
-		Dir:        testDir,
-		ToolAccess: types.ToolAccessFull,
+		Dir: testDir,
 	})
 	require.NoError(t, err)
 
@@ -952,8 +938,7 @@ func TestPrompt_IncrementalPersistenceOnCancel(t *testing.T) {
 	t.Cleanup(ResetProviderResolver)
 
 	res, err := Prompt(ctx, "Run bash task", types.PromptOptions{
-		Dir:        testDir,
-		ToolAccess: types.ToolAccessFull,
+		Dir: testDir,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -1071,8 +1056,7 @@ func TestPrompt_PersistErrorPropagated(t *testing.T) {
 	t.Cleanup(ResetProviderResolver)
 
 	res, err := Prompt(ctx, "hello", types.PromptOptions{
-		Dir:        testDir,
-		ToolAccess: types.ToolAccessFull,
+		Dir: testDir,
 	})
 	require.Error(t, err, "Prompt must return an error when message persistence fails")
 	assert.Nil(t, res)

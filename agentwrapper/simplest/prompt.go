@@ -151,19 +151,8 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("building session context: %w", err)
 	}
 
-	// Assemble tools according to the configured tool access mode.
-	// The --tool-access flag wins when set; otherwise the AW_AGENTS.md
-	// contract metadata (when mounted) provides it.
-	toolAccess := opts.ToolAccess
-	contract, hasContract := common.Load()
-	if toolAccess == "" && hasContract {
-		toolAccess = contract.ToolAccess
-	}
 	reg := simplest.DefaultRegistry(runDir)
-	toolList, toolNames, err := selectTools(toolAccess, reg.Tools())
-	if err != nil {
-		return nil, err
-	}
+	toolList, toolNames := selectTools(reg.Tools())
 
 	// Build system prompt
 	home, err := os.UserHomeDir()
@@ -173,7 +162,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	agentCfgDir := filepath.Join(home, ".config", "simplest")
 	contextFiles := simplest.LoadProjectContextFiles(runDir, agentCfgDir)
 	var customPrompt string
-	if hasContract {
+	if contract, hasContract := common.Load(); hasContract {
 		// The AW_AGENTS.md contract is the authoritative agent identity in
 		// sandbox runs: compose the CLI protocol headers with its body. Any
 		// lingering instruction files under the agent config directory (e.g.
@@ -353,19 +342,13 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}, nil
 }
 
-// selectTools returns the tool set for the configured access mode. Unknown
-// modes are rejected (fail closed): "" or "full" selects the default full tool set.
-func selectTools(toolAccess string, allTools []simplest.AgentTool) ([]simplest.AgentTool, []string, error) {
-	switch toolAccess {
-	case "", types.ToolAccessFull:
-		names := make([]string, 0, len(allTools))
-		for _, t := range allTools {
-			names = append(names, t.Name())
-		}
-		return allTools, names, nil
-	default:
-		return nil, nil, fmt.Errorf("unsupported tool access mode %q: must be %q", toolAccess, types.ToolAccessFull)
+// selectTools extracts tool names and returns the full tool set.
+func selectTools(allTools []simplest.AgentTool) ([]simplest.AgentTool, []string) {
+	names := make([]string, 0, len(allTools))
+	for _, t := range allTools {
+		names = append(names, t.Name())
 	}
+	return allTools, names
 }
 
 // filterAgentCfgFiles drops loaded instruction files that live under the

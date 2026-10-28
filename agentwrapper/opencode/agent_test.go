@@ -42,11 +42,10 @@ func TestPrepareAgent_NoContract(t *testing.T) {
 func TestPrepareAgent_FullAccessTeam(t *testing.T) {
 	home := withSandboxHome(t)
 	writeContract(t, home, &common.Contract{
-		AgentID:    "builder",
-		AgentName:  "Builder",
-		ToolAccess: types.ToolAccessFull,
-		Team:       "core",
-		Body:       "Build things.\n",
+		AgentID:   "builder",
+		AgentName: "Builder",
+		Team:      "core",
+		Body:      "Build things.\n",
 	})
 
 	name, cleanup, err := PrepareAgent(types.PromptOptions{})

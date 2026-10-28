@@ -13,18 +13,16 @@ func TestRenderParseRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	original := &Contract{
-		AgentID:    "intend",
-		AgentName:  "Intend Planner",
-		ToolAccess: "full",
-		Team:       "core-team",
-		Body:       "## Language Preferences\n\nrule body here",
+		AgentID:   "intend",
+		AgentName: "Intend Planner",
+		Team:      "core-team",
+		Body:      "## Language Preferences\n\nrule body here",
 	}
 
 	parsed, ok := Parse([]byte(Render(original)))
 	require.True(t, ok)
 	assert.Equal(t, original.AgentID, parsed.AgentID)
 	assert.Equal(t, original.AgentName, parsed.AgentName)
-	assert.Equal(t, original.ToolAccess, parsed.ToolAccess)
 	assert.Equal(t, original.Team, parsed.Team)
 	assert.Equal(t, original.Body, parsed.Body)
 }
@@ -45,7 +43,6 @@ func TestRenderOmitsEmptyFields(t *testing.T) {
 	out := Render(&Contract{AgentID: "intend", Body: "body"})
 	assert.Contains(t, out, "agent_id: intend")
 	assert.NotContains(t, out, "agent_name")
-	assert.NotContains(t, out, "tool_access")
 	assert.NotContains(t, out, "team")
 	assert.Contains(t, out, "\nbody")
 }

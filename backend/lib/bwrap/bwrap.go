@@ -64,7 +64,6 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 	if cfg != nil {
 		contract.AgentID = strings.TrimSpace(cfg.ID)
 		contract.AgentName = strings.TrimSpace(cfg.Name)
-		contract.ToolAccess = strings.TrimSpace(cfg.ToolAccess)
 		contract.Team = strings.TrimSpace(cfg.Team)
 	}
 	content := common.Render(contract)
@@ -311,10 +310,6 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	args = append(args, "--model", target.Model)
 	if spec := agentwrapper.GetSandboxSpec(target.CLI); spec != nil {
 		args = append(args, spec.ExtraArgs()...)
-	}
-	// Only the simplest CLI understands --tool-access.
-	if target.CLI == "simplest" && cfg != nil && cfg.ToolAccess != "" {
-		args = append(args, "--tool-access", cfg.ToolAccess)
 	}
 	if session.IsSome() {
 		sessVal := session.Unwrap()

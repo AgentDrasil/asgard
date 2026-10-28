@@ -36,12 +36,6 @@ type SandboxSpec interface {
 	ExtraArgs() []string
 }
 
-// Tool access modes controlling which tools an agent may use.
-const (
-	// ToolAccessFull exposes the complete built-in tool set (default).
-	ToolAccessFull = "full"
-)
-
 // CLIClient defines the interface that all CLI agents must implement.
 type CLIClient interface {
 	Usage(ctx context.Context, opts UsageOptions) ([]ModelUsage, error)
@@ -128,11 +122,6 @@ type PromptOptions struct {
 	// definitions (e.g. an opencode agents/<id>.md file). When empty, the
 	// adapter falls back to the agent_id in the AW_AGENTS.md contract.
 	AgentID string
-
-	// ToolAccess selects the tool set exposed to the agent. Valid value is
-	// ToolAccessFull (default).
-	// Unsupported values must be rejected by the CLI (fail closed).
-	ToolAccess string
 
 	// AddTmpToDir adds /tmp as an additional allowed directory for the agent.
 	AddTmpToDir bool

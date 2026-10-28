@@ -42,9 +42,6 @@ type Contract struct {
 	// AgentName is the human-readable agent name.
 	AgentName string
 
-	// ToolAccess declares the agent's tool set ("full").
-	ToolAccess string
-
 	// Team is the agent's team name; non-empty means the agent operates in
 	// a multi-agent team and should receive the peer-collaboration header.
 	Team string
@@ -56,7 +53,7 @@ type Contract struct {
 
 // IsEmpty reports whether the contract carries no metadata and no body.
 func (c *Contract) IsEmpty() bool {
-	return c == nil || (c.AgentID == "" && c.AgentName == "" && c.ToolAccess == "" && c.Team == "" && strings.TrimSpace(c.Body) == "")
+	return c == nil || (c.AgentID == "" && c.AgentName == "" && c.Team == "" && strings.TrimSpace(c.Body) == "")
 }
 
 // Path returns the contract file location: $AW_AGENTS_PATH when set,
@@ -125,8 +122,6 @@ func parseFrontmatter(content string, c *Contract) string {
 			c.AgentID = value
 		case "agent_name":
 			c.AgentName = value
-		case "tool_access":
-			c.ToolAccess = value
 		case "team":
 			c.Team = value
 		}
@@ -161,7 +156,6 @@ func Render(c *Contract) string {
 	sb.WriteString(frontmatterDelimiter + "\n")
 	writeMetaLine(&sb, "agent_id", c.AgentID)
 	writeMetaLine(&sb, "agent_name", c.AgentName)
-	writeMetaLine(&sb, "tool_access", c.ToolAccess)
 	writeMetaLine(&sb, "team", c.Team)
 	sb.WriteString(frontmatterDelimiter + "\n")
 	if body := strings.TrimSpace(c.Body); body != "" {

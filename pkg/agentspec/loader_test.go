@@ -379,34 +379,6 @@ func TestAgentConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid tool_access full",
-			config: AgentConfig{
-				ID:          "agent-one",
-				Name:        "agent1",
-				Description: "Test Agent 1",
-				CLI: []CLITarget{
-					{CLI: "agy", Model: "gemini-2.5-flash"},
-				},
-				RunDirs:    []string{"/tmp/run"},
-				ToolAccess: "full",
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid tool_access",
-			config: AgentConfig{
-				ID:          "agent-one",
-				Name:        "agent1",
-				Description: "Test Agent 1",
-				CLI: []CLITarget{
-					{CLI: "agy", Model: "gemini-2.5-flash"},
-				},
-				RunDirs:    []string{"/tmp/run"},
-				ToolAccess: "preview",
-			},
-			wantErr: true,
-		},
-		{
 			name: "main_agent true without run_dirs",
 			config: AgentConfig{
 				ID:          "agent-one",

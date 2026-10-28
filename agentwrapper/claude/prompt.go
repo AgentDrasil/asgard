@@ -46,20 +46,9 @@ type agentSetup struct {
 // no contract mounted (plain `aw claude` outside the sandbox) it returns the
 // zero value and claude runs with its native defaults.
 func prepareAgent(opts types.PromptOptions) (agentSetup, error) {
-	toolAccess := strings.TrimSpace(opts.ToolAccess)
-	if toolAccess != "" && toolAccess != types.ToolAccessFull {
-		return agentSetup{}, fmt.Errorf("unsupported tool access %q", toolAccess)
-	}
-
 	contract, ok := common.Load()
 	if !ok {
 		return agentSetup{}, nil
-	}
-	if toolAccess == "" {
-		toolAccess = strings.TrimSpace(contract.ToolAccess)
-	}
-	if toolAccess != "" && toolAccess != types.ToolAccessFull {
-		return agentSetup{}, fmt.Errorf("unsupported tool access %q", toolAccess)
 	}
 
 	c := &Client{}

@@ -47,15 +47,6 @@ func writeContractFile(t *testing.T, home string, contract *common.Contract) str
 	return path
 }
 
-func toolNamesOf(t *testing.T, cx *simplest.Context) []string {
-	t.Helper()
-	var names []string
-	for _, td := range cx.Tools {
-		names = append(names, td.Name)
-	}
-	return names
-}
-
 func TestPrompt_ContractDrivesIdentity(t *testing.T) {
 	home := t.TempDir()
 	capturingP, _ := setupCapturedPrompt(t, home, "workspace")
@@ -69,11 +60,10 @@ func TestPrompt_ContractDrivesIdentity(t *testing.T) {
 		[]byte("HOST_USER_CONTRACT_COMPETITOR"), 0644))
 
 	writeContractFile(t, home, &common.Contract{
-		AgentID:    "intend",
-		AgentName:  "Intend",
-		ToolAccess: types.ToolAccessFull,
-		Team:       "core",
-		Body:       "CONTRACT_IDENTITY_BODY",
+		AgentID:   "intend",
+		AgentName: "Intend",
+		Team:      "core",
+		Body:      "CONTRACT_IDENTITY_BODY",
 	})
 
 	res, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir})
@@ -107,53 +97,6 @@ func TestPrompt_ContractTeamGatesPeerHeader(t *testing.T) {
 	assert.Contains(t, sysPrompt, "SOLO_BODY")
 	assert.Contains(t, sysPrompt, "/bin/ask-user")
 	assert.NotContains(t, sysPrompt, "call-peer")
-}
-
-func TestPrompt_ContractToolAccessFallback(t *testing.T) {
-	home := t.TempDir()
-	capturingP, _ := setupCapturedPrompt(t, home, "workspace")
-	testDir := filepath.Join(home, "workspace")
-
-	writeContractFile(t, home, &common.Contract{AgentID: "intend", ToolAccess: types.ToolAccessFull, Body: "x"})
-
-	_, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir})
-	require.NoError(t, err)
-
-	require.NotEmpty(t, capturingP.capturedCtxs)
-	names := toolNamesOf(t, capturingP.capturedCtxs[0])
-	assert.Contains(t, names, "bash")
-	assert.Contains(t, names, "edit")
-	assert.Contains(t, names, "write")
-	assert.Contains(t, names, "read")
-}
-
-func TestPrompt_FlagToolAccessWinsOverContract(t *testing.T) {
-	home := t.TempDir()
-	capturingP, _ := setupCapturedPrompt(t, home, "workspace")
-	testDir := filepath.Join(home, "workspace")
-
-	writeContractFile(t, home, &common.Contract{AgentID: "coder", ToolAccess: "", Body: "x"})
-
-	// Explicit flag overrides the contract metadata.
-	_, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir, ToolAccess: types.ToolAccessFull})
-	require.NoError(t, err)
-
-	require.NotEmpty(t, capturingP.capturedCtxs)
-	names := toolNamesOf(t, capturingP.capturedCtxs[0])
-	assert.Contains(t, names, "bash")
-	assert.Contains(t, names, "edit")
-}
-
-func TestPrompt_ContractInvalidToolAccessFailsClosed(t *testing.T) {
-	home := t.TempDir()
-	_, _ = setupCapturedPrompt(t, home, "workspace")
-	testDir := filepath.Join(home, "workspace")
-
-	writeContractFile(t, home, &common.Contract{AgentID: "x", ToolAccess: "banana", Body: "x"})
-
-	_, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported tool access mode")
 }
 
 func TestFilterAgentCfgFiles(t *testing.T) {

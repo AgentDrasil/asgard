@@ -79,12 +79,6 @@ func TestBuildPromptArgv(t *testing.T) {
 	}, argv)
 }
 
-func TestPrepareAgentRejectsUnknownToolAccess(t *testing.T) {
-	t.Parallel()
-	_, err := prepareAgent(types.PromptOptions{ToolAccess: "bogus"})
-	assert.Error(t, err)
-}
-
 func TestNewSessionID(t *testing.T) {
 	t.Parallel()
 	id, err := newSessionID()
@@ -358,7 +352,7 @@ func TestPromptPassesContractAsFile(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := filepath.Join(dir, "AW_AGENTS.md")
 	require.NoError(t, os.WriteFile(contractPath, []byte(common.Render(&common.Contract{
-		AgentID: "a1", ToolAccess: types.ToolAccessFull, Body: "You are the test agent.",
+		AgentID: "a1", Body: "You are the test agent.",
 	})), 0o644))
 
 	copyFile := filepath.Join(dir, "prompt-copy")
@@ -441,13 +435,11 @@ func TestPrepareAgentToolRestrictions(t *testing.T) {
 	tests := []struct {
 		name         string
 		contract     common.Contract
-		toolAccess   string
 		wantDisallow []string
 		wantAbsent   []string
 	}{
-		{"full no team", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, "", []string{"AskUserQuestion"}, []string{"Task", "Agent", "Bash"}},
-		{"team", common.Contract{AgentID: "a", Team: "t", Body: "BODY-MARKER"}, "", []string{"AskUserQuestion", "Task", "Agent"}, []string{"Bash"}},
-		{"full access option", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, types.ToolAccessFull, []string{"AskUserQuestion"}, []string{"Task", "Agent", "Bash"}},
+		{"full no team", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, []string{"AskUserQuestion"}, []string{"Task", "Agent", "Bash"}},
+		{"team", common.Contract{AgentID: "a", Team: "t", Body: "BODY-MARKER"}, []string{"AskUserQuestion", "Task", "Agent"}, []string{"Bash"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -455,7 +447,7 @@ func TestPrepareAgentToolRestrictions(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, []byte(common.Render(&tt.contract)), 0o644))
 			t.Setenv(common.EnvVar, path)
 
-			setup, err := prepareAgent(types.PromptOptions{ToolAccess: tt.toolAccess})
+			setup, err := prepareAgent(types.PromptOptions{})
 			require.NoError(t, err)
 			assert.Contains(t, setup.appendPrompt, "BODY-MARKER")
 			for _, tool := range tt.wantDisallow {

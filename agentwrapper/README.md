@@ -56,7 +56,7 @@ type SandboxSpec interface {
 ```
 
 Agent identity is NOT delivered through `SandboxSpec`. Instead, the host
-renders the `AW_AGENTS.md` contract (agent id/name/team/tool-access metadata
+renders the `AW_AGENTS.md` contract (agent id/name/team metadata
 in YAML frontmatter plus the prompt body) and bind-mounts it at the canonical
 `/session/AW_AGENTS.md` path (`$AW_AGENTS_PATH`). The `aw` subcommand running
 inside the sandbox loads the contract via `agentwrapper/common` and
