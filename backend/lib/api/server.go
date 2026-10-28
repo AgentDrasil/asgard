@@ -570,6 +570,9 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	// enabled) and, when enabled, the OAuth endpoints.
 	mux.HandleFunc("GET "+authStatusPath, s.handleAuthStatus)
 	s.auth.RegisterRoutes(mux)
+	// Protected by the auth middleware; both are 404 while auth is disabled.
+	mux.HandleFunc("GET /api/auth/me", s.auth.HandleMe)
+	mux.HandleFunc("GET "+auth.AvatarPath, s.auth.HandleAvatar)
 
 	if s.conf != nil && s.conf.WebUIPath != "" {
 		fs := http.FileServer(http.Dir(s.conf.WebUIPath))

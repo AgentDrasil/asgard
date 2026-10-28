@@ -31,6 +31,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 const (
@@ -96,6 +98,8 @@ type Service struct {
 
 	statesMu sync.Mutex
 	states   map[string]stateEntry
+
+	avatars *avatarStore
 }
 
 // provider bundles what OIDC discovery and the oauth2 config yield.
@@ -153,6 +157,7 @@ func New(ctx context.Context, cfg *Config, baseURL string) (*Service, error) {
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		cookieSecure: base.Scheme == "https",
 		states:       map[string]stateEntry{},
+		avatars:      newAvatarStore(paths.AvatarsDir()),
 	}
 
 	if _, err := s.ensureProvider(ctx); err != nil {
@@ -328,6 +333,7 @@ func (s *Service) verifyToken(ctx context.Context, raw string) (tokenStatus, *Us
 		Subject: idToken.Subject,
 		Roles:   roles,
 	}
+	user.Name, user.Email, user.Picture = extractProfile(claims)
 
 	if requiredRole != "" && !containsRole(roles, requiredRole) {
 		log.Warn().Str("role_claim", s.cfg.Claim()).Str("required_role", requiredRole).

@@ -29,6 +29,7 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
 └── data/
     ├── sessions/<chatID>/  # persistent per-session data  → sandbox /session
     ├── tmp/<chatID>/       # per-session scratch data      → sandbox /tmp
+    ├── avatars/            # cached OIDC user avatars (served locally)
     └── data.db             # SQLite database (+ -wal/-shm)
 ```
 
@@ -226,8 +227,12 @@ Asgard ships **unauthenticated by default**. Adding an `auth` section to
 it out keeps the previous behaviour, including deployments where an external
 reverse proxy already handles SSO.
 
-The implementation is **stateless**: there is no user table, no session table
-and no token store. Tokens live in the browser's `localStorage`, are verified
+The implementation is **nearly stateless**: there is no user table, no session
+table and no token store. The one piece of on-disk state is the avatar cache in
+`~/asgard/data/avatars/`: each user's OIDC `picture` is fetched server-side
+(public http/https hosts only, images up to 2 MiB) and served from
+`/api/auth/avatar`, so browsers never contact the IdP. It is refetched when the
+picture URL changes and has no eviction or TTL. Tokens live in the browser's `localStorage`, are verified
 against the provider's JWKS on every request, and the only server-side state is
 a short-lived in-memory CSRF `state` map. This means the `state` map is
 per-process, so a deployment must run a single replica (or use sticky sessions).

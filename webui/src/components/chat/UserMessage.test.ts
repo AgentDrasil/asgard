@@ -4,6 +4,8 @@ import { createApp, h } from "vue";
 import UserMessage from "./UserMessage.vue";
 import type { ChatMessage } from "../../types";
 import { i18n } from "../../i18n";
+import { useUserProfile, __resetUserProfileForTest } from "../../composables/useUserProfile";
+import type { UserProfile } from "../../composables/useUserProfile";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -95,5 +97,52 @@ describe("UserMessage.vue", () => {
     expect(links[1].getAttribute("href")).toBe("/api/sessions/sess-123/attachments/data.csv");
 
     app.unmount();
+  });
+
+  describe("user profile", () => {
+    const message: ChatMessage = { id: "m", role: "user", content: "hi" };
+
+    const mountWithProfile = (p: UserProfile | null) => {
+      useUserProfile().profile.value = p;
+      const app = createApp({ render: () => h(UserMessage, { message }) });
+      app.use(i18n);
+      app.mount(root);
+      return app;
+    };
+
+    beforeEach(() => {
+      __resetUserProfileForTest();
+    });
+
+    it("falls back to the localized label with no profile", () => {
+      const app = mountWithProfile(null);
+      expect(root.querySelector('[data-testid="user-name"]')?.textContent).toContain("You");
+      expect(root.querySelector('[data-testid="user-avatar"]')).toBeNull();
+      expect(root.querySelector('[data-testid="user-initials"]')).toBeNull();
+      app.unmount();
+    });
+
+    it("shows the name and local avatar image", () => {
+      const app = mountWithProfile({
+        subject: "s",
+        name: "Ada Lovelace",
+        avatarUrl: "/api/auth/avatar",
+      });
+      expect(root.querySelector('[data-testid="user-name"]')?.textContent).toContain(
+        "Ada Lovelace",
+      );
+      expect(root.textContent).not.toContain("You");
+      expect(root.querySelector('[data-testid="user-avatar"]')?.getAttribute("src")).toBe(
+        "/api/auth/avatar",
+      );
+      app.unmount();
+    });
+
+    it("shows initials when there is no picture", () => {
+      const app = mountWithProfile({ subject: "s", name: "Ada Lovelace" });
+      expect(root.querySelector('[data-testid="user-avatar"]')).toBeNull();
+      expect(root.querySelector('[data-testid="user-initials"]')?.textContent?.trim()).toBe("AL");
+      app.unmount();
+    });
   });
 });

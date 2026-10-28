@@ -10,6 +10,11 @@ type userContextKey struct{}
 type User struct {
 	Subject string
 	Roles   []string
+	// Name, Email and Picture come from the ID token profile claims. Picture
+	// is the IdP-hosted URL and must never be handed to the browser.
+	Name    string
+	Email   string
+	Picture string
 }
 
 // AdminRole is the default role required to access administrative/management APIs.

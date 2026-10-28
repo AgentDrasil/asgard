@@ -59,6 +59,9 @@ func DataDir() string { return filepath.Join(Root(), "data") }
 // DBFile is the SQLite database file (~/asgard/data/data.db).
 func DBFile() string { return filepath.Join(DataDir(), "data.db") }
 
+// AvatarsDir is the cache of locally stored user avatars (~/asgard/data/avatars).
+func AvatarsDir() string { return filepath.Join(DataDir(), "avatars") }
+
 // SessionsDir is the persistent per-session data root (~/asgard/data/sessions).
 func SessionsDir() string { return filepath.Join(DataDir(), "sessions") }
 
