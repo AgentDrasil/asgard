@@ -23,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/paths"
@@ -144,6 +145,7 @@ type App struct {
 	server       *api.Server
 	scheduler    *cleanup.Scheduler
 	proxyManager *proxy.ProxyManager
+	runnerHub    *runnerhub.Hub
 	stopOnce     sync.Once
 	stopErr      error
 }
@@ -186,6 +188,7 @@ func New(opts ...Option) (*App, error) {
 	etcdClient := options.EtcdClient
 	var agentStore *config.AgentStore
 	var proxyHolder atomic.Pointer[proxy.ProxyManager]
+	var hubHolder atomic.Pointer[runnerhub.Hub]
 	var resolvedConfigPath string
 
 	if conf != nil {
@@ -221,6 +224,7 @@ func New(opts ...Option) (*App, error) {
 				log.Info().Msg("etcd configuration update detected, reloading proxy and main config")
 				newProxy := newTree.Asgard.Proxy
 				conf.SetProxy(&newProxy)
+				reloadRunnerConfig(conf, newTree.Asgard.Config.Runner, diagnostics, hubHolder.Load())
 				if pm := proxyHolder.Load(); pm != nil {
 					if err := pm.Reload(&newProxy); err != nil {
 						log.Error().Err(err).Msg("failed to live-reload proxy configuration from etcd")
@@ -352,11 +356,38 @@ func New(opts ...Option) (*App, error) {
 		proxyHolder.Store(proxyMgr)
 	}
 
+	// 7b. Start the runner hub when the runner section is configured.
+	var hub *runnerhub.Hub
+	if rc := conf.GetRunner(); rc != nil {
+		hubOpts := runnerhub.Options{
+			TLSCertFile:  rc.TLSCertFile,
+			TLSKeyFile:   rc.TLSKeyFile,
+			ClientCAFile: rc.ClientCAFile,
+			Addr:         fmt.Sprintf(":%d", rc.RegistryPort),
+			AllowedNodes: conf.AllowedRunnerNodes,
+		}
+		if database != nil {
+			hubOpts.Store = dbmodels.NewFinalizedRunRepository(database)
+		}
+		if len(rc.AllowedNodes) == 0 {
+			log.Warn().Msg("runner.allowed_nodes is empty: no runner may connect")
+		}
+		hub = runnerhub.New(hubOpts)
+		hubHolder.Store(hub)
+		if err := hub.Start(); err != nil {
+			log.Warn().Err(err).Msg("failed to start runner hub, entering degraded mode")
+			diagnostics.AddError("runner", err.Error())
+		}
+	}
+
 	// 8. Assemble API Server with options
 	apiOpts := []api.ServerOption{
 		api.WithDiagnostics(diagnostics),
 		api.WithConfigPath(resolvedConfigPath),
 		api.WithProxyManager(proxyMgr),
+	}
+	if hub != nil {
+		apiOpts = append(apiOpts, api.WithRunnerRegistry(hub))
 	}
 	if options.FunctionRegistry != nil {
 		apiOpts = append(apiOpts, api.WithFunctionRegistry(options.FunctionRegistry))
@@ -374,6 +405,9 @@ func New(opts ...Option) (*App, error) {
 
 	srv, err := api.New(conf, database, apiOpts...)
 	if err != nil {
+		if hub != nil {
+			hub.Stop()
+		}
 		if agentStore != nil {
 			agentStore.Close()
 		}
@@ -422,7 +456,55 @@ func New(opts ...Option) (*App, error) {
 		server:       srv,
 		scheduler:    scheduler,
 		proxyManager: proxyMgr,
+		runnerHub:    hub,
 	}, nil
+}
+
+// reloadRunnerConfig applies a reloaded runner section to conf so the hub sees
+// the new allowed_nodes. An invalid section is reported and the previous one
+// kept; TLS material and the listen port are only read at startup.
+func reloadRunnerConfig(conf *config.Config, newRunner *config.RunnerConfig, diagnostics *api.SystemDiagnostics, hub *runnerhub.Hub) {
+	if conf == nil || conf.GetRunner() == nil {
+		return
+	}
+	if newRunner == nil {
+		// Removing the section must not fail open: keep the hub but allow
+		// nobody, dropping every connected runner.
+		cur := conf.GetRunner()
+		cur.AllowedNodes = nil
+		conf.SetRunner(cur)
+		if hub != nil {
+			hub.RefreshAllowed()
+		}
+		log.Warn().Msg("runner section removed on reload: all runners disconnected, restart required to fully disable")
+		if diagnostics != nil {
+			diagnostics.AddError("runner_config", "runner section removed; no runner is allowed, restart required to fully disable the listener")
+		}
+		return
+	}
+	rc := *newRunner
+	if err := rc.ApplyDefaultsAndValidate(); err != nil {
+		log.Error().Err(err).Msg("invalid runner configuration on reload, keeping previous")
+		if diagnostics != nil {
+			diagnostics.AddError("runner_config", err.Error())
+		}
+		return
+	}
+	conf.SetRunner(&rc)
+	if hub != nil {
+		hub.RefreshAllowed()
+	}
+	if diagnostics != nil {
+		diagnostics.ResetSource("runner_config")
+	}
+}
+
+// RunnerHub returns the runner hub of the App (nil when not configured).
+func (a *App) RunnerHub() *runnerhub.Hub {
+	if a == nil {
+		return nil
+	}
+	return a.runnerHub
 }
 
 // Config returns the resolved configuration of the App.
@@ -488,6 +570,9 @@ func (a *App) Stop(ctx context.Context) error {
 			if err := a.proxyManager.Shutdown(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("proxy manager shutdown failed: %w", err))
 			}
+		}
+		if a.runnerHub != nil {
+			a.runnerHub.Stop()
 		}
 		if a.server != nil {
 			if err := a.server.Shutdown(ctx); err != nil {

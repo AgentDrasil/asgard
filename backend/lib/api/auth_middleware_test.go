@@ -57,6 +57,7 @@ var protectedPaths = []string{
 	"/api/agents",
 	"/api/sessions",
 	"/api/config",
+	"/api/runners",
 	"/api/auth/me",
 	"/api/auth/avatar",
 	"/api/manage/config",

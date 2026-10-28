@@ -9,13 +9,16 @@ require (
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0
+	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/creack/pty v1.1.24
 	github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e
+	github.com/getsops/sops/v3 v3.13.3
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/goccy/go-yaml v1.19.2
+	github.com/hashicorp/yamux v0.1.2
 	github.com/josexy/mitmproxy-go v1.2.1
 	github.com/libtnb/sqlite v1.2.2
 	github.com/moznion/go-optional v0.13.0
@@ -27,6 +30,7 @@ require (
 	golang.org/x/sync v0.24.0
 	google.golang.org/genai v1.71.0
 	google.golang.org/grpc v1.84.0
+	google.golang.org/protobuf v1.36.12
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 )
@@ -93,7 +97,6 @@ require (
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/getsops/gopgagent v0.0.0-20241224165529-7044f28e491e // indirect
-	github.com/getsops/sops/v3 v3.13.3
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/go-git/go-git/v5 v5.19.3 // indirect
@@ -185,7 +188,6 @@ require (
 	google.golang.org/genproto v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.77.1 // indirect
@@ -204,6 +206,7 @@ replace (
 	github.com/AgentDrasil/asgard/pkg/metrics => ../pkg/metrics
 	github.com/AgentDrasil/asgard/pkg/paths => ../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../pkg/pluginsdk
+	github.com/AgentDrasil/asgard/pkg/runnerpb => ../pkg/runnerpb
 	github.com/AgentDrasil/asgard/pkg/version => ../pkg/version
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../pkg/workflowspec
 	github.com/AgentDrasil/asgard/simplest => ../simplest

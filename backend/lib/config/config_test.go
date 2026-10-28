@@ -897,3 +897,71 @@ auth:
 		assert.Nil(t, cfg.AuthConfig())
 	})
 }
+
+func TestRunnerConfig_ApplyDefaultsAndValidate(t *testing.T) {
+	t.Parallel()
+
+	valid := func() *RunnerConfig {
+		return &RunnerConfig{
+			TLSCertFile:  "/certs/backend.crt",
+			TLSKeyFile:   "/certs/backend.key",
+			ClientCAFile: "/certs/client-ca.crt",
+			AllowedNodes: []string{"runner-a", "runner-a", "runner-b"},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*RunnerConfig)
+		wantErr string
+	}{
+		{"valid", func(*RunnerConfig) {}, ""},
+		{"missing cert", func(r *RunnerConfig) { r.TLSCertFile = "" }, "tls_cert_file"},
+		{"missing key", func(r *RunnerConfig) { r.TLSKeyFile = "" }, "tls_key_file"},
+		{"missing ca", func(r *RunnerConfig) { r.ClientCAFile = "" }, "client_ca_file"},
+		{"bad port", func(r *RunnerConfig) { r.RegistryPort = 70000 }, "registry_port"},
+		{"empty node", func(r *RunnerConfig) { r.AllowedNodes = []string{""} }, "empty node id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := valid()
+			tt.mutate(r)
+			err := r.ApplyDefaultsAndValidate()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, DefaultRunnerRegistryPort, r.RegistryPort)
+			assert.Equal(t, []string{"runner-a", "runner-b"}, r.AllowedNodes)
+		})
+	}
+}
+
+func TestParseAndValidate_RunnerSection(t *testing.T) {
+	t.Parallel()
+
+	base := "host: h\ndb: sqlite\ngemini_api_key: k\ngemini_model_for_chat_title: m\n"
+	cfg, err := ParseAndValidate([]byte(base))
+	require.NoError(t, err)
+	assert.Nil(t, cfg.GetRunner())
+
+	cfg, err = ParseAndValidate([]byte(base + "runner:\n  tls_cert_file: a\n  tls_key_file: b\n  client_ca_file: c\n  allowed_nodes: [runner-a]\n"))
+	require.NoError(t, err)
+	require.NotNil(t, cfg.GetRunner())
+	assert.Equal(t, 9311, cfg.GetRunner().RegistryPort)
+	assert.Equal(t, []string{"runner-a"}, cfg.Clone().AllowedRunnerNodes())
+
+	_, err = ParseAndValidate([]byte(base + "runner:\n  tls_cert_file: a\n"))
+	require.ErrorContains(t, err, "runner config error")
+}
+
+func TestRunnerConfig_EmptyAllowedNodesIsValid(t *testing.T) {
+	t.Parallel()
+
+	r := &RunnerConfig{TLSCertFile: "a", TLSKeyFile: "b", ClientCAFile: "c"}
+	require.NoError(t, r.ApplyDefaultsAndValidate())
+	assert.Empty(t, r.AllowedNodes)
+}

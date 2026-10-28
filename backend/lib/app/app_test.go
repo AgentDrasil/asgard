@@ -17,6 +17,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/lib/api"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -705,4 +706,23 @@ rules:
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = appInstance.Stop(ctx)
+}
+
+func TestReloadRunnerConfigRemovalFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	conf := &config.Config{}
+	conf.SetRunner(&config.RunnerConfig{TLSCertFile: "a", TLSKeyFile: "b", ClientCAFile: "c", RegistryPort: 1, AllowedNodes: []string{"runner-a"}})
+	diag := api.NewSystemDiagnostics()
+
+	reloadRunnerConfig(conf, nil, diag, nil)
+
+	require.NotNil(t, conf.GetRunner())
+	assert.Empty(t, conf.AllowedRunnerNodes())
+	assert.Equal(t, "a", conf.GetRunner().TLSCertFile)
+
+	// An invalid non-empty section keeps the previous (now empty) one.
+	conf.SetRunner(&config.RunnerConfig{TLSCertFile: "a", TLSKeyFile: "b", ClientCAFile: "c", RegistryPort: 1, AllowedNodes: []string{"runner-a"}})
+	reloadRunnerConfig(conf, &config.RunnerConfig{AllowedNodes: []string{"runner-b"}}, diag, nil)
+	assert.Equal(t, []string{"runner-a"}, conf.AllowedRunnerNodes())
 }

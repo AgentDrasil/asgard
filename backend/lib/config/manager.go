@@ -117,6 +117,12 @@ func (c *Config) ApplyDefaultsAndValidate() error {
 		}
 	}
 
+	if c.Runner != nil {
+		if err := c.Runner.ApplyDefaultsAndValidate(); err != nil {
+			return fmt.Errorf("runner config error: %w", err)
+		}
+	}
+
 	return c.validate()
 }
 
@@ -149,6 +155,7 @@ func (c *Config) Clone() *Config {
 		Providers:                          append([]string(nil), c.Providers...),
 		Proxy:                              c.Proxy,
 		Auth:                               c.Auth,
+		Runner:                             c.GetRunner(),
 		ConfigPath:                         c.ConfigPath,
 	}
 	return cp

@@ -28,6 +28,54 @@ type FirebaseWebpushWebConfig struct {
 
 const DefaultLanguage = "English (US)"
 
+// DefaultRunnerRegistryPort is the registry_port used when the runner section
+// leaves it unset.
+const DefaultRunnerRegistryPort = 9311
+
+// RunnerConfig configures the mTLS listener runners connect to.
+type RunnerConfig struct {
+	TLSCertFile  string `yaml:"tls_cert_file"`
+	TLSKeyFile   string `yaml:"tls_key_file"`
+	ClientCAFile string `yaml:"client_ca_file"`
+	RegistryPort int    `yaml:"registry_port"`
+	// AllowedNodes lists the runner ids (client certificate CNs) allowed to
+	// connect. Empty is valid and means no runner may connect.
+	AllowedNodes []string `yaml:"allowed_nodes"`
+}
+
+// ApplyDefaultsAndValidate applies defaults to and validates the runner
+// section.
+func (r *RunnerConfig) ApplyDefaultsAndValidate() error {
+	if r.RegistryPort == 0 {
+		r.RegistryPort = DefaultRunnerRegistryPort
+	}
+	if r.RegistryPort < 1 || r.RegistryPort > 65535 {
+		return fmt.Errorf("invalid runner.registry_port %d", r.RegistryPort)
+	}
+	if r.TLSCertFile == "" {
+		return fmt.Errorf("missing runner.tls_cert_file")
+	}
+	if r.TLSKeyFile == "" {
+		return fmt.Errorf("missing runner.tls_key_file")
+	}
+	if r.ClientCAFile == "" {
+		return fmt.Errorf("missing runner.client_ca_file")
+	}
+	seen := make(map[string]bool, len(r.AllowedNodes))
+	nodes := make([]string, 0, len(r.AllowedNodes))
+	for _, n := range r.AllowedNodes {
+		if n == "" {
+			return fmt.Errorf("runner.allowed_nodes contains an empty node id")
+		}
+		if !seen[n] {
+			seen[n] = true
+			nodes = append(nodes, n)
+		}
+	}
+	r.AllowedNodes = nodes
+	return nil
+}
+
 type Config struct {
 	Debug bool   `yaml:"debug"`
 	DB    string `yaml:"db"`
@@ -50,11 +98,47 @@ type Config struct {
 	UILang                             string                    `yaml:"ui_lang"`
 	Providers                          []string                  `yaml:"providers" json:"providers,omitempty"`
 	Proxy                              *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
+	// Runner enables the runner listener. A nil value leaves it disabled.
+	Runner *RunnerConfig `yaml:"runner" json:"-"`
 	// Auth enables optional OIDC/OAuth authentication. A nil value leaves every
 	// API route unauthenticated.
 	Auth       *auth.Config `yaml:"auth" json:"auth,omitempty"`
 	ConfigPath string       `yaml:"-" json:"-"`
 	proxyMu    sync.RWMutex `yaml:"-" json:"-"`
+	runnerMu   sync.RWMutex `yaml:"-" json:"-"`
+}
+
+// GetRunner returns a copy of the runner section (nil when not configured).
+func (c *Config) GetRunner() *RunnerConfig {
+	if c == nil {
+		return nil
+	}
+	c.runnerMu.RLock()
+	defer c.runnerMu.RUnlock()
+	if c.Runner == nil {
+		return nil
+	}
+	cp := *c.Runner
+	cp.AllowedNodes = append([]string(nil), c.Runner.AllowedNodes...)
+	return &cp
+}
+
+// SetRunner replaces the runner section (used on live config reload).
+func (c *Config) SetRunner(r *RunnerConfig) {
+	if c == nil {
+		return
+	}
+	c.runnerMu.Lock()
+	c.Runner = r
+	c.runnerMu.Unlock()
+}
+
+// AllowedRunnerNodes returns the currently allowed runner ids.
+func (c *Config) AllowedRunnerNodes() []string {
+	if r := c.GetRunner(); r != nil {
+		return r.AllowedNodes
+	}
+	return nil
 }
 
 // AuthConfig returns the optional authentication configuration (nil when auth

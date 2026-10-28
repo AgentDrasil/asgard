@@ -73,6 +73,7 @@ type Server struct {
 	runSingleAgentFn    singleAgentRunner
 	proxyManager        *proxy.ProxyManager
 	auth                *auth.Service
+	runners             RunnerRegistry
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -549,6 +550,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/quota", s.handleQuota)
+	mux.HandleFunc("GET /api/runners", s.handleRunners)
 	mux.HandleFunc("GET /api/subdirs", s.handleSubdirs)
 	mux.HandleFunc("GET /api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("GET /api/git/log", s.handleGitLog)
