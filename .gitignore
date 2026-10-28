@@ -8,3 +8,5 @@ cmd/call-peer/call-peer
 cmd/find-peer/find-peer
 cmd/show-output/show-output
 cmd/tester/tester
+
+.claude/worktrees

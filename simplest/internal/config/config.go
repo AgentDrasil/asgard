@@ -615,6 +615,14 @@ func (c *Config) ResolveModelAndProvider(modelID string) (*types.Model, types.Pr
 			oa.BaseURL = provCfg.BaseURL
 		}
 		p = oa
+	case types.APIOpenAIResponses:
+		or := provider.NewOpenAIResponses(apiKey)
+		if matched.BaseURL != "" {
+			or.BaseURL = matched.BaseURL
+		} else if hasProv && provCfg.BaseURL != "" {
+			or.BaseURL = provCfg.BaseURL
+		}
+		p = or
 	default:
 		return nil, nil, fmt.Errorf("unsupported API wire protocol %q for model %q", matched.API, matched.ID)
 	}

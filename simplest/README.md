@@ -21,7 +21,7 @@ go get github.com/AgentDrasil/simplest
 | `types`    | Shared data model: messages, content blocks, events, `Provider`, `Model`, `Context` |
 | `tools`    | 7 built-ins (`read`, `bash`, `edit`, `write`, `find`, `grep`, `ls`), registry, JSON-schema validation, Go-func tool adapter |
 | `session`  | JSONL v3 session store (tree entries, resume, compaction) |
-| `provider` | `openai-compat` and `gemini` SSE streaming clients |
+| `provider` | `openai-compat` (Chat Completions), `openai-responses` (Responses API) and `gemini` SSE streaming clients |
 | `prompt`   | System-prompt assembly + AGENTS.md / CLAUDE.md context-file loading |
 | `agent`    | The run loop: `Run(ctx, Request) <-chan AgentEvent` |
 
@@ -167,7 +167,13 @@ Provider protocol heuristics (e.g. Gemini 3 tool-call-id echoing) follow
 `WireID`, since they depend on the actual model the API sees. Event/session
 attribution keeps `ID`.
 
-Both providers parse SSE streams into the same protocol: `start`, block
+`openai-compat` speaks Chat Completions (`/chat/completions`) and is what most
+third-party endpoints support. `openai-responses` (`types.APIOpenAIResponses`,
+`provider.NewOpenAIResponses`) speaks the OpenAI Responses API (`/responses`,
+`store:false`, reasoning items replayed via encrypted content) and is selected
+with `api: openai-responses` in config; base URL handling is identical.
+
+All providers parse SSE streams into the same protocol: `start`, block
 deltas (`text_*`, `thinking_*`, `toolcall_*`), then `done` or `error`.
 Usage and cost accounting is filled automatically from the model's rates.
 

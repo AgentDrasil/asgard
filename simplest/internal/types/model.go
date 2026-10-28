@@ -10,7 +10,9 @@ import (
 // API wire protocols supported by this library.
 const (
 	APIOpenAICompat = "openai-compat"
-	APIGemini       = "gemini"
+	// APIOpenAIResponses is the OpenAI Responses API (POST /responses).
+	APIOpenAIResponses = "openai-responses"
+	APIGemini          = "gemini"
 )
 
 // ModelType distinguishes chat models, image models, and classifier models.
@@ -119,7 +121,7 @@ type Model struct {
 	Model            string              `json:"model,omitempty"`
 	Name             string              `json:"name"`
 	Type             ModelType           `json:"type,omitempty"`
-	API              string              `json:"api"` // APIOpenAICompat or APIGemini
+	API              string              `json:"api"` // APIOpenAICompat, APIOpenAIResponses or APIGemini
 	Provider         string              `json:"provider"`
 	BaseURL          string              `json:"baseUrl"`
 	Reasoning        bool                `json:"reasoning"`

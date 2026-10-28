@@ -94,14 +94,16 @@ var (
 // ---- providers ----
 
 type (
-	Gemini       = provider.Gemini
-	OpenAICompat = provider.OpenAICompat
+	Gemini          = provider.Gemini
+	OpenAICompat    = provider.OpenAICompat
+	OpenAIResponses = provider.OpenAIResponses
 )
 
 var (
-	NewGemini       = provider.NewGemini
-	NewOpenAICompat = provider.NewOpenAICompat
-	CalculateCost   = provider.CalculateCost
+	NewGemini          = provider.NewGemini
+	NewOpenAICompat    = provider.NewOpenAICompat
+	NewOpenAIResponses = provider.NewOpenAIResponses
+	CalculateCost      = provider.CalculateCost
 
 	// Context-overflow detection (pi 73f8de80b).
 	IsContextOverflowError   = provider.IsContextOverflowError
@@ -241,8 +243,9 @@ var (
 )
 
 const (
-	APIGemini       = types.APIGemini
-	APIOpenAICompat = types.APIOpenAICompat
+	APIGemini          = types.APIGemini
+	APIOpenAICompat    = types.APIOpenAICompat
+	APIOpenAIResponses = types.APIOpenAIResponses
 )
 
 // ---- types: tool authoring ----

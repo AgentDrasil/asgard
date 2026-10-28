@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/simplest/internal/provider"
 	"github.com/AgentDrasil/asgard/simplest/internal/types"
 )
 
@@ -785,4 +786,20 @@ models:
 	require.True(t, *compat.RequiresReasoningContentOnAssistantMessages)
 
 	assert.Nil(t, byID["plain-model"].Compat, "absent compat must stay nil")
+}
+
+func TestResolveModelAndProvider_OpenAIResponses(t *testing.T) {
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{
+			"openai": {API: types.APIOpenAIResponses, APIKey: "k", BaseURL: "https://api.openai.com/v1"},
+		},
+		Models: []ModelConfig{{ID: "gpt-5", Name: "GPT 5", Provider: "openai", ContextWindow: 1000}},
+	}
+	m, p, err := cfg.ResolveModelAndProvider("openai/gpt-5")
+	require.NoError(t, err)
+	assert.Equal(t, types.APIOpenAIResponses, m.API)
+	rp, ok := p.(*provider.OpenAIResponses)
+	require.True(t, ok, "got %T", p)
+	assert.Equal(t, "k", rp.APIKey)
+	assert.Equal(t, "https://api.openai.com/v1", rp.BaseURL)
 }
