@@ -139,6 +139,7 @@ type App struct {
 	conf         *config.Config
 	treeManager  *configlib.ConfigManager[config.AsgardTreeConfig]
 	etcdClient   *clientv3.Client
+	agentStore   *config.AgentStore
 	db           *gorm.DB
 	server       *api.Server
 	scheduler    *cleanup.Scheduler
@@ -183,6 +184,7 @@ func New(opts ...Option) (*App, error) {
 	conf := options.Config
 	treeMgr := options.TreeManager
 	etcdClient := options.EtcdClient
+	var agentStore *config.AgentStore
 	var proxyHolder atomic.Pointer[proxy.ProxyManager]
 	var resolvedConfigPath string
 
@@ -253,6 +255,13 @@ func New(opts ...Option) (*App, error) {
 		}
 		if err := conf.ApplyDefaultsAndValidate(); err != nil {
 			return nil, fmt.Errorf("invalid configuration from etcd: %w", err)
+		}
+		if etcdClient != nil {
+			agentStore = config.NewEtcdAgentStore(etcdClient, config.EtcdPrefix())
+			if err := agentStore.Start(context.Background()); err != nil {
+				_ = etcdClient.Close()
+				return nil, fmt.Errorf("failed to start agent definition store: %w", err)
+			}
 		}
 	}
 	configLoaded := true
@@ -359,8 +368,15 @@ func New(opts ...Option) (*App, error) {
 		apiOpts = append(apiOpts, api.WithCustomRunners(options.CustomRunners...))
 	}
 
+	if agentStore != nil {
+		apiOpts = append(apiOpts, api.WithAgentSource(agentStore))
+	}
+
 	srv, err := api.New(conf, database, apiOpts...)
 	if err != nil {
+		if agentStore != nil {
+			agentStore.Close()
+		}
 		if proxyMgr != nil {
 			_ = proxyMgr.Shutdown(context.Background())
 		}
@@ -373,7 +389,32 @@ func New(opts ...Option) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
 
+	if agentStore != nil {
+		syncCollisions := func() {
+			diagnostics.ResetSource("agent_collision")
+			for _, cerr := range agentStore.Collisions() {
+				log.Error().Err(cerr).Msg("agent name collision between global and runner agents")
+				diagnostics.AddError("agent_collision", cerr.Error())
+			}
+			diagnostics.ResetSource("runner_agent_error")
+			for _, rerr := range agentStore.RunnerErrors() {
+				log.Error().Err(rerr).Msg("invalid runner agent definition")
+				diagnostics.AddError("runner_agent_error", rerr.Error())
+			}
+		}
+		agentStore.OnChange(func() {
+			log.Info().Msg("etcd agent definitions changed, reloading agents")
+			_ = srv.ReloadAgents()
+			syncCollisions()
+		})
+		// Changes between api.New's initial load and the registration above
+		// would otherwise be missed.
+		_ = srv.ReloadAgents()
+		syncCollisions()
+	}
+
 	return &App{
+		agentStore:   agentStore,
 		conf:         conf,
 		treeManager:  treeMgr,
 		etcdClient:   etcdClient,
@@ -457,6 +498,9 @@ func (a *App) Stop(ctx context.Context) error {
 			if err := a.scheduler.Shutdown(); err != nil {
 				errs = append(errs, fmt.Errorf("scheduler shutdown failed: %w", err))
 			}
+		}
+		if a.agentStore != nil {
+			a.agentStore.Close()
 		}
 		if a.etcdClient != nil {
 			_ = a.etcdClient.Close()

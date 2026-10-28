@@ -27,6 +27,15 @@ const (
 // ErrMissingEtcdEndpoints is returned when ETCD_ENDPOINTS environment variable is missing or empty.
 var ErrMissingEtcdEndpoints = errors.New("ETCD_ENDPOINTS environment variable is required; Asgard runs exclusively with etcd")
 
+// EtcdPrefix returns the configured etcd prefix, or DefaultEtcdPrefix.
+func EtcdPrefix() string {
+	prefix := os.Getenv(EnvEtcdPrefix)
+	if strings.TrimSpace(prefix) == "" {
+		return DefaultEtcdPrefix
+	}
+	return prefix
+}
+
 // NewEtcdConfigManager connects to etcd and starts a ConfigManager for AsgardTreeConfig.
 // It fails fast if ETCD_ENDPOINTS is not configured or if connection/initial fetch fails.
 func NewEtcdConfigManager(ctx context.Context) (*configlib.ConfigManager[AsgardTreeConfig], *clientv3.Client, error) {
@@ -47,10 +56,7 @@ func NewEtcdConfigManager(ctx context.Context) (*configlib.ConfigManager[AsgardT
 		return nil, nil, ErrMissingEtcdEndpoints
 	}
 
-	prefix := os.Getenv(EnvEtcdPrefix)
-	if strings.TrimSpace(prefix) == "" {
-		prefix = DefaultEtcdPrefix
-	}
+	prefix := EtcdPrefix()
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,

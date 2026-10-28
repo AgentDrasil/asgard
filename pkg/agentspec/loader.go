@@ -41,22 +41,11 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 		return nil, fmt.Errorf("failed to read teams.yaml: %w", err)
 	}
 
-	var tCfg teamsConfig
-	if err := yaml.Unmarshal(teamsData, &tCfg); err != nil {
-		return nil, fmt.Errorf("failed to parse teams.yaml: %w", err)
+	teams, err := parseTeams(teamsData)
+	if err != nil {
+		return nil, err
 	}
-
-	if len(tCfg.Teams) == 0 {
-		var teamsList []string
-		if err := yaml.Unmarshal(teamsData, &teamsList); err == nil && len(teamsList) > 0 {
-			tCfg.Teams = teamsList
-		}
-	}
-
-	validTeams := make(map[string]bool)
-	for _, t := range tCfg.Teams {
-		validTeams[t] = true
-	}
+	validTeams := teamSet(teams)
 
 	supportedCLIs := agentwrapper.GetSupportedCLIsAndModels()
 
@@ -78,27 +67,9 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 			return nil, fmt.Errorf("failed to read config for agent %s: %w", entry.Name(), err)
 		}
 
-		var cfg AgentConfig
-		if err := yaml.Unmarshal(configData, &cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse config for agent %s: %w", entry.Name(), err)
-		}
-
-		if cfg.ID != entry.Name() {
-			return nil, fmt.Errorf("agent ID %q does not match directory name %q", cfg.ID, entry.Name())
-		}
-
-		// Validation: Name in config should match directory name?
-		// Or just use the name in config. Let's use the name in config.
-		if cfg.Name == "" {
-			cfg.Name = entry.Name()
-		}
-
-		if err := cfg.ValidateWithCLIs(supportedCLIs); err != nil {
-			return nil, fmt.Errorf("invalid config for agent %s: %w", entry.Name(), err)
-		}
-
-		if cfg.Team != "" && !validTeams[cfg.Team] {
-			return nil, fmt.Errorf("team %q for agent %s is not defined in teams.yaml", cfg.Team, entry.Name())
+		cfg, err := parseAgentConfig(entry.Name(), configData, validTeams, supportedCLIs)
+		if err != nil {
+			return nil, err
 		}
 
 		agent := &Agent{
@@ -118,4 +89,56 @@ func (l *Loader) LoadAll() ([]*Agent, error) {
 	}
 
 	return agents, nil
+}
+
+// parseTeams parses teams.yaml, accepting both a {teams: [...]} mapping and a
+// bare list.
+func parseTeams(data []byte) ([]string, error) {
+	var tCfg teamsConfig
+	if err := yaml.Unmarshal(data, &tCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse teams.yaml: %w", err)
+	}
+
+	if len(tCfg.Teams) == 0 {
+		var teamsList []string
+		if err := yaml.Unmarshal(data, &teamsList); err == nil && len(teamsList) > 0 {
+			tCfg.Teams = teamsList
+		}
+	}
+	return tCfg.Teams, nil
+}
+
+func teamSet(teams []string) map[string]bool {
+	valid := make(map[string]bool, len(teams))
+	for _, t := range teams {
+		valid[t] = true
+	}
+	return valid
+}
+
+// parseAgentConfig parses and validates the config.yaml of the agent stored
+// under directory name id. Shared by the directory Loader and the file-set
+// parser so both apply identical validation.
+func parseAgentConfig(id string, data []byte, validTeams map[string]bool, supportedCLIs map[string][]string) (AgentConfig, error) {
+	var cfg AgentConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("failed to parse config for agent %s: %w", id, err)
+	}
+
+	if cfg.ID != id {
+		return cfg, fmt.Errorf("agent ID %q does not match directory name %q", cfg.ID, id)
+	}
+
+	if cfg.Name == "" {
+		cfg.Name = id
+	}
+
+	if err := cfg.ValidateWithCLIs(supportedCLIs); err != nil {
+		return cfg, fmt.Errorf("invalid config for agent %s: %w", id, err)
+	}
+
+	if cfg.Team != "" && !validTeams[cfg.Team] {
+		return cfg, fmt.Errorf("team %q for agent %s is not defined in teams.yaml", cfg.Team, id)
+	}
+	return cfg, nil
 }

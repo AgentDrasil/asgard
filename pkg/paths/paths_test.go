@@ -32,6 +32,9 @@ func TestPaths_RootAndSubdirs(t *testing.T) {
 	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "chat-1"), SessionTmpDir("chat-1"))
 	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "chat-1", "attachments"), AttachmentsDir("chat-1"))
 	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "sock-name"), SockDir("sock-name"))
+	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache"), AgentsCacheDir())
+	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache", "coder@abc123"), AgentCacheDir("coder", "abc123"))
+	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache", "runners", "n1", "coder@abc123"), RunnerAgentCacheDir("n1", "coder", "abc123"))
 }
 
 func TestPaths_CABundle(t *testing.T) {

@@ -40,6 +40,8 @@ type Server struct {
 	restartTrigger     func()
 	mu                 sync.RWMutex
 	agents             []*agentspec.Agent
+	agentSource        agentspec.Lister
+	reloadMu           sync.Mutex // serializes reload() so a stale list never overwrites a newer one
 	mux                *http.ServeMux
 	repo               *dbmodels.SessionRepository
 	workflowRunRepo    *dbmodels.WorkflowRunRepository
@@ -83,6 +85,14 @@ type ServerOption func(*Server)
 func WithConfigPath(path string) ServerOption {
 	return func(s *Server) {
 		s.configPath = path
+	}
+}
+
+// WithAgentSource sets where agent definitions are loaded from on (re)load,
+// replacing the default directory scan of the configured agent dir.
+func WithAgentSource(src agentspec.Lister) ServerOption {
+	return func(s *Server) {
+		s.agentSource = src
 	}
 }
 
@@ -297,6 +307,12 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		s.diagnostics = NewSystemDiagnostics()
 	}
 
+	// Production injects the etcd-backed source; the directory scan only
+	// serves callers that do not run against etcd (tests).
+	if s.agentSource == nil && s.conf != nil {
+		s.agentSource = agentspec.NewLoader(s.conf.GetAgentDir())
+	}
+
 	if s.compressionMetrics == nil {
 		s.compressionMetrics = NewCompressionMetricsStore("")
 	}
@@ -312,7 +328,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		s.auth = svc
 	}
 
-	workflowEngine, err := newWorkflowEngine(conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
+	workflowEngine, err := newWorkflowEngine(conf, s.agentSource, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
 	}

@@ -50,6 +50,23 @@ func AgentsDir() string { return filepath.Join(Root(), "agents") }
 // TeamsFile is the teams definition file (~/asgard/teams.yaml).
 func TeamsFile() string { return filepath.Join(Root(), "teams.yaml") }
 
+// AgentsCacheDir is the directory holding agent definitions materialized from
+// etcd (~/asgard/data/agents-cache).
+func AgentsCacheDir() string { return filepath.Join(DataDir(), "agents-cache") }
+
+// AgentCacheDir is the materialized directory of a global agent, addressed by
+// a content hash of its files (~/asgard/data/agents-cache/<id>@<hash>), so an
+// existing directory always holds identical content.
+func AgentCacheDir(id, hash string) string {
+	return filepath.Join(AgentsCacheDir(), id+"@"+hash)
+}
+
+// RunnerAgentCacheDir is the materialized directory of a runner-scoped agent
+// (~/asgard/data/agents-cache/runners/<nodeID>/<id>@<hash>).
+func RunnerAgentCacheDir(nodeID, id, hash string) string {
+	return filepath.Join(AgentsCacheDir(), "runners", nodeID, id+"@"+hash)
+}
+
 // LogsDir is the log directory (~/asgard/logs).
 func LogsDir() string { return filepath.Join(Root(), "logs") }
 

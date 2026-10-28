@@ -104,9 +104,13 @@ func checkManageOrigin(r *http.Request) error {
 
 // Reload reloads the agent configurations and refreshes the HTTP handlers.
 func (s *Server) reload() error {
-	agentDir := s.conf.GetAgentDir()
-	loader := agentspec.NewLoader(agentDir)
-	agents, err := loader.LoadAll()
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+
+	if s.agentSource == nil {
+		return errors.New("no agent source configured")
+	}
+	agents, err := s.agentSource.LoadAll()
 	if err != nil {
 		return err
 	}
@@ -120,7 +124,7 @@ func (s *Server) reload() error {
 	}
 
 	if !hasAgentFather {
-		return fmt.Errorf("agent_father is required as the initial root agent, but was not found in the agents directory (%s). You can clone the default agents via: git clone https://github.com/AgentDrasil/asgard-agents.git %s", agentDir, agentDir)
+		return errors.New("agent_father is required as the initial root agent, but was not found in the loaded agent definitions")
 	}
 
 	s.mu.Lock()
@@ -130,6 +134,12 @@ func (s *Server) reload() error {
 	}
 	s.mux = s.buildMuxLocked()
 	s.mu.Unlock()
+
+	// Only now is the new list being served, so only now may the source stop
+	// protecting the previous one.
+	if acc, ok := s.agentSource.(interface{ Accept([]*agentspec.Agent) }); ok {
+		acc.Accept(agents)
+	}
 
 	if s.diagnostics != nil {
 		s.validateModelContextWindows(agents)
@@ -141,6 +151,22 @@ func (s *Server) reload() error {
 	}
 
 	return nil
+}
+
+// ReloadAgents reloads agents from the agent source (for example on an etcd
+// watch event) and records the outcome in diagnostics.
+func (s *Server) ReloadAgents() error {
+	err := s.reload()
+	if s.diagnostics != nil {
+		s.diagnostics.ResetSource("agent_load")
+		if err != nil {
+			s.diagnostics.AddError("agent_load", err.Error())
+		}
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to reload agents")
+	}
+	return err
 }
 
 // validateWorkflows validates workflow definitions and checks model pairing coverage,

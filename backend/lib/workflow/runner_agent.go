@@ -73,7 +73,7 @@ type AgentStatusUpdate struct {
 
 // agentRunner executes agent nodes by invoking CLI agents inside sandboxes.
 type agentRunner struct {
-	loader         *agentspec.Loader
+	loader         agentspec.Lister
 	conf           *config.Config
 	statusListener AgentStatusListener
 
@@ -84,12 +84,12 @@ type agentRunner struct {
 
 // NewAgentRunner creates the runner for `agent` nodes. The loader resolves
 // agent_id references lazily (and re-resolves after agent reloads on cache miss).
-func NewAgentRunner(loader *agentspec.Loader, conf *config.Config) NodeRunner {
+func NewAgentRunner(loader agentspec.Lister, conf *config.Config) NodeRunner {
 	return NewAgentRunnerWithListener(loader, conf, nil)
 }
 
 // NewAgentRunnerWithListener creates the runner for `agent` nodes with an optional status listener.
-func NewAgentRunnerWithListener(loader *agentspec.Loader, conf *config.Config, listener AgentStatusListener) NodeRunner {
+func NewAgentRunnerWithListener(loader agentspec.Lister, conf *config.Config, listener AgentStatusListener) NodeRunner {
 	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agentspec.Agent)}
 }
 

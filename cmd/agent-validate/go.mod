@@ -17,6 +17,7 @@ require (
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

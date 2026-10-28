@@ -3,9 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
+	"github.com/elmhuangyu/configs/pkg/cfgfs"
+	"github.com/elmhuangyu/configs/pkg/configlib"
+	"github.com/getsops/sops/v3/decrypt"
 	"github.com/goccy/go-yaml"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -15,11 +21,13 @@ import (
 
 var agentsDirFlag = flag.String("agents-dir", "", "Path to the agents root directory containing agents/ subdirectories and teams.yaml")
 
+var noDecryptFlag = flag.Bool("no-decrypt", false, "Do not decrypt SOPS envelopes when validating an etcd tree (encrypted values are validated as-is)")
+
 func main() {
 	flag.Parse()
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: agent-validate [--agents-dir=<path>] <path-to-config-file-or-dir-or-workflow>")
+		fmt.Fprintln(os.Stderr, "Usage: agent-validate [--agents-dir=<path>] <path-to-config-file-or-dir-or-workflow-or-etcd-tree-root>")
 		os.Exit(1)
 	}
 
@@ -31,6 +39,12 @@ func main() {
 	}
 
 	if info.IsDir() {
+		if isTreeRoot(targetPath) {
+			if !validateTree(targetPath, os.Stdout, os.Stderr) {
+				os.Exit(1)
+			}
+			return
+		}
 		validateDir(targetPath)
 		return
 	}
@@ -246,4 +260,175 @@ func containsNodesKey(data []byte) bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// isTreeRoot reports whether dir is shaped like the etcd tree: agents/teams.yaml,
+// a runners/ directory, or an agents/ directory of agent subdirectories with no
+// legacy teams.yaml beside it.
+func isTreeRoot(dir string) bool {
+	if fileExists(filepath.Join(dir, "agents", "teams.yaml")) {
+		return true
+	}
+	if info, err := os.Stat(filepath.Join(dir, "runners")); err == nil && info.IsDir() {
+		return true
+	}
+	if fileExists(filepath.Join(dir, "teams.yaml")) {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "agents"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(dir, "agents", e.Name(), "config.yaml")) {
+			return true
+		}
+	}
+	return false
+}
+
+// readTreeFiles loads agents/ and runners/ of an etcd-tree-shaped directory
+// into a slash-keyed file map, using the same on-disk to key convention as
+// publishing (cfgfs: ignore rules, ".sops.json" suffix stripped) and decrypting
+// SOPS envelopes. A file that cannot be decrypted is an error.
+func readTreeFiles(root string) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	err := cfgfs.Walk(root, func(rel, abs string) error {
+		key := cfgfs.LogicalKey(filepath.ToSlash(rel))
+		if !strings.HasPrefix(key, "agents/") && !strings.HasPrefix(key, "runners/") {
+			return nil
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		if !*noDecryptFlag {
+			data, err = decryptFile(rel, data)
+			if err != nil {
+				return fmt.Errorf("%s: %w (use --no-decrypt to validate without decrypting)", rel, err)
+			}
+		}
+		files[key] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// validateTree validates an etcd-tree-shaped directory: every global and
+// runner agent, name collisions between scopes, and each agent's workflow
+// against the agents visible in its scope.
+func validateTree(root string, out, errOut io.Writer) bool {
+	files, err := readTreeFiles(root)
+	if err != nil {
+		say(errOut, "Error reading agent tree %q: %v\n", root, err)
+		return false
+	}
+
+	if len(files) == 0 {
+		say(errOut, "Error: %q contains neither agents/ nor runners/ files\n", root)
+		return false
+	}
+
+	set, err := agentspec.ParseFiles(files)
+	if err != nil {
+		say(errOut, "Agent tree validation failed: %v\n", err)
+		return false
+	}
+
+	failed := false
+	for _, cerr := range set.Collisions() {
+		say(errOut, "Error: %v\n", cerr)
+		failed = true
+	}
+
+	for _, rerr := range set.RunnerErrors() {
+		say(errOut, "Error: %v\n", rerr)
+		failed = true
+	}
+
+	say(out, "Global agents: %d\n", len(set.Global))
+	if validateScopeWorkflows(out, errOut, set, "", set.Global) {
+		failed = true
+	}
+	for node, own := range set.Runners {
+		say(out, "Runner %q agents: %d\n", node, len(own))
+		if validateScopeWorkflows(out, errOut, set, node, own) {
+			failed = true
+		}
+	}
+
+	if failed {
+		return false
+	}
+	sayln(out, "Agent tree is valid")
+	return true
+}
+
+// validateScopeWorkflows validates the workflows of the given agents against
+// the effective agent list of their scope (global, or global plus the runner).
+// A scope with a name collision has no effective list and is skipped (the
+// collision is already reported). It returns true when any check failed.
+func validateScopeWorkflows(out, errOut io.Writer, set *agentspec.Set, node string, defs map[string]*agentspec.Definition) bool {
+	effective, err := set.Effective(node)
+	if err != nil {
+		return false
+	}
+	var agents []*agentspec.Agent
+	for _, d := range effective {
+		agents = append(agents, &agentspec.Agent{Config: d.Config})
+	}
+	infos := agentspec.AgentsToWorkflowAgentInfos(agents)
+
+	failed := false
+	for _, id := range sortedIDs(defs) {
+		d := defs[id]
+		say(out, "  Agent config is valid (ID: %q, Name: %q, Type: %q)\n", d.Config.ID, d.Config.Name, d.Config.Type)
+		if d.Config.Type != "workflow" {
+			continue
+		}
+		defn, err := workflowspec.ParseDefinition(d.Files["workflow.yaml"])
+		if err == nil {
+			err = defn.ValidateWithAgents(infos)
+		}
+		if err != nil {
+			say(errOut, "  Workflow validation failed for agent %q: %v\n", id, err)
+			failed = true
+			continue
+		}
+		for _, warning := range defn.ModelPairingWarnings() {
+			say(errOut, "  Warning: %s\n", warning)
+		}
+		say(out, "  Workflow definition is valid (Agent: %q, Nodes: %d)\n", id, len(defn.Nodes))
+	}
+	return failed
+}
+
+func sortedIDs(m map[string]*agentspec.Definition) []string {
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func say(w io.Writer, format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
+
+func sayln(w io.Writer, args ...any) { _, _ = fmt.Fprintln(w, args...) }
+
+// decryptFile decrypts a SOPS envelope and passes plaintext through. For YAML
+// files a failure reports the YAML store's error: configlib tries yaml then
+// json and returns only the last (json) error, which masks real causes such as
+// a missing KMS key.
+func decryptFile(name string, raw []byte) ([]byte, error) {
+	out, err := configlib.DecryptIfNeeded(raw)
+	if err != nil && (strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
+		if _, yerr := decrypt.Data(raw, "yaml"); yerr != nil {
+			return nil, fmt.Errorf("sops decryption failed: %w", yerr)
+		}
+	}
+	return out, err
 }

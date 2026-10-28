@@ -24,12 +24,12 @@ import (
 // runner (nil falls back to the process-wide default registry); resolveDefn
 // resolves sub-workflow definitions by name for the `workflow` node runner;
 // extraRunners replace the default runner for the node types they support.
-func newWorkflowEngine(conf *config.Config, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, resolveDefn workflow.ResolveDefnFunc, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
+func newWorkflowEngine(conf *config.Config, agents agentspec.Lister, statusListener workflow.AgentStatusListener, funcRegistry *workflow.FunctionRegistry, resolveDefn workflow.ResolveDefnFunc, extraRunners ...workflow.NodeRunner) (*workflow.Engine, error) {
 	registry := workflow.NewNodeRunnerRegistry()
 	registry.Register(workflow.NewCommandRunnerWithConfig(true, conf))
 	registry.Register(workflow.NewFunctionRunner(funcRegistry))
 	if conf != nil {
-		registry.Register(workflow.NewAgentRunnerWithListener(agentspec.NewLoader(conf.GetAgentDir()), conf, statusListener))
+		registry.Register(workflow.NewAgentRunnerWithListener(agents, conf, statusListener))
 		if conf.GeminiAPIKey != "" {
 			client, err := llm.NewClient(context.Background(), conf.GeminiAPIKey)
 			if err != nil {
@@ -105,7 +105,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 	engine := s.workflowEngine
 	if engine == nil {
 		var err error
-		engine, err = newWorkflowEngine(s.conf, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
+		engine, err = newWorkflowEngine(s.conf, s.agentSource, s, s.funcRegistry, s.resolveWorkflowDefinition, s.customRunners...)
 		if err != nil {
 			log.Error().Err(err).Str("agent", agent.Config.ID).Msg("failed to create workflow engine")
 			s.emitWorkflowPreExecutionCleanup(chatID, agentID)
