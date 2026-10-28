@@ -114,17 +114,16 @@ func TestPrompt_ContractToolAccessFallback(t *testing.T) {
 	capturingP, _ := setupCapturedPrompt(t, home, "workspace")
 	testDir := filepath.Join(home, "workspace")
 
-	// No --tool-access flag, but the contract declares doc-only.
-	writeContractFile(t, home, &common.Contract{AgentID: "intend", ToolAccess: types.ToolAccessDocOnly, Body: "x"})
+	writeContractFile(t, home, &common.Contract{AgentID: "intend", ToolAccess: types.ToolAccessFull, Body: "x"})
 
 	_, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir})
 	require.NoError(t, err)
 
 	require.NotEmpty(t, capturingP.capturedCtxs)
 	names := toolNamesOf(t, capturingP.capturedCtxs[0])
-	assert.NotContains(t, names, "bash")
-	assert.NotContains(t, names, "edit")
-	assert.Contains(t, names, "write_doc")
+	assert.Contains(t, names, "bash")
+	assert.Contains(t, names, "edit")
+	assert.Contains(t, names, "write")
 	assert.Contains(t, names, "read")
 }
 
@@ -133,7 +132,7 @@ func TestPrompt_FlagToolAccessWinsOverContract(t *testing.T) {
 	capturingP, _ := setupCapturedPrompt(t, home, "workspace")
 	testDir := filepath.Join(home, "workspace")
 
-	writeContractFile(t, home, &common.Contract{AgentID: "coder", ToolAccess: types.ToolAccessDocOnly, Body: "x"})
+	writeContractFile(t, home, &common.Contract{AgentID: "coder", ToolAccess: "", Body: "x"})
 
 	// Explicit flag overrides the contract metadata.
 	_, err := Prompt(context.Background(), "run", types.PromptOptions{Dir: testDir, ToolAccess: types.ToolAccessFull})

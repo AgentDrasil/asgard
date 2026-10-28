@@ -447,8 +447,7 @@ func TestPrepareAgentToolRestrictions(t *testing.T) {
 	}{
 		{"full no team", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, "", []string{"AskUserQuestion"}, []string{"Task", "Agent", "Bash"}},
 		{"team", common.Contract{AgentID: "a", Team: "t", Body: "BODY-MARKER"}, "", []string{"AskUserQuestion", "Task", "Agent"}, []string{"Bash"}},
-		{"doc-only from contract", common.Contract{AgentID: "a", ToolAccess: types.ToolAccessDocOnly, Body: "BODY-MARKER"}, "", []string{"AskUserQuestion", "Bash"}, []string{"Task"}},
-		{"doc-only from options", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, types.ToolAccessDocOnly, []string{"AskUserQuestion", "Bash"}, nil},
+		{"full access option", common.Contract{AgentID: "a", Body: "BODY-MARKER"}, types.ToolAccessFull, []string{"AskUserQuestion"}, []string{"Task", "Agent", "Bash"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

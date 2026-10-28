@@ -379,7 +379,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid tool_access doc-only",
+			name: "valid tool_access full",
 			config: AgentConfig{
 				ID:          "agent-one",
 				Name:        "agent1",
@@ -388,7 +388,7 @@ func TestAgentConfig_Validate(t *testing.T) {
 					{CLI: "agy", Model: "gemini-2.5-flash"},
 				},
 				RunDirs:    []string{"/tmp/run"},
-				ToolAccess: "doc-only",
+				ToolAccess: "full",
 			},
 			wantErr: false,
 		},

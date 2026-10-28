@@ -160,7 +160,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		toolAccess = contract.ToolAccess
 	}
 	reg := simplest.DefaultRegistry(runDir)
-	toolList, toolNames, err := selectTools(toolAccess, runDir, reg.Tools(), docToolOptions())
+	toolList, toolNames, err := selectTools(toolAccess, reg.Tools())
 	if err != nil {
 		return nil, err
 	}
@@ -188,9 +188,6 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		contextFiles = filterAgentCfgFiles(agentCfgDir, contextFiles)
 	} else {
 		customPrompt, contextFiles = agentIdentityPrompt(agentCfgDir, contextFiles)
-	}
-	if customPrompt == "" && toolAccess == types.ToolAccessDocOnly {
-		customPrompt = docOnlyIdentity
 	}
 
 	toolSnippets := make(map[string]string, len(toolList))
@@ -356,14 +353,9 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}, nil
 }
 
-// docOnlyIdentity replaces the default coding-assistant identity when a
-// doc-only agent has no agent-level AGENTS.md, so the identity matches the
-// trimmed tool set.
-const docOnlyIdentity = "You are an analysis and documentation agent operating inside an agent harness. You read and search files, and you produce or revise markdown documents. You cannot run commands or modify source code."
-
 // selectTools returns the tool set for the configured access mode. Unknown
-// modes are rejected (fail closed): "" selects the full default set.
-func selectTools(toolAccess, runDir string, allTools []simplest.AgentTool, docOpts simplest.DocToolOptions) ([]simplest.AgentTool, []string, error) {
+// modes are rejected (fail closed): "" or "full" selects the default full tool set.
+func selectTools(toolAccess string, allTools []simplest.AgentTool) ([]simplest.AgentTool, []string, error) {
 	switch toolAccess {
 	case "", types.ToolAccessFull:
 		names := make([]string, 0, len(allTools))
@@ -371,35 +363,9 @@ func selectTools(toolAccess, runDir string, allTools []simplest.AgentTool, docOp
 			names = append(names, t.Name())
 		}
 		return allTools, names, nil
-	case types.ToolAccessDocOnly:
-		filtered := make([]simplest.AgentTool, 0, len(allTools))
-		var names []string
-		for _, t := range allTools {
-			switch t.Name() {
-			case "bash":
-				continue
-			case "write":
-				t = simplest.NewWriteDocTool(runDir, docOpts)
-			case "edit":
-				t = simplest.NewEditDocTool(runDir, docOpts)
-			}
-			filtered = append(filtered, t)
-			names = append(names, t.Name())
-		}
-		return filtered, names, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported tool access mode %q: must be %q or %q", toolAccess, types.ToolAccessFull, types.ToolAccessDocOnly)
+		return nil, nil, fmt.Errorf("unsupported tool access mode %q: must be %q", toolAccess, types.ToolAccessFull)
 	}
-}
-
-// docToolOptions loads the doc-tool path policy from the simplest config.
-// Missing or unreadable config falls back to the default policy (any .md).
-func docToolOptions() simplest.DocToolOptions {
-	cfg, err := simplest.LoadConfig()
-	if err != nil || cfg == nil {
-		return simplest.DocToolOptions{}
-	}
-	return simplest.DocToolOptions{AllowedDirs: cfg.DocToolAllowedDirs}
 }
 
 // filterAgentCfgFiles drops loaded instruction files that live under the
@@ -439,7 +405,7 @@ func agentIdentityPrompt(agentCfgDir string, files []simplest.ContextFile) (stri
 
 func extractTargetFiles(toolName string, rawArgs any) []string {
 	switch toolName {
-	case "write", "edit", "write_doc", "edit_doc":
+	case "write", "edit":
 	default:
 		return nil
 	}

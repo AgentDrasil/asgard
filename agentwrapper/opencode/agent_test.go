@@ -89,35 +89,6 @@ func TestPrepareAgent_FullAccessTeam(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
-func TestPrepareAgent_DocOnlyNoTeam(t *testing.T) {
-	home := withSandboxHome(t)
-	writeContract(t, home, &common.Contract{
-		AgentID:    "intend",
-		AgentName:  "Intend",
-		ToolAccess: types.ToolAccessDocOnly,
-		Body:       "Analyze only.\n",
-	})
-
-	name, cleanup, err := PrepareAgent(types.PromptOptions{})
-	require.NoError(t, err)
-	assert.Equal(t, "intend", name)
-	defer cleanup()
-
-	data, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "agents", "intend.md"))
-	require.NoError(t, err)
-	content := string(data)
-
-	assert.Contains(t, content, "question: deny")
-	// No team: native task delegation stays available (peer header absent).
-	assert.NotContains(t, content, "task:")
-	assert.NotContains(t, content, "call-peer")
-	// Doc-only for opencode only disables shell execution; editing stays.
-	assert.Contains(t, content, "bash:\n    \"*\": deny")
-	assert.Contains(t, content, "shell:\n    \"*\": deny")
-	assert.NotContains(t, content, "edit:")
-	assert.Contains(t, content, "Analyze only.")
-}
-
 func TestPrepareAgent_OptsAgentIDWins(t *testing.T) {
 	home := withSandboxHome(t)
 	writeContract(t, home, &common.Contract{AgentID: "from-contract", Body: "x"})

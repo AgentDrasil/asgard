@@ -63,17 +63,15 @@ inside the sandbox loads the contract via `agentwrapper/common` and
 translates it into CLI-native form:
 
 - **opencode**: writes `~/.config/opencode/agents/<agent-id>.md` (frontmatter
-  with `mode: primary` and `permission` rules derived from the contract, e.g.
-  doc-only agents lose `bash` while editing stays available) and runs
+  with `mode: primary` and `permission` rules derived from the contract) and runs
   `opencode run --agent <agent-id>`, so the contract identity replaces
   opencode's built-in `build` persona instead of arriving as weak ambient
   instructions.
 - **simplest**: composes the in-process system prompt from the CLI protocol
-  headers plus the contract body, and selects/crops the tool set from the
-  contract's `tool_access`.
+  headers plus the contract body.
 - **claude**: passes the composed prompt via `--append-system-prompt-file` (a temp file) and
   derives `--disallowedTools` from the contract (`AskUserQuestion` always,
-  `Task`/`Agent` for team agents, `Bash` for doc-only). Runs
+  `Task`/`Agent` for team agents). Runs
   `claude --print --verbose --output-format stream-json
   --dangerously-skip-permissions` (the sandbox must not run as root); a new
   session gets a generated `--session-id`, a given one uses `--resume`, and a
@@ -95,8 +93,6 @@ translates it into CLI-native form:
     came from the main agent, and they also overwrite the reported
     `input_tokens`, so the figure can flap while subagents run (and end up as a
     subagent's context if one finishes after the parent's last message).
-  - `doc-only` only disallows `Bash`; other command-capable tools (e.g.
-    `Monitor`) and source editing stay available. doc-only is being deprecated.
   - `--agent` is accepted (the sandbox passes it to every CLI) but unused:
     the identity travels entirely in the appended contract prompt.
 - **agy**: installs the composed prompt into `~/.gemini/GEMINI.md` for the

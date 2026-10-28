@@ -110,7 +110,6 @@ func renderAgentFile(displayName string, contract *common.Contract, body string)
 	sb.WriteString("mode: primary\n")
 	sb.WriteString("permission:\n")
 	appendBasePermissions(&sb, contract)
-	appendToolAccessPermissions(&sb, contract)
 	sb.WriteString("---\n\n")
 	sb.WriteString(strings.TrimSpace(body))
 	sb.WriteString("\n")
@@ -136,20 +135,4 @@ func appendBasePermissions(sb *strings.Builder, contract *common.Contract) {
 		sb.WriteString("  task:\n")
 		sb.WriteString("    " + common.YAMLQuote("*") + ": deny\n")
 	}
-}
-
-// appendToolAccessPermissions translates the contract's tool access metadata
-// into opencode permission rules. Full-access agents need no extra rules
-// (opencode run --auto approves everything that is not explicitly denied).
-// Doc-only (analysis/documentation) agents lose shell execution entirely
-// (mirroring simplest, which drops the bash tool); file editing stays
-// available.
-func appendToolAccessPermissions(sb *strings.Builder, contract *common.Contract) {
-	if strings.TrimSpace(contract.ToolAccess) != types.ToolAccessDocOnly {
-		return
-	}
-	sb.WriteString("  bash:\n")
-	sb.WriteString("    " + common.YAMLQuote("*") + ": deny\n")
-	sb.WriteString("  shell:\n")
-	sb.WriteString("    " + common.YAMLQuote("*") + ": deny\n")
 }

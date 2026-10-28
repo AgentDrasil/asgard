@@ -40,10 +40,6 @@ type SandboxSpec interface {
 const (
 	// ToolAccessFull exposes the complete built-in tool set (default).
 	ToolAccessFull = "full"
-	// ToolAccessDocOnly exposes read/search tools plus the markdown-only
-	// write_doc/edit_doc tools; command execution and source-code editing
-	// are unavailable.
-	ToolAccessDocOnly = "doc-only"
 )
 
 // CLIClient defines the interface that all CLI agents must implement.
@@ -133,9 +129,9 @@ type PromptOptions struct {
 	// adapter falls back to the agent_id in the AW_AGENTS.md contract.
 	AgentID string
 
-	// ToolAccess selects the tool set exposed to the agent. Valid values are
-	// ToolAccessFull (default) and ToolAccessDocOnly. Unsupported values must
-	// be rejected by the CLI (fail closed).
+	// ToolAccess selects the tool set exposed to the agent. Valid value is
+	// ToolAccessFull (default).
+	// Unsupported values must be rejected by the CLI (fail closed).
 	ToolAccess string
 
 	// AddTmpToDir adds /tmp as an additional allowed directory for the agent.

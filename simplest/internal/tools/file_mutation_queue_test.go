@@ -280,33 +280,6 @@ func TestEditToolBlocksOnQueue(t *testing.T) {
 	}
 }
 
-func TestDocToolsInheritQueueWithoutDeadlock(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "doc.md")
-	tool := NewWriteDocTool(dir, DocToolOptions{})
-	require.NoError(t, os.WriteFile(path, []byte("old\n"), 0o644))
-
-	release := holdMutation(t, path)
-
-	done := execAsync(tool, fmt.Sprintf(`{"path":%q,"content":"new"}`, path))
-
-	select {
-	case err := <-done:
-		t.Fatalf("write_doc did not inherit the queue: %v", err)
-	case <-time.After(500 * time.Millisecond):
-	}
-	release()
-
-	select {
-	case err := <-done:
-		require.NoError(t, err, "write_doc must not double-acquire and deadlock")
-		assert.Equal(t, "new", readFile(t, path))
-	case <-time.After(2 * time.Second):
-		t.Fatal("write_doc deadlocked (double-acquire)")
-	}
-}
-
 // drainExec consumes an execAsync result; errors are tolerated because the
 // regression test only asserts on the resulting file contents.
 func drainExec(t *testing.T, ch chan error) {

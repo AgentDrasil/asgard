@@ -83,9 +83,9 @@ var simplestCmd = &cobra.Command{
 		}
 
 		switch simplestToolAccess {
-		case "", types.ToolAccessFull, types.ToolAccessDocOnly:
+		case "", types.ToolAccessFull:
 		default:
-			return fmt.Errorf("invalid --tool-access %q: must be %q or %q", simplestToolAccess, types.ToolAccessFull, types.ToolAccessDocOnly)
+			return fmt.Errorf("invalid --tool-access %q: must be %q", simplestToolAccess, types.ToolAccessFull)
 		}
 
 		result, err := simplest.Prompt(ctx, prompt, types.PromptOptions{
@@ -118,7 +118,7 @@ func init() {
 	simplestCmd.Flags().BoolVar(&simplestUsage, "usage", false, "Print token usage information")
 	simplestCmd.Flags().StringVarP(&simplestModel, "model", "m", "", "Model to select for the session")
 	simplestCmd.Flags().StringVar(&simplestAgent, "agent", "", "Asgard agent ID (drives CLI-native agent adaptation from the AW_AGENTS.md contract)")
-	simplestCmd.Flags().StringVar(&simplestToolAccess, "tool-access", "", fmt.Sprintf("Tool set exposed to the agent: %q or %q (default %q)", types.ToolAccessFull, types.ToolAccessDocOnly, types.ToolAccessFull))
+	simplestCmd.Flags().StringVar(&simplestToolAccess, "tool-access", "", fmt.Sprintf("Tool set exposed to the agent: %q (default %q)", types.ToolAccessFull, types.ToolAccessFull))
 	simplestCmd.Flags().BoolVar(&simplestAddTmpToDir, "add-tmp-to-dir", false, "Add /tmp to allowed directories for the agent (no-op for simplest)")
 
 	simplestCmd.AddCommand(simplestModelsCmd)

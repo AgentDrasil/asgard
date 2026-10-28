@@ -42,7 +42,7 @@ type Contract struct {
 	// AgentName is the human-readable agent name.
 	AgentName string
 
-	// ToolAccess declares the agent's tool set ("full" or "doc-only").
+	// ToolAccess declares the agent's tool set ("full").
 	ToolAccess string
 
 	// Team is the agent's team name; non-empty means the agent operates in

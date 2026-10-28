@@ -202,9 +202,9 @@ image (including APNG and invalid BMP). `bash` exposes `PI_SESSION_ID`,
 commands, sourced from `Request.SessionID`/`SessionFile` and the active
 model/thinking level; stale inherited `PI_*` values are removed.
 
-`edit` and `edit_doc` participate in parallel tool batches. The per-path
+`edit` participates in parallel tool batches. The per-path
 mutation queue serializes concurrent mutations of the same path, including
-`write` and `write_doc`.
+`write`.
 
 ### Registering your own tool (Go func)
 

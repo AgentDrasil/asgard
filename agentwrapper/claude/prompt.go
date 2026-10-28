@@ -47,7 +47,7 @@ type agentSetup struct {
 // zero value and claude runs with its native defaults.
 func prepareAgent(opts types.PromptOptions) (agentSetup, error) {
 	toolAccess := strings.TrimSpace(opts.ToolAccess)
-	if toolAccess != "" && toolAccess != types.ToolAccessFull && toolAccess != types.ToolAccessDocOnly {
+	if toolAccess != "" && toolAccess != types.ToolAccessFull {
 		return agentSetup{}, fmt.Errorf("unsupported tool access %q", toolAccess)
 	}
 
@@ -57,6 +57,9 @@ func prepareAgent(opts types.PromptOptions) (agentSetup, error) {
 	}
 	if toolAccess == "" {
 		toolAccess = strings.TrimSpace(contract.ToolAccess)
+	}
+	if toolAccess != "" && toolAccess != types.ToolAccessFull {
+		return agentSetup{}, fmt.Errorf("unsupported tool access %q", toolAccess)
 	}
 
 	c := &Client{}
@@ -68,9 +71,6 @@ func prepareAgent(opts types.PromptOptions) (agentSetup, error) {
 	// Delegation goes through /bin/call-peer for team agents.
 	if strings.TrimSpace(contract.Team) != "" {
 		setup.disallowedTools = append(setup.disallowedTools, "Task", "Agent")
-	}
-	if toolAccess == types.ToolAccessDocOnly {
-		setup.disallowedTools = append(setup.disallowedTools, "Bash")
 	}
 	return setup, nil
 }

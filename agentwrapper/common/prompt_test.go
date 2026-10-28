@@ -15,7 +15,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 	original := &Contract{
 		AgentID:    "intend",
 		AgentName:  "Intend Planner",
-		ToolAccess: "doc-only",
+		ToolAccess: "full",
 		Team:       "core-team",
 		Body:       "## Language Preferences\n\nrule body here",
 	}

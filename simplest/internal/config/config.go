@@ -83,11 +83,6 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type Config struct {
 	Providers map[string]ProviderConfig `yaml:"providers" json:"providers"`
 	Models    []ModelConfig             `yaml:"models" json:"models"`
-
-	// DocToolAllowedDirs restricts the doc tools (write_doc, edit_doc) to
-	// markdown files under these absolute directories. Empty means any .md
-	// path is allowed.
-	DocToolAllowedDirs []string `yaml:"docToolAllowedDirs,omitempty" json:"docToolAllowedDirs,omitempty"`
 }
 
 // DefaultConfigPath resolves the configuration (keys/providers) file path by precedence:
@@ -269,7 +264,7 @@ func Load() (*Config, error) {
 
 // LoadFrom loads and parses configuration files.
 // Under the split configuration policy:
-//  1. key.yaml only defines provider secrets (apiKey / key) and security settings (docToolAllowedDirs).
+//  1. key.yaml only defines provider secrets (apiKey / key).
 //     Defining api, baseUrl, or models in key.yaml is rejected with an error.
 //  2. providers.yaml defines provider metadata (api, baseUrl, headers).
 //  3. models.yaml defines model catalog.
@@ -283,9 +278,8 @@ func LoadFrom(path string) (*Config, error) {
 	expanded := os.ExpandEnv(string(data))
 
 	var rawKeyDoc struct {
-		Providers          map[string]ProviderConfig `yaml:"providers"`
-		Models             []ModelConfig             `yaml:"models"`
-		DocToolAllowedDirs []string                  `yaml:"docToolAllowedDirs"`
+		Providers map[string]ProviderConfig `yaml:"providers"`
+		Models    []ModelConfig             `yaml:"models"`
 	}
 	if err := yaml.Unmarshal([]byte(expanded), &rawKeyDoc); err != nil {
 		return nil, fmt.Errorf("parse yaml config %s: %w", path, err)
@@ -303,9 +297,8 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	cfg := Config{
-		Providers:          make(map[string]ProviderConfig),
-		Models:             make([]ModelConfig, 0),
-		DocToolAllowedDirs: rawKeyDoc.DocToolAllowedDirs,
+		Providers: make(map[string]ProviderConfig),
+		Models:    make([]ModelConfig, 0),
 	}
 
 	// Load providers from standalone providers.yaml/providers.yml

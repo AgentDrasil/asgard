@@ -55,11 +55,7 @@ type AgentConfig struct {
 	SessionMode string `yaml:"session_mode"`
 
 	// ToolAccess controls the tool set exposed to the agent. "full" (default):
-	// all built-in tools. "doc-only": read/search tools plus restricted
-	// writes, for analysis and review agents that must not run shell
-	// commands. Honored by the simplest CLI (tool cropping: markdown-only
-	// writes, no shell) and the opencode CLI (permission frontmatter on the
-	// generated agent file: no shell, editing stays available).
+	// all built-in tools.
 	ToolAccess string `yaml:"tool_access"`
 }
 
@@ -177,10 +173,10 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	}
 
 	switch cfg.ToolAccess {
-	case "", types.ToolAccessFull, types.ToolAccessDocOnly:
+	case "", types.ToolAccessFull:
 		// valid
 	default:
-		return fmt.Errorf("tool_access must be %q or %q, got %q", types.ToolAccessFull, types.ToolAccessDocOnly, cfg.ToolAccess)
+		return fmt.Errorf("tool_access must be %q, got %q", types.ToolAccessFull, cfg.ToolAccess)
 	}
 
 	return nil

@@ -104,7 +104,7 @@ func TestWriteContractFile(t *testing.T) {
 		ID:         "test-agent",
 		Name:       "Test Agent",
 		Team:       "test-team",
-		ToolAccess: "doc-only",
+		ToolAccess: "full",
 	}
 
 	path, err := writeContractFile(tmpDir, cfg, agentsMDPath, "## Language Preferences")
@@ -117,7 +117,7 @@ func TestWriteContractFile(t *testing.T) {
 	assert.Contains(t, content, "agent_id: test-agent")
 	// YAML quotes scalar values containing spaces.
 	assert.Contains(t, content, `agent_name: "Test Agent"`)
-	assert.Contains(t, content, "tool_access: doc-only")
+	assert.Contains(t, content, "tool_access: full")
 	assert.Contains(t, content, "team: test-team")
 	assert.Contains(t, content, "## Language Preferences")
 	assert.Contains(t, content, "agents instructions")
@@ -276,7 +276,7 @@ func TestBuildArgs(t *testing.T) {
 	assert.True(t, strings.HasSuffix(argStrOpencode, expectedEndOpencode), "expected suffix %q, got: %s", expectedEndOpencode, argStrOpencode)
 
 	// Test case 3: simplest CLITarget receives --tool-access from the agent spec
-	cfgDocOnly := &agentspec.AgentConfig{
+	cfgFull := &agentspec.AgentConfig{
 		ID:          "test-agent",
 		Name:        "Test Agent",
 		Description: "A test agent",
@@ -285,7 +285,7 @@ func TestBuildArgs(t *testing.T) {
 			CLI:   "simplest",
 			Model: "simple-model",
 		}},
-		ToolAccess: "doc-only",
+		ToolAccess: "full",
 	}
 
 	targetSimplest := agentspec.CLITarget{
@@ -293,7 +293,7 @@ func TestBuildArgs(t *testing.T) {
 		Model: "simple-model",
 	}
 
-	argsSimplest, err := buildArgsForAgent(cfgDocOnly, agentPath, targetSimplest, "run", optional.None[string](), runDir, "test-sock-dir", "", "", "")
+	argsSimplest, err := buildArgsForAgent(cfgFull, agentPath, targetSimplest, "run", optional.None[string](), runDir, "test-sock-dir", "", "", "")
 	require.NoError(t, err)
 
 	argStrSimplest := strings.Join(argsSimplest, " ")
@@ -302,13 +302,13 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStrSimplest, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "asgard", "data", "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedSimplestSkills)
-	expectedEndSimplest := "-- aw simplest --agent test-agent --model simple-model --tool-access doc-only --prompt run"
+	expectedEndSimplest := "-- aw simplest --agent test-agent --model simple-model --tool-access full --prompt run"
 	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
 
-	// doc-only must be a validated spec value; buildArgsForAgent passes it verbatim.
-	require.NoError(t, cfgDocOnly.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
-	cfgDocOnly.ToolAccess = "banana"
-	require.Error(t, cfgDocOnly.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
+	// ToolAccess must be a validated spec value; buildArgsForAgent passes it verbatim.
+	require.NoError(t, cfgFull.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
+	cfgFull.ToolAccess = "banana"
+	require.Error(t, cfgFull.ValidateWithCLIs(map[string][]string{"simplest": {"simple-model"}}))
 }
 
 func TestTimezoneInheritance(t *testing.T) {

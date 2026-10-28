@@ -312,9 +312,7 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	if spec := agentwrapper.GetSandboxSpec(target.CLI); spec != nil {
 		args = append(args, spec.ExtraArgs()...)
 	}
-	// Only the simplest CLI understands --tool-access, which selects the
-	// agent's tool set (doc-only agents lose bash/edit/write in favor of
-	// write_doc/edit_doc).
+	// Only the simplest CLI understands --tool-access.
 	if target.CLI == "simplest" && cfg != nil && cfg.ToolAccess != "" {
 		args = append(args, "--tool-access", cfg.ToolAccess)
 	}
