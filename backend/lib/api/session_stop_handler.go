@@ -100,6 +100,42 @@ func executionGuardValue(ctx context.Context) any {
 	return struct{}{}
 }
 
+// cancelWorkflowSession aborts the workflow runs of a session. A run registers
+// its cancel func with the engine only after its setup, and the workflow
+// executor deliberately detaches the run from the request context, so a stop
+// that lands in that window would find nothing to cancel and the run would go
+// on for good. When nothing was cancelled it therefore retries until a run was
+// signalled, the guard that was active at the stop is released or replaced, or
+// a generous deadline passes.
+func (s *Server) cancelWorkflowSession(chatID string, guard any) {
+	engine := s.workflowEngine
+	if engine == nil || chatID == "" {
+		return
+	}
+	if engine.CancelSession(chatID) > 0 {
+		return
+	}
+	go func() {
+		t := time.NewTicker(20 * time.Millisecond)
+		defer t.Stop()
+		deadline := time.NewTimer(30 * time.Second)
+		defer deadline.Stop()
+		for {
+			select {
+			case <-deadline.C:
+				return
+			case <-t.C:
+			}
+			if cur, running := s.activeExecutions.Load(chatID); !running || cur != guard {
+				return
+			}
+			if engine.CancelSession(chatID) > 0 {
+				return
+			}
+		}
+	}()
+}
+
 // sessionStopInProgress reports whether the session's execution was aborted
 // via the stop API and the stop marker has not been consumed yet. It lets
 // event handlers classify cancellation-induced failures precisely instead of
@@ -142,8 +178,8 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 	}
 
 	if handle, ok := value.(*executionHandle); ok {
-		if handle.isWorkflow && s.workflowEngine != nil {
-			s.workflowEngine.CancelSession(sessionID)
+		if handle.isWorkflow {
+			s.cancelWorkflowSession(sessionID, value)
 		}
 		if handle.cancel != nil {
 			handle.cancel()

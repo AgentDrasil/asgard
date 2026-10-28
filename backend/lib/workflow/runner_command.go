@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 	"uuid"
 
@@ -141,6 +142,14 @@ func runDirectCommand(ctx context.Context, command, workingDir string, stdout, s
 	cmd.Dir = workingDir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	// Run the command in its own process group and kill the whole group on
+	// cancel: killing only bash would leave its children (e.g. `sleep 60`)
+	// holding the output pipes, and Run would block until they exit.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if ok := asExitError(err, &exitErr); ok {

@@ -259,9 +259,7 @@ func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter,
 			defer s.releaseExecution(chatID)
 			defer handle.cancel()
 			defer cancelWhenDone(stopWith, func() {
-				if s.workflowEngine != nil {
-					s.workflowEngine.CancelSession(chatID)
-				}
+				s.cancelWorkflowSession(chatID, handle)
 				handle.cancel()
 			})()
 			status, output, err := s.runWorkflow(execCtx, targetAgent, chatID, req)
