@@ -16,7 +16,14 @@ export const LOCALE_STORAGE_KEY = "asgard_locale";
 
 export function getSavedLocale(): string | null {
   try {
-    return localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (
+      typeof localStorage !== "undefined" &&
+      localStorage &&
+      typeof localStorage.getItem === "function"
+    ) {
+      return localStorage.getItem(LOCALE_STORAGE_KEY);
+    }
+    return null;
   } catch {
     return null;
   }
@@ -53,7 +60,13 @@ export function setLocale(locale: string, persist = true): boolean {
   (i18n.global.locale as any).value = locale;
   if (persist) {
     try {
-      localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      if (
+        typeof localStorage !== "undefined" &&
+        localStorage &&
+        typeof localStorage.setItem === "function"
+      ) {
+        localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      }
     } catch (e) {
       console.warn("Failed to persist locale to localStorage:", e);
     }
