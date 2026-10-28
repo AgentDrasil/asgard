@@ -63,7 +63,6 @@ type Server struct {
 	funcRegistry        *workflow.FunctionRegistry
 	customRunners       []workflow.NodeRunner
 	publicSrv           *http.Server
-	internalSrv         *http.Server
 	keybindingsMu       sync.Mutex
 	shutdownStarted     chan struct{}
 	shutdownOnce        sync.Once
@@ -625,23 +624,8 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(authStatusResponse{Enabled: s.auth != nil})
 }
 
-// buildInternalMux builds the loopback-only mux. Its routes are reachable
-// without credentials because they are only bound to 127.0.0.1; in particular
-// agent-to-agent calls (find-peer, call-peer) use it to bypass the public auth
-// middleware.
-func (s *Server) buildInternalMux() *http.ServeMux {
-	internalMux := http.NewServeMux()
-	internalMux.HandleFunc("/agent-status", s.handleAgentStatus)
-	internalMux.HandleFunc("/api/ask-user", s.handleAskUser)
-	internalMux.HandleFunc("POST "+metrics.EndpointPath, s.handleRecordCompressionMetrics)
-	internalMux.HandleFunc("GET /team", s.handleTeam)
-	internalMux.HandleFunc("POST /api/agents/{id}/message", s.handleTriggerMessage)
-	return internalMux
-}
-
-// Start starts the public HTTP server and an internal-only loopback HTTP server
-// for agent status callbacks. Both shut down gracefully on SIGINT/SIGTERM or
-// when the Server's root context is canceled.
+// Start starts the public HTTP server. It shuts down gracefully on
+// SIGINT/SIGTERM or when the Server's root context is canceled.
 func (s *Server) Start() error {
 	// ── Public server ────────────────────────────────────────────────────────
 	publicSrv := &http.Server{
@@ -649,38 +633,23 @@ func (s *Server) Start() error {
 		Handler: s,
 	}
 
-	// ── Internal server (loopback only) ──────────────────────────────────────
-	internalSrv := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", s.conf.InternalPort),
-		Handler: s.buildInternalMux(),
-	}
-
 	s.mu.Lock()
 	s.publicSrv = publicSrv
-	s.internalSrv = internalSrv
 	s.mu.Unlock()
 
 	select {
 	case <-s.shutdownStarted:
 		// Shutdown was called before or during handle registration; clean up immediately.
 		_ = publicSrv.Close()
-		_ = internalSrv.Close()
 		return ErrServerShutdownBeforeStart
 	default:
 	}
 
-	serverErrors := make(chan error, 2)
+	serverErrors := make(chan error, 1)
 
 	go func() {
 		log.Info().Msgf("Starting public HTTP server on %s", publicSrv.Addr)
 		if err := publicSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			serverErrors <- err
-		}
-	}()
-
-	go func() {
-		log.Info().Msgf("Starting internal HTTP server on %s", internalSrv.Addr)
-		if err := internalSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErrors <- err
 		}
 	}()
@@ -744,17 +713,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 
 		s.mu.RLock()
-		publicSrv, internalSrv := s.publicSrv, s.internalSrv
+		publicSrv := s.publicSrv
 		s.mu.RUnlock()
 
 		if publicSrv != nil {
 			if err := publicSrv.Shutdown(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("public server graceful shutdown failed: %w", err))
-			}
-		}
-		if internalSrv != nil {
-			if err := internalSrv.Shutdown(ctx); err != nil {
-				errs = append(errs, fmt.Errorf("internal server graceful shutdown failed: %w", err))
 			}
 		}
 		if s.eventHub != nil {

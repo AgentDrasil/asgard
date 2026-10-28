@@ -4,30 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock/socktest"
 )
 
-func TestReport_PostsEventsToBackend(t *testing.T) {
+func TestReport_PostsEventsToRunner(t *testing.T) {
 	var (
 		gotPath string
 		gotBody []Event
 		calls   atomic.Int64
 	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		gotPath = r.URL.Path
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer server.Close()
-
-	t.Setenv("ASGARD_INTERNAL_API_HOST", server.URL)
 
 	Report(context.Background(),
 		Event{Kind: KindJev, Tokens: 120},
@@ -35,7 +35,7 @@ func TestReport_PostsEventsToBackend(t *testing.T) {
 	)
 
 	assert.Equal(t, int64(1), calls.Load())
-	assert.Equal(t, EndpointPath, gotPath)
+	assert.Equal(t, sandboxsock.PathMetrics, gotPath)
 	assert.Equal(t, []Event{
 		{Kind: KindJev, Tokens: 120},
 		{Kind: KindShowOutput, Bytes: 4096},
@@ -44,26 +44,19 @@ func TestReport_PostsEventsToBackend(t *testing.T) {
 
 func TestReport_NoEventsIsNoOp(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 	}))
-	defer server.Close()
-
-	t.Setenv("ASGARD_INTERNAL_API_HOST", server.URL)
 
 	Report(context.Background())
 
 	assert.Zero(t, calls.Load())
 }
 
-func TestReport_UnreachableBackendIsSwallowed(t *testing.T) {
-	// A closed listener yields an immediate connection refusal; Report must
+func TestReport_UnreachableRunnerIsSwallowed(t *testing.T) {
+	// A missing socket yields an immediate connection failure; Report must
 	// absorb it rather than panicking or surfacing an error.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	host := server.URL
-	server.Close()
-
-	t.Setenv("ASGARD_INTERNAL_API_HOST", host)
+	t.Setenv(sandboxsock.EnvURL, "unix://"+filepath.Join(t.TempDir(), "gone.sock"))
 
 	done := make(chan struct{})
 	go func() {
@@ -74,6 +67,6 @@ func TestReport_UnreachableBackendIsSwallowed(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Report blocked on an unreachable backend")
+		t.Fatal("Report blocked on an unreachable runner")
 	}
 }

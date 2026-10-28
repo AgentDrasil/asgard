@@ -1,112 +1,79 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/logger"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 )
 
 func main() {
+	os.Exit(run(os.Args, os.Stdout))
+}
+
+// run executes call-peer (args includes the program name) and returns the
+// exit code.
+func run(args []string, stdout io.Writer) int {
 	logger.SetupLogger("call-peer")
-	log.Debug().Interface("args", os.Args).Msg("call-peer: command started")
+	log.Debug().Interface("args", args).Msg("call-peer: command started")
 
-	if len(os.Args) < 3 {
+	if len(args) < 3 {
 		log.Error().Msg("Usage: call-peer <agent-id> <message>")
-		os.Exit(1)
+		return 1
 	}
 
-	agentID := os.Args[1]
-	messageText := os.Args[2]
+	agentID := args[1]
+	messageText := args[2]
 
-	chatID := os.Getenv("ASGARD_CHAT_ID")
-	if chatID == "" {
-		log.Error().Msg("ASGARD_CHAT_ID environment variable is not set")
-		os.Exit(1)
-	}
-
-	// Reach the API over the internal loopback listener: the public listener is
-	// guarded by the auth middleware, which agent-to-agent traffic must bypass.
-	host := os.Getenv("ASGARD_INTERNAL_API_HOST")
-	if host == "" {
-		host = "http://127.0.0.1:8081"
-	}
-	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-		host = "http://" + host
+	// The runner stamps the chat and the calling agent, and the backend
+	// resolves the peer within the caller's chat.
+	client, err := sandboxsock.New(0)
+	if err != nil {
+		log.Error().Err(err).Msg("Error preparing call-peer client")
+		return 1
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	reqPayload := map[string]any{
-		"prompt": messageText,
-		"chatId": chatID,
-		"wait":   true,
-		"metadata": map[string]any{
-			"internal":          true,
-			"source":            "call-peer",
-			"caller_agent_id":   os.Getenv("ASGARD_AGENT_ID"),
-			"caller_agent_name": os.Getenv("ASGARD_AGENT_NAME"),
-		},
-	}
-
-	reqBody, err := json.Marshal(reqPayload)
-	if err != nil {
-		log.Error().Err(err).Msg("Error encoding call-peer request")
-		os.Exit(1)
-	}
-
-	url := fmt.Sprintf("%s/api/agents/%s/message?wait=true", host, agentID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		log.Error().Err(err).Msg("Error creating request for peer agent")
-		os.Exit(1)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := client.PostJSON(ctx, sandboxsock.PathCallPeer, sandboxsock.CallPeerRequest{AgentID: agentID, Prompt: messageText})
 	if err != nil {
 		log.Error().Err(err).Msg("Error calling peer agent")
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var result struct {
-		Status string `json:"status"`
-		Output string `json:"output"`
-		Error  string `json:"error,omitempty"`
-	}
-
+	var result sandboxsock.CallPeerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Error().Err(err).Int("http_status", resp.StatusCode).Msg("Error decoding peer agent response")
-		os.Exit(1)
+		return 1
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Error().Int("http_status", resp.StatusCode).Str("status", result.Status).Str("error", result.Error).Msg("Peer agent returned non-200 status")
-		os.Exit(1)
+		return 1
 	}
 
 	if result.Status == "completed" {
 		if result.Output != "" {
-			fmt.Println(result.Output)
+			_, _ = fmt.Fprintln(stdout, result.Output)
 		}
-		return
+		return 0
 	}
 
 	if result.Status == "waiting_human" {
 		// Target workflow suspended awaiting human input; exit cleanly without error
-		return
+		return 0
 	}
 
 	log.Error().Str("status", result.Status).Str("error", result.Error).Msg("Peer agent execution failed")
-	os.Exit(1)
+	return 1
 }

@@ -215,24 +215,6 @@ func TestAuthMiddlewareDisabledLeavesEverythingOpen(t *testing.T) {
 	}
 }
 
-func TestInternalMuxBypassesAuthMiddleware(t *testing.T) {
-	p := authtest.NewProvider(t)
-	srv := newAuthServer(t, p, nil)
-
-	internal := srv.buildInternalMux()
-
-	// /team is reachable over loopback without credentials: a missing chat_id
-	// yields 400, not 401.
-	rec := httptest.NewRecorder()
-	internal.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/team", nil))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-
-	// The agent message route is registered as well.
-	rec = httptest.NewRecorder()
-	internal.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/agents/ghost/message", nil))
-	assert.NotEqual(t, http.StatusUnauthorized, rec.Code)
-}
-
 func TestCORSHeaders(t *testing.T) {
 	t.Run("permissive without auth", func(t *testing.T) {
 		srv := &Server{conf: &config.Config{}}

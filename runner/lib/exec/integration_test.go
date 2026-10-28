@@ -45,6 +45,16 @@ for arg in "$@"; do
 done
 case "$*" in
   *HOLD*) exec sleep 60 ;;
+  *ASKME*)
+    reply=$(curl -sf --unix-socket "$sock" -H 'Content-Type: application/json' \
+      -d '{"chat_id":"evil","question":"proceed?"}' http://asgard/ask-user) || reply="ask failed"
+    printf "ask-reply: %s\n" "$reply"
+    ;;
+  *PEERME*)
+    reply=$(curl -sf --unix-socket "$sock" -H 'Content-Type: application/json' \
+      -d '{"chat_id":"evil","agent_id":"peer","prompt":"hello peer"}' http://asgard/call-peer) || reply="peer failed"
+    printf "peer-reply: %s\n" "$reply"
+    ;;
   *STATUSME*)
     curl -sf --unix-socket "$sock" -H 'Content-Type: application/json' \
       -d '{"chat_id":"evil","step_index":2,"source":"aw","entry_type":"tool_call","content":"working","metadata":{"target_files":["/tmp/out.md"]}}' \
@@ -141,6 +151,13 @@ func (p *pki) writePEM(dir, name string, block *pem.Block) string {
 // startStack runs an in-process hub and a runner conn.Client wired to ex.
 func startStack(t *testing.T, ex *Executor) *runnerhub.Hub {
 	t.Helper()
+	return startStackWith(t, ex, nil)
+}
+
+// startStackWith is startStack with the hub options adjustable by mutate. The
+// executor's sandbox callbacks go over the stack's runner connection.
+func startStackWith(t *testing.T, ex *Executor, mutate func(*runnerhub.Options)) *runnerhub.Hub {
+	t.Helper()
 	p := newPKI(t)
 	dir := t.TempDir()
 	srvCert := p.issue("backend", x509.ExtKeyUsageServerAuth)
@@ -148,17 +165,25 @@ func startStack(t *testing.T, ex *Executor) *runnerhub.Hub {
 	require.NoError(t, err)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	hub := runnerhub.New(runnerhub.Options{
+	hubOpts := runnerhub.Options{
 		TLSCertFile:  p.writePEM(dir, "b.crt", &pem.Block{Type: "CERTIFICATE", Bytes: srvCert.Certificate[0]}),
 		TLSKeyFile:   p.writePEM(dir, "b.key", &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
 		ClientCAFile: p.writePEM(dir, "ca.crt", &pem.Block{Type: "CERTIFICATE", Bytes: p.ca.Raw}),
 		AllowedNodes: func() []string { return []string{testNode} },
 		Listener:     ln,
-	})
+	}
+	if mutate != nil {
+		mutate(&hubOpts)
+	}
+	hub := runnerhub.New(hubOpts)
 	require.NoError(t, hub.Start())
 	t.Cleanup(hub.Stop)
 
-	client := conn.New(conn.Options{
+	var client *conn.Client
+	if ex.opts.Callbacks == nil {
+		ex.opts.Callbacks = func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() }
+	}
+	client = conn.New(conn.Options{
 		Addr:   ln.Addr().String(),
 		NodeID: testNode,
 		TLSConfig: func() (*tls.Config, error) {
@@ -211,12 +236,12 @@ func integrationStartRun(t *testing.T, runID, prompt string) *runnerpb.StartRun 
 	}
 }
 
-func newIntegrationExecutor(t *testing.T) *Executor {
+func newIntegrationExecutor(t *testing.T, extra ...*agentspec.Agent) *Executor {
 	t.Helper()
 	agent := testAgent("a", "h1", "")
 	agent.Config.CLI = []agentspec.CLITarget{{CLI: "opencode", Model: "m1"}}
 	return New(Options{
-		Agents:    &fakeAgents{agents: []*agentspec.Agent{agent}},
+		Agents:    &fakeAgents{agents: append([]*agentspec.Agent{agent}, extra...)},
 		AgentWait: time.Second,
 		Conf:      func() *config.Config { return &config.Config{ConfigPath: paths.ConfigFile()} },
 	})

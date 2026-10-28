@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
 	"sync"
 	"sync/atomic"
 
@@ -11,8 +9,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 )
 
-// AgentStatusUpdate is the JSON payload posted by aw to the internal status
-// endpoint whenever the agent produces an incremental transcript update.
+// AgentStatusUpdate is an incremental transcript update of an agent run.
 type AgentStatusUpdate = workflow.AgentStatusUpdate
 
 // statusListener pairs a buffered update channel with an optional match
@@ -63,33 +60,9 @@ func (s *Server) AddStatusListener(chatID string, match func(workflow.AgentStatu
 	return l.ch, cancel
 }
 
-// handleAgentStatus handles POST /agent-status on the internal-only server.
-// It decodes the update, logs it, and fans it out to all registered listeners
-// for the update's ChatID whose match predicate (if any) accepts it.
-func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
-	var update AgentStatusUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	log.Debug().
-		Str("chat_id", update.ChatID).
-		Str("node_id", update.NodeID).
-		Str("run_token", update.RunToken).
-		Int("step_index", update.StepIndex).
-		Str("source", update.Source).
-		Str("entry_type", update.EntryType).
-		Msg("agent status update received")
-
-	s.PublishStatusUpdate(update)
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // PublishStatusUpdate fans update out to the listeners registered for its
-// chat. It serves both POST /agent-status and the RunEvents of remote runs, so
-// both reach the same consumers.
+// chat. It delivers the RunEvents of remote runs to the registered status
+// listeners.
 func (s *Server) PublishStatusUpdate(update AgentStatusUpdate) {
 	// The channel is intentionally never closed on cancel: fan-out sends below
 	// run outside the mutex on a snapshot of the listener list, so closing in

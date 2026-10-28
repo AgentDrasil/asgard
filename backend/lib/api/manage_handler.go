@@ -31,7 +31,6 @@ var osRename = os.Rename
 const defaultConfigTemplate = `# Asgard Configuration Template
 debug: false
 port: 8080
-internal_port: 8081
 host: "127.0.0.1"
 db: "sqlite"
 # dsn is only used when db is "pg" (PostgreSQL connection string).

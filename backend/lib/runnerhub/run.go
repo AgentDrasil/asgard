@@ -21,6 +21,7 @@ type Result struct {
 type Run struct {
 	runID  string
 	nodeID string
+	start  *runnerpb.StartRun
 
 	mu       sync.Mutex
 	events   []*runnerpb.RunEvent
@@ -33,8 +34,8 @@ type Run struct {
 	changed  chan struct{}
 }
 
-func newRun(runID, nodeID string) *Run {
-	return &Run{runID: runID, nodeID: nodeID, done: make(chan struct{}), changed: make(chan struct{})}
+func newRun(runID, nodeID string, start *runnerpb.StartRun) *Run {
+	return &Run{runID: runID, nodeID: nodeID, start: start, done: make(chan struct{}), changed: make(chan struct{})}
 }
 
 // RunID returns the attempt's run id.

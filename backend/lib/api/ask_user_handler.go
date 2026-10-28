@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -74,11 +75,26 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reply, err := s.askUser(r.Context(), req)
+	if err != nil {
+		log.Warn().Str("chat_id", req.ChatID).Str("message_id", req.MessageID).Msg("ask-user HTTP context cancelled before user replied")
+		http.Error(w, "client disconnected", http.StatusRequestTimeout)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(AskUserResponse{Reply: reply})
+}
+
+// askUser records the question as an ask_user chat message, notifies the user
+// and blocks until the reply arrives (or ctx ends, returning its error). It is
+// the single authoritative writer of the ask_user message. An empty
+// req.MessageID is generated.
+func (s *Server) askUser(ctx context.Context, req AskUserRequest) (string, error) {
 	if req.MessageID == "" {
 		req.MessageID = fmt.Sprintf("ask-%s", uuid.NewV7().String())
 	}
 
-	log.Info().Str("chat_id", req.ChatID).Str("question", req.Question).Str("agent_name", req.AgentName).Msg("handleAskUser: received ask-user request from sandbox")
+	log.Info().Str("chat_id", req.ChatID).Str("question", req.Question).Str("agent_name", req.AgentName).Msg("askUser: received ask-user request from sandbox")
 
 	if s.repo != nil {
 		agentName := req.AgentName
@@ -113,11 +129,9 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case reply := <-replyCh:
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(AskUserResponse{Reply: reply})
-	case <-r.Context().Done():
-		log.Warn().Str("chat_id", req.ChatID).Str("message_id", req.MessageID).Msg("ask-user HTTP context cancelled before user replied")
-		http.Error(w, "client disconnected", http.StatusRequestTimeout)
+		return reply, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 }
 

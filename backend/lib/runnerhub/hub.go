@@ -16,6 +16,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -23,7 +24,9 @@ import (
 	"github.com/hashicorp/yamux"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -102,10 +105,11 @@ type Hub struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu    sync.Mutex
-	nodes map[string]*node
-	runs  map[string]*Run
-	conns map[*connection]struct{}
+	mu        sync.Mutex
+	callbacks runnerpb.AgentCallbackServiceServer
+	nodes     map[string]*node
+	runs      map[string]*Run
+	conns     map[*connection]struct{}
 	// raw tracks accepted connections still in the TLS handshake.
 	raw    map[net.Conn]struct{}
 	ln     net.Listener
@@ -127,15 +131,16 @@ func New(opts Options) *Hub {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{
-		opts:   opts,
-		bootID: newBootID(),
-		store:  store,
-		ctx:    ctx,
-		cancel: cancel,
-		nodes:  make(map[string]*node),
-		runs:   make(map[string]*Run),
-		conns:  make(map[*connection]struct{}),
-		raw:    make(map[net.Conn]struct{}),
+		callbacks: opts.Callbacks,
+		opts:      opts,
+		bootID:    newBootID(),
+		store:     store,
+		ctx:       ctx,
+		cancel:    cancel,
+		nodes:     make(map[string]*node),
+		runs:      make(map[string]*Run),
+		conns:     make(map[*connection]struct{}),
+		raw:       make(map[net.Conn]struct{}),
 	}
 }
 
@@ -375,15 +380,17 @@ func (h *Hub) serveSession(nodeID string, sess *yamux.Session) {
 	srv := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxGRPCMessageSize),
 		grpc.MaxSendMsgSize(maxGRPCMessageSize),
-		grpc.ChainUnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		grpc.ChainUnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (resp any, err error) {
+			defer recoverToStatus(info.FullMethod, &err)
 			return next(withNodeID(ctx, nodeID), req)
 		}),
-		grpc.ChainStreamInterceptor(func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+		grpc.ChainStreamInterceptor(func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, next grpc.StreamHandler) (err error) {
+			defer recoverToStatus(info.FullMethod, &err)
 			return next(srv, &nodeStream{ServerStream: ss, ctx: withNodeID(ss.Context(), nodeID)})
 		}),
 	)
 	runnerpb.RegisterNodeControlServiceServer(srv, &nodeControl{conn: c})
-	runnerpb.RegisterAgentCallbackServiceServer(srv, h.opts.Callbacks)
+	runnerpb.RegisterAgentCallbackServiceServer(srv, callbackProxy{h: h})
 
 	// A connection that never registers must not linger.
 	timer := time.AfterFunc(h.opts.RegisterTimeout, func() {
@@ -397,6 +404,15 @@ func (h *Hub) serveSession(nodeID string, sess *yamux.Session) {
 	srv.Stop()
 	_ = cc.Close()
 	h.detach(c)
+}
+
+// recoverToStatus turns a handler panic into codes.Internal so a bad runner
+// request can never crash the backend.
+func recoverToStatus(method string, err *error) {
+	if r := recover(); r != nil {
+		log.Error().Interface("panic", r).Str("method", method).Bytes("stack", debug.Stack()).Msg("panic in runner gRPC handler")
+		*err = status.Error(codes.Internal, "internal error")
+	}
 }
 
 // RefreshAllowed re-reads the allowed node set and closes the sessions of
@@ -466,7 +482,7 @@ func (h *Hub) Dispatch(ctx context.Context, nodeID string, sr *runnerpb.StartRun
 	if _, dup := h.runs[sr.GetRunId()]; dup {
 		return nil, fmt.Errorf("%w: %s", ErrDuplicateRun, sr.GetRunId())
 	}
-	r := newRun(sr.GetRunId(), nodeID)
+	r := newRun(sr.GetRunId(), nodeID, sr)
 	h.runs[sr.GetRunId()] = r
 	n.enqueueLocked(&runnerpb.BackendMessage{Payload: &runnerpb.BackendMessage_StartRun{StartRun: sr}})
 	return r, nil
@@ -484,6 +500,77 @@ func (h *Hub) Cancel(nodeID, runID string) error {
 	}
 	n.enqueueLocked(&runnerpb.BackendMessage{Payload: &runnerpb.BackendMessage_CancelRun{CancelRun: &runnerpb.CancelRun{RunId: runID}}})
 	return nil
+}
+
+// SetCallbacks installs the AgentCallbackService handler. It takes effect for
+// all connections, also those already established.
+func (h *Hub) SetCallbacks(cb runnerpb.AgentCallbackServiceServer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.callbacks = cb
+}
+
+// callbackProxy serves AgentCallbackService on every connection by delegating
+// to the handler installed at call time.
+type callbackProxy struct {
+	runnerpb.UnimplementedAgentCallbackServiceServer
+	h *Hub
+}
+
+func (p callbackProxy) AskUser(ctx context.Context, req *runnerpb.AskUserRequest) (*runnerpb.AskUserResponse, error) {
+	return p.h.currentCallbacks().AskUser(ctx, req)
+}
+
+func (p callbackProxy) CallPeer(ctx context.Context, req *runnerpb.CallPeerRequest) (*runnerpb.CallPeerResponse, error) {
+	return p.h.currentCallbacks().CallPeer(ctx, req)
+}
+
+func (p callbackProxy) FindPeer(ctx context.Context, req *runnerpb.FindPeerRequest) (*runnerpb.FindPeerResponse, error) {
+	return p.h.currentCallbacks().FindPeer(ctx, req)
+}
+
+func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
+	return p.h.currentCallbacks().RecordMetrics(ctx, req)
+}
+
+func (h *Hub) currentCallbacks() runnerpb.AgentCallbackServiceServer {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.callbacks
+}
+
+// RunInfo describes an active run as the hub tracks it. Callback handlers
+// derive the identity of a sandbox call from it, never from the request.
+type RunInfo struct {
+	RunID          string
+	NodeID         string
+	ChatID         string
+	AgentID        string
+	WorkflowNodeID string
+	RunToken       string
+	Attempt        uint32
+	// Done is closed once the run finished (result, loss or hub stop).
+	Done <-chan struct{}
+}
+
+// ActiveRun returns the run runID if it is active and executes on nodeID.
+func (h *Hub) ActiveRun(runID, nodeID string) (RunInfo, bool) {
+	h.mu.Lock()
+	r := h.runs[runID]
+	h.mu.Unlock()
+	if r == nil || r.nodeID != nodeID {
+		return RunInfo{}, false
+	}
+	return RunInfo{
+		RunID:          r.runID,
+		NodeID:         r.nodeID,
+		ChatID:         r.start.GetChatId(),
+		AgentID:        r.start.GetAgentId(),
+		WorkflowNodeID: r.start.GetStatusScope().GetNodeId(),
+		RunToken:       r.start.GetStatusScope().GetRunToken(),
+		Attempt:        r.start.GetAttempt(),
+		Done:           r.done,
+	}, true
 }
 
 // Client returns the RunnerService client of an online node. It is bound to

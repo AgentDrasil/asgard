@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,20 +18,21 @@ import (
 
 	"github.com/AgentDrasil/asgard/fakebash/pb"
 	"github.com/AgentDrasil/asgard/pkg/metrics"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock/socktest"
 )
 
-// metricsRecorder is a stand-in for the backend's internal metrics endpoint.
+// metricsRecorder is a stand-in for the runner's metrics route.
 type metricsRecorder struct {
 	mu     sync.Mutex
 	events []metrics.Event
-	server *httptest.Server
 }
 
 func newMetricsRecorder(t *testing.T) *metricsRecorder {
 	t.Helper()
 	rec := &metricsRecorder{}
-	rec.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, metrics.EndpointPath, r.URL.Path)
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, sandboxsock.PathMetrics, r.URL.Path)
 		var events []metrics.Event
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&events))
 		rec.mu.Lock()
@@ -40,8 +40,6 @@ func newMetricsRecorder(t *testing.T) *metricsRecorder {
 		rec.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	t.Cleanup(rec.server.Close)
-	t.Setenv("ASGARD_INTERNAL_API_HOST", rec.server.URL)
 	return rec
 }
 

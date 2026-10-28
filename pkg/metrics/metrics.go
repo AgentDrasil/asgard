@@ -1,21 +1,19 @@
 // Package metrics reports command-output compression telemetry from the
 // sandbox tools that produce it (fakebash, show-output) back to the Asgard
-// backend, which aggregates it for the WebUI.
+// backend through the runner, which aggregates it for the WebUI.
 package metrics
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 )
 
-// EndpointPath is the backend route that ingests metric events. Producer and
-// consumer share this constant so the wire contract cannot drift.
+// EndpointPath is the backend route that serves the aggregated tally to the
+// WebUI.
 const EndpointPath = "/api/compression-metrics"
 
 // Kind identifies which part of the compression pipeline an event describes.
@@ -46,46 +44,27 @@ type Event struct {
 	Bytes  int64 `json:"bytes,omitempty"`
 }
 
-const (
-	defaultInternalHost = "http://127.0.0.1:8081"
-	reportTimeout       = time.Second
-)
+const reportTimeout = time.Second
 
-// client is package-level so consecutive reports within one process reuse the
-// connection instead of re-dialing.
-var client = &http.Client{Timeout: reportTimeout}
-
-// Report sends events to the backend's internal metrics endpoint. It is
-// best-effort by design: telemetry must never change the exit status of the
-// command that produced it, so failures are swallowed and only logged at debug
-// level. An empty event slice is a no-op.
+// Report sends events to the runner's callback socket, which forwards them to
+// the backend. It is best-effort by design: telemetry must never change the
+// exit status of the command that produced it, so failures are swallowed and
+// only logged at debug level. An empty event slice is a no-op.
 func Report(ctx context.Context, events ...Event) {
 	if len(events) == 0 {
 		return
 	}
 
-	body, err := json.Marshal(events)
+	client, err := sandboxsock.New(reportTimeout)
 	if err != nil {
-		log.Debug().Err(err).Msg("metrics: failed to encode events")
+		log.Debug().Err(err).Msg("metrics: no callback socket")
 		return
-	}
-
-	host := os.Getenv("ASGARD_INTERNAL_API_HOST")
-	if host == "" {
-		host = defaultInternalHost
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, host+EndpointPath, bytes.NewReader(body))
-	if err != nil {
-		log.Debug().Err(err).Msg("metrics: failed to build request")
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
+	resp, err := client.PostJSON(reqCtx, sandboxsock.PathMetrics, events)
 	if err != nil {
 		log.Debug().Err(err).Msg("metrics: report failed")
 		return
@@ -93,6 +72,6 @@ func Report(ctx context.Context, events ...Event) {
 	_ = resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Debug().Int("status", resp.StatusCode).Msg("metrics: report rejected by backend")
+		log.Debug().Int("status", resp.StatusCode).Msg("metrics: report rejected by runner")
 	}
 }

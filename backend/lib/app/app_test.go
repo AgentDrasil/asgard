@@ -85,12 +85,10 @@ cli:
 	require.NoError(t, os.WriteFile(filepath.Join(fatherDir, "config.yaml"), []byte(fatherYAML), 0644))
 
 	port := getFreePort(t)
-	internalPort := getFreePort(t)
 
 	return &config.Config{
 		Host:                    "127.0.0.1",
 		Port:                    port,
-		InternalPort:            internalPort,
 		DB:                      "sqlite",
 		DSN:                     filepath.Join(tempDir, "test.db"),
 		AgentDir:                tempDir,
@@ -276,7 +274,6 @@ func TestApp_New_DegradedModeOnMissingAgentFather(t *testing.T) {
 	conf := &config.Config{
 		Host:                    "127.0.0.1",
 		Port:                    getFreePort(t),
-		InternalPort:            getFreePort(t),
 		DB:                      "sqlite",
 		DSN:                     filepath.Join(tempDir, "test.db"),
 		AgentDir:                tempDir,

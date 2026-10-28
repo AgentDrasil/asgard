@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
 )
@@ -49,6 +49,9 @@ type Options struct {
 	// Conf returns the sandbox configuration (proxy options, config path to
 	// mask). It is required: runs fail while it is nil.
 	Conf func() *config.Config
+	// Callbacks reaches the backend's AgentCallbackService for the sandbox
+	// calls (ask-user, call-peer, find-peer, metrics). Nil rejects them.
+	Callbacks CallbacksFunc
 	// Ready, when set, is consulted before every run; a non-nil error fails
 	// the run (sandbox masking/proxy not healthy).
 	Ready func() error
@@ -170,22 +173,21 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 	return outcome{output: res.Output, target: res.Target, runDir: res.RunDir, err: err}
 }
 
-// runOptions builds the sandbox inputs of a run. The status socket is served
-// from the run's sock dir; the other callbacks (ask-user, call-peer,
-// find-peer, metrics) still point at the backend hosts of the runner process
-// environment.
+// runOptions builds the sandbox inputs of a run. The runner's socket is served
+// from the run's sock dir: status updates and every other sandbox call
+// (ask-user, call-peer, find-peer, metrics) go through it.
 func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, conf *config.Config, sink conn.Sink) run.Options {
 	opts := run.Options{
 		LangRules:  sr.GetLangRules(),
 		ConfigPath: conf.GetConfigPath(),
 		Proxy:      conf.SandboxProxyOptions(),
 		Env: []string{
-			"ASGARD_STATUS_URL=" + SandboxStatusURL,
-			"ASGARD_INTERNAL_API_HOST=" + envOr("ASGARD_INTERNAL_API_HOST", "http://127.0.0.1:8081"),
-			"ASGARD_API_HOST=" + envOr("ASGARD_API_HOST", "http://127.0.0.1:8080"),
+			sandboxsock.EnvURL + "=" + SandboxStatusURL,
 		},
 		OnSockDir: func(sockDir, runDir string) (func(), error) {
-			return newStatusServer(ctx, sr, agent, runDir, sink).serve(sockDir)
+			srv := newStatusServer(ctx, sr, agent, runDir, sink)
+			srv.callbacks = e.opts.Callbacks
+			return srv.serve(sockDir)
 		},
 	}
 	if enabled := sr.GetEnabledProviders(); len(enabled) > 0 {
@@ -196,13 +198,6 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 		opts.IsProviderEnabled = func(cli string) bool { return set[cli] }
 	}
 	return opts
-}
-
-func envOr(name, def string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	return def
 }
 
 // report streams the output and finalizes the run.

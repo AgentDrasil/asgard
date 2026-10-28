@@ -217,7 +217,7 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
     *   Returns details on all other agents that belong to the same team.
 
 ### 4. Compression Telemetry API
-*   **Record Metrics** (`POST /api/compression-metrics`, internal loopback server only): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
+*   **Record Metrics** (`AgentCallbackService.RecordMetrics`, over the runner connection; there is no HTTP endpoint): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
 *   **Read Metrics** (`GET /api/compression-metrics`): Returns the aggregated counters rendered by the WebUI compression statistics page: Jev and compass calls, tokens and per-call token averages, compressed outputs, truncations, and `show-output` calls with the raw bytes retrieved. It also derives the **retrieval rate** (show-output calls over compressed outputs), the headline quality signal — the agent calls `show-output` because the summary or classification dropped detail it needed, so a rising rate points at the classifier or summarizer prompt.
 
 ## Authentication (optional OIDC)
@@ -303,9 +303,13 @@ or an audience mapper.
     **403** means the account lacks `required_role` (logging in again cannot
     help), and **503** means the provider is unreachable and the client should
     keep its session and retry.
-*   Agent-to-agent calls (`find-peer`, `call-peer`) reach `/team` and
-    `/api/agents/{id}/message` over the internal loopback listener, so they are
-    unaffected by the public middleware.
+*   Agent-to-agent calls (`find-peer`, `call-peer`) and the other sandbox calls
+    (`ask-user`, metrics) do not use HTTP to the backend at all: they go
+    sandbox -> runner (`unix:///fakebash/asgard.sock`) -> backend
+    (`AgentCallbackService` over the authenticated runner connection), so they
+    are unaffected by the public middleware. The former internal loopback
+    listener and its `internal_port` setting are gone (an old `internal_port`
+    key in the config file is ignored).
 
 ### Security trade-offs
 

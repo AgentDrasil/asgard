@@ -444,6 +444,59 @@ func TestAgentCallbacks(t *testing.T) {
 	})
 }
 
+func TestSetCallbacksAppliesToEstablishedConnections(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t, nil, nil, "runner-a")
+	f := env.newRunner("runner-a")
+	f.mustConnect()
+	client := runnerpb.NewAgentCallbackServiceClient(f.cc)
+	_, err := client.FindPeer(context.Background(), &runnerpb.FindPeerRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	cb := recordingCallbacks{nodeIDs: make(chan string, 1)}
+	env.hub.SetCallbacks(cb)
+	_, err = client.FindPeer(context.Background(), &runnerpb.FindPeerRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "runner-a", <-cb.nodeIDs)
+}
+
+func TestActiveRun(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t, nil, nil, "runner-a")
+	f := env.newRunner("runner-a")
+	f.mustConnect()
+	_, err := env.hub.Dispatch(context.Background(), "runner-a", &runnerpb.StartRun{
+		RunId: "r1", ChatId: "chat-1", AgentId: "agent-1", Attempt: 2,
+		StatusScope: &runnerpb.StatusScope{NodeId: "wf-node", RunToken: "tok"},
+	})
+	require.NoError(t, err)
+
+	info, ok := env.hub.ActiveRun("r1", "runner-a")
+	require.True(t, ok)
+	assert.Equal(t, "chat-1", info.ChatID)
+	assert.Equal(t, "agent-1", info.AgentID)
+	assert.Equal(t, "wf-node", info.WorkflowNodeID)
+	assert.Equal(t, "tok", info.RunToken)
+	assert.Equal(t, uint32(2), info.Attempt)
+
+	_, ok = env.hub.ActiveRun("r1", "runner-b")
+	assert.False(t, ok, "another runner does not own the run")
+	_, ok = env.hub.ActiveRun("nope", "runner-a")
+	assert.False(t, ok)
+
+	f.nextBackend()
+	f.sendResult(&runnerpb.RunResult{RunId: "r1"})
+	select {
+	case <-info.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done was not closed when the run finished")
+	}
+	_, ok = env.hub.ActiveRun("r1", "runner-a")
+	assert.False(t, ok, "a finished run is no longer active")
+}
+
 func TestCancelQueuesCancelRun(t *testing.T) {
 	t.Parallel()
 
@@ -662,4 +715,26 @@ func TestAcceptLoopSurvivesTemporaryErrors(t *testing.T) {
 
 	f := env.newRunner("runner-a")
 	f.mustConnect()
+}
+
+type panicCallbacks struct {
+	runnerpb.UnimplementedAgentCallbackServiceServer
+}
+
+func (panicCallbacks) FindPeer(context.Context, *runnerpb.FindPeerRequest) (*runnerpb.FindPeerResponse, error) {
+	panic("boom")
+}
+
+func TestHandlerPanicDoesNotCrashHub(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t, nil, panicCallbacks{}, "runner-a")
+	f := env.newRunner("runner-a")
+	f.mustConnect()
+	client := runnerpb.NewAgentCallbackServiceClient(f.cc)
+	_, err := client.FindPeer(context.Background(), &runnerpb.FindPeerRequest{})
+	assert.Equal(t, codes.Internal, status.Code(err))
+	// The connection still works.
+	_, err = client.AskUser(context.Background(), &runnerpb.AskUserRequest{})
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }

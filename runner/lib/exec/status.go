@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
 )
@@ -24,9 +26,10 @@ const (
 	// SocketName is the status socket's file name inside the per-run sock dir.
 	SocketName = "asgard.sock"
 	// SandboxStatusURL is how the sandboxes address the status socket: the
-	// sock dir is bind mounted at /fakebash in both of them. aw understands
-	// the unix:// form (HTTP over the socket).
-	SandboxStatusURL = "unix:///fakebash/" + SocketName
+	// sock dir is bind mounted at /fakebash in both of them. aw and the
+	// sandbox tools (ask-user, call-peer, ...) understand the unix:// form
+	// (HTTP over the socket).
+	SandboxStatusURL = sandboxsock.DefaultURL
 
 	maxEventContent  = 4 << 20
 	maxEventMetadata = 4 << 20
@@ -49,7 +52,8 @@ type statusUpdate struct {
 }
 
 // statusServer serves the sandbox -> runner callbacks of one run on a unix
-// socket and turns every status update into a RunEvent.
+// socket: status updates become RunEvents, ask-user / call-peer / find-peer /
+// metrics calls are forwarded to the backend (see callbacks.go).
 type statusServer struct {
 	sr      *runnerpb.StartRun
 	agent   *agentspec.Agent
@@ -58,10 +62,18 @@ type statusServer struct {
 	ctx     context.Context
 	mu      sync.Mutex // serializes event_index assignment and sink delivery
 	nextIdx uint64
+
+	// callbacks reaches the backend's AgentCallbackService; nil rejects the
+	// callback routes.
+	callbacks CallbacksFunc
+	// callSeq numbers the sandbox calls of this run (call_seq).
+	callSeq  atomic.Uint64
+	retryMin time.Duration
+	retryMax time.Duration
 }
 
 func newStatusServer(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, runDir string, sink conn.Sink) *statusServer {
-	return &statusServer{sr: sr, agent: agent, runDir: runDir, sink: sink, ctx: ctx}
+	return &statusServer{sr: sr, agent: agent, runDir: runDir, sink: sink, ctx: ctx, retryMin: callRetryMin, retryMax: callRetryMax}
 }
 
 // serve listens on sockDir/asgard.sock. The returned stop func closes the
@@ -72,7 +84,8 @@ func (s *statusServer) serve(sockDir string) (stop func(), err error) {
 		return nil, fmt.Errorf("listening on status socket: %w", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /agent-status", s.handleStatus)
+	mux.HandleFunc("POST "+sandboxsock.PathStatus, s.handleStatus)
+	s.registerCallbacks(mux)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 	go func() {

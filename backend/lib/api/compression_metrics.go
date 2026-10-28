@@ -158,19 +158,6 @@ func (s *CompressionMetricsStore) persistLocked() {
 	}
 }
 
-// handleRecordCompressionMetrics ingests telemetry batches posted by the
-// sandbox tools. It is registered on the internal (loopback-only) mux.
-func (s *Server) handleRecordCompressionMetrics(w http.ResponseWriter, r *http.Request) {
-	var events []metrics.Event
-	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	s.compressionMetrics.Record(events)
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // handleGetCompressionMetrics returns the aggregated tally to the WebUI.
 func (s *Server) handleGetCompressionMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

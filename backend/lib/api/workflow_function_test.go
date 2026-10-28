@@ -224,9 +224,8 @@ cli:
 
 	testDB := db.NewDBForTest(t)
 	conf := &config.Config{
-		AgentDir:     agentDir,
-		Port:         0,
-		InternalPort: 0,
+		AgentDir: agentDir,
+		Port:     0,
 	}
 
 	srv, err := New(conf, testDB)
@@ -271,9 +270,8 @@ cli:
 
 	testDB := db.NewDBForTest(t)
 	conf := &config.Config{
-		AgentDir:     agentDir,
-		Port:         0,
-		InternalPort: 0,
+		AgentDir: agentDir,
+		Port:     0,
 	}
 
 	srv, err := New(conf, testDB)

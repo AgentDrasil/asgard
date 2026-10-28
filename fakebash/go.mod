@@ -6,6 +6,7 @@ require (
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/genai v1.71.0
@@ -17,7 +18,6 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.0 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
-	github.com/AgentDrasil/asgard/pkg/paths v0.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect

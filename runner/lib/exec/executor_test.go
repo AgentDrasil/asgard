@@ -144,7 +144,7 @@ func TestExecutorRunSuccess(t *testing.T) {
 	assert.Equal(t, "/cfg/config.yaml", gotOpts.ConfigPath)
 	assert.True(t, gotOpts.IsProviderEnabled("opencode"))
 	assert.False(t, gotOpts.IsProviderEnabled("agy"))
-	assert.Contains(t, gotOpts.Env, "ASGARD_STATUS_URL="+SandboxStatusURL)
+	assert.Equal(t, []string{"ASGARD_STATUS_URL=" + SandboxStatusURL}, gotOpts.Env, "the socket is the only backend address the sandboxes get")
 }
 
 func TestExecutorOutputChunking(t *testing.T) {

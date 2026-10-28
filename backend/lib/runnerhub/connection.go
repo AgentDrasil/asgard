@@ -438,3 +438,7 @@ func truncateErrorText(s string) (string, bool) {
 func shortID(s string) string {
 	return truncateString(s, maxIDLogSize)
 }
+
+// TruncateErrorText caps a free-text error at 64 KiB for the *_truncated
+// flags of the callback responses and reports whether it was cut.
+func TruncateErrorText(s string) (string, bool) { return truncateErrorText(s) }

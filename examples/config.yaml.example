@@ -1,7 +1,6 @@
 debug: true
 host: https://example.com
 port: 7000
-internal_port: 8081
 db: sqlite
 # dsn is only used when db is "pg" (PostgreSQL connection string).
 # SQLite always lives at ~/asgard/data/data.db.

@@ -1,8 +1,7 @@
 package api
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -30,10 +29,9 @@ func drainListener(t *testing.T, ch <-chan workflow.AgentStatusUpdate) []workflo
 
 func postStatusUpdate(t *testing.T, s *Server, body string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/agent-status", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	s.handleAgentStatus(rec, req)
-	require.Equal(t, http.StatusNoContent, rec.Code)
+	var u AgentStatusUpdate
+	require.NoError(t, json.NewDecoder(strings.NewReader(body)).Decode(&u))
+	s.PublishStatusUpdate(u)
 }
 
 func TestAddStatusListenerMatchFiltering(t *testing.T) {

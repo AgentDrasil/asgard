@@ -118,31 +118,18 @@ func (o Options) providerEnabled(cli string) bool {
 	return o.IsProviderEnabled == nil || o.IsProviderEnabled(cli)
 }
 
-// OptionsFromConfig derives the Options the backend runs agents with. A nil
-// conf falls back to the ASGARD_API_HOST / ASGARD_STATUS_URL environment of
-// the process.
+// OptionsFromConfig derives the Options the backend runs agents with. Sandbox
+// callbacks are not wired here: only the runner serves them (Options.OnSockDir
+// and Options.Env).
 func OptionsFromConfig(conf *config.Config) Options {
 	if conf == nil {
-		var env []string
-		if envHost := os.Getenv("ASGARD_API_HOST"); envHost != "" {
-			env = append(env, "ASGARD_API_HOST="+envHost)
-		}
-		if statusURL := os.Getenv("ASGARD_STATUS_URL"); statusURL != "" {
-			internalHost := strings.TrimSuffix(statusURL, "/agent-status")
-			env = append(env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
-		}
-		return Options{Env: env}
+		return Options{}
 	}
 	return Options{
 		IsProviderEnabled: conf.IsProviderEnabled,
 		LangRules:         conf.LanguageRules(),
 		ConfigPath:        conf.GetConfigPath(),
 		Proxy:             conf.SandboxProxyOptions(),
-		Env: []string{
-			"ASGARD_STATUS_URL=" + conf.StatusURL(),
-			"ASGARD_INTERNAL_API_HOST=" + conf.InternalAPIHost(),
-			"ASGARD_API_HOST=" + conf.APIHost(),
-		},
 	}
 }
 

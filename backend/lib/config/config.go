@@ -84,7 +84,6 @@ type Config struct {
 	// configurable; the field is exported so tests can inject a temp root.
 	AgentDir                           string                    `yaml:"-" json:"-"`
 	Port                               int                       `yaml:"port"`
-	InternalPort                       int                       `yaml:"internal_port"`
 	Host                               string                    `yaml:"host"`
 	WebUIPath                          string                    `yaml:"webui_path"`
 	GeminiAPIKey                       string                    `yaml:"gemini_api_key"`
@@ -251,24 +250,6 @@ func (c *Config) LanguageRules() string {
 - Responses/Conversations: %s
 - Documents and Artifacts: %s
 - Code Comments and Docstrings: %s`, c.GetChatLang(), c.GetDocLang(), c.GetCommentLang())
-}
-
-func (c *Config) APIHost() string {
-	if c == nil || c.Port <= 0 {
-		return "http://127.0.0.1:8080"
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", c.Port)
-}
-
-func (c *Config) InternalAPIHost() string {
-	if c == nil || c.InternalPort <= 0 {
-		return "http://127.0.0.1:8081"
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", c.InternalPort)
-}
-
-func (c *Config) StatusURL() string {
-	return c.InternalAPIHost() + "/agent-status"
 }
 
 func (c *Config) GetProxy() *proxy.Config {

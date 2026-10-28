@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/pkg/metrics"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock/socktest"
 )
 
 func setupTestLogDir(t *testing.T) (dir string, cmdID string, filePath string) {
@@ -135,7 +136,7 @@ func TestShowOutput_Run_InvalidID(t *testing.T) {
 	assert.Contains(t, stderr.String(), "invalid command ID format")
 }
 
-// setupMetricsRecorder installs a stand-in backend and returns the events it
+// setupMetricsRecorder installs a stand-in runner socket and returns the events it
 // captured.
 func setupMetricsRecorder(t *testing.T) *[]metrics.Event {
 	t.Helper()
@@ -143,8 +144,8 @@ func setupMetricsRecorder(t *testing.T) *[]metrics.Event {
 		mu     sync.Mutex
 		events []metrics.Event
 	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, metrics.EndpointPath, r.URL.Path)
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, sandboxsock.PathMetrics, r.URL.Path)
 		var batch []metrics.Event
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&batch))
 		mu.Lock()
@@ -152,8 +153,6 @@ func setupMetricsRecorder(t *testing.T) *[]metrics.Event {
 		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	t.Cleanup(server.Close)
-	t.Setenv("ASGARD_INTERNAL_API_HOST", server.URL)
 	return &events
 }
 

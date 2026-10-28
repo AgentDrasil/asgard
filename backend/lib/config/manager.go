@@ -77,9 +77,6 @@ func (c *Config) ApplyDefaultsAndValidate() error {
 	if c.Port <= 0 {
 		c.Port = 8080
 	}
-	if c.InternalPort <= 0 {
-		c.InternalPort = 8081
-	}
 	if c.ChatLang == "" {
 		c.ChatLang = DefaultLanguage
 	}
@@ -140,7 +137,6 @@ func (c *Config) Clone() *Config {
 		DSN:                                c.DSN,
 		AgentDir:                           c.AgentDir,
 		Port:                               c.Port,
-		InternalPort:                       c.InternalPort,
 		Host:                               c.Host,
 		WebUIPath:                          c.WebUIPath,
 		GeminiAPIKey:                       c.GeminiAPIKey,

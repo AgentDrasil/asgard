@@ -129,6 +129,27 @@ func formatPromptWithAttachments(prompt string, attachments []dbmodels.Attachmen
 	return sb.String()
 }
 
+// cancelWhenDone runs cancel once ctx ends (no-op for a nil ctx). The returned
+// func detaches it.
+func cancelWhenDone(ctx context.Context, cancel func()) func() bool {
+	if ctx == nil {
+		return func() bool { return false }
+	}
+	return context.AfterFunc(ctx, cancel)
+}
+
+// findLoadedAgent returns the loaded agent with the given id or name, or nil.
+func (s *Server) findLoadedAgent(agentID string) *agentspec.Agent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.agents {
+		if a.Config.ID == agentID || a.Config.Name == agentID {
+			return a
+		}
+	}
+	return nil
+}
+
 // handleTriggerMessage handles POST /api/agents/{id}/message, launching agent execution
 // either asynchronously (202 Accepted) or synchronously (200 OK when wait=true).
 func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
@@ -138,15 +159,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var targetAgent *agentspec.Agent
-	s.mu.RLock()
-	for _, a := range s.agents {
-		if a.Config.ID == agentID || a.Config.Name == agentID {
-			targetAgent = a
-			break
-		}
-	}
-	s.mu.RUnlock()
+	targetAgent := s.findLoadedAgent(agentID)
 
 	// A runner-owned agent is only visible once the request names its runner,
 	// so with runner binding the lookup is finished below.
@@ -165,6 +178,16 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.triggerMessage(context.Background(), w, agentID, targetAgent, req, r.URL.Query().Get("wait") == "true")
+}
+
+// triggerMessage is the body of POST /api/agents/{id}/message once the request
+// is decoded: it launches the agent run and writes the response to w.
+// targetAgent is nil when the agent is runner-owned and still to be resolved
+// through runner binding. queryWait is the ?wait=true query flag. When
+// stopWith is non-nil, a synchronous (wait) execution started here is cancelled
+// as soon as it ends (in-process callers whose own run went away).
+func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter, agentID string, targetAgent *agentspec.Agent, req TriggerMessageRequest, queryWait bool) {
 	if strings.TrimSpace(req.Prompt) == "" {
 		http.Error(w, `{"error":"prompt is required"}`, http.StatusBadRequest)
 		return
@@ -202,7 +225,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	wait := req.Wait || r.URL.Query().Get("wait") == "true"
+	wait := req.Wait || queryWait
 
 	// 1. Workflow branch: acquire the guard; on conflict return 409, otherwise run
 	// runWorkflow and keep the guard release
@@ -235,6 +258,12 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		if wait {
 			defer s.releaseExecution(chatID)
 			defer handle.cancel()
+			defer cancelWhenDone(stopWith, func() {
+				if s.workflowEngine != nil {
+					s.workflowEngine.CancelSession(chatID)
+				}
+				handle.cancel()
+			})()
 			status, output, err := s.runWorkflow(execCtx, targetAgent, chatID, req)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
@@ -288,6 +317,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	if wait && !loaded {
 		defer s.releaseExecution(chatID)
 		defer handle.cancel()
+		defer cancelWhenDone(stopWith, handle.cancel)()
 		if !s.requireRunnerOnline(w, runnerID) {
 			return
 		}

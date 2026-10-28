@@ -27,19 +27,27 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	teamAgents, status, msg := s.teamAgentsFor(chatID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if msg != "" {
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(teamAgents)
+}
+
+// teamAgentsFor returns the ids of the other agents on the team of the chat's
+// current agent. On failure it returns the HTTP status and message to report.
+// The repo must be set.
+func (s *Server) teamAgentsFor(chatID string) (teamAgents []string, status int, msg string) {
 	session, err := s.repo.GetSession(chatID)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to get session: " + err.Error()})
-		return
+		return nil, http.StatusInternalServerError, "failed to get session: " + err.Error()
 	}
 
 	if session == nil || session.CurrentAgent == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session or current agent not found"})
-		return
+		return nil, http.StatusNotFound, "session or current agent not found"
 	}
 
 	s.mu.RLock()
@@ -54,14 +62,11 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if currentAgent == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "current agent not loaded"})
-		return
+		return nil, http.StatusNotFound, "current agent not loaded"
 	}
 
 	team := currentAgent.Config.Team
-	teamAgents := []string{}
+	teamAgents = []string{}
 
 	if team != "" {
 		for _, a := range s.agents {
@@ -70,8 +75,5 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(teamAgents)
+	return teamAgents, http.StatusOK, ""
 }

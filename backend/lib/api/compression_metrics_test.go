@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -122,33 +121,6 @@ func TestCompressionMetricsStore_UnknownKindIsIgnored(t *testing.T) {
 	store.Record([]metrics.Event{{Kind: "someday-new-kind", Tokens: 1}})
 
 	assert.Equal(t, CompressionCounters{}, store.Snapshot().CompressionCounters)
-}
-
-func TestHandleRecordCompressionMetrics(t *testing.T) {
-	t.Parallel()
-
-	store := NewCompressionMetricsStore(tempMetricsPath(t))
-	srv := &Server{compressionMetrics: store}
-
-	body, err := json.Marshal([]metrics.Event{{Kind: metrics.KindCompass, Tokens: 11}})
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	srv.handleRecordCompressionMetrics(rec, httptest.NewRequest(http.MethodPost, metrics.EndpointPath, bytes.NewReader(body)))
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Equal(t, int64(1), store.Snapshot().CompassCalls)
-}
-
-func TestHandleRecordCompressionMetrics_RejectsMalformedBody(t *testing.T) {
-	t.Parallel()
-
-	srv := &Server{compressionMetrics: NewCompressionMetricsStore(tempMetricsPath(t))}
-
-	rec := httptest.NewRecorder()
-	srv.handleRecordCompressionMetrics(rec, httptest.NewRequest(http.MethodPost, metrics.EndpointPath, bytes.NewReader([]byte("{not json"))))
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestHandleGetCompressionMetrics(t *testing.T) {

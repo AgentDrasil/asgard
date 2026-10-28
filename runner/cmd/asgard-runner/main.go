@@ -13,6 +13,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/pkg/logger"
+	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/pkg/version"
 	"github.com/AgentDrasil/asgard/runner/lib/config"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
@@ -64,8 +65,16 @@ func run() error {
 		remote.Close()
 		sb.Close()
 	}()
-	executor := exec.New(exec.Options{Agents: remote, Conf: sb.Conf, Ready: sb.Ready})
-	client := conn.New(conn.Options{
+	// The executor forwards the sandbox calls over the backend connection the
+	// client below maintains.
+	var client *conn.Client
+	executor := exec.New(exec.Options{
+		Agents:    remote,
+		Conf:      sb.Conf,
+		Ready:     sb.Ready,
+		Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() },
+	})
+	client = conn.New(conn.Options{
 		Executor:      executor,
 		Addr:          boot.Backend,
 		NodeID:        nodeID,
