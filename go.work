@@ -23,5 +23,6 @@ use (
 	./pkg/version
 	./pkg/workflowspec
 	./plugins/notebook
+	./runner
 	./simplest
 )

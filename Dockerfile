@@ -121,6 +121,7 @@ COPY pkg/runnerpb/go.mod pkg/runnerpb/go.sum* ./pkg/runnerpb/
 COPY pkg/version/go.mod ./pkg/version/
 COPY pkg/workflowspec/go.mod pkg/workflowspec/go.sum* ./pkg/workflowspec/
 COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
+COPY runner/go.mod runner/go.sum* ./runner/
 COPY cmd/agent-validate/go.mod cmd/agent-validate/go.sum* ./cmd/agent-validate/
 COPY cmd/asgard/go.mod cmd/asgard/go.sum* ./cmd/asgard/
 COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
@@ -145,6 +146,7 @@ RUN (cd backend && go mod download) && \
     (cd pkg/version && go mod download) && \
     (cd pkg/workflowspec && go mod download) && \
     (cd plugins/notebook && go mod download) && \
+    (cd runner && go mod download) && \
     (cd cmd/agent-validate && go mod download) && \
     (cd cmd/asgard && go mod download) && \
     (cd cmd/ask-user && go mod download) && \
@@ -162,6 +164,7 @@ COPY llms/ ./llms/
 COPY pkg/ ./pkg/
 COPY plugins/ ./plugins/
 COPY cmd/ ./cmd/
+COPY runner/ ./runner/
 COPY simplest/ ./simplest/
 
 RUN mkdir -p /app/bin && \
@@ -175,7 +178,8 @@ RUN mkdir -p /app/bin && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/aw ./agentwrapper/cmd/aw && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/fakebash ./fakebash/cmd/fakebash && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/fakebashd ./fakebash/cmd/fakebashd && \
-    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/agystatusline ./agystatusline/cmd/agystatusline
+    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/agystatusline ./agystatusline/cmd/agystatusline && \
+    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/asgard-runner ./runner/cmd/asgard-runner
 
 # Stage 5: runner
 FROM base_devtool AS runner
