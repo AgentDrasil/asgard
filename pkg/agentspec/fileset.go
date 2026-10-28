@@ -74,7 +74,7 @@ func (d *Definition) Materialize(dir string) (*Agent, error) {
 		}
 	}
 
-	agent := &Agent{Config: d.Config, Path: absDir}
+	agent := &Agent{Config: d.Config, Path: absDir, Hash: d.Hash(), NodeID: d.NodeID}
 	if d.Config.Type == "workflow" {
 		agent.WorkflowPath = filepath.Join(absDir, "workflow.yaml")
 	}

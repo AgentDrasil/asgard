@@ -8,6 +8,12 @@ type Agent struct {
 	Config AgentConfig
 	Path   string // Absolute path to the agent directory
 
+	// Hash is the content hash of the definition the agent was materialized
+	// from (Definition.Hash); empty for agents loaded from a plain directory.
+	Hash string
+	// NodeID is the owning runner of a runner-scoped agent, empty for global ones.
+	NodeID string
+
 	// WorkflowPath is the absolute path to workflow.yaml for agents of type
 	// "workflow"; empty for regular agents.
 	WorkflowPath string

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
@@ -90,33 +91,7 @@ func ViewerArtifactPath(path, tmpDir string) string {
 // /session/<rel> so the file endpoint can remap them back to
 // <home>/data/<sessionID>/<rel>.
 func ViewerArtifactPathInSession(path, tmpDir, sessionDir string) string {
-	clean := filepath.Clean(path)
-	if tmpDir != "" {
-		if rel, err := filepath.Rel(filepath.Clean(tmpDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-			return filepath.Join("/tmp", rel)
-		}
-	}
-	if sessionDir != "" {
-		if rel, err := filepath.Rel(filepath.Clean(sessionDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-			return filepath.Join("/session", rel)
-		}
-	}
-	if strings.HasPrefix(clean, ".tmp/") {
-		return "/tmp/" + strings.TrimPrefix(clean, ".tmp/")
-	}
-	if clean == ".tmp" {
-		return "/tmp"
-	}
-	if strings.HasPrefix(clean, ".session/") {
-		return "/session/" + strings.TrimPrefix(clean, ".session/")
-	}
-	if clean == ".session" {
-		return "/session"
-	}
-	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" || strings.HasPrefix(clean, "/session/") || clean == "/session" {
-		return clean
-	}
-	return path
+	return agents.ViewerArtifactPath(path, tmpDir, sessionDir)
 }
 
 // ArtifactViewerPaths converts a node result's artifact map (declared name →

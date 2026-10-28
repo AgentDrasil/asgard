@@ -92,3 +92,37 @@ func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir s
 
 	return false
 }
+
+// ViewerArtifactPath converts a host or sandbox artifact path into the form the
+// file API accepts: paths under tmpDir become /tmp/<rel>, paths under sessionDir
+// become /session/<rel>, .tmp/.session prefixes are canonicalised and anything
+// else is returned unchanged.
+func ViewerArtifactPath(path, tmpDir, sessionDir string) string {
+	clean := filepath.Clean(path)
+	if tmpDir != "" {
+		if rel, err := filepath.Rel(filepath.Clean(tmpDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("/tmp", rel)
+		}
+	}
+	if sessionDir != "" {
+		if rel, err := filepath.Rel(filepath.Clean(sessionDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("/session", rel)
+		}
+	}
+	if strings.HasPrefix(clean, ".tmp/") {
+		return "/tmp/" + strings.TrimPrefix(clean, ".tmp/")
+	}
+	if clean == ".tmp" {
+		return "/tmp"
+	}
+	if strings.HasPrefix(clean, ".session/") {
+		return "/session/" + strings.TrimPrefix(clean, ".session/")
+	}
+	if clean == ".session" {
+		return "/session"
+	}
+	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" || strings.HasPrefix(clean, "/session/") || clean == "/session" {
+		return clean
+	}
+	return path
+}

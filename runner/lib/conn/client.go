@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,8 @@ var (
 	ErrNotConnected = errors.New("not connected to backend")
 	// ErrTooLarge is returned when a message exceeds the protocol size caps.
 	ErrTooLarge = errors.New("message too large")
+	// ErrInvalidMessage is returned when a message cannot be marshaled.
+	ErrInvalidMessage = errors.New("invalid message")
 	// ErrRejected is the error of a session the backend refused to register.
 	ErrRejected = errors.New("registration rejected")
 )
@@ -443,9 +446,20 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 func (c *Client) sendHeartbeat() {
 	hb := &runnerpb.Heartbeat{ActiveRuns: uint32(c.runs.Len()), MaxRuns: c.opts.MaxRuns}
 	if c.opts.Quotas != nil {
-		hb.Quotas = c.opts.Quotas()
+		for _, q := range c.opts.Quotas() {
+			q = proto.Clone(q).(*runnerpb.TargetQuota)
+			q.Cli = strings.ToValidUTF8(q.Cli, "\uFFFD")
+			q.Model = strings.ToValidUTF8(q.Model, "\uFFFD")
+			hb.Quotas = append(hb.Quotas, q)
+		}
 	}
 	msg := &runnerpb.RunnerMessage{Payload: &runnerpb.RunnerMessage_Heartbeat{Heartbeat: hb}}
+	// Same checks as enqueue: an unencodable or oversized heartbeat is dropped
+	// instead of poisoning the queue.
+	if _, err := proto.Marshal(msg); err != nil || proto.Size(msg) > maxControlMessageSize {
+		log.Error().Err(err).Int("size", proto.Size(msg)).Msg("dropping invalid heartbeat")
+		return
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -554,6 +568,13 @@ func (c *Client) Result(ctx context.Context, res *runnerpb.RunResult) error {
 // enqueue assigns the next upstream seq and queues msg for (re)delivery. It
 // blocks while the unacked queue is full.
 func (c *Client) enqueue(ctx context.Context, msg *runnerpb.RunnerMessage) error {
+	// Marshal once up front: a message that cannot be encoded (e.g. a string
+	// field with invalid UTF-8) would fail every send and replay forever and
+	// poison the queue, so reject it here.
+	if _, err := proto.Marshal(msg); err != nil {
+		log.Error().Err(err).Msgf("dropping unencodable %T", msg.GetPayload())
+		return fmt.Errorf("%w: %w", ErrInvalidMessage, err)
+	}
 	size := proto.Size(msg)
 	if size > maxControlMessageSize {
 		return fmt.Errorf("%w: %d bytes", ErrTooLarge, size)

@@ -90,22 +90,80 @@ type StatusScope struct {
 	AllowCrossSession bool
 }
 
+// Options carries the host-side inputs of a run that the backend takes from
+// its *config.Config and the runner receives explicitly (StartRun and its own
+// configuration). The zero value enables every provider and adds nothing to
+// the sandboxes.
+type Options struct {
+	// IsProviderEnabled reports whether a CLI provider may be used; nil
+	// enables all providers.
+	IsProviderEnabled func(cli string) bool
+	// LangRules is injected into the agent contract file.
+	LangRules string
+	// ConfigPath is the host config file masked inside the sandboxes.
+	ConfigPath string
+	// Proxy is the sandbox proxy configuration.
+	Proxy bwrap.ProxySandboxConfig
+	// Env is appended to the environment of both sandboxes after the
+	// ASGARD_CHAT_ID / node / agent variables.
+	Env []string
+	// OnSockDir, when set, is called with the per-run socket directory (bind
+	// mounted at /fakebash in both sandboxes) and the resolved run directory
+	// before the sandboxes start. The returned stop func, if non-nil, runs
+	// after both sandboxes ended.
+	OnSockDir func(sockDir, runDir string) (stop func(), err error)
+}
+
+func (o Options) providerEnabled(cli string) bool {
+	return o.IsProviderEnabled == nil || o.IsProviderEnabled(cli)
+}
+
+// OptionsFromConfig derives the Options the backend runs agents with. A nil
+// conf falls back to the ASGARD_API_HOST / ASGARD_STATUS_URL environment of
+// the process.
+func OptionsFromConfig(conf *config.Config) Options {
+	if conf == nil {
+		var env []string
+		if envHost := os.Getenv("ASGARD_API_HOST"); envHost != "" {
+			env = append(env, "ASGARD_API_HOST="+envHost)
+		}
+		if statusURL := os.Getenv("ASGARD_STATUS_URL"); statusURL != "" {
+			internalHost := strings.TrimSuffix(statusURL, "/agent-status")
+			env = append(env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
+		}
+		return Options{Env: env}
+	}
+	return Options{
+		IsProviderEnabled: conf.IsProviderEnabled,
+		LangRules:         conf.LanguageRules(),
+		ConfigPath:        conf.GetConfigPath(),
+		Proxy:             conf.SandboxProxyOptions(),
+		Env: []string{
+			"ASGARD_STATUS_URL=" + conf.StatusURL(),
+			"ASGARD_INTERNAL_API_HOST=" + conf.InternalAPIHost(),
+			"ASGARD_API_HOST=" + conf.APIHost(),
+		},
+	}
+}
+
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
-func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, conf *config.Config) ([]byte, error) {
+func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, opts Options) ([]byte, error) {
 	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
-
-	var langRules string
-	var configPath string
-	var proxyCfg bwrap.ProxySandboxConfig
-	if conf != nil {
-		langRules = conf.LanguageRules()
-		configPath = conf.GetConfigPath()
-		proxyCfg = conf.SandboxProxyOptions()
+	if opts.OnSockDir != nil {
+		stop, err := opts.OnSockDir(sockDir, runDir)
+		if err != nil {
+			return nil, fmt.Errorf("preparing sock directory %q: %w", sockDir, err)
+		}
+		if stop != nil {
+			defer stop()
+		}
 	}
+
+	langRules, configPath, proxyCfg := opts.LangRules, opts.ConfigPath, opts.Proxy
 
 	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)
 	if err != nil {
@@ -136,31 +194,8 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
 		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
 	}
-	if conf != nil {
-		statusURL := conf.StatusURL()
-		internalHost := conf.InternalAPIHost()
-		apiHost := conf.APIHost()
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env,
-			"ASGARD_STATUS_URL="+statusURL,
-			"ASGARD_INTERNAL_API_HOST="+internalHost,
-			"ASGARD_API_HOST="+apiHost,
-		)
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env,
-			"ASGARD_STATUS_URL="+statusURL,
-			"ASGARD_INTERNAL_API_HOST="+internalHost,
-			"ASGARD_API_HOST="+apiHost,
-		)
-	} else {
-		if envHost := os.Getenv("ASGARD_API_HOST"); envHost != "" {
-			agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_API_HOST="+envHost)
-			cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_API_HOST="+envHost)
-		}
-		if statusURL := os.Getenv("ASGARD_STATUS_URL"); statusURL != "" {
-			internalHost := strings.TrimSuffix(statusURL, "/agent-status")
-			agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
-			cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_STATUS_URL="+statusURL, "ASGARD_INTERNAL_API_HOST="+internalHost)
-		}
-	}
+	agentSandboxCmd.Env = append(agentSandboxCmd.Env, opts.Env...)
+	cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, opts.Env...)
 
 	cmdSandboxCmd.Stdout = os.Stdout
 	cmdSandboxCmd.Stderr = os.Stderr
@@ -282,13 +317,13 @@ func (e *NoQuotaError) Error() string {
 
 // quotaStatuses snapshots the quota state of every given CLI target.
 // Disabled providers are recorded without a usage query.
-func quotaStatuses(targets []agentspec.CLITarget, conf *config.Config) []QuotaTargetStatus {
+func quotaStatuses(targets []agentspec.CLITarget, opts Options) []QuotaTargetStatus {
 	statuses := make([]QuotaTargetStatus, 0, len(targets))
 	for _, target := range targets {
 		st := QuotaTargetStatus{
 			CLI:     target.CLI,
 			Model:   target.Model,
-			Enabled: conf.IsProviderEnabled(target.CLI),
+			Enabled: opts.providerEnabled(target.CLI),
 		}
 		if st.Enabled {
 			st.Remaining = agentwrapper.CheckQuota(target.CLI, target.Model)
@@ -344,12 +379,29 @@ func Run(ctx context.Context, agent *agentspec.Agent, prompt string, sessions Se
 // sessions carries per-CLI session IDs (see SessionMap); only the entry
 // matching the selected target's CLI is resumed.
 func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, sessions SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
+	res, err := RunWithOptions(ctx, agent, candidates, prompt, sessions, runDirOpt, modelOpt, chatID, statusScope, OptionsFromConfig(conf))
+	return res.Output, res.Target, err
+}
+
+// Result is the outcome of RunWithOptions. Target and RunDir are set as far as
+// the run got, also when it failed.
+type Result struct {
+	Output []byte
+	Target agentspec.CLITarget
+	// RunDir is the resolved working directory (empty if resolution failed).
+	RunDir string
+}
+
+// RunWithOptions is RunWithCandidates with the host-side inputs given
+// explicitly instead of derived from the backend config, and additionally
+// reporting the resolved run directory.
+func RunWithOptions(ctx context.Context, agent *agentspec.Agent, candidates []agentspec.CLITarget, prompt string, sessions SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, opts Options) (Result, error) {
 	targets := agent.Config.CLI
 	if len(candidates) > 0 {
 		targets = candidates
 	}
 	if len(targets) == 0 {
-		return nil, agentspec.CLITarget{}, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
+		return Result{}, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
 
 	var selectedTarget *agentspec.CLITarget
@@ -362,25 +414,25 @@ func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates [
 			}
 		}
 		if selectedTarget == nil {
-			return nil, agentspec.CLITarget{}, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
+			return Result{}, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
 		}
-		if !conf.IsProviderEnabled(selectedTarget.CLI) {
-			return nil, agentspec.CLITarget{}, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
+		if !opts.providerEnabled(selectedTarget.CLI) {
+			return Result{}, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
 		}
 		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
 		if quota <= 0 {
-			return nil, agentspec.CLITarget{}, &NoQuotaError{
+			return Result{}, &NoQuotaError{
 				AgentID:       agent.Config.ID,
 				ExplicitModel: reqModel,
 				MinThreshold:  MinAutoQuotaThreshold,
-				Targets:       quotaStatuses(targets, conf),
+				Targets:       quotaStatuses(targets, opts),
 			}
 		}
 	} else {
 		hasEnabledTarget := false
 		var statuses []QuotaTargetStatus
 		for _, target := range targets {
-			if !conf.IsProviderEnabled(target.CLI) {
+			if !opts.providerEnabled(target.CLI) {
 				statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Enabled: false})
 				continue
 			}
@@ -395,9 +447,9 @@ func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates [
 
 		if selectedTarget == nil {
 			if !hasEnabledTarget {
-				return nil, agentspec.CLITarget{}, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
+				return Result{}, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
 			}
-			return nil, agentspec.CLITarget{}, &NoQuotaError{
+			return Result{}, &NoQuotaError{
 				AgentID:      agent.Config.ID,
 				MinThreshold: MinAutoQuotaThreshold,
 				Targets:      statuses,
@@ -407,12 +459,12 @@ func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates [
 
 	runDir, err := resolveRunDir(agent, runDirOpt)
 	if err != nil {
-		return nil, agentspec.CLITarget{}, err
+		return Result{}, err
 	}
 
 	// Ensure the resolved runDir exists (e.g. if it was a subdirectory under config run_dirs that was not created yet)
 	if err := os.MkdirAll(runDir, 0755); err != nil {
-		return nil, agentspec.CLITarget{}, fmt.Errorf("creating run directory %q: %w", runDir, err)
+		return Result{}, fmt.Errorf("creating run directory %q: %w", runDir, err)
 	}
 
 	session := optional.None[string]()
@@ -420,6 +472,6 @@ func RunWithCandidates(ctx context.Context, agent *agentspec.Agent, candidates [
 		session = optional.Some(sid)
 	}
 
-	out, err := runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, conf)
-	return out, *selectedTarget, err
+	out, err := runTarget(ctx, agent, *selectedTarget, prompt, session, runDir, chatID, statusScope, opts)
+	return Result{Output: out, Target: *selectedTarget, RunDir: runDir}, err
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -378,4 +380,42 @@ func TestCancelDeliveredAfterBlockedStart(t *testing.T) {
 		return len(exec.calls) == 2
 	}, 5*time.Second, 10*time.Millisecond)
 	assert.Equal(t, []string{"start:r1", "cancel:r1"}, exec.calls)
+}
+
+func TestEnqueueRejectsUnencodableMessage(t *testing.T) {
+	t.Parallel()
+
+	c := New(Options{Addr: "127.0.0.1:1", NodeID: "r1"})
+	err := c.Event(context.Background(), &runnerpb.RunEvent{RunId: "x", Content: "bad \xff utf8"})
+	require.ErrorIs(t, err, ErrInvalidMessage)
+
+	c.mu.Lock()
+	queued := len(c.queue)
+	next := c.nextSeq
+	c.mu.Unlock()
+	assert.Zero(t, queued, "the invalid message must not enter the queue")
+	assert.Zero(t, next, "no seq is consumed")
+
+	require.NoError(t, c.Event(context.Background(), &runnerpb.RunEvent{RunId: "x", Content: "fine"}))
+}
+
+func TestHeartbeatSanitizesQuotaStrings(t *testing.T) {
+	t.Parallel()
+
+	c := New(Options{
+		Addr: "127.0.0.1:1", NodeID: "r1",
+		Quotas: func() []*runnerpb.TargetQuota {
+			return []*runnerpb.TargetQuota{{Cli: "op\xffen", Model: "m\xfe", Remaining: 0.5, Enabled: true}}
+		},
+	})
+	c.sendHeartbeat()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	require.Len(t, c.queue, 1)
+	q := c.queue[0].GetHeartbeat().GetQuotas()[0]
+	assert.Equal(t, "op\uFFFDen", q.GetCli())
+	assert.Equal(t, "m\uFFFD", q.GetModel())
+	_, err := proto.Marshal(c.queue[0])
+	assert.NoError(t, err)
 }

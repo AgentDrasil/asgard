@@ -7,10 +7,13 @@ require (
 	github.com/AgentDrasil/asgard/backend v0.0.0
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
+	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0
 	github.com/hashicorp/yamux v0.1.2
+	github.com/moznion/go-optional v0.13.0
 	github.com/rs/zerolog v1.35.1
+	github.com/stretchr/testify v1.12.1
 	go.etcd.io/etcd/client/v3 v3.7.2
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
@@ -34,7 +37,6 @@ require (
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0 // indirect
-	github.com/AgentDrasil/asgard/pkg/paths v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3 // indirect
@@ -128,7 +130,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/moznion/go-optional v0.13.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect

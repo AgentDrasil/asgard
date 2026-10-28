@@ -884,3 +884,33 @@ func TestProxyManager_Interceptor_BearerBidirectionalCompatibility(t *testing.T)
 		})
 	}
 }
+
+func TestProxyManager_StartBackgroundReportsBindSynchronously(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	newMgr := func(addr string) *ProxyManager {
+		pm, err := NewManager(&Config{
+			Enable: true,
+			Server: ServerConfig{Addr: addr, CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
+			Rules:  []Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "real-secret-123456", DummySecret: "dummy"}},
+		}, "")
+		require.NoError(t, err)
+		return pm
+	}
+
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = busy.Close() })
+	failing := newMgr(busy.Addr().String())
+	require.Error(t, failing.StartBackground(nil))
+	assert.False(t, failing.Running(), "a failed bind is never running")
+
+	pm := newMgr("127.0.0.1:0")
+	exited := make(chan error, 1)
+	require.NoError(t, pm.StartBackground(func(err error) { exited <- err }))
+	assert.True(t, pm.Running(), "running as soon as StartBackground returns")
+	require.NoError(t, pm.Shutdown(context.Background()))
+	assert.NoError(t, <-exited)
+	assert.False(t, pm.Running())
+}

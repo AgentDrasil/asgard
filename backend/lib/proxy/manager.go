@@ -45,6 +45,11 @@ func (pm *ProxyManager) Addr() string {
 	return pm.server.Addr
 }
 
+// Running reports whether the proxy server is currently listening.
+func (pm *ProxyManager) Running() bool {
+	return pm != nil && pm.running.Load() && pm.listenAddr.Load() != nil
+}
+
 // SetExcludeHosts records exclude-hosts to be preserved across reloads.
 func (pm *ProxyManager) SetExcludeHosts(excludes []string) {
 	if pm == nil {
@@ -179,34 +184,63 @@ func NewManager(cfg *Config, configPath string, extraOpts ...mitmproxy.Option) (
 	return pm, nil
 }
 
-// Start starts the proxy HTTP server.
-func (pm *ProxyManager) Start() error {
+// bind opens the listener for a start. running and the bound address are only
+// published after the bind succeeded.
+func (pm *ProxyManager) bind() (net.Listener, error) {
 	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	if pm.stopped.Load() {
-		pm.mu.Unlock()
-		return fmt.Errorf("proxy manager has been stopped and cannot be restarted")
+		return nil, fmt.Errorf("proxy manager has been stopped and cannot be restarted")
 	}
 	if pm.running.Load() {
-		pm.mu.Unlock()
-		return fmt.Errorf("proxy manager is already running")
+		return nil, fmt.Errorf("proxy manager is already running")
 	}
-	pm.running.Store(true)
-	pm.mu.Unlock()
-
 	ln, err := net.Listen("tcp", pm.server.Addr)
 	if err != nil {
-		pm.running.Store(false)
-		return fmt.Errorf("proxy server listen error: %w", err)
+		return nil, fmt.Errorf("proxy server listen error: %w", err)
 	}
 	bound := ln.Addr().String()
 	pm.listenAddr.Store(&bound)
+	pm.running.Store(true)
+	return ln, nil
+}
 
+// serve runs the HTTP server on ln until it stops, then marks the manager as
+// not running.
+func (pm *ProxyManager) serve(ln net.Listener) error {
 	log.Info().Str("addr", pm.server.Addr).Msg("proxy manager starting HTTP server")
-	err = pm.server.Serve(ln)
+	err := pm.server.Serve(ln)
+	pm.running.Store(false)
+	pm.listenAddr.Store(nil)
 	if err != nil && err != http.ErrServerClosed {
-		pm.running.Store(false)
 		return fmt.Errorf("proxy server ListenAndServe error: %w", err)
 	}
+	return nil
+}
+
+// Start starts the proxy HTTP server and blocks until it stops.
+func (pm *ProxyManager) Start() error {
+	ln, err := pm.bind()
+	if err != nil {
+		return err
+	}
+	return pm.serve(ln)
+}
+
+// StartBackground binds the listener synchronously and serves in the
+// background. A bind failure is returned; onExit (may be nil) is called when
+// the server later stops, with a non-nil error if it failed.
+func (pm *ProxyManager) StartBackground(onExit func(error)) error {
+	ln, err := pm.bind()
+	if err != nil {
+		return err
+	}
+	go func() {
+		err := pm.serve(ln)
+		if onExit != nil {
+			onExit(err)
+		}
+	}()
 	return nil
 }
 
@@ -228,8 +262,9 @@ func (pm *ProxyManager) ServeListener(ln net.Listener) error {
 	pm.listenAddr.Store(&bound)
 
 	err := pm.server.Serve(ln)
+	pm.running.Store(false)
+	pm.listenAddr.Store(nil)
 	if err != nil && err != http.ErrServerClosed {
-		pm.running.Store(false)
 		return fmt.Errorf("proxy server Serve error: %w", err)
 	}
 	return nil
@@ -249,6 +284,7 @@ func (pm *ProxyManager) Shutdown(ctx context.Context) error {
 	}
 
 	pm.running.Store(false)
+	pm.listenAddr.Store(nil)
 	var sErr error
 	if pm.server != nil {
 		sErr = pm.server.Shutdown(ctx)

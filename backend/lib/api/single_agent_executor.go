@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"uuid"
@@ -362,78 +361,9 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 		agentName = name
 	}
 	targetFiles := toStringSlice(update.Metadata["target_files"])
-	baseTmp := GetSessionTmpBaseDir(chatID)
-	baseSession := GetSessionScopedBaseDir("session", chatID)
-	isRunDirSessionTmp := (workspaceDir != "" && (workspaceDir == baseTmp || NormalizeSessionRunDir(workspaceDir, chatID) == baseTmp))
-
 	var artifactFiles []string
-	for _, tf := range targetFiles {
-		processedPath := tf
-
-		if isRelTmp, sub := isRelativeScopedPrefixedPath(tf, chatID, "tmp"); isRelTmp {
-			sub = filepath.Clean(sub)
-			if sub == "." {
-				sub = ""
-			}
-			canonicalTmpPath := "/tmp"
-			if sub != "" {
-				canonicalTmpPath = "/tmp/" + sub
-			}
-
-			if isRunDirSessionTmp {
-				processedPath = canonicalTmpPath
-			} else {
-				// workspaceDir is regular project workspace
-				wsFilePath := tf
-				if workspaceDir != "" && !filepath.IsAbs(tf) {
-					wsFilePath = filepath.Join(workspaceDir, tf)
-				}
-				if _, err := os.Stat(wsFilePath); err == nil {
-					// Exists in workspace -> keep original workspace relative path
-					processedPath = tf
-				} else {
-					// Does not exist in workspace, check session tmp
-					tmpFilePath := filepath.Join(baseTmp, sub)
-					if _, err := os.Stat(tmpFilePath); err == nil {
-						processedPath = canonicalTmpPath
-					} else {
-						processedPath = tf
-					}
-				}
-			}
-		} else if isRelSess, sub := isRelativeScopedPrefixedPath(tf, chatID, "session"); isRelSess {
-			sub = filepath.Clean(sub)
-			if sub == "." {
-				sub = ""
-			}
-			canonicalSessionPath := "/session"
-			if sub != "" {
-				canonicalSessionPath = "/session/" + sub
-			}
-
-			// workspaceDir is regular project workspace
-			wsFilePath := tf
-			if workspaceDir != "" && !filepath.IsAbs(tf) {
-				wsFilePath = filepath.Join(workspaceDir, tf)
-			}
-			if _, err := os.Stat(wsFilePath); err == nil {
-				// Exists in workspace -> keep original workspace relative path
-				processedPath = tf
-			} else {
-				// Does not exist in workspace, check session namespace
-				sessFilePath := filepath.Join(baseSession, sub)
-				if _, err := os.Stat(sessFilePath); err == nil {
-					processedPath = canonicalSessionPath
-				} else {
-					processedPath = tf
-				}
-			}
-		}
-
-		if agents.IsArtifact(processedPath, agentConfig, workspaceDir) {
-			normalizedViewerPath := workflow.ViewerArtifactPathInSession(processedPath, baseTmp, baseSession)
-			artifactFiles = append(artifactFiles, normalizedViewerPath)
-		}
+	for _, a := range agents.StatusArtifacts(chatID, targetFiles, agentConfig, workspaceDir) {
+		artifactFiles = append(artifactFiles, a.ViewerPath)
 	}
 	if len(artifactFiles) > 0 {
 		if err := repo.AppendArtifacts(chatID, artifactFiles); err != nil {

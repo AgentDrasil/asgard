@@ -2,9 +2,11 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -193,6 +195,16 @@ func buildHTTPReporter() types.ReportFunc {
 	// it is stamped onto every update so the host can attribute messages to it.
 	model := os.Getenv("ASGARD_MODEL")
 	client := &http.Client{}
+	// unix:///path/to/sock addresses an HTTP server on a unix socket (the
+	// runner's status socket); the request host is a fixed placeholder.
+	if sock, ok := strings.CutPrefix(statusURL, "unix://"); ok {
+		client.Transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+			},
+		}
+		statusURL = "http://asgard/agent-status"
+	}
 
 	return func(stepIndex int, source, entryType, content string, metadata map[string]any) {
 		if model != "" {

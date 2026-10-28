@@ -16,6 +16,8 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/version"
 	"github.com/AgentDrasil/asgard/runner/lib/config"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
+	"github.com/AgentDrasil/asgard/runner/lib/exec"
+	"github.com/AgentDrasil/asgard/runner/lib/sandbox"
 )
 
 func main() {
@@ -48,7 +50,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer remote.Close()
 	if agents, err := remote.Agents(); err != nil {
 		log.Warn().Err(err).Msg("agent definitions not usable yet")
 	} else {
@@ -56,7 +57,16 @@ func run() error {
 	}
 
 	log.Info().Str("node_id", nodeID).Str("backend", boot.Backend).Str("version", version.Get()).Msg("asgard-runner starting")
+	sb := sandbox.Setup(remote, sandbox.Options{})
+	// Stop the etcd watchers first so no change arrives while the sandbox
+	// setup shuts down (Close also ignores late changes).
+	defer func() {
+		remote.Close()
+		sb.Close()
+	}()
+	executor := exec.New(exec.Options{Agents: remote, Conf: sb.Conf, Ready: sb.Ready})
 	client := conn.New(conn.Options{
+		Executor:      executor,
 		Addr:          boot.Backend,
 		NodeID:        nodeID,
 		TLSConfig:     boot.TLSConfig,
