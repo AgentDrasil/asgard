@@ -21,6 +21,7 @@ type ChatSession struct {
 	RunDir            string                   `json:"runDir"`
 	GitRoot           string                   `json:"gitRoot,omitempty"`
 	AllowCrossSession bool                     `json:"allowCrossSession"`
+	RunnerID          string                   `json:"runnerId,omitempty"`
 	IsRunning         bool                     `json:"isRunning"`
 	IsWaitingForUser  bool                     `json:"isWaitingForUser,omitempty"`
 	IsArchived        bool                     `json:"isArchived"`
@@ -35,6 +36,9 @@ type CreateSessionRequest struct {
 	CurrentAgent      string `json:"currentAgent"`
 	RunDir            string `json:"runDir"`
 	AllowCrossSession bool   `json:"allowCrossSession"`
+	// RunnerID is the runner the chat executes on; required when runner
+	// binding is enabled.
+	RunnerID string `json:"runnerId"`
 }
 
 // handleSessions handles GET, POST, and DELETE requests to /api/sessions.
@@ -63,6 +67,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	chatID := uuid.NewV7().String()
 
+	runnerID, needBind, bindErr := s.resolveRunner(chatID, req.RunnerID)
+	if bindErr != nil {
+		writeJSONError(w, bindErr.status, bindErr.msg)
+		return
+	}
+
 	normalizedRunDir := NormalizeSessionRunDir(req.RunDir, chatID)
 	runDirOpt := optional.None[string]()
 	if normalizedRunDir != "" {
@@ -76,9 +86,17 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if needBind {
+		if berr := s.persistRunnerBinding(chatID, runnerID); berr != nil {
+			writeJSONError(w, berr.status, berr.msg)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(ChatSession{
+		RunnerID:          runnerID,
 		ChatID:            chatID,
 		CurrentAgent:      req.CurrentAgent,
 		RunDir:            normalizedRunDir,
@@ -145,6 +163,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		RunDir:            sess.RunDir,
 		GitRoot:           findGitRoot(sess.RunDir),
 		AllowCrossSession: sess.AllowCrossSession,
+		RunnerID:          sess.RunnerNodeID,
 		IsRunning:         s.isSessionRunning(sess),
 		IsWaitingForUser:  sess.HasUnrepliedAskUser(),
 		IsArchived:        sess.IsArchived,
@@ -209,6 +228,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			RunDir:            sess.RunDir,
 			GitRoot:           findGitRoot(sess.RunDir),
 			AllowCrossSession: sess.AllowCrossSession,
+			RunnerID:          sess.RunnerNodeID,
 			IsRunning:         s.isSessionRunning(&sessCopy),
 			IsWaitingForUser:  sess.HasUnrepliedAskUser(),
 			IsArchived:        sess.IsArchived,

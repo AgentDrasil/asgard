@@ -96,15 +96,24 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve target agent from session.CurrentAgent (must be single agent, non-workflow)
+	// Agents are those visible to the chat's runner (global plus its own). A
+	// chat without a runner cannot run anything once binding is enforced.
+	if s.bindingEnforced() && session.RunnerNodeID == "" {
+		writeJSONError(w, http.StatusBadRequest, "chat is not bound to a runner")
+		return
+	}
+	visible, aerr := s.agentsFor(session.RunnerNodeID)
+	if aerr != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+aerr.Error())
+		return
+	}
 	var targetAgent *agentspec.Agent
-	s.mu.RLock()
-	for _, a := range s.agents {
+	for _, a := range visible {
 		if (a.Config.ID == session.CurrentAgent || a.Config.Name == session.CurrentAgent) && a.Config.Type != "workflow" {
 			targetAgent = a
 			break
 		}
 	}
-	s.mu.RUnlock()
 
 	if targetAgent == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -152,7 +161,9 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 		Payload: map[string]any{"queue": updatedQueue},
 	})
 
-	// Attempt to start consumer if idle
+	s.unparkQueue(id)
+	// Attempt to start consumer if idle. An offline runner is not an error
+	// here: the message stays queued and RunnerOnline resumes it.
 	s.startQueueConsumerIfIdle(session.ChatID, targetAgent, session.RunDir)
 
 	w.Header().Set("Content-Type", "application/json")

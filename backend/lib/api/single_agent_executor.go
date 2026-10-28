@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -38,6 +39,9 @@ type SingleAgentExecutor struct {
 	repo      *dbmodels.SessionRepository
 	server    *Server
 	llmClient llm.Client
+	// dispatcher executes the agent runs: the chat's runner in production, the
+	// server's injected dispatcher otherwise.
+	dispatcher dispatch.Dispatcher
 
 	// suspendQuota requests a quota decision from the user and blocks until a
 	// reply arrives or ctx is cancelled. It returns the raw reply text. When
@@ -50,12 +54,20 @@ type SingleAgentExecutor struct {
 // llmClient may be nil; in that case a genai-backed client is created lazily
 // for session title generation using the configured (or env) API key.
 func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *dbmodels.SessionRepository, server *Server, llmClient llm.Client) *SingleAgentExecutor {
+	var d dispatch.Dispatcher
+	if server != nil {
+		d = server.dispatcher
+	}
+	if d == nil {
+		d = dispatch.NewLocal(conf)
+	}
 	return &SingleAgentExecutor{
-		agent:     agent,
-		conf:      conf,
-		repo:      repo,
-		server:    server,
-		llmClient: llmClient,
+		agent:      agent,
+		conf:       conf,
+		repo:       repo,
+		server:     server,
+		llmClient:  llmClient,
+		dispatcher: d,
 	}
 }
 
@@ -123,20 +135,24 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 			if len(e.agent.Config.RunDirs) > 0 && !run.IsAllowedDir(rd, e.agent.Config.RunDirs) {
 				return "", fmt.Errorf("run directory %q is not allowed by agent configuration", rd)
 			}
-			baseTmp := GetSessionTmpBaseDir(chatID)
-			baseSession := GetSessionScopedBaseDir("session", chatID)
-			if (rd == baseTmp || strings.HasPrefix(rd, baseTmp+string(os.PathSeparator))) ||
-				(rd == baseSession || strings.HasPrefix(rd, baseSession+string(os.PathSeparator))) {
-				if mkdirErr := os.MkdirAll(rd, 0755); mkdirErr != nil {
-					return "", fmt.Errorf("failed to create session temporary run_dir %q: %w", rd, mkdirErr)
+			// The directory lives on the runner, which creates and checks it;
+			// the backend only checks its own filesystem for in-process runs.
+			if _, local := e.dispatcher.(*dispatch.Local); local {
+				baseTmp := GetSessionTmpBaseDir(chatID)
+				baseSession := GetSessionScopedBaseDir("session", chatID)
+				if (rd == baseTmp || strings.HasPrefix(rd, baseTmp+string(os.PathSeparator))) ||
+					(rd == baseSession || strings.HasPrefix(rd, baseSession+string(os.PathSeparator))) {
+					if mkdirErr := os.MkdirAll(rd, 0755); mkdirErr != nil {
+						return "", fmt.Errorf("failed to create session temporary run_dir %q: %w", rd, mkdirErr)
+					}
 				}
-			}
-			info, err := os.Stat(rd)
-			if err != nil {
-				return "", fmt.Errorf("run_dir %q does not exist: %w", rd, err)
-			}
-			if !info.IsDir() {
-				return "", fmt.Errorf("run_dir %q is not a directory", rd)
+				info, err := os.Stat(rd)
+				if err != nil {
+					return "", fmt.Errorf("run_dir %q does not exist: %w", rd, err)
+				}
+				if !info.IsDir() {
+					return "", fmt.Errorf("run_dir %q is not a directory", rd)
+				}
 			}
 		}
 	}
@@ -346,7 +362,10 @@ func (e *SingleAgentExecutor) markAgentCompleted(chatID string, runErr error) {
 // recordStatusUpdate processes an incremental status update from an agent run,
 // saving artifacts and messages to the session database, and logging warnings on error.
 func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID string, update AgentStatusUpdate, agentConfig *agentspec.AgentConfig, workspaceDir string) {
-	if repo == nil || update.Content == "" || update.EntryType == "agent_response" {
+	// A runner splits more than 1000 artifacts across events, so an event may
+	// carry artifacts and no content.
+	hasArtifacts := update.ArtifactsKnown && len(update.Artifacts) > 0
+	if repo == nil || (update.Content == "" && !hasArtifacts) || update.EntryType == "agent_response" {
 		return
 	}
 	role := update.EntryType
@@ -362,8 +381,13 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 	}
 	targetFiles := toStringSlice(update.Metadata["target_files"])
 	var artifactFiles []string
-	for _, a := range agents.StatusArtifacts(chatID, targetFiles, agentConfig, workspaceDir) {
-		artifactFiles = append(artifactFiles, a.ViewerPath)
+	if update.ArtifactsKnown {
+		// Computed on the runner, which owns the files.
+		artifactFiles = append(artifactFiles, update.Artifacts...)
+	} else {
+		for _, a := range agents.StatusArtifacts(chatID, targetFiles, agentConfig, workspaceDir) {
+			artifactFiles = append(artifactFiles, a.ViewerPath)
+		}
 	}
 	if len(artifactFiles) > 0 {
 		if err := repo.AppendArtifacts(chatID, artifactFiles); err != nil {
@@ -374,6 +398,9 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 				Payload: map[string]any{"artifacts": artifactFiles},
 			})
 		}
+	}
+	if update.Content == "" {
+		return
 	}
 	if update.Metadata == nil {
 		update.Metadata = make(map[string]any)

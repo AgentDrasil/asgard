@@ -15,9 +15,11 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -69,6 +71,49 @@ type AgentStatusUpdate struct {
 	EntryType string         `json:"entry_type"`
 	Content   string         `json:"content"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
+
+	// ArtifactsKnown marks Artifacts as computed by the runner (RunEvent
+	// artifacts): receivers use them instead of re-deriving artifacts from
+	// target_files on the backend filesystem. Never set from the wire.
+	ArtifactsKnown bool `json:"-"`
+	// Artifacts are the viewer paths of the run's artifact files so far.
+	Artifacts []string `json:"-"`
+}
+
+// StatusUpdateFromRunEvent converts a runner's RunEvent into the status update
+// the rest of the backend consumes (the same shape POST /agent-status
+// delivers), carrying the runner-computed artifacts.
+func StatusUpdateFromRunEvent(ev *runnerpb.RunEvent) AgentStatusUpdate {
+	u := AgentStatusUpdate{
+		ChatID:         ev.GetChatId(),
+		NodeID:         ev.GetNodeId(),
+		RunToken:       ev.GetRunToken(),
+		StepIndex:      int(ev.GetStepIndex()),
+		Source:         ev.GetSource(),
+		EntryType:      ev.GetEntryType(),
+		Content:        ev.GetContent(),
+		ArtifactsKnown: true,
+	}
+	if b := ev.GetMetadataJson(); len(b) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			log.Warn().Err(err).Str("run_id", ev.GetRunId()).Msg("dropping undecodable run event metadata")
+		} else {
+			u.Metadata = m
+		}
+	}
+	for _, a := range ev.GetArtifacts() {
+		if a.GetViewerPath() != "" {
+			u.Artifacts = append(u.Artifacts, a.GetViewerPath())
+		}
+	}
+	return u
+}
+
+// StatusPublisher is implemented by status listeners that can also accept
+// updates produced outside the HTTP status endpoint (runner RunEvents).
+type StatusPublisher interface {
+	PublishStatusUpdate(AgentStatusUpdate)
 }
 
 // agentRunner executes agent nodes by invoking CLI agents inside sandboxes.
@@ -76,6 +121,10 @@ type agentRunner struct {
 	loader         agentspec.Lister
 	conf           *config.Config
 	statusListener AgentStatusListener
+	dispatcher     dispatch.Dispatcher
+	// sessionAgents, when set, returns the agents visible to a chat (global
+	// plus its runner's own); ok=false falls back to the global cache.
+	sessionAgents func(sessionID string) ([]*agentspec.Agent, bool)
 
 	mu     sync.Mutex
 	agents map[string]*agentspec.Agent
@@ -89,8 +138,18 @@ func NewAgentRunner(loader agentspec.Lister, conf *config.Config) NodeRunner {
 }
 
 // NewAgentRunnerWithListener creates the runner for `agent` nodes with an optional status listener.
+//
+// Runs execute in-process (dispatch.Local); production wiring uses
+// NewAgentRunnerWithDispatcher to send them to the chat's runner.
 func NewAgentRunnerWithListener(loader agentspec.Lister, conf *config.Config, listener AgentStatusListener) NodeRunner {
-	return &agentRunner{loader: loader, conf: conf, statusListener: listener, agents: make(map[string]*agentspec.Agent)}
+	return NewAgentRunnerWithDispatcher(loader, conf, listener, dispatch.NewLocal(conf), nil)
+}
+
+// NewAgentRunnerWithDispatcher creates the runner for `agent` nodes executing
+// runs through d. sessionAgents optionally resolves the agents visible to a
+// chat (its runner's effective list).
+func NewAgentRunnerWithDispatcher(loader agentspec.Lister, conf *config.Config, listener AgentStatusListener, d dispatch.Dispatcher, sessionAgents func(sessionID string) ([]*agentspec.Agent, bool)) NodeRunner {
+	return &agentRunner{loader: loader, conf: conf, statusListener: listener, dispatcher: d, sessionAgents: sessionAgents, agents: make(map[string]*agentspec.Agent)}
 }
 
 func (r *agentRunner) Supports(t workflowspec.NodeType) bool {
@@ -140,13 +199,29 @@ func (r *agentRunner) lookup(agentID string) (*agentspec.Agent, error) {
 	return agent, nil
 }
 
+// lookupFor resolves an agent for a chat: the chat's runner-specific list
+// first (global agents plus the runner's own), the global cache otherwise.
+func (r *agentRunner) lookupFor(sessionID, agentID string) (*agentspec.Agent, error) {
+	if r.sessionAgents != nil && sessionID != "" {
+		if list, ok := r.sessionAgents(sessionID); ok {
+			for _, a := range list {
+				if a != nil && a.Config.ID == agentID {
+					return a, nil
+				}
+			}
+			return nil, fmt.Errorf("agent %q not found", agentID)
+		}
+	}
+	return r.lookup(agentID)
+}
+
 // Lookup resolves an agent by ID (lazily loading the agent directory).
 func (r *agentRunner) Lookup(agentID string) (*agentspec.Agent, error) { return r.lookup(agentID) }
 
 func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 
-	agent, err := r.lookup(node.AgentID)
+	agent, err := r.lookupFor(nctx.SessionID, node.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +303,10 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 	var targetKnown bool
 	var userForced bool
 
+	// dispatched counts the StartRuns of this node invocation (corrective
+	// retries and quota re-checks included): it is the logical attempt number.
+	var dispatched uint32
+
 	totalAttempts := maxRetries + 1
 	for attempt := 1; attempt <= totalAttempts; attempt++ {
 		executionErr = nil
@@ -265,7 +344,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		outCh := make(chan runOutcome, 1)
 
 		go func(currentPrompt string, currentSessions run.SessionMap) {
-			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSessions, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless, AllowCrossSession: nctx.AllowCrossSession}, pairing)
+			runOut, runTarget, runForced, runErr := r.runWithQuotaDecisions(ctx, nctx, node, effectiveAgent, currentPrompt, currentSessions, runDirOpt, modelOpt, run.StatusScope{NodeID: node.ID, RunToken: runToken, Headless: nctx.Headless, AllowCrossSession: nctx.AllowCrossSession}, pairing, &dispatched)
 			outCh <- runOutcome{out: runOut, target: runTarget, userForced: runForced, err: runErr}
 		}(prompt, sessions)
 
@@ -278,23 +357,37 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 			workspaceDir = runDirOpt.Unwrap()
 		}
 
-	innerLoop:
-		for {
-			select {
-			case update, ok := <-statusCh:
-				if !ok {
-					statusCh = nil
-					continue
-				}
-				// Defensive: the server-side match should already filter, but never
-				// attribute another node invocation's update to this node.
-				if update.RunToken != runToken {
-					continue
-				}
+		processUpdate := func(update AgentStatusUpdate) {
+			// Defensive: the server-side match should already filter, but never
+			// attribute another node invocation's update to this node.
+			if update.RunToken != runToken {
+				return
+			}
 
-				var stepArtifacts []string
-				if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
-					for _, tf := range targetFiles {
+			var stepArtifacts []string
+			if update.ArtifactsKnown {
+				// The runner already decided which files are artifacts.
+				for _, vPath := range update.Artifacts {
+					stepArtifacts = append(stepArtifacts, vPath)
+					if !seenArtifacts[vPath] {
+						seenArtifacts[vPath] = true
+						nodeArtifacts = append(nodeArtifacts, vPath)
+					}
+				}
+			} else if targetFiles, ok := update.Metadata["target_files"].([]string); ok {
+				for _, tf := range targetFiles {
+					if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
+						vPath := ViewerArtifactPathInSession(tf, nctx.TmpDir, DefaultSessionDir(nctx.SessionID))
+						stepArtifacts = append(stepArtifacts, vPath)
+						if !seenArtifacts[vPath] {
+							seenArtifacts[vPath] = true
+							nodeArtifacts = append(nodeArtifacts, vPath)
+						}
+					}
+				}
+			} else if targetFilesAny, ok := update.Metadata["target_files"].([]any); ok {
+				for _, item := range targetFilesAny {
+					if tf, ok := item.(string); ok && tf != "" {
 						if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
 							vPath := ViewerArtifactPathInSession(tf, nctx.TmpDir, DefaultSessionDir(nctx.SessionID))
 							stepArtifacts = append(stepArtifacts, vPath)
@@ -304,44 +397,57 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 							}
 						}
 					}
-				} else if targetFilesAny, ok := update.Metadata["target_files"].([]any); ok {
-					for _, item := range targetFilesAny {
-						if tf, ok := item.(string); ok && tf != "" {
-							if agents.IsArtifact(tf, &effectiveAgent.Config, workspaceDir) {
-								vPath := ViewerArtifactPathInSession(tf, nctx.TmpDir, DefaultSessionDir(nctx.SessionID))
-								stepArtifacts = append(stepArtifacts, vPath)
-								if !seenArtifacts[vPath] {
-									seenArtifacts[vPath] = true
-									nodeArtifacts = append(nodeArtifacts, vPath)
-								}
-							}
+				}
+			}
+
+			if update.Metadata == nil {
+				update.Metadata = make(map[string]any)
+			}
+			update.Metadata["step_index"] = update.StepIndex
+			if len(stepArtifacts) > 0 {
+				update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
+			}
+
+			if nctx.EventEmitter != nil {
+				nctx.EventEmitter(WorkflowEvent{
+					Type:      EventNodeStatusUpdate,
+					NodeID:    node.ID,
+					NodeType:  workflowspec.NodeTypeAgent,
+					AgentID:   node.AgentID,
+					AgentName: effectiveAgent.Config.Name,
+					Status:    workflowspec.StatusRunning,
+					Message:   update.Content,
+					EntryType: update.EntryType,
+					Metadata:  SanitizeMetadata(update.Metadata),
+					Artifacts: stepArtifacts,
+				})
+			}
+		}
+
+	innerLoop:
+		for {
+			select {
+			case update, ok := <-statusCh:
+				if !ok {
+					statusCh = nil
+					continue
+				}
+				processUpdate(update)
+			case outcome := <-outCh:
+				// Events precede the result on the wire: flush what is
+				// already buffered so none is lost to the select order.
+				for draining := statusCh != nil; draining; {
+					select {
+					case update, ok := <-statusCh:
+						if !ok {
+							draining = false
+							break
 						}
+						processUpdate(update)
+					default:
+						draining = false
 					}
 				}
-
-				if update.Metadata == nil {
-					update.Metadata = make(map[string]any)
-				}
-				update.Metadata["step_index"] = update.StepIndex
-				if len(stepArtifacts) > 0 {
-					update.Metadata["artifact_files"] = ToAnySlice(stepArtifacts)
-				}
-
-				if nctx.EventEmitter != nil {
-					nctx.EventEmitter(WorkflowEvent{
-						Type:      EventNodeStatusUpdate,
-						NodeID:    node.ID,
-						NodeType:  workflowspec.NodeTypeAgent,
-						AgentID:   node.AgentID,
-						AgentName: effectiveAgent.Config.Name,
-						Status:    workflowspec.StatusRunning,
-						Message:   update.Content,
-						EntryType: update.EntryType,
-						Metadata:  SanitizeMetadata(update.Metadata),
-						Artifacts: stepArtifacts,
-					})
-				}
-			case outcome := <-outCh:
 				out = outcome.out
 				executionErr = outcome.err
 				userForced = outcome.userForced
@@ -581,7 +687,7 @@ const (
 	QuotaDecisionCancel
 )
 
-// runWithQuotaDecisions invokes run.RunWithCandidates and, whenever no CLI
+// runWithQuotaDecisions dispatches the run and, whenever no CLI
 // target has usable quota, suspends the run for a user decision instead of
 // failing the node:
 //
@@ -602,7 +708,7 @@ const (
 // The userForced return reports that the target was forced by the user
 // through a suspension option ("Use <cli> <model>"), so callers can suppress
 // fallback-style observability for that execution.
-func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, sessions run.SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope, pairing *pairingPlan) (out []byte, target agentspec.CLITarget, userForced bool, err error) {
+func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeContext, node *workflowspec.NodeSpec, agent *agentspec.Agent, prompt string, sessions run.SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], scope run.StatusScope, pairing *pairingPlan, attempts *uint32) (out []byte, target agentspec.CLITarget, userForced bool, err error) {
 	var candidates []agentspec.CLITarget
 	if pairing != nil {
 		candidates = pairing.Candidates
@@ -614,7 +720,20 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 
 	forcedModel := modelOpt
 	for {
-		out, target, runErr := run.RunWithCandidates(ctx, agent, candidates, prompt, sessions, runDirOpt, forcedModel, nctx.SessionID, scope, r.conf)
+		*attempts++
+		res, runErr := r.dispatcher.Run(ctx, dispatch.Request{
+			ChatID:     nctx.SessionID,
+			Agent:      agent,
+			Candidates: candidates,
+			Prompt:     prompt,
+			Sessions:   sessions,
+			RunDir:     runDirOpt,
+			Model:      forcedModel,
+			Scope:      scope,
+			Attempt:    *attempts,
+			OnEvent:    r.publishRunEvent(nctx.SessionID),
+		})
+		out, target := res.Output, res.Target
 		var nq *run.NoQuotaError
 		if errors.As(runErr, &nq) {
 			if pairing != nil && nq.PairingNote == "" {
@@ -677,6 +796,23 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 			continue
 		}
 		return out, target, userForced, runErr
+	}
+}
+
+// publishRunEvent forwards a runner's RunEvents into the status listener of
+// the chat, the same path POST /agent-status updates take. It returns nil when
+// the listener cannot accept published updates.
+func (r *agentRunner) publishRunEvent(sessionID string) func(*runnerpb.RunEvent) {
+	pub, ok := r.statusListener.(StatusPublisher)
+	if !ok || sessionID == "" {
+		return nil
+	}
+	return func(ev *runnerpb.RunEvent) {
+		u := StatusUpdateFromRunEvent(ev)
+		if u.ChatID == "" {
+			u.ChatID = sessionID
+		}
+		pub.PublishStatusUpdate(u)
 	}
 }
 

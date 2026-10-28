@@ -113,6 +113,9 @@ func (s *nodeControl) Connect(stream connectStream) error {
 
 	go c.writeLoop(stream)
 	c.wakeup() // replay unacked messages
+	if h.opts.OnNodeOnline != nil {
+		go h.opts.OnNodeOnline(c.nodeID)
+	}
 
 	for {
 		msg, err := stream.Recv()
@@ -230,6 +233,7 @@ func (h *Hub) register(c *connection, reg *runnerpb.Register) *runnerpb.Register
 	}
 	n.lastSeen = time.Now()
 	n.online = true
+	n.onlineGen++
 	n.conn = c
 
 	// Runs neither executing, nor awaiting result replay, nor still queued

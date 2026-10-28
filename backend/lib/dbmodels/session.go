@@ -109,6 +109,9 @@ type Session struct {
 	Agents Agents `gorm:"type:text"`
 	// Dir agent running on
 	RunDir string
+	// RunnerNodeID is the runner every run of this chat executes on. It is
+	// set once, when the chat starts, and never changes afterwards.
+	RunnerNodeID string `gorm:"column:runner_node_id;index" json:"runnerId,omitempty"`
 	// Title of the session
 	Title string
 	// Messages of the session (not stored in DB, persisted in messages.jsonl)
@@ -403,12 +406,54 @@ func (r *SessionRepository) UpsertSession(session *Session) error {
 			}
 			return err
 		}
-		return tx.Model(&existing).Updates(map[string]any{
+		updates := map[string]any{
 			"title":         session.Title,
 			"current_agent": session.CurrentAgent,
 			"run_dir":       session.RunDir,
-		}).Error
+		}
+		// An existing binding is never replaced.
+		if existing.RunnerNodeID == "" && session.RunnerNodeID != "" {
+			updates["runner_node_id"] = session.RunnerNodeID
+		}
+		return tx.Model(&existing).Updates(updates).Error
 	})
+}
+
+// BindRunner binds the chat to runnerID unless it is already bound, creating
+// the session row if needed. It returns the runner the chat is bound to
+// afterwards: runnerID for a new binding, the stored one otherwise, so callers
+// detect a conflicting concurrent binding by comparing the result.
+func (r *SessionRepository) BindRunner(chatID, runnerID string) (string, error) {
+	var bound string
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var session Session
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return err
+			}
+			bound = runnerID
+			return tx.Create(&Session{ChatID: chatID, RunnerNodeID: runnerID}).Error
+		}
+		if session.RunnerNodeID != "" {
+			bound = session.RunnerNodeID
+			return nil
+		}
+		bound = runnerID
+		return tx.Model(&session).Update("runner_node_id", runnerID).Error
+	})
+	return bound, err
+}
+
+// ChatIDsForRunnerWithQueue returns the chats bound to the given runner that
+// have queued messages.
+func (r *SessionRepository) ChatIDsForRunnerWithQueue(runnerID string) ([]string, error) {
+	var ids []string
+	err := r.db.Model(&Session{}).
+		Where("runner_node_id = ? AND chat_id IN (?)", runnerID,
+			r.db.Model(&QueuedMessage{}).Select("DISTINCT chat_id")).
+		Pluck("chat_id", &ids).Error
+	return ids, err
 }
 
 // UpdateAgentStatus updates the status for a specific agent in a session.

@@ -203,3 +203,15 @@ func (r *SessionRepository) ClearQueuedMessages(chatID string) (int64, error) {
 	}
 	return result.RowsAffected, nil
 }
+
+// RequeueFront puts a previously popped message back with its original id and
+// created_at, so it is again the head of the queue. It is exempt from the
+// queue limit: the slot it occupied was only released by the pop.
+func (r *SessionRepository) RequeueFront(msg *QueuedMessage) error {
+	lock := r.getSessionLock(msg.ChatID)
+	lock.Lock()
+	defer lock.Unlock()
+	restored := *msg
+	restored.UpdatedAt = time.Now()
+	return r.db.Create(&restored).Error
+}

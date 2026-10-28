@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 // AgentInfo holds details about an agent for the frontend UI.
@@ -15,15 +17,31 @@ type AgentInfo struct {
 	RunDirs     []string `json:"run_dirs"`
 	MainAgent   bool     `json:"main_agent"`
 	Models      []string `json:"models"`
+	// RunnerID is the owning runner of a runner-scoped agent (empty for
+	// global ones).
+	RunnerID string `json:"runner_id,omitempty"`
 }
 
 // handleAgents handles GET /api/agents to list loaded agent metadata.
+//
+// With ?runner=<id> it lists the agents that runner can run (global plus the
+// runner's own); without it, the global agents.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	list := func() []*agentspec.Agent {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return append([]*agentspec.Agent(nil), s.agents...)
+	}()
+	if runner := r.URL.Query().Get("runner"); runner != "" {
+		var err error
+		if list, err = s.agentsFor(runner); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+err.Error())
+			return
+		}
+	}
 
-	richAgents := make([]AgentInfo, 0, len(s.agents))
-	for _, agent := range s.agents {
+	richAgents := make([]AgentInfo, 0, len(list))
+	for _, agent := range list {
 		models := make([]string, 0, len(agent.Config.CLI))
 		for _, target := range agent.Config.CLI {
 			if target.Model != "" && s.conf.IsProviderEnabled(target.CLI) {
@@ -45,6 +63,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			RunDirs:     agent.Config.RunDirs,
 			MainAgent:   agent.Config.IsMainAgent(),
 			Models:      models,
+			RunnerID:    agent.NodeID,
 		})
 	}
 

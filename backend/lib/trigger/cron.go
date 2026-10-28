@@ -3,6 +3,8 @@ package trigger
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sync"
@@ -34,7 +36,7 @@ type WorkflowCronManager struct {
 	repo      *dbmodels.SessionRepository
 	trigger   TriggerFunc
 	mu        sync.Mutex
-	jobs      map[string]gocron.Job // agent.Config.ID -> gocron Job
+	jobs      map[string]gocron.Job // jobKey(agent) -> gocron Job
 }
 
 // NewWorkflowCronManager creates and starts a gocron scheduler.
@@ -66,6 +68,26 @@ func CleanCronSessionID(workflowName string) string {
 	return id
 }
 
+// CronSessionID is the synthetic session of a scheduled workflow on a runner.
+// A chat's runner is immutable, so the runner is part of the id: changing the
+// definition's runner_id yields a new session instead of silently running on
+// the old binding. Over-long ids are shortened with a hash of the full name.
+func CronSessionID(runnerID, workflowName string) string {
+	if runnerID == "" {
+		return CleanCronSessionID(workflowName)
+	}
+	id := CleanCronSessionID(runnerID + "-" + workflowName)
+	if len(id) < maxChatIDLength && id == cronSessionIDPrefix+runnerID+"-"+workflowName {
+		return id
+	}
+	sum := sha256.Sum256([]byte(runnerID + "\x00" + workflowName))
+	suffix := "-" + hex.EncodeToString(sum[:4])
+	if len(id)+len(suffix) > maxChatIDLength {
+		id = id[:maxChatIDLength-len(suffix)]
+	}
+	return id + suffix
+}
+
 // Reload synchronizes scheduled jobs with the latest workflow agents:
 // jobs of removed agents or agents whose schedule was dropped are removed,
 // while new or updated scheduled workflows are (re-)registered.
@@ -77,6 +99,7 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 	type scheduled struct {
 		agent    *agentspec.Agent
 		schedule string
+		runnerID string
 	}
 	desired := make(map[string]scheduled)
 	for _, a := range agentsList {
@@ -89,7 +112,15 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 			continue
 		}
 		if defn.Schedule != "" {
-			desired[a.Config.ID] = scheduled{agent: a, schedule: defn.Schedule}
+			if err := defn.ValidateScheduleRunner(a.NodeID); err != nil {
+				log.Error().Err(err).Str("agent", a.Config.ID).Msg("workflow cron job not scheduled")
+				continue
+			}
+			runnerID := defn.RunnerID
+			if a.NodeID != "" {
+				runnerID = a.NodeID
+			}
+			desired[jobKey(a)] = scheduled{agent: a, schedule: defn.Schedule, runnerID: runnerID}
 		}
 	}
 
@@ -113,7 +144,7 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 			}
 			delete(m.jobs, id)
 		}
-		job, err := m.addJobLocked(item.agent, gocron.CronJob(item.schedule, false))
+		job, err := m.addJobLocked(item.agent, item.runnerID, gocron.CronJob(item.schedule, false))
 		if err != nil {
 			log.Error().Err(err).Str("agent", id).Str("schedule", item.schedule).Msg("failed to register workflow cron job")
 			continue
@@ -125,10 +156,10 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 
 // addJobLocked registers a job with singleton mode so overlapping cycles are
 // skipped while a previous run is still in flight. Callers must hold m.mu.
-func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, defn gocron.JobDefinition) (gocron.Job, error) {
+func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, runnerID string, defn gocron.JobDefinition) (gocron.Job, error) {
 	job, err := m.scheduler.NewJob(
 		defn,
-		gocron.NewTask(m.runScheduledWorkflow, agent),
+		gocron.NewTask(m.runScheduledWorkflow, agent, runnerID),
 		gocron.WithSingletonMode(gocron.LimitModeReschedule),
 	)
 	if err != nil {
@@ -138,18 +169,24 @@ func (m *WorkflowCronManager) addJobLocked(agent *agentspec.Agent, defn gocron.J
 }
 
 // runScheduledWorkflow is the task body executed on every schedule cycle.
-func (m *WorkflowCronManager) runScheduledWorkflow(agent *agentspec.Agent) {
+func (m *WorkflowCronManager) runScheduledWorkflow(agent *agentspec.Agent, runnerID string) {
 	ctx := context.Background()
-	sessionID := CleanCronSessionID(agent.Config.Name)
+	sessionID := CronSessionID(runnerID, agent.Config.Name)
 
 	if m.repo != nil {
 		session := &dbmodels.Session{
 			ChatID:       sessionID,
 			CurrentAgent: agent.Config.ID,
 			Title:        fmt.Sprintf("Scheduled: %s", agent.Config.Name),
+			RunnerNodeID: runnerID,
 		}
 		if err := m.repo.UpsertSession(session); err != nil {
 			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to upsert synthetic cron session")
+		}
+		// Never run on a different runner than the definition says.
+		if sess, err := m.repo.GetSession(sessionID); err != nil || sess == nil || sess.RunnerNodeID != runnerID {
+			log.Error().Err(err).Str("chat_id", sessionID).Str("runner", runnerID).Msg("cron session is not bound to the definition's runner; skipping cycle")
+			return
 		}
 	}
 
@@ -168,3 +205,7 @@ func (m *WorkflowCronManager) Shutdown() error {
 	}
 	return m.scheduler.Shutdown()
 }
+
+// jobKey identifies a scheduled agent: runner agents may reuse ids across
+// runners.
+func jobKey(a *agentspec.Agent) string { return a.NodeID + "/" + a.Config.ID }

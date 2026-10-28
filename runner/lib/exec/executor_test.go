@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -330,4 +332,49 @@ func TestExecutorFallbackResultKeepsOutputAndDirs(t *testing.T) {
 	assert.Equal(t, "/proj", res.GetRunDir())
 	assert.NotNil(t, res.GetRunDirRef())
 	assert.Equal(t, "opencode", res.GetSelectedTarget().GetCli())
+}
+
+// The status server computes artifacts with the workflow-effective (overlaid)
+// agent config, as the backend did before: a file under an overlay read-write
+// mount is an artifact although the agent's own config has no such mount.
+func TestExecutorArtifactsUseOverlaidAgentConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	rw := "/ovrw"
+	fn := func(ctx context.Context, agent *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		sockDir := shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		status := postStatus(t, unixClient(filepath.Join(sockDir, SocketName)), map[string]any{
+			"step_index": 1, "source": "aw", "entry_type": "tool_call", "content": "w",
+			"metadata": map[string]any{"target_files": []string{filepath.Join(rw, "out.md")}},
+		})
+		assert.Equal(t, http.StatusNoContent, status)
+		return run.Result{Target: agentspec.CLITarget{CLI: "opencode", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	agent := testAgent("a", "h1", "")
+	require.Empty(t, agent.Config.MountDirs.ReadWrite, "the agent's own config has no rw mount")
+	ex := newTestExecutor(t, fn, agent)
+	sr := baseStartRun()
+	sr.RunDir = &runnerpb.DirRef{Scope: runnerpb.FileScope_FILE_SCOPE_ABSOLUTE, RelOrPath: "/proj"}
+	sr.MountDirsReadwrite = []string{rw}
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), sr, sink)
+	sink.wait(t)
+
+	evs := sink.eventList()
+	require.Len(t, evs, 1)
+	require.Len(t, evs[0].GetArtifacts(), 1)
+	assert.Equal(t, filepath.Join(rw, "out.md"), evs[0].GetArtifacts()[0].GetViewerPath())
+
+	// Without the overlay the same file is not an artifact.
+	sr2 := baseStartRun()
+	sr2.RunId = "run-2"
+	sr2.RunDir = sr.RunDir
+	sink2 := newRecordingSink()
+	ex.StartRun(context.Background(), sr2, sink2)
+	sink2.wait(t)
+	evs = sink2.eventList()
+	require.Len(t, evs, 1)
+	assert.Empty(t, evs[0].GetArtifacts())
 }

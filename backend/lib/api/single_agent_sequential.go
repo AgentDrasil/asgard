@@ -12,10 +12,13 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
 // seqRunResult carries the output of a sequential run.Run call.
@@ -126,6 +129,7 @@ func (e *SingleAgentExecutor) executeSequential(
 	}
 	cliCandidates := targetsForCLI(e.agent.Config, targetCLI)
 
+	attempt := uint32(0)
 	for {
 		// Reset back to Running only when returning from a suspension so the
 		// initial Running status written by Execute is not churned.
@@ -135,10 +139,22 @@ func (e *SingleAgentExecutor) executeSequential(
 
 		runToken := uuid.NewV7().String()
 		resultCh := make(chan seqRunResult, 1)
-		go func(mOpt optional.Option[string]) {
-			out, target, err := run.RunWithCandidates(ctx, e.agent, cliCandidates, prompt, sessions, runDirOpt, mOpt, chatID, run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession}, e.conf)
-			resultCh <- seqRunResult{out: out, target: target, err: err}
-		}(forcedModel)
+		attempt++
+		go func(mOpt optional.Option[string], attempt uint32) {
+			res, err := e.dispatcher.Run(ctx, dispatch.Request{
+				ChatID:     chatID,
+				Agent:      e.agent,
+				Candidates: cliCandidates,
+				Prompt:     prompt,
+				Sessions:   sessions,
+				RunDir:     runDirOpt,
+				Model:      mOpt,
+				Scope:      run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
+				Attempt:    attempt,
+				OnEvent:    e.publishRunEvent,
+			})
+			resultCh <- seqRunResult{out: res.Output, target: res.Target, err: err}
+		}(forcedModel, attempt)
 
 		result, err := e.drainUntilResult(ctx, chatID, runDirOpt, statusCh, resultCh)
 		if err != nil {
@@ -151,6 +167,11 @@ func (e *SingleAgentExecutor) executeSequential(
 
 		var nq *run.NoQuotaError
 		if !errors.As(result.err, &nq) {
+			if errors.Is(result.err, dispatch.ErrNotDispatched) || errors.Is(result.err, runnerhub.ErrRunnerOffline) {
+				// Not an execution failure: the message did not run and
+				// queued ones must stay queued.
+				return "", result.err
+			}
 			return "", &agentRunError{Err: result.err}
 		}
 
@@ -190,6 +211,16 @@ func (e *SingleAgentExecutor) executeSequential(
 		}
 		suspended = true
 	}
+}
+
+// publishRunEvent feeds a runner's RunEvent into the status path POST
+// /agent-status updates take.
+func (e *SingleAgentExecutor) publishRunEvent(ev *runnerpb.RunEvent) {
+	if e.server == nil {
+		return
+	}
+	u := workflow.StatusUpdateFromRunEvent(ev)
+	e.server.PublishStatusUpdate(u)
 }
 
 // requestQuotaDecision obtains the user's quota decision. A test- or

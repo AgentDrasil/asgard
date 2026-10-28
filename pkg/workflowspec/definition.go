@@ -34,6 +34,10 @@ type WorkflowDefinition struct {
 	// Schedule is an optional standard 5-field cron expression (gocron /
 	// robfig ParseStandard syntax) triggering headless runs.
 	Schedule string `yaml:"schedule"`
+	// RunnerID names the runner a scheduled run executes on. It is required
+	// for the schedule of a global agent (which has no runner of its own);
+	// agents owned by a runner always run on that runner.
+	RunnerID string `yaml:"runner_id"`
 	// ModelPairings declares heterogeneous model pairing groups governing
 	// reviewer-side model selection (see model_pairing.go).
 	ModelPairings []*ModelPairingSpec `yaml:"model_pairings"`
@@ -419,6 +423,22 @@ func (d *WorkflowDefinition) validateNoHumanAndSchedule() error {
 	}
 	if sched.Next(time.Now()).IsZero() {
 		return fmt.Errorf("schedule expression will never fire: %q", d.Schedule)
+	}
+	return nil
+}
+
+// ValidateScheduleRunner checks the schedule's runner for a definition owned
+// by nodeID (empty for a global agent): a scheduled global workflow must name
+// its runner_id, and a runner's own workflow may only name that runner.
+func (d *WorkflowDefinition) ValidateScheduleRunner(nodeID string) error {
+	if d.Schedule == "" {
+		return nil
+	}
+	switch {
+	case nodeID == "" && d.RunnerID == "":
+		return fmt.Errorf("scheduled workflow of a global agent must set runner_id")
+	case nodeID != "" && d.RunnerID != "" && d.RunnerID != nodeID:
+		return fmt.Errorf("runner_id %q does not match the owning runner %q", d.RunnerID, nodeID)
 	}
 	return nil
 }

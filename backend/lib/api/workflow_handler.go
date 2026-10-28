@@ -48,15 +48,49 @@ func newWorkflowEngine(conf *config.Config, agents agentspec.Lister, statusListe
 	return engine, nil
 }
 
+// wireAgentRunner replaces the engine's default agent-node runner with one that
+// dispatches runs through the server's dispatcher and resolves agents per the
+// chat's runner. A custom runner injected for agent nodes is left alone.
+func (s *Server) wireAgentRunner(engine *workflow.Engine) {
+	if engine == nil {
+		return
+	}
+	if r, ok := engine.Registry().Get(workflowspec.NodeTypeWorkflow); ok {
+		if sub, ok := r.(*workflow.SubWorkflowRunner); ok {
+			sub.SetSessionResolver(s.resolveWorkflowDefinitionFor)
+		}
+	}
+	if s.conf == nil {
+		return
+	}
+	for _, r := range s.customRunners {
+		if r.Supports(workflowspec.NodeTypeAgent) {
+			return
+		}
+	}
+	engine.Registry().Register(workflow.NewAgentRunnerWithDispatcher(s.agentSource, s.conf, s, s.dispatcher, s.sessionAgents))
+}
+
 // resolveWorkflowDefinition resolves a sub-workflow definition by name against
 // the server's registered agentspec. Agents are matched first by config ID or
 // display name; if none matches, all workflow agents' definitions are loaded
 // and compared by definition name.
 func (s *Server) resolveWorkflowDefinition(name string) (*workflowspec.WorkflowDefinition, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	return s.resolveWorkflowDefinitionFor("", name)
+}
+
+// resolveWorkflowDefinitionFor is resolveWorkflowDefinition among the agents
+// visible to the chat's runner (global plus the runner's own); without a
+// runner it uses the global list.
+func (s *Server) resolveWorkflowDefinitionFor(sessionID, name string) (*workflowspec.WorkflowDefinition, error) {
+	candidates, ok := s.sessionAgents(sessionID)
+	if !ok {
+		s.mu.RLock()
+		candidates = append([]*agentspec.Agent(nil), s.agents...)
+		s.mu.RUnlock()
+	}
 	var fallbacks []*agentspec.Agent
-	for _, agent := range s.agents {
+	for _, agent := range candidates {
 		if agent.Config.Type != "workflow" || agent.WorkflowPath == "" {
 			continue
 		}
@@ -111,6 +145,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 			s.emitWorkflowPreExecutionCleanup(chatID, agentID)
 			return "failed", "", fmt.Errorf("failed to create workflow engine: %w", err)
 		}
+		s.wireAgentRunner(engine)
 		s.mu.RLock()
 		if len(s.agents) > 0 {
 			agentsSnapshot := make([]*agentspec.Agent, len(s.agents))

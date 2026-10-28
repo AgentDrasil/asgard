@@ -75,6 +75,7 @@ func newTestWorkflowAgent(t *testing.T, id string, schedule string) *agentspec.A
 name: %s
 no_human: true
 schedule: %q
+runner_id: r1
 nodes:
   - id: cmd1
     type: command
@@ -130,7 +131,7 @@ func TestWorkflowCronManager_ScheduleTrigger(t *testing.T) {
 
 	agent := newTestWorkflowAgent(t, "sched-trigger-wf", "")
 	m.mu.Lock()
-	job, err := m.addJobLocked(agent, gocron.DurationJob(50*time.Millisecond))
+	job, err := m.addJobLocked(agent, "", gocron.DurationJob(50*time.Millisecond))
 	m.mu.Unlock()
 	require.NoError(t, err)
 	assert.NotNil(t, job)
@@ -192,7 +193,7 @@ func TestWorkflowCronManager_SingletonExecution(t *testing.T) {
 
 	agent := newTestWorkflowAgent(t, "singleton-wf", "")
 	m.mu.Lock()
-	_, err := m.addJobLocked(agent, gocron.DurationJob(100*time.Millisecond))
+	_, err := m.addJobLocked(agent, "", gocron.DurationJob(100*time.Millisecond))
 	m.mu.Unlock()
 	require.NoError(t, err)
 
@@ -236,7 +237,7 @@ func TestWorkflowCronManager_SyntheticSession_UpsertPreservesMessages(t *testing
 	require.NoError(t, repo.SaveSession(existing))
 
 	m.mu.Lock()
-	_, err := m.addJobLocked(agent, gocron.DurationJob(50*time.Millisecond))
+	_, err := m.addJobLocked(agent, "", gocron.DurationJob(50*time.Millisecond))
 	m.mu.Unlock()
 	require.NoError(t, err)
 
@@ -267,7 +268,7 @@ func TestWorkflowCronManager_NilRepo_Tolerance(t *testing.T) {
 
 	agent := newTestWorkflowAgent(t, "nil-repo-wf", "")
 	m.mu.Lock()
-	_, err := m.addJobLocked(agent, gocron.DurationJob(50*time.Millisecond))
+	_, err := m.addJobLocked(agent, "", gocron.DurationJob(50*time.Millisecond))
 	m.mu.Unlock()
 	require.NoError(t, err)
 
@@ -310,4 +311,98 @@ func TestWorkflowCronManager_DynamicReload(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return len(m.scheduler.Jobs()) == 0
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestWorkflowCronManager_RunnerIDRules(t *testing.T) {
+	t.Parallel()
+	write := func(t *testing.T, extra string) *agentspec.Agent {
+		t.Helper()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "workflow.yaml")
+		spec := "name: wf\nno_human: true\nschedule: \"* * * * *\"\n" + extra + "nodes:\n  - id: c\n    type: command\n    command: \"true\"\n"
+		require.NoError(t, os.WriteFile(path, []byte(spec), 0o644))
+		return &agentspec.Agent{Config: agentspec.AgentConfig{ID: "wf", Name: "wf", Type: "workflow"}, WorkflowPath: path}
+	}
+	jobs := func(m *WorkflowCronManager) []string {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		var keys []string
+		for k := range m.jobs {
+			keys = append(keys, k)
+		}
+		return keys
+	}
+
+	t.Run("global agent without runner_id is not scheduled", func(t *testing.T) {
+		m := newTestCronManager(t, nil, nil)
+		m.Reload([]*agentspec.Agent{write(t, "")})
+		assert.Empty(t, jobs(m))
+	})
+	t.Run("global agent with runner_id is scheduled", func(t *testing.T) {
+		m := newTestCronManager(t, nil, nil)
+		m.Reload([]*agentspec.Agent{write(t, "runner_id: r1\n")})
+		assert.Equal(t, []string{"/wf"}, jobs(m))
+	})
+	t.Run("runner agent runs on its own runner without runner_id", func(t *testing.T) {
+		m := newTestCronManager(t, nil, nil)
+		a := write(t, "")
+		a.NodeID = "r2"
+		m.Reload([]*agentspec.Agent{a})
+		assert.Equal(t, []string{"r2/wf"}, jobs(m))
+	})
+	t.Run("runner agent naming another runner is rejected", func(t *testing.T) {
+		m := newTestCronManager(t, nil, nil)
+		a := write(t, "runner_id: r1\n")
+		a.NodeID = "r2"
+		m.Reload([]*agentspec.Agent{a})
+		assert.Empty(t, jobs(m))
+	})
+}
+
+func TestCronSessionID_IncludesRunner(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "wf-cron-r1-nightly", CronSessionID("r1", "nightly"))
+	assert.NotEqual(t, CronSessionID("r1", "nightly"), CronSessionID("r2", "nightly"))
+	assert.Equal(t, CleanCronSessionID("nightly"), CronSessionID("", "nightly"))
+
+	long := strings.Repeat("x", 80)
+	a, b := CronSessionID("r1", long+"a"), CronSessionID("r1", long+"b")
+	assert.LessOrEqual(t, len(a), maxChatIDLength)
+	assert.NotEqual(t, a, b, "truncation must not make different workflows share a session")
+	assert.Equal(t, a, CronSessionID("r1", long+"a"), "deterministic")
+}
+
+func TestRunScheduledWorkflow_ChangedRunnerGetsNewSession(t *testing.T) {
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	repo := dbmodels.NewSessionRepository(testDB)
+
+	var mu sync.Mutex
+	var chats []string
+	m := newTestCronManager(t, repo, func(_ context.Context, _ *agentspec.Agent, chatID, _ string, _ bool) error {
+		mu.Lock()
+		chats = append(chats, chatID)
+		mu.Unlock()
+		return nil
+	})
+	agent := newTestWorkflowAgent(t, "nightly", "* * * * *")
+
+	m.runScheduledWorkflow(agent, "r1")
+	m.runScheduledWorkflow(agent, "r2") // definition's runner_id changed
+
+	require.Len(t, chats, 2)
+	assert.NotEqual(t, chats[0], chats[1])
+	for chat, want := range map[string]string{chats[0]: "r1", chats[1]: "r2"} {
+		sess, err := repo.GetSession(chat)
+		require.NoError(t, err)
+		require.NotNil(t, sess)
+		assert.Equal(t, want, sess.RunnerNodeID)
+	}
+
+	// A session squatting on the id with another binding stops the cycle.
+	squat := CronSessionID("r3", "nightly")
+	_, err := repo.BindRunner(squat, "other")
+	require.NoError(t, err)
+	m.runScheduledWorkflow(agent, "r3")
+	assert.Len(t, chats, 2, "must not run on a runner the definition does not name")
 }

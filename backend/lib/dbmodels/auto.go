@@ -79,3 +79,20 @@ func backfillLegacyWorkflowRuns(db *gorm.DB) error {
 
 	return nil
 }
+
+// BackfillRunnerNodeID binds every session that has no runner yet to nodeID.
+// It is idempotent and meant to run once at startup, with the first entry of
+// runner.allowed_nodes, for chats created before sessions were bound to a
+// runner.
+func BackfillRunnerNodeID(db *gorm.DB, nodeID string) error {
+	if nodeID == "" {
+		return nil
+	}
+	if err := db.Model(&Session{}).
+		// Cron sessions get their runner from the workflow definition.
+		Where("(runner_node_id = '' OR runner_node_id IS NULL) AND chat_id NOT LIKE 'wf-cron-%'").
+		Update("runner_node_id", nodeID).Error; err != nil {
+		return fmt.Errorf("backfill session runner: %w", err)
+	}
+	return nil
+}

@@ -10,8 +10,11 @@ import (
 // outbound queue, the dedup state and the pending runs are kept across
 // reconnects. All fields are guarded by Hub.mu.
 type node struct {
-	id              string
-	online          bool
+	id     string
+	online bool
+	// onlineGen counts the registrations of the node: it increases on every
+	// transition to online, so a changed value means a real reconnect.
+	onlineGen       uint64
 	lastSeen        time.Time
 	version         string
 	protocolVersion uint32

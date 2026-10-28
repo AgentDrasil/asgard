@@ -1565,3 +1565,30 @@ model_pairings:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "model_pairings: group \"code\" does not cover actor node \"coding_agent\" target simplest/zai-coding-plan/glm-5.3-flash/high")
 }
+
+func TestValidateScheduleRunner(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		defn    WorkflowDefinition
+		node    string
+		wantErr string
+	}{
+		{"no schedule needs nothing", WorkflowDefinition{}, "", ""},
+		{"global schedule without runner_id", WorkflowDefinition{Schedule: "* * * * *"}, "", "must set runner_id"},
+		{"global schedule with runner_id", WorkflowDefinition{Schedule: "* * * * *", RunnerID: "r1"}, "", ""},
+		{"runner schedule defaults to its runner", WorkflowDefinition{Schedule: "* * * * *"}, "r1", ""},
+		{"runner schedule naming itself", WorkflowDefinition{Schedule: "* * * * *", RunnerID: "r1"}, "r1", ""},
+		{"runner schedule naming another runner", WorkflowDefinition{Schedule: "* * * * *", RunnerID: "r2"}, "r1", "does not match"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.defn.ValidateScheduleRunner(tt.node)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}

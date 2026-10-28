@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -74,6 +75,11 @@ type Server struct {
 	proxyManager        *proxy.ProxyManager
 	auth                *auth.Service
 	runners             RunnerRegistry
+	// dispatcher executes agent runs (the chat's runner in production).
+	dispatcher dispatch.Dispatcher
+	// queueParks (chatID -> queuePark) keeps queues whose consumer gave up from
+	// being restarted in a loop.
+	queueParks sync.Map
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -289,6 +295,11 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		}
 	}
 
+	if s.dispatcher == nil {
+		// Without a runner hub (tests, embedded use) runs execute in-process.
+		s.dispatcher = dispatch.NewLocal(s.conf)
+	}
+
 	if s.configPath == "" {
 		s.configPath = paths.ConfigFile()
 	}
@@ -333,6 +344,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow engine: %w", err)
 	}
+	s.wireAgentRunner(workflowEngine)
 	s.workflowEngine = workflowEngine
 
 	if repo != nil {
@@ -388,24 +400,7 @@ func (s *Server) recoverOrphanQueuedSessions() {
 	}
 
 	for _, chatID := range chatIDs {
-		sess, err := s.repo.GetSession(chatID)
-		if err != nil || sess == nil || sess.IsArchived {
-			continue
-		}
-
-		var targetAgent *agentspec.Agent
-		s.mu.RLock()
-		for _, a := range s.agents {
-			if (a.Config.ID == sess.CurrentAgent || a.Config.Name == sess.CurrentAgent) && a.Config.Type != "workflow" {
-				targetAgent = a
-				break
-			}
-		}
-		s.mu.RUnlock()
-
-		if targetAgent != nil {
-			s.startQueueConsumerIfIdle(sess.ChatID, targetAgent, sess.RunDir)
-		}
+		s.resumeQueuedChat(chatID)
 	}
 }
 
@@ -784,6 +779,10 @@ func (s *Server) runWorkflowCronTrigger(ctx context.Context, agent *agentspec.Ag
 	agentID := ""
 	if agent != nil {
 		agentID = agent.Config.ID
+	}
+	if s.chatRunnerOffline(chatID) {
+		log.Warn().Str("chatId", chatID).Msg("skip cron cycle: runner offline")
+		return nil
 	}
 	execCtx, handle, running := s.beginExecution(chatID, agentID, true)
 	if running {

@@ -393,6 +393,9 @@ func validateScopeWorkflows(out, errOut io.Writer, set *agentspec.Set, node stri
 		if err == nil {
 			err = defn.ValidateWithAgents(infos)
 		}
+		if err == nil {
+			err = defn.ValidateScheduleRunner(node)
+		}
 		if err != nil {
 			say(errOut, "  Workflow validation failed for agent %q: %v\n", id, err)
 			failed = true

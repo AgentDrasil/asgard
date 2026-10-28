@@ -15,7 +15,9 @@ import (
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -32,9 +34,12 @@ func convertEnvCommands(prompt string) string {
 
 // TriggerMessageRequest represents the payload for POST /api/agents/{id}/message.
 type TriggerMessageRequest struct {
-	Prompt            string `json:"prompt"`
-	ChatID            string `json:"chatId,omitempty"`
-	RunDir            string `json:"runDir,omitempty"`
+	Prompt string `json:"prompt"`
+	ChatID string `json:"chatId,omitempty"`
+	RunDir string `json:"runDir,omitempty"`
+	// RunnerID is the runner a new chat executes on. Required when the chat
+	// has no runner yet; afterwards it may be omitted or repeat the bound one.
+	RunnerID          string `json:"runnerId,omitempty"`
 	Model             string `json:"model,omitempty"`
 	Wait              bool   `json:"wait,omitempty"`
 	Headless          bool   `json:"-"`
@@ -143,7 +148,9 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RUnlock()
 
-	if targetAgent == nil {
+	// A runner-owned agent is only visible once the request names its runner,
+	// so with runner binding the lookup is finished below.
+	if targetAgent == nil && !s.bindingEnforced() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "agent not found"})
@@ -171,6 +178,30 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runnerID, needBind, bindErr := s.resolveRunner(chatID, req.RunnerID)
+	if bindErr != nil {
+		writeJSONError(w, bindErr.status, bindErr.msg)
+		return
+	}
+	if targetAgent == nil {
+		var ferr error
+		targetAgent, ferr = s.findAgentFor(runnerID, agentID)
+		if ferr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+ferr.Error())
+			return
+		}
+		if targetAgent == nil {
+			writeJSONError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+	}
+	if needBind {
+		if berr := s.persistRunnerBinding(chatID, runnerID); berr != nil {
+			writeJSONError(w, berr.status, berr.msg)
+			return
+		}
+	}
+
 	wait := req.Wait || r.URL.Query().Get("wait") == "true"
 
 	// 1. Workflow branch: acquire the guard; on conflict return 409, otherwise run
@@ -179,6 +210,11 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		execCtx, handle, loaded := s.beginExecution(chatID, targetAgent.Config.ID, true)
 		if loaded {
 			http.Error(w, `{"error":"session is already running a task"}`, http.StatusConflict)
+			return
+		}
+		if !s.requireRunnerOnline(w, runnerID) {
+			s.releaseExecution(chatID)
+			handle.cancel()
 			return
 		}
 
@@ -252,6 +288,9 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 	if wait && !loaded {
 		defer s.releaseExecution(chatID)
 		defer handle.cancel()
+		if !s.requireRunnerOnline(w, runnerID) {
+			return
+		}
 		runDirOpt := optional.None[string]()
 		if req.RunDir != "" {
 			runDirOpt = optional.Some(req.RunDir)
@@ -340,6 +379,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 			if session != nil && session.RunDir != "" {
 				runDir = session.RunDir
 			}
+			s.unparkQueue(chatID)
 			s.startQueueConsumerIfIdle(chatID, targetAgent, runDir)
 
 			w.Header().Set("Content-Type", "application/json")
@@ -360,6 +400,11 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Async single-agent initial dispatch branch: !wait && !loaded
 	// The guard lifecycle is fully handed over to runSingleAgentWithQueue (no defer here)
+	if !s.requireRunnerOnline(w, runnerID) {
+		s.releaseExecution(chatID)
+		handle.cancel()
+		return
+	}
 	runDirOpt := optional.None[string]()
 	if req.RunDir != "" {
 		runDirOpt = optional.Some(req.RunDir)
@@ -446,9 +491,18 @@ func (s *Server) runSingleAgentWithQueue(ctx context.Context, targetAgent *agent
 	}
 
 	// Phase 1: execute the initial task
+	_, dispatchGen := s.chatRunnerState(chatID)
 	_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, req)
 	if qErr != nil {
 		s.handleQueuedTaskError(chatID, targetAgent, qErr)
+		// Queued messages only wait for a runner reconnect after an offline
+		// failure; any other failure would repeat for them. releaseExecution
+		// drains whatever may run.
+		if errors.Is(qErr, runnerhub.ErrRunnerOffline) {
+			s.parkQueueUntilReconnect(chatID, dispatchGen)
+		} else {
+			s.parkQueue(chatID)
+		}
 		s.releaseExecution(chatID)
 		return
 	}
@@ -460,6 +514,19 @@ func (s *Server) runSingleAgentWithQueue(ctx context.Context, targetAgent *agent
 func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspec.Agent, chatID string, runDir string) {
 	for {
 		if s.repo == nil {
+			s.releaseExecution(chatID)
+			break
+		}
+
+		// Queued messages wait for their runner: leave them queued and let the
+		// runner's reconnect restart the consumer (RunnerOnline).
+		offline, gen := s.chatRunnerState(chatID)
+		if offline {
+			log.Info().Str("chat_id", chatID).Msg("runner offline, queued messages stay queued")
+			// Parked against the generation seen here: a reconnect after this
+			// observation (whose RunnerOnline may have found the guard held)
+			// is noticed by the drain that releaseExecution performs.
+			s.parkQueueUntilReconnect(chatID, gen)
 			s.releaseExecution(chatID)
 			break
 		}
@@ -480,6 +547,7 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 			}
 			_ = s.repo.AppendMessage(chatID, errMsg)
 			s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
+			s.parkQueue(chatID)
 			s.releaseExecution(chatID)
 			break
 		}
@@ -498,6 +566,7 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 				}
 				_ = s.repo.AppendMessage(chatID, errMsg)
 				s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
+				s.parkQueue(chatID)
 				break
 			}
 			if head == nil {
@@ -519,6 +588,8 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 			}
 		}
 
+		dispatchGen := gen
+
 		// Broadcast the latest queue snapshot after dequeue
 		remaining, _ := s.repo.GetQueuedMessages(chatID)
 		if remaining == nil {
@@ -527,9 +598,36 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeQueue, Payload: map[string]any{"queue": remaining}})
 
 		// Execute the queued task
-		_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, TriggerMessageRequest{Prompt: nextMsg.Prompt, Model: nextMsg.Model, RunDir: runDir})
+		// The transcript id derives from the queued message, so a retry after
+		// the runner dropped updates the same user message instead of adding one.
+		_, _, qErr := s.executeSingleAgent(ctx, targetAgent, chatID, TriggerMessageRequest{
+			Prompt: nextMsg.Prompt, Model: nextMsg.Model, RunDir: runDir,
+			Metadata: map[string]any{"message_id": "msg-" + nextMsg.ID},
+		})
 		if qErr != nil {
+			offline := errors.Is(qErr, runnerhub.ErrRunnerOffline)
+			if offline || errors.Is(qErr, dispatch.ErrNotDispatched) {
+				// The message never reached a runner: put it back at its
+				// original position and keep the rest of the queue.
+				if err := s.repo.RequeueFront(nextMsg); err != nil {
+					log.Error().Err(err).Str("chat_id", chatID).Msg("failed to re-queue message that was not dispatched")
+				}
+				if q, _ := s.repo.GetQueuedMessages(chatID); q != nil {
+					s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeQueue, Payload: map[string]any{"queue": q}})
+				}
+				if offline {
+					// Only a reconnect newer than this dispatch can help.
+					s.parkQueueUntilReconnect(chatID, dispatchGen)
+				} else {
+					// Retrying would fail the same way: notice only.
+					s.handleQueuedTaskError(chatID, targetAgent, qErr)
+					s.parkQueue(chatID)
+				}
+				s.releaseExecution(chatID)
+				break
+			}
 			s.handleQueuedTaskError(chatID, targetAgent, qErr)
+			s.parkQueue(chatID)
 			s.releaseExecution(chatID)
 			break
 		}

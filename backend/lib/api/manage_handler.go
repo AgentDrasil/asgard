@@ -147,7 +147,7 @@ func (s *Server) reload() error {
 	}
 
 	if s.cronManager != nil {
-		s.cronManager.Reload(agents)
+		s.cronManager.Reload(s.cronAgents(agents))
 	}
 
 	return nil
@@ -186,6 +186,9 @@ func (s *Server) validateWorkflows(agents []*agentspec.Agent) {
 			continue
 		}
 
+		if err := defn.ValidateScheduleRunner(a.NodeID); err != nil {
+			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q: %v", a.Config.ID, err))
+		}
 		if err := defn.ValidateWithAgents(wfAgents); err != nil {
 			log.Error().Err(err).Str("agent", a.Config.ID).Msg("Workflow validation failed")
 			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q: %v", a.Config.ID, err))
@@ -758,4 +761,27 @@ func (s *Server) handleReloadManageProxy(w http.ResponseWriter, r *http.Request)
 	s.conf.SetProxy(newCfg)
 
 	writeStatusOK(w, "proxy config reloaded")
+}
+
+// cronAgents extends the global agents with the agents owned by the allowed
+// runners, so their scheduled workflows run too.
+func (s *Server) cronAgents(global []*agentspec.Agent) []*agentspec.Agent {
+	src, ok := s.agentSource.(agentsForRunner)
+	if !ok || s.conf == nil {
+		return global
+	}
+	all := append([]*agentspec.Agent(nil), global...)
+	for _, node := range s.conf.AllowedRunnerNodes() {
+		list, err := src.AgentsFor(node)
+		if err != nil {
+			log.Warn().Err(err).Str("runner", node).Msg("runner agents unavailable for cron scheduling")
+			continue
+		}
+		for _, a := range list {
+			if a.NodeID != "" {
+				all = append(all, a)
+			}
+		}
+	}
+	return all
 }

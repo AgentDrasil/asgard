@@ -82,6 +82,15 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		Str("entry_type", update.EntryType).
 		Msg("agent status update received")
 
+	s.PublishStatusUpdate(update)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// PublishStatusUpdate fans update out to the listeners registered for its
+// chat. It serves both POST /agent-status and the RunEvents of remote runs, so
+// both reach the same consumers.
+func (s *Server) PublishStatusUpdate(update AgentStatusUpdate) {
 	// The channel is intentionally never closed on cancel: fan-out sends below
 	// run outside the mutex on a snapshot of the listener list, so closing in
 	// cancel could race with an in-flight send and panic (send on closed
@@ -107,6 +116,4 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 				Msg("status listener buffer full, dropping update")
 		}
 	}
-
-	w.WriteHeader(http.StatusNoContent)
 }

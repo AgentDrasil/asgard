@@ -85,6 +85,10 @@ type Options struct {
 	// Callbacks serves AgentCallbackService; nil answers Unimplemented.
 	// Handlers can call NodeIDFromContext to learn the calling runner.
 	Callbacks runnerpb.AgentCallbackServiceServer
+	// OnNodeOnline, when set, is called (in its own goroutine) every time a
+	// runner completes registration, so the host can resume work that waited
+	// for it (e.g. queued chat messages).
+	OnNodeOnline func(nodeID string)
 	// RegisterTimeout bounds how long a connection may take to complete the
 	// Register exchange (default 15s).
 	RegisterTimeout time.Duration
@@ -496,8 +500,11 @@ func (h *Hub) Client(nodeID string) (runnerpb.RunnerServiceClient, error) {
 
 // NodeInfo is a snapshot of one runner node.
 type NodeInfo struct {
-	NodeID          string
-	Online          bool
+	NodeID string
+	Online bool
+	// OnlineGen increases with every registration of the node; comparing two
+	// values tells whether it reconnected in between.
+	OnlineGen       uint64
 	LastSeen        time.Time
 	Version         string
 	ProtocolVersion uint32
@@ -525,6 +532,7 @@ func (h *Hub) Nodes() []NodeInfo {
 		info := NodeInfo{
 			NodeID:          id,
 			Online:          n.online && h.isAllowed(id),
+			OnlineGen:       n.onlineGen,
 			LastSeen:        n.lastSeen,
 			Version:         n.version,
 			ProtocolVersion: n.protocolVersion,

@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/api"
 	"github.com/AgentDrasil/asgard/backend/lib/cleanup"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
@@ -189,6 +190,7 @@ func New(opts ...Option) (*App, error) {
 	var agentStore *config.AgentStore
 	var proxyHolder atomic.Pointer[proxy.ProxyManager]
 	var hubHolder atomic.Pointer[runnerhub.Hub]
+	var serverHolder atomic.Pointer[api.Server]
 	var resolvedConfigPath string
 
 	if conf != nil {
@@ -329,6 +331,16 @@ func New(opts ...Option) (*App, error) {
 		}
 	}
 
+	// 5b. Sessions created before runner binding run on the first allowed runner.
+	if database != nil {
+		if nodes := conf.AllowedRunnerNodes(); len(nodes) > 0 {
+			if err := dbmodels.BackfillRunnerNodeID(database, nodes[0]); err != nil {
+				log.Warn().Err(err).Msg("failed to backfill session runner binding")
+				diagnostics.AddError("db", err.Error())
+			}
+		}
+	}
+
 	// 6. Initialize cleanup scheduler
 	var scheduler *cleanup.Scheduler
 	if database != nil {
@@ -365,6 +377,11 @@ func New(opts ...Option) (*App, error) {
 			ClientCAFile: rc.ClientCAFile,
 			Addr:         fmt.Sprintf(":%d", rc.RegistryPort),
 			AllowedNodes: conf.AllowedRunnerNodes,
+			OnNodeOnline: func(nodeID string) {
+				if srv := serverHolder.Load(); srv != nil {
+					srv.RunnerOnline(nodeID)
+				}
+			},
 		}
 		if database != nil {
 			hubOpts.Store = dbmodels.NewFinalizedRunRepository(database)
@@ -387,7 +404,10 @@ func New(opts ...Option) (*App, error) {
 		api.WithProxyManager(proxyMgr),
 	}
 	if hub != nil {
-		apiOpts = append(apiOpts, api.WithRunnerRegistry(hub))
+		apiOpts = append(apiOpts, api.WithRunnerHub(hub))
+	} else {
+		// The backend never executes agents itself.
+		apiOpts = append(apiOpts, api.WithDispatcher(dispatch.Unavailable{Err: errors.New("no runner configured: set the runner section and connect an asgard-runner")}))
 	}
 	if options.FunctionRegistry != nil {
 		apiOpts = append(apiOpts, api.WithFunctionRegistry(options.FunctionRegistry))
@@ -422,6 +442,10 @@ func New(opts ...Option) (*App, error) {
 		}
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
+
+	serverHolder.Store(srv)
+	// Runners that registered before the server existed missed OnNodeOnline.
+	srv.ResumeQueuesOfOnlineRunners()
 
 	if agentStore != nil {
 		syncCollisions := func() {

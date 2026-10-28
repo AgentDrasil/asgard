@@ -54,6 +54,7 @@ func (s *Server) beginExecution(chatID, agentID string, isWorkflow bool) (contex
 		cancel()
 		return nil, nil, true
 	}
+	s.unparkQueue(chatID)
 	return context.WithValue(ctx, executionHandleKey{}, handle), handle, false
 }
 
@@ -81,6 +82,13 @@ func (s *Server) ensureExecutionGuard(chatID, agentID string, isWorkflow bool) {
 func (s *Server) releaseExecution(chatID string) {
 	s.activeExecutions.Delete(chatID)
 	s.consumeSessionStop(chatID)
+	// Whoever releases last drains: messages queued meanwhile, or left behind
+	// by a consumer that gave up on an unavailable runner, run now if possible.
+	// It runs off the caller's path: releases are on latency-sensitive paths
+	// (workflow suspension) that update session state right afterwards.
+	if s.repo != nil {
+		go s.drainQueueAfterRelease(chatID)
+	}
 }
 
 // executionGuardValue returns the value to store when a running loop re-acquires

@@ -19,12 +19,21 @@ import (
 // ResolveDefnFunc resolves a sub-workflow definition by name.
 type ResolveDefnFunc func(name string) (*workflowspec.WorkflowDefinition, error)
 
+// SessionResolveDefnFunc resolves a sub-workflow definition by name among the
+// agents visible to the given chat (its runner's effective list).
+type SessionResolveDefnFunc func(sessionID, name string) (*workflowspec.WorkflowDefinition, error)
+
 // SubWorkflowRunner executes sub-workflow nodes (single run or fan-out).
 type SubWorkflowRunner struct {
 	resolveDefn ResolveDefnFunc
-	engine      *Engine
-	maxDepth    int
+	// resolveForSession, when set, takes precedence over resolveDefn.
+	resolveForSession SessionResolveDefnFunc
+	engine            *Engine
+	maxDepth          int
 }
+
+// SetSessionResolver makes sub-workflow resolution chat-aware.
+func (r *SubWorkflowRunner) SetSessionResolver(f SessionResolveDefnFunc) { r.resolveForSession = f }
 
 // NewSubWorkflowRunner creates a new SubWorkflowRunner.
 func NewSubWorkflowRunner(resolve ResolveDefnFunc) *SubWorkflowRunner {
@@ -56,7 +65,7 @@ func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*workfl
 	if r.engine == nil {
 		return nil, fmt.Errorf("node %s: engine is not set on SubWorkflowRunner", node.ID)
 	}
-	if r.resolveDefn == nil {
+	if r.resolveDefn == nil && r.resolveForSession == nil {
 		return nil, fmt.Errorf("node %s: resolveDefn is not configured", node.ID)
 	}
 
@@ -85,7 +94,13 @@ func (r *SubWorkflowRunner) Run(ctx context.Context, nctx *NodeContext) (*workfl
 	childCtx := context.WithValue(ctx, wfCallChainKey{}, append(append([]string(nil), chain...), node.Workflow))
 
 	// 2. Resolve and validate sub-workflow definition
-	subDefn, err := r.resolveDefn(node.Workflow)
+	var subDefn *workflowspec.WorkflowDefinition
+	var err error
+	if r.resolveForSession != nil {
+		subDefn, err = r.resolveForSession(nctx.SessionID, node.Workflow)
+	} else {
+		subDefn, err = r.resolveDefn(node.Workflow)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("node %s: resolving sub-workflow %q: %w", node.ID, node.Workflow, err)
 	}

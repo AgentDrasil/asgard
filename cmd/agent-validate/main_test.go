@@ -140,6 +140,44 @@ func TestValidateTree(t *testing.T) {
 			wantErr: "invalid runner node id",
 		},
 		{
+			name: "scheduled global workflow needs runner_id",
+			files: map[string]string{
+				"agents/a/config.yaml":    agentFixture("a"),
+				"agents/wf/config.yaml":   workflowAgentFixture("wf"),
+				"agents/wf/workflow.yaml": scheduledWorkflow("a", ""),
+			},
+			wantErr: "must set runner_id",
+		},
+		{
+			name: "scheduled global workflow with runner_id is valid",
+			files: map[string]string{
+				"agents/a/config.yaml":    agentFixture("a"),
+				"agents/wf/config.yaml":   workflowAgentFixture("wf"),
+				"agents/wf/workflow.yaml": scheduledWorkflow("a", "runner_id: r1\n"),
+			},
+			wantOK:  true,
+			wantOut: "Agent tree is valid",
+		},
+		{
+			name: "scheduled runner workflow runs on its own runner",
+			files: map[string]string{
+				"agents/a/config.yaml":               agentFixture("a"),
+				"runners/n1/agents/wf/config.yaml":   workflowAgentFixture("wf"),
+				"runners/n1/agents/wf/workflow.yaml": scheduledWorkflow("a", ""),
+			},
+			wantOK:  true,
+			wantOut: "Agent tree is valid",
+		},
+		{
+			name: "scheduled runner workflow naming another runner is rejected",
+			files: map[string]string{
+				"agents/a/config.yaml":               agentFixture("a"),
+				"runners/n1/agents/wf/config.yaml":   workflowAgentFixture("wf"),
+				"runners/n1/agents/wf/workflow.yaml": scheduledWorkflow("a", "runner_id: n2\n"),
+			},
+			wantErr: "does not match the owning runner",
+		},
+		{
 			name:    "neither agents nor runners",
 			files:   map[string]string{"asgard/config.yaml": "debug: true"},
 			wantErr: "neither agents/ nor runners/",
@@ -194,4 +232,12 @@ func TestReadTreeFiles_DecryptsInlineSOPSYAML(t *testing.T) {
 	_, err = readTreeFiles(root)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "invalid character")
+}
+
+func workflowAgentFixture(id string) string {
+	return fmt.Sprintf("id: %s\nname: %s\ndescription: d\ntype: workflow\nmain_agent: false\n", id, id)
+}
+
+func scheduledWorkflow(agentID, extra string) string {
+	return fmt.Sprintf("name: sched\nno_human: true\nschedule: \"0 3 * * *\"\n%snodes:\n  - id: n\n    type: agent\n    agent_id: %s\n    entry: true\n", extra, agentID)
 }

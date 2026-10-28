@@ -198,9 +198,9 @@ go run ./cmd/agent-validate ../.agents/agents/my-workflow-agent/
 Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, team discovery, and system management:
 
 ### 1. Agent Execution & Real-Time Events API
-*   **Trigger Execution** (`POST /api/agents/{agent_id}/message`): Triggers single agent or workflow execution. Returns `202 Accepted` asynchronously by default; supports `?wait=true` synchronous mode for CLI consumers (e.g., `call-peer`).
+*   **Trigger Execution** (`POST /api/agents/{agent_id}/message`): Triggers single agent or workflow execution. Returns `202 Accepted` asynchronously by default; supports `?wait=true` synchronous mode for CLI consumers (e.g., `call-peer`). With a `runner` section configured, every run executes on the runner the chat is bound to: the body must carry `runnerId` for a chat that has no runner yet (400 otherwise, 400 for an unknown runner), the binding is immutable (a different `runnerId` is `409`), and an offline runner answers `503` (queued messages stay queued and resume when the runner reconnects). `POST /api/sessions` accepts `runnerId` the same way.
 *   **Real-Time Events Stream** (`GET /api/sessions/{session_id}/events`): Server-Sent Events (SSE) stream for real-time `SessionEvent` delivery (messages, activities, artifacts, status, done) with `Last-Event-ID` reconnection catch-up.
-*   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents.
+*   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents. `?runner=<id>` lists what that runner can run (global agents plus the runner's own).
 
 ### 2. Workspace & File Browsing API
 *   **Workspace File Content** (`GET /api/v1/workspace/file`): Retrieves authorized file content or media streams (`?raw=true`) from session workspace, session tmp, or session `/session` directory. Supports `session_id`, `path`, and optional `scope` (`tmp`, `session`, or `workspace`) disambiguation parameters.
