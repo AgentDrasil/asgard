@@ -54,8 +54,10 @@ type Server struct {
 	compressionMetrics *CompressionMetricsStore
 	ctx                context.Context
 	cancel             context.CancelFunc
-	resumeWG           sync.WaitGroup // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
-	activeExecutions   sync.Map       // chatID -> *executionHandle (or legacy struct{} placeholder)
+	resumeWG           sync.WaitGroup      // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
+	peerMu             sync.Mutex          // guards peerChains
+	peerChains         map[string][]string // chatID -> agent ids on the active call-peer chain
+	activeExecutions   sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)
 	// cancelledExecutions records chatIDs whose execution was aborted via the
 	// stop API (chatID -> cancel time). It lets event handlers distinguish
 	// cancellation-induced node failures from genuine errors.

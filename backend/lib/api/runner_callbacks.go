@@ -330,6 +330,11 @@ func (c *callbackService) callPeer(ctx context.Context, info runnerhub.RunInfo, 
 	if target == nil && !c.s.bindingEnforced() {
 		return fail("agent not found")
 	}
+	// The caller's run holds its chat's execution guard while it waits for the
+	// peer; tell triggerMessage so the peer is admitted under that guard.
+	if holder, running := c.s.activeExecutions.Load(info.ChatID); running {
+		ctx = context.WithValue(ctx, peerCallKey{}, &peerCall{chatID: info.ChatID, holder: holder, callerAgentID: info.AgentID})
+	}
 	c.s.triggerMessage(ctx, rec, agentID, target, tr, true)
 
 	var body struct {

@@ -227,6 +227,14 @@ func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter,
 
 	wait := req.Wait || queryWait
 
+	// A call-peer from the run holding this chat's guard is admitted under
+	// that guard instead of hitting the chat-wide 409.
+	if pc := peerCallFromContext(stopWith); pc != nil && pc.chatID == chatID {
+		if s.triggerNestedPeer(stopWith, w, pc, targetAgent, runnerID, chatID, req) {
+			return
+		}
+	}
+
 	// 1. Workflow branch: acquire the guard; on conflict return 409, otherwise run
 	// runWorkflow and keep the guard release
 	if targetAgent.Config.Type == "workflow" {

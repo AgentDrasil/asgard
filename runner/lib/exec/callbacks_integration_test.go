@@ -45,14 +45,16 @@ func newCallbackStack(t *testing.T) *callbackStack {
 	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0o755))
 	require.NoError(t, os.WriteFile(paths.ConfigFile(), []byte("secret"), 0o600))
 
+	// Agents of one chat share its run dir, so both allow it.
+	sharedRunDir := t.TempDir()
 	peer := testAgent("peer", "h2", "")
-	peer.Config.RunDirs = []string{t.TempDir()}
+	peer.Config.RunDirs = []string{sharedRunDir}
 	hub := startStack(t, newIntegrationExecutor(t, peer))
 
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	caller := testAgent("a", "h1", "")
-	caller.Config.RunDirs = []string{t.TempDir()}
+	caller.Config.RunDirs = []string{sharedRunDir}
 	server, err := api.New(&config.Config{AgentDir: t.TempDir()}, testDB,
 		api.WithAgentSource(staticAgents{caller, peer, testAgent("agent_father", "h3", "")}),
 		api.WithRunnerHub(hub),
@@ -119,7 +121,7 @@ func TestSandboxAskUserThroughRunnerAndBackend(t *testing.T) {
 // dispatch only: the caller run is dispatched straight through the hub, so it
 // does NOT hold the chat's execution guard the way a run started through
 // POST /api/agents/{id}/message does. See
-// TestSandboxCallPeerIntoOwnChatIsRejectedByGuard for that path. Here the
+// TestSandboxCallPeerIntoOwnChatSucceeds for that path. Here the
 // backend triggers the peer agent in the caller's chat, which the hub
 // dispatches to the same runner.
 func TestSandboxCallPeerRunsPeerOnSameRunner(t *testing.T) {
@@ -154,11 +156,11 @@ func shortCtx(t *testing.T, d time.Duration) context.Context {
 	return ctx
 }
 
-// TestSandboxCallPeerIntoOwnChatIsRejectedByGuard starts the caller through
-// the backend's trigger endpoint, so it holds the chat-wide execution guard.
-// call-peer into the caller's own chat then gets the pre-existing 409 "session
-// is already running a task", reported as a failed peer call.
-func TestSandboxCallPeerIntoOwnChatIsRejectedByGuard(t *testing.T) {
+// TestSandboxCallPeerIntoOwnChatSucceeds starts the caller through the
+// backend's trigger endpoint, so it holds the chat-wide execution guard while
+// it waits in call-peer. The peer in the same chat is admitted under that
+// guard instead of getting a 409.
+func TestSandboxCallPeerIntoOwnChatSucceeds(t *testing.T) {
 	st := newCallbackStack(t)
 
 	body, err := json.Marshal(map[string]any{"prompt": "PEERME", "chatId": "chat-int", "wait": true})
@@ -177,9 +179,10 @@ func TestSandboxCallPeerIntoOwnChatIsRejectedByGuard(t *testing.T) {
 	line = line[:strings.Index(line, "\n")]
 	var peer struct {
 		Status string `json:"status"`
+		Output string `json:"output"`
 		Error  string `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(line), &peer), line)
-	assert.Equal(t, "failed", peer.Status)
-	assert.Contains(t, peer.Error, "session is already running a task")
+	assert.Equal(t, "completed", peer.Status, peer.Error)
+	assert.Contains(t, peer.Output, "fake agent output")
 }

@@ -16,7 +16,11 @@ import (
 // executionHandle tracks one in-flight execution of a chat session so a user
 // can cancel it mid-flight. It is the value stored in Server.activeExecutions.
 type executionHandle struct {
-	cancel     context.CancelFunc
+	cancel context.CancelFunc
+	// ctx is the execution context the cancel func ends; nested call-peer runs
+	// derive from it so cancelling the caller cancels its peers. Nil for
+	// guards of executions started elsewhere.
+	ctx        context.Context
 	agentID    string
 	isWorkflow bool
 	startTime  time.Time
@@ -50,6 +54,7 @@ func (s *Server) beginExecution(chatID, agentID string, isWorkflow bool) (contex
 		isWorkflow: isWorkflow,
 		startTime:  time.Now(),
 	}
+	handle.ctx = ctx // before publishing the handle, so readers never see nil
 	if _, loaded := s.activeExecutions.LoadOrStore(chatID, handle); loaded {
 		cancel()
 		return nil, nil, true

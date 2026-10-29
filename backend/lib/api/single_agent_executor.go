@@ -245,7 +245,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	// context cancellation. This guarantees the session's isRunning
 	// state is cleared after the agent sandbox exits.
 	defer func() {
-		e.markAgentCompleted(chatID, err)
+		e.markAgentCompleted(ctx, chatID, err)
 	}()
 	augmentedPrompt := formatPromptWithAttachments(prompt, params.Attachments)
 	return e.executeSequential(ctx, augmentedPrompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
@@ -335,7 +335,7 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 // markAgentCompleted sets the agent status to completed and broadcasts done/isRunning=false.
 // If err == nil and there are still queued messages in repo, it skips marking completed
 // and skips broadcasting done/isRunning=false to avoid status flickering between queued tasks.
-func (e *SingleAgentExecutor) markAgentCompleted(chatID string, runErr error) {
+func (e *SingleAgentExecutor) markAgentCompleted(ctx context.Context, chatID string, runErr error) {
 	if runErr == nil && e.repo != nil {
 		if queued, err := e.repo.GetQueuedMessages(chatID); err == nil && len(queued) > 0 {
 			return
@@ -347,7 +347,9 @@ func (e *SingleAgentExecutor) markAgentCompleted(chatID string, runErr error) {
 			log.Error().Err(err).Str("chat_id", chatID).Str("agent", e.agent.Config.ID).Msg("failed to mark agent status completed after run")
 		}
 	}
-	if e.server != nil {
+	// A nested call-peer run ends while the caller still holds the chat: the
+	// chat is not done, so no done/isRunning=false is announced for it.
+	if e.server != nil && !isNestedPeerRun(ctx) {
 		e.server.PublishSessionEvent(chatID, SessionEvent{
 			Type:    "status",
 			Payload: map[string]any{"agent": e.agent.Config.ID, "isRunning": false},
