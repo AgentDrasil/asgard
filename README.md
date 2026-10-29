@@ -11,9 +11,26 @@ Asgard is designed to be a self-hosted AI coding solution that:
 
 ## Architecture
 
-- **Backend**: Go orchestration layer
-- **AI Engine**: CLI-based coding agents (antigravity-cli/...)
-- **Runtime**: Docker container
+Asgard is split into a **backend** and one or more **runners**. There is no scheduler: a chat is pinned to one runner and every run of that chat executes there.
+
+- **Backend** (`asgard`, Go): orchestration, the database (SQLite or PostgreSQL, metadata only), agent definitions (read from etcd), the WebUI and the REST/SSE API. It never executes agents, shell commands, git or ttyd itself for a runner-bound chat.
+- **Runner** (`asgard-runner`): runs the CLI agents in the bubblewrap sandbox, and owns everything on disk for its chats: the per-chat tmp/session directories, transcripts (`messages.jsonl`), workflow run files, git operations, ttyd terminals, workflow command nodes and the CLI quota queries.
+- **AI engine**: CLI-based coding agents (antigravity-cli/claude/opencode/...), installed on the runner.
+
+```
+ WebUI / API clients
+        |
+     Backend  ---- etcd (config, agent definitions)
+        ^  mTLS TCP :9311 (runner dials in), yamux session
+        |    runner -> backend: NodeControl (run control + events), AgentCallback
+        |    backend -> runner: RunnerService (files, git, ttyd, command, cleanup, quota)
+     Runner(s) -> bwrap agent sandbox + command sandbox
+```
+
+- **Connection**: the runner dials the backend's registry port (`runner.registry_port`, default `9311`) over mutual TLS. The client certificate CN is the runner's node id and must be listed in `runner.allowed_nodes`. One yamux session carries two gRPC directions: runner to backend (`NodeControl` bidi stream for run dispatch/events/acks, `AgentCallback` for sandbox callbacks) and backend to runner (`RunnerService`).
+- **No message queue**: run events are cached on the runner and replayed to the backend on reconnect (sequence numbers and acks make delivery idempotent). While a runner is offline, messages for its chats stay queued and resume when it reconnects.
+- **Chat pinning**: a chat is bound to one runner when it is created (the user picks it in the WebUI sidebar runner dropdown) and the binding is immutable. `call-peer` can only reach agents on the same runner; it may also target an agent in the caller's own chat, with cycle detection and a maximum call chain depth of 4.
+- **Config**: runner and agent configuration live in etcd (`ETCD_ENDPOINTS`, `ETCD_PREFIX`, default prefix `/asgard/configs`); both backend and runner need etcd access.
 
 ## Filesystem Layout
 
@@ -33,6 +50,8 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
     └── data.db             # SQLite database (+ -wal/-shm)
 ```
 
+The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `data/sessions` and `data/tmp` (the chat directories) live on the **runner** that owns the chat.
+
 The SQLite database path is fixed (`dsn` is only used for `db: pg`). `aw`'s own
 `~/.config/aw/config.yaml` and the web UI static asset path (`webui_path`) are
 not part of this layout.
@@ -41,14 +60,17 @@ not part of this layout.
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).
 
-The sandbox execution is managed by the orchestrator in [run.go](backend/lib/agents/run/run.go).
+The sandboxes are started by the **runner** (the backend only dispatches runs to it); the bwrap argument construction lives in [bwrap.go](backend/lib/bwrap/bwrap.go). Sandbox callbacks (ask-user, call-peer, find-peer, show-output, status, metrics) go agent sandbox → runner (`/fakebash/asgard.sock`) → backend over the runner connection.
 
 ```mermaid
 graph TD
-    subgraph Host Process [Host Orchestrator]
+    subgraph Host Process [Runner]
         RunGo[run.Go]
         SockDir[Host Socket Directory]
     end
+
+    Backend[Backend]
+    RunGo <-->|mTLS + yamux gRPC| Backend
 
     subgraph AgentSandbox [Agent Sandbox (bwrap)]
         AW[aw/agent wrapper]
@@ -67,13 +89,14 @@ graph TD
     SockDir ---|Mounts to /fakebash| AgentSandbox
     SockDir ---|Mounts to /fakebash| CmdSandbox
     FakeBashClient <-->|gRPC over /fakebash/fakebash.sock| FakeBashDaemon
+    AW <-->|asgard.sock callbacks| RunGo
 ```
 
 ### 1. The Dual-Sandbox Concept
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
-Both sandboxes bind-mount per-chat host directories: `~/asgard/data/tmp/<chat-id>` at `/tmp` and `~/asgard/data/sessions/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
+Both sandboxes bind-mount per-chat directories of the runner host: `~/asgard/data/tmp/<chat-id>` at `/tmp` and `~/asgard/data/sessions/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
 The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/asgard/data/sessions/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
@@ -111,6 +134,114 @@ The host process initializes a temporary host directory and bind-mounts it to `/
       ```
       *(Note: `show-output` shares the output directory `/tmp/fakebash-outputs`, filename convention `c-<unix-ms>-<pid>-<rand>.log`, and symlink `latest.log` with `fakebash/storage.go` as a standalone utility with no shared internal package dependencies.)*
 
+
+## Deploying the Backend and Runners
+
+### Backend configuration
+
+Add a `runner` section to `~/asgard/config/config.yaml` (or the etcd config tree). Without it the runner listener is disabled and the backend cannot run any agent (every chat message fails with "no runner configured"); the WebUI, configuration and metadata APIs still work.
+
+```yaml
+runner:
+  tls_cert_file: /certs/server.crt   # backend server certificate (required)
+  tls_key_file: /certs/server.key    # required
+  client_ca_file: /certs/ca.crt      # CA that signed the runner certificates (required)
+  registry_port: 9311                # default 9311
+  allowed_nodes: [runner-1]          # runner ids (client certificate CNs) allowed to connect
+```
+
+An empty `allowed_nodes` is valid and lets no runner connect. The section can be changed through live config reload.
+
+**Agent definitions live in etcd** (`ETCD_ENDPOINTS` is required; `ETCD_PREFIX` defaults to `/asgard/configs`), not in `~/asgard/agents`:
+
+```
+<prefix>/agents/teams.yaml                      # teams (global)
+<prefix>/agents/<agent_id>/<files>              # global agent: config.yaml, AGENTS.md, workflow.yaml, ...
+<prefix>/runners/<node_id>/agents/<agent_id>/…  # agent that only exists on that runner
+```
+
+A runner's effective agent list is the global agents plus its own. Defining the same id both globally and under a runner is an error that invalidates that runner's list (the global list is unaffected). A parse error in a global agent or `teams.yaml` is fatal for loading; one under `runners/<node_id>/` only affects that runner.
+
+API additions:
+- `GET /api/runners`: `{"backend_version": "...", "runners": [{"node_id", "online", "last_seen", "version", "active_runs", "supported_clis": {cli: [models]}}]}`.
+- `GET /api/quota[?runner=<node_id>]`: the quota lives on the runners. With `?runner=` it returns that runner's flat `{"<cli>": [ModelUsage...]}` (404 unknown, 503 offline, 502 runner error). Without it, one online runner returns the same flat object; otherwise `{"runners": {node_id: {...}}, "errors": {node_id: "..."}}` (503 when none is online).
+- `POST /api/sessions` and the first `POST /api/agents/{id}/message` of a chat require `runnerId` (when runners are configured).
+- Scheduled (cron) workflows of a global agent must set `runner_id` in the workflow definition; runner-owned agents always run on their own runner.
+
+### Runner certificates
+
+The runner authenticates with a client certificate whose **CN is its node id**; the backend verifies it against `runner.client_ca_file` and checks the CN against `runner.allowed_nodes`. Example with a private CA (adjust names; the backend certificate must carry a SAN matching the host runners dial, or set the runner's `-server-name`):
+
+```bash
+openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=asgard-ca" -keyout ca.key -out ca.crt
+
+# backend (server) certificate
+openssl req -newkey rsa:4096 -nodes -subj "/CN=backend" -keyout server.key -out server.csr
+printf 'subjectAltName=DNS:backend\nextendedKeyUsage=serverAuth\n' > server.ext
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -extfile server.ext -out server.crt
+
+# runner (client) certificate: CN = node id
+openssl req -newkey rsa:4096 -nodes -subj "/CN=runner-1" -keyout runner-1.key -out runner-1.csr
+printf 'extendedKeyUsage=clientAuth\n' > client.ext
+openssl x509 -req -in runner-1.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -extfile client.ext -out runner-1.crt
+```
+
+TLS 1.3 is required. The runner re-reads its certificate files on every reconnect, so rotation needs no restart. Node ids are also used as path segments in etcd, so they must be simple ids (no `/` or `..`).
+
+### Running a runner
+
+`asgard-runner` takes flags, with environment variables as fallback:
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `-backend` | `ASGARD_RUNNER_BACKEND` | backend registry address `host:port` (required) |
+| `-tls-cert` | `ASGARD_RUNNER_TLS_CERT` | client certificate PEM; CN = node id (required) |
+| `-tls-key` | `ASGARD_RUNNER_TLS_KEY` | client private key PEM (required) |
+| `-ca` | `ASGARD_RUNNER_CA` | CA bundle verifying the backend (required) |
+| `-server-name` | `ASGARD_RUNNER_SERVER_NAME` | name checked in the backend certificate (default: host of `-backend`) |
+| `-allow-unsandboxed-commands` | `ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS` | **insecure, development only**: lets workflow command nodes with `sandbox: false` run without bubblewrap |
+
+The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions, proxy and credential config), and the agent CLIs and credentials (`~/.claude`, `~/.gemini`, ...) of the user it runs as. Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
+
+Constraints to know before deploying:
+- **Runner root directories must be real paths.** The directories agents and workflows may use (their `run_dirs` and mount dirs) and the runner's data roots are opened without following symlinks. A root that is, or lies under, a symlink is refused (fail closed); mount or configure the resolved path instead.
+- **Keep the runner's TLS key out of the sandbox.** The command sandbox bind-mounts the runner user's `$HOME` read-write and only masks specific paths (`~/asgard/config`, `~/asgard/data`, `~/.ssh`, agent credential directories). The runner does **not** verify where its key lives, so a key under `$HOME` (or under any run dir/mount dir) is readable by agents and lets them impersonate the runner. Put the certificate files outside `$HOME` (for example `/certs`, as in the Docker example) with permissions limited to the runner user.
+- **bubblewrap needs unprivileged user namespaces.** Inside Docker run the runner with a seccomp profile that permits `clone`/`unshare`/`mount`/`pivot_root` (for example `--security-opt seccomp=unconfined`) and, where AppArmor restricts user namespaces, `--security-opt apparmor=unconfined`.
+
+### Docker images and versions
+
+Two images are built from the `Dockerfile` (CI pushes both): `ghcr.io/agentdrasil/asgard-backend` (orchestration server, WebUI) and `ghcr.io/agentdrasil/asgard-runner` (agent CLIs, bwrap, ttyd, `asgard-runner`). Build locally with `just build-image-backend`, `just build-image-runner` or `just build-image`. Example run of a runner:
+
+```bash
+docker run --security-opt seccomp=unconfined \
+  -e ETCD_ENDPOINTS=http://etcd:2379 \
+  -v ./certs:/certs:ro -v ./runner-asgard:/home/user/asgard \
+  ghcr.io/agentdrasil/asgard-runner:main \
+  -backend backend:9311 -tls-cert /certs/runner-1.crt -tls-key /certs/runner-1.key -ca /certs/ca.crt
+```
+
+See [examples/compose.prod.example.yaml](examples/compose.prod.example.yaml) for a backend plus runner compose file.
+
+Builds are stamped with a version `YYYY-MM-DD-HH-MM-SS:abc123ed` (UTC build time and short commit); Docker tags use `-` instead of `:`. Backend and runner versions are shown in the WebUI under Settings → Runners and returned by `GET /api/runners`; the runner also logs its version at startup (`asgard-runner starting`).
+
+### Upgrading a single-machine install
+
+1. Add the `runner` section above and list the runner id in `runner.allowed_nodes`.
+2. Generate the certificates and start a runner on the same host (or a new one), with the node id from the list. Mount the existing `~/asgard` data directory into the runner: it owns `data/sessions` and `data/tmp` now.
+3. Move the agent definitions and `teams.yaml` into etcd (`agents/…`, see above).
+4. At startup the backend binds every existing chat without a runner to the **first** entry of `allowed_nodes` (`BackfillRunnerNodeID`; cron sessions take the runner from the workflow). Put the runner that holds the old chat data first.
+5. Scheduled workflows of global agents need `runner_id`.
+
+### Operations notes and known limitations
+
+- **Transcripts live on the runner.** The backend database only holds metadata. While a runner is down its chats' history, files and terminals are unavailable until it reconnects.
+- **Cleanup** runs daily on the backend: chats inactive for a month are removed through the runner's `Cleanup` RPC, and the database record is deleted only after the runner confirms. An offline runner is retried the next day.
+- **Legacy workflow runs**: `workflow_runs` rows written before the split stored the DAG spec and input in database columns. These are not migrated and are no longer readable; the columns are left untouched.
+- Runs lost because a runner restarted are reported as failed and are **not** automatically re-dispatched.
+- Finalized run ids are stored in the backend database (`finalized_runs`) and are not pruned.
+- Sandbox execution on the runner has so far been validated by unit tests (the generated bwrap arguments); the first real deployment is the actual validation.
+- Confined file access resolves paths beneath the root with `openat2`, but bwrap binds directories by path, so a TOCTOU window exists between resolution and bind.
+- A `/tmp` absolute path is ambiguous between the sandbox's `/tmp` (the chat's tmp directory) and the runner host's `/tmp`.
 
 ## Workflow Orchestration Engine
 

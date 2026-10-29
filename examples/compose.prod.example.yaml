@@ -1,13 +1,65 @@
 services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.21
+    container_name: asgard-etcd
+    command:
+      - etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --data-dir=/etcd-data
+    volumes:
+      - ./etcd-data:/etcd-data
+    restart: always
+
   asgard:
     image: ghcr.io/agentdrasil/asgard-backend:main
     container_name: asgard-prod
-    hostname: asgard-host
+    hostname: backend
+    networks:
+      default:
+        # The runner dials backend:9311; compose DNS resolves aliases, not hostname.
+        aliases:
+          - backend
+    environment:
+      # Agent definitions and shared config live in etcd.
+      - ETCD_ENDPOINTS=http://etcd:2379
     volumes:
-      # All Asgard state (config, agents, logs, data, SQLite db) lives here.
+      # Backend state (config incl. runner section, logs, SQLite db).
       - ./asgard:/home/user/asgard
-      - ~/src:/home/user/src
+      # Server certificate/key and the CA verifying runner certificates.
+      - ./certs:/certs:ro
       - ./ssh:/home/user/.ssh:ro
     restart: always
     ports:
       - "7000:7000"
+    # Runners reach the backend on runner.registry_port (default 9311) inside
+    # the compose network; publish it only for runners on other machines.
+
+  runner:
+    image: ghcr.io/agentdrasil/asgard-runner:main
+    container_name: asgard-runner-1
+    environment:
+      - ETCD_ENDPOINTS=http://etcd:2379
+    # bubblewrap needs unprivileged user namespaces.
+    security_opt:
+      - seccomp=unconfined
+      # Uncomment where AppArmor restricts user namespaces:
+      # - apparmor=unconfined
+    command:
+      - -backend
+      - backend:9311
+      - -tls-cert
+      - /certs/runner-1.crt # CN=runner-1, listed in runner.allowed_nodes
+      - -tls-key
+      - /certs/runner-1.key
+      - -ca
+      - /certs/ca.crt
+    volumes:
+      # The runner owns the chat directories (data/sessions, data/tmp) and the
+      # agent CLI credentials. Keep /certs outside $HOME so agents cannot read
+      # the TLS key; root paths must be real paths (no symlinks).
+      - ./runner-asgard:/home/user/asgard
+      - ./certs:/certs:ro
+      - ~/src:/home/user/src
+      - ./ssh:/home/user/.ssh:ro
+    restart: always

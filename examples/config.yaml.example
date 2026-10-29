@@ -4,12 +4,12 @@ port: 7000
 db: sqlite
 # dsn is only used when db is "pg" (PostgreSQL connection string).
 # SQLite always lives at ~/asgard/data/data.db.
-gemini_api_key: [GCP_API_KEY]
+gemini_api_key: "<GCP_API_KEY>"
 gemini_model_for_chat_title: gemini-3.1-flash-lite
 # Model used for fakebash command output summarization (default: gemini-3.5-flash-lite)
 gemini_model_for_command_result_compass: gemini-3.5-flash-lite
 # TypeSafe API key for Jev System One evaluation (optional, falls back to TYPESAFE_API_KEY env)
-typesafe_api_key: [TYPESAFE_API_KEY]
+typesafe_api_key: "<TYPESAFE_API_KEY>"
 # Language preferences for agents (default: English (US))
 chat_lang: English (US)
 doc_lang: English (US)
@@ -22,13 +22,23 @@ providers:
   - simplest
 webui_path: /opt/asgard/webui
 firebase_webpush_web:
-  api_key: [FIREBASE_API_KEY]
-  auth_domain: [FIREBASE_AUTH_DOMAIN]
-  project_id: [FIREBASE_PROJECT_ID]
-  storage_bucket: [FIREBASE_STORAGE_BUCKET]
-  messaging_sender_id: [FIREBASE_MESSAGING_SENDER_ID]
-  app_id: [FIREBASE_APP_ID]
-  vapid_key: [FIREBASE_CLOUD_MESSAGING_PUBLIC_KEY]
+  api_key: "<FIREBASE_API_KEY>"
+  auth_domain: "<FIREBASE_AUTH_DOMAIN>"
+  project_id: "<FIREBASE_PROJECT_ID>"
+  storage_bucket: "<FIREBASE_STORAGE_BUCKET>"
+  messaging_sender_id: "<FIREBASE_MESSAGING_SENDER_ID>"
+  app_id: "<FIREBASE_APP_ID>"
+  vapid_key: "<FIREBASE_CLOUD_MESSAGING_PUBLIC_KEY>"
+# Runner listener (required to run agents; see README "Deploying the Backend
+# and Runners"). Runners dial in over mTLS; the client certificate CN is the
+# runner's node id and must be listed in allowed_nodes.
+runner:
+  tls_cert_file: /certs/server.crt
+  tls_key_file: /certs/server.key
+  client_ca_file: /certs/ca.crt
+  registry_port: 9311 # default 9311
+  allowed_nodes:
+    - runner-1
 
 # Credential Injection Proxy configuration (optional).
 # The standalone proxy config (~/asgard/config/proxy.yaml), CA cert
