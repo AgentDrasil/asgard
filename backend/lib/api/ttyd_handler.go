@@ -1,20 +1,89 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os"
 	"strings"
+	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+
+	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
-// handleTTYD handles reverse proxy requests to /api/ttyd/{session_id...}
+// ttyd WebSocket protocol command bytes (the browser terminal speaks ttyd's
+// protocol; the shell itself runs on the runner behind RunnerService.Ttyd).
+const (
+	ttydInput  = '0' // client -> server
+	ttydResize = '1' // client -> server
+	ttydOutput = '0' // server -> client
+)
+
+var ttydUpgrader = websocket.Upgrader{
+	Subprotocols:    []string{"tty"},
+	ReadBufferSize:  32 * 1024,
+	WriteBufferSize: 32 * 1024,
+}
+
+// ttydTarget is where a terminal session runs.
+type ttydTarget struct {
+	runner     string
+	chatID     string
+	workingDir *runnerpb.DirRef
+}
+
+// resolveTTYDTarget maps a session key onto the runner, chat and start
+// directory: "agent-<chat>" opens in the chat's run dir on its runner, every
+// other key is a plain shell on the runner named by the request (or the only
+// known one).
+func (s *Server) resolveTTYDTarget(r *http.Request, sessionKey string) (ttydTarget, int, string) {
+	t := ttydTarget{}
+	chatID, isAgent := strings.CutPrefix(sessionKey, "agent-")
+	if isAgent && s.repo != nil {
+		if !IsValidChatID(chatID) {
+			return t, http.StatusBadRequest, "invalid session_id format"
+		}
+		sess, err := s.repo.GetSession(chatID)
+		if err != nil {
+			log.Error().Err(err).Str("agent_session_id", chatID).Msg("failed to query agent session for ttyd working directory")
+			return t, http.StatusInternalServerError, "failed to query session"
+		}
+		if sess == nil {
+			return t, http.StatusNotFound, "session not found"
+		}
+		t.chatID, t.runner = chatID, sess.RunnerNodeID
+		if sess.RunDir != "" {
+			runDir := NormalizeSessionRunDir(sess.RunDir, chatID)
+			if code, msg := s.checkWorkspaceRunDir(chatID, runDir); code != 0 {
+				return t, code, msg
+			}
+			t.workingDir = agents.DirRefFor(chatID, runDir)
+		}
+		if t.runner == "" && s.bindingEnforced() {
+			return t, http.StatusBadRequest, "chat is not bound to a runner"
+		}
+	}
+	if t.runner == "" {
+		node, err := s.requestRunner(r)
+		if err != nil {
+			status, msg := fsErrorStatus(err)
+			return t, status, msg
+		}
+		t.runner = node
+	}
+	return t, 0, ""
+}
+
+// handleTTYD serves the terminal WebSocket at /api/ttyd/{session_key}/ws. The
+// shell runs on the runner; frames are relayed between the browser's ttyd
+// protocol and RunnerService.Ttyd.
 func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
-	if s.ttydManager == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "ttyd manager not initialized"})
+	if s.runnerClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, "ttyd requires a runner")
 		return
 	}
 
@@ -23,49 +92,112 @@ func (s *Server) handleTTYD(w http.ResponseWriter, r *http.Request) {
 		// Fallback for path stripping / wildcard routing
 		rawPath = strings.TrimPrefix(r.URL.Path, "/api/ttyd/")
 	}
-
-	parts := strings.SplitN(rawPath, "/", 2)
-	sessionKey := parts[0]
-
+	sessionKey, _, _ := strings.Cut(rawPath, "/")
 	if sessionKey == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session_id is required"})
+		writeJSONError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	if !websocket.IsWebSocketUpgrade(r) {
+		writeJSONError(w, http.StatusBadRequest, "websocket upgrade required")
 		return
 	}
 
-	// Determine working directory for session
-	workingDir := ""
-	if sessionKey == "sidebar" {
-		home, err := os.UserHomeDir()
-		if err == nil && home != "" {
-			workingDir = home
-		}
-	} else if strings.HasPrefix(sessionKey, "agent-") {
-		agentSessionID := strings.TrimPrefix(sessionKey, "agent-")
-		if s.repo != nil {
-			sess, err := s.repo.GetSession(agentSessionID)
+	target, status, msg := s.resolveTTYDTarget(r, sessionKey)
+	if status != 0 {
+		writeJSONError(w, status, msg)
+		return
+	}
+	client, err := s.nodeClient(target.runner)
+	if err != nil {
+		writeFSError(w, err)
+		return
+	}
+
+	conn, err := ttydUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return // Upgrade already answered
+	}
+	defer func() { _ = conn.Close() }()
+
+	// ttyd's first client message is the JSON that spawns the shell.
+	_, first, err := conn.ReadMessage()
+	if err != nil {
+		return
+	}
+	var init struct {
+		Columns uint32 `json:"columns"`
+		Rows    uint32 `json:"rows"`
+	}
+	_ = json.Unmarshal(first, &init)
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	st, err := client.Ttyd(ctx)
+	if err != nil {
+		closeTTYD(conn, websocket.CloseInternalServerErr, "failed to start ttyd session")
+		return
+	}
+	if err := st.Send(&runnerpb.TtydFrame{Payload: &runnerpb.TtydFrame_Open{Open: &runnerpb.TtydOpen{
+		SessionKey: sessionKey, WorkingDir: target.workingDir, Cols: init.Columns, Rows: init.Rows, ChatId: target.chatID,
+	}}}); err != nil {
+		closeTTYD(conn, websocket.CloseInternalServerErr, "failed to start ttyd session")
+		return
+	}
+
+	// Browser -> runner. A WebSocket close ends the shell (single-client).
+	go func() {
+		defer cancel()
+		for {
+			_, msg, err := conn.ReadMessage()
 			if err != nil {
-				log.Error().Err(err).Str("agent_session_id", agentSessionID).Msg("failed to query agent session for ttyd working directory")
-			} else if sess == nil {
-				log.Warn().Str("agent_session_id", agentSessionID).Msg("agent session not found for ttyd working directory")
-			} else if sess.RunDir != "" {
-				workingDir = sess.RunDir
-			} else {
-				log.Warn().Str("agent_session_id", agentSessionID).Msg("agent session RunDir is empty")
+				return
+			}
+			if len(msg) == 0 {
+				continue
+			}
+			var f *runnerpb.TtydFrame
+			switch msg[0] {
+			case ttydInput:
+				f = &runnerpb.TtydFrame{Payload: &runnerpb.TtydFrame_Input{Input: msg[1:]}}
+			case ttydResize:
+				var sz struct {
+					Columns uint32 `json:"columns"`
+					Rows    uint32 `json:"rows"`
+				}
+				if json.Unmarshal(msg[1:], &sz) != nil {
+					continue
+				}
+				f = &runnerpb.TtydFrame{Payload: &runnerpb.TtydFrame_Resize{Resize: &runnerpb.TtydResize{Cols: sz.Columns, Rows: sz.Rows}}}
+			default:
+				continue // pause/resume and unknown commands
+			}
+			if st.Send(f) != nil {
+				return
 			}
 		}
-	}
+	}()
 
-	inst, err := s.ttydManager.GetOrStart(sessionKey, workingDir)
-	if err != nil {
-		log.Error().Err(err).Str("session_key", sessionKey).Msg("failed to get or start ttyd session")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to start ttyd session: " + err.Error()})
-		return
+	// Runner -> browser.
+	for {
+		f, err := st.Recv()
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+				closeTTYD(conn, websocket.CloseGoingAway, "runner connection lost")
+			}
+			return
+		}
+		switch p := f.GetPayload().(type) {
+		case *runnerpb.TtydFrame_Output:
+			if err := conn.WriteMessage(websocket.BinaryMessage, append([]byte{ttydOutput}, p.Output...)); err != nil {
+				return
+			}
+		case *runnerpb.TtydFrame_Exit:
+			closeTTYD(conn, websocket.CloseNormalClosure, "")
+			return
+		}
 	}
+}
 
-	// Serve request via reverse proxy (httputil.ReverseProxy handles HTTP & WebSocket hijacking transparently)
-	inst.Proxy.ServeHTTP(w, r)
+func closeTTYD(conn *websocket.Conn, code int, text string) {
+	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, text), time.Now().Add(time.Second))
 }

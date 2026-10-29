@@ -3,6 +3,7 @@ package bwrap
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -752,4 +753,116 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 	if bound(one, filepath.Join(home, ".gemini")) {
 		t.Error("claude sandbox must not mount ~/.gemini")
 	}
+}
+
+func indexOfSeq(args []string, seq ...string) int {
+	for i := 0; i+len(seq) <= len(args); i++ {
+		if strings.Join(args[i:i+len(seq)], "\x00") == strings.Join(seq, "\x00") {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestGitSandboxArgs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".ssh"), 0o700))
+	git := []string{"--git-dir=/repo/.git", "--work-tree=/repo", "status"}
+
+	tests := []struct {
+		name      string
+		spec      GitSandboxSpec
+		bind      string
+		unshare   bool
+		wantSSH   bool
+		wantProxy bool
+	}{
+		{"read-only offline", GitSandboxSpec{ChatID: "chat1", WorkTreeSrc: "/proc/self/fd/3", Git: git}, "--ro-bind", true, false, false},
+		{"pull writable with network", GitSandboxSpec{ChatID: "chat1", WorkTreeSrc: "/proc/self/fd/3", ReadWrite: true, Network: true, Git: git}, "--bind", false, true, false},
+		{"push read-only with network", GitSandboxSpec{
+			ChatID: "chat1", WorkTreeSrc: "/proc/self/fd/3", Network: true, Git: git,
+			Proxy: ProxySandboxConfig{Enabled: false, ProxyAddr: "http://127.0.0.1:1"},
+		}, "--ro-bind", false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := GitSandboxArgs(tt.spec)
+			require.NoError(t, err)
+			assert.Equal(t, 0, indexOfSeq(args, "--clearenv"))
+			for _, flag := range []string{"--die-with-parent", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--new-session"} {
+				assert.Contains(t, args, flag)
+			}
+			assert.Equal(t, tt.unshare, indexOfSeq(args, "--unshare-net") >= 0)
+			assert.GreaterOrEqual(t, indexOfSeq(args, tt.bind, "/proc/self/fd/3", "/repo", "--chdir", "/repo"), 0)
+			otherBind := map[string]string{"--bind": "--ro-bind", "--ro-bind": "--bind"}[tt.bind]
+			assert.Less(t, indexOfSeq(args, otherBind, "/proc/self/fd/3", "/repo"), 0)
+			// Only the repo, chat dirs and system paths are mounted: HOME is a tmpfs.
+			assert.GreaterOrEqual(t, indexOfSeq(args, "--tmpfs", home), 0)
+			assert.Less(t, indexOfSeq(args, "--bind", home, home), 0)
+			assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", filepath.Join(home, ".gitconfig"), filepath.Join(home, ".gitconfig")), 0)
+			assert.Equal(t, tt.wantSSH, indexOfSeq(args, "--tmpfs", filepath.Join(home, ".ssh")) >= 0, "ssh dir masked only with network")
+			// The data root is masked like in agent command sandboxes.
+			assert.GreaterOrEqual(t, indexOfSeq(args, "--tmpfs", paths.DataDir()), 0)
+			n := len(args)
+			assert.Equal(t, append([]string{"--", "git"}, git...), args[n-len(git)-2:])
+		})
+	}
+
+	t.Run("env is passed explicitly", func(t *testing.T) {
+		args, err := GitSandboxArgs(GitSandboxSpec{ChatID: "chat1", WorkTreeSrc: "/x", Env: []string{"GIT_TERMINAL_PROMPT=0", "bad"}, Git: git})
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, indexOfSeq(args, "--setenv", "GIT_TERMINAL_PROMPT", "0"), 0)
+		assert.Less(t, indexOfSeq(args, "--setenv", "bad"), 0)
+	})
+}
+
+func TestGitSandboxArgsConfigMasks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("secret: x"), 0o600))
+	args, err := GitSandboxArgs(GitSandboxSpec{ChatID: "chat1", WorkTreeSrc: "/x", ConfigPath: cfg, Git: []string{"status"}})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", "/dev/null", cfg), 0)
+}
+
+// TestGitSandboxRuns needs a working bwrap (user namespaces); it is skipped
+// where bubblewrap is missing or cannot create a sandbox.
+func TestGitSandboxRuns(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap is not installed")
+	}
+	if err := exec.Command("bwrap", "--ro-bind", "/", "/", "true").Run(); err != nil {
+		t.Skipf("bwrap cannot create a sandbox here: %v", err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "--allow-empty", "-m", "c"}} {
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	dir, err := os.Open(repo)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dir.Close() })
+
+	run := func(spec GitSandboxSpec) (string, error) {
+		spec.ChatID = "chat1"
+		cmd, err := CommandForGit(t.Context(), spec)
+		require.NoError(t, err)
+		cmd.ExtraFiles = []*os.File{dir}
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	out, err := run(GitSandboxSpec{Git: []string{"--git-dir=/repo/.git", "--work-tree=/repo", "log", "--format=%s"}})
+	require.NoError(t, err, out)
+	assert.Equal(t, "c", strings.TrimSpace(out))
+
+	// Read-only: a write inside the repo fails.
+	_, err = run(GitSandboxSpec{Git: []string{"--git-dir=/repo/.git", "--work-tree=/repo", "tag", "t1"}})
+	assert.Error(t, err)
+	_, err = run(GitSandboxSpec{ReadWrite: true, Git: []string{"--git-dir=/repo/.git", "--work-tree=/repo", "tag", "t1"}})
+	assert.NoError(t, err)
 }

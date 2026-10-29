@@ -11,6 +11,8 @@ require (
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0
+	github.com/creack/pty v1.1.24
+	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/yamux v0.1.2
 	github.com/moznion/go-optional v0.13.0
 	github.com/rs/zerolog v1.35.1
@@ -104,7 +106,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.23 // indirect
 	github.com/googleapis/gax-go/v2 v2.26.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/goware/prefixer v0.0.0-20160118172347-395022866408 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

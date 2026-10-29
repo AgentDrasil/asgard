@@ -32,9 +32,9 @@ func (s *Server) chatFS(chatID string) (runnerfs.FS, error) {
 	if err != nil {
 		return nil, runnerfs.Errf(runnerfs.CodeBadRequest, "%v", err)
 	}
-	client, err := s.runnerClient(node)
+	client, err := s.nodeClient(node)
 	if err != nil {
-		return nil, runnerfs.Errf(runnerfs.CodeUnavailable, "runner %q is offline; try again when it reconnects", node)
+		return nil, err
 	}
 	return runnerfs.NewRemote(client, chatID), nil
 }
@@ -42,8 +42,8 @@ func (s *Server) chatFS(chatID string) (runnerfs.FS, error) {
 // runnerClientFunc returns the RunnerService client of an online runner.
 type runnerClientFunc func(nodeID string) (runnerpb.RunnerServiceClient, error)
 
-// writeFSError answers the HTTP status matching a runnerfs error.
-func writeFSError(w http.ResponseWriter, err error) {
+// fsErrorStatus maps a runnerfs error onto the HTTP status and message.
+func fsErrorStatus(err error) (int, string) {
 	status := http.StatusInternalServerError
 	switch runnerfs.CodeOf(err) {
 	case runnerfs.CodeNotFound:
@@ -62,7 +62,69 @@ func writeFSError(w http.ResponseWriter, err error) {
 	if !errors.As(err, &fe) {
 		msg = fmt.Sprintf("file operation failed: %v", err)
 	}
+	return status, msg
+}
+
+// writeFSError answers the HTTP status matching a runnerfs error.
+func writeFSError(w http.ResponseWriter, err error) {
+	status, msg := fsErrorStatus(err)
 	writeJSONError(w, status, msg)
+}
+
+// WithRunnerClient resolves runner nodes to their RunnerService clients
+// without a runner hub (tests, embedding).
+func WithRunnerClient(fn func(nodeID string) (runnerpb.RunnerServiceClient, error)) ServerOption {
+	return func(s *Server) { s.runnerClient = fn }
+}
+
+// nodeClient returns the RunnerService client of an online runner, or a
+// CodeUnavailable error (503) when it is offline.
+func (s *Server) nodeClient(node string) (runnerpb.RunnerServiceClient, error) {
+	client, err := s.runnerClient(node)
+	if err != nil {
+		return nil, runnerfs.Errf(runnerfs.CodeUnavailable, "runner %q is offline; try again when it reconnects", node)
+	}
+	return client, nil
+}
+
+// requestRunner picks the runner of a request that names no chat: the runner
+// query parameter, or the only known runner. It returns a CodeBadRequest error
+// when it stays ambiguous.
+func (s *Server) requestRunner(r *http.Request) (string, error) {
+	if id := r.URL.Query().Get("runner"); id != "" {
+		return id, nil
+	}
+	if s.runners != nil {
+		var only string
+		n := 0
+		for _, node := range s.runners.Nodes() {
+			only = node.NodeID
+			n++
+		}
+		if n == 1 {
+			return only, nil
+		}
+	}
+	return "", runnerfs.Errf(runnerfs.CodeBadRequest, "runner is required")
+}
+
+// runnerOnlyFS is the FS of requests that name a runner but no chat.
+func (s *Server) runnerOnlyFS(r *http.Request) (runnerfs.FS, error) {
+	if s.fsResolver != nil {
+		return s.fsResolver("")
+	}
+	if s.runnerClient == nil {
+		return runnerfs.NewLocal(""), nil
+	}
+	node, err := s.requestRunner(r)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.nodeClient(node)
+	if err != nil {
+		return nil, err
+	}
+	return runnerfs.NewRemote(client, ""), nil
 }
 
 // checkWorkspaceRunDir is the backend's defense-in-depth check of a stored

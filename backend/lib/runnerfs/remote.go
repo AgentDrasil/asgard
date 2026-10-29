@@ -322,3 +322,136 @@ func (r Remote) Remove(ctx context.Context, ref PathRef, recursive bool, request
 	})
 	return ToError(err)
 }
+
+var _ DirOps = Remote{}
+
+// Tree implements DirOps. It follows the runner's pages to the end.
+func (r Remote) Tree(ctx context.Context, req TreeRequest) (TreeResult, error) {
+	res := TreeResult{Entries: []TreeEntry{}}
+	token := req.PageToken
+	for {
+		resp, err := r.Client.Tree(ctx, &runnerpb.TreeRequest{
+			SessionId: r.ChatID, Path: req.Path, Scope: ScopeToProto(req.Scope),
+			RunDir: RunDirRef(r.ChatID, req.RunDir), Limit: int32(req.Limit), PageToken: token,
+		})
+		if err != nil {
+			return TreeResult{}, ToError(err)
+		}
+		res.Path = resp.GetPath()
+		for _, e := range resp.GetEntries() {
+			res.Entries = append(res.Entries, TreeEntry{Name: e.GetName(), Path: e.GetPath(), IsDir: e.GetIsDir(), Size: e.GetSize(), Ext: e.GetExt()})
+		}
+		token = resp.GetNextPageToken()
+		if token == "" || req.Limit > 0 {
+			// A caller that asks for a page limit pages itself.
+			res.NextPageToken = token
+			return res, nil
+		}
+	}
+}
+
+// Search implements DirOps.
+func (r Remote) Search(ctx context.Context, req SearchRequest) ([]SearchHit, error) {
+	resp, err := r.Client.Search(ctx, &runnerpb.SearchRequest{
+		SessionId: r.ChatID, Query: req.Query, Limit: int32(req.Limit), RunDir: RunDirRef(r.ChatID, req.RunDir),
+	})
+	if err != nil {
+		return nil, ToError(err)
+	}
+	hits := make([]SearchHit, 0, len(resp.GetFiles()))
+	for _, f := range resp.GetFiles() {
+		hits = append(hits, SearchHit{Path: f.GetPath(), Name: f.GetName(), Ext: f.GetExt(), Size: f.GetSize(), Scope: ScopeFromProto(f.GetScope())})
+	}
+	return hits, nil
+}
+
+// Subdirs implements DirOps. It follows the runner's pages to the end unless
+// the caller sets a page limit.
+func (r Remote) Subdirs(ctx context.Context, req SubdirsRequest) (SubdirsResult, error) {
+	res := SubdirsResult{Subdirs: []string{}}
+	token := req.PageToken
+	for {
+		resp, err := r.Client.Subdirs(ctx, &runnerpb.SubdirsRequest{Dir: req.Dir, Limit: int32(req.Limit), PageToken: token})
+		if err != nil {
+			return SubdirsResult{}, ToError(err)
+		}
+		res.Subdirs = append(res.Subdirs, resp.GetSubdirs()...)
+		if resp.GetGitRoot() != "" {
+			res.GitRoot = resp.GetGitRoot()
+		}
+		token = resp.GetNextPageToken()
+		if token == "" || req.Limit > 0 {
+			res.NextPageToken = token
+			return res, nil
+		}
+	}
+}
+
+// GitDiff implements DirOps.
+func (r Remote) GitDiff(ctx context.Context, req GitDiffRequest, yield func(GitDiffFile) bool) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st, err := r.Client.GitDiff(ctx, &runnerpb.GitDiffRequest{
+		SessionId: r.ChatID, Commit: req.Commit, RunDir: RunDirRef(r.ChatID, req.RunDir),
+	})
+	if err != nil {
+		return ToError(err)
+	}
+	for {
+		f, err := st.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return ToError(err)
+		}
+		if !yield(GitDiffFile{
+			OldPath: f.GetOldPath(), NewPath: f.GetNewPath(), Status: f.GetStatus(),
+			OldContent: f.GetOldContent(), NewContent: f.GetNewContent(), Hunks: f.GetHunks(),
+			ContentTruncated: f.GetContentTruncated(), HunksTruncated: f.GetHunksTruncated(),
+		}) {
+			return nil
+		}
+	}
+}
+
+// GitLog implements DirOps.
+func (r Remote) GitLog(ctx context.Context, runDir string, limit int) (GitLogResult, error) {
+	resp, err := r.Client.GitLog(ctx, &runnerpb.GitLogRequest{
+		SessionId: r.ChatID, Limit: int32(limit), RunDir: RunDirRef(r.ChatID, runDir),
+	})
+	if err != nil {
+		return GitLogResult{}, ToError(err)
+	}
+	res := GitLogResult{
+		Commits: []GitCommit{}, CurrentBranch: resp.GetCurrentBranch(), TrackingBranch: resp.GetTrackingBranch(),
+		Ahead: int(resp.GetAhead()), Behind: int(resp.GetBehind()), UnstashedCount: int(resp.GetUnstashedCount()),
+	}
+	for _, c := range resp.GetCommits() {
+		res.Commits = append(res.Commits, GitCommit{
+			Hash: c.GetHash(), ShortHash: c.GetShortHash(), Author: c.GetAuthor(), AuthorEmail: c.GetAuthorEmail(),
+			Date: c.GetDate(), RelativeDate: c.GetRelativeDate(), Refs: c.GetRefs(), Message: c.GetMessage(),
+		})
+	}
+	return res, nil
+}
+
+func (r Remote) gitOp(ctx context.Context, runDir, requestID string, call func(context.Context, *runnerpb.GitSessionRequest, ...grpc.CallOption) (*runnerpb.GitOpResponse, error)) (GitOpResult, error) {
+	resp, err := call(ctx, &runnerpb.GitSessionRequest{
+		SessionId: r.ChatID, RunDir: RunDirRef(r.ChatID, runDir), RequestId: requestID,
+	})
+	if err != nil {
+		return GitOpResult{}, ToError(err)
+	}
+	return GitOpResult{Success: resp.GetSuccess(), Output: resp.GetOutput(), Error: resp.GetError()}, nil
+}
+
+// GitPush implements DirOps.
+func (r Remote) GitPush(ctx context.Context, runDir, requestID string) (GitOpResult, error) {
+	return r.gitOp(ctx, runDir, requestID, r.Client.GitPush)
+}
+
+// GitPull implements DirOps.
+func (r Remote) GitPull(ctx context.Context, runDir, requestID string) (GitOpResult, error) {
+	return r.gitOp(ctx, runDir, requestID, r.Client.GitPull)
+}

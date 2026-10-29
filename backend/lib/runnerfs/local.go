@@ -30,6 +30,9 @@ type Local struct {
 	// ReadonlyDirs lists the readonly mount roots: they veto writes even when
 	// a writable root contains them (bwrap's --ro-bind over a --bind).
 	ReadonlyDirs func() []string
+	// GitExec, when set, runs every git invocation (see GitExecFunc); the
+	// runner always sets it so git executes inside a sandbox.
+	GitExec GitExecFunc
 }
 
 // NewLocal returns the Local FS of chatID with unrestricted run dirs (tests

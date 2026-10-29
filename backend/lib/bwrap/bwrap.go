@@ -628,6 +628,47 @@ func RunQuery(ctx context.Context, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// appendProxyArgs mounts the merged CA bundle and injects the protected proxy
+// environment (and the custom proxy env vars) into a sandbox.
+func appendProxyArgs(args []string, chatID string, proxyCfg ProxySandboxConfig) ([]string, error) {
+	cID := chatID
+	if cID == "" {
+		cID = "default"
+	}
+	mergedBundlePath := filepath.Join(paths.CABundleDir(cID), "merged-ca-certificates.crt")
+	if err := proxy.MergeCACert("/etc/ssl/certs/ca-certificates.crt", proxyCfg.CACert, mergedBundlePath); err != nil {
+		return nil, fmt.Errorf("merging CA cert bundle: %w", err)
+	}
+
+	args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/certs/ca-certificates.crt")
+	if _, err := os.Stat("/etc/ssl/cert.pem"); err == nil {
+		args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/cert.pem")
+	}
+
+	// Inject protected proxy and CA bundle environment variables
+	for _, k := range fakebash.ProtectedProxyEnvKeys {
+		switch k {
+		case "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy":
+			if proxyCfg.ProxyAddr != "" {
+				args = append(args, "--setenv", k, proxyCfg.ProxyAddr)
+			}
+		case "NO_PROXY", "no_proxy":
+			args = append(args, "--setenv", k, "localhost,127.0.0.1")
+		case "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE":
+			args = append(args, "--setenv", k, "/etc/ssl/certs/ca-certificates.crt")
+		}
+	}
+
+	// Inject custom proxy env vars (dummy secrets exposed to command sandbox)
+	for envKey, dummyVal := range proxyCfg.EnvVars {
+		if strings.TrimSpace(envKey) != "" {
+			log.Debug().Str("env_key", envKey).Str("masked_value", proxy.MaskSecret(dummyVal)).Msg("injecting proxy env into command sandbox")
+			args = append(args, "--setenv", envKey, dummyVal)
+		}
+	}
+	return args, nil
+}
+
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
 func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, allowCrossSession bool, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
 	home, err := os.UserHomeDir()
@@ -700,41 +741,9 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
 	if len(proxyOpts) > 0 && proxyOpts[0].Enabled {
-		proxyCfg := proxyOpts[0]
-		cID := chatID
-		if cID == "" {
-			cID = "default"
-		}
-		mergedBundlePath := filepath.Join(paths.CABundleDir(cID), "merged-ca-certificates.crt")
-		if err := proxy.MergeCACert("/etc/ssl/certs/ca-certificates.crt", proxyCfg.CACert, mergedBundlePath); err != nil {
-			return nil, fmt.Errorf("merging CA cert bundle: %w", err)
-		}
-
-		args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/certs/ca-certificates.crt")
-		if _, err := os.Stat("/etc/ssl/cert.pem"); err == nil {
-			args = append(args, "--ro-bind", mergedBundlePath, "/etc/ssl/cert.pem")
-		}
-
-		// Inject protected proxy and CA bundle environment variables
-		for _, k := range fakebash.ProtectedProxyEnvKeys {
-			switch k {
-			case "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy":
-				if proxyCfg.ProxyAddr != "" {
-					args = append(args, "--setenv", k, proxyCfg.ProxyAddr)
-				}
-			case "NO_PROXY", "no_proxy":
-				args = append(args, "--setenv", k, "localhost,127.0.0.1")
-			case "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE":
-				args = append(args, "--setenv", k, "/etc/ssl/certs/ca-certificates.crt")
-			}
-		}
-
-		// Inject custom proxy env vars (dummy secrets exposed to command sandbox)
-		for envKey, dummyVal := range proxyCfg.EnvVars {
-			if strings.TrimSpace(envKey) != "" {
-				log.Debug().Str("env_key", envKey).Str("masked_value", proxy.MaskSecret(dummyVal)).Msg("injecting proxy env into command sandbox")
-				args = append(args, "--setenv", envKey, dummyVal)
-			}
+		args, err = appendProxyArgs(args, chatID, proxyOpts[0])
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -748,4 +757,92 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 	cmd := exec.Command("bwrap", args...)
 	return cmd, nil
+}
+
+// GitSandboxSpec describes one sandboxed git invocation (see GitSandboxArgs).
+type GitSandboxSpec struct {
+	ChatID string
+	// WorkTreeSrc is the bind source of the repository: the runner passes
+	// /proc/self/fd/3 for an inherited directory fd opened beneath an allowed
+	// root, so nothing but that directory is reachable.
+	WorkTreeSrc string
+	// ReadWrite mounts the repository writable (pull); otherwise read-only.
+	ReadWrite bool
+	// Network keeps the network (push/pull) with the ssh-agent passthrough and
+	// the masking proxy; otherwise the network namespace is unshared.
+	Network bool
+	// Env are extra KEY=VALUE variables; the environment is otherwise cleared.
+	Env        []string
+	ConfigPath string
+	Proxy      ProxySandboxConfig
+	// Git are the git arguments (after the git binary).
+	Git []string
+}
+
+// GitRepoMount is where the repository appears inside the git sandbox.
+const GitRepoMount = "/repo"
+
+// GitSandboxArgs builds the bubblewrap arguments that run git on a single
+// repository directory: fresh pid/ipc/uts/cgroup namespaces, die-with-parent,
+// a cleared environment, no HOME contents besides the git config, the same
+// credential and proxy-config masks as agent command sandboxes, and the
+// network only when asked for.
+func GitSandboxArgs(spec GitSandboxSpec) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting user home directory: %w", err)
+	}
+	args := []string{"--clearenv", "--new-session"}
+	args, err = appendBaseSandboxArgs(args, home, spec.ChatID)
+	if err != nil {
+		return nil, err
+	}
+	if !spec.Network {
+		args = append(args, "--unshare-net")
+	}
+
+	// HOME is an empty tmpfs with only the git configuration visible.
+	args = append(args, "--tmpfs", home)
+	for _, p := range []string{filepath.Join(home, ".gitconfig"), filepath.Join(home, ".config", "git")} {
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+	if spec.Network {
+		args = appendSSHSandboxArgs(args, home)
+	}
+
+	bind := "--ro-bind"
+	if spec.ReadWrite {
+		bind = "--bind"
+	}
+	args = append(args, bind, spec.WorkTreeSrc, GitRepoMount, "--chdir", GitRepoMount)
+
+	args = appendConfigMaskArgs(args, spec.ConfigPath)
+	args = appendProxySensitiveMaskArgs(args, spec.Proxy.CAKey, spec.Proxy.ProxyConfigPath)
+	args = appendCrossSessionMaskArgs(args)
+	if spec.Network && spec.Proxy.Enabled {
+		args, err = appendProxyArgs(args, spec.ChatID, spec.Proxy)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, kv := range spec.Env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			args = append(args, "--setenv", k, v)
+		}
+	}
+	args = append(args, "--", "git")
+	return append(args, spec.Git...), nil
+}
+
+// CommandForGit returns the bwrap command running git per spec. The caller
+// passes the repository directory as the first extra file (fd 3 of bwrap).
+func CommandForGit(ctx context.Context, spec GitSandboxSpec) (*exec.Cmd, error) {
+	spec.WorkTreeSrc = "/proc/self/fd/3"
+	args, err := GitSandboxArgs(spec)
+	if err != nil {
+		return nil, err
+	}
+	return exec.CommandContext(ctx, "bwrap", args...), nil
 }

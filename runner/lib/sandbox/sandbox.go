@@ -10,13 +10,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 )
 
@@ -215,4 +219,23 @@ func (s *Sandbox) Close() {
 		s.shutdownProxy(s.pm)
 		s.pm = nil
 	}
+}
+
+// GitExec runs a git invocation inside a bubblewrap sandbox that holds only
+// the repository (see bwrap.CommandForGit), with the runner's credential and
+// proxy masking. It refuses while the sandbox setup is not healthy.
+func (s *Sandbox) GitExec(ctx context.Context, spec runnerfs.GitExecSpec) (*exec.Cmd, error) {
+	if err := s.Ready(); err != nil {
+		return nil, fmt.Errorf("sandbox not ready: %w", err)
+	}
+	conf := s.Conf()
+	cmd, err := bwrap.CommandForGit(ctx, bwrap.GitSandboxSpec{
+		ChatID: spec.ChatID, ReadWrite: spec.ReadWrite, Network: spec.Network, Env: spec.Env,
+		ConfigPath: conf.GetConfigPath(), Proxy: conf.SandboxProxyOptions(), Git: spec.Git,
+	})
+	if err != nil {
+		return nil, err
+	}
+	cmd.ExtraFiles = []*os.File{spec.WorkTree}
+	return cmd, nil
 }

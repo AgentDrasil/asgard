@@ -31,19 +31,27 @@ type Options struct {
 	// must lie in one of their run_dirs or writable mount_dirs, or in the
 	// chat's own tmp/session dirs; nothing else is reachable.
 	Agents func() ([]*agentspec.Agent, error)
+	// Shell is the terminal shell (empty: fish, bash or sh from PATH).
+	Shell string
+	// GitExec runs git invocations (the runner passes the sandboxed one); nil
+	// runs git directly (tests, development).
+	GitExec runnerfs.GitExecFunc
 }
 
 // Service implements runnerpb.RunnerServiceServer. RPCs that are not
 // implemented yet answer Unimplemented.
 type Service struct {
 	runnerpb.UnimplementedRunnerServiceServer
-	idem   *idemCache
-	agents func() ([]*agentspec.Agent, error)
+	idem    *idemCache
+	agents  func() ([]*agentspec.Agent, error)
+	shell   string
+	gitExec runnerfs.GitExecFunc
+	ttyd    ttydSessions
 }
 
 // New returns a Service.
 func New(opts Options) *Service {
-	return &Service{idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents}
+	return &Service{idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents, shell: opts.Shell, gitExec: opts.GitExec}
 }
 
 // grpcErr maps a runnerfs error onto a gRPC status.
@@ -97,7 +105,9 @@ func (s *Service) readonlyDirs() []string {
 }
 
 func (s *Service) fsFor(chatID string) runnerfs.Local {
-	return runnerfs.NewConfined(chatID, s.allowedRunDirs, s.readonlyDirs)
+	l := runnerfs.NewConfined(chatID, s.allowedRunDirs, s.readonlyDirs)
+	l.GitExec = s.gitExec
+	return l
 }
 
 // runDirString turns a DirRef into the run dir string Local interprets.

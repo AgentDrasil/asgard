@@ -163,4 +163,132 @@ type FS interface {
 	WriteFile(ctx context.Context, req WriteRequest, r io.Reader) (int64, error)
 	AppendFile(ctx context.Context, req AppendRequest) error
 	Remove(ctx context.Context, ref PathRef, recursive bool, requestID string) error
+	DirOps
+}
+
+// TreeRequest lists one directory. Limit 0 means DefaultTreeLimit.
+type TreeRequest struct {
+	RunDir    string
+	Path      string
+	Scope     string
+	Limit     int
+	PageToken string
+}
+
+// TreeEntry is one directory entry; Path is relative to the workspace (or
+// prefixed /tmp, /session when the namespace is not the run dir itself).
+type TreeEntry struct {
+	Name  string
+	Path  string
+	IsDir bool
+	Size  int64
+	Ext   string
+}
+
+// TreeResult is one page of a directory listing: directories first, then by
+// name. NextPageToken is empty on the last page.
+type TreeResult struct {
+	Entries       []TreeEntry
+	Path          string
+	NextPageToken string
+}
+
+// SearchRequest searches the workspace, tmp and session dirs by path
+// substring. Limit is clamped to 1..MaxSearchLimit (0: DefaultSearchLimit).
+type SearchRequest struct {
+	RunDir string
+	Query  string
+	Limit  int
+}
+
+// SearchHit is one matching file.
+type SearchHit struct {
+	Path  string
+	Name  string
+	Ext   string
+	Size  int64
+	Scope string // "workspace" | "tmp" | "session"
+}
+
+// SubdirsRequest lists the visible subdirectories of an absolute directory.
+type SubdirsRequest struct {
+	Dir       string
+	Limit     int
+	PageToken string
+}
+
+// SubdirsResult is one page of subdirectory names plus the enclosing git root.
+type SubdirsResult struct {
+	Subdirs       []string
+	GitRoot       string
+	NextPageToken string
+}
+
+// GitDiffRequest selects the working tree diff (Commit empty) or one commit.
+type GitDiffRequest struct {
+	RunDir string
+	Commit string
+}
+
+// GitDiffFile is one changed file. Old/New content are cut at MaxDiffSide
+// bytes (ContentTruncated) and the hunks at MaxDiffHunks (HunksTruncated).
+type GitDiffFile struct {
+	OldPath          string
+	NewPath          string
+	Status           string
+	OldContent       string
+	NewContent       string
+	Hunks            []string
+	ContentTruncated bool
+	HunksTruncated   bool
+}
+
+// GitCommit is one log entry.
+type GitCommit struct {
+	Hash, ShortHash, Author, AuthorEmail, Date, RelativeDate, Refs, Message string
+}
+
+// GitLogResult is the recent history plus branch state.
+type GitLogResult struct {
+	Commits        []GitCommit
+	CurrentBranch  string
+	TrackingBranch string
+	Ahead, Behind  int
+	UnstashedCount int
+}
+
+// GitOpResult is the outcome of push/pull; a failing git command is reported
+// here (Success false), not as an error.
+type GitOpResult struct {
+	Success bool
+	Output  string
+	Error   string
+}
+
+// Limits of the directory and git operations.
+const (
+	DefaultTreeLimit   = 5000
+	MaxTreeLimit       = 10000
+	DefaultSearchLimit = 50
+	MaxSearchLimit     = 100
+	DefaultSubdirLimit = 5000
+	// MaxDiffSide caps each side of a file diff; MaxDiffHunks caps the hunks
+	// of a file; MaxDiffFrame bounds a whole diff frame (the protocol's
+	// 12 MiB whole-message cap, with headroom for paths).
+	MaxDiffSide  = 4 << 20
+	MaxDiffHunks = 4 << 20
+	MaxDiffFrame = 11 << 20
+)
+
+// DirOps is the directory listing, search and git surface of a chat.
+type DirOps interface {
+	Tree(ctx context.Context, req TreeRequest) (TreeResult, error)
+	Search(ctx context.Context, req SearchRequest) ([]SearchHit, error)
+	// Subdirs needs no chat: dir is an absolute directory on the runner.
+	Subdirs(ctx context.Context, req SubdirsRequest) (SubdirsResult, error)
+	// GitDiff calls yield once per changed file; a false return stops early.
+	GitDiff(ctx context.Context, req GitDiffRequest, yield func(GitDiffFile) bool) error
+	GitLog(ctx context.Context, runDir string, limit int) (GitLogResult, error)
+	GitPush(ctx context.Context, runDir, requestID string) (GitOpResult, error)
+	GitPull(ctx context.Context, runDir, requestID string) (GitOpResult, error)
 }

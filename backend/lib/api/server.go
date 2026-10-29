@@ -25,7 +25,6 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
-	"github.com/AgentDrasil/asgard/backend/lib/ttyd"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/metrics"
@@ -48,7 +47,6 @@ type Server struct {
 	repo               *dbmodels.SessionRepository
 	workflowRunRepo    *dbmodels.WorkflowRunRepository
 	statusListeners    map[string][]*statusListener
-	ttydManager        *ttyd.Manager
 	workflowEngine     *workflow.Engine
 	cronManager        *trigger.WorkflowCronManager
 	eventHub           *SessionEventHub
@@ -265,11 +263,6 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		repo = dbmodels.NewSessionRepository(dbConn)
 	}
 
-	ttydMgr, err := ttyd.NewManager("")
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize ttyd manager: %w", err)
-	}
-
 	geminiKey := ""
 	if conf != nil {
 		geminiKey = conf.GeminiAPIKey
@@ -282,7 +275,6 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	s := &Server{
 		conf:            conf,
 		repo:            repo,
-		ttydManager:     ttydMgr,
 		eventHub:        NewSessionEventHub(),
 		ctx:             ctx,
 		cancel:          cancel,

@@ -77,7 +77,7 @@ func run() error {
 	})
 	client = conn.New(conn.Options{
 		Executor:      executor,
-		Service:       service.New(service.Options{Agents: remote.Agents}),
+		Service:       service.New(service.Options{Agents: remote.Agents, GitExec: sb.GitExec}),
 		Addr:          boot.Backend,
 		NodeID:        nodeID,
 		TLSConfig:     boot.TLSConfig,

@@ -234,7 +234,7 @@ func TestAttachmentsRoundTripRangesAndCaps(t *testing.T) {
 
 func TestUnimplementedRPCs(t *testing.T) {
 	cl, _ := startService(t, Options{})
-	_, err := cl.Tree(t.Context(), &runnerpb.TreeRequest{SessionId: chat})
+	_, err := cl.QueryQuota(t.Context(), &runnerpb.QueryQuotaRequest{})
 	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }
 
