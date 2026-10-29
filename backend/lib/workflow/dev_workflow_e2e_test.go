@@ -273,12 +273,16 @@ func runDevWorkflowE2E(t *testing.T, totalSteps int, verdictFor func(reviewN int
 	defer close(stop)
 	go func() {
 		replied := map[string]int{}
+		handled := 0
 		for {
 			select {
 			case <-stop:
 				return
 			case <-time.After(5 * time.Millisecond):
-				for _, req := range rec.all() {
+				all := rec.all()
+				for handled < len(all) {
+					req := all[handled]
+					handled++
 					n := replied[req.NodeID]
 					if n >= len(script[req.NodeID]) {
 						continue

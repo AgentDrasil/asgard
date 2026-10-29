@@ -50,7 +50,6 @@ func (t *ttydSessions) replace(key string, ses *ttydSession) {
 	t.mu.Unlock()
 	if old != nil {
 		old.kill()
-		<-old.done
 	}
 }
 
@@ -94,17 +93,20 @@ func (s *ttydSession) kill() {
 		case <-time.After(2 * time.Second):
 		}
 		signalSession(pid, s.alive(), s.marker, syscall.SIGKILL)
-		_ = s.cmd.Process.Kill()
+		if s.alive() {
+			_ = s.cmd.Process.Kill()
+		}
 	}()
 }
 
 // signalSession signals every process belonging to the terminal session.
 func signalSession(shellPid int, shellAlive bool, marker string, sig syscall.Signal) {
+	if shellAlive {
+		_ = syscall.Kill(-shellPid, sig)
+		_ = syscall.Kill(shellPid, sig)
+	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		if shellAlive {
-			_ = syscall.Kill(-shellPid, sig)
-		}
 		return
 	}
 	type proc struct {
