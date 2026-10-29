@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestExecute_AllowCrossSession_PropagatesToNodes(t *testing.T) {
 			engine := NewEngineWithRunner(runner)
 
 			res, err := engine.Execute(t.Context(), defn, RunContext{
-				SessionID:         "sess-cross-" + tt.name,
+				SessionID:         "sess-cross-" + strings.NewReplacer(" ", "-", "(", "", ")", "").Replace(tt.name),
 				RunDir:            t.TempDir(),
 				AllowCrossSession: tt.flag,
 			})

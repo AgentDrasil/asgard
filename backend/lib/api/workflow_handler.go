@@ -60,6 +60,7 @@ func (s *Server) wireAgentRunner(engine *workflow.Engine) {
 			sub.SetSessionResolver(s.resolveWorkflowDefinitionFor)
 		}
 	}
+	engine.SetFSResolver(s.chatFS)
 	if s.conf == nil {
 		return
 	}
@@ -113,11 +114,56 @@ func (s *Server) resolveWorkflowDefinitionFor(sessionID, name string) (*workflow
 }
 
 // runWorkflow executes a workflow agent synchronously, returning its settled status and summary output.
+// workflowRunDir picks the run dir of a workflow run: the explicit request
+// dir (or metadata run_dir), else the session's stored run dir, else the
+// agent's first configured run_dir. A runner-bound chat never falls back to
+// the backend's working directory: its run dir must pass the same check as
+// the workspace file API, and a run without any is refused.
+func (s *Server) workflowRunDir(chatID string, agent *agentspec.Agent, req TriggerMessageRequest) (string, error) {
+	runDir := req.RunDir
+	if runDir == "" {
+		if rd, ok := req.Metadata["run_dir"].(string); ok {
+			runDir = rd
+		}
+	}
+	explicit := runDir != ""
+	if runDir == "" && s.repo != nil && chatID != "" {
+		if session, _ := s.repo.GetSessionMeta(chatID); session != nil {
+			runDir = session.RunDir
+		}
+	}
+	if runDir == "" && len(agent.Config.RunDirs) > 0 {
+		runDir = agent.Config.RunDirs[0]
+	}
+	if s.runnerClient == nil {
+		if explicit {
+			return req.RunDir, nil
+		}
+		return runDir, nil
+	}
+	if runDir == "" {
+		return "", fmt.Errorf("workflow has no run dir: pass runDir or configure run_dirs on the agent")
+	}
+	if explicit {
+		return req.RunDir, nil
+	}
+	if code, msg := s.checkWorkspaceRunDir(chatID, runDir); code != 0 {
+		return "", fmt.Errorf("workflow run dir %q refused: %s", runDir, msg)
+	}
+	return runDir, nil
+}
+
 func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID string, req TriggerMessageRequest) (status string, output string, err error) {
 	s.persistIncomingWorkflowMessage(agent, chatID, req)
 	s.maybeGenerateWorkflowTitle(ctx, agent, chatID, req.Prompt)
 
 	agentID := agent.Config.ID
+	runDir, rdErr := s.workflowRunDir(chatID, agent, req)
+	if rdErr != nil {
+		s.emitWorkflowPreExecutionCleanup(chatID, agentID)
+		return "failed", "", rdErr
+	}
+	req.RunDir = runDir
 	if s.repo != nil && chatID != "" && agentID != "" {
 		if err := s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")

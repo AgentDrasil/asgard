@@ -386,8 +386,13 @@ func TestAgentRunner_SetAgents(t *testing.T) {
 func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 	t.Parallel()
 
-	tempDir := t.TempDir()
-	sessionDir := t.TempDir()
+	// The session dir lies inside the run dir: runnerfs confines paths to the
+	// run dir and the chat's own tmp/session dirs.
+	runDir := t.TempDir()
+	tempDir := filepath.Join(runDir, "tmp")
+	sessionDir := filepath.Join(runDir, "session")
+	require.NoError(t, os.MkdirAll(tempDir, 0o755))
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
 
 	validFile := filepath.Join(tempDir, "output.md")
 	require.NoError(t, os.WriteFile(validFile, []byte("# Valid Output"), 0644))
@@ -402,7 +407,7 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 	require.NoError(t, os.WriteFile(emptySessionFile, []byte(""), 0644))
 
 	nctx := &NodeContext{
-		RunDir:     tempDir,
+		RunDir:     runDir,
 		TmpDir:     tempDir,
 		SessionDir: sessionDir,
 		SessionID:  "sess-123",
@@ -459,7 +464,7 @@ func TestCheckRequiredOutputs_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			missing := checkRequiredOutputs(tt.requiredOutputs, nctx)
+			missing := checkRequiredOutputs(t.Context(), tt.requiredOutputs, nctx)
 			assert.Equal(t, tt.wantMissing, missing)
 		})
 	}

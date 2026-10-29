@@ -377,3 +377,43 @@ func TestLocalWriteThenReadRoundTripsForEveryPathForm(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalMkdir(t *testing.T) {
+	fs, ws, outside := confinedFS(t)
+
+	require.NoError(t, fs.Mkdir(t.Context(), wref(ws, "a/b/c"), "r1"))
+	assert.DirExists(t, filepath.Join(ws, "a", "b", "c"))
+	// Idempotent.
+	require.NoError(t, fs.Mkdir(t.Context(), wref(ws, "a/b/c"), "r1"))
+
+	// A file in the way is an error.
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "f"), nil, 0o644))
+	assert.Error(t, fs.Mkdir(t.Context(), wref(ws, "f/sub"), ""))
+
+	// Namespace dirs are created on demand, including the root itself.
+	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: ws, Path: "/tmp"}, ""))
+	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: ws, Path: "/session/x/y"}, ""))
+	assert.DirExists(t, filepath.Join(os.Getenv("HOME"), "asgard", "data", "sessions", testChat, "x", "y"))
+
+	// Confinement: escapes, symlinks and outside roots are refused.
+	require.NoError(t, os.Symlink(outside, filepath.Join(ws, "link")))
+	for _, ref := range []PathRef{
+		wref(ws, "../escape"),
+		wref(ws, "link/new"),
+		{RunDir: outside, Path: "new", Scope: "workspace"},
+		{RunDir: ws, Path: ""},
+	} {
+		assert.Error(t, fs.Mkdir(t.Context(), ref, ""), ref.Path)
+	}
+	assert.NoDirExists(t, filepath.Join(outside, "new"))
+	assert.NoDirExists(t, filepath.Join(filepath.Dir(ws), "escape"))
+}
+
+func TestLocalMkdirReadonlyVeto(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	rw, ro := t.TempDir(), t.TempDir()
+	fs := NewConfined(testChat, func(bool) []string { return []string{rw, ro} }, func() []string { return []string{ro} })
+	assert.Error(t, fs.Mkdir(t.Context(), PathRef{RunDir: ro, Path: "new", Scope: "workspace"}, ""))
+	assert.NoDirExists(t, filepath.Join(ro, "new"))
+	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: rw, Path: "new", Scope: "workspace"}, ""))
+}

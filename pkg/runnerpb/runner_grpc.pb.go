@@ -362,6 +362,7 @@ const (
 	RunnerService_WriteFile_FullMethodName     = "/asgard.runner.v1.RunnerService/WriteFile"
 	RunnerService_AppendFile_FullMethodName    = "/asgard.runner.v1.RunnerService/AppendFile"
 	RunnerService_Remove_FullMethodName        = "/asgard.runner.v1.RunnerService/Remove"
+	RunnerService_Mkdir_FullMethodName         = "/asgard.runner.v1.RunnerService/Mkdir"
 	RunnerService_RunCommand_FullMethodName    = "/asgard.runner.v1.RunnerService/RunCommand"
 	RunnerService_Cleanup_FullMethodName       = "/asgard.runner.v1.RunnerService/Cleanup"
 	RunnerService_QueryQuota_FullMethodName    = "/asgard.runner.v1.RunnerService/QueryQuota"
@@ -394,6 +395,8 @@ type RunnerServiceClient interface {
 	WriteFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteFileChunk, WriteFileResponse], error)
 	AppendFile(ctx context.Context, in *AppendFileRequest, opts ...grpc.CallOption) (*AppendFileResponse, error)
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (*RemoveResponse, error)
+	// Mkdir creates a directory and its missing parents (idempotent).
+	Mkdir(ctx context.Context, in *MkdirRequest, opts ...grpc.CallOption) (*MkdirResponse, error)
 	// RunCommand executes a workflow command node on the runner (optionally in
 	// the bwrap + fakebashd sandbox, which is configured by the runner).
 	RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RunCommandFrame], error)
@@ -595,6 +598,16 @@ func (c *runnerServiceClient) Remove(ctx context.Context, in *RemoveRequest, opt
 	return out, nil
 }
 
+func (c *runnerServiceClient) Mkdir(ctx context.Context, in *MkdirRequest, opts ...grpc.CallOption) (*MkdirResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MkdirResponse)
+	err := c.cc.Invoke(ctx, RunnerService_Mkdir_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *runnerServiceClient) RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RunCommandFrame], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &RunnerService_ServiceDesc.Streams[6], RunnerService_RunCommand_FullMethodName, cOpts...)
@@ -661,6 +674,8 @@ type RunnerServiceServer interface {
 	WriteFile(grpc.ClientStreamingServer[WriteFileChunk, WriteFileResponse]) error
 	AppendFile(context.Context, *AppendFileRequest) (*AppendFileResponse, error)
 	Remove(context.Context, *RemoveRequest) (*RemoveResponse, error)
+	// Mkdir creates a directory and its missing parents (idempotent).
+	Mkdir(context.Context, *MkdirRequest) (*MkdirResponse, error)
 	// RunCommand executes a workflow command node on the runner (optionally in
 	// the bwrap + fakebashd sandbox, which is configured by the runner).
 	RunCommand(*RunCommandRequest, grpc.ServerStreamingServer[RunCommandFrame]) error
@@ -720,6 +735,9 @@ func (UnimplementedRunnerServiceServer) AppendFile(context.Context, *AppendFileR
 }
 func (UnimplementedRunnerServiceServer) Remove(context.Context, *RemoveRequest) (*RemoveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Remove not implemented")
+}
+func (UnimplementedRunnerServiceServer) Mkdir(context.Context, *MkdirRequest) (*MkdirResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Mkdir not implemented")
 }
 func (UnimplementedRunnerServiceServer) RunCommand(*RunCommandRequest, grpc.ServerStreamingServer[RunCommandFrame]) error {
 	return status.Error(codes.Unimplemented, "method RunCommand not implemented")
@@ -967,6 +985,24 @@ func _RunnerService_Remove_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunnerService_Mkdir_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MkdirRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunnerServiceServer).Mkdir(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunnerService_Mkdir_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunnerServiceServer).Mkdir(ctx, req.(*MkdirRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RunnerService_RunCommand_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(RunCommandRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1056,6 +1092,10 @@ var RunnerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Remove",
 			Handler:    _RunnerService_Remove_Handler,
+		},
+		{
+			MethodName: "Mkdir",
+			Handler:    _RunnerService_Mkdir_Handler,
 		},
 		{
 			MethodName: "Cleanup",

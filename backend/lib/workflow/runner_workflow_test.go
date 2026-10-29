@@ -99,8 +99,11 @@ nodes:
 	})
 
 	t.Run("non-existent items file creates 0 byte output file and succeeds", func(t *testing.T) {
-		tmpDir := t.TempDir()
+		// The tmp dir lies inside the run dir: runnerfs confines paths to the
+		// run dir and the chat's own tmp/session dirs.
 		runDir := t.TempDir()
+		tmpDir := filepath.Join(runDir, "tmp")
+		require.NoError(t, os.MkdirAll(tmpDir, 0o755))
 		outputFilePath := filepath.Join(tmpDir, "out.jsonl")
 
 		parentYAML := fmt.Sprintf(`
@@ -151,8 +154,11 @@ nodes:
 	})
 
 	t.Run("empty items file creates 0 byte output file", func(t *testing.T) {
-		tmpDir := t.TempDir()
+		// The tmp dir lies inside the run dir: runnerfs confines paths to the
+		// run dir and the chat's own tmp/session dirs.
 		runDir := t.TempDir()
+		tmpDir := filepath.Join(runDir, "tmp")
+		require.NoError(t, os.MkdirAll(tmpDir, 0o755))
 		emptyItemsFile := filepath.Join(tmpDir, "empty.txt")
 		require.NoError(t, os.WriteFile(emptyItemsFile, []byte("   \n\n  \t\n"), 0644))
 		outputFilePath := filepath.Join(tmpDir, "out_empty.jsonl")

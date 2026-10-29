@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -53,7 +52,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 	}
 
 	if reply := e.takeHumanReply(rc, node.ID); reply != "" {
-		return humanReplyResult(nctx, reply)
+		return humanReplyResult(ctx, nctx, reply)
 	}
 
 	suspend := rc.SuspendHuman
@@ -71,7 +70,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 
 	// Collect artifact files referenced by the prompt so the host app can
 	// register them for the session and surface them to the frontend.
-	artifactPaths := ExtractArtifactPathsInSession(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir, nctx.SessionDir)
+	artifactPaths := ExtractArtifactPathsInSession(node.Prompt, prompt, nctx.TmpDir, nctx.RunDir, nctx.SessionDir, opsOf(ctx, nctx).isFile(ctx))
 	artifactViewerPaths := make([]string, 0, len(artifactPaths))
 	for _, p := range artifactPaths {
 		artifactViewerPaths = append(artifactViewerPaths, ViewerArtifactPathInSession(p, nctx.TmpDir, DefaultSessionDir(nctx.SessionID)))
@@ -210,7 +209,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 			Status:   workflowspec.StatusRunning,
 			Message:  fmt.Sprintf("node %s resumed with user reply", node.ID),
 		})
-		return humanReplyResult(nctx, reply)
+		return humanReplyResult(ctx, nctx, reply)
 	case <-ctx.Done():
 		return &workflowspec.NodeResult{
 			Status: workflowspec.StatusFailed,
@@ -221,7 +220,7 @@ func (e *Engine) runHumanNode(ctx context.Context, rc RunContext, nctx *NodeCont
 
 // humanReplyResult settles a human node from a user reply, persisting the
 // reply into the node's declared output_file artifact when configured.
-func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult {
+func humanReplyResult(ctx context.Context, nctx *NodeContext, reply string) *workflowspec.NodeResult {
 	result := &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded, Output: reply}
 	if nctx.Node.OutputFile == "" {
 		return result
@@ -235,11 +234,7 @@ func humanReplyResult(nctx *NodeContext, reply string) *workflowspec.NodeResult 
 		}
 		path = filepath.Join(baseDir, path)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		log.Warn().Err(err).Str("path", path).Msg("creating human output artifact dir failed")
-		return result
-	}
-	if err := os.WriteFile(path, []byte(reply), 0o644); err != nil {
+	if err := opsOf(ctx, nctx).write(ctx, path, []byte(reply)); err != nil {
 		log.Warn().Err(err).Str("path", path).Msg("writing human output artifact failed")
 		return result
 	}

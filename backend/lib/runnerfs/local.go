@@ -495,6 +495,31 @@ func (l Local) WriteFile(_ context.Context, req WriteRequest, r io.Reader) (int6
 	return writeBeneath(rootfd, rel, req, mode, r, l.guard())
 }
 
+// Mkdir implements FS.
+func (l Local) Mkdir(_ context.Context, ref PathRef, _ string) error {
+	if err := l.checkChat(); err != nil {
+		return err
+	}
+	if ref.Path == "" {
+		return Errf(CodeBadRequest, "path is required")
+	}
+	switch ref.Scope {
+	case "", "workspace", "tmp", "session":
+	default:
+		return Errf(CodeBadRequest, "invalid scope %q", ref.Scope)
+	}
+	rootfd, rel, _, err := l.resolvePath(ref.Path, ref.Scope, ref.RunDir, true, true)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(rootfd) }()
+	fd, err := mkdirAllBeneath(rootfd, rel, true, l.guard())
+	if err != nil {
+		return err
+	}
+	return unix.Close(fd)
+}
+
 // AppendFile implements FS.
 func (l Local) AppendFile(_ context.Context, req AppendRequest) error {
 	if len(req.Data) > MaxWriteSize {

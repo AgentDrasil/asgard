@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -495,7 +494,7 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 		}
 
 		// Quality gate: check required outputs
-		missing := checkRequiredOutputs(node.RequiredOutputs, nctx)
+		missing := checkRequiredOutputs(ctx, node.RequiredOutputs, nctx)
 		if len(missing) == 0 {
 			log.Info().
 				Str("session_id", nctx.SessionID).
@@ -588,12 +587,12 @@ func (r *agentRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec
 }
 
 // checkRequiredOutputs checks if all required output file paths exist and are non-empty.
-// Paths are interpolated against the node context and evaluated against the host filesystem.
+// Paths are interpolated against the node context and evaluated through the chat's runnerfs.
 // Note: Variable paths like ${tmp_dir}, ${session_dir} and ${run_dir} correspond to directories mounted
 // into the sandbox container. Missing paths are returned as sandbox-visible paths (e.g. /session/plan.md,
 // /tmp/output.md) so corrective notices sent to sandbox agents do not leak host physical paths.
 // Returns a slice of missing or empty file paths.
-func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string {
+func checkRequiredOutputs(ctx context.Context, requiredOutputs []string, nctx *NodeContext) []string {
 	if len(requiredOutputs) == 0 {
 		return nil
 	}
@@ -601,6 +600,7 @@ func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string 
 	if sessionDir == "" && nctx.SessionID != "" {
 		sessionDir = DefaultSessionDir(nctx.SessionID)
 	}
+	ops := opsOf(ctx, nctx)
 	var missing []string
 	for _, raw := range requiredOutputs {
 		interpolated := strings.TrimSpace(nctx.Interpolate(raw))
@@ -612,8 +612,8 @@ func checkRequiredOutputs(requiredOutputs []string, nctx *NodeContext) []string 
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(nctx.RunDir, path)
 		}
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() || info.Size() == 0 {
+		info, err := ops.stat(ctx, path)
+		if err != nil || !info.Exists || info.IsDir || info.Size == 0 {
 			missing = append(missing, ViewerArtifactPathInSession(path, nctx.TmpDir, sessionDir))
 		}
 	}

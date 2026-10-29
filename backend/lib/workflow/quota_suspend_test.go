@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,7 +129,7 @@ func startQuotaWorkflow(t *testing.T, quotaExhausted bool) *quotaTestHarness {
 		rec:     rec,
 		waited:  waited,
 		runID:   "qrun-" + strings.ReplaceAll(t.Name(), "/", "-"),
-		session: "qsess-" + t.Name(),
+		session: fmt.Sprintf("qsess-%d", time.Now().UnixNano()),
 		done:    make(chan struct{}),
 	}
 

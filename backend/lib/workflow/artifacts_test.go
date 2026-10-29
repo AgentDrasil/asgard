@@ -13,6 +13,12 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
+// osIsFile checks regular files straight on the test host's filesystem.
+func osIsFile(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
+
 func TestExtractArtifactPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	runDir := t.TempDir()
@@ -32,7 +38,7 @@ func TestExtractArtifactPaths(t *testing.T) {
 
 	// ${tmp_dir} references resolve even when interpolation already ran, and
 	// absolute paths under run_dir are picked up from the interpolated text.
-	got := ExtractArtifactPaths(raw, interpolated, tmpDir, runDir)
+	got := ExtractArtifactPaths(raw, interpolated, tmpDir, runDir, osIsFile)
 	assert.Equal(t, []string{planPath, reviewPath, srcPath}, got)
 
 	// Missing files are dropped; duplicates collapse; paths outside the
@@ -40,7 +46,7 @@ func TestExtractArtifactPaths(t *testing.T) {
 	got = ExtractArtifactPaths(
 		"see ${tmp_dir}/missing.txt and ${tmp_dir}/plan/plan.md and ${tmp_dir}/plan/plan.md",
 		"see /etc/passwd too",
-		tmpDir, runDir,
+		tmpDir, runDir, osIsFile,
 	)
 	assert.Equal(t, []string{planPath}, got)
 }
@@ -56,11 +62,11 @@ func TestExtractArtifactPathsWithSessionDir(t *testing.T) {
 	raw := "See report (${session_dir}/report.md) and tmp (${tmp_dir}/x.md)."
 	interpolated := "See report (" + reportPath + ") and tmp (" + filepath.Join(tmpDir, "x.md") + ")."
 
-	got := ExtractArtifactPathsInSession(raw, interpolated, tmpDir, runDir, sessionDir)
+	got := ExtractArtifactPathsInSession(raw, interpolated, tmpDir, runDir, sessionDir, osIsFile)
 	assert.Equal(t, []string{reportPath}, got)
 
 	// Absolute session path in interpolated text is also picked up.
-	got2 := ExtractArtifactPathsInSession("", "also "+reportPath, tmpDir, runDir, sessionDir)
+	got2 := ExtractArtifactPathsInSession("", "also "+reportPath, tmpDir, runDir, sessionDir, osIsFile)
 	assert.Equal(t, []string{reportPath}, got2)
 }
 

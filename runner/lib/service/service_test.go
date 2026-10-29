@@ -394,3 +394,23 @@ func TestIdemInFlightNotEvictedAndPanicRecovered(t *testing.T) {
 	_, err = c.do("m", "boom", func() (any, error) { return nil, nil })
 	assert.Equal(t, codes.Internal, status.Code(err), "panic result is cached and waiters are released")
 }
+
+func TestMkdirIsConfinedAndIdempotent(t *testing.T) {
+	cl, ws := startService(t, Options{})
+	outside := t.TempDir()
+	ref := func(rd, p string) *runnerpb.PathRef {
+		return &runnerpb.PathRef{SessionId: chat, Path: p, Scope: runnerpb.FileScope_FILE_SCOPE_WORKSPACE, RunDir: &runnerpb.DirRef{Scope: runnerpb.FileScope_FILE_SCOPE_ABSOLUTE, RelOrPath: rd}}
+	}
+	for range 2 {
+		_, err := cl.Mkdir(t.Context(), &runnerpb.MkdirRequest{Ref: ref(ws, "d/e"), RequestId: "m1"})
+		require.NoError(t, err)
+	}
+	assert.DirExists(t, filepath.Join(ws, "d", "e"))
+
+	_, err := cl.Mkdir(t.Context(), &runnerpb.MkdirRequest{Ref: ref(ws, "../esc")})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = cl.Mkdir(t.Context(), &runnerpb.MkdirRequest{Ref: ref(outside, "new")})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.NoDirExists(t, filepath.Join(outside, "new"))
+	assert.NoDirExists(t, filepath.Join(filepath.Dir(ws), "esc"))
+}

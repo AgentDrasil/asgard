@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -87,13 +87,6 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 			rc.RunDir = rd
 		}
 	}
-	if rc.RunDir != "" {
-
-		if err := validateRunDir(rc.RunDir); err != nil {
-			return nil, err
-		}
-	}
-
 	persistCh := make(chan WorkflowEvent, 256)
 	persistDone := make(chan struct{})
 	go func() {
@@ -138,13 +131,18 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 	return result, err
 }
 
-func validateRunDir(runDir string) error {
-	info, err := os.Stat(runDir)
-	if err != nil {
+// validateRunDir checks through the chat's FS that runDir is an existing
+// directory the chat may use (the runner enforces its allowlist).
+func validateRunDir(ctx context.Context, fs runnerfs.FS, runDir string) error {
+	_, err := fs.Tree(ctx, runnerfs.TreeRequest{RunDir: runDir, Path: ".", Scope: "workspace", Limit: 1})
+	switch runnerfs.CodeOf(err) {
+	case runnerfs.CodeNotFound:
 		return fmt.Errorf("run_dir %q does not exist: %w", runDir, err)
+	case runnerfs.CodeBadRequest:
+		return fmt.Errorf("run_dir %q is not a directory: %w", runDir, err)
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("run_dir %q is not a directory", runDir)
+	if err != nil {
+		return fmt.Errorf("run_dir %q: %w", runDir, err)
 	}
 	return nil
 }

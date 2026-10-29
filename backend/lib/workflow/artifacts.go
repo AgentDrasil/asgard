@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -36,15 +35,15 @@ func DefaultSessionDir(sessionID string) string {
 // ExtractArtifactPaths collects artifact file paths referenced by a human
 // node prompt: explicit `${tmp_dir}/...` / `${session_dir}/...` references
 // from the raw prompt plus absolute paths under the run's tmp/session/run
-// directories found in the interpolated prompt. Only paths that exist as
+// directories found in the interpolated prompt. Only paths that isFile reports as
 // regular files are returned, in order of first appearance.
-func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string) []string {
-	return ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, "")
+func ExtractArtifactPaths(rawPrompt, interpolatedPrompt, tmpDir, runDir string, isFile func(string) bool) []string {
+	return ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, "", isFile)
 }
 
 // ExtractArtifactPathsInSession extends ExtractArtifactPaths with the run's
 // session directory (sandbox /session).
-func ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, sessionDir string) []string {
+func ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir, sessionDir string, isFile func(string) bool) []string {
 	var ordered []string
 	seen := make(map[string]bool)
 	add := func(p string) {
@@ -71,7 +70,7 @@ func ExtractArtifactPathsInSession(rawPrompt, interpolatedPrompt, tmpDir, runDir
 
 	out := make([]string, 0, len(ordered))
 	for _, p := range ordered {
-		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+		if isFile(p) {
 			out = append(out, p)
 		}
 	}

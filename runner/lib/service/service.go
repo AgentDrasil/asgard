@@ -324,6 +324,22 @@ func (s *Service) AppendFile(ctx context.Context, req *runnerpb.AppendFileReques
 	return v.(*runnerpb.AppendFileResponse), nil
 }
 
+// Mkdir implements RunnerService.
+func (s *Service) Mkdir(ctx context.Context, req *runnerpb.MkdirRequest) (*runnerpb.MkdirResponse, error) {
+	ref, err := pathRefOf(req.GetRef())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+	v, err := s.idem.do("Mkdir", req.GetRequestId(), func() (any, error) {
+		err := s.fsFor(req.GetRef().GetSessionId()).Mkdir(ctx, ref, req.GetRequestId())
+		return &runnerpb.MkdirResponse{}, grpcErr(err)
+	})
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+	return v.(*runnerpb.MkdirResponse), nil
+}
+
 // Remove implements RunnerService.
 func (s *Service) Remove(ctx context.Context, req *runnerpb.RemoveRequest) (*runnerpb.RemoveResponse, error) {
 	ref, err := pathRefOf(req.GetRef())

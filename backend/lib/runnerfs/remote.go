@@ -323,6 +323,12 @@ func (r Remote) Remove(ctx context.Context, ref PathRef, recursive bool, request
 	return ToError(err)
 }
 
+// Mkdir implements FS.
+func (r Remote) Mkdir(ctx context.Context, ref PathRef, requestID string) error {
+	_, err := r.Client.Mkdir(ctx, &runnerpb.MkdirRequest{Ref: pathRef(r.ChatID, ref), RequestId: requestID})
+	return ToError(err)
+}
+
 var _ DirOps = Remote{}
 
 // Tree implements DirOps. It follows the runner's pages to the end.

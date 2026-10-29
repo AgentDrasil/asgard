@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
@@ -117,6 +118,8 @@ type Engine struct {
 	// once by the host application (lib/api).
 	store        RunStore
 	suspendHuman SuspendHumanFunc
+	// fsResolver yields a chat's file access (see SetFSResolver).
+	fsResolver FSResolver
 
 	// waitMu guards waitingByMsg, waitingByRun, executing, sessionRuns, replayPending,
 	// and replay message-to-run mappings.
@@ -219,6 +222,21 @@ func (e *Engine) CancelSession(sessionID string) int {
 // runs whose RunContext carries no Store.
 func (e *Engine) SetRunStore(store RunStore) {
 	e.store = store
+}
+
+// SetFSResolver wires how a chat's directories are reached (its runner's
+// RunnerService). Without it the host's own layout is used (development and
+// tests without a runner).
+func (e *Engine) SetFSResolver(resolve FSResolver) {
+	e.fsResolver = resolve
+}
+
+// chatFS returns the file access surface of a chat.
+func (e *Engine) chatFS(sessionID string) (runnerfs.FS, error) {
+	if e.fsResolver != nil {
+		return e.fsResolver(sessionID)
+	}
+	return runnerfs.NewLocal(sessionID), nil
 }
 
 // SetHumanSuspender wires the engine-level suspension delivery hook.
@@ -447,14 +465,6 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 	if rc.RunID == "" {
 		rc.RunID = uuid.NewV7().String()
 	}
-	if rc.RunDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("resolving default run dir: %w", err)
-		}
-		rc.RunDir = wd
-	}
-
 	// Make the run independently cancellable so the host can abort it even
 	// though callers may wrap the request context with WithoutCancel.
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -462,6 +472,32 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 	e.registerRunCancel(rc.SessionID, rc.RunID, cancelRun)
 	defer e.unregisterRunCancel(rc.SessionID, rc.RunID)
 	ctx = runCtx
+
+	// All of the run's file access goes through the chat's FS (its runner).
+	fs, err := e.chatFS(rc.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving chat file system: %w", err)
+	}
+	ctx = withFS(ctx, fs)
+
+	// The backend's working directory means nothing to a remote runner, so
+	// only the host-local FS defaults to it; with a runner an empty run dir
+	// stays empty (workspace-scoped operations then fail with "run dir is
+	// required"). The effective run dir is validated before anything runs.
+	if rc.RunDir == "" {
+		if _, local := fs.(runnerfs.Local); local {
+			wd, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("resolving default run dir: %w", err)
+			}
+			rc.RunDir = wd
+		}
+	}
+	if rc.RunDir != "" && !rc.Inline {
+		if err := validateRunDir(ctx, fs, rc.RunDir); err != nil {
+			return nil, err
+		}
+	}
 
 	store := rc.Store
 	if store == nil {
@@ -491,7 +527,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 		if !filepath.IsAbs(tmpDir) {
 			tmpDir = filepath.Join(rc.RunDir, tmpDir)
 		}
-		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		if err := newFileOps(ctx, rc.SessionID, tmpDir, "", rc.RunDir).ensureDir(ctx, tmpDir); err != nil {
 			return nil, fmt.Errorf("creating tmp dir: %w", err)
 		}
 	}
@@ -513,7 +549,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 		if !filepath.IsAbs(sessionDir) {
 			sessionDir = filepath.Join(rc.RunDir, sessionDir)
 		}
-		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		if err := newFileOps(ctx, rc.SessionID, "", sessionDir, rc.RunDir).ensureDir(ctx, sessionDir); err != nil {
 			return nil, fmt.Errorf("creating session dir: %w", err)
 		}
 	}

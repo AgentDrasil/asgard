@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -221,12 +221,12 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 	}
 
 	// Read items file
+	ops := opsOf(ctx, nctx)
 	var lines []string
 	fileExists := true
-	file, err := os.Open(itemsFilePath)
-	if err != nil {
-		fileExists = false
-	} else {
+	file, err := ops.open(ctx, itemsFilePath)
+	switch {
+	case err == nil:
 		defer func() { _ = file.Close() }()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -235,15 +235,22 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 				lines = append(lines, trimmed)
 			}
 		}
+	case runnerfs.CodeOf(err) != runnerfs.CodeNotFound && runnerfs.CodeOf(err) != runnerfs.CodeDenied:
+		// Only a missing (or deliberately inaccessible) items file means "no
+		// items"; any other error fails the node before the output file is
+		// touched.
+		return &workflowspec.NodeResult{
+			Status: workflowspec.StatusFailed,
+			Error:  fmt.Errorf("fanout: reading items file: %w", err),
+		}, nil
+	default:
+		fileExists = false
 	}
 
 	// Empty set handling
 	if !fileExists || len(lines) == 0 {
 		if outputFilePath != "" {
-			if err := os.MkdirAll(filepath.Dir(outputFilePath), 0o755); err != nil {
-				log.Warn().Err(err).Str("path", outputFilePath).Msg("creating empty output file dir failed")
-			}
-			if err := os.WriteFile(outputFilePath, []byte{}, 0o644); err != nil {
+			if err := ops.write(ctx, outputFilePath, nil); err != nil {
 				log.Warn().Err(err).Str("path", outputFilePath).Msg("writing empty output file failed")
 			}
 		}
@@ -429,10 +436,7 @@ func (r *SubWorkflowRunner) runFanout(ctx context.Context, nctx *NodeContext, no
 
 	// Write OutputFile if configured
 	if outputFilePath != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFilePath), 0o755); err != nil {
-			log.Warn().Err(err).Str("path", outputFilePath).Msg("creating fanout output dir failed")
-		}
-		if err := os.WriteFile(outputFilePath, []byte(aggregatedJSONL), 0o644); err != nil {
+		if err := ops.write(ctx, outputFilePath, []byte(aggregatedJSONL)); err != nil {
 			log.Warn().Err(err).Str("path", outputFilePath).Msg("writing fanout output file failed")
 		}
 	}

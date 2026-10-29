@@ -406,6 +406,8 @@ service RunnerService {
   rpc WriteFile(stream WriteFileChunk) returns (WriteFileResponse);
   rpc AppendFile(AppendFileRequest) returns (AppendFileResponse);
   rpc Remove(RemoveRequest) returns (RemoveResponse);
+  // Mkdir creates a directory and its missing parents (idempotent).
+  rpc Mkdir(MkdirRequest) returns (MkdirResponse);
   // RunCommand executes a workflow command node on the runner (optionally in
   // the bwrap + fakebashd sandbox, which is configured by the runner).
   rpc RunCommand(RunCommandRequest) returns (stream RunCommandFrame);
@@ -712,6 +714,17 @@ message RemoveRequest {
   string request_id = 3;
 }
 message RemoveResponse {}
+
+// MkdirRequest creates ref.path (a directory) beneath its confined root, with
+// missing parents. An existing directory is success.
+message MkdirRequest {
+  PathRef ref = 1;
+  // request_id makes this call idempotent: the runner keeps a bounded TTL
+  // cache of completed results and attaches retries to in-flight calls,
+  // keyed by request_id.
+  string request_id = 2;
+}
+message MkdirResponse {}
 
 message RunCommandRequest {
   string chat_id = 1;

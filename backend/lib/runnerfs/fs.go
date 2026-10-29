@@ -163,6 +163,9 @@ type FS interface {
 	WriteFile(ctx context.Context, req WriteRequest, r io.Reader) (int64, error)
 	AppendFile(ctx context.Context, req AppendRequest) error
 	Remove(ctx context.Context, ref PathRef, recursive bool, requestID string) error
+	// Mkdir creates the directory ref names and its missing parents. An
+	// existing directory is success. requestID makes retries idempotent.
+	Mkdir(ctx context.Context, ref PathRef, requestID string) error
 	DirOps
 }
 
