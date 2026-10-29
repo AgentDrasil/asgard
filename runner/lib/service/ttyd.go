@@ -82,8 +82,12 @@ func (s *ttydSession) kill() {
 		return
 	}
 	pid := s.cmd.Process.Pid
-	signalSession(pid, s.alive(), s.marker, syscall.SIGHUP)
+	// The /proc sweeps run off the caller's goroutine: they cost time
+	// proportional to the number of processes on the host, and the stream
+	// handler must not delay its final frame / status behind them.
+	aliveNow := s.alive()
 	go func() {
+		signalSession(pid, aliveNow, s.marker, syscall.SIGHUP)
 		select {
 		case <-s.done:
 			time.Sleep(time.Second)
@@ -103,7 +107,10 @@ func signalSession(shellPid int, shellAlive bool, marker string, sig syscall.Sig
 		}
 		return
 	}
-	type proc struct{ pid, ppid, sid int }
+	type proc struct {
+		pid, ppid, sid int
+		marked         bool // carries the session's environment marker
+	}
 	var procs []proc
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
@@ -125,7 +132,15 @@ func signalSession(shellPid int, shellAlive bool, marker string, sig syscall.Sig
 		}
 		ppid, _ := strconv.Atoi(f[1])
 		sid, _ := strconv.Atoi(f[3])
-		procs = append(procs, proc{pid, ppid, sid})
+		// A shell's own session and descendants are matched without the
+		// environment, so only read it for processes outside the session.
+		inSession := shellAlive && sid == shellPid
+		var marked bool
+		if !inSession {
+			env, _ := os.ReadFile("/proc/" + e.Name() + "/environ")
+			marked = bytes.Contains(env, []byte("\x00"+marker+"\x00")) || bytes.HasPrefix(env, []byte(marker+"\x00"))
+		}
+		procs = append(procs, proc{pid, ppid, sid, marked})
 	}
 	// A reaped shell's pid may be reused: then only marker/session matches count.
 	members := map[int]bool{}
@@ -138,8 +153,7 @@ func signalSession(shellPid int, shellAlive bool, marker string, sig syscall.Sig
 			if members[p.pid] {
 				continue
 			}
-			env, _ := os.ReadFile("/proc/" + strconv.Itoa(p.pid) + "/environ")
-			if shellAlive && p.sid == shellPid || members[p.ppid] || bytes.Contains(env, []byte("\x00"+marker+"\x00")) || bytes.HasPrefix(env, []byte(marker+"\x00")) {
+			if shellAlive && p.sid == shellPid || members[p.ppid] || p.marked {
 				members[p.pid] = true
 				changed = true
 			}
