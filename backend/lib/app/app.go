@@ -341,17 +341,6 @@ func New(opts ...Option) (*App, error) {
 		}
 	}
 
-	// 6. Initialize cleanup scheduler
-	var scheduler *cleanup.Scheduler
-	if database != nil {
-		repo := dbmodels.NewSessionRepository(database)
-		var err error
-		scheduler, err = cleanup.NewScheduler(repo)
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to initialize cleanup scheduler")
-		}
-	}
-
 	// 7. Initialize Proxy Manager if enabled (R7 degrade philosophy)
 	var proxyMgr *proxy.ProxyManager
 	if conf != nil && conf.IsProxyEnabled() {
@@ -394,6 +383,23 @@ func New(opts ...Option) (*App, error) {
 		if err := hub.Start(); err != nil {
 			log.Warn().Err(err).Msg("failed to start runner hub, entering degraded mode")
 			diagnostics.AddError("runner", err.Error())
+		}
+	}
+
+	// 7c. Initialize the cleanup scheduler. With a runner hub the chats'
+	// directories live on the runners, which the scheduler asks to clean up;
+	// without one it cleans this host's directories (development).
+	var scheduler *cleanup.Scheduler
+	if database != nil {
+		repo := dbmodels.NewSessionRepository(database)
+		var schedOpts []cleanup.SchedulerOption
+		if hub != nil {
+			schedOpts = append(schedOpts, cleanup.WithRunners(hub))
+		}
+		var err error
+		scheduler, err = cleanup.NewScheduler(repo, schedOpts...)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to initialize cleanup scheduler")
 		}
 	}
 

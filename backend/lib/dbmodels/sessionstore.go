@@ -133,8 +133,11 @@ func (s fsStore) WriteAtomic(path string, data []byte, skipIfUnchanged bool) err
 	return fsErr("write "+path, err)
 }
 
-// CleanOrphanTmp is a no-op remotely: the runner sweeps orphan temp files
-// itself (Cleanup orphan_tmp_sweeps, with the cleanup commit).
+// CleanOrphanTmp is a no-op remotely: the FS surface has no sweep operation and
+// a per-write RPC walk is not worth it. The leftover temp files of a crashed
+// atomic write are removed by the daily cleanup instead, which sends the
+// runner a Cleanup orphan_tmp_sweeps entry for every chat's workflows dir
+// (backend/lib/cleanup).
 func (s fsStore) CleanOrphanTmp(string) error { return nil }
 
 // IsUnavailable reports whether err means the chat's runner could not be

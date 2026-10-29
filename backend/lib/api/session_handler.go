@@ -19,7 +19,6 @@ type ChatSession struct {
 	Title             string                   `json:"title"`
 	CurrentAgent      string                   `json:"currentAgent"`
 	RunDir            string                   `json:"runDir"`
-	GitRoot           string                   `json:"gitRoot,omitempty"`
 	AllowCrossSession bool                     `json:"allowCrossSession"`
 	RunnerID          string                   `json:"runnerId,omitempty"`
 	IsRunning         bool                     `json:"isRunning"`
@@ -100,7 +99,6 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		ChatID:            chatID,
 		CurrentAgent:      req.CurrentAgent,
 		RunDir:            normalizedRunDir,
-		GitRoot:           findGitRoot(normalizedRunDir),
 		AllowCrossSession: req.AllowCrossSession,
 	})
 }
@@ -164,7 +162,6 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		Title:             sess.Title,
 		CurrentAgent:      sess.CurrentAgent,
 		RunDir:            sess.RunDir,
-		GitRoot:           findGitRoot(sess.RunDir),
 		AllowCrossSession: sess.AllowCrossSession,
 		RunnerID:          sess.RunnerNodeID,
 		IsRunning:         s.isSessionRunning(sess),
@@ -229,7 +226,6 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			Title:             sess.Title,
 			CurrentAgent:      sess.CurrentAgent,
 			RunDir:            sess.RunDir,
-			GitRoot:           findGitRoot(sess.RunDir),
 			AllowCrossSession: sess.AllowCrossSession,
 			RunnerID:          sess.RunnerNodeID,
 			IsRunning:         s.isSessionRunning(&sessCopy),

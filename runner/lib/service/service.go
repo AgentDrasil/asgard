@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
+	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
@@ -51,6 +52,9 @@ type Options struct {
 	// DetachGrace is how long a command survives without an attached stream
 	// before it is killed (default 30s); it lets a reset connection resume.
 	DetachGrace time.Duration
+	// Quota queries the runner's quota (default agentwrapper.GetQuota; tests
+	// substitute it).
+	Quota func(context.Context) (map[string][]llms.ModelUsage, error)
 }
 
 // Service implements runnerpb.RunnerServiceServer. RPCs that are not
@@ -68,6 +72,9 @@ type Service struct {
 	sandboxConf      func() *config.Config
 	allowUnsandboxed bool
 	detachGrace      time.Duration
+	// quota queries the runner's quota (agentwrapper.GetQuota; tests
+	// substitute it).
+	quota func(context.Context) (map[string][]llms.ModelUsage, error)
 	// runSandboxed runs a sandboxed command (cmdexec.RunSandboxed; tests
 	// substitute it).
 	runSandboxed func(context.Context, cmdexec.SandboxSpec, io.Writer, io.Writer) (int, error)
@@ -82,7 +89,7 @@ func New(opts Options) *Service {
 	return &Service{
 		idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents, shell: opts.Shell, gitExec: opts.GitExec,
 		cmds: newCmdRegistry(opts.IdemTTL, 0), ready: opts.Ready, sandboxConf: opts.SandboxConf,
-		allowUnsandboxed: opts.AllowUnsandboxed, detachGrace: grace, runSandboxed: cmdexec.RunSandboxed,
+		allowUnsandboxed: opts.AllowUnsandboxed, detachGrace: grace, quota: opts.Quota, runSandboxed: cmdexec.RunSandboxed,
 	}
 }
 

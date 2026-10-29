@@ -5,12 +5,14 @@ go 1.27.1
 require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/backend v0.0.0
+	github.com/AgentDrasil/asgard/llms v0.0.0
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0
+	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
 	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/yamux v0.1.2
@@ -37,10 +39,8 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/AgentDrasil/asgard/fakebash v0.0.0 // indirect
-	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0 // indirect
-	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1 // indirect

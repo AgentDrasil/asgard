@@ -232,12 +232,6 @@ func TestAttachmentsRoundTripRangesAndCaps(t *testing.T) {
 	assert.Equal(t, runnerfs.CodeNotFound, runnerfs.CodeOf(err))
 }
 
-func TestUnimplementedRPCs(t *testing.T) {
-	cl, _ := startService(t, Options{})
-	_, err := cl.QueryQuota(t.Context(), &runnerpb.QueryQuotaRequest{})
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
-
 func TestIdemCache(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1000, 0)

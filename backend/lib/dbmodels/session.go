@@ -340,6 +340,17 @@ func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, 
 
 // DeleteSession deletes a session by chat ID and removes its session directory.
 func (r *SessionRepository) DeleteSession(chatID string) error {
+	return r.deleteSession(chatID, true)
+}
+
+// DeleteSessionRecord deletes the chat's database rows only. The chat's
+// directories live on its runner, which the caller has asked (or will ask) to
+// remove them; the backend touches no local directory.
+func (r *SessionRepository) DeleteSessionRecord(chatID string) error {
+	return r.deleteSession(chatID, false)
+}
+
+func (r *SessionRepository) deleteSession(chatID string, removeLocal bool) error {
 	lock := r.getSessionLock(chatID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -358,7 +369,7 @@ func (r *SessionRepository) DeleteSession(chatID string) error {
 	// and the per-chat merged CA bundle directory (~/tmp/.asgard-ca/<chatID>).
 	// With a runner resolver those live on the runner and the backend touches
 	// no local directory: the runner's cleanup sweep removes them.
-	if r.fsResolver == nil {
+	if removeLocal && r.fsResolver == nil {
 		if dir := r.sessionDir(chatID); dir != "" {
 			_ = os.RemoveAll(dir)
 		}

@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/fakebash v0.0.0
+	github.com/AgentDrasil/asgard/llms v0.0.0
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
@@ -51,7 +52,6 @@ require (
 	filippo.io/age v1.3.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	filippo.io/hpke v0.4.0 // indirect
-	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/simplest v0.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3 // indirect

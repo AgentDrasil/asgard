@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +20,8 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
+	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	"github.com/AgentDrasil/asgard/pkg/version"
@@ -513,20 +517,147 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleQuota handles GET /api/quota.
+// QuotaAllResponse is the body of GET /api/quota without ?runner= when more
+// than one runner is online (or one answered with an error).
+type QuotaAllResponse struct {
+	// Runners maps an online runner's node id to its quota, keyed by CLI.
+	Runners map[string]map[string][]llms.ModelUsage `json:"runners"`
+	// Errors maps a runner node id to why its quota is missing.
+	Errors map[string]string `json:"errors,omitempty"`
+}
+
+// quotaTimeout bounds the quota query of one runner (it contacts providers).
+const quotaTimeout = 60 * time.Second
+
+// handleQuota handles GET /api/quota[?runner=<node_id>].
+//
+// The quota lives on the runners (their CLIs and credentials). Response shape,
+// chosen for backward compatibility with the web UI, which expects the former
+// flat object {"<cli>": [ModelUsage...]}:
+//   - ?runner=<node>: that runner's flat object. 404 for an unknown node, 503
+//     when it is offline, 502 when the runner failed to answer.
+//   - no parameter, exactly one online runner that answered: the same flat
+//     object (the single-runner deployment is unchanged).
+//   - no parameter otherwise: QuotaAllResponse, every online runner keyed by
+//     node id plus per-node errors. With no runner online it is 503.
+//
+// Without runners configured (development) the backend host is queried
+// directly, as before.
 func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
-	res, err := agentwrapper.GetQuota(r.Context())
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to fetch quota info")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	if s.runnerClient == nil {
+		res, err := agentwrapper.GetQuota(r.Context())
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to fetch quota info")
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(res)
+	if node := r.URL.Query().Get("runner"); node != "" {
+		known := s.runners == nil // without a registry the client lookup decides
+		if s.runners != nil {
+			for _, n := range s.runners.Nodes() {
+				if n.NodeID == node {
+					known = true
+					break
+				}
+			}
+		}
+		if !known {
+			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("unknown runner %q", node))
+			return
+		}
+		res, err := s.runnerQuota(r.Context(), node)
+		if err != nil {
+			status, msg := fsErrorStatus(err)
+			if status != http.StatusServiceUnavailable {
+				status = http.StatusBadGateway
+			}
+			writeJSONError(w, status, msg)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+
+	if s.runners == nil {
+		// No registry to enumerate (WithRunnerClient only): ask the
+		// configured client, which resolves the default runner.
+		res, err := s.runnerQuota(r.Context(), "")
+		if err != nil {
+			status, msg := fsErrorStatus(err)
+			if status != http.StatusServiceUnavailable {
+				status = http.StatusBadGateway
+			}
+			writeJSONError(w, status, msg)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+	var online []string
+	if s.runners != nil {
+		for _, n := range s.runners.Nodes() {
+			if n.Online {
+				online = append(online, n.NodeID)
+			}
+		}
+	}
+	if len(online) == 0 {
+		writeJSONError(w, http.StatusServiceUnavailable, "no runner is online")
+		return
+	}
+	type result struct {
+		res map[string][]llms.ModelUsage
+		err error
+	}
+	results := make([]result, len(online))
+	var wg sync.WaitGroup
+	for i, node := range online {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i].res, results[i].err = s.runnerQuota(r.Context(), node)
+		}()
+	}
+	wg.Wait()
+	all := QuotaAllResponse{Runners: map[string]map[string][]llms.ModelUsage{}, Errors: map[string]string{}}
+	for i, node := range online {
+		if results[i].err != nil {
+			log.Warn().Err(results[i].err).Str("runner", node).Msg("Failed to fetch runner quota")
+			all.Errors[node] = results[i].err.Error()
+			continue
+		}
+		all.Runners[node] = results[i].res
+	}
+	if len(online) == 1 && len(all.Errors) == 0 {
+		writeJSON(w, http.StatusOK, all.Runners[online[0]])
+		return
+	}
+	if len(all.Errors) == 0 {
+		all.Errors = nil
+	}
+	writeJSON(w, http.StatusOK, all)
+}
+
+// runnerQuota queries one runner's quota.
+func (s *Server) runnerQuota(ctx context.Context, node string) (map[string][]llms.ModelUsage, error) {
+	client, err := s.nodeClient(node)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
+	defer cancel()
+	res, err := runnerfs.QueryQuota(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		res = map[string][]llms.ModelUsage{}
+	}
+	return res, nil
 }
 
 // ConfigResponse represents the public configuration sent to web clients.
@@ -783,4 +914,10 @@ func (s *Server) cronAgents(global []*agentspec.Agent) []*agentspec.Agent {
 		}
 	}
 	return all
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(v)
 }

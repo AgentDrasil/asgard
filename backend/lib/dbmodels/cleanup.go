@@ -24,10 +24,66 @@ type CleanExpiredSessionsOptions struct {
 	SessionBase string
 }
 
-// CleanExpiredSessions deletes inactive, non-running sessions and their corresponding
+// ExpiredIdleSessions returns the sessions last updated before cutoff that are
+// not running (running ones are never cleaned up).
+func (r *SessionRepository) ExpiredIdleSessions(cutoff time.Time) ([]Session, error) {
+	var expired []Session
+	if err := r.db.Where("updated_at < ?", cutoff).Find(&expired).Error; err != nil {
+		return nil, fmt.Errorf("query expired sessions: %w", err)
+	}
+	idle := expired[:0]
+	for _, sess := range expired {
+		if sess.IsRunning() {
+			log.Info().Str("chatID", sess.ChatID).Msg("Skipping cleanup for active running session")
+			continue
+		}
+		idle = append(idle, sess)
+	}
+	return idle, nil
+}
+
+// AllChatIDs lists every chat id in the database: the keep set of the runners'
+// orphan sweeps.
+func (r *SessionRepository) AllChatIDs() ([]string, error) {
+	var ids []string
+	if err := r.db.Model(&Session{}).Pluck("chat_id", &ids).Error; err != nil {
+		return nil, fmt.Errorf("list chat ids: %w", err)
+	}
+	return ids, nil
+}
+
+// WorkflowChatsByRunner maps each runner node to the chats bound to it that
+// have workflow runs (their offloaded files live in <session>/workflows on
+// that runner).
+func (r *SessionRepository) WorkflowChatsByRunner() (map[string][]string, error) {
+	if !r.db.Migrator().HasTable(&WorkflowRun{}) {
+		return nil, nil
+	}
+	var rows []struct {
+		RunnerNodeID string
+		ChatID       string
+	}
+	err := r.db.Table("sessions").
+		Select("DISTINCT sessions.runner_node_id AS runner_node_id, sessions.chat_id AS chat_id").
+		Joins("JOIN workflow_runs ON workflow_runs.session_id = sessions.chat_id").
+		Where("sessions.runner_node_id <> ''").Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list workflow chats: %w", err)
+	}
+	out := make(map[string][]string)
+	for _, row := range rows {
+		out[row.RunnerNodeID] = append(out[row.RunnerNodeID], row.ChatID)
+	}
+	return out, nil
+}
+
+// CleanExpiredSessions is the runner-less cleanup: it deletes inactive, non-running sessions and their corresponding
 // session directories (~/asgard/data/tmp/<chatID> and
 // ~/asgard/data/sessions/<chatID>, plus the per-chat merged CA bundle dir
-// ~/asgard/data/tmp/.asgard-ca/<chatID>) older than cutoff.
+// ~/asgard/data/tmp/.asgard-ca/<chatID>) older than cutoff on THIS host. Only
+// the runner-less (development) setup uses it: with runners configured the
+// directories live on the runners and backend/lib/cleanup asks them to clean
+// up (Cleanup RPC) instead of touching any local directory.
 func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOptions) error {
 	var expiredSessions []Session
 	if err := r.db.Where("updated_at < ?", opts.Cutoff).Find(&expiredSessions).Error; err != nil {
