@@ -86,7 +86,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	var session *dbmodels.Session
 	if e.repo != nil {
 		var err error
-		session, err = e.repo.GetSession(chatID)
+		session, err = e.repo.GetSessionMeta(chatID)
 		if err != nil {
 			return "", fmt.Errorf("failed to get session: %w", err)
 		}

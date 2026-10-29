@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -172,16 +173,18 @@ func DecodeIntMap(raw string) (map[string]int, error) {
 	return m, nil
 }
 
-// workflowRunDir returns the absolute directory for a workflow run under sessionDir.
-func workflowRunDir(sessionDir, runID string) string {
-	return filepath.Join(sessionDir, "workflows", runID)
-}
-
 // atomicWriteFile writes data to targetPath via a unique temporary file with fsync and rename.
 // If targetPath already exists and its content is identical to data, it skips writing to avoid write amplification.
 func atomicWriteFile(targetPath string, data []byte) error {
-	if existing, err := os.ReadFile(targetPath); err == nil && bytes.Equal(existing, data) {
-		return nil
+	return atomicWrite(targetPath, data, true)
+}
+
+// atomicWrite is atomicWriteFile with the identical-content skip optional.
+func atomicWrite(targetPath string, data []byte, skipIfUnchanged bool) error {
+	if skipIfUnchanged {
+		if existing, err := os.ReadFile(targetPath); err == nil && bytes.Equal(existing, data) {
+			return nil
+		}
 	}
 
 	dir := filepath.Dir(targetPath)
@@ -258,30 +261,31 @@ func isWithinDir(dir, path string) bool {
 // WriteOffloadedFiles offloads DAGSpec, Input, and node outputs to the filesystem under sessionDir/workflows/runID/.
 // It writes files atomically (.tmp + Sync + Rename) and returns the paths and pruned NodeStates (Output cleared).
 func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states map[string]NodeState) (dagPath, inPath string, offloadedStates map[string]NodeState, err error) {
+	return writeOffloadedFiles(dirStore{sessionDir}, runID, dagSpec, input, states)
+}
+
+func writeOffloadedFiles(store sessionStore, runID string, dagSpec, input string, states map[string]NodeState) (dagPath, inPath string, offloadedStates map[string]NodeState, err error) {
 	safeRunID := filepath.Clean(runID)
 	if safeRunID == "." || safeRunID == ".." || strings.Contains(safeRunID, "/") || strings.Contains(safeRunID, "\\") {
 		return "", "", nil, fmt.Errorf("invalid run id %q for offloaded path", runID)
 	}
 
-	runDir := workflowRunDir(sessionDir, safeRunID)
-	_ = CleanOrphanTmpFiles(runDir)
-	nodesDir := filepath.Join(runDir, "nodes")
-	if err := os.MkdirAll(nodesDir, 0755); err != nil {
-		return "", "", nil, fmt.Errorf("create run nodes dir: %w", err)
-	}
+	runDir := path.Join(store.Root(), "workflows", safeRunID)
+	_ = store.CleanOrphanTmp(runDir)
+	nodesDir := path.Join(runDir, "nodes")
 
 	// 1. Offload DAGSpec
 	if dagSpec != "" {
-		dagPath = filepath.Join(runDir, "dag_spec.yaml")
-		if err := atomicWriteFile(dagPath, []byte(dagSpec)); err != nil {
+		dagPath = path.Join(runDir, "dag_spec.yaml")
+		if err := store.WriteAtomic(dagPath, []byte(dagSpec), true); err != nil {
 			return "", "", nil, fmt.Errorf("write offloaded dag_spec: %w", err)
 		}
 	}
 
 	// 2. Offload Input
 	if input != "" {
-		inPath = filepath.Join(runDir, "input.txt")
-		if err := atomicWriteFile(inPath, []byte(input)); err != nil {
+		inPath = path.Join(runDir, "input.txt")
+		if err := store.WriteAtomic(inPath, []byte(input), true); err != nil {
 			return "", "", nil, fmt.Errorf("write offloaded input: %w", err)
 		}
 	}
@@ -297,8 +301,8 @@ func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states
 				return "", "", nil, fmt.Errorf("invalid node id %q for offloaded path", nodeID)
 			}
 
-			outPath := filepath.Join(nodesDir, safeNodeID+".log")
-			if err := atomicWriteFile(outPath, []byte(cloned.Output)); err != nil {
+			outPath := path.Join(nodesDir, safeNodeID+".log")
+			if err := store.WriteAtomic(outPath, []byte(cloned.Output), true); err != nil {
 				return "", "", nil, fmt.Errorf("write offloaded node output %s: %w", safeNodeID, err)
 			}
 			cloned.OutputPath = outPath
@@ -313,13 +317,17 @@ func WriteOffloadedFiles(sessionDir, runID string, dagSpec, input string, states
 // HydrateRun populates offloaded fields (DAGSpec, Input, and optionally node Outputs) from files.
 // Returns ErrOffloadedFileMissing if an expected file is missing.
 func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
+	return hydrateRun(dirStore{}, run, hydrateNodeOutput)
+}
+
+func hydrateRun(store sessionStore, run *WorkflowRun, hydrateNodeOutput bool) error {
 	if run == nil {
 		return nil
 	}
 
 	// 1. Hydrate DAGSpec
 	if run.DAGSpecPath != "" {
-		data, err := os.ReadFile(run.DAGSpecPath)
+		data, err := store.Read(run.DAGSpecPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("%w: %s", ErrOffloadedFileMissing, run.DAGSpecPath)
@@ -331,7 +339,7 @@ func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
 
 	// 2. Hydrate Input
 	if run.InputPath != "" {
-		data, err := os.ReadFile(run.InputPath)
+		data, err := store.Read(run.InputPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("%w: %s", ErrOffloadedFileMissing, run.InputPath)
@@ -353,7 +361,7 @@ func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
 		// the whole run load.
 		nodesDir := ""
 		if run.DAGSpecPath != "" {
-			nodesDir = filepath.Join(filepath.Dir(run.DAGSpecPath), "nodes")
+			nodesDir = path.Join(path.Dir(run.DAGSpecPath), "nodes")
 		}
 		updated := false
 		for nodeID, state := range states {
@@ -366,7 +374,7 @@ func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
 				updated = true
 				continue
 			}
-			data, err := os.ReadFile(state.OutputPath)
+			data, err := store.Read(state.OutputPath)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("%w: node %s: %s", ErrOffloadedFileMissing, nodeID, state.OutputPath)
@@ -392,6 +400,7 @@ func HydrateRun(run *WorkflowRun, hydrateNodeOutput bool) error {
 type WorkflowRunRepository struct {
 	db             *gorm.DB
 	sessionDirFunc func(sessionID string) string
+	fsResolver     FSResolver
 }
 
 func NewWorkflowRunRepository(db *gorm.DB) *WorkflowRunRepository {
@@ -406,11 +415,36 @@ func (r *WorkflowRunRepository) SetSessionDirFunc(fn func(sessionID string) stri
 	r.sessionDirFunc = fn
 }
 
+// SetFSResolver routes the offloaded files (dag spec, input, node logs) of
+// every run through the chat's runner instead of a local session directory.
+func (r *WorkflowRunRepository) SetFSResolver(fn FSResolver) { r.fsResolver = fn }
+
+// store returns the offloaded-file store of a session.
+func (r *WorkflowRunRepository) store(sessionID string) (sessionStore, error) {
+	if r.fsResolver != nil {
+		fs, err := r.fsResolver(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		return fsStore{fs}, nil
+	}
+	return dirStore{r.sessionDir(sessionID)}, nil
+}
+
 func (r *WorkflowRunRepository) sessionDir(sessionID string) string {
 	if r.sessionDirFunc != nil {
 		return r.sessionDirFunc(sessionID)
 	}
 	return defaultSessionDir(sessionID)
+}
+
+// hydrate loads the offloaded files of a run from its chat's store.
+func (r *WorkflowRunRepository) hydrate(run *WorkflowRun) error {
+	store, err := r.store(run.SessionID)
+	if err != nil {
+		return err
+	}
+	return hydrateRun(store, run, true)
 }
 
 // SaveRun offloads large content to files and saves the metadata and paths to the DB.
@@ -419,7 +453,10 @@ func (r *WorkflowRunRepository) SaveRun(run *WorkflowRun) error {
 		return nil
 	}
 
-	sessionDir := r.sessionDir(run.SessionID)
+	store, err := r.store(run.SessionID)
+	if err != nil {
+		return err
+	}
 
 	// Decode existing states if any
 	states, err := DecodeNodeStates(run.NodeStates)
@@ -428,7 +465,7 @@ func (r *WorkflowRunRepository) SaveRun(run *WorkflowRun) error {
 	}
 
 	// Offload to files
-	dagPath, inPath, offloadedStates, err := WriteOffloadedFiles(sessionDir, run.RunID, run.DAGSpec, run.Input, states)
+	dagPath, inPath, offloadedStates, err := writeOffloadedFiles(store, run.RunID, run.DAGSpec, run.Input, states)
 	if err != nil {
 		return fmt.Errorf("offload workflow run files: %w", err)
 	}
@@ -492,7 +529,7 @@ func (r *WorkflowRunRepository) GetRun(runID string) (*WorkflowRun, error) {
 	if err != nil || run == nil {
 		return nil, err
 	}
-	if err := HydrateRun(run, true); err != nil {
+	if err := r.hydrate(run); err != nil {
 		return nil, err
 	}
 	return run, nil
@@ -512,7 +549,7 @@ func (r *WorkflowRunRepository) FindWaitingHumanBySession(sessionID string) (*Wo
 		}
 		return nil, err
 	}
-	if err := HydrateRun(&run, true); err != nil {
+	if err := r.hydrate(&run); err != nil {
 		return nil, err
 	}
 	return &run, nil
@@ -531,7 +568,7 @@ func (r *WorkflowRunRepository) FindWaitingHumansBySession(sessionID string) ([]
 		return nil, err
 	}
 	for _, run := range runs {
-		if err := HydrateRun(run, true); err != nil {
+		if err := r.hydrate(run); err != nil {
 			return nil, err
 		}
 	}
@@ -569,7 +606,7 @@ func (r *WorkflowRunRepository) FindWaitingHumanByMessageID(messageID string) (*
 		Where("suspended_message_id = ? AND status = ?", messageID, WorkflowStatusWaitingHuman).
 		First(&run).Error
 	if err == nil {
-		if err := HydrateRun(&run, true); err != nil {
+		if err := r.hydrate(&run); err != nil {
 			return nil, err
 		}
 		return &run, nil
@@ -587,7 +624,7 @@ func (r *WorkflowRunRepository) FindWaitingHumanByMessageID(messageID string) (*
 		}
 		return nil, err
 	}
-	if err := HydrateRun(&run, true); err != nil {
+	if err := r.hydrate(&run); err != nil {
 		return nil, err
 	}
 	return &run, nil
@@ -608,8 +645,11 @@ func (r *WorkflowRunRepository) RefreshSuspension(runID string, states map[strin
 		return gorm.ErrRecordNotFound
 	}
 
-	sessionDir := r.sessionDir(run.SessionID)
-	_, _, offloadedStates, err := WriteOffloadedFiles(sessionDir, runID, "", "", states)
+	store, err := r.store(run.SessionID)
+	if err != nil {
+		return err
+	}
+	_, _, offloadedStates, err := writeOffloadedFiles(store, runID, "", "", states)
 	if err != nil {
 		return fmt.Errorf("offload states during refresh suspension: %w", err)
 	}

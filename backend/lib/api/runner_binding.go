@@ -87,7 +87,7 @@ func (e *bindingError) Error() string { return e.msg }
 func (s *Server) resolveRunner(chatID, requested string) (runnerID string, bind bool, err *bindingError) {
 	stored := ""
 	if s.repo != nil && chatID != "" {
-		sess, serr := s.repo.GetSession(chatID)
+		sess, serr := s.repo.GetSessionMeta(chatID)
 		if serr != nil {
 			return "", false, &bindingError{http.StatusInternalServerError, "failed to query session: " + serr.Error()}
 		}
@@ -169,7 +169,7 @@ func (s *Server) chatRunner(chatID string) (string, error) {
 	if s.repo == nil {
 		return "", errors.New("database unavailable: cannot determine the chat's runner")
 	}
-	sess, err := s.repo.GetSession(chatID)
+	sess, err := s.repo.GetSessionMeta(chatID)
 	if err != nil {
 		return "", fmt.Errorf("loading chat %s: %w", chatID, err)
 	}
@@ -185,7 +185,7 @@ func (s *Server) sessionAgents(chatID string) ([]*agentspec.Agent, bool) {
 	if s.repo == nil {
 		return nil, false
 	}
-	sess, err := s.repo.GetSession(chatID)
+	sess, err := s.repo.GetSessionMeta(chatID)
 	if err != nil || sess == nil || sess.RunnerNodeID == "" {
 		return nil, false
 	}
@@ -211,7 +211,7 @@ func (s *Server) chatRunnerState(chatID string) (offline bool, gen uint64) {
 	if !s.bindingEnforced() || s.repo == nil {
 		return false, 0
 	}
-	sess, err := s.repo.GetSession(chatID)
+	sess, err := s.repo.GetSessionMeta(chatID)
 	if err != nil || sess == nil || sess.RunnerNodeID == "" {
 		return false, 0
 	}
@@ -270,6 +270,9 @@ func (s *Server) RunnerOnline(nodeID string) {
 	if s == nil || s.repo == nil {
 		return
 	}
+	// Quota suspensions orphaned by a backend restart could not be retired
+	// while this runner (and so the transcript) was offline.
+	s.repo.ResetPendingQuotaSuspensions(nodeID)
 	chatIDs, err := s.repo.ChatIDsForRunnerWithQueue(nodeID)
 	if err != nil {
 		log.Error().Err(err).Str("runner", nodeID).Msg("failed to list queued chats of runner")
@@ -285,7 +288,7 @@ func (s *Server) RunnerOnline(nodeID string) {
 // resumeQueuedChat starts the queue consumer of a chat with lingering queued
 // messages, unless one is running already.
 func (s *Server) resumeQueuedChat(chatID string) {
-	sess, err := s.repo.GetSession(chatID)
+	sess, err := s.repo.GetSessionMeta(chatID)
 	if err != nil || sess == nil || sess.IsArchived {
 		return
 	}

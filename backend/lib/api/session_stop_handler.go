@@ -219,7 +219,7 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 	// may carry no agentID; fall back to the session's current agent so the
 	// frontend can still attribute the status change.
 	if statusPayload["agent"] == "" && s.repo != nil {
-		if sess, err := s.repo.GetSession(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
+		if sess, err := s.repo.GetSessionMeta(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
 			statusPayload["agent"] = sess.CurrentAgent
 		}
 	}

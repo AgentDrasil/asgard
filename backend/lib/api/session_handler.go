@@ -126,8 +126,11 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 
 	sess, err := s.repo.GetSession(id)
 	if err != nil {
+		// The transcript lives on the chat's runner: an offline runner is a
+		// 503 and an unbound chat a 400, like the other runner-backed endpoints.
+		status, _ := fsErrorStatus(err)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query session: " + err.Error()})
 		return
 	}

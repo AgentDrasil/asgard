@@ -291,6 +291,17 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		}
 	}
 
+	if s.runnerClient != nil || s.fsResolver != nil {
+		// A runner-bound chat's transcript lives on its runner.
+		if repo != nil {
+			repo.SetFSResolver(s.chatFS)
+		}
+	}
+
+	if repo != nil && s.runners != nil {
+		go s.retryPendingQuotaResets()
+	}
+
 	if s.dispatcher == nil {
 		// Without a runner hub (tests, embedded use) runs execute in-process.
 		s.dispatcher = dispatch.NewLocal(s.conf)
@@ -353,6 +364,9 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 			log.Warn().Err(err).Msg("failed to reset orphaned quota suspensions on startup")
 		}
 		wfRepo := dbmodels.NewWorkflowRunRepository(dbConn)
+		if s.runnerClient != nil || s.fsResolver != nil {
+			wfRepo.SetFSResolver(s.chatFS)
+		}
 		s.workflowRunRepo = wfRepo
 		if err := wfRepo.ResetAllRunningWorkflows(); err != nil {
 			log.Warn().Err(err).Msg("failed to reset stale running workflows on startup")
@@ -810,4 +824,27 @@ func (s *Server) isSessionRunning(sess *dbmodels.Session) bool {
 		}
 	}
 	return false
+}
+
+// quotaRetryInterval paces the retry of deferred quota resets.
+var quotaRetryInterval = 60 * time.Second
+
+// retryPendingQuotaResets retries the quota resets that could not finish
+// (transient runner errors while the runner stayed connected, so no
+// RunnerOnline event follows) for every online runner, until shutdown.
+func (s *Server) retryPendingQuotaResets() {
+	t := time.NewTicker(quotaRetryInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+			for _, id := range s.repo.PendingQuotaRunners() {
+				if s.runnerOnline(id) {
+					s.repo.ResetPendingQuotaSuspensions(id)
+				}
+			}
+		}
+	}
 }

@@ -99,7 +99,7 @@ func (s *Server) askUser(ctx context.Context, req AskUserRequest) (string, error
 	if s.repo != nil {
 		agentName := req.AgentName
 		if agentName == "" {
-			session, _ := s.repo.GetSession(req.ChatID)
+			session, _ := s.repo.GetSessionMeta(req.ChatID)
 			if session != nil {
 				agentName = session.CurrentAgent
 			}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -128,6 +129,11 @@ type Session struct {
 	// AllowCrossSession allows accessing host ~/tmp, ~/data, and database files inside sandbox
 	AllowCrossSession bool `gorm:"column:allow_cross_session;default:false" json:"allowCrossSession"`
 
+	// QuotaResetIDs is the journal of an in-progress orphaned-quota reset: a
+	// JSON list of the quota ask messages being retired. It is non-empty only
+	// between the steps of the reset (see resetQuotaSuspension).
+	QuotaResetIDs *string `gorm:"column:quota_reset_ids;type:text" json:"-"`
+
 	IsArchived bool `gorm:"default:false"`
 
 	CreatedAt time.Time
@@ -192,7 +198,13 @@ type SessionRepository struct {
 	db              *gorm.DB
 	sessionDirFunc  func(chatID string) string
 	caBundleDirFunc func(chatID string) string
-	sessionLocks    sync.Map // chatID string -> *sync.Mutex
+	fsResolver      FSResolver
+	// pendingQuotaReset maps chats whose startup quota reset was deferred to
+	// a pendingQuotaReset entry.
+	pendingQuotaReset sync.Map
+	// quotaResetHook is called between the reset steps (tests inject failures).
+	quotaResetHook func(stage string) error
+	sessionLocks   sync.Map // chatID string -> *sync.Mutex
 }
 
 func NewSessionRepository(db *gorm.DB) *SessionRepository {
@@ -212,6 +224,25 @@ func (r *SessionRepository) SetSessionDirFunc(fn func(chatID string) string) {
 // (used for testing isolation).
 func (r *SessionRepository) SetCABundleDirFunc(fn func(chatID string) string) {
 	r.caBundleDirFunc = fn
+}
+
+// SetFSResolver routes every chat's transcript through its runner's
+// RunnerService instead of a local session directory: the runner's copy of
+// messages.jsonl is authoritative (the sandbox reads it as /session), and the
+// backend never creates per-chat directories of its own. Without a resolver
+// (tests, runner-less development) the transcript is a local file.
+func (r *SessionRepository) SetFSResolver(fn FSResolver) { r.fsResolver = fn }
+
+// store returns the transcript store of a chat.
+func (r *SessionRepository) store(chatID string) (sessionStore, error) {
+	if r.fsResolver != nil {
+		fs, err := r.fsResolver(chatID)
+		if err != nil {
+			return nil, err
+		}
+		return fsStore{fs}, nil
+	}
+	return dirStore{r.sessionDir(chatID)}, nil
 }
 
 func (r *SessionRepository) sessionDir(chatID string) string {
@@ -323,16 +354,17 @@ func (r *SessionRepository) DeleteSession(chatID string) error {
 		}
 	}
 
-	// Clean physical session directory (messages.jsonl, workflows, etc.)
-	dir := r.sessionDir(chatID)
-	if dir != "" {
-		_ = os.RemoveAll(dir)
-	}
-
-	// Clean per-chat merged CA bundle directory (~/tmp/.asgard-ca/<chatID>)
-	caDir := r.caBundleDir(chatID)
-	if caDir != "" {
-		_ = os.RemoveAll(caDir)
+	// Clean the physical session directory (messages.jsonl, workflows, etc.)
+	// and the per-chat merged CA bundle directory (~/tmp/.asgard-ca/<chatID>).
+	// With a runner resolver those live on the runner and the backend touches
+	// no local directory: the runner's cleanup sweep removes them.
+	if r.fsResolver == nil {
+		if dir := r.sessionDir(chatID); dir != "" {
+			_ = os.RemoveAll(dir)
+		}
+		if caDir := r.caBundleDir(chatID); caDir != "" {
+			_ = os.RemoveAll(caDir)
+		}
 	}
 
 	// Remove lock entry from map while holding lock to avoid leaks
@@ -340,8 +372,10 @@ func (r *SessionRepository) DeleteSession(chatID string) error {
 	return nil
 }
 
-// GetSession retrieves the session for a given chat ID and loads messages from messages.jsonl.
-func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
+// GetSessionMeta retrieves the session row for a chat ID without its
+// transcript (Messages stays empty). Most callers only need the metadata, and
+// the transcript lives on the chat's runner, so reading it costs an RPC.
+func (r *SessionRepository) GetSessionMeta(chatID string) (*Session, error) {
 	var session Session
 	err := r.db.First(&session, "chat_id = ?", chatID).Error
 	if err != nil {
@@ -350,14 +384,28 @@ func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
 		}
 		return nil, err
 	}
+	return &session, nil
+}
+
+// GetSession retrieves the session for a given chat ID and loads messages from
+// messages.jsonl (on the chat's runner when a resolver is set).
+func (r *SessionRepository) GetSession(chatID string) (*Session, error) {
+	session, err := r.GetSessionMeta(chatID)
+	if err != nil || session == nil {
+		return nil, err
+	}
 
 	// Read messages from transcript file
-	msgs, err := ReadMessages(r.sessionDir(chatID))
+	store, err := r.store(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("read session transcript: %w", err)
+	}
+	msgs, err := readMessages(store)
 	if err != nil {
 		return nil, fmt.Errorf("read session transcript: %w", err)
 	}
 	session.Messages = msgs
-	return &session, nil
+	return session, nil
 }
 
 // SaveSession saves or updates the session metadata and writes messages to messages.jsonl if len(Messages) > 0.
@@ -367,12 +415,11 @@ func (r *SessionRepository) SaveSession(session *Session) error {
 		lock.Lock()
 		defer lock.Unlock()
 
-		dir := r.sessionDir(session.ChatID)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("create session dir: %w", err)
+		store, err := r.store(session.ChatID)
+		if err != nil {
+			return fmt.Errorf("save transcript: %w", err)
 		}
-		path := TranscriptFilePath(dir)
-		if err := writeAllMessagesAtomic(dir, path, session.Messages); err != nil {
+		if err := writeAllMessages(store, session.Messages); err != nil {
 			return fmt.Errorf("save transcript: %w", err)
 		}
 
@@ -618,51 +665,250 @@ func (r *SessionRepository) ResetAllRunningAgents() error {
 const QuotaAskMessagePrefix = "ask-quota-"
 
 // ResetOrphanedQuotaSuspensions clears single-agent quota suspensions left
-// behind by a crash. Unreplied quota ask_user messages are marked replied with
-// the given note (so the UI stops showing a pending decision whose waiter no
-// longer exists) and the owning agent's WaitingHuman status is reset to
-// Completed.
+// behind by a crash. Unreplied quota ask_user messages created before this
+// call (the backend start) are marked replied with the given note (so the UI
+// stops showing a pending decision whose waiter no longer exists), the owning
+// agents' WaitingHuman status is reset to Completed and the unreplied flag is
+// updated. Asks created after the cutoff belong to live waiters and are never
+// touched.
+//
+// A chat whose transcript cannot be reached now (its runner has not
+// reconnected yet) is skipped with a warning and remembered with the same
+// cutoff; it is redone by ResetPendingQuotaSuspensions when its runner comes
+// online.
 func (r *SessionRepository) ResetOrphanedQuotaSuspensions(note string) error {
+	cutoff := time.Now()
 	var sessions []Session
 	if err := r.db.Find(&sessions).Error; err != nil {
 		return err
 	}
-	for _, sess := range sessions {
-		dir := r.sessionDir(sess.ChatID)
-		msgs, err := ReadMessages(dir)
+	for i := range sessions {
+		sess := sessions[i]
+		done, err := r.resetQuotaSuspension(sess.ChatID, note, cutoff)
 		if err != nil {
+			// Keep sweeping the other chats; the runner-online path retries.
+			log.Warn().Err(err).Str("chat_id", sess.ChatID).Msg("failed to reset orphaned quota suspension; will retry")
+			r.pendingQuotaReset.Store(sess.ChatID, pendingQuotaReset{runner: sess.RunnerNodeID, note: note, cutoff: cutoff})
 			continue
 		}
-		orphaned := false
-		for _, m := range msgs {
-			if m.Role == "ask_user" && !m.Replied && strings.HasPrefix(m.ID, QuotaAskMessagePrefix) {
-				if _, _, err := MarkAskUserReplied(dir, m.ID, note); err == nil {
-					orphaned = true
-				}
-			}
-		}
-		if !orphaned {
-			continue
-		}
-		modified := false
-		for i, a := range sess.Agents {
-			if a.Status == AgentStatusWaitingHuman {
-				sess.Agents[i].Status = AgentStatusCompleted
-				modified = true
-			}
-		}
-		if modified {
-			if err := r.db.Save(&sess).Error; err != nil {
-				return err
-			}
+		if !done {
+			log.Warn().Str("chat_id", sess.ChatID).Str("runner", sess.RunnerNodeID).
+				Msg("quota suspension reset deferred until the chat's runner is reachable")
+			r.pendingQuotaReset.Store(sess.ChatID, pendingQuotaReset{runner: sess.RunnerNodeID, note: note, cutoff: cutoff})
 		}
 	}
 	return nil
 }
 
+// pendingQuotaReset is a quota reset deferred until runner is reachable.
+type pendingQuotaReset struct {
+	runner string
+	note   string
+	cutoff time.Time
+}
+
+// ResetPendingQuotaSuspensions redoes the startup reset for chats of runnerID
+// that were skipped while it was offline, with the original cutoff. It is
+// idempotent: a chat without a pre-cutoff unreplied quota ask is left untouched.
+func (r *SessionRepository) ResetPendingQuotaSuspensions(runnerID string) {
+	r.pendingQuotaReset.Range(func(k, v any) bool {
+		if v.(pendingQuotaReset).runner == runnerID {
+			r.retryPendingQuota(k.(string))
+		}
+		return true
+	})
+}
+
+// RetryPendingQuotaReset retries the deferred reset of one chat, if any (a
+// new run or message starting for the chat).
+func (r *SessionRepository) RetryPendingQuotaReset(chatID string) {
+	r.retryPendingQuota(chatID)
+}
+
+// PendingQuotaRunners lists the runners with deferred quota resets.
+func (r *SessionRepository) PendingQuotaRunners() []string {
+	seen := map[string]bool{}
+	var out []string
+	r.pendingQuotaReset.Range(func(_, v any) bool {
+		if id := v.(pendingQuotaReset).runner; !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+		return true
+	})
+	return out
+}
+
+func (r *SessionRepository) retryPendingQuota(chatID string) {
+	v, ok := r.pendingQuotaReset.Load(chatID)
+	if !ok {
+		return
+	}
+	p := v.(pendingQuotaReset)
+	if done, err := r.resetQuotaSuspension(chatID, p.note, p.cutoff); err != nil {
+		log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to reset orphaned quota suspension")
+	} else if done {
+		r.pendingQuotaReset.Delete(chatID)
+	}
+}
+
+// quotaResetItem is one retired quota ask and the agent that owned it.
+type quotaResetItem struct {
+	ID    string `json:"id"`
+	Agent string `json:"agent,omitempty"`
+	// Timestamp identifies the retired ask: quota ask ids are deterministic,
+	// so a later suspension can replace the line under the same id.
+	Timestamp int64 `json:"ts"`
+}
+
+func (r *SessionRepository) hook(stage string) error {
+	if r.quotaResetHook == nil {
+		return nil
+	}
+	return r.quotaResetHook(stage)
+}
+
+// resetQuotaSuspension resets one chat in three journaled steps so a crash or
+// error between them converges on the next run:
+//
+//	(a) DB: record the ids about to be retired (sessions.quota_reset_ids);
+//	(b) transcript: mark exactly those ids replied (idempotent by id);
+//	(c) DB: reconcile the unreplied flag and the owning agents' status, and
+//	    clear the journal.
+//
+// A chat with a journal resumes from (b) for exactly its ids. done is false
+// when the transcript could not be reached.
+func (r *SessionRepository) resetQuotaSuspension(chatID, note string, cutoff time.Time) (done bool, err error) {
+	lock := r.getSessionLock(chatID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	meta, err := r.GetSessionMeta(chatID)
+	if err != nil {
+		return false, err
+	}
+	if meta == nil {
+		return true, nil
+	}
+	store, serr := r.store(chatID)
+	if serr != nil {
+		return false, nil
+	}
+	msgs, rerr := readMessages(store)
+	if rerr != nil {
+		return false, nil
+	}
+
+	var items []quotaResetItem
+	if meta.QuotaResetIDs != nil && *meta.QuotaResetIDs != "" {
+		if err := json.Unmarshal([]byte(*meta.QuotaResetIDs), &items); err != nil {
+			return true, fmt.Errorf("decode quota reset journal: %w", err)
+		}
+	} else {
+		for _, m := range msgs {
+			if m.Role == "ask_user" && !m.Replied && strings.HasPrefix(m.ID, QuotaAskMessagePrefix) && m.Timestamp < cutoff.UnixMilli() {
+				items = append(items, quotaResetItem{ID: m.ID, Agent: m.AgentName, Timestamp: m.Timestamp})
+			}
+		}
+		if len(items) == 0 {
+			return true, nil
+		}
+		// (a)
+		raw, _ := json.Marshal(items)
+		if err := r.db.Model(&Session{}).Where("chat_id = ?", chatID).Update("quota_reset_ids", string(raw)).Error; err != nil {
+			return true, err
+		}
+		if err := r.hook("journaled"); err != nil {
+			return true, err
+		}
+	}
+
+	// (b) Exact-id marking only: an item whose message is gone, or was
+	// replaced by a newer ask under the same id, is dropped unmarked. The
+	// positional fallback of MarkAskUserReplied is never used here.
+	var retained []quotaResetItem
+	dirty := false
+	for _, it := range items {
+		for i := range msgs {
+			m := &msgs[i]
+			if m.ID != it.ID || m.Role != "ask_user" || m.Timestamp != it.Timestamp || m.Timestamp >= cutoff.UnixMilli() {
+				continue
+			}
+			retained = append(retained, it)
+			if !m.Replied {
+				m.Replied = true
+				m.ReplyText = note
+				dirty = true
+			}
+			break
+		}
+	}
+	if dirty {
+		if err := writeAllMessages(store, msgs); err != nil {
+			return false, nil
+		}
+	}
+	items = retained
+	if err := r.hook("marked"); err != nil {
+		return true, err
+	}
+	after, rerr := readMessages(store)
+	if rerr != nil {
+		return false, nil
+	}
+	hasUnreplied := hasUnrepliedAskUser(after)
+	agentBusy := map[string]bool{}
+	for _, m := range after {
+		if m.Role == "ask_user" && !m.Replied {
+			agentBusy[m.AgentName] = true
+		}
+	}
+
+	// (c) Targeted updates under a row lock: never rewrite the other columns
+	// from a stale snapshot.
+	return true, r.db.Transaction(func(tx *gorm.DB) error {
+		var sess Session
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sess, "chat_id = ?", chatID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		// A workflow suspended on a human node owns WaitingHuman agents too.
+		wfWaiting := false
+		if tx.Migrator().HasTable(&WorkflowRun{}) {
+			var n int64
+			if err := tx.Model(&WorkflowRun{}).Where("session_id = ? AND status = ?", chatID, WorkflowStatusWaitingHuman).Count(&n).Error; err != nil {
+				return err
+			}
+			wfWaiting = n > 0
+		}
+		updates := map[string]any{"has_ask_user_unreplied": hasUnreplied, "quota_reset_ids": nil}
+		if !wfWaiting {
+			owners := map[string]bool{}
+			for _, it := range items {
+				if it.Agent != "" && !agentBusy[it.Agent] {
+					owners[it.Agent] = true
+				}
+			}
+			changed := false
+			for i, a := range sess.Agents {
+				if owners[a.Name] && a.Status == AgentStatusWaitingHuman {
+					sess.Agents[i].Status = AgentStatusCompleted
+					changed = true
+				}
+			}
+			if changed {
+				updates["agents"] = sess.Agents
+			}
+		}
+		return tx.Model(&Session{}).Where("chat_id = ?", chatID).Updates(updates).Error
+	})
+}
+
 // GetAgentSessions returns the sessions map for a specific agent in a chat.
 func (r *SessionRepository) GetAgentSessions(chatID string, agentID string) (map[string]string, error) {
-	session, err := r.GetSession(chatID)
+	session, err := r.GetSessionMeta(chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -712,27 +958,24 @@ func (r *SessionRepository) AppendMessage(chatID string, msg ChatMessage) error 
 		return err
 	}
 
-	dir := r.sessionDir(chatID)
-	appended, err := AppendMessage(dir, msg)
+	store, err := r.store(chatID)
+	if err != nil {
+		return fmt.Errorf("append transcript message: %w", err)
+	}
+	appended, state, err := appendMessage(store, msg)
 	if err != nil {
 		return fmt.Errorf("append transcript message: %w", err)
 	}
 
 	summary := TruncateSummary(msg.Content, 200)
 
-	// Re-check unreplied ask_user state in transcript
-	msgs, readErr := ReadMessages(dir)
-	hasUnreplied := false
-	if readErr == nil {
-		for _, m := range msgs {
-			if m.Role == "ask_user" && !m.Replied {
-				hasUnreplied = true
-				break
-			}
-		}
-	} else {
-		// Fallback to local logic if read fails
-		hasUnreplied = session.HasAskUserUnreplied || (msg.Role == "ask_user" && !msg.Replied)
+	// The unreplied ask_user state: exact when the append had to read the
+	// transcript anyway (id-keyed update). A plain append cannot resolve an
+	// ask_user, so the stored flag only turns on; re-reading the whole
+	// transcript over RPC after every message would be wasteful.
+	hasUnreplied := session.HasAskUserUnreplied || (msg.Role == "ask_user" && !msg.Replied)
+	if state.known {
+		hasUnreplied = state.unreplied
 	}
 
 	updates := map[string]any{
@@ -762,8 +1005,11 @@ func (r *SessionRepository) MarkAskUserReplied(chatID string, messageID string, 
 	lock.Lock()
 	defer lock.Unlock()
 
-	dir := r.sessionDir(chatID)
-	updatedMsg, hasUnreplied, err := MarkAskUserReplied(dir, messageID, replyText)
+	store, err := r.store(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("mark ask user replied in transcript: %w", err)
+	}
+	updatedMsg, hasUnreplied, err := markAskUserReplied(store, messageID, replyText)
 	if err != nil {
 		return nil, fmt.Errorf("mark ask user replied in transcript: %w", err)
 	}

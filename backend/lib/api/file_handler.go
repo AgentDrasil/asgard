@@ -50,7 +50,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	var sessionModifiedFiles []string
 
 	if s.repo != nil {
-		sess, err := s.repo.GetSession(sessionID)
+		sess, err := s.repo.GetSessionMeta(sessionID)
 		if err != nil {
 			log.Error().Err(err).Str("session_id", sessionID).Msg("Failed to retrieve session for file read")
 			writeJSONError(w, http.StatusInternalServerError, "failed to query session")

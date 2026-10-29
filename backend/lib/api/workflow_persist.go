@@ -260,7 +260,7 @@ func (s *Server) suspendWorkflowHuman(req workflow.SuspendRequest) error {
 	}
 	agentName := req.AgentName
 	if agentName == "" {
-		if session, _ := s.repo.GetSession(req.SessionID); session != nil {
+		if session, _ := s.repo.GetSessionMeta(req.SessionID); session != nil {
 			agentName = session.CurrentAgent
 		}
 	}
@@ -311,7 +311,7 @@ func (s *Server) resolveWorkflowAgentKey(sessionID, agentName string) string {
 		s.mu.RUnlock()
 	}
 	if s.repo != nil && sessionID != "" {
-		if sess, err := s.repo.GetSession(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
+		if sess, err := s.repo.GetSessionMeta(sessionID); err == nil && sess != nil && sess.CurrentAgent != "" {
 			return sess.CurrentAgent
 		}
 	}

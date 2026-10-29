@@ -19,6 +19,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
@@ -55,6 +56,9 @@ func newCallbackStack(t *testing.T) *callbackStack {
 	server, err := api.New(&config.Config{AgentDir: t.TempDir()}, testDB,
 		api.WithAgentSource(staticAgents{caller, peer, testAgent("agent_father", "h3", "")}),
 		api.WithRunnerHub(hub),
+		// The test runner serves no RunnerService; the transcript lives in
+		// the shared test HOME, which runnerfs.Local reads like the runner.
+		api.WithRunnerFS(func(id string) (runnerfs.FS, error) { return runnerfs.NewLocal(id), nil }),
 		api.WithCompressionMetrics(api.NewCompressionMetricsStore(t.TempDir()+"/metrics.json")),
 	)
 	require.NoError(t, err)

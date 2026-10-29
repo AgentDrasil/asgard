@@ -27,7 +27,7 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := s.repo.GetSession(id)
+	sess, err := s.repo.GetSessionMeta(id)
 	if err != nil {
 		http.Error(w, `{"error":"failed to fetch session"}`, http.StatusInternalServerError)
 		return

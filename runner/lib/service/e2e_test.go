@@ -299,3 +299,49 @@ func TestAPITtydOverRunnerService(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }
+
+// TestTranscriptAndWorkflowStoreOverRunnerService drives the backend's
+// transcript and offloaded workflow files through a real gRPC Service: the
+// session API reads the runner's messages.jsonl, which is the file the
+// sandbox sees as /session/messages.jsonl.
+func TestTranscriptAndWorkflowStoreOverRunnerService(t *testing.T) {
+	cl, ws := startService(t, Options{})
+	resolve := func(id string) (runnerfs.FS, error) { return runnerfs.NewRemote(cl, id), nil }
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	srv, err := api.New(&config.Config{Host: "http://localhost:8080"}, testDB, api.WithRunnerFS(resolve))
+	require.NoError(t, err)
+	repo := dbmodels.NewSessionRepository(testDB)
+	repo.SetFSResolver(resolve)
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chat, Title: "t", RunDir: ws}))
+
+	require.NoError(t, repo.AppendMessage(chat, dbmodels.ChatMessage{Role: "user", Content: "hello"}))
+	require.NoError(t, repo.AppendMessage(chat, dbmodels.ChatMessage{ID: "ask-1", Role: "ask_user", Content: "ok?"}))
+	_, err = repo.MarkAskUserReplied(chat, "ask-1", "yes")
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sessions/"+chat, nil))
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var got struct {
+		Messages []dbmodels.ChatMessage `json:"messages"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Len(t, got.Messages, 2)
+	assert.Equal(t, "hello", got.Messages[0].Content)
+	assert.True(t, got.Messages[1].Replied)
+	assert.Equal(t, "yes", got.Messages[1].ReplyText)
+
+	raw, err := os.ReadFile(filepath.Join(paths.SessionDir(chat), "messages.jsonl"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"content":"hello"`)
+
+	// Offloaded workflow files land in the same session dir on the runner.
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	wfRepo.SetFSResolver(resolve)
+	require.NoError(t, wfRepo.SaveRun(&dbmodels.WorkflowRun{RunID: "run-e2e", SessionID: chat, Status: dbmodels.WorkflowStatusRunning, DAGSpec: "name: x\n", Input: "in"}))
+	assert.FileExists(t, filepath.Join(paths.SessionDir(chat), "workflows", "run-e2e", "dag_spec.yaml"))
+	run, err := wfRepo.GetRun("run-e2e")
+	require.NoError(t, err)
+	assert.Equal(t, "name: x\n", run.DAGSpec)
+}

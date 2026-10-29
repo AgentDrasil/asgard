@@ -59,7 +59,7 @@ func (s *Server) resolveSessionWorkspace(sessionID string) (string, int, error) 
 		return "", http.StatusBadRequest, errors.New("invalid session_id format")
 	}
 
-	sess, err := s.repo.GetSession(sessionID)
+	sess, err := s.repo.GetSessionMeta(sessionID)
 	if err != nil {
 		log.Error().Err(err).Str("session_id", sessionID).Msg("Failed to query session for workspace")
 		return "", http.StatusInternalServerError, errors.New("failed to query session")

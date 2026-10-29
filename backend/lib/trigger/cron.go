@@ -184,7 +184,7 @@ func (m *WorkflowCronManager) runScheduledWorkflow(agent *agentspec.Agent, runne
 			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to upsert synthetic cron session")
 		}
 		// Never run on a different runner than the definition says.
-		if sess, err := m.repo.GetSession(sessionID); err != nil || sess == nil || sess.RunnerNodeID != runnerID {
+		if sess, err := m.repo.GetSessionMeta(sessionID); err != nil || sess == nil || sess.RunnerNodeID != runnerID {
 			log.Error().Err(err).Str("chat_id", sessionID).Str("runner", runnerID).Msg("cron session is not bound to the definition's runner; skipping cycle")
 			return
 		}

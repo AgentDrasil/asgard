@@ -881,7 +881,7 @@ func TestResetOrphanedQuotaSuspensions(t *testing.T) {
 	require.NoError(t, repo.SaveSession(&Session{ChatID: chatID, CurrentAgent: agentID}))
 
 	quotaMsgID := QuotaAskMessagePrefix + chatID + "-" + agentID
-	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: quotaMsgID, Role: "ask_user", Content: "no quota"}))
+	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: quotaMsgID, Role: "ask_user", Content: "no quota", AgentName: agentID}))
 	// A normal ask_user message must be left untouched.
 	require.NoError(t, repo.AppendMessage(chatID, ChatMessage{ID: "ask-regular", Role: "ask_user", Content: "regular"}))
 	require.NoError(t, repo.UpdateAgentStatus(chatID, agentID, AgentStatusWaitingHuman))

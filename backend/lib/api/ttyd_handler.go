@@ -47,7 +47,7 @@ func (s *Server) resolveTTYDTarget(r *http.Request, sessionKey string) (ttydTarg
 		if !IsValidChatID(chatID) {
 			return t, http.StatusBadRequest, "invalid session_id format"
 		}
-		sess, err := s.repo.GetSession(chatID)
+		sess, err := s.repo.GetSessionMeta(chatID)
 		if err != nil {
 			log.Error().Err(err).Str("agent_session_id", chatID).Msg("failed to query agent session for ttyd working directory")
 			return t, http.StatusInternalServerError, "failed to query session"

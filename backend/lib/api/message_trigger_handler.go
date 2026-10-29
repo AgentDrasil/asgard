@@ -402,7 +402,7 @@ func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter,
 			})
 
 			// Try to start the shared consumer (in case the previous one just finished)
-			session, _ := s.repo.GetSession(chatID)
+			session, _ := s.repo.GetSessionMeta(chatID)
 			runDir := req.RunDir
 			if session != nil && session.RunDir != "" {
 				runDir = session.RunDir
@@ -432,6 +432,11 @@ func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter,
 		s.releaseExecution(chatID)
 		handle.cancel()
 		return
+	}
+	// A deferred quota reset of this chat gets another chance now that its
+	// runner is known to be reachable.
+	if s.repo != nil {
+		go s.repo.RetryPendingQuotaReset(chatID)
 	}
 	runDirOpt := optional.None[string]()
 	if req.RunDir != "" {

@@ -55,7 +55,7 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 	}
 
 	if s.repo != nil {
-		sess, err := s.repo.GetSession(sessionID)
+		sess, err := s.repo.GetSessionMeta(sessionID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query session: "+err.Error())
 			return

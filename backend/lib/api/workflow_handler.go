@@ -168,7 +168,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 	// rules as plain single-agent chats).
 	allowCrossSession := false
 	if s.repo != nil {
-		if session, serr := s.repo.GetSession(chatID); serr != nil {
+		if session, serr := s.repo.GetSessionMeta(chatID); serr != nil {
 			log.Warn().Err(serr).Str("chat_id", chatID).Msg("failed to load session for cross-session access policy")
 		} else if session != nil {
 			allowCrossSession = session.AllowCrossSession
@@ -284,7 +284,7 @@ func (s *Server) maybeGenerateWorkflowTitle(ctx context.Context, agent *agentspe
 	if s == nil || s.repo == nil || chatID == "" || !IsValidChatID(chatID) {
 		return
 	}
-	session, err := s.repo.GetSession(chatID)
+	session, err := s.repo.GetSessionMeta(chatID)
 	if err != nil {
 		log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to get session for workflow title generation")
 		return

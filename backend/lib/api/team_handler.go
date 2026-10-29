@@ -41,7 +41,7 @@ func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
 // current agent. On failure it returns the HTTP status and message to report.
 // The repo must be set.
 func (s *Server) teamAgentsFor(chatID string) (teamAgents []string, status int, msg string) {
-	session, err := s.repo.GetSession(chatID)
+	session, err := s.repo.GetSessionMeta(chatID)
 	if err != nil {
 		return nil, http.StatusInternalServerError, "failed to get session: " + err.Error()
 	}
