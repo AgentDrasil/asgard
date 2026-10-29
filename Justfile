@@ -75,6 +75,16 @@ compile-proto:
 compile-runner-proto:
     cd pkg/runnerpb && PATH=$PATH:$(go env GOPATH)/bin GOWORK=off go run github.com/bufbuild/buf/cmd/buf@v1.50.0 generate
 
-# Build Docker Image
-build-image:
-    docker build --build-arg ASGARD_VERSION={{version}} -t ghcr.io/agentdrasil/asgard:main -f Dockerfile .
+# Docker tag form of the version (':' is not allowed in tags)
+image_version := replace(version, ":", "-")
+
+# Build the backend Docker image
+build-image-backend:
+    docker build --target backend --build-arg ASGARD_VERSION={{version}} -t ghcr.io/agentdrasil/asgard-backend:main -t ghcr.io/agentdrasil/asgard-backend:{{image_version}} -f Dockerfile .
+
+# Build the runner Docker image
+build-image-runner:
+    docker build --target runner --build-arg ASGARD_VERSION={{version}} -t ghcr.io/agentdrasil/asgard-runner:main -t ghcr.io/agentdrasil/asgard-runner:{{image_version}} -f Dockerfile .
+
+# Build both Docker images
+build-image: build-image-backend build-image-runner

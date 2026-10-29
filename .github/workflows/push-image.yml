@@ -10,7 +10,33 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Computed once so the backend and runner images of one push carry the same
+  # version (matrix legs start at different seconds).
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Compute build version
+        id: version
+        run: |
+          version="$(date -u +%Y-%m-%d-%H-%M-%S):$(git rev-parse --short=8 HEAD)"
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+          # Docker tags cannot contain ':'
+          echo "tag=${version//:/-}" >> "$GITHUB_OUTPUT"
+
   build-and-push:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, runner]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,28 +53,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute build version
-        id: version
-        run: echo "value=$(date -u +%Y-%m-%d-%H-%M-%S):$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Extract metadata (tags, labels) for main image
+      - name: Extract metadata (tags, labels) for ${{ matrix.target }} image
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.target }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch
             type=sha
+            type=raw,value=${{ needs.version.outputs.tag }}
 
-      - name: Build and push main image
+      - name: Build and push ${{ matrix.target }} image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
-          target: runner
+          target: ${{ matrix.target }}
           build-args: |
-            ASGARD_VERSION=${{ steps.version.outputs.value }}
+            ASGARD_VERSION=${{ needs.version.outputs.value }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

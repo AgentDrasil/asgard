@@ -98,10 +98,8 @@ RUN pnpm install --frozen-lockfile
 COPY webui/ .
 RUN pnpm run build
 
-# Stage 4: go-builder
+# Stage 4: go-builder (dependencies and sources; shared by the per-image build stages)
 FROM golang:${GO_VERSION}-alpine AS go-builder
-
-ARG ASGARD_VERSION=dev
 
 WORKDIR /app
 
@@ -167,13 +165,26 @@ COPY cmd/ ./cmd/
 COPY runner/ ./runner/
 COPY simplest/ ./simplest/
 
+# Stage 4a: go-build-backend (only what the backend image ships)
+FROM go-builder AS go-build-backend
+
+ARG ASGARD_VERSION=dev
+
 RUN mkdir -p /app/bin && \
-    for d in cmd/*; do \
-    if [ -d "$d" ]; then \
-    name=$(basename "$d"); \
+    for name in asgard agent-validate; do \
     echo "Building $name..."; \
-    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./$d"; \
-    fi; \
+    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./cmd/$name"; \
+    done
+
+# Stage 4b: go-build-runner (only what the runner image ships)
+FROM go-builder AS go-build-runner
+
+ARG ASGARD_VERSION=dev
+
+RUN mkdir -p /app/bin && \
+    for name in ask-user call-peer find-peer show-output; do \
+    echo "Building $name..."; \
+    go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./cmd/$name"; \
     done && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/aw ./agentwrapper/cmd/aw && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/fakebash ./fakebash/cmd/fakebash && \
@@ -181,7 +192,46 @@ RUN mkdir -p /app/bin && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/agystatusline ./agystatusline/cmd/agystatusline && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/asgard-runner ./runner/cmd/asgard-runner
 
-# Stage 5: runner
+# Stage 5: backend
+# The orchestration server only. Chat directories, agent CLIs, bwrap and ttyd
+# live on runners (see the runner stage); the backend talks to them over gRPC.
+# git, bash and openssh-client are kept for the SSH agent setup at startup and
+# artifact path checks. Without a runner, sandboxed workflow command nodes
+# cannot run here (no bwrap/fakebashd); that layout is for development only.
+FROM debian:${DEBIAN_VERSION}-slim AS backend
+
+ARG USER_UID
+ARG USER_GID
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    bash \
+    git \
+    openssh-client && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g ${USER_GID} user && \
+    useradd -u ${USER_UID} -g user -m -s /bin/bash user
+
+COPY --from=go-build-backend /app/bin/* /bin/
+COPY --from=webui-builder /webui/dist /opt/asgard/webui
+
+USER user
+WORKDIR /home/user
+
+CMD ["asgard"]
+
+# Stage 6: runner
+# Runs on the machine that holds the chat directories and executes agents.
+# Sandboxing uses bubblewrap, which needs unprivileged user namespaces: run
+# with a seccomp profile that allows them (e.g. `--security-opt
+# seccomp=unconfined`, or a profile permitting clone/unshare/mount/pivot_root)
+# and, where AppArmor restricts user namespaces, `--security-opt
+# apparmor=unconfined`. Typical run:
+#   docker run --security-opt seccomp=unconfined \
+#     -v ./certs:/certs:ro -v /srv/asgard:/srv/asgard \
+#     ghcr.io/agentdrasil/asgard-runner:main \
+#     -backend backend:9311 -tls-cert /certs/tls.crt -tls-key /certs/tls.key -ca /certs/ca.crt
 FROM base_devtool AS runner
 
 ARG USER_UID
@@ -190,8 +240,7 @@ ARG USER_GID
 RUN groupadd -g ${USER_GID} user && \
     useradd -u ${USER_UID} -g user -m -s /bin/bash user
 
-COPY --from=go-builder /app/bin/* /bin/
-COPY --from=webui-builder /webui/dist /opt/asgard/webui
+COPY --from=go-build-runner /app/bin/* /bin/
 
 USER user
 WORKDIR /home/user
@@ -202,4 +251,5 @@ WORKDIR /home/user
 ENV CLAUDE_CONFIG_DIR=/home/user/.claude
 ENV DISABLE_AUTOUPDATER=1
 
-CMD ["asgard"]
+ENTRYPOINT ["asgard-runner"]
+CMD []
