@@ -58,6 +58,9 @@ func run() error {
 		log.Info().Int("agents", len(agents)).Msg("agent definitions loaded")
 	}
 
+	if boot.AllowUnsandboxedCommands {
+		log.Warn().Msg("unsandboxed workflow commands are enabled: nodes with sandbox: false run directly on this host")
+	}
 	log.Info().Str("node_id", nodeID).Str("backend", boot.Backend).Str("version", version.Get()).Msg("asgard-runner starting")
 	sb := sandbox.Setup(remote, sandbox.Options{})
 	// Stop the etcd watchers first so no change arrives while the sandbox
@@ -75,9 +78,14 @@ func run() error {
 		Ready:     sb.Ready,
 		Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() },
 	})
+	svc := service.New(service.Options{
+		Agents: remote.Agents, GitExec: sb.GitExec,
+		Ready: sb.Ready, SandboxConf: sb.Conf, AllowUnsandboxed: boot.AllowUnsandboxedCommands,
+	})
+	defer svc.Close() // no command outlives the runner
 	client = conn.New(conn.Options{
 		Executor:      executor,
-		Service:       service.New(service.Options{Agents: remote.Agents, GitExec: sb.GitExec}),
+		Service:       svc,
 		Addr:          boot.Backend,
 		NodeID:        nodeID,
 		TLSConfig:     boot.TLSConfig,

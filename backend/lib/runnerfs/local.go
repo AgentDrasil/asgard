@@ -545,3 +545,48 @@ func (l Local) Remove(_ context.Context, ref PathRef, recursive bool, _ string) 
 	defer func() { _ = unix.Close(rootfd) }()
 	return removeBeneath(rootfd, rel, recursive, l.guard())
 }
+
+// EnsureDir resolves the directory ref names with the same confinement as
+// Mkdir, creating it (and its missing parents) when it does not exist yet, and
+// returns its real path: symlink-free as of the moment it was opened. An
+// existing directory is accepted wherever the allowed roots reach (also under
+// readonly mounts, which a sandbox keeps readonly); a missing one is created
+// only beneath writable roots. An empty ref.Path names the scope root itself.
+func (l Local) EnsureDir(ref PathRef) (string, error) {
+	if err := l.checkChat(); err != nil {
+		return "", err
+	}
+	if ref.Path == "" {
+		ref.Path = "."
+	}
+	switch ref.Scope {
+	case "", "workspace", "tmp", "session":
+	default:
+		return "", Errf(CodeBadRequest, "invalid scope %q", ref.Scope)
+	}
+	for _, create := range []bool{false, true} {
+		rootfd, rel, _, err := l.resolvePath(ref.Path, ref.Scope, ref.RunDir, create, create)
+		if err != nil {
+			if !create && CodeOf(err) == CodeNotFound {
+				continue
+			}
+			return "", err
+		}
+		var g *guard
+		if create {
+			g = l.guard()
+		}
+		fd, err := mkdirAllBeneath(rootfd, rel, create, g)
+		_ = unix.Close(rootfd)
+		if err != nil {
+			if !create && CodeOf(err) == CodeNotFound {
+				continue
+			}
+			return "", err
+		}
+		p, err := fdPath(fd)
+		_ = unix.Close(fd)
+		return p, err
+	}
+	return "", Errf(CodeNotFound, "not found")
+}

@@ -749,6 +749,15 @@ message RunCommandRequest {
   // buffered output (kept for the request_id TTL) starting at these offsets.
   uint64 resume_stdout_offset = 11;
   uint64 resume_stderr_offset = 12;
+  // cancel kills the command of (chat_id, request_id) immediately and returns
+  // without output. It is idempotent, and an unknown or finished request_id is
+  // a no-op success. Only chat_id and request_id are read.
+  bool cancel = 13;
+  // resumed is true on every retry after the first attempt of a request_id.
+  // A runner with no record of the request_id (restart, expiry) answers
+  // NOT_FOUND to a resumed call, whatever the offsets, and never runs the
+  // command again; only a call with resumed=false starts a command.
+  bool resumed = 14;
 }
 message RunCommandExit {
   int32 code = 1;

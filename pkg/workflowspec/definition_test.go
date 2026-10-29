@@ -1592,3 +1592,14 @@ func TestValidateScheduleRunner(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMountDirsMustBeAbsolute(t *testing.T) {
+	for _, kind := range []string{"readonly", "readwrite"} {
+		_, err := ParseDefinition([]byte("name: w\nmount_dirs:\n  " + kind + ": [\"/ok\", \"rel/dir\"]\nnodes:\n  - id: a\n    type: command\n    command: \"true\"\n"))
+		require.Error(t, err, kind)
+		assert.Contains(t, err.Error(), `"rel/dir"`)
+		assert.Contains(t, err.Error(), kind)
+	}
+	_, err := ParseDefinition([]byte("name: w\nmount_dirs:\n  readonly: [\"/ok\"]\n  readwrite: [\"/also\"]\nnodes:\n  - id: a\n    type: command\n    command: \"true\"\n"))
+	require.NoError(t, err)
+}

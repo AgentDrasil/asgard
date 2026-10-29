@@ -33,3 +33,25 @@ func TestParseBootstrap(t *testing.T) {
 	_, err = ParseBootstrap([]string{"-backend", "nohostport"}, getenv)
 	assert.ErrorContains(t, err, "invalid backend address")
 }
+
+func TestParseBootstrapUnsandboxedCommandsIsOptIn(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{EnvBackend: "b:1", EnvTLSCert: "/c", EnvTLSKey: "/k", EnvCA: "/ca"}
+	parse := func(extra map[string]string, args ...string) bool {
+		getenv := func(k string) string {
+			if v, ok := extra[k]; ok {
+				return v
+			}
+			return env[k]
+		}
+		b, err := ParseBootstrap(args, getenv)
+		require.NoError(t, err)
+		return b.AllowUnsandboxedCommands
+	}
+	assert.False(t, parse(nil), "off by default")
+	assert.False(t, parse(map[string]string{EnvAllowUnsandboxedCommands: "garbage"}))
+	assert.True(t, parse(map[string]string{EnvAllowUnsandboxedCommands: "1"}))
+	assert.True(t, parse(map[string]string{EnvAllowUnsandboxedCommands: "true"}))
+	assert.True(t, parse(nil, "-allow-unsandboxed-commands"))
+	assert.False(t, parse(map[string]string{EnvAllowUnsandboxedCommands: "1"}, "-allow-unsandboxed-commands=false"))
+}

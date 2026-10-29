@@ -345,13 +345,20 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 		return nil, err
 	}
 
+	// Every read-write bind below is demoted to read-only when its path is at
+	// or beneath a readonly mount root (e.g. through a symlink alias).
+	var readonlyDirs []string
+	if cfg != nil {
+		readonlyDirs = cfg.MountDirs.ReadOnly
+	}
+
 	// Mount roles config run_dirs as read-write
 	if cfg != nil {
 		for _, dir := range cfg.RunDirs {
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("run directory %q does not exist: %w", dir, err)
 			}
-			args = append(args, "--bind", dir, dir)
+			args = appendBind(args, readonlyDirs, dir)
 		}
 
 		// Mount additional directories from MountDirs
@@ -359,13 +366,14 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("mount readonly directory %q does not exist: %w", dir, err)
 			}
-			args = append(args, "--ro-bind", dir, dir)
+			// Bound read-only below, after every read-write bind: a later
+			// bind of an ancestor would otherwise bury it.
 		}
 		for _, dir := range cfg.MountDirs.ReadWrite {
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("mount readwrite directory %q does not exist: %w", dir, err)
 			}
-			args = append(args, "--bind", dir, dir)
+			args = appendBind(args, readonlyDirs, dir)
 		}
 	}
 
@@ -389,7 +397,7 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	}
 	if !runDirMounted {
 		if _, err := os.Stat(runDir); err == nil {
-			args = append(args, "--bind", runDir, runDir)
+			args = appendBind(args, readonlyDirs, runDir)
 		} else {
 			return nil, fmt.Errorf("run directory %q does not exist: %w", runDir, err)
 		}
@@ -477,12 +485,17 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	for _, sp := range specs {
 		for _, dir := range sp.MountDirectories(home) {
 			if _, err := os.Stat(dir); err == nil {
-				args = append(args, "--bind", dir, dir)
+				args = appendBind(args, readonlyDirs, dir)
 			}
 		}
 		for k, v := range sp.ExtraEnv(home) {
 			envs[k] = v
 		}
+	}
+	// Readonly mounts last among the directory binds, so they win over any
+	// read-write bind of an ancestor (run_dirs, mount_dirs.readwrite, CLI dirs).
+	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
+		return nil, err
 	}
 	keys := make([]string, 0, len(envs))
 	for k := range envs {
@@ -671,6 +684,117 @@ func appendProxyArgs(args []string, chatID string, proxyCfg ProxySandboxConfig) 
 
 // CommandForCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox.
 func CommandForCommandExec(runDir string, sockDir string, chatID string, configPath string, allowCrossSession bool, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+	return CommandForCommandExecAt(runDir, "", sockDir, chatID, configPath, allowCrossSession, nil, proxyOpts...)
+}
+
+// SandboxCwd returns the path at which the host directory dir is visible
+// inside a command sandbox of chatID: the chat's tmp and session dirs are
+// mounted at /tmp and /session, anything else under the host runtime-data root
+// (~/asgard/data) is masked unless allowCrossSession (an operator readonly
+// mount beneath it is re-mounted after the mask), and every other
+// directory keeps its path (CommandForCommandExecAt binds it there).
+func SandboxCwd(chatID, dir string, allowCrossSession bool, readonlyDirs []string) (string, error) {
+	dir = filepath.Clean(dir)
+	for _, m := range []struct{ host, mount string }{
+		{paths.SessionTmpDir(chatID), "/tmp"},
+		{paths.SessionDir(chatID), "/session"},
+	} {
+		for _, base := range realAndLexical(m.host) {
+			if rel, err := filepath.Rel(base, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+				return filepath.Join(m.mount, rel), nil
+			}
+		}
+	}
+	if !allowCrossSession && !beneathAny(readonlyDirs, dir) {
+		for _, base := range realAndLexical(paths.DataDir()) {
+			if rel, err := filepath.Rel(base, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+				return "", fmt.Errorf("directory %q is not visible in the sandbox (the runtime data directory is masked)", dir)
+			}
+		}
+	}
+	return dir, nil
+}
+
+// appendReadonlyBinds binds each existing dir read-only at its own path and,
+// when it is a symlink, at its resolved path too: a process may reach the tree
+// through either name and both must be read-only. A relative entry is an error
+// (fail closed): it could not be mounted, leaving the tree writable.
+func appendReadonlyBinds(args []string, dirs []string) ([]string, error) {
+	for _, dir := range dirs {
+		if !filepath.IsAbs(dir) {
+			return nil, fmt.Errorf("mount readonly directory must be an absolute path: %q", dir)
+		}
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		args = append(args, "--ro-bind", dir, dir)
+		if ev, err := filepath.EvalSymlinks(dir); err == nil && ev != filepath.Clean(dir) {
+			args = append(args, "--ro-bind", ev, ev)
+		}
+	}
+	return args, nil
+}
+
+// appendBind binds dir read-write, or read-only when it is at or beneath one
+// of readonlyDirs (compared by lexical and resolved path, so a symlink alias
+// of a readonly tree cannot be mounted writable).
+func appendBind(args []string, readonlyDirs []string, dir string) []string {
+	if beneathAny(readonlyDirs, dir) {
+		return append(args, "--ro-bind", dir, dir)
+	}
+	return append(args, "--bind", dir, dir)
+}
+
+// splitUnderDataRoot separates the dirs at or beneath the runtime-data root.
+func splitUnderDataRoot(dirs []string) (other, under []string) {
+	for _, d := range dirs {
+		if filepath.IsAbs(d) && beneathAny([]string{paths.DataDir()}, d) {
+			under = append(under, d)
+		} else {
+			other = append(other, d)
+		}
+	}
+	return other, under
+}
+
+// beneathAny reports whether p is one of dirs or lies beneath one.
+func beneathAny(dirs []string, p string) bool {
+	p = filepath.Clean(p)
+	cands := realAndLexical(p)
+	for _, d := range dirs {
+		if !filepath.IsAbs(d) {
+			continue
+		}
+		for _, base := range realAndLexical(d) {
+			for _, c := range cands {
+				if rel, err := filepath.Rel(base, c); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func realAndLexical(p string) []string {
+	out := []string{filepath.Clean(p)}
+	if ev, err := filepath.EvalSymlinks(p); err == nil && ev != out[0] {
+		out = append(out, ev)
+	}
+	return out
+}
+
+// CommandForCommandExecAt is CommandForCommandExec with the sandbox working
+// directory cwd given separately from the host directory runDir (empty cwd:
+// runDir). A chat's tmp/session dir is visible as /tmp/<rel> or /session/<rel>
+// (see SandboxCwd), not at its host path. readonlyDirs are the operator's
+// readonly mount roots: like in agent sandboxes each existing one is bound
+// read-only after the broader read-write binds (HOME, runDir), so they win, and
+// a runDir beneath one is never bound read-write.
+func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID string, configPath string, allowCrossSession bool, readonlyDirs []string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+	if cwd == "" {
+		cwd = runDir
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -693,9 +817,11 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 			// requires runDir to be part of the HOME mount (not a separate
 			// container volume mounted under HOME).
 			if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
-				args = append(args, "--bind", runDir, runDir)
+				// Beneath a readonly root (also through a symlink alias) the
+				// path is mounted read-only so it exists and cannot be written.
+				args = appendBind(args, readonlyDirs, runDir)
 			}
-			args = append(args, "--chdir", runDir)
+			args = append(args, "--chdir", cwd)
 		} else {
 			args = append(args, "--chdir", home)
 		}
@@ -705,6 +831,19 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 	// Bind HOME
 	args = append(args, "--bind", home, home)
+
+	// Readonly mounts come after the read-write binds above so they win.
+	// Roots under the runtime-data root are re-mounted after the mask below
+	// (unless the mask is off), so the operator's explicit mount stays
+	// visible, read-only.
+	var maskedRO []string
+	normalRO := readonlyDirs
+	if !allowCrossSession {
+		normalRO, maskedRO = splitUnderDataRoot(readonlyDirs)
+	}
+	if args, err = appendReadonlyBinds(args, normalRO); err != nil {
+		return nil, err
+	}
 
 	// Ignore auth dir for all registered CLIs, and ssh dir to prevent key leak
 	for _, cli := range agentwrapper.GetRegisteredCLIs() {
@@ -737,6 +876,9 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 	// Filter out the host runtime-data root (~/asgard/data) unless cross-session debugging is allowed
 	if !allowCrossSession {
 		args = appendCrossSessionMaskArgs(args)
+		if args, err = appendReadonlyBinds(args, maskedRO); err != nil {
+			return nil, err
+		}
 	}
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars

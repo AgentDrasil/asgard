@@ -5115,8 +5115,17 @@ type RunCommandRequest struct {
 	// buffered output (kept for the request_id TTL) starting at these offsets.
 	ResumeStdoutOffset uint64 `protobuf:"varint,11,opt,name=resume_stdout_offset,json=resumeStdoutOffset,proto3" json:"resume_stdout_offset,omitempty"`
 	ResumeStderrOffset uint64 `protobuf:"varint,12,opt,name=resume_stderr_offset,json=resumeStderrOffset,proto3" json:"resume_stderr_offset,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// cancel kills the command of (chat_id, request_id) immediately and returns
+	// without output. It is idempotent, and an unknown or finished request_id is
+	// a no-op success. Only chat_id and request_id are read.
+	Cancel bool `protobuf:"varint,13,opt,name=cancel,proto3" json:"cancel,omitempty"`
+	// resumed is true on every retry after the first attempt of a request_id.
+	// A runner with no record of the request_id (restart, expiry) answers
+	// NOT_FOUND to a resumed call, whatever the offsets, and never runs the
+	// command again; only a call with resumed=false starts a command.
+	Resumed       bool `protobuf:"varint,14,opt,name=resumed,proto3" json:"resumed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunCommandRequest) Reset() {
@@ -5231,6 +5240,20 @@ func (x *RunCommandRequest) GetResumeStderrOffset() uint64 {
 		return x.ResumeStderrOffset
 	}
 	return 0
+}
+
+func (x *RunCommandRequest) GetCancel() bool {
+	if x != nil {
+		return x.Cancel
+	}
+	return false
+}
+
+func (x *RunCommandRequest) GetResumed() bool {
+	if x != nil {
+		return x.Resumed
+	}
+	return false
 }
 
 type RunCommandExit struct {
@@ -6445,7 +6468,7 @@ const file_runner_proto_rawDesc = "" +
 	"\x03ref\x18\x01 \x01(\v2\x19.asgard.runner.v1.PathRefR\x03ref\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x02 \x01(\tR\trequestId\"\x0f\n" +
-	"\rMkdirResponse\"\xee\x03\n" +
+	"\rMkdirResponse\"\xa0\x04\n" +
 	"\x11RunCommandRequest\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x1f\n" +
@@ -6462,7 +6485,9 @@ const file_runner_proto_rawDesc = "" +
 	"request_id\x18\n" +
 	" \x01(\tR\trequestId\x120\n" +
 	"\x14resume_stdout_offset\x18\v \x01(\x04R\x12resumeStdoutOffset\x120\n" +
-	"\x14resume_stderr_offset\x18\f \x01(\x04R\x12resumeStderrOffsetB\n" +
+	"\x14resume_stderr_offset\x18\f \x01(\x04R\x12resumeStderrOffset\x12\x16\n" +
+	"\x06cancel\x18\r \x01(\bR\x06cancel\x12\x18\n" +
+	"\aresumed\x18\x0e \x01(\bR\aresumedB\n" +
 	"\n" +
 	"\b_sandbox\"^\n" +
 	"\x0eRunCommandExit\x12\x12\n" +

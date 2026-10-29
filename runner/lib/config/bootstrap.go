@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,9 @@ const (
 	EnvTLSKey     = "ASGARD_RUNNER_TLS_KEY"
 	EnvCA         = "ASGARD_RUNNER_CA"
 	EnvServerName = "ASGARD_RUNNER_SERVER_NAME"
+	// EnvAllowUnsandboxedCommands opts the runner in to workflow command
+	// nodes that run without the bubblewrap sandbox ("1" or "true").
+	EnvAllowUnsandboxedCommands = "ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS"
 )
 
 // Bootstrap is the configuration a runner needs before it can reach etcd or
@@ -36,6 +40,11 @@ type Bootstrap struct {
 	// ServerName overrides the name verified in the backend certificate
 	// (default: the host part of Backend).
 	ServerName string
+	// AllowUnsandboxedCommands lets workflow command nodes that ask for
+	// sandbox: false run directly with bash on this runner. Off by default:
+	// commands then always run in the bubblewrap sandbox. Only the operator can
+	// turn it on; a request never can.
+	AllowUnsandboxedCommands bool
 }
 
 // ParseBootstrap reads the bootstrap settings from args (flags) with env as
@@ -48,6 +57,8 @@ func ParseBootstrap(args []string, getenv func(string) string) (*Bootstrap, erro
 	fs.StringVar(&b.TLSKey, "tls-key", getenv(EnvTLSKey), "client private key PEM [$"+EnvTLSKey+"]")
 	fs.StringVar(&b.CA, "ca", getenv(EnvCA), "CA bundle PEM verifying the backend [$"+EnvCA+"]")
 	fs.StringVar(&b.ServerName, "server-name", getenv(EnvServerName), "expected backend certificate name (default: host of -backend) [$"+EnvServerName+"]")
+	allowUnsandboxed, _ := strconv.ParseBool(getenv(EnvAllowUnsandboxedCommands))
+	fs.BoolVar(&b.AllowUnsandboxedCommands, "allow-unsandboxed-commands", allowUnsandboxed, "let workflow command nodes with sandbox: false run without the sandbox (insecure; development only) [$"+EnvAllowUnsandboxedCommands+"]")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}

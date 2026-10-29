@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -36,6 +38,19 @@ type Options struct {
 	// GitExec runs git invocations (the runner passes the sandboxed one); nil
 	// runs git directly (tests, development).
 	GitExec runnerfs.GitExecFunc
+	// Ready and SandboxConf gate and configure the bubblewrap sandbox of
+	// RunCommand (the runner passes the sandbox setup's Ready and Conf). A
+	// sandboxed command fails closed when Ready is nil or reports an error.
+	Ready       func() error
+	SandboxConf func() *config.Config
+	// AllowUnsandboxed lets the runner's operator permit workflow command
+	// nodes that ask for no sandbox (sandbox: false) to run directly with
+	// bash. It is never derived from a request: without it such commands are
+	// refused. The runner binary sets it from -allow-unsandboxed-commands.
+	AllowUnsandboxed bool
+	// DetachGrace is how long a command survives without an attached stream
+	// before it is killed (default 30s); it lets a reset connection resume.
+	DetachGrace time.Duration
 }
 
 // Service implements runnerpb.RunnerServiceServer. RPCs that are not
@@ -47,11 +62,28 @@ type Service struct {
 	shell   string
 	gitExec runnerfs.GitExecFunc
 	ttyd    ttydSessions
+
+	cmds             *cmdRegistry
+	ready            func() error
+	sandboxConf      func() *config.Config
+	allowUnsandboxed bool
+	detachGrace      time.Duration
+	// runSandboxed runs a sandboxed command (cmdexec.RunSandboxed; tests
+	// substitute it).
+	runSandboxed func(context.Context, cmdexec.SandboxSpec, io.Writer, io.Writer) (int, error)
 }
 
 // New returns a Service.
 func New(opts Options) *Service {
-	return &Service{idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents, shell: opts.Shell, gitExec: opts.GitExec}
+	grace := opts.DetachGrace
+	if grace <= 0 {
+		grace = defaultDetachGrace
+	}
+	return &Service{
+		idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents, shell: opts.Shell, gitExec: opts.GitExec,
+		cmds: newCmdRegistry(opts.IdemTTL, 0), ready: opts.Ready, sandboxConf: opts.SandboxConf,
+		allowUnsandboxed: opts.AllowUnsandboxed, detachGrace: grace, runSandboxed: cmdexec.RunSandboxed,
+	}
 }
 
 // grpcErr maps a runnerfs error onto a gRPC status.
@@ -93,13 +125,23 @@ func (s *Service) allowedRunDirs(write bool) []string {
 	return agents.AllowedDirs(list, write)
 }
 
+// readonlyDirs lists the absolute readonly roots (write vetoes of the file
+// service); malformed entries cannot veto anything here, see
+// readonlyDirsChecked for the commands that must refuse them.
 func (s *Service) readonlyDirs() []string {
+	dirs, _ := s.readonlyDirsChecked()
+	return dirs
+}
+
+// readonlyDirsChecked is readonlyDirs but fails on a non-absolute entry, and
+// on an agent list that cannot be loaded (fail closed).
+func (s *Service) readonlyDirsChecked() ([]string, error) {
 	if s.agents == nil {
-		return nil
+		return nil, nil
 	}
 	list, err := s.agents()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	return agents.ReadonlyDirs(list)
 }

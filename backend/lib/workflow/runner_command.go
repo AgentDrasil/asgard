@@ -3,25 +3,14 @@ package workflow
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"syscall"
 	"time"
-	"uuid"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
-	"github.com/AgentDrasil/asgard/fakebash/pb"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -49,6 +38,20 @@ func (r *commandRunner) Supports(t workflowspec.NodeType) bool {
 }
 
 func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+	sandbox := r.sandboxEnabled
+	if nctx.Node.Sandbox != nil {
+		sandbox = *nctx.Node.Sandbox
+	}
+	// A chat bound to a runner runs its commands there; only the host-local
+	// layout (development and tests without a runner) executes them here.
+	if cr, ok := ctx.Value(fsCtxKey{}).(runnerfs.CommandRunner); ok {
+		return r.runOnRunner(ctx, nctx, cr, sandbox)
+	}
+	return r.runLocal(ctx, nctx, sandbox)
+}
+
+// runLocal executes the command on this host.
+func (r *commandRunner) runLocal(ctx context.Context, nctx *NodeContext, sandbox bool) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 	command := nctx.Interpolate(node.Command)
 
@@ -62,11 +65,6 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 		return nil, fmt.Errorf("node %s: creating working dir: %w", node.ID, err)
 	}
 
-	sandbox := r.sandboxEnabled
-	if node.Sandbox != nil {
-		sandbox = *node.Sandbox
-	}
-
 	ctx, cancel := withNodeTimeout(ctx, node)
 	defer cancel()
 
@@ -74,34 +72,124 @@ func (r *commandRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowsp
 	var exitCode int
 	var err error
 	if sandbox {
-		configPath := ""
-		var proxyCfg bwrap.ProxySandboxConfig
-		if r.conf != nil {
-			configPath = r.conf.GetConfigPath()
-			proxyCfg = r.conf.SandboxProxyOptions()
+		spec := cmdexec.SandboxSpec{
+			Command: command, Dir: workingDir, ChatID: nctx.SessionID, AllowCrossSession: nctx.AllowCrossSession,
 		}
-		exitCode, err = runSandboxedCommand(ctx, command, workingDir, nctx.SessionID, configPath, proxyCfg, nctx.AllowCrossSession, &stdout, &stderr)
+		if r.conf != nil {
+			spec.ConfigPath = r.conf.GetConfigPath()
+			spec.Proxy = r.conf.SandboxProxyOptions()
+		}
+		exitCode, err = cmdexec.RunSandboxed(ctx, spec, &stdout, &stderr)
 	} else {
-		exitCode, err = runDirectCommand(ctx, command, workingDir, &stdout, &stderr)
+		exitCode, err = cmdexec.RunDirect(ctx, command, workingDir, nil, &stdout, &stderr)
 	}
 
 	result := &workflowspec.NodeResult{ExitCode: exitCode, Output: stdout.String()}
 	collectArtifact(nctx, node, result)
+	return finishCommand(node, result, err, stderr.String()), nil
+}
+
+// finishCommand sets the status of a command that ended with exitCode (or an
+// execution error).
+func finishCommand(node *workflowspec.NodeSpec, result *workflowspec.NodeResult, err error, stderr string) *workflowspec.NodeResult {
 	if err != nil {
 		result.Status = workflowspec.StatusFailed
 		result.Error = err
-		return result, nil
+		return result
 	}
 	// ExitCode always keeps the real process exit code (even on success) so
 	// downstream `when: "nodes.<id>.exit_code == N"` edges match precisely.
-	if !exitCodeAllowed(node, exitCode) {
+	if !exitCodeAllowed(node, result.ExitCode) {
 		result.Status = workflowspec.StatusFailed
-		result.Error = fmt.Errorf("command exited with code %d: %s", exitCode, truncate(stderr.String(), 2000))
-		return result, nil
+		result.Error = fmt.Errorf("command exited with code %d: %s", result.ExitCode, truncate(stderr, 2000))
+		return result
 	}
 	result.Status = workflowspec.StatusSucceeded
-	return result, nil
+	return result
 }
+
+// commandDirs are the directories as the command sees them, which for a
+// runner-bound chat are never backend host paths. The chat's default tmp and
+// session dirs live at the runner's own location: a sandboxed command sees
+// them as /tmp and /session; an unsandboxed one gets the runner's paths in
+// $ASGARD_TMP_DIR and $ASGARD_SESSION_DIR. Dirs the workflow chose itself
+// are kept.
+func commandDirs(nctx *NodeContext, sandbox bool) (tmp, session string) {
+	tmp, session = nctx.TmpDir, nctx.SessionDir
+	if nctx.SessionID == "" {
+		return
+	}
+	if tmp == DefaultTmpDir(nctx.SessionID) {
+		tmp = "${ASGARD_TMP_DIR}"
+		if sandbox {
+			tmp = "/tmp"
+		}
+	}
+	if session == DefaultSessionDir(nctx.SessionID) {
+		session = "${ASGARD_SESSION_DIR}"
+		if sandbox {
+			session = "/session"
+		}
+	}
+	return
+}
+
+// interpolateAs expands nctx's placeholders with the given tmp and session dir.
+func interpolateAs(nctx *NodeContext, text, tmp, session string) string {
+	c := *nctx
+	c.TmpDir, c.SessionDir = tmp, session
+	return c.Interpolate(text)
+}
+
+// runOnRunner executes the command on the chat's runner and maps the outcome
+// onto a NodeResult exactly like a local run.
+func (r *commandRunner) runOnRunner(ctx context.Context, nctx *NodeContext, cr runnerfs.CommandRunner, sandbox bool) (*workflowspec.NodeResult, error) {
+	node := nctx.Node
+	tmp, session := commandDirs(nctx, sandbox)
+	command := interpolateAs(nctx, node.Command, tmp, session)
+	// The working dir is resolved by the runner, which understands the chat's
+	// namespaced /tmp and /session forms but not shell variables.
+	wdTmp, wdSession := nctx.TmpDir, nctx.SessionDir
+	if nctx.TmpDir == DefaultTmpDir(nctx.SessionID) {
+		wdTmp = "/tmp"
+	}
+	if nctx.SessionDir == DefaultSessionDir(nctx.SessionID) {
+		wdSession = "/session"
+	}
+	workingDir := interpolateAs(nctx, node.WorkingDir, wdTmp, wdSession)
+
+	// The runner enforces the node timeout itself so that a timeout looks
+	// like a killed process (exit -1), as it does locally; this context only
+	// carries the cancellation and a safety margin against a hung runner.
+	callCtx, cancel := ctx, context.CancelFunc(func() {})
+	if d := node.TimeoutDuration(); d > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, d+remoteTimeoutMargin)
+	}
+	defer cancel()
+
+	res, err := cr.RunCommand(callCtx, runnerfs.CommandSpec{
+		Command: command, WorkingDir: workingDir, RunDir: nctx.RunDir, TmpDir: nctx.TmpDir,
+		OutputFile: node.OutputFile, Sandbox: sandbox, AllowCrossSession: nctx.AllowCrossSession,
+		Timeout: node.TimeoutDuration(),
+	})
+	result := &workflowspec.NodeResult{ExitCode: res.ExitCode, Output: string(res.Stdout)}
+	if err != nil {
+		result.ExitCode = -1
+	}
+	for _, a := range res.Artifacts {
+		if result.Artifacts == nil {
+			result.Artifacts = make(map[string]string)
+		}
+		// The viewer path is the key the file API accepts; a runner path
+		// would mean nothing on the backend.
+		result.Artifacts[a.Name] = a.ViewerPath
+	}
+	return finishCommand(node, result, err, string(res.Stderr)), nil
+}
+
+// remoteTimeoutMargin is how long past the node timeout the backend waits for
+// the runner to report a timed out command.
+const remoteTimeoutMargin = 30 * time.Second
 
 // exitCodeAllowed reports whether the exit code counts as success: zero or a
 // member of the node's allowed_exit_codes whitelist.
@@ -134,140 +222,6 @@ func collectArtifact(nctx *NodeContext, node *workflowspec.NodeSpec, result *wor
 		result.Artifacts = make(map[string]string)
 	}
 	result.Artifacts[node.OutputFile] = path
-}
-
-// runDirectCommand runs the command with bash on the host.
-func runDirectCommand(ctx context.Context, command, workingDir string, stdout, stderr *bytes.Buffer) (int, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	cmd.Dir = workingDir
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	// Run the command in its own process group and kill the whole group on
-	// cancel: killing only bash would leave its children (e.g. `sleep 60`)
-	// holding the output pipes, and Run would block until they exit.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 5 * time.Second
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if ok := asExitError(err, &exitErr); ok {
-			return exitErr.ExitCode(), nil
-		}
-		return -1, fmt.Errorf("running command: %w", err)
-	}
-	return 0, nil
-}
-
-func asExitError(err error, target **exec.ExitError) bool {
-	exitErr, ok := err.(*exec.ExitError)
-	if ok {
-		*target = exitErr
-	}
-	return ok
-}
-
-// runSandboxedCommand runs the command inside a bubblewrap sandbox hosting a
-// fakebashd gRPC daemon, mirroring the dual-sandbox execution model used by
-// agent runs: the host dials the socket directory bind-mounted at /fakebash.
-func runSandboxedCommand(ctx context.Context, command, runDir, chatID, configPath string, proxyCfg bwrap.ProxySandboxConfig, allowCrossSession bool, stdout, stderr *bytes.Buffer) (int, error) {
-	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
-	if err := os.MkdirAll(sockDir, 0o755); err != nil {
-		return -1, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
-	}
-	defer func() { _ = os.RemoveAll(sockDir) }()
-
-	sandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, allowCrossSession, proxyCfg)
-	if err != nil {
-		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
-	}
-	sandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
-	sandboxCmd.Stdout = os.Stdout
-	sandboxCmd.Stderr = os.Stderr
-
-	if err := sandboxCmd.Start(); err != nil {
-		return -1, fmt.Errorf("starting command exec sandbox: %w", err)
-	}
-	defer func() {
-		if sandboxCmd.Process != nil {
-			_ = sandboxCmd.Process.Kill()
-			_, _ = sandboxCmd.Process.Wait()
-		}
-	}()
-
-	conn, err := dialFakebashSocket(ctx, filepath.Join(sockDir, "fakebash.sock"))
-	if err != nil {
-		return -1, err
-	}
-	defer func() { _ = conn.Close() }()
-
-	client := pb.NewFakebashServiceClient(conn)
-	stream, err := client.RunCommand(ctx, &pb.CommandRequest{
-		Args: []string{"-c", command},
-		Cwd:  runDir,
-		Env:  os.Environ(),
-	})
-	if err != nil {
-		return -1, fmt.Errorf("run command stream error: %w", err)
-	}
-
-	exitCode := 0
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return -1, fmt.Errorf("stream recv error: %w", err)
-		}
-		switch resp.Type {
-		case pb.CommandResponse_STDOUT:
-			stdout.Write(resp.Payload)
-		case pb.CommandResponse_STDERR:
-			stderr.Write(resp.Payload)
-		case pb.CommandResponse_EXIT:
-			if len(resp.Payload) > 0 {
-				var err error
-				exitCode, err = strconv.Atoi(string(resp.Payload))
-				if err != nil {
-					return -1, fmt.Errorf("malformed exit code payload %q: %w", string(resp.Payload), err)
-				}
-			}
-		}
-	}
-	return exitCode, nil
-}
-
-// dialFakebashSocket waits for the sandbox daemon's unix socket to accept
-// connections (it may still be booting) and returns a gRPC client connection.
-func dialFakebashSocket(ctx context.Context, socketPath string) (*grpc.ClientConn, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	for {
-		if conn, err := net.DialTimeout("unix", socketPath, time.Second); err == nil {
-			_ = conn.Close()
-			break
-		}
-		select {
-		case <-waitCtx.Done():
-			return nil, fmt.Errorf("fakebash socket %q not ready: %w", socketPath, waitCtx.Err())
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-
-	conn, err := grpc.NewClient("unix://"+socketPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("grpc dial %q: %w", socketPath, err)
-	}
-	return conn, nil
 }
 
 func truncate(s string, n int) string {

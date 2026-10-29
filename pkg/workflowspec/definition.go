@@ -3,6 +3,7 @@ package workflowspec
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -213,6 +214,16 @@ func (d *WorkflowDefinition) Validate() error {
 	}
 	if d.MaxNodeExecutions < 0 {
 		return fmt.Errorf("max_node_executions cannot be negative")
+	}
+	for _, m := range []struct {
+		kind string
+		dirs []string
+	}{{"readonly", d.MountDirs.ReadOnly}, {"readwrite", d.MountDirs.ReadWrite}} {
+		for _, dir := range m.dirs {
+			if !filepath.IsAbs(dir) {
+				return fmt.Errorf("mount_dirs.%s entry must be an absolute path: %q", m.kind, dir)
+			}
+		}
 	}
 
 	ids := make(map[string]*NodeSpec, len(d.Nodes))

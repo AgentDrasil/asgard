@@ -866,3 +866,299 @@ func TestGitSandboxRuns(t *testing.T) {
 	_, err = run(GitSandboxSpec{ReadWrite: true, Git: []string{"--git-dir=/repo/.git", "--work-tree=/repo", "tag", "t1"}})
 	assert.NoError(t, err)
 }
+
+func TestSandboxCwd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chat := "chat-1"
+	tmp, sess, data := paths.SessionTmpDir(chat), paths.SessionDir(chat), paths.DataDir()
+	outside := t.TempDir()
+
+	for _, tc := range []struct {
+		name, dir, want string
+		cross           bool
+		wantErr         bool
+	}{
+		{name: "tmp root", dir: tmp, want: "/tmp"},
+		{name: "tmp sub", dir: filepath.Join(tmp, "a", "b"), want: "/tmp/a/b"},
+		{name: "session sub", dir: filepath.Join(sess, "sub"), want: "/session/sub"},
+		{name: "outside root keeps its path", dir: outside, want: outside},
+		{name: "another chat is masked", dir: paths.SessionTmpDir("chat-2"), wantErr: true},
+		{name: "data root is masked", dir: filepath.Join(data, "shared"), wantErr: true},
+		{name: "another chat with cross-session", dir: paths.SessionTmpDir("chat-2"), cross: true, want: paths.SessionTmpDir("chat-2")},
+		{name: "own tmp sub-name prefix is not own tmp", dir: tmp + "x", wantErr: true},
+	} {
+		got, err := SandboxCwd(chat, tc.dir, tc.cross, nil)
+		if tc.wantErr {
+			assert.Error(t, err, tc.name)
+			continue
+		}
+		require.NoError(t, err, tc.name)
+		assert.Equal(t, tc.want, got, tc.name)
+	}
+}
+
+func TestCommandForCommandExecAt_Chdir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chat := "chat-1"
+	hostDir := filepath.Join(paths.SessionTmpDir(chat), "sub")
+	require.NoError(t, os.MkdirAll(hostDir, 0o755))
+
+	cmd, err := CommandForCommandExecAt(hostDir, "/tmp/sub", "sock", chat, "", false, nil)
+	require.NoError(t, err)
+	chdir := indexOfSeq(cmd.Args, "--chdir", "/tmp/sub")
+	require.GreaterOrEqual(t, chdir, 0, "the sandbox cwd is the in-sandbox path: %v", cmd.Args)
+	assert.Less(t, indexOfSeq(cmd.Args, "--bind", paths.SessionTmpDir(chat), "/tmp"), chdir)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--chdir", hostDir), "the host path does not exist in the sandbox")
+	// The /tmp mount precedes the data-root mask, so it stays visible.
+	mask := indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir())
+	require.GreaterOrEqual(t, mask, 0)
+	assert.Less(t, indexOfSeq(cmd.Args, "--bind", paths.SessionTmpDir(chat), "/tmp"), mask)
+
+	// A run dir outside HOME is bound at its own path, before the masks.
+	outside := t.TempDir()
+	cmd, err = CommandForCommandExecAt(outside, outside, "sock", chat, "", false, nil)
+	require.NoError(t, err)
+	bind := indexOfSeq(cmd.Args, "--bind", outside, outside)
+	require.GreaterOrEqual(t, bind, 0)
+	assert.Less(t, bind, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()))
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", outside), 0)
+}
+
+func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chat := "chat-1"
+	homeBind := func(args []string) int { return indexOfSeq(args, "--bind", home, home) }
+
+	// A readonly root under HOME, with the run dir inside it: ro-bound after
+	// the whole-HOME rw bind, so it wins.
+	roHome := filepath.Join(home, "docs")
+	require.NoError(t, os.MkdirAll(filepath.Join(roHome, "sub"), 0o755))
+	cmd, err := CommandForCommandExecAt(filepath.Join(roHome, "sub"), filepath.Join(roHome, "sub"), "sock", chat, "", false, []string{roHome})
+	require.NoError(t, err)
+	ro := indexOfSeq(cmd.Args, "--ro-bind", roHome, roHome)
+	require.GreaterOrEqual(t, ro, 0, "%v", cmd.Args)
+	assert.Greater(t, ro, homeBind(cmd.Args))
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", filepath.Join(roHome, "sub"), filepath.Join(roHome, "sub")))
+
+	// A readonly root outside HOME holding the run dir: never bound rw.
+	roOut := t.TempDir()
+	runDir := filepath.Join(roOut, "work")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	cmd, err = CommandForCommandExecAt(runDir, runDir, "sock", chat, "", false, []string{roOut})
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", runDir, runDir))
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", roOut, roOut))
+	ro = indexOfSeq(cmd.Args, "--ro-bind", roOut, roOut)
+	require.GreaterOrEqual(t, ro, 0)
+	assert.Greater(t, ro, homeBind(cmd.Args))
+	assert.Less(t, ro, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()), "before the masks")
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", runDir), 0)
+
+	// A writable run dir containing a readonly sub-root: rw bind first, the
+	// ro-bind of the sub-root after it.
+	rw := t.TempDir()
+	sub := filepath.Join(rw, "ro")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	cmd, err = CommandForCommandExecAt(rw, rw, "sock", chat, "", false, []string{sub, filepath.Join(rw, "missing")})
+	require.NoError(t, err)
+	rwBind := indexOfSeq(cmd.Args, "--bind", rw, rw)
+	require.GreaterOrEqual(t, rwBind, 0)
+	assert.Greater(t, indexOfSeq(cmd.Args, "--ro-bind", sub, sub), rwBind)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--ro-bind", filepath.Join(rw, "missing"), filepath.Join(rw, "missing")), "absent roots are skipped")
+
+	// A sibling with the same name prefix is not "beneath" the readonly root.
+	other := roOut + "x"
+	require.NoError(t, os.MkdirAll(other, 0o755))
+	t.Cleanup(func() { _ = os.RemoveAll(other) })
+	cmd, err = CommandForCommandExecAt(other, other, "sock", chat, "", false, []string{roOut})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", other, other), 0)
+}
+
+func TestBuildSandboxArgs_ReadonlyMountsComeAfterEveryReadWriteBind(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runDir := t.TempDir()
+	check := func(t *testing.T, args []string, roDir string, rwDirs ...string) {
+		t.Helper()
+		ro := indexOfSeq(args, "--ro-bind", roDir, roDir)
+		require.GreaterOrEqual(t, ro, 0, "%v", args)
+		for _, rw := range rwDirs {
+			i := indexOfSeq(args, "--bind", rw, rw)
+			require.GreaterOrEqual(t, i, 0, rw)
+			assert.Greater(t, ro, i, "the ro-bind of %s must come after the rw bind of %s", roDir, rw)
+		}
+		assert.Less(t, ro, indexOfSeq(args, "--"), "before the end of the sandbox args")
+	}
+
+	// Under an rw ancestor given by mount_dirs.readwrite.
+	rw := t.TempDir()
+	ro := filepath.Join(rw, "ro")
+	require.NoError(t, os.MkdirAll(ro, 0o755))
+	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{ro}, ReadWrite: []string{rw}}}
+	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	require.NoError(t, err)
+	check(t, args, ro, rw)
+
+	// Under an ancestor that is a run dir, and under the (extra) bound run dir.
+	cfg = &agentspec.AgentConfig{RunDirs: []string{rw}, MountDirs: agentspec.MountConfig{ReadOnly: []string{ro}}}
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c2", "", "")
+	require.NoError(t, err)
+	check(t, args, ro, rw, runDir)
+	sub := filepath.Join(runDir, "docs")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{sub}}}
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c3", "", "")
+	require.NoError(t, err)
+	check(t, args, sub, runDir)
+
+	// Under a CLI mount directory (~/.cache is bound for the CLIs).
+	cacheRo := filepath.Join(home, ".cache", "refs")
+	require.NoError(t, os.MkdirAll(cacheRo, 0o755))
+	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{cacheRo}}}
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, runDir, "", "c4", "", "")
+	require.NoError(t, err)
+	check(t, args, cacheRo, filepath.Join(home, ".cache"))
+}
+
+func TestReadonlyMountsFollowSymlinks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chat := "chat-1"
+	real := t.TempDir()
+	proj := filepath.Join(real, "proj")
+	require.NoError(t, os.MkdirAll(proj, 0o755))
+	link := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.Symlink(real, link))
+	evReal, err := filepath.EvalSymlinks(real)
+	require.NoError(t, err)
+	evProj := filepath.Join(evReal, "proj")
+
+	// Both names of the root are bound read-only, so the working dir under the
+	// resolved target exists in the sandbox, read-only and not re-bound rw.
+	cmd, err := CommandForCommandExecAt(evProj, evProj, "sock", chat, "", false, []string{link})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", link, link), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", evReal, evReal), 0)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", evProj, evProj))
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", evProj), 0)
+
+	// Backend-local shape: the run dir is reached through a symlink into the
+	// readonly root, and must not get a read-write bind either.
+	viaLink := filepath.Join(link, "proj")
+	cmd, err = CommandForCommandExecAt(viaLink, viaLink, "sock", chat, "", false, []string{real})
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", viaLink, viaLink))
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", real, real), 0)
+}
+
+func TestReadonlyAliasRunDirIsMountedReadOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	// The run dir is an alias (outside HOME) of a readonly root: its path must
+	// exist in the sandbox, read-only, never read-write.
+	cmd, err := CommandForCommandExecAt(alias, alias, "sock", "chat-1", "", false, []string{real})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", alias, alias), 0, "%v", cmd.Args)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", alias, alias))
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", alias), 0)
+
+	// Without a readonly root it stays read-write.
+	cmd, err = CommandForCommandExecAt(alias, alias, "sock", "chat-1", "", false, nil)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", alias, alias), 0)
+}
+
+func TestBuildSandboxArgs_ReadWriteBindsAliasingReadonlyRootsAreDemoted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	realRO := t.TempDir()
+	alias := func() string {
+		l := filepath.Join(t.TempDir(), "alias")
+		require.NoError(t, os.Symlink(realRO, l))
+		return l
+	}
+	runDir := t.TempDir()
+	demoted := func(args []string, dir string) {
+		t.Helper()
+		assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", dir, dir), 0, "%s must be read-only: %v", dir, args)
+		assert.Equal(t, -1, indexOfSeq(args, "--bind", dir, dir), "%s must not be read-write", dir)
+	}
+
+	rwAlias, runAlias, extra := alias(), alias(), alias()
+	cfg := &agentspec.AgentConfig{
+		RunDirs:   []string{runAlias},
+		MountDirs: agentspec.MountConfig{ReadOnly: []string{realRO}, ReadWrite: []string{rwAlias}},
+	}
+	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, extra, "", "c1", "", "")
+	require.NoError(t, err)
+	demoted(args, rwAlias)
+	demoted(args, runAlias)
+	demoted(args, extra) // the extra run dir bind
+
+	// A CLI mount directory that aliases a readonly root.
+	cache := filepath.Join(home, ".cache")
+	require.NoError(t, os.Symlink(realRO, cache))
+	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{realRO}}}
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, runDir, "", "c2", "", "")
+	require.NoError(t, err)
+	demoted(args, cache)
+	// Unrelated dirs stay read-write.
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", runDir, runDir), 0)
+}
+
+func TestReadonlyRootUnderDataRootIsRemountedAfterTheMask(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	chat := "chat-1"
+	roUnder := filepath.Join(paths.DataDir(), "shared", "docs")
+	require.NoError(t, os.MkdirAll(roUnder, 0o755))
+	roElsewhere := t.TempDir()
+
+	cmd, err := CommandForCommandExecAt(roUnder, roUnder, "sock", chat, "", false, []string{roUnder, roElsewhere})
+	require.NoError(t, err)
+	mask := indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir())
+	require.GreaterOrEqual(t, mask, 0)
+	under := indexOfSeq(cmd.Args, "--ro-bind", roUnder, roUnder)
+	require.GreaterOrEqual(t, under, 0)
+	assert.Greater(t, under, mask, "re-mounted after the data-root mask so it stays visible")
+	elsewhere := indexOfSeq(cmd.Args, "--ro-bind", roElsewhere, roElsewhere)
+	require.GreaterOrEqual(t, elsewhere, 0)
+	assert.Less(t, elsewhere, mask, "other readonly roots keep their place")
+
+	// With cross-session access there is no mask: normal place.
+	cmd, err = CommandForCommandExecAt(roUnder, roUnder, "sock", chat, "", true, []string{roUnder})
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()))
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", roUnder, roUnder), 0)
+
+	// The cwd under such a root is visible, so it is accepted.
+	got, err := SandboxCwd(chat, roUnder, false, []string{roUnder})
+	require.NoError(t, err)
+	assert.Equal(t, roUnder, got)
+	_, err = SandboxCwd(chat, roUnder, false, nil)
+	assert.Error(t, err)
+}
+
+func TestRelativeReadonlyMountsFailClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	runDir := t.TempDir()
+
+	_, err := appendReadonlyBinds(nil, []string{"/abs-but-missing", "relative/dir"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"relative/dir"`)
+
+	_, err = CommandForCommandExecAt(runDir, runDir, "sock", "chat-1", "", false, []string{"relative/dir"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "relative/dir")
+
+	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{"relative/dir"}}}
+	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "relative/dir")
+}
