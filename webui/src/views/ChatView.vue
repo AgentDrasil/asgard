@@ -20,6 +20,7 @@ const props = withDefaults(
     activeAgent: AgentInfo | null;
     agents?: AgentInfo[];
     runDir: string;
+    runnerId?: string;
     sessionId: string;
     gitRoot: string;
     terminalType?: "session" | "sidebar";
@@ -208,6 +209,7 @@ function navigateToVcs(gitRoot?: string) {
         :activeAgent="activeAgent"
         :agents="agents"
         :runDir="runDir"
+        :runnerId="runnerId"
         :sessionId="sessionId"
         :isTerminalOpen="isTerminalOpen"
         :modifiedFiles="modifiedFiles"

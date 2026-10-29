@@ -34,6 +34,8 @@ const props = withDefaults(
     activeAgent: AgentInfo | null;
     agents?: AgentInfo[];
     runDir: string;
+    /** Runner the chat is bound to (absent in legacy mode). */
+    runnerId?: string;
     sessionId?: string | null;
     isDetailsOpen?: boolean;
     isTerminalOpen?: boolean;
@@ -122,13 +124,13 @@ const stopArtifactResize = () => {
 const gitRoot = ref("");
 
 watch(
-  () => props.runDir,
-  async (newDir) => {
+  () => [props.runDir, props.runnerId] as const,
+  async ([newDir, runner]) => {
     if (!newDir) {
       gitRoot.value = "";
       return;
     }
-    const info = await getDirInfo(newDir);
+    const info = await getDirInfo(newDir, runner);
     gitRoot.value = info.gitRoot || "";
   },
   { immediate: true },
@@ -265,6 +267,15 @@ onUnmounted(() => {
               {{ $t("chat.workspace") }}
               <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
                 formatPath(runDir)
+              }}</span>
+            </p>
+            <p
+              v-if="runnerId"
+              class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
+              data-testid="chat-runner"
+            >
+              <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
+                $t("runners.boundRunner", { id: runnerId })
               }}</span>
             </p>
             <p

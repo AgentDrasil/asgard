@@ -1,6 +1,7 @@
 import { ref, watch } from "vue";
 import type { AgentInfo } from "../types";
 import { getAgents } from "../lib/api";
+import { useRunners } from "./useRunners";
 
 export function useAgents() {
   const agents = ref<AgentInfo[]>([]);
@@ -8,9 +9,18 @@ export function useAgents() {
   const selectedDir = ref("");
   const selectedModel = ref("");
 
-  const loadAgents = async () => {
-    const loadedAgents = await getAgents();
+  const { selectedRunnerId } = useRunners();
+
+  const loadAgents = async (runner?: string) => {
+    // Agents are scoped to a runner (global plus the runner's own).
+    const loadedAgents = await getAgents(runner || selectedRunnerId.value || undefined);
     agents.value = loadedAgents;
+
+    // Keep the current selection across a reload (e.g. the runner changed)
+    // when that agent is still available.
+    if (selectedAgentId.value && loadedAgents.some((a) => a.id === selectedAgentId.value)) {
+      return;
+    }
 
     const mainAgents = loadedAgents.filter((a) => a.main_agent !== false);
     const initialAgent = mainAgents.length > 0 ? mainAgents[0] : loadedAgents[0];

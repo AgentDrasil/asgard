@@ -23,6 +23,11 @@ import {
   redriveWorkflowRun,
   stopSessionExecution,
   stopWorkflowRun,
+  createSession,
+  getRunners,
+  getDirInfo,
+  withRunner,
+  RunnerRequestError,
 } from "./api";
 
 describe("API Library", () => {
@@ -872,6 +877,52 @@ describe("API Library", () => {
       const res = await archiveSession("sess-123");
       expect(res).toBe(false);
       expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to archive session:", expect.any(Error));
+    });
+  });
+
+  describe("runner support", () => {
+    it("withRunner appends or skips the query parameter", () => {
+      expect(withRunner("/api/agents")).toBe("/api/agents");
+      expect(withRunner("/api/agents", "n 1")).toBe("/api/agents?runner=n%201");
+      expect(withRunner("/api/subdirs?dir=/a", "n1")).toBe("/api/subdirs?dir=/a&runner=n1");
+    });
+
+    it("getAgents and getDirInfo pass ?runner=", async () => {
+      const fetchSpy = vi.fn<(url: string) => Promise<unknown>>(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+      await getAgents("n1");
+      await getDirInfo("/w", "n1");
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/agents?runner=n1");
+      expect(fetchSpy.mock.calls[1][0]).toBe("/api/subdirs?dir=%2Fw&runner=n1");
+      vi.unstubAllGlobals();
+    });
+
+    it("createSession sends runnerId and throws RunnerRequestError on 409/503", async () => {
+      const fetchSpy = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: "offline" }),
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+      await expect(createSession("a", "/w", false, "n1")).rejects.toBeInstanceOf(
+        RunnerRequestError,
+      );
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      expect(JSON.parse(init.body as string).runnerId).toBe("n1");
+      vi.unstubAllGlobals();
+    });
+
+    it("getRunners returns null on failure", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: false, status: 500 })),
+      );
+      expect(await getRunners()).toBeNull();
+      vi.unstubAllGlobals();
     });
   });
 });

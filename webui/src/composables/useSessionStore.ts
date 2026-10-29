@@ -19,10 +19,13 @@ import {
   updateQueuedMessage,
   deleteQueuedMessage,
   stopSessionExecution,
+  deleteSessionFromLocal,
+  RunnerRequestError,
 } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
 import { t } from "../i18n";
+import { useToast } from "./useToast";
 
 export interface SessionStoreOptions {
   agents?: Ref<AgentInfo[]>;
@@ -334,6 +337,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     loading.value = false;
     workingAgentLabel.value = null;
     events.disconnect();
+    // Invalidate any in-flight openSession so it cannot resurrect this state.
+    loadGen++;
   };
 
   const loadSessions = async () => {
@@ -420,6 +425,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       attachments?: Attachment[];
       pendingFiles?: File[];
       allowCrossSession?: boolean;
+      runnerId?: string;
     },
   ) => {
     let currentThreadId = activeSessionId.value;
@@ -468,15 +474,36 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     };
     rawMessages.value = [...rawMessages.value, userMsg];
 
+    let createdHere = false;
     if (!currentThreadId) {
       const targetAgent = opts?.selectedAgentId || "";
       const targetDir = opts?.selectedDir || "";
-      const created =
-        opts?.allowCrossSession !== undefined
-          ? await createSession(targetAgent, targetDir, opts.allowCrossSession)
-          : await createSession(targetAgent, targetDir);
+      let created: ChatSession | null = null;
+      let runnerFailure = "";
+      try {
+        if (opts?.runnerId) {
+          created = await createSession(
+            targetAgent,
+            targetDir,
+            opts.allowCrossSession,
+            opts.runnerId,
+          );
+        } else if (opts?.allowCrossSession !== undefined) {
+          created = await createSession(targetAgent, targetDir, opts.allowCrossSession);
+        } else {
+          created = await createSession(targetAgent, targetDir);
+        }
+      } catch (err) {
+        if (err instanceof RunnerRequestError) {
+          runnerFailure =
+            err.status === 503 ? t("runners.offlineError") : t("runners.conflictError");
+        } else {
+          throw err;
+        }
+      }
       if (created && created.chatID) {
         currentThreadId = created.chatID;
+        createdHere = true;
         activeSessionId.value = currentThreadId;
         activeSession.value = created;
         sessions.value = [created, ...sessions.value.filter((s) => s.chatID !== created.chatID)];
@@ -510,7 +537,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
         loading.value = false;
         isRunning.value = false;
-        pushErrorMessage(t("chat.createSessionFailed"));
+        pushErrorMessage(runnerFailure || t("chat.createSessionFailed"));
         return;
       }
     }
@@ -545,7 +572,28 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
     const res = await triggerAgentMessage(targetAgentId, triggerParams);
 
-    if (res?.conflict) {
+    if (res?.runnerOffline) {
+      rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
+      loading.value = false;
+      isRunning.value = false;
+      if (createdHere && currentThreadId) {
+        // The chat we just created is bound to a runner that is offline: drop
+        // it so a retry re-creates the chat against the newly selected runner.
+        const deadId = currentThreadId;
+        // Only tear down the view if the user is still on the dead chat; they
+        // may have switched to another chat while the trigger was in flight.
+        const stillActive = activeSessionId.value === deadId;
+        sessions.value = sessions.value.filter((s) => s.chatID !== deadId);
+        if (stillActive) {
+          closeSession();
+          if (router) await router.push("/newchat");
+        }
+        await deleteSessionFromLocal(deadId);
+        useToast().error(t("runners.offlineError"));
+      } else {
+        pushErrorMessage(t("runners.offlineError"));
+      }
+    } else if (res?.conflict) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
       loading.value = false;
       isRunning.value = false;

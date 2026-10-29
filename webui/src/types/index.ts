@@ -63,7 +63,8 @@ export interface ChatSession {
   title: string;
   currentAgent: string;
   runDir: string;
-  gitRoot?: string;
+  /** Node id of the runner the chat is bound to (absent in legacy mode). */
+  runnerId?: string;
   allowCrossSession?: boolean;
   isRunning?: boolean;
   isWaitingForUser?: boolean;
@@ -80,6 +81,20 @@ export interface WorkflowRunSummary {
   status: "RUNNING" | "WAITING_HUMAN" | "COMPLETED" | "FAILED" | "CANCELLED";
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface RunnerInfo {
+  node_id: string;
+  online: boolean;
+  last_seen?: string;
+  version?: string;
+  active_runs?: number;
+  supported_clis?: Record<string, string[]>;
+}
+
+export interface RunnersResponse {
+  backend_version: string;
+  runners: RunnerInfo[];
 }
 
 export interface DirInfo {

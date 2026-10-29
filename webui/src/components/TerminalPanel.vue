@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import { useI18n } from "vue-i18n";
 import TerminalView from "./TerminalView.vue";
 import { useTerminalTheme } from "../composables/useTerminalTheme";
 import { useShortcuts } from "../composables/useShortcuts";
+import { useRunners } from "../composables/useRunners";
 
 const { t } = useI18n();
 const { toggleTerminalShortcut } = useShortcuts();
+const { selectedRunnerId } = useRunners();
 
 const props = withDefaults(
   defineProps<{
@@ -42,6 +44,14 @@ let startHeight = 0;
 // Keep the terminal mounted after its first open so toggling show/hide reuses
 // the same ttyd session instead of spawning a new shell each time.
 const hasBeenOpened = ref(false);
+// The sidebar terminal has no chat and runs on the selected runner, so a runner
+// switch must remount (reconnect) it; session terminals follow the chat.
+const terminalKey = computed(() =>
+  props.terminalType === "sidebar"
+    ? `sidebar-${selectedRunnerId.value}`
+    : `${props.terminalType}-${props.sessionId}`,
+);
+
 watch(
   () => props.isOpen,
   (v) => {
@@ -218,7 +228,7 @@ onUnmounted(() => {
       <div class="flex-1 w-full h-full bg-black overflow-hidden relative">
         <div v-if="isResizing" class="absolute inset-0 bg-transparent z-20"></div>
         <TerminalView
-          :key="`${terminalType}-${sessionId}`"
+          :key="terminalKey"
           :session-id="sessionId"
           :terminal-type="terminalType"
           :theme="activeTheme"
@@ -261,7 +271,7 @@ onUnmounted(() => {
     </header>
     <div class="flex-1 w-full h-full bg-black overflow-hidden">
       <TerminalView
-        :key="`${terminalType}-${sessionId}`"
+        :key="terminalKey"
         :session-id="sessionId"
         :terminal-type="terminalType"
         :theme="activeTheme"

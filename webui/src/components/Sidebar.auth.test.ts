@@ -22,6 +22,7 @@ vi.mock("vue-router", () => ({
 vi.mock("../lib/api", () => ({
   isAuthEnabled: vi.fn<() => boolean>(() => true),
   logout: vi.fn<() => void>(),
+  getRunners: vi.fn<() => Promise<null>>(async () => null),
 }));
 
 const mockSessions: ChatSession[] = [

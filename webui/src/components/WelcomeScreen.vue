@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import type { AgentInfo, VoiceErrorCode } from "../types";
 import { getDirInfo, getSubdirs } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
+import { useRunners } from "../composables/useRunners";
 import { useToast } from "../composables/useToast";
 import { useVoiceInput } from "../composables/useVoiceInput";
 import AttachmentChips from "./chat/AttachmentChips.vue";
@@ -13,6 +14,7 @@ import { t } from "../i18n";
 
 const { toggleSidebarShortcut, sendShortcut } = useShortcuts();
 const toast = useToast();
+const { selectedRunnerId } = useRunners();
 
 const props = defineProps<{
   agents: AgentInfo[];
@@ -201,7 +203,7 @@ watch(
       selectedGitRoot.value = "";
       return;
     }
-    const info = await getDirInfo(newDir);
+    const info = await getDirInfo(newDir, selectedRunnerId.value || undefined);
     selectedGitRoot.value = info.gitRoot || "";
   },
   { immediate: true },
@@ -216,7 +218,7 @@ const loadSubdirsForLevel = async (currentBase: string, segments: string[], leve
   newLoading[levelIndex] = true;
   loadingLevels.value = newLoading;
 
-  const subdirs = await getSubdirs(currentPath);
+  const subdirs = await getSubdirs(currentPath, selectedRunnerId.value || undefined);
 
   const newLevels = [...levelSubdirs.value];
   newLevels[levelIndex] = subdirs;
@@ -235,7 +237,7 @@ const loadSubdirsUntil = async (currentBase: string, targetSegments: string[]) =
     const currentPath = [currentBase, ...targetSegments.slice(0, i)].join("/").replace(/\/+/g, "/");
     newLoadingLevels[i] = true;
     loadingLevels.value = [...newLoadingLevels];
-    const subdirs = await getSubdirs(currentPath);
+    const subdirs = await getSubdirs(currentPath, selectedRunnerId.value || undefined);
     newLevelSubdirs[i] = subdirs;
     newLoadingLevels[i] = false;
     loadingLevels.value = [...newLoadingLevels];

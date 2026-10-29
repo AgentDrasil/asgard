@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
 import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
+import RunnersPanel from "../components/RunnersPanel.vue";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
 import { reloadAgents, reloadProxyConfig, getSystemLogs, isAuthEnabled, logout } from "../lib/api";
 import { useToast } from "../composables/useToast";
@@ -216,6 +217,8 @@ const navigateBack = () => {
           </button>
         </div>
       </section>
+
+      <RunnersPanel />
 
       <!-- Section: System & Server Actions -->
       <section class="space-y-3">

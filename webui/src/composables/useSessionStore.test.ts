@@ -372,6 +372,79 @@ describe("useSessionStore", () => {
     });
   });
 
+  it("passes runnerId to createSession for a new chat and shows a clear error when the runner is offline", async () => {
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+    const createSpy = vi
+      .spyOn(api, "createSession")
+      .mockRejectedValue(new api.RunnerRequestError(503, "runner offline"));
+    const store = useSessionStore({ agents });
+    await store.sendMessage("hi", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/w",
+      runnerId: "n1",
+    });
+    expect(createSpy).toHaveBeenCalledWith("agent-1", "/w", undefined, "n1");
+    const err = store.rawMessages.value.find((m) => m.role === "error");
+    expect(err?.content).toContain("runner is offline");
+  });
+
+  it("drops a freshly created chat when the trigger finds its runner offline", async () => {
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+    vi.spyOn(api, "createSession").mockResolvedValue({
+      chatID: "dead-1",
+      title: "",
+      currentAgent: "agent-1",
+      runDir: "/w",
+      runnerId: "n1",
+    });
+    vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+      status: "runner_offline",
+      chatId: "dead-1",
+      runnerOffline: true,
+    });
+    const delSpy = vi.spyOn(api, "deleteSessionFromLocal").mockResolvedValue();
+    const store = useSessionStore({ agents });
+    await store.sendMessage("hi", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/w",
+      runnerId: "n1",
+    });
+    expect(delSpy).toHaveBeenCalledWith("dead-1");
+    expect(store.sessions.value.some((s) => s.chatID === "dead-1")).toBe(false);
+    expect(store.activeSessionId.value).toBeNull();
+  });
+
+  it("keeps the active chat when the user switched away while the offline trigger was in flight", async () => {
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
+    ]);
+    vi.spyOn(api, "createSession").mockResolvedValue({
+      chatID: "dead-2",
+      title: "",
+      currentAgent: "agent-1",
+      runDir: "/w",
+      runnerId: "n1",
+    });
+    const store = useSessionStore({ agents });
+    vi.spyOn(api, "triggerAgentMessage").mockImplementation(async () => {
+      store.activeSessionId.value = "other-chat";
+      return { status: "runner_offline", chatId: "dead-2", runnerOffline: true };
+    });
+    const delSpy = vi.spyOn(api, "deleteSessionFromLocal").mockResolvedValue();
+    await store.sendMessage("hi", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/w",
+      runnerId: "n1",
+    });
+    expect(delSpy).toHaveBeenCalledWith("dead-2");
+    expect(store.sessions.value.some((s) => s.chatID === "dead-2")).toBe(false);
+    expect(store.activeSessionId.value).toBe("other-chat");
+  });
+
   it("should create session, upload pendingFiles, and pass uploaded attachments when activeSessionId is empty", async () => {
     const mockCreatedSession: ChatSession = {
       chatID: "new-session-123",

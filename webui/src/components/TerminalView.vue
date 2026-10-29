@@ -5,7 +5,10 @@ import type { ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { appendAccessToken } from "../lib/api";
+import { appendAccessToken, withRunner } from "../lib/api";
+import { useRunners } from "../composables/useRunners";
+
+const { selectedRunnerId } = useRunners();
 
 const props = defineProps<{
   sessionId: string;
@@ -46,7 +49,10 @@ const wsUrl = () => {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   // A WebSocket upgrade cannot carry an Authorization header, so the bearer
   // token goes in the query string while auth is enabled.
-  return appendAccessToken(`${proto}//${window.location.host}/api/ttyd/${key}/ws`);
+  // Session terminals run on the chat's bound runner; the sidebar terminal has
+  // no chat, so it names the selected runner.
+  const base = `${proto}//${window.location.host}/api/ttyd/${key}/ws`;
+  return appendAccessToken(key === "sidebar" ? withRunner(base, selectedRunnerId.value) : base);
 };
 
 const send = (cmdByte: number, payload: Uint8Array | string) => {

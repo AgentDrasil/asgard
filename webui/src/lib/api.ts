@@ -16,6 +16,7 @@ import type {
   KeybindingsApiResponse,
   KeybindingsOverrides,
   QueuedMessage,
+  RunnersResponse,
   StoredTokens,
   SystemLogEntry,
   SystemLogsResponse,
@@ -288,10 +289,45 @@ export async function getCompressionMetrics(): Promise<CompressionMetrics | null
   }
 }
 
-// Fetch loaded agents from backend
-export async function getAgents(): Promise<AgentInfo[]> {
+// withRunner appends the ?runner= query parameter the backend uses to scope a
+// request that names no chat (agents list, subdirs, sidebar terminal) to one
+// runner. An empty runner (legacy mode) leaves the URL untouched.
+export function withRunner(url: string, runner?: string): string {
+  if (!runner) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}runner=${encodeURIComponent(runner)}`;
+}
+
+// RunnerRequestError is a runner binding failure on a chat-creating request:
+// 409 (chat bound to another runner) or 503 (runner offline).
+export class RunnerRequestError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "RunnerRequestError";
+    this.status = status;
+  }
+}
+
+// Fetch the runners known to the backend. Returns null on failure.
+export async function getRunners(): Promise<RunnersResponse | null> {
   try {
-    const res = await apiFetch("/api/agents");
+    const res = await apiFetch("/api/runners");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      backend_version: data?.backend_version || "",
+      runners: Array.isArray(data?.runners) ? data.runners : [],
+    };
+  } catch (err) {
+    console.error("getRunners error:", err);
+    return null;
+  }
+}
+
+// Fetch loaded agents from backend
+export async function getAgents(runner?: string): Promise<AgentInfo[]> {
+  try {
+    const res = await apiFetch(withRunner("/api/agents", runner));
     if (!res.ok) throw new Error("Failed to fetch agents");
     return await res.json();
   } catch (err) {
@@ -497,15 +533,26 @@ export async function createSession(
   currentAgent?: string,
   runDir?: string,
   allowCrossSession?: boolean,
+  runnerId?: string,
 ): Promise<ChatSession | null> {
   try {
     const res = await apiFetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentAgent, runDir, allowCrossSession }),
+      body: JSON.stringify({
+        currentAgent,
+        runDir,
+        allowCrossSession,
+        runnerId: runnerId || undefined,
+      }),
     });
     if (res.ok) return await res.json();
+    if (res.status === 409 || res.status === 503) {
+      const body = await res.json().catch(() => null);
+      throw new RunnerRequestError(res.status, body?.error || "");
+    }
   } catch (err) {
+    if (err instanceof RunnerRequestError) throw err;
     console.error("Failed to create session on backend:", err);
   }
   return null;
@@ -521,10 +568,10 @@ export async function deleteSessionFromLocal(chatID: string): Promise<void> {
   }
 }
 
-export async function getDirInfo(dir: string): Promise<DirInfo> {
+export async function getDirInfo(dir: string, runner?: string): Promise<DirInfo> {
   if (!dir) return { subdirs: [], gitRoot: "" };
   try {
-    const res = await apiFetch(`/api/subdirs?dir=${encodeURIComponent(dir)}`);
+    const res = await apiFetch(withRunner(`/api/subdirs?dir=${encodeURIComponent(dir)}`, runner));
     if (!res.ok) return { subdirs: [], gitRoot: "" };
     const data = await res.json();
     return {
@@ -537,8 +584,8 @@ export async function getDirInfo(dir: string): Promise<DirInfo> {
   }
 }
 
-export async function getSubdirs(dir: string): Promise<string[]> {
-  const info = await getDirInfo(dir);
+export async function getSubdirs(dir: string, runner?: string): Promise<string[]> {
+  const info = await getDirInfo(dir, runner);
   return info.subdirs;
 }
 
@@ -748,6 +795,7 @@ export async function triggerAgentMessage(
   status: string;
   chatId: string;
   conflict?: boolean;
+  runnerOffline?: boolean;
   queued?: boolean;
   messageId?: string;
 } | null> {
@@ -765,6 +813,9 @@ export async function triggerAgentMessage(
         allowCrossSession: params.allowCrossSession,
       }),
     });
+    if (res.status === 503) {
+      return { status: "runner_offline", chatId: params.chatId || "", runnerOffline: true };
+    }
     if (res.status === 409) {
       return { status: "conflict", chatId: params.chatId || "", conflict: true };
     }

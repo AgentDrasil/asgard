@@ -22,6 +22,7 @@ import {
 } from "./utils/routeUtils";
 
 import { useAgents } from "./composables/useAgents";
+import { useRunners } from "./composables/useRunners";
 import { useSessions } from "./composables/useSessions";
 import { useSessionStore } from "./composables/useSessionStore";
 import { useShortcuts } from "./composables/useShortcuts";
@@ -194,6 +195,7 @@ const openSessionSearch = () => {
 };
 
 // 1. Agents Composable
+const { selectedRunnerId, runnerForSession, refreshRunners } = useRunners();
 const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
 // 2. Session Store (Single Source of Truth)
@@ -237,13 +239,13 @@ const { handleSelectSession, handleNewChat, handleDeleteSession, handleArchiveSe
 // VCS entry point is available on direct loads (e.g. refresh while in file view).
 const effectiveRunDir = computed(() => activeSession.value?.runDir || selectedDir.value);
 watch(
-  effectiveRunDir,
-  async (dir) => {
+  [effectiveRunDir, () => runnerForSession(activeSession.value)] as const,
+  async ([dir, runner]) => {
     if (!dir) {
       currentGitRoot.value = "";
       return;
     }
-    const info = await getDirInfo(dir);
+    const info = await getDirInfo(dir, runner || undefined);
     if (effectiveRunDir.value === dir) {
       currentGitRoot.value = info.gitRoot || "";
     }
@@ -338,8 +340,22 @@ onMounted(async () => {
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
   void checkSystemStatus();
   void loadCustomKeybindings();
-  await Promise.all([loadAgents(), loadSessions()]);
+  // Runners first: the agents list is scoped to the selected runner.
+  await refreshRunners();
+  await Promise.all([
+    loadAgents(runnerForSession(activeSession.value) || undefined),
+    loadSessions(),
+  ]);
 });
+
+// Re-scope the agents list when the effective runner changes (dropdown for a
+// new chat, bound runner for an existing chat).
+watch(
+  () => runnerForSession(activeSession.value),
+  (runner, prev) => {
+    if (runner !== prev) void loadAgents(runner || undefined);
+  },
+);
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown, true);
@@ -352,6 +368,7 @@ const handleStartWelcomeChat = (files?: File[]) => {
       selectedDir: selectedDir.value,
       selectedModel: selectedModel.value,
       allowCrossSession: allowCrossSession.value,
+      runnerId: selectedRunnerId.value || undefined,
       pendingFiles: files,
     });
     selectedModel.value = "";
@@ -419,7 +436,10 @@ const reloadApp = async () => {
       toast.success(t("app.reloadSuccessMessage"), {
         title: t("app.reloadSuccessTitle"),
       });
-      await Promise.all([loadAgents(), loadSessions()]);
+      await Promise.all([
+        loadAgents(runnerForSession(activeSession.value) || undefined),
+        loadSessions(),
+      ]);
     } else {
       toast.error(result.error || t("app.reloadErrorMessage"), {
         title: t("app.reloadErrorTitle"),
@@ -615,6 +635,7 @@ const commandList = computed<CommandItem[]>(() => [
           :artifacts="artifacts"
           :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
+          :runnerId="activeSession?.runnerId"
           :sessionId="activeSessionId || ''"
           :gitRoot="currentGitRoot"
           :terminalType="terminalType"

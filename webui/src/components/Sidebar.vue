@@ -7,6 +7,7 @@ import { Icon } from "@iconify/vue";
 import SessionList from "./sidebar/SessionList.vue";
 import { useShortcuts } from "../composables/useShortcuts";
 import { isAuthEnabled, logout } from "../lib/api";
+import { useRunners } from "../composables/useRunners";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -42,6 +43,32 @@ const emit = defineEmits<{
 const authEnabled = isAuthEnabled();
 
 const handleLogout = () => logout();
+
+const {
+  runners,
+  runnerMode,
+  selectedRunnerId,
+  selectedRunner,
+  selectRunner,
+  startPolling,
+  stopPolling,
+} = useRunners();
+const runnerMenuOpen = ref(false);
+const runnerSelectEl = ref<HTMLElement | null>(null);
+
+const onDocPointerDown = (e: MouseEvent) => {
+  if (runnerMenuOpen.value && !runnerSelectEl.value?.contains(e.target as Node)) {
+    runnerMenuOpen.value = false;
+  }
+};
+const onDocKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Escape") runnerMenuOpen.value = false;
+};
+
+const chooseRunner = (id: string) => {
+  selectRunner(id);
+  runnerMenuOpen.value = false;
+};
 
 const navigateToDashboard = () => {
   if (typeof window !== "undefined" && window.innerWidth < 768 && props.isOpen) {
@@ -100,6 +127,9 @@ const navigateToSettings = () => {
 };
 
 onMounted(() => {
+  startPolling();
+  document.addEventListener("mousedown", onDocPointerDown);
+  document.addEventListener("keydown", onDocKeydown);
   if (typeof localStorage !== "undefined" && localStorage) {
     const savedViewMode = localStorage.getItem("asgard_sidebar_view_mode");
     if (savedViewMode === "list" || savedViewMode === "agent") {
@@ -117,6 +147,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  stopPolling();
+  document.removeEventListener("mousedown", onDocPointerDown);
+  document.removeEventListener("keydown", onDocKeydown);
   document.removeEventListener("mousemove", handleMouseMove);
   document.removeEventListener("mouseup", stopResize);
 });
@@ -165,6 +198,61 @@ onUnmounted(() => {
       >
         <Icon icon="mynaui:sidebar" class="h-5 w-5 fill-current" />
       </button>
+    </div>
+
+    <!-- Runner selector (hidden in legacy mode, when no runners are reported) -->
+    <div
+      v-if="isOpen && runnerMode"
+      ref="runnerSelectEl"
+      class="px-3 pb-2 w-full relative"
+      data-testid="runner-select"
+    >
+      <button
+        type="button"
+        class="btn btn-sm btn-ghost w-full justify-between bg-base-200/60 font-normal gap-2"
+        :title="t('runners.selectRunner')"
+        data-testid="runner-select-button"
+        @click="runnerMenuOpen = !runnerMenuOpen"
+      >
+        <span class="flex items-center gap-2 min-w-0">
+          <span
+            :class="[
+              'inline-block h-2 w-2 rounded-full shrink-0',
+              selectedRunner?.online ? 'bg-success' : 'bg-error',
+            ]"
+            data-testid="runner-selected-dot"
+          />
+          <span class="truncate">{{ selectedRunnerId }}</span>
+        </span>
+        <Icon icon="mynaui:chevron-down" class="h-4 w-4 shrink-0" />
+      </button>
+      <ul
+        v-if="runnerMenuOpen"
+        class="menu menu-sm absolute left-3 right-3 z-40 mt-1 rounded-box bg-base-200 border border-base-100 shadow-lg p-1"
+        data-testid="runner-menu"
+      >
+        <li v-for="r in runners" :key="r.node_id">
+          <button
+            type="button"
+            :disabled="!r.online"
+            :class="[
+              'flex items-center gap-2',
+              { 'menu-active': r.node_id === selectedRunnerId, 'opacity-50': !r.online },
+            ]"
+            :data-testid="`runner-option-${r.node_id}`"
+            @click="chooseRunner(r.node_id)"
+          >
+            <span
+              :class="[
+                'inline-block h-2 w-2 rounded-full shrink-0',
+                r.online ? 'bg-success' : 'bg-error',
+              ]"
+              :title="r.online ? t('runners.online') : t('runners.offline')"
+            />
+            <span class="truncate">{{ r.node_id }}</span>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <!-- Action buttons (Dashboard when collapsed, New Chat, Search) -->
