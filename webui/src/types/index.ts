@@ -58,6 +58,18 @@ export interface QueuedMessage {
   updatedAt: string;
 }
 
+export interface DirLockStatus {
+  isLocked?: boolean;
+  lockMode?: "exclusive" | "readonly";
+  lockReason?: "running" | "uncommitted";
+  lockedDir?: string;
+  canUnlock?: boolean;
+  isWaitingForLock?: boolean;
+  lockedByChatId?: string;
+  lockedByTitle?: string;
+  blockingReason?: "running" | "uncommitted";
+}
+
 export interface ChatSession {
   chatID: string;
   title: string;
@@ -74,6 +86,7 @@ export interface ChatSession {
   messages?: ChatMessage[];
   artifacts?: string[];
   queuedMessages?: QueuedMessage[];
+  dirLock?: DirLockStatus;
 }
 
 export interface WorkflowRunSummary {
@@ -165,12 +178,22 @@ export interface FirebaseWebpushWebConfig {
   vapidKey?: string;
 }
 
+export interface SessionStatusPayload {
+  isRunning?: boolean;
+  isWaitingForUser?: boolean;
+  agent?: string;
+  agent_name?: string;
+  title?: string;
+  dirLock?: DirLockStatus;
+  [key: string]: any;
+}
+
 export interface SessionEvent {
   eventId: number;
   chatId: string;
   type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "queue";
   message?: ChatMessage;
-  payload?: Record<string, any>;
+  payload?: SessionStatusPayload | Record<string, any>;
   timestamp: number;
 }
 

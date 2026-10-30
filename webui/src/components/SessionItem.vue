@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ChatSession } from "../types";
 import { Icon } from "@iconify/vue";
+import { formatLockTooltip } from "../utils/dirLockUtils";
 
 const { t } = useI18n();
 
@@ -10,6 +11,10 @@ const props = defineProps<{
   session: ChatSession;
   isActive: boolean;
 }>();
+
+const lockTooltip = computed(() => {
+  return formatLockTooltip(props.session.dirLock, t);
+});
 
 const emit = defineEmits<{
   (e: "select-session", id: string): void;
@@ -144,6 +149,33 @@ const handleArchive = () => {
       <span class="truncate min-w-0 select-none flex-1">{{
         session.title || t("sidebar.untitledChat")
       }}</span>
+
+      <!-- Directory Lock Indicator / Badge -->
+      <span
+        v-if="session.dirLock?.isWaitingForLock"
+        class="badge badge-warning badge-xs gap-1 shrink-0 px-1.5 py-0.5"
+        :title="lockTooltip"
+        :aria-label="lockTooltip"
+        data-testid="session-waiting-lock-badge"
+      >
+        <Icon icon="lucide:clock" class="h-3 w-3 shrink-0" />
+        <span class="text-[10px] hidden sm:inline">{{ t("dirlock.queuedBadge") }}</span>
+      </span>
+      <span
+        v-else-if="session.dirLock?.isLocked"
+        :class="[
+          'badge badge-xs gap-1 shrink-0 px-1.5 py-0.5',
+          session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+        ]"
+        :title="lockTooltip"
+        :aria-label="lockTooltip"
+        data-testid="session-locked-badge"
+      >
+        <Icon icon="lucide:lock" class="h-3 w-3 shrink-0" />
+        <span v-if="session.dirLock?.canUnlock" class="text-[10px] hidden sm:inline">{{
+          t("dirlock.uncommittedBadge")
+        }}</span>
+      </span>
 
       <div class="flex items-center gap-1 shrink-0">
         <!-- Desktop Mouse Hover Archive Button -->

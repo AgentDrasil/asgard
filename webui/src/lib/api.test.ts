@@ -19,6 +19,7 @@ import {
   triggerAgentMessage,
   getSessions,
   archiveSession,
+  unlockSession,
   getSessionWorkflows,
   redriveWorkflowRun,
   stopSessionExecution,
@@ -877,6 +878,38 @@ describe("API Library", () => {
       const res = await archiveSession("sess-123");
       expect(res).toBe(false);
       expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to archive session:", expect.any(Error));
+    });
+  });
+
+  describe("unlockSession", () => {
+    it("throws error if chatID is empty", async () => {
+      await expect(unlockSession("")).rejects.toThrow("Session ID is required");
+    });
+
+    it("returns response on successful 200 OK unlock", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok", chatId: "sess-123", unlocked: true }),
+      } as Response);
+
+      const res = await unlockSession("sess-123");
+      expect(res).toEqual({ status: "ok", chatId: "sess-123", unlocked: true });
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions/sess-123/unlock", {
+        method: "POST",
+      });
+    });
+
+    it("throws error on non-ok HTTP status", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "cannot unlock directory while session is actively running" }),
+      } as Response);
+
+      await expect(unlockSession("sess-123")).rejects.toThrow(
+        "cannot unlock directory while session is actively running",
+      );
     });
   });
 

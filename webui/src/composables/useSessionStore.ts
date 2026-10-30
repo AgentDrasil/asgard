@@ -7,11 +7,13 @@ import type {
   SessionEvent,
   Attachment,
   QueuedMessage,
+  DirLockStatus,
 } from "../types";
 import {
   getSession,
   getSessions,
   archiveSession,
+  unlockSession,
   createSession,
   triggerAgentMessage,
   uploadAttachment,
@@ -142,6 +144,17 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
       if (sIdx > -1) {
         sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: running };
+      }
+    }
+
+    if (ev.payload && "dirLock" in ev.payload) {
+      const dirLock = (ev.payload.dirLock as DirLockStatus) || undefined;
+      if (activeSession.value) {
+        activeSession.value.dirLock = dirLock;
+      }
+      const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
+      if (sIdx > -1) {
+        sessions.value[sIdx] = { ...sessions.value[sIdx], dirLock };
       }
     }
 
@@ -683,6 +696,21 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     return success;
   };
 
+  const unlockSessionById = async (id: string): Promise<boolean> => {
+    const res = await unlockSession(id);
+    if (res.status === "ok" || res.status === "unlocked") {
+      if (activeSession.value && activeSession.value.chatID === id) {
+        activeSession.value.dirLock = undefined;
+      }
+      const sIdx = sessions.value.findIndex((s) => s.chatID === id);
+      if (sIdx > -1) {
+        sessions.value[sIdx] = { ...sessions.value[sIdx], dirLock: undefined };
+      }
+      return true;
+    }
+    return false;
+  };
+
   return {
     sessions,
     activeSessionId,
@@ -701,6 +729,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     closeSession,
     loadSessions,
     archiveSessionById,
+    unlockSessionById,
     updateMessageReply,
     sendMessage,
     stopExecution,

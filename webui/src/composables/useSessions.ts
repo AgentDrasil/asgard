@@ -1,7 +1,8 @@
-import type { Ref } from "vue";
+import { ref, type Ref } from "vue";
 import type { RouteLocationNormalizedLoaded, Router } from "vue-router";
 import type { AgentInfo } from "../types";
-import { deleteSessionFromLocal } from "../lib/api";
+import { deleteSessionFromLocal, unlockSession } from "../lib/api";
+import { i18n } from "../i18n";
 import { useToast } from "./useToast";
 
 export function useSessions(
@@ -13,6 +14,7 @@ export function useSessions(
   activeSessionId: Ref<string | null>,
   loadSessions: () => Promise<void>,
   archiveSessionById?: (id: string) => Promise<boolean>,
+  unlockSessionById?: (id: string) => Promise<boolean>,
 ) {
   const toast = useToast();
 
@@ -74,10 +76,46 @@ export function useSessions(
     }
   };
 
+  const isUnlockingSession = ref(false);
+
+  const handleUnlockSession = async (id: string): Promise<boolean> => {
+    if (!id || isUnlockingSession.value) return false;
+    isUnlockingSession.value = true;
+    try {
+      if (unlockSessionById) {
+        const success = await unlockSessionById(id);
+        if (success) {
+          toast.success(i18n.global.t("dirlock.unlockSuccess"));
+          return true;
+        } else {
+          toast.error(i18n.global.t("dirlock.unlockFailed"));
+          return false;
+        }
+      } else {
+        const res = await unlockSession(id);
+        if (res.status === "ok" || res.status === "unlocked") {
+          await loadSessions();
+          toast.success(i18n.global.t("dirlock.unlockSuccess"));
+          return true;
+        }
+        toast.error(i18n.global.t("dirlock.unlockFailed"));
+        return false;
+      }
+    } catch (err: any) {
+      console.error("handleUnlockSession error:", err);
+      toast.error(err?.message || i18n.global.t("dirlock.unlockFailed"));
+      return false;
+    } finally {
+      isUnlockingSession.value = false;
+    }
+  };
+
   return {
     handleSelectSession,
     handleNewChat,
     handleDeleteSession,
     handleArchiveSession,
+    handleUnlockSession,
+    isUnlockingSession,
   };
 }

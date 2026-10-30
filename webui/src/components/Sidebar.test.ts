@@ -186,4 +186,78 @@ describe("Sidebar.vue", () => {
 
     app.unmount();
   });
+
+  it("renders waiting for lock badge and tooltip on session item", async () => {
+    const lockedSessions: ChatSession[] = [
+      {
+        chatID: "sess-waiting",
+        title: "Queued Session",
+        currentAgent: "Coder",
+        runDir: "/workspace",
+        isRunning: true,
+        dirLock: {
+          isWaitingForLock: true,
+          lockedDir: "/workspace",
+          lockedByTitle: "Active Task",
+          blockingReason: "running",
+        },
+      },
+    ];
+
+    const app = createApp({
+      render() {
+        return h(Sidebar, {
+          sessions: lockedSessions,
+          activeSessionId: "sess-waiting",
+          isOpen: true,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const badge = root.querySelector('[data-testid="session-waiting-lock-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("title")).toContain("Queued: Waiting for lock on /workspace");
+    expect(badge?.getAttribute("title")).toContain("Active Task");
+
+    app.unmount();
+  });
+
+  it("renders locked badge and tooltip on session item", async () => {
+    const heldSessions: ChatSession[] = [
+      {
+        chatID: "sess-held",
+        title: "Held Session",
+        currentAgent: "Coder",
+        runDir: "/workspace",
+        dirLock: {
+          isLocked: true,
+          canUnlock: true,
+          lockedDir: "/workspace",
+          lockReason: "uncommitted",
+        },
+      },
+    ];
+
+    const app = createApp({
+      render() {
+        return h(Sidebar, {
+          sessions: heldSessions,
+          activeSessionId: "sess-held",
+          isOpen: true,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const badge = root.querySelector('[data-testid="session-locked-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("title")).toContain("Locked: uncommitted changes (/workspace)");
+
+    app.unmount();
+  });
 });

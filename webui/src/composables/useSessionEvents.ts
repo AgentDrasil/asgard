@@ -1,5 +1,7 @@
-import type { SessionEvent } from "../types";
+import type { SessionEvent, SessionStatusPayload } from "../types";
 import { appendAccessToken, isAuthEnabled, recoverSession } from "../lib/api";
+
+export type { SessionStatusPayload };
 
 // AUTH_RECONNECT_DELAY_MS is the backoff before retrying a stream whose session
 // could not be recovered because the provider was unreachable.

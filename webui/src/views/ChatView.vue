@@ -7,7 +7,14 @@ import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
 import TerminalPanel from "../components/TerminalPanel.vue";
-import type { ChatMessage, AgentInfo, ActiveView, Attachment, QueuedMessage } from "../types";
+import type {
+  ChatMessage,
+  AgentInfo,
+  ActiveView,
+  Attachment,
+  QueuedMessage,
+  DirLockStatus,
+} from "../types";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
 const router = useRouter();
@@ -27,10 +34,13 @@ const props = withDefaults(
     workingAgentLabel?: string | null;
     queuedMessages?: QueuedMessage[];
     isRunning?: boolean;
+    dirLock?: DirLockStatus;
+    isUnlocking?: boolean;
   }>(),
   {
     queuedMessages: () => [],
     isRunning: false,
+    isUnlocking: false,
   },
 );
 
@@ -60,6 +70,7 @@ const emit = defineEmits<{
   (e: "delete-queued", id: string): void;
   (e: "stop"): void;
   (e: "retry"): void;
+  (e: "unlock"): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -218,6 +229,8 @@ function navigateToVcs(gitRoot?: string) {
         :workingAgentLabel="workingAgentLabel"
         :queuedMessages="queuedMessages"
         :isRunning="isRunning"
+        :dirLock="dirLock"
+        :isUnlocking="isUnlocking"
         v-model:isDetailsOpen="isDetailsOpen"
         @open-diff="navigateToVcs"
         @open-file-view="navigateToFiles"
@@ -230,6 +243,7 @@ function navigateToVcs(gitRoot?: string) {
         @edit-queued="(id, text) => emit('edit-queued', id, text)"
         @delete-queued="(id) => emit('delete-queued', id)"
         @retry="emit('retry')"
+        @unlock="emit('unlock')"
       />
     </div>
 

@@ -5,10 +5,11 @@ import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
 import { useShortcuts } from "../composables/useShortcuts";
-import { getSessions, archiveSession, getAgents } from "../lib/api";
+import { getSessions, archiveSession, getAgents, unlockSession } from "../lib/api";
 import { formatTimestamp } from "../lib/format";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import { getAgentIcon, formatPath } from "../utils/agentUtils";
+import { formatLockTooltip } from "../utils/dirLockUtils";
 import type { ChatSession, AgentInfo } from "../types";
 
 const emit = defineEmits<{
@@ -26,6 +27,7 @@ const agents = ref<AgentInfo[]>([]);
 const isLoading = ref(false);
 const isPolling = ref(false);
 const isArchiving = ref<Record<string, boolean>>({});
+const isUnlocking = ref<Record<string, boolean>>({});
 const searchQuery = ref("");
 const viewMode = ref<"kanban" | "archived">("kanban");
 
@@ -194,6 +196,32 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
     toast.error(t("dashboard.archiveUnexpectedError"));
   } finally {
     isArchiving.value[chatID] = false;
+  }
+};
+
+const handleUnlock = async (session: ChatSession, event?: Event) => {
+  if (event) {
+    event.stopPropagation();
+  }
+  const chatID = session.chatID;
+  if (!chatID || isUnlocking.value[chatID]) return;
+
+  isUnlocking.value[chatID] = true;
+  try {
+    const res = await unlockSession(chatID);
+    if (res.status === "ok" || res.status === "unlocked") {
+      toast.success(t("dirlock.unlockSuccess"));
+      activeSessions.value = activeSessions.value.map((s) =>
+        s.chatID === chatID ? { ...s, dirLock: undefined } : s,
+      );
+    } else {
+      toast.error(t("dirlock.unlockFailed"));
+    }
+  } catch (err: any) {
+    console.error("Unlock error in DashboardView:", err);
+    toast.error(err?.message || t("dirlock.unlockFailed"));
+  } finally {
+    isUnlocking.value[chatID] = false;
   }
 };
 </script>
@@ -393,9 +421,52 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-primary animate-pulse shrink-0">
+                  <span
+                    v-if="session.dirLock?.isWaitingForLock"
+                    class="badge badge-xs badge-warning gap-1 shrink-0"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-waiting-lock"
+                    data-test="badge-waiting-lock"
+                  >
+                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
+                    {{ t("dashboard.cards.waitingLockBadge") }}
+                  </span>
+                  <span v-else class="badge badge-xs badge-primary animate-pulse shrink-0">
                     {{ t("dashboard.cards.runningBadge") }}
                   </span>
+                  <span
+                    v-if="session.dirLock?.isLocked"
+                    :class="[
+                      'badge badge-xs gap-1 shrink-0',
+                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+                    ]"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-locked"
+                    data-test="badge-locked"
+                  >
+                    <Icon icon="lucide:lock" class="w-3 h-3" />
+                  </span>
+                  <button
+                    v-if="session.dirLock?.canUnlock"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
+                    :title="t('dirlock.unlockTooltip')"
+                    :aria-label="t('dirlock.unlockTooltip')"
+                    :disabled="isUnlocking[session.chatID]"
+                    :aria-busy="isUnlocking[session.chatID]"
+                    @click.stop="handleUnlock(session, $event)"
+                    data-testid="kanban-unlock-btn"
+                    data-test="kanban-unlock-btn"
+                  >
+                    <Icon
+                      v-if="isUnlocking[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
@@ -491,9 +562,52 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-warning shrink-0">
+                  <span
+                    v-if="session.dirLock?.isWaitingForLock"
+                    class="badge badge-xs badge-warning gap-1 shrink-0"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-waiting-lock"
+                    data-test="badge-waiting-lock"
+                  >
+                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
+                    {{ t("dashboard.cards.waitingLockBadge") }}
+                  </span>
+                  <span v-else class="badge badge-xs badge-warning shrink-0">
                     {{ t("dashboard.cards.waitingBadge") }}
                   </span>
+                  <span
+                    v-if="session.dirLock?.isLocked"
+                    :class="[
+                      'badge badge-xs gap-1 shrink-0',
+                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+                    ]"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-locked"
+                    data-test="badge-locked"
+                  >
+                    <Icon icon="lucide:lock" class="w-3 h-3" />
+                  </span>
+                  <button
+                    v-if="session.dirLock?.canUnlock"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
+                    :title="t('dirlock.unlockTooltip')"
+                    :aria-label="t('dirlock.unlockTooltip')"
+                    :disabled="isUnlocking[session.chatID]"
+                    :aria-busy="isUnlocking[session.chatID]"
+                    @click.stop="handleUnlock(session, $event)"
+                    data-testid="kanban-unlock-btn"
+                    data-test="kanban-unlock-btn"
+                  >
+                    <Icon
+                      v-if="isUnlocking[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
@@ -591,9 +705,52 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-success shrink-0">
+                  <span
+                    v-if="session.dirLock?.isWaitingForLock"
+                    class="badge badge-xs badge-warning gap-1 shrink-0"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-waiting-lock"
+                    data-test="badge-waiting-lock"
+                  >
+                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
+                    {{ t("dashboard.cards.waitingLockBadge") }}
+                  </span>
+                  <span v-else class="badge badge-xs badge-success shrink-0">
                     {{ t("dashboard.cards.recentCompletedBadge") }}
                   </span>
+                  <span
+                    v-if="session.dirLock?.isLocked"
+                    :class="[
+                      'badge badge-xs gap-1 shrink-0',
+                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+                    ]"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-locked"
+                    data-test="badge-locked"
+                  >
+                    <Icon icon="lucide:lock" class="w-3 h-3" />
+                  </span>
+                  <button
+                    v-if="session.dirLock?.canUnlock"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
+                    :title="t('dirlock.unlockTooltip')"
+                    :aria-label="t('dirlock.unlockTooltip')"
+                    :disabled="isUnlocking[session.chatID]"
+                    :aria-busy="isUnlocking[session.chatID]"
+                    @click.stop="handleUnlock(session, $event)"
+                    data-testid="kanban-unlock-btn"
+                    data-test="kanban-unlock-btn"
+                  >
+                    <Icon
+                      v-if="isUnlocking[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
@@ -691,9 +848,52 @@ const handleArchive = async (session: ChatSession, event?: Event) => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-neutral shrink-0">
+                  <span
+                    v-if="session.dirLock?.isWaitingForLock"
+                    class="badge badge-xs badge-warning gap-1 shrink-0"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-waiting-lock"
+                    data-test="badge-waiting-lock"
+                  >
+                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
+                    {{ t("dashboard.cards.waitingLockBadge") }}
+                  </span>
+                  <span v-else class="badge badge-xs badge-neutral shrink-0">
                     {{ t("dashboard.cards.completedBadge") }}
                   </span>
+                  <span
+                    v-if="session.dirLock?.isLocked"
+                    :class="[
+                      'badge badge-xs gap-1 shrink-0',
+                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+                    ]"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-locked"
+                    data-test="badge-locked"
+                  >
+                    <Icon icon="lucide:lock" class="w-3 h-3" />
+                  </span>
+                  <button
+                    v-if="session.dirLock?.canUnlock"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
+                    :title="t('dirlock.unlockTooltip')"
+                    :aria-label="t('dirlock.unlockTooltip')"
+                    :disabled="isUnlocking[session.chatID]"
+                    :aria-busy="isUnlocking[session.chatID]"
+                    @click.stop="handleUnlock(session, $event)"
+                    data-testid="kanban-unlock-btn"
+                    data-test="kanban-unlock-btn"
+                  >
+                    <Icon
+                      v-if="isUnlocking[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"

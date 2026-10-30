@@ -215,6 +215,7 @@ const {
   closeSession,
   loadSessions,
   archiveSessionById,
+  unlockSessionById,
   sendMessage,
   stopExecution,
   updateMessageReply,
@@ -223,17 +224,24 @@ const {
 } = store;
 
 // 3. Sessions Navigation & Operations
-const { handleSelectSession, handleNewChat, handleDeleteSession, handleArchiveSession } =
-  useSessions(
-    route,
-    router,
-    agents,
-    selectedAgentId,
-    selectedDir,
-    activeSessionId,
-    loadSessions,
-    archiveSessionById,
-  );
+const {
+  handleSelectSession,
+  handleNewChat,
+  handleDeleteSession,
+  handleArchiveSession,
+  handleUnlockSession,
+  isUnlockingSession,
+} = useSessions(
+  route,
+  router,
+  agents,
+  selectedAgentId,
+  selectedDir,
+  activeSessionId,
+  loadSessions,
+  archiveSessionById,
+  unlockSessionById,
+);
 
 // Keep the VCS git root in sync with the effective workspace directory so the
 // VCS entry point is available on direct loads (e.g. refresh while in file view).
@@ -644,6 +652,8 @@ const commandList = computed<CommandItem[]>(() => [
           :terminalType="terminalType"
           :queuedMessages="queuedMessages"
           :isRunning="isRunning"
+          :dirLock="activeSession?.dirLock"
+          :isUnlocking="isUnlockingSession"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
           v-model:selectedCommit="selectedCommit"
@@ -662,6 +672,7 @@ const commandList = computed<CommandItem[]>(() => [
           @send="handleSendMessage"
           @stop="handleStopExecution"
           @archive-session="handleArchiveSession"
+          @unlock="handleUnlockSession(activeSessionId || '')"
           @open-diff="
             (gitRoot: string) => {
               currentGitRoot = gitRoot;

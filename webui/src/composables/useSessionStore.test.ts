@@ -1326,4 +1326,82 @@ describe("useSessionStore", () => {
       expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
     });
   });
+
+  describe("directory lock handling", () => {
+    it("updates dirLock on status event", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-lock-1",
+        title: "Lock Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+      };
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+
+      const store = useSessionStore();
+      await store.openSession("session-lock-1");
+
+      const es = MockEventSource.instances[0];
+      expect(es).toBeDefined();
+
+      const statusEv: SessionEvent = {
+        eventId: 10,
+        chatId: "session-lock-1",
+        type: "status",
+        payload: {
+          dirLock: {
+            isLocked: true,
+            lockReason: "uncommitted",
+            canUnlock: true,
+            lockedDir: "/workspace",
+          },
+        },
+        timestamp: 1000,
+      };
+      es.emit("status", statusEv);
+
+      expect(store.activeSession.value?.dirLock).toEqual({
+        isLocked: true,
+        lockReason: "uncommitted",
+        canUnlock: true,
+        lockedDir: "/workspace",
+      });
+      const inList = store.sessions.value.find((s) => s.chatID === "session-lock-1");
+      expect(inList?.dirLock).toEqual({
+        isLocked: true,
+        lockReason: "uncommitted",
+        canUnlock: true,
+        lockedDir: "/workspace",
+      });
+    });
+
+    it("unlockSessionById calls API and clears dirLock", async () => {
+      const mockSession: ChatSession = {
+        chatID: "session-lock-2",
+        title: "Lock Session 2",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+        dirLock: {
+          isLocked: true,
+          canUnlock: true,
+        },
+      };
+      vi.spyOn(api, "getSession").mockResolvedValue(mockSession);
+      const unlockSpy = vi
+        .spyOn(api, "unlockSession")
+        .mockResolvedValue({ status: "ok", chatId: "session-lock-2", unlocked: true });
+
+      const store = useSessionStore();
+      await store.openSession("session-lock-2");
+      expect(store.activeSession.value?.dirLock?.canUnlock).toBe(true);
+
+      const success = await store.unlockSessionById("session-lock-2");
+      expect(success).toBe(true);
+      expect(unlockSpy).toHaveBeenCalledWith("session-lock-2");
+      expect(store.activeSession.value?.dirLock).toBeUndefined();
+      const inList = store.sessions.value.find((s) => s.chatID === "session-lock-2");
+      expect(inList?.dirLock).toBeUndefined();
+    });
+  });
 });

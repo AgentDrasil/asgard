@@ -544,6 +544,22 @@ export async function archiveSession(chatID: string): Promise<boolean> {
   }
 }
 
+export async function unlockSession(
+  chatID: string,
+): Promise<{ status: string; chatId?: string; unlocked?: boolean }> {
+  if (!chatID) {
+    throw new Error("Session ID is required");
+  }
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(chatID)}/unlock`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Failed to unlock session (${res.status})`);
+  }
+  return await res.json();
+}
+
 export async function searchSessions(query: string, signal?: AbortSignal): Promise<ChatSession[]> {
   if (!query || !query.trim()) return [];
   try {

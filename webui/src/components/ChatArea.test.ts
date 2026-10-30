@@ -14,7 +14,6 @@ vi.mock("@iconify/vue", () => ({
   },
 }));
 
-// Mock api
 vi.mock("../lib/api", () => ({
   getDirInfo: vi
     .fn<(...args: any[]) => Promise<any>>()
@@ -554,5 +553,86 @@ describe("ChatArea.vue", () => {
       expect(retryButtons(root).length).toBe(0);
       unmount();
     }
+  });
+
+  it("renders unlock button and lock indicator when canUnlock is true and emits unlock on click", async () => {
+    let unlocked = false;
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+          dirLock: {
+            isLocked: true,
+            canUnlock: true,
+            lockReason: "uncommitted",
+            lockedDir: "/home/user/project",
+          },
+          onUnlock: () => {
+            unlocked = true;
+          },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const unlockBtn = root.querySelector(
+      '[data-testid="chat-header-unlock-button"]',
+    ) as HTMLButtonElement;
+    expect(unlockBtn).not.toBeNull();
+    expect(unlockBtn?.getAttribute("aria-label")).toBeTruthy();
+    const lockIndicator = root.querySelector('[data-testid="chat-header-lock-indicator"]');
+    expect(lockIndicator).not.toBeNull();
+    expect(lockIndicator?.getAttribute("aria-label")).toBeTruthy();
+
+    unlockBtn.click();
+    await nextTick();
+
+    expect(unlocked).toBe(true);
+
+    app.unmount();
+  });
+
+  it("renders waiting banner and indicator when isWaitingForLock is true", async () => {
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: true,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+          dirLock: {
+            isWaitingForLock: true,
+            lockedDir: "/home/user/project",
+            lockedByTitle: "Feature Run",
+            blockingReason: "running",
+          },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const banner = root.querySelector('[data-testid="waiting-for-lock-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute("role")).toBe("status");
+    expect(banner?.getAttribute("aria-label")).toBeTruthy();
+    expect(banner?.textContent).toContain("Waiting for Directory Lock");
+    expect(banner?.textContent).toContain("Feature Run");
+
+    const indicator = root.querySelector('[data-testid="waiting-for-lock-indicator"]');
+    expect(indicator).not.toBeNull();
+    expect(indicator?.getAttribute("role")).toBe("status");
+    expect(indicator?.getAttribute("aria-label")).toBeTruthy();
+    expect(indicator?.textContent).toContain("Feature Run");
+
+    app.unmount();
   });
 });

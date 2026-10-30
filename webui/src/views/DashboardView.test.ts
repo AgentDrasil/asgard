@@ -357,6 +357,93 @@ describe("DashboardView.vue", () => {
     app.unmount();
   });
 
+  it("reflects waiting for lock status and displays badge with tooltip", async () => {
+    const lockSession: ChatSession = {
+      chatID: "sess-lock-waiting",
+      title: "Session Waiting For Lock",
+      currentAgent: "coder",
+      runDir: "/workspace/proj",
+      isRunning: true,
+      isWaitingForUser: false,
+      isArchived: false,
+      dirLock: {
+        isWaitingForLock: true,
+        lockedDir: "/workspace/proj",
+        lockedByTitle: "Blocking Chat",
+        blockingReason: "running",
+      },
+    };
+    vi.spyOn(api, "getSessions").mockImplementation(async (archived?: boolean) => {
+      return archived ? [] : [lockSession];
+    });
+
+    const app = createApp({
+      render() {
+        return h(DashboardView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const waitingLockBadge = root.querySelector('[data-testid="badge-waiting-lock"]');
+    expect(waitingLockBadge).not.toBeNull();
+    expect(waitingLockBadge?.textContent).toContain("Waiting for Lock");
+    expect(waitingLockBadge?.getAttribute("title")).toContain("Blocking Chat");
+    expect(waitingLockBadge?.getAttribute("aria-label")).toContain("Blocking Chat");
+
+    app.unmount();
+  });
+
+  it("allows unlocking idle session held by uncommitted changes directly from kanban card", async () => {
+    const lockedSession: ChatSession = {
+      chatID: "sess-unlockable",
+      title: "Idle Session Held By Dirty Git",
+      currentAgent: "coder",
+      runDir: "/workspace/proj",
+      isRunning: false,
+      isWaitingForUser: false,
+      isArchived: false,
+      updatedAt: new Date(now - 10 * 60 * 1000).toISOString(),
+      dirLock: {
+        isLocked: true,
+        canUnlock: true,
+        lockReason: "uncommitted",
+        lockedDir: "/workspace/proj",
+      },
+    };
+    vi.spyOn(api, "getSessions").mockImplementation(async (archived?: boolean) => {
+      return archived ? [] : [lockedSession];
+    });
+    const unlockSpy = vi
+      .spyOn(api, "unlockSession")
+      .mockResolvedValue({ status: "ok", chatId: "sess-unlockable", unlocked: true });
+
+    const app = createApp({
+      render() {
+        return h(DashboardView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const lockedBadge = root.querySelector('[data-testid="badge-locked"]');
+    expect(lockedBadge).not.toBeNull();
+    expect(lockedBadge?.getAttribute("aria-label")).toBeTruthy();
+
+    const unlockBtn = root.querySelector('[data-testid="kanban-unlock-btn"]') as HTMLButtonElement;
+    expect(unlockBtn).not.toBeNull();
+    expect(unlockBtn?.getAttribute("aria-label")).toBeTruthy();
+
+    unlockBtn.click();
+    await flush();
+
+    expect(unlockSpy).toHaveBeenCalledWith("sess-unlockable");
+
+    app.unmount();
+  });
+
   describe("Automatic 5s Polling", () => {
     beforeEach(() => {
       vi.useFakeTimers();

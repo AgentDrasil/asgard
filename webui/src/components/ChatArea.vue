@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
-import type { ChatMessage, AgentInfo, QueuedMessage } from "../types";
+import type { ChatMessage, AgentInfo, QueuedMessage, DirLockStatus } from "../types";
 import { formatPath } from "../utils/agentUtils";
 import { getDirInfo } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
@@ -15,6 +15,7 @@ import AskUserCard from "./chat/AskUserCard.vue";
 import QueuedMessageCard from "./chat/QueuedMessageCard.vue";
 import ArtifactViewer from "./ArtifactViewer.vue";
 import { t } from "../i18n";
+import { formatLockTooltip, formatWaitingBannerText } from "../utils/dirLockUtils";
 
 const {
   toggleSidebarShortcut,
@@ -45,6 +46,8 @@ const props = withDefaults(
     workingAgentLabel?: string | null;
     queuedMessages?: QueuedMessage[];
     isRunning?: boolean;
+    dirLock?: DirLockStatus;
+    isUnlocking?: boolean;
   }>(),
   {
     isDetailsOpen: true,
@@ -55,6 +58,7 @@ const props = withDefaults(
     workingAgentLabel: null,
     queuedMessages: () => [],
     isRunning: false,
+    isUnlocking: false,
   },
 );
 
@@ -71,7 +75,16 @@ const emit = defineEmits<{
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
   (e: "retry"): void;
+  (e: "unlock"): void;
 }>();
+
+const lockTooltip = computed(() => formatLockTooltip(props.dirLock, t));
+const waitingBannerText = computed(() => formatWaitingBannerText(props.dirLock, t));
+
+const handleUnlockClick = () => {
+  if (props.isUnlocking) return;
+  emit("unlock");
+};
 
 // Resizable artifact panel width logic
 const DEFAULT_ARTIFACT_WIDTH = 500;
@@ -258,6 +271,30 @@ onUnmounted(() => {
           >
             <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
             <span class="font-bold truncate">{{ activeAgent?.name || $t("chat.agent") }}</span>
+            <!-- Directory Lock Status Badge in Agent Header -->
+            <span
+              v-if="dirLock?.isWaitingForLock"
+              class="badge badge-warning badge-xs gap-1 shrink-0 ml-1"
+              :title="lockTooltip"
+              :aria-label="lockTooltip"
+              data-testid="chat-header-waiting-badge"
+            >
+              <Icon icon="lucide:clock" class="h-3 w-3 animate-pulse shrink-0" />
+              <span>{{ t("dirlock.queuedBadge") }}</span>
+            </span>
+            <span
+              v-else-if="dirLock?.isLocked"
+              :class="[
+                'badge badge-xs gap-1 shrink-0 ml-1',
+                dirLock.canUnlock ? 'badge-accent' : 'badge-ghost',
+              ]"
+              :title="lockTooltip"
+              :aria-label="lockTooltip"
+              data-testid="chat-header-lock-badge"
+            >
+              <Icon icon="lucide:lock" class="h-3 w-3 shrink-0" />
+              <span v-if="dirLock.canUnlock">{{ t("dirlock.uncommittedBadge") }}</span>
+            </span>
             <Icon
               :icon="isDetailsOpen ? 'ep:arrow-up' : 'ep:arrow-down'"
               class="h-3.5 w-3.5 text-base-content/70 shrink-0"
@@ -289,11 +326,63 @@ onUnmounted(() => {
                 formatPath(gitRoot)
               }}</span>
             </p>
+            <!-- Lock details badge -->
+            <div
+              v-if="dirLock?.isLocked || dirLock?.isWaitingForLock"
+              class="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono truncate"
+              :class="
+                dirLock.isWaitingForLock
+                  ? 'bg-warning/15 text-warning border border-warning/30'
+                  : dirLock.canUnlock
+                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    : 'bg-base-300 text-base-content/70'
+              "
+              :title="lockTooltip"
+              :aria-label="lockTooltip"
+              data-testid="chat-header-lock-indicator"
+            >
+              <Icon
+                :icon="dirLock.isWaitingForLock ? 'lucide:clock' : 'lucide:lock'"
+                class="h-3 w-3 shrink-0"
+                :class="dirLock.isWaitingForLock ? 'animate-pulse' : ''"
+              />
+              <span class="truncate">{{
+                dirLock.isWaitingForLock
+                  ? t("dirlock.queued")
+                  : dirLock.canUnlock
+                    ? t("dirlock.lockedUncommitted")
+                    : t("dirlock.lockedRunning")
+              }}</span>
+              <span v-if="dirLock.lockedDir" class="opacity-80 truncate"
+                >({{ formatPath(dirLock.lockedDir) }})</span
+              >
+            </div>
           </div>
         </div>
       </div>
 
       <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 h-7 sm:h-8">
+        <!-- Unlock Session Button -->
+        <button
+          v-if="dirLock?.canUnlock"
+          type="button"
+          @click="handleUnlockClick"
+          :disabled="isUnlocking"
+          :aria-busy="isUnlocking"
+          :aria-label="t('dirlock.unlockTooltip')"
+          class="btn btn-xs btn-accent gap-1 text-[11px] h-7 sm:h-8"
+          :title="t('dirlock.unlockTooltip')"
+          data-testid="chat-header-unlock-button"
+        >
+          <Icon
+            v-if="isUnlocking"
+            icon="lucide:loader-2"
+            class="h-3.5 w-3.5 animate-spin shrink-0"
+          />
+          <Icon v-else icon="lucide:lock-open" class="h-3.5 w-3.5 shrink-0" />
+          <span>{{ isUnlocking ? t("dirlock.unlocking") : t("dirlock.unlock") }}</span>
+        </button>
+
         <!-- Find in Chat Button -->
         <button
           @click="findState.toggle()"
@@ -411,6 +500,23 @@ onUnmounted(() => {
           @close="findState.close"
         />
 
+        <!-- Waiting For Lock Banner -->
+        <div
+          v-if="dirLock?.isWaitingForLock"
+          class="bg-warning/15 border-b border-warning/30 px-4 py-2.5 flex items-center justify-between gap-3 text-warning shrink-0"
+          role="status"
+          :aria-label="waitingBannerText"
+          data-testid="waiting-for-lock-banner"
+        >
+          <div class="flex items-center gap-2 text-xs sm:text-sm">
+            <Icon icon="lucide:clock" class="h-4 w-4 shrink-0 text-warning animate-pulse" />
+            <div>
+              <span class="font-semibold">{{ t("dirlock.waitingBannerTitle") }}:</span>
+              <span class="ml-1 opacity-90">{{ waitingBannerText }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Message List -->
         <div
           ref="scrollContainerRef"
@@ -462,6 +568,18 @@ onUnmounted(() => {
                 :active-agent="activeAgent"
                 :agents="agents"
               />
+            </div>
+
+            <!-- Waiting for Lock Activity Indicator -->
+            <div
+              v-if="dirLock?.isWaitingForLock"
+              class="flex items-center gap-2 text-xs text-warning font-mono pl-2 py-2"
+              role="status"
+              :aria-label="waitingBannerText"
+              data-testid="waiting-for-lock-indicator"
+            >
+              <Icon icon="lucide:clock" class="h-3.5 w-3.5 animate-pulse shrink-0" />
+              <span>{{ waitingBannerText }}</span>
             </div>
 
             <!-- Agent Working state -->
