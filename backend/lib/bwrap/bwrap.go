@@ -412,10 +412,6 @@ func matchesCompiledMaskPatterns(name, relFromBase string, patterns []compiledMa
 	return false
 }
 
-func matchesMaskRulePatterns(name, relFromBase string, patterns []string) bool {
-	return matchesCompiledMaskPatterns(name, relFromBase, compileMaskPatterns(patterns))
-}
-
 type spineStep struct {
 	scanDir     string
 	activeChild string
@@ -650,9 +646,6 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 
 		if !beneathAny(mountedRWDirs, runDir) {
 			args = appendBind(args, readonlyDirs, runDir)
-			if !beneathAny(readonlyDirs, runDir) {
-				mountedRWDirs = append(mountedRWDirs, runDir)
-			}
 		}
 
 		// Pass 2: Apply subdir mask rules after all RW mounts (including runDir) are bound
@@ -1205,9 +1198,6 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 			if _, err := os.Stat(runDir); err == nil {
 				if !beneathAny(mountedRWDirs, runDir) {
 					args = appendBind(args, mergedReadonlyDirs, runDir)
-					if !beneathAny(mergedReadonlyDirs, runDir) {
-						mountedRWDirs = append(mountedRWDirs, runDir)
-					}
 				}
 				args = append(args, "--chdir", cwd)
 			} else {
