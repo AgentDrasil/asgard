@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/api"
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -50,6 +51,7 @@ func TestMain(m *testing.M) {
 		"opencode": &mockClient{models: []string{"deepseek-chat"}},
 	}
 	agentwrapper.SetClients(mockClients)
+	skipAuthCheck = true
 	code := m.Run()
 	agentwrapper.SetClients(nil)
 	os.Exit(code)
@@ -722,4 +724,12 @@ func TestReloadRunnerConfigRemovalFailsClosed(t *testing.T) {
 	conf.SetRunner(&config.RunnerConfig{TLSCertFile: "a", TLSKeyFile: "b", ClientCAFile: "c", RegistryPort: 1, AllowedNodes: []string{"runner-a"}})
 	reloadRunnerConfig(conf, &config.RunnerConfig{AllowedNodes: []string{"runner-b"}}, diag, nil)
 	assert.Equal(t, []string{"runner-a"}, conf.AllowedRunnerNodes())
+}
+
+func TestRequireAuthConfigured(t *testing.T) {
+	t.Parallel()
+
+	require.ErrorContains(t, requireAuthConfigured(nil), "authentication is required")
+	require.ErrorContains(t, requireAuthConfigured(&config.Config{}), "authentication is required")
+	require.NoError(t, requireAuthConfigured(&config.Config{Auth: &auth.Config{Issuer: "https://idp.example.com"}}))
 }

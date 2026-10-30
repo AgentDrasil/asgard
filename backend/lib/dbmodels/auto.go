@@ -12,7 +12,7 @@ func AutoMigrate(db *gorm.DB) error {
 	// chat's runner, the backend must not create them in its own data dirs, and
 	// the old code cleared the columns afterwards (losing the data when the
 	// runner never saw the files). The legacy columns are left untouched.
-	return db.AutoMigrate(&Session{}, &WorkflowRun{}, &QueuedMessage{}, &FinalizedRun{})
+	return db.AutoMigrate(&Session{}, &WorkflowRun{}, &QueuedMessage{}, &FinalizedRun{}, &User{}, &RunnerAssignment{})
 }
 
 // BackfillRunnerNodeID binds every session that has no runner yet to nodeID.

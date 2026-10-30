@@ -172,6 +172,18 @@ func setupLogger(conf *config.Config) {
 	})
 }
 
+// skipAuthCheck is flipped only by this package's tests, whose fixtures build
+// an App without an OIDC provider.
+var skipAuthCheck bool
+
+// requireAuthConfigured fails closed when no auth section is configured.
+func requireAuthConfigured(conf *config.Config) error {
+	if conf == nil || conf.AuthConfig() == nil {
+		return errors.New("authentication is required: add an auth section to config.yaml")
+	}
+	return nil
+}
+
 // New creates and initializes an App instance according to the provided options.
 func New(opts ...Option) (*App, error) {
 	options := &Options{}
@@ -427,6 +439,14 @@ func New(opts ...Option) (*App, error) {
 
 	if agentStore != nil {
 		apiOpts = append(apiOpts, api.WithAgentSource(agentStore))
+	}
+
+	// Runner access is granted per authenticated user, so running without
+	// authentication is not supported.
+	if !skipAuthCheck {
+		if err := requireAuthConfigured(conf); err != nil {
+			return nil, err
+		}
 	}
 
 	srv, err := api.New(conf, database, apiOpts...)

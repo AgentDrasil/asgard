@@ -67,6 +67,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	chatID := uuid.NewV7().String()
 
 	runnerID, needBind, bindErr := s.resolveRunner(chatID, req.RunnerID)
+	if bindErr == nil && runnerID != "" {
+		bindErr = s.authorizeRunner(r, runnerID)
+	}
 	if bindErr != nil {
 		writeJSONError(w, bindErr.status, bindErr.msg)
 		return

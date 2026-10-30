@@ -6,6 +6,8 @@ import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
 import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
 import RunnersPanel from "../components/RunnersPanel.vue";
+import RunnerAdminPanel from "../components/RunnerAdminPanel.vue";
+import { useUserProfile } from "../composables/useUserProfile";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
 import { reloadAgents, reloadProxyConfig, getSystemLogs, isAuthEnabled, logout } from "../lib/api";
 import { useToast } from "../composables/useToast";
@@ -33,6 +35,8 @@ const backendWarnCount = ref(0);
 // Authentication is opt-in: the section only appears when the backend runs
 // OIDC, so a logout button never shows up in an unauthenticated deployment.
 const authEnabled = isAuthEnabled();
+const { profile, load: loadProfile } = useUserProfile();
+onMounted(() => void loadProfile());
 const handleLogout = () => logout();
 
 const fetchBackendLogCounts = async () => {
@@ -219,6 +223,8 @@ const navigateBack = () => {
       </section>
 
       <RunnersPanel />
+
+      <RunnerAdminPanel v-if="profile?.isAdmin" />
 
       <!-- Section: System & Server Actions -->
       <section class="space-y-3">

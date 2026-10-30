@@ -45,6 +45,8 @@ type profileResponse struct {
 	Name      string `json:"name"`
 	Email     string `json:"email,omitempty"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
+	// IsAdmin tells the WebUI to show the admin pages; the server enforces it.
+	IsAdmin bool `json:"isAdmin"`
 }
 
 // avatarMeta is the sidecar describing a cached avatar file.
@@ -292,7 +294,7 @@ func (s *Service) HandleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "no user profile")
 		return
 	}
-	resp := profileResponse{Subject: u.Subject, Name: u.Name, Email: u.Email}
+	resp := profileResponse{Subject: u.Subject, Name: u.Name, Email: u.Email, IsAdmin: containsRole(u.Roles, AdminRole)}
 	if s.avatars.Ensure(r.Context(), u.Subject, u.Picture) {
 		resp.AvatarURL = AvatarPath
 	}

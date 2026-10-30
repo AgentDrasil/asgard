@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/version"
 )
@@ -44,10 +43,13 @@ func TestHandleRunners(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			srv := &Server{conf: &config.Config{}, runners: tt.reg}
-			srv.mux = srv.buildMuxLocked()
+			srv, p := newAccessServer(t)
+			srv.runners = tt.reg
+			for _, w := range tt.want {
+				require.NoError(t, srv.access.Assign(w.NodeID, "user-1", "admin"))
+			}
 
-			rec := serve(srv, http.MethodGet, "/api/runners", nil)
+			rec := serve(srv, http.MethodGet, "/api/runners", bearer(t, p, "user-1"))
 			require.Equal(t, http.StatusOK, rec.Code)
 
 			var got RunnersResponse

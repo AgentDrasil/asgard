@@ -178,7 +178,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.triggerMessage(context.Background(), w, agentID, targetAgent, req, r.URL.Query().Get("wait") == "true")
+	s.triggerMessage(context.Background(), r, w, agentID, targetAgent, req, r.URL.Query().Get("wait") == "true")
 }
 
 // triggerMessage is the body of POST /api/agents/{id}/message once the request
@@ -187,7 +187,7 @@ func (s *Server) handleTriggerMessage(w http.ResponseWriter, r *http.Request) {
 // through runner binding. queryWait is the ?wait=true query flag. When
 // stopWith is non-nil, a synchronous (wait) execution started here is cancelled
 // as soon as it ends (in-process callers whose own run went away).
-func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter, agentID string, targetAgent *agentspec.Agent, req TriggerMessageRequest, queryWait bool) {
+func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request, w http.ResponseWriter, agentID string, targetAgent *agentspec.Agent, req TriggerMessageRequest, queryWait bool) {
 	if strings.TrimSpace(req.Prompt) == "" {
 		http.Error(w, `{"error":"prompt is required"}`, http.StatusBadRequest)
 		return
@@ -202,6 +202,11 @@ func (s *Server) triggerMessage(stopWith context.Context, w http.ResponseWriter,
 	}
 
 	runnerID, needBind, bindErr := s.resolveRunner(chatID, req.RunnerID)
+	if bindErr == nil && runnerID != "" && authReq != nil {
+		// Applies to bound chats too, so a revoked user is cut off. In-process
+		// callers (call-peer) pass no request: peers stay on the caller's runner.
+		bindErr = s.authorizeRunner(authReq, runnerID)
+	}
 	if bindErr != nil {
 		writeJSONError(w, bindErr.status, bindErr.msg)
 		return

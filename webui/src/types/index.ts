@@ -97,6 +97,23 @@ export interface RunnersResponse {
   runners: RunnerInfo[];
 }
 
+export interface ManageRunner {
+  node_id: string;
+  online: boolean;
+  users: string[];
+}
+
+export interface ManageUser {
+  subject: string;
+  name?: string;
+  email?: string;
+}
+
+export interface ManageRunnersResponse {
+  runners: ManageRunner[];
+  users: ManageUser[];
+}
+
 export interface DirInfo {
   subdirs: string[];
   gitRoot?: string;

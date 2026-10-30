@@ -128,7 +128,7 @@ func TestQuotaProtoRoundTripKeepsLimits(t *testing.T) {
 func TestCreateRunnerBoundSessionCreatesNoLocalDirs(t *testing.T) {
 	f := setupBindingFixture(t)
 	rr := httptest.NewRecorder()
-	f.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(`{"currentAgent":"global-agent","runnerId":"r1"}`)))
+	f.server.ServeHTTP(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(`{"currentAgent":"global-agent","runnerId":"r1"}`))))
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 	var created ChatSession
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))

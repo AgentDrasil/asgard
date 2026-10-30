@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -128,6 +129,10 @@ func setupBindingFixture(t *testing.T) *bindingFixture {
 		agents:      []*agentspec.Agent{global},
 		agentSource: src,
 		runners:     f.runners,
+		access:      dbmodels.NewRunnerAccessRepository(testDB),
+	}
+	for _, id := range []string{"r1", "r2"} {
+		require.NoError(t, f.server.access.Assign(id, "u1", "admin"))
 	}
 	f.server.runSingleAgentFn = func(_ context.Context, _ *agentspec.Agent, _ string, req TriggerMessageRequest) (string, string, error) {
 		f.mu.Lock()
@@ -145,8 +150,14 @@ func (f *bindingFixture) post(t *testing.T, agentID string, body map[string]any)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/message", bytes.NewReader(b))
 	rr := httptest.NewRecorder()
-	f.server.ServeHTTP(rr, req)
+	f.server.ServeHTTP(rr, asUser(req))
 	return rr
+}
+
+// asUser makes req look like it came from the authenticated test user, to
+// whom setupBindingFixture assigns every runner.
+func asUser(req *http.Request) *http.Request {
+	return req.WithContext(auth.WithUser(req.Context(), &auth.User{Subject: "u1"}))
 }
 
 func TestRunnerBinding_RequiredOnNewChat(t *testing.T) {
@@ -224,7 +235,7 @@ func TestHandleAgents_RunnerQuery(t *testing.T) {
 	f := setupBindingFixture(t)
 	ids := func(url string) []string {
 		rr := httptest.NewRecorder()
-		f.server.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, url, nil))
+		f.server.ServeHTTP(rr, asUser(httptest.NewRequest(http.MethodGet, url, nil)))
 		require.Equal(t, http.StatusOK, rr.Code)
 		var list []AgentInfo
 		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &list))
@@ -243,7 +254,7 @@ func TestCreateSession_RunnerRequiredAndBound(t *testing.T) {
 	f := setupBindingFixture(t)
 	post := func(body string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()
-		f.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body)))
+		f.server.ServeHTTP(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))))
 		return rr
 	}
 	assert.Equal(t, http.StatusBadRequest, post(`{"currentAgent":"global-agent"}`).Code)
@@ -412,7 +423,7 @@ func TestEnqueueEndpoint_UsesChatsRunnerAgentsAndBinding(t *testing.T) {
 	f := setupBindingFixture(t)
 	post := func(chatID string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()
-		f.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/queue", bytes.NewBufferString(`{"prompt":"later"}`)))
+		f.server.ServeHTTP(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/queue", bytes.NewBufferString(`{"prompt":"later"}`))))
 		return rr
 	}
 
@@ -629,7 +640,7 @@ func TestHardParkedQueueIsNotAutoRestartedUntilNewActivity(t *testing.T) {
 
 	// A new enqueue lifts the park.
 	rr := httptest.NewRecorder()
-	f.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/queue", bytes.NewBufferString(`{"prompt":"q2"}`)))
+	f.server.ServeHTTP(rr, asUser(httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/queue", bytes.NewBufferString(`{"prompt":"q2"}`))))
 	require.Equal(t, http.StatusCreated, rr.Code)
 	require.Eventually(t, func() bool { return calls.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
 }

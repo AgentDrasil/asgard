@@ -6,6 +6,7 @@ export interface UserProfile {
   name: string;
   email?: string;
   avatarUrl?: string;
+  isAdmin?: boolean;
 }
 
 // Shared across components so the profile is fetched once per page load.

@@ -168,6 +168,16 @@ API additions:
 - `POST /api/sessions` and the first `POST /api/agents/{id}/message` of a chat require `runnerId` (when runners are configured).
 - Scheduled (cron) workflows of a global agent must set `runner_id` in the workflow definition; runner-owned agents always run on their own runner.
 
+### Runner access (admin assignment)
+
+A runner is **not assigned to any user** when it first connects: nobody can start a chat on it until an administrator assigns it. Assignments live in the `runner_assignments` table (`node_id`, `user_subject`, `assigned_by`, `created_at`); the `users` table lists the users an admin can pick (a user appears after their first login).
+
+- An administrator is a user whose OIDC role claim contains `admin` (the same role that guards `/api/manage/*`). The role alone grants no runner; an admin must assign runners to themselves too.
+- `GET /api/runners` only returns the runners assigned to the caller. Starting a new chat (`POST /api/sessions`, first `POST /api/agents/{id}/message`) on a runner that is not assigned to the caller returns `403`. The same check applies to messages and queue operations on an already-bound chat, so revoking a user's assignment cuts them off from that runner's chats too (running work is not interrupted). `call-peer` stays on the caller's runner. Chats have no owner: any user assigned to a runner can use that runner's chats.
+- `GET /api/manage/runners` (admin): `{"runners": [{"node_id", "online", "users": [subject]}], "users": [{"subject", "name", "email"}]}`.
+- `PUT /api/manage/runners/{node}/users` (admin) with `{"users": [subject, ...]}` replaces the users assigned to that runner. Changes are logged with the acting admin.
+- The WebUI shows a "Runner Access" panel in Settings to admins.
+
 ### Runner certificates
 
 The runner authenticates with a client certificate whose **CN is its node id**; the backend verifies it against `runner.client_ca_file` and checks the CN against `runner.allowed_nodes`. Example with a private CA (adjust names; the backend certificate must carry a SAN matching the host runners dial, or set the runner's `-server-name`):
@@ -352,15 +362,16 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **Record Metrics** (`AgentCallbackService.RecordMetrics`, over the runner connection; there is no HTTP endpoint): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
 *   **Read Metrics** (`GET /api/compression-metrics`): Returns the aggregated counters rendered by the WebUI compression statistics page: Jev and compass calls, tokens and per-call token averages, compressed outputs, truncations, and `show-output` calls with the raw bytes retrieved. It also derives the **retrieval rate** (show-output calls over compressed outputs), the headline quality signal — the agent calls `show-output` because the summary or classification dropped detail it needed, so a rising rate points at the classifier or summarizer prompt.
 
-## Authentication (optional OIDC)
+## Authentication (required OIDC)
 
-Asgard ships **unauthenticated by default**. Adding an `auth` section to
-`config.yaml` turns on OIDC/OAuth 2.0 sign-in for the API and the WebUI; leaving
-it out keeps the previous behaviour, including deployments where an external
-reverse proxy already handles SSO.
+Authentication is **required**: the backend refuses to start without an `auth`
+section in `config.yaml`. It provides OIDC/OAuth 2.0 sign-in for the API and the
+WebUI.
 
-The implementation is **nearly stateless**: there is no user table, no session
-table and no token store. The one piece of on-disk state is the avatar cache in
+Sign-in itself is **nearly stateless**: there is no session table and no token
+store. The only user-related database state is the `users` table (subject,
+name, email, first/last seen) written on login, and the runner assignments
+described below. The one piece of on-disk state is the avatar cache in
 `~/asgard/data/avatars/`: each user's OIDC `picture` is fetched server-side
 (public http/https hosts only, images up to 2 MiB) and served from
 `/api/auth/avatar`, so browsers never contact the IdP. It is refetched when the

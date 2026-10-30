@@ -115,7 +115,7 @@ func TestTriggerIntoBusyChatStill409(t *testing.T) {
 	// A call-peer whose guard holder changed meanwhile is a 409 too.
 	pc := &peerCall{chatID: rigChat, holder: struct{}{}, callerAgentID: "alpha"}
 	rr = httptest.NewRecorder()
-	rig.server.triggerMessage(context.WithValue(context.Background(), peerCallKey{}, pc), rr, "beta", nil, TriggerMessageRequest{Prompt: "hi", ChatID: rigChat}, true)
+	rig.server.triggerMessage(context.WithValue(context.Background(), peerCallKey{}, pc), nil, rr, "beta", nil, TriggerMessageRequest{Prompt: "hi", ChatID: rigChat}, true)
 	assert.Equal(t, http.StatusConflict, rr.Code)
 }
 

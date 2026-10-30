@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/version"
 )
@@ -41,7 +43,17 @@ type RunnersResponse struct {
 func (s *Server) handleRunners(w http.ResponseWriter, r *http.Request) {
 	resp := RunnersResponse{BackendVersion: version.Get(), Runners: []RunnerInfoResponse{}}
 	if s.runners != nil {
+		// Only the runners assigned to the requester are visible.
+		allowed, aerr := s.assignedRunners(r)
+		if aerr != nil {
+			log.Error().Err(aerr).Msg("failed to load runner assignments")
+			writeJSONError(w, http.StatusInternalServerError, "failed to load runner assignments")
+			return
+		}
 		for _, n := range s.runners.Nodes() {
+			if !allowed[n.NodeID] {
+				continue
+			}
 			info := RunnerInfoResponse{
 				NodeID:        n.NodeID,
 				Online:        n.Online,

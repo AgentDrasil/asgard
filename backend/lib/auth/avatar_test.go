@@ -120,7 +120,7 @@ func TestHandleMeAndAvatar(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.HandleMe(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"subject":"sub-1","name":"Ada","email":"ada@example.com","avatarUrl":"/api/auth/avatar"}`, rec.Body.String())
+	assert.JSONEq(t, `{"subject":"sub-1","name":"Ada","email":"ada@example.com","avatarUrl":"/api/auth/avatar","isAdmin":false}`, rec.Body.String())
 
 	req = httptest.NewRequest(http.MethodGet, AvatarPath, nil).WithContext(WithUser(context.Background(), user))
 	rec = httptest.NewRecorder()

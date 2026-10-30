@@ -76,6 +76,9 @@ type Server struct {
 	proxyManager        *proxy.ProxyManager
 	auth                *auth.Service
 	runners             RunnerRegistry
+	// access stores users and runner assignments; users tracks login upserts.
+	access *dbmodels.RunnerAccessRepository
+	users  userTracker
 	// runnerClient reaches a runner's RunnerService; fsResolver overrides chatFS.
 	runnerClient runnerClientFunc
 	fsResolver   func(chatID string) (runnerfs.FS, error)
@@ -261,8 +264,10 @@ func (s *Server) requireRepo(w http.ResponseWriter) bool {
 // New creates a new Server instance, loading all agents from the configured directory.
 func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, error) {
 	var repo *dbmodels.SessionRepository
+	var access *dbmodels.RunnerAccessRepository
 	if dbConn != nil {
 		repo = dbmodels.NewSessionRepository(dbConn)
+		access = dbmodels.NewRunnerAccessRepository(dbConn)
 	}
 
 	geminiKey := ""
@@ -277,6 +282,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	s := &Server{
 		conf:            conf,
 		repo:            repo,
+		access:          access,
 		eventHub:        NewSessionEventHub(),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -485,6 +491,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !s.auth.Authenticate(w, r) {
 			return // Authenticate already wrote the 401/403/503 response
 		}
+		s.trackUser(r)
 		if isAdminPath(r.URL.Path) && !auth.HasRole(r.Context(), auth.AdminRole) {
 			writeJSONError(w, http.StatusForbidden, "admin role required")
 			return
@@ -559,6 +566,8 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/quota", s.handleQuota)
 	mux.HandleFunc("GET /api/runners", s.handleRunners)
+	mux.HandleFunc("GET /api/manage/runners", s.handleManageRunners)
+	mux.HandleFunc("PUT /api/manage/runners/{node}/users", s.handleSetRunnerUsers)
 	mux.HandleFunc("GET /api/subdirs", s.handleSubdirs)
 	mux.HandleFunc("GET /api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("GET /api/git/log", s.handleGitLog)

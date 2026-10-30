@@ -335,7 +335,7 @@ func (c *callbackService) callPeer(ctx context.Context, info runnerhub.RunInfo, 
 	if holder, running := c.s.activeExecutions.Load(info.ChatID); running {
 		ctx = context.WithValue(ctx, peerCallKey{}, &peerCall{chatID: info.ChatID, holder: holder, callerAgentID: info.AgentID})
 	}
-	c.s.triggerMessage(ctx, rec, agentID, target, tr, true)
+	c.s.triggerMessage(ctx, nil, rec, agentID, target, tr, true)
 
 	var body struct {
 		Status string `json:"status"`

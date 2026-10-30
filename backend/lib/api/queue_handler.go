@@ -102,6 +102,12 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "chat is not bound to a runner")
 		return
 	}
+	if session.RunnerNodeID != "" {
+		if aerr := s.authorizeRunner(r, session.RunnerNodeID); aerr != nil {
+			writeJSONError(w, aerr.status, aerr.msg)
+			return
+		}
+	}
 	visible, aerr := s.agentsFor(session.RunnerNodeID)
 	if aerr != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+aerr.Error())
