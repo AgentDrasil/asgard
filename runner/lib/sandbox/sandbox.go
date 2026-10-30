@@ -37,6 +37,8 @@ type Source interface {
 type Options struct {
 	// SetupSSH starts the ssh-agent (default sshagent.SetupSSHAgent).
 	SetupSSH func() error
+	// ClearSSH removes all identities from the ssh-agent (default sshagent.ClearKeys).
+	ClearSSH func() error
 	// SkipSSH disables ssh-agent setup (tests).
 	SkipSSH bool
 	// NewProxy creates the proxy manager (default proxy.NewManager).
@@ -66,6 +68,11 @@ type Sandbox struct {
 	// snapshot never overwrites a newer one.
 	refreshMu sync.Mutex
 	src       Source
+
+	// lastSSHSynced tracks whether SSH credentials have been synced from etcd.
+	lastSSHSynced bool
+	// lastSSHKey tracks the last synced SSH private key bytes to detect actual changes.
+	lastSSHKey []byte
 }
 
 // Setup performs the backend's startup steps for sandboxes (ssh-agent, proxy
@@ -74,6 +81,9 @@ type Sandbox struct {
 func Setup(src Source, opts Options) *Sandbox {
 	if opts.SetupSSH == nil {
 		opts.SetupSSH = sshagent.SetupSSHAgent
+	}
+	if opts.ClearSSH == nil {
+		opts.ClearSSH = sshagent.ClearKeys
 	}
 	if opts.NewProxy == nil {
 		opts.NewProxy = func(cfg *proxy.Config, path string) (*proxy.ProxyManager, error) {
@@ -114,6 +124,34 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 	if tree != nil {
 		if syncErr := SyncCLICredentials(s.opts.HomeDir, &tree.Credentials); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync CLI credentials to home directory")
+		}
+
+		currKey := tree.Credentials.SSH.Key
+		hasKey := len(currKey) > 0
+		keyChanged := hasKey && (!s.lastSSHSynced || !bytes.Equal(s.lastSSHKey, currKey))
+		keyRevoked := !hasKey && s.lastSSHSynced
+
+		if keyRevoked && !s.opts.SkipSSH && s.opts.ClearSSH != nil {
+			if err := s.opts.ClearSSH(); err != nil {
+				log.Warn().Err(err).Msg("failed to clear keys from ssh-agent")
+			}
+		}
+
+		if syncErr := SyncSSHCredentials(s.opts.HomeDir, &tree.Credentials.SSH); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync SSH credentials to home directory")
+		} else {
+			if keyChanged {
+				s.lastSSHSynced = true
+				s.lastSSHKey = bytes.Clone(currKey)
+				if !s.opts.SkipSSH && s.opts.SetupSSH != nil {
+					if err := s.opts.SetupSSH(); err != nil {
+						log.Warn().Err(err).Msg("failed to re-add SSH keys to ssh-agent")
+					}
+				}
+			} else if keyRevoked {
+				s.lastSSHSynced = false
+				s.lastSSHKey = nil
+			}
 		}
 	}
 	if err != nil {
@@ -316,6 +354,87 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		// Credential revoked / cleared: remove file if it exists
 		if err := os.Remove(agyPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", agyPath, err)
+		}
+	}
+
+	return nil
+}
+
+// SyncSSHCredentials writes SSH credentials received from etcd to the runner user's ~/.ssh directory.
+func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+		}
+	}
+
+	sshDir := filepath.Join(home, ".ssh")
+	keyPath := filepath.Join(sshDir, "key")
+	pubPath := filepath.Join(sshDir, "key.pub")
+	configPath := filepath.Join(sshDir, "config")
+
+	if ssh == nil || len(ssh.Key) == 0 {
+		// Revocation: if key exists in ~/.ssh, remove it along with key.pub and config if previously synced.
+		if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", keyPath, err)
+		}
+		if err := os.Remove(pubPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", pubPath, err)
+		}
+		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", configPath, err)
+		}
+		return nil
+	}
+
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return fmt.Errorf("create ssh directory %s: %w", sshDir, err)
+	}
+	if err := os.Chmod(sshDir, 0700); err != nil {
+		return fmt.Errorf("chmod ssh directory %s: %w", sshDir, err)
+	}
+
+	existingKey, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(existingKey, ssh.Key) {
+		if err := atomicWriteFile(keyPath, ssh.Key, 0600); err != nil {
+			return fmt.Errorf("write %s: %w", keyPath, err)
+		}
+	} else {
+		_ = os.Chmod(keyPath, 0600)
+	}
+
+	if len(ssh.KeyPub) > 0 {
+		existingPub, err := os.ReadFile(pubPath)
+		if err != nil || !bytes.Equal(existingPub, ssh.KeyPub) {
+			if err := atomicWriteFile(pubPath, ssh.KeyPub, 0644); err != nil {
+				return fmt.Errorf("write %s: %w", pubPath, err)
+			}
+		} else {
+			_ = os.Chmod(pubPath, 0644)
+		}
+	} else {
+		if err := os.Remove(pubPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", pubPath, err)
+		}
+	}
+
+	if len(ssh.Config) > 0 {
+		existingConfig, err := os.ReadFile(configPath)
+		if err != nil || !bytes.Equal(existingConfig, ssh.Config) {
+			if err := atomicWriteFile(configPath, ssh.Config, 0644); err != nil {
+				return fmt.Errorf("write %s: %w", configPath, err)
+			}
+		} else {
+			_ = os.Chmod(configPath, 0644)
+		}
+	} else {
+		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", configPath, err)
 		}
 	}
 

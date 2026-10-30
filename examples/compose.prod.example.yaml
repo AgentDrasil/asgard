@@ -28,6 +28,7 @@ services:
       - ./asgard:/asgard
       # Server certificate/key and the CA verifying runner certificates.
       - ./certs:/certs:ro
+      # Backend keeps local host SSH mount for server-side git operations:
       - ./ssh:/home/user/.ssh:ro
     restart: always
     ports:
@@ -57,5 +58,6 @@ services:
       - ./session-data:/session-data
       # Workspaces mounted under /data:
       - ~/src:/data/src
-      - ./ssh:/home/user/.ssh:ro
+      # SSH credentials are delivered via etcd credentials/ssh/ (no host mount required).
+      # - ./ssh:/home/user/.ssh:ro
     restart: always

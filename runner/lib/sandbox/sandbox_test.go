@@ -473,3 +473,272 @@ func TestSyncCLICredentials_RevocationAndPermissionTightening(t *testing.T) {
 	_, err = os.Stat(agyPath)
 	assert.True(t, os.IsNotExist(err))
 }
+
+func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+
+	tree := validTree(proxy.Config{})
+	tree.Credentials.SSH.Key = []byte("initial-ssh-key")
+	tree.Credentials.SSH.KeyPub = []byte("initial-ssh-pub")
+	tree.Credentials.SSH.Config = []byte("initial-ssh-config")
+
+	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
+	require.NoError(t, err)
+
+	src := &fakeSource{conf: initialConf, tree: tree}
+
+	var setupSSHCount int
+	var clearSSHCount int
+	var mu sync.Mutex
+	sb := Setup(src, Options{
+		SkipSSH: false,
+		HomeDir: tempHome,
+		SetupSSH: func() error {
+			mu.Lock()
+			setupSSHCount++
+			mu.Unlock()
+			return nil
+		},
+		ClearSSH: func() error {
+			mu.Lock()
+			clearSSHCount++
+			mu.Unlock()
+			return nil
+		},
+	})
+	t.Cleanup(sb.Close)
+
+	require.NoError(t, sb.Ready())
+
+	sshDir := filepath.Join(tempHome, ".ssh")
+	keyPath := filepath.Join(sshDir, "key")
+	pubPath := filepath.Join(sshDir, "key.pub")
+	cfgPath := filepath.Join(sshDir, "config")
+
+	// Verify ~/.ssh directory permissions (0700)
+	dirStat, err := os.Stat(sshDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirStat.Mode().Perm())
+
+	// Verify key (0600)
+	keyBytes, err := os.ReadFile(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "initial-ssh-key", string(keyBytes))
+	keyStat, err := os.Stat(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), keyStat.Mode().Perm())
+
+	// Verify key.pub (0644)
+	pubBytes, err := os.ReadFile(pubPath)
+	require.NoError(t, err)
+	assert.Equal(t, "initial-ssh-pub", string(pubBytes))
+	pubStat, err := os.Stat(pubPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), pubStat.Mode().Perm())
+
+	// Verify config (0644)
+	cfgBytes, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "initial-ssh-config", string(cfgBytes))
+	cfgStat, err := os.Stat(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), cfgStat.Mode().Perm())
+
+	// SetupSSH should have been called on startup and after credential sync
+	mu.Lock()
+	assert.Equal(t, 2, setupSSHCount, "SetupSSH should be called on startup and initial credential sync")
+	assert.Equal(t, 0, clearSSHCount)
+	mu.Unlock()
+
+	// Unrelated tree change: SSH credentials did not change -> SetupSSH must NOT be called again
+	unrelatedTree := validTree(proxy.Config{})
+	unrelatedTree.Credentials.SSH = tree.Credentials.SSH
+	src.fire(unrelatedTree)
+	mu.Lock()
+	assert.Equal(t, 2, setupSSHCount, "SetupSSH must not be called when SSH credentials did not change")
+	assert.Equal(t, 0, clearSSHCount)
+	mu.Unlock()
+
+	// Update credentials
+	updatedTree := validTree(proxy.Config{})
+	updatedTree.Credentials.SSH.Key = []byte("updated-ssh-key")
+	updatedTree.Credentials.SSH.KeyPub = []byte("updated-ssh-pub")
+	updatedTree.Credentials.SSH.Config = []byte("updated-ssh-config")
+
+	src.fire(updatedTree)
+
+	keyBytes, err = os.ReadFile(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "updated-ssh-key", string(keyBytes))
+
+	pubBytes, err = os.ReadFile(pubPath)
+	require.NoError(t, err)
+	assert.Equal(t, "updated-ssh-pub", string(pubBytes))
+
+	cfgBytes, err = os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "updated-ssh-config", string(cfgBytes))
+
+	mu.Lock()
+	assert.Equal(t, 3, setupSSHCount, "SetupSSH should be called again on credential update")
+	assert.Equal(t, 0, clearSSHCount)
+	mu.Unlock()
+
+	// Clear/revoke credentials
+	clearedTree := validTree(proxy.Config{})
+	clearedTree.Credentials.SSH = config.SSHScope{}
+
+	src.fire(clearedTree)
+
+	_, err = os.Stat(keyPath)
+	assert.True(t, os.IsNotExist(err), "key must be removed when revoked")
+
+	_, err = os.Stat(pubPath)
+	assert.True(t, os.IsNotExist(err), "key.pub must be removed when revoked")
+
+	_, err = os.Stat(cfgPath)
+	assert.True(t, os.IsNotExist(err), "config must be removed when revoked")
+
+	mu.Lock()
+	assert.Equal(t, 3, setupSSHCount)
+	assert.Equal(t, 1, clearSSHCount, "ClearSSH must be called to evict keys on revocation")
+	mu.Unlock()
+
+	// Subsequent tree change while empty: ClearSSH must NOT be called again
+	anotherClearedTree := validTree(proxy.Config{})
+	anotherClearedTree.Credentials.SSH = config.SSHScope{}
+	src.fire(anotherClearedTree)
+
+	mu.Lock()
+	assert.Equal(t, 3, setupSSHCount)
+	assert.Equal(t, 1, clearSSHCount, "ClearSSH must not be called continuously while credentials remain empty")
+	mu.Unlock()
+}
+
+func TestSyncSSHCredentials_StartupWithEmptySSHDoesNotEvict(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+
+	tree := validTree(proxy.Config{})
+	tree.Credentials.SSH = config.SSHScope{} // No SSH credentials
+
+	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
+	require.NoError(t, err)
+
+	src := &fakeSource{conf: initialConf, tree: tree}
+
+	var clearSSHCount int
+	var mu sync.Mutex
+	sb := Setup(src, Options{
+		SkipSSH: false,
+		HomeDir: tempHome,
+		ClearSSH: func() error {
+			mu.Lock()
+			clearSSHCount++
+			mu.Unlock()
+			return nil
+		},
+	})
+	t.Cleanup(sb.Close)
+
+	require.NoError(t, sb.Ready())
+
+	// ClearSSH should NOT be called on startup when etcd never had an SSH key
+	mu.Lock()
+	assert.Equal(t, 0, clearSSHCount, "ClearSSH must not be called on startup when no SSH credentials exist")
+	mu.Unlock()
+
+	// Unrelated change with no SSH credentials should not call ClearSSH
+	src.fire(tree)
+	mu.Lock()
+	assert.Equal(t, 0, clearSSHCount, "ClearSSH must not be called on subsequent tree updates when no SSH credentials exist")
+	mu.Unlock()
+}
+
+func TestSyncSSHCredentials_RevocationAndPermissionTightening(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	sshDir := filepath.Join(tempHome, ".ssh")
+
+	// Pre-create ~/.ssh with loose permissions 0755
+	require.NoError(t, os.MkdirAll(sshDir, 0755))
+	require.NoError(t, os.Chmod(sshDir, 0755))
+
+	// Write pre-existing files with different permissions
+	keyPath := filepath.Join(sshDir, "key")
+	pubPath := filepath.Join(sshDir, "key.pub")
+	cfgPath := filepath.Join(sshDir, "config")
+	require.NoError(t, os.WriteFile(keyPath, []byte("old-key"), 0644))
+	require.NoError(t, os.WriteFile(pubPath, []byte("old-pub"), 0600))
+	require.NoError(t, os.WriteFile(cfgPath, []byte("old-cfg"), 0600))
+
+	// Sync with updated credentials
+	ssh := &config.SSHScope{
+		Key:    []byte("new-key"),
+		KeyPub: []byte("new-pub"),
+		Config: []byte("new-cfg"),
+	}
+	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
+
+	// Verify permissions tightened to 0700 on ~/.ssh, 0600 on key, 0644 on pub/config
+	dirStat, err := os.Stat(sshDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirStat.Mode().Perm())
+
+	keyStat, err := os.Stat(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), keyStat.Mode().Perm())
+
+	pubStat, err := os.Stat(pubPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), pubStat.Mode().Perm())
+
+	cfgStat, err := os.Stat(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), cfgStat.Mode().Perm())
+
+	// Clobber prevention: sync with matching content: files must not be rewritten
+	past := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	require.NoError(t, os.Chtimes(keyPath, past, past))
+	require.NoError(t, os.Chtimes(pubPath, past, past))
+	require.NoError(t, os.Chtimes(cfgPath, past, past))
+
+	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
+
+	keyStatAfter, err := os.Stat(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, past.Unix(), keyStatAfter.ModTime().Unix(), "identical key content must not be rewritten")
+
+	pubStatAfter, err := os.Stat(pubPath)
+	require.NoError(t, err)
+	assert.Equal(t, past.Unix(), pubStatAfter.ModTime().Unix(), "identical pub content must not be rewritten")
+
+	cfgStatAfter, err := os.Stat(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, past.Unix(), cfgStatAfter.ModTime().Unix(), "identical config content must not be rewritten")
+
+	// Revoke: sync with nil and empty SSHScope
+	require.NoError(t, SyncSSHCredentials(tempHome, &config.SSHScope{}))
+
+	_, err = os.Stat(keyPath)
+	assert.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(pubPath)
+	assert.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(cfgPath)
+	assert.True(t, os.IsNotExist(err))
+
+	// Re-create and test revocation with nil ssh
+	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
+	_, err = os.Stat(keyPath)
+	require.NoError(t, err)
+
+	require.NoError(t, SyncSSHCredentials(tempHome, nil))
+	_, err = os.Stat(keyPath)
+	assert.True(t, os.IsNotExist(err))
+}

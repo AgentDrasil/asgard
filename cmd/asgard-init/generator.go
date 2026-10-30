@@ -111,6 +111,15 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		}
 	}
 
+	// Create SSH credentials directory with strict permissions (0700)
+	sshCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh")
+	if err := os.MkdirAll(sshCredDir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory %q: %w", sshCredDir, err)
+	}
+	if err := os.Chmod(sshCredDir, 0700); err != nil {
+		return fmt.Errorf("failed to chmod directory %q: %w", sshCredDir, err)
+	}
+
 	// 2. Generate TLS certificates
 	caCert, caKey, caCertPEM, caKeyPEM, err := GenerateCA()
 	if err != nil {

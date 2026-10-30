@@ -10,6 +10,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// DedicatedSocketPath is the socket path used by the dedicated background ssh-agent spawned by Asgard.
+const DedicatedSocketPath = "/tmp/asgard-ssh-agent.sock"
+
 // SetupSSHAgent starts ssh-agent if not already running, scans ~/.ssh for private keys, and adds them.
 func SetupSSHAgent() error {
 	home, err := os.UserHomeDir()
@@ -38,7 +41,7 @@ func SetupSSHAgent() error {
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		if _, err := os.Stat(sock); err == nil {
 			log.Info().Str("socket", sock).Msg("Using existing SSH_AUTH_SOCK")
-			return nil
+			return AddKeysFromDir(sshDir)
 		}
 	}
 
@@ -50,7 +53,7 @@ func SetupSSHAgent() error {
 	}
 
 	// Force socket path to /tmp/asgard-ssh-agent.sock to avoid Read-only file system errors on ~/.ssh
-	socketPath := "/tmp/asgard-ssh-agent.sock"
+	socketPath := DedicatedSocketPath
 	_ = os.Remove(socketPath)
 
 	// Start a background ssh-agent with explicit socket path in /tmp
@@ -88,7 +91,11 @@ func SetupSSHAgent() error {
 		return os.ErrNotExist
 	}
 
-	// Find and add private keys in ~/.ssh
+	return AddKeysFromDir(sshDir)
+}
+
+// AddKeysFromDir scans dir for private keys and adds them to the running ssh-agent.
+func AddKeysFromDir(sshDir string) error {
 	entries, err := os.ReadDir(sshDir)
 	if err != nil {
 		return err
@@ -116,5 +123,69 @@ func SetupSSHAgent() error {
 		}
 	}
 
+	return nil
+}
+
+// ClearKeys removes identities from the running ssh-agent.
+// To avoid wiping out unrelated identities on an inherited or forwarded agent,
+// it only runs `ssh-add -D` if the agent was spawned by Asgard (DedicatedSocketPath).
+// If an external agent is in use, it removes ~/.ssh/key specifically via RemoveKey.
+func ClearKeys() error {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return nil
+	}
+	if _, err := os.Stat(sock); err != nil {
+		return nil
+	}
+	sshAddBin, err := exec.LookPath("ssh-add")
+	if err != nil {
+		return nil
+	}
+
+	// Restrict ssh-add -D to agents spawned by Asgard
+	if sock != DedicatedSocketPath {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			keyPath := filepath.Join(home, ".ssh", "key")
+			if _, err := os.Stat(keyPath); err == nil {
+				return RemoveKey(keyPath)
+			}
+		}
+		return nil
+	}
+
+	cmd := exec.Command(sshAddBin, "-D")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		log.Debug().Err(err).Str("stderr", stderr.String()).Msg("Could not clear keys from ssh-agent")
+		return err
+	}
+	log.Info().Msg("Cleared all identities from ssh-agent")
+	return nil
+}
+
+// RemoveKey removes a specific private key identity from the running ssh-agent using `ssh-add -d <keyPath>`.
+func RemoveKey(keyPath string) error {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return nil
+	}
+	if _, err := os.Stat(sock); err != nil {
+		return nil
+	}
+	sshAddBin, err := exec.LookPath("ssh-add")
+	if err != nil {
+		return nil
+	}
+	cmd := exec.Command(sshAddBin, "-d", keyPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		log.Debug().Str("key", keyPath).Err(err).Str("stderr", stderr.String()).Msg("Could not remove key from ssh-agent")
+		return err
+	}
+	log.Info().Str("key", keyPath).Msg("Removed SSH key from ssh-agent")
 	return nil
 }
