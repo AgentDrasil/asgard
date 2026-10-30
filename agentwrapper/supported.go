@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -110,7 +111,13 @@ func GetSupportedCLIsAndModels() map[string][]string {
 	var sandboxed map[string][]string
 	if ok, err := runQuery(qctx, &sandboxed, "models", "--unfiltered"); ok {
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to list models in sandbox")
+			if _, lerr := exec.LookPath("bwrap"); lerr != nil {
+				// No sandbox tooling on this host (e.g. the slim backend
+				// image, where runners own the CLIs): expected, not an error.
+				log.Debug().Err(err).Msg("Skipping model probe: bwrap is not installed on this host")
+			} else {
+				log.Error().Err(err).Msg("Failed to list models in sandbox")
+			}
 			sandboxed = nil
 		}
 		res := make(map[string][]string, len(registeredClients()))

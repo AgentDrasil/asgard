@@ -650,14 +650,7 @@ func (s *Server) runnerQuota(ctx context.Context, node string) (map[string][]llm
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	res, err := runnerfs.QueryQuota(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		res = map[string][]llms.ModelUsage{}
-	}
-	return res, nil
+	return runnerfs.QueryQuota(ctx, client)
 }
 
 // ConfigResponse represents the public configuration sent to web clients.

@@ -131,6 +131,17 @@ func (cs *Scheduler) reclaimLocal(chats ...string) {
 	}
 }
 
+// decommissionedGrace is how long past the expiry cutoff a session bound to a
+// runner the hub does not know at all is kept before its record is deleted
+// without the runner's confirmation (90 days since the last update).
+const decommissionedGrace = 90 * 24 * time.Hour
+
+// finalizedRunRetention is how long finalized run ids are remembered. The
+// dedupe only matters for results replayed by a runner after a reconnect or
+// backend restart (hours to days); a replay of a pruned id is merely logged
+// and ignored when the run is untracked.
+const finalizedRunRetention = 90 * 24 * time.Hour
+
 // rpcTimeout bounds one cleanup RPC (a large orphan sweep walks directory
 // trees on the runner).
 const rpcTimeout = 10 * time.Minute
@@ -152,6 +163,11 @@ func (cs *Scheduler) CleanExpiredSessions() {
 		})
 	} else {
 		err = cs.cleanRunners(context.Background(), cutoff)
+	}
+	if n, perr := cs.repo.PruneFinalizedRuns(cs.now().Add(-finalizedRunRetention)); perr != nil {
+		log.Warn().Err(perr).Msg("Failed to prune finalized run ids")
+	} else if n > 0 {
+		log.Info().Int64("pruned", n).Msg("Pruned old finalized run ids")
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Scheduled session cleanup encountered errors")
@@ -179,6 +195,7 @@ func (cs *Scheduler) cleanRunners(ctx context.Context, cutoff time.Time) error {
 		return err
 	}
 	byRunner := make(map[string][]string)
+	updated := make(map[string]time.Time)
 	for _, sess := range expired {
 		switch {
 		case sess.RunnerNodeID == "" || !agents.IsValidChatID(sess.ChatID):
@@ -191,11 +208,32 @@ func (cs *Scheduler) cleanRunners(ctx context.Context, cutoff time.Time) error {
 			}
 		default:
 			byRunner[sess.RunnerNodeID] = append(byRunner[sess.RunnerNodeID], sess.ChatID)
+			updated[sess.ChatID] = sess.UpdatedAt
 		}
+	}
+	known := make(map[string]bool)
+	for _, n := range cs.runners.Nodes() {
+		known[n.NodeID] = true
 	}
 	for node, chats := range byRunner {
 		client, err := cs.runners.Client(node)
 		if err != nil {
+			if !known[node] {
+				// A decommissioned runner never comes back to confirm the
+				// removal; after a long grace the record is dropped anyway.
+				grace := cs.now().Add(-decommissionedGrace)
+				for _, chat := range chats {
+					if !updated[chat].Before(grace) {
+						continue
+					}
+					log.Warn().Str("runner", node).Str("chatID", chat).Msg("Deleting expired session of an unknown runner; its data may be left behind on that runner")
+					if err := cs.repo.DeleteSessionRecord(chat); err != nil {
+						errs = append(errs, fmt.Errorf("delete session %s: %w", chat, err))
+					} else {
+						cs.reclaimLocal(chat)
+					}
+				}
+			}
 			log.Warn().Err(err).Str("runner", node).Int("chats", len(chats)).Msg("Runner offline: expired sessions are kept and retried next run")
 			continue
 		}
@@ -227,6 +265,10 @@ func (cs *Scheduler) cleanRunners(ctx context.Context, cutoff time.Time) error {
 		return errors.Join(append(errs, err)...)
 	}
 	// Legacy orphans on the backend host itself (sweep only; creates nothing).
+	// Intentionally removes ANY directory below tmp/sessions older than the
+	// cutoff, not just chat-id-named ones: transient entries such as
+	// fakebash-sock-<uuid> and per-run <uuid> dirs are leftovers of crashed
+	// runs once they are that old.
 	for _, f := range cs.localRoots().Cleanup(runnerfs.CleanupSpec{Cutoff: cutoff, Keep: keep}).Failures {
 		log.Warn().Str("error", f.Err).Msg("Failed to sweep legacy local orphan dir")
 	}

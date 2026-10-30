@@ -246,7 +246,10 @@ watch(
       return;
     }
     const info = await getDirInfo(dir, runner || undefined);
-    if (effectiveRunDir.value === dir) {
+    if (
+      effectiveRunDir.value === dir &&
+      (runnerForSession(activeSession.value) || "") === (runner || "")
+    ) {
       currentGitRoot.value = info.gitRoot || "";
     }
   },

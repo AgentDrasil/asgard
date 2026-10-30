@@ -65,9 +65,6 @@ func (s *Server) enterPeerCall(chatID, callerAgentID, targetAgentID string) erro
 	if len(chain) >= maxPeerCallDepth {
 		return fmt.Errorf("call-peer nesting too deep: the call chain %s already has %d agents (limit %d)", strings.Join(chain, " -> "), len(chain), maxPeerCallDepth)
 	}
-	if s.peerChains == nil {
-		s.peerChains = map[string][]string{}
-	}
 	s.peerChains[chatID] = append(chain[:len(chain):len(chain)], targetAgentID)
 	return nil
 }
@@ -143,10 +140,15 @@ func (s *Server) triggerNestedPeer(stopWith context.Context, w http.ResponseWrit
 		allowOpt = optional.Some(*req.AllowCrossSession)
 	}
 	if s.repo != nil {
+		go s.repo.RetryPendingQuotaReset(chatID)
 		if err := s.repo.UpdateAgentSession(chatID, target.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on nested peer call")
 		}
 	}
+	// Note: like a normal trigger this flips the session's CurrentAgent to the
+	// peer, and it is deliberately not restored when the peer returns: the
+	// caller's own later updates set it again, and a restore here could race
+	// with them.
 	status, output, err := s.executeSingleAgent(execCtx, target, chatID, req)
 	resp := map[string]any{"status": status, "chatId": chatID}
 	code := http.StatusOK

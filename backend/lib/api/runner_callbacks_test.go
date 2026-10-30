@@ -102,6 +102,7 @@ func newCallbackRig(t *testing.T, agents ...*agentspec.Agent) *callbackRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	server := &Server{
+		peerChains:         map[string][]string{},
 		conf:               &config.Config{},
 		repo:               repo,
 		eventHub:           events,

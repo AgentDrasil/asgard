@@ -281,6 +281,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		ctx:             ctx,
 		cancel:          cancel,
 		shutdownStarted: make(chan struct{}),
+		peerChains:      map[string][]string{},
 		geminiAPIKey:    geminiKey,
 		voiceAuthURL:    DefaultGoogleAuthURL,
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},

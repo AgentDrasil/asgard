@@ -218,3 +218,48 @@ func (h *errHub) Client(string) (runnerpb.RunnerServiceClient, error) {
 func (h *errHub) Nodes() []runnerhub.NodeInfo {
 	return []runnerhub.NodeInfo{{NodeID: "A", Online: true}}
 }
+
+func TestSchedulerDropsSessionsOfUnknownRunnerAfterGrace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dbConn := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(dbConn))
+	repo := dbmodels.NewSessionRepository(dbConn)
+	for _, id := range []string{"longGone", "recentlyExpired", "knownOffline"} {
+		node := "Z" // never known to the hub
+		if id == "knownOffline" {
+			node = "B"
+		}
+		require.NoError(t, dbConn.Create(&dbmodels.Session{ChatID: id, RunnerNodeID: node}).Error)
+	}
+	set := func(id string, at time.Time) {
+		require.NoError(t, dbConn.Exec("UPDATE sessions SET updated_at = ? WHERE chat_id = ?", at, id).Error)
+	}
+	set("longGone", time.Now().AddDate(0, 0, -120))
+	set("recentlyExpired", time.Now().AddDate(0, 0, -40))
+	set("knownOffline", time.Now().AddDate(0, 0, -120))
+	require.NoError(t, dbConn.Create(&dbmodels.FinalizedRun{RunID: "old", FinalizedAt: time.Now().AddDate(0, 0, -120)}).Error)
+	require.NoError(t, dbConn.Create(&dbmodels.FinalizedRun{RunID: "new", FinalizedAt: time.Now()}).Error)
+
+	hub := &fakeHub{runners: map[string]*fakeRunner{"B": {}}, offline: map[string]bool{"B": true}}
+	s, err := NewScheduler(repo, WithRunners(hub), WithTmpBase(t.TempDir()), WithSessionBase(t.TempDir()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Shutdown() })
+	s.CleanExpiredSessions()
+
+	exists := func(id string) bool {
+		sess, err := repo.GetSessionMeta(id)
+		require.NoError(t, err)
+		return sess != nil
+	}
+	assert.False(t, exists("longGone"))
+	assert.True(t, exists("recentlyExpired"))
+	assert.True(t, exists("knownOffline"), "a known offline runner may come back")
+
+	fr := dbmodels.NewFinalizedRunRepository(dbConn)
+	done, err := fr.IsFinalized(t.Context(), "old")
+	require.NoError(t, err)
+	assert.False(t, done, "old finalized ids are pruned")
+	done, err = fr.IsFinalized(t.Context(), "new")
+	require.NoError(t, err)
+	assert.True(t, done)
+}

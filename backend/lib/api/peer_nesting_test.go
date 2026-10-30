@@ -195,3 +195,11 @@ func TestNestedPeerDoesNotAnnounceDone(t *testing.T) {
 		t.Fatal("a root run must announce completion")
 	}
 }
+
+func TestReleaseExecutionClearsStalePeerChain(t *testing.T) {
+	s := &Server{peerChains: map[string][]string{}}
+	require.NoError(t, s.enterPeerCall("c1", "alpha", "beta"))
+	assert.Equal(t, 1, s.peerChainCount())
+	s.releaseExecution("c1")
+	assert.Equal(t, 0, s.peerChainCount())
+}

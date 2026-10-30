@@ -171,7 +171,7 @@ FROM go-builder AS go-build-backend
 ARG ASGARD_VERSION=dev
 
 RUN mkdir -p /app/bin && \
-    for name in asgard agent-validate; do \
+    for name in asgard; do \
     echo "Building $name..."; \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./cmd/$name"; \
     done
@@ -192,36 +192,7 @@ RUN mkdir -p /app/bin && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/agystatusline ./agystatusline/cmd/agystatusline && \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o /app/bin/asgard-runner ./runner/cmd/asgard-runner
 
-# Stage 5: backend
-# The orchestration server only. Chat directories, agent CLIs, bwrap and ttyd
-# live on runners (see the runner stage); the backend talks to them over gRPC.
-# git, bash and openssh-client are kept for the SSH agent setup at startup and
-# artifact path checks. Without a runner, sandboxed workflow command nodes
-# cannot run here (no bwrap/fakebashd); that layout is for development only.
-FROM debian:${DEBIAN_VERSION}-slim AS backend
-
-ARG USER_UID
-ARG USER_GID
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    bash \
-    git \
-    openssh-client && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN groupadd -g ${USER_GID} user && \
-    useradd -u ${USER_UID} -g user -m -s /bin/bash user
-
-COPY --from=go-build-backend /app/bin/* /bin/
-COPY --from=webui-builder /webui/dist /opt/asgard/webui
-
-USER user
-WORKDIR /home/user
-
-CMD ["asgard"]
-
-# Stage 6: runner
+# Stage 5: runner
 # Runs on the machine that holds the chat directories and executes agents.
 # Sandboxing uses bubblewrap, which needs unprivileged user namespaces: run
 # with a seccomp profile that allows them (e.g. `--security-opt
@@ -253,3 +224,32 @@ ENV DISABLE_AUTOUPDATER=1
 
 ENTRYPOINT ["asgard-runner"]
 CMD []
+
+# Stage 6: backend (last, so a plain `docker build` produces the backend image)
+# The orchestration server only. Chat directories, agent CLIs, bwrap and ttyd
+# live on runners (see the runner stage); the backend talks to them over gRPC.
+# git, bash and openssh-client are kept for the SSH agent setup at startup and
+# artifact path checks. Without a runner, sandboxed workflow command nodes
+# cannot run here (no bwrap/fakebashd); that layout is for development only.
+FROM debian:${DEBIAN_VERSION}-slim AS backend
+
+ARG USER_UID
+ARG USER_GID
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    bash \
+    git \
+    openssh-client && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g ${USER_GID} user && \
+    useradd -u ${USER_UID} -g user -m -s /bin/bash user
+
+COPY --from=go-build-backend /app/bin/* /bin/
+COPY --from=webui-builder /webui/dist /opt/asgard/webui
+
+USER user
+WORKDIR /home/user
+
+CMD ["asgard"]

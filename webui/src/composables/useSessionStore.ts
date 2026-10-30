@@ -572,18 +572,28 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
     const res = await triggerAgentMessage(targetAgentId, triggerParams);
 
-    if (res?.runnerOffline) {
-      rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
+    // The trigger was in flight: the user may have moved to another chat since.
+    // The loading/running state and error bubbles belong to the active chat, so
+    // only touch them when it is still the chat this request was for.
+    const stillActive = activeSessionId.value === currentThreadId;
+    const resetBusy = () => {
+      if (!stillActive) return;
       loading.value = false;
       isRunning.value = false;
+    };
+    const pushErrorIfActive = (content: string) => {
+      if (stillActive) pushErrorMessage(content);
+    };
+
+    if (res?.runnerOffline) {
+      rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
+      resetBusy();
       if (createdHere && currentThreadId) {
         // The chat we just created is bound to a runner that is offline: drop
         // it so a retry re-creates the chat against the newly selected runner.
         const deadId = currentThreadId;
-        // Only tear down the view if the user is still on the dead chat; they
-        // may have switched to another chat while the trigger was in flight.
-        const stillActive = activeSessionId.value === deadId;
         sessions.value = sessions.value.filter((s) => s.chatID !== deadId);
+        // Only tear down the view if the user is still on the dead chat.
         if (stillActive) {
           closeSession();
           if (router) await router.push("/newchat");
@@ -591,13 +601,12 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         await deleteSessionFromLocal(deadId);
         useToast().error(t("runners.offlineError"));
       } else {
-        pushErrorMessage(t("runners.offlineError"));
+        pushErrorIfActive(t("runners.offlineError"));
       }
     } else if (res?.conflict) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
-      loading.value = false;
-      isRunning.value = false;
-      pushErrorMessage(t("chat.sessionAlreadyRunning"));
+      resetBusy();
+      pushErrorIfActive(t("chat.sessionAlreadyRunning"));
     } else if (res?.queued) {
       // Server queued the message (local running state was stale): drop the
       // optimistic bubble. The SSE queue snapshot owns queue display, and the
@@ -606,9 +615,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
     } else if (!res) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
-      loading.value = false;
-      isRunning.value = false;
-      pushErrorMessage(t("chat.triggerFailed"));
+      resetBusy();
+      pushErrorIfActive(t("chat.triggerFailed"));
     }
   };
 

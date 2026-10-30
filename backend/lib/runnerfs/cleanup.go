@@ -131,8 +131,8 @@ func openOptionalRoot(root string) (int, bool, error) {
 	return fd, true, nil
 }
 
-// removeChild removes root/name (without following symlinks) and reports
-// whether something was there.
+// removeChild removes root/name (without following symlinks) and returns 1
+// when a directory was removed (a removed symlink or file counts 0).
 func removeChild(root, name string) (int, error) {
 	fd, ok, err := openOptionalRoot(root)
 	if err != nil || !ok {
@@ -148,6 +148,9 @@ func removeChild(root, name string) (int, error) {
 	}
 	if err := removeAllAt(fd, name, nil); err != nil {
 		return 0, fmt.Errorf("remove %s: %w", filepath.Join(root, name), err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return 0, nil
 	}
 	return 1, nil
 }

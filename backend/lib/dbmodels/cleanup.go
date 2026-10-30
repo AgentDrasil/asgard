@@ -217,3 +217,13 @@ func getLatestModTime(dirPath string, entry os.DirEntry) time.Time {
 
 	return latest
 }
+
+// PruneFinalizedRuns deletes finalized-run ids recorded before cutoff and
+// returns how many were removed.
+func (r *SessionRepository) PruneFinalizedRuns(cutoff time.Time) (int64, error) {
+	res := r.db.Where("finalized_at < ?", cutoff).Delete(&FinalizedRun{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("prune finalized runs: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}

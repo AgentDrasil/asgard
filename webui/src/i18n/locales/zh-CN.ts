@@ -89,7 +89,7 @@ export const zhCN: MessageSchema = {
     refresh: "刷新",
     desc: "为此后端执行 Agent 的 Runner 节点。",
     offlineError: "Runner 已离线，请在其重新连接后重试。",
-    conflictError: "该会话已绑定到其他 Runner，无法迁移。",
+    conflictError: "Runner 拒绝了此请求（冲突）。请检查所选 Runner 后重试。",
   },
   quota: {
     runnerErrors: "Runner 错误",

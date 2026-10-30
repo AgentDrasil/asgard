@@ -131,6 +131,8 @@ watch(
       return;
     }
     const info = await getDirInfo(newDir, runner);
+    // Drop a response for a dir/runner the chat has moved away from.
+    if (props.runDir !== newDir || props.runnerId !== runner) return;
     gitRoot.value = info.gitRoot || "";
   },
   { immediate: true },

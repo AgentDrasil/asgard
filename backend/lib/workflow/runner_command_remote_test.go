@@ -199,3 +199,12 @@ func TestCommandRunnerWithoutRunnerFSRunsLocally(t *testing.T) {
 	_, isRunner := any(runnerfs.NewLocal("x")).(runnerfs.CommandRunner)
 	assert.False(t, isRunner)
 }
+
+func TestCommandRunnerOnRunnerMarksTruncatedStdout(t *testing.T) {
+	node := &workflowspec.NodeSpec{ID: "n", Type: workflowspec.NodeTypeCommand, Command: "c"}
+	fs := &fakeCommandFS{do: func(context.Context, runnerfs.CommandSpec) (runnerfs.CommandResult, error) {
+		return runnerfs.CommandResult{Stdout: []byte("big"), StdoutTruncated: true}, nil
+	}}
+	res := runRemoteCommand(t, t.Context(), fs, NewCommandRunner(true), node, nil)
+	assert.Equal(t, "big"+StdoutTruncatedMarker, res.Output)
+}

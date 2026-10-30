@@ -87,7 +87,8 @@ export const en = {
     refresh: "Refresh",
     desc: "Runner nodes that execute agents for this backend.",
     offlineError: "The runner is offline. Try again when it reconnects.",
-    conflictError: "This chat is bound to a different runner and cannot be moved.",
+    conflictError:
+      "The runner rejected this request (conflict). Check the selected runner and try again.",
   },
   quota: {
     runnerErrors: "Runner errors",

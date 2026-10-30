@@ -86,6 +86,11 @@ func (s *Server) ensureExecutionGuard(chatID, agentID string, isWorkflow bool) {
 // consumed so later failures of this session are not misclassified.
 func (s *Server) releaseExecution(chatID string) {
 	s.activeExecutions.Delete(chatID)
+	// The guard's holder is gone, so no call-peer chain of it can be live; an
+	// abnormal teardown of a blocked root must not leave a stale chain.
+	s.peerMu.Lock()
+	delete(s.peerChains, chatID)
+	s.peerMu.Unlock()
 	s.consumeSessionStop(chatID)
 	// Whoever releases last drains: messages queued meanwhile, or left behind
 	// by a consumer that gave up on an unavailable runner, run now if possible.

@@ -352,6 +352,10 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 		readonlyDirs = cfg.MountDirs.ReadOnly
 	}
 
+	if err := validateReadonlyRoots(readonlyDirs, []string{filepath.Join(home, ".ssh"), paths.ConfigDir()}); err != nil {
+		return nil, err
+	}
+
 	// Mount roles config run_dirs as read-write
 	if cfg != nil {
 		for _, dir := range cfg.RunDirs {
@@ -361,14 +365,10 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 			args = appendBind(args, readonlyDirs, dir)
 		}
 
-		// Mount additional directories from MountDirs
-		for _, dir := range cfg.MountDirs.ReadOnly {
-			if _, err := os.Stat(dir); err != nil {
-				return nil, fmt.Errorf("mount readonly directory %q does not exist: %w", dir, err)
-			}
-			// Bound read-only below, after every read-write bind: a later
-			// bind of an ancestor would otherwise bury it.
-		}
+		// Mount additional directories from MountDirs. Readonly roots are
+		// bound below, after every read-write bind (a later bind of an
+		// ancestor would otherwise bury them); a missing one is skipped with
+		// a warning by appendReadonlyBinds, as in command sandboxes.
 		for _, dir := range cfg.MountDirs.ReadWrite {
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("mount readwrite directory %q does not exist: %w", dir, err)
@@ -715,7 +715,30 @@ func SandboxCwd(chatID, dir string, allowCrossSession bool, readonlyDirs []strin
 	return dir, nil
 }
 
-// appendReadonlyBinds binds each existing dir read-only at its own path and,
+// validateReadonlyRoots rejects operator readonly roots that cannot work in a
+// sandbox: a root at or beneath a path the sandbox masks with a later tmpfs
+// (it would be silently shadowed), or at or beneath the reserved /session or
+// at /tmp itself (it would replace the chat's own bind).
+func validateReadonlyRoots(readonlyDirs, masked []string) error {
+	for _, d := range readonlyDirs {
+		if !filepath.IsAbs(d) {
+			continue // reported by appendReadonlyBinds
+		}
+		for _, c := range realAndLexical(d) {
+			if c == "/tmp" || c == "/session" || strings.HasPrefix(c, "/session/") {
+				return fmt.Errorf("mount readonly directory %q collides with the reserved sandbox mount point /tmp or /session", d)
+			}
+		}
+		for _, m := range masked {
+			if m != "" && beneathAny([]string{m}, d) {
+				return fmt.Errorf("mount readonly directory %q lies inside %q, which the sandbox masks; it would be invisible", d, m)
+			}
+		}
+	}
+	return nil
+}
+
+// appendReadonlyBinds binds each dir read-only at its own path and,
 // when it is a symlink, at its resolved path too: a process may reach the tree
 // through either name and both must be read-only. A relative entry is an error
 // (fail closed): it could not be mounted, leaving the tree writable.
@@ -724,7 +747,10 @@ func appendReadonlyBinds(args []string, dirs []string) ([]string, error) {
 		if !filepath.IsAbs(dir) {
 			return nil, fmt.Errorf("mount readonly directory must be an absolute path: %q", dir)
 		}
+		// A missing root has nothing to protect: skip it (loudly), the same
+		// as agent sandboxes do.
 		if _, err := os.Stat(dir); err != nil {
+			log.Warn().Str("dir", dir).Msg("skipping missing readonly mount directory")
 			continue
 		}
 		args = append(args, "--ro-bind", dir, dir)
@@ -803,6 +829,16 @@ func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID s
 	var args []string
 	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
+		return nil, err
+	}
+
+	masked := []string{filepath.Join(home, ".ssh"), paths.ConfigDir()}
+	for _, cli := range agentwrapper.GetRegisteredCLIs() {
+		if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
+			masked = append(masked, spec.AuthDirectory(home))
+		}
+	}
+	if err := validateReadonlyRoots(readonlyDirs, masked); err != nil {
 		return nil, err
 	}
 

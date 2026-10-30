@@ -1162,3 +1162,36 @@ func TestRelativeReadonlyMountsFailClosed(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "relative/dir")
 }
+
+func TestValidateReadonlyRoots(t *testing.T) {
+	home := t.TempDir()
+	masked := []string{filepath.Join(home, ".ssh")}
+	require.NoError(t, validateReadonlyRoots([]string{filepath.Join(home, "proj")}, masked))
+	require.NoError(t, validateReadonlyRoots([]string{home}, masked))
+
+	err := validateReadonlyRoots([]string{filepath.Join(home, ".ssh", "keys")}, masked)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "masks")
+
+	for _, d := range []string{"/tmp", "/session", "/session/x"} {
+		err = validateReadonlyRoots([]string{d}, nil)
+		require.Error(t, err, d)
+		assert.Contains(t, err.Error(), "reserved")
+	}
+}
+
+func TestReadonlyRootInMaskedDirIsRejected(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	runDir := t.TempDir()
+	ro := []string{filepath.Join(home, ".ssh", "sub")}
+
+	_, err = CommandForCommandExecAt(runDir, runDir, "sock", "chat-1", "", false, ro)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "masks")
+
+	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: ro}}
+	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "masks")
+}

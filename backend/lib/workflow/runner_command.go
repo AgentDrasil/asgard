@@ -176,6 +176,9 @@ func (r *commandRunner) runOnRunner(ctx context.Context, nctx *NodeContext, cr r
 	if err != nil {
 		result.ExitCode = -1
 	}
+	if res.StdoutTruncated {
+		result.Output += StdoutTruncatedMarker
+	}
 	for _, a := range res.Artifacts {
 		if result.Artifacts == nil {
 			result.Artifacts = make(map[string]string)
@@ -186,6 +189,10 @@ func (r *commandRunner) runOnRunner(ctx context.Context, nctx *NodeContext, cr r
 	}
 	return finishCommand(node, result, err, string(res.Stderr)), nil
 }
+
+// StdoutTruncatedMarker is appended to the output of a runner command whose
+// stdout hit the runner's cap.
+const StdoutTruncatedMarker = "\n[asgard: stdout truncated]\n"
 
 // remoteTimeoutMargin is how long past the node timeout the backend waits for
 // the runner to report a timed out command.
