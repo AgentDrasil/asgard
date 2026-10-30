@@ -22,6 +22,8 @@ import (
 type Request struct {
 	// ChatID is the chat the run belongs to; it selects the runner.
 	ChatID string
+	// UserID identifies the user owning the session for personal proxy keys.
+	UserID string
 	// Agent is the effective agent (workflow overlay already applied to its
 	// config). Its Hash and NodeID identify the definition to the runner.
 	Agent      *agentspec.Agent

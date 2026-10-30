@@ -83,7 +83,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
-	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt, optional.Some(req.AllowCrossSession)); err != nil {
+	sub := s.userSubject(r)
+	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt, optional.Some(req.AllowCrossSession), sub); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create session: " + err.Error()})

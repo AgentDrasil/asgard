@@ -97,6 +97,7 @@ type Config struct {
 	UILang                             string                    `yaml:"ui_lang"`
 	Providers                          []string                  `yaml:"providers" json:"providers,omitempty"`
 	Proxy                              *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
+	KMSKeyName                         string                    `yaml:"kms_key_name" json:"kms_key_name,omitempty"`
 	// Runner enables the runner listener. A nil value leaves it disabled.
 	Runner *RunnerConfig `yaml:"runner" json:"-"`
 	// Auth enables optional OIDC/OAuth authentication. A nil value leaves every

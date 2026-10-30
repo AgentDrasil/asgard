@@ -26,16 +26,19 @@ import (
 // fakeCallbacks is a manually written AgentCallbackServiceClient. Each method
 // first runs its hook (if set) and otherwise answers with the canned reply.
 type fakeCallbacks struct {
-	mu       sync.Mutex
-	asks     []*runnerpb.AskUserRequest
-	peers    []*runnerpb.CallPeerRequest
-	finds    []*runnerpb.FindPeerRequest
-	records  []*runnerpb.RecordMetricsRequest
-	askHook  func(n int, req *runnerpb.AskUserRequest) (*runnerpb.AskUserResponse, error)
-	peerResp *runnerpb.CallPeerResponse
-	peerErr  error
-	findResp *runnerpb.FindPeerResponse
-	findErr  error
+	mu               sync.Mutex
+	asks             []*runnerpb.AskUserRequest
+	peers            []*runnerpb.CallPeerRequest
+	finds            []*runnerpb.FindPeerRequest
+	records          []*runnerpb.RecordMetricsRequest
+	askHook          func(n int, req *runnerpb.AskUserRequest) (*runnerpb.AskUserResponse, error)
+	peerResp         *runnerpb.CallPeerResponse
+	peerErr          error
+	findResp         *runnerpb.FindPeerResponse
+	findErr          error
+	proxyKeys        map[string]string
+	proxyErr         error
+	lastProxyKeysReq *runnerpb.GetUserProxyKeysRequest
 }
 
 func (f *fakeCallbacks) AskUser(ctx context.Context, req *runnerpb.AskUserRequest, _ ...grpc.CallOption) (*runnerpb.AskUserResponse, error) {
@@ -69,6 +72,16 @@ func (f *fakeCallbacks) RecordMetrics(_ context.Context, req *runnerpb.RecordMet
 	defer f.mu.Unlock()
 	f.records = append(f.records, req)
 	return &runnerpb.RecordMetricsResponse{}, nil
+}
+
+func (f *fakeCallbacks) GetUserProxyKeys(_ context.Context, req *runnerpb.GetUserProxyKeysRequest, _ ...grpc.CallOption) (*runnerpb.GetUserProxyKeysResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastProxyKeysReq = req
+	if f.proxyErr != nil {
+		return nil, f.proxyErr
+	}
+	return &runnerpb.GetUserProxyKeysResponse{Keys: f.proxyKeys}, nil
 }
 
 func (f *fakeCallbacks) askCount() int {

@@ -390,24 +390,39 @@ export async function reloadAgents(): Promise<{ success: boolean; error?: string
   }
 }
 
-// Reload standalone proxy config via /api/manage/proxy/reload
-export async function reloadProxyConfig(): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await apiFetch("/api/manage/proxy/reload", { method: "POST" });
-    if (res.ok) {
-      return { success: true };
-    }
-    const body = await res.json().catch(() => null);
-    return {
-      success: false,
-      error: body?.error || `Proxy reload failed with status ${res.status}`,
-    };
-  } catch (err: any) {
-    console.error("reloadProxyConfig error:", err);
-    return {
-      success: false,
-      error: err?.message || "Failed to reload proxy config",
-    };
+export interface UserProxyKeyMeta {
+  key_name: string;
+  updated_at: string;
+}
+
+export async function getUserProxyKeys(): Promise<UserProxyKeyMeta[]> {
+  const res = await apiFetch("/api/user/proxy-keys");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || `Failed to fetch user proxy keys: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function saveUserProxyKey(key_name: string, value: string): Promise<void> {
+  const res = await apiFetch("/api/user/proxy-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key_name, value }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || `Failed to save user proxy key: ${res.statusText}`);
+  }
+}
+
+export async function deleteUserProxyKey(key_name: string): Promise<void> {
+  const res = await apiFetch(`/api/user/proxy-keys/${encodeURIComponent(key_name)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || `Failed to delete user proxy key: ${res.statusText}`);
   }
 }
 

@@ -378,3 +378,64 @@ func TestExecutorArtifactsUseOverlaidAgentConfig(t *testing.T) {
 	require.Len(t, evs, 1)
 	assert.Empty(t, evs[0].GetArtifacts())
 }
+
+func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeCallbacks{
+		proxyKeys: map[string]string{
+			"PROXY_SECRET": "secret-proxy-123",
+			"CUSTOM_VAR":   "custom-val-456",
+		},
+	}
+	cbFunc := func() (runnerpb.AgentCallbackServiceClient, error) {
+		return fake, nil
+	}
+
+	ex := New(Options{Callbacks: cbFunc})
+	conf := &config.Config{}
+
+	t.Run("with user_id queries and merges keys", func(t *testing.T) {
+		t.Parallel()
+		sr := &runnerpb.StartRun{
+			RunId:  "run-test-123",
+			ChatId: "chat-1",
+			UserId: "user-test",
+		}
+		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		assert.Equal(t, "secret-proxy-123", opts.Proxy.EnvVars["PROXY_SECRET"])
+		assert.Equal(t, "custom-val-456", opts.Proxy.EnvVars["CUSTOM_VAR"])
+		require.NotNil(t, fake.lastProxyKeysReq)
+		assert.Equal(t, "run-test-123", fake.lastProxyKeysReq.GetMeta().GetRunId())
+		assert.Equal(t, "user-test", fake.lastProxyKeysReq.GetUserId())
+	})
+
+	t.Run("with GEMINI_API_KEY sets GeminiAPIKey", func(t *testing.T) {
+		t.Parallel()
+		customFake := &fakeCallbacks{
+			proxyKeys: map[string]string{
+				"GEMINI_API_KEY": "ai-studio-key-789",
+			},
+		}
+		customEx := New(Options{Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) {
+			return customFake, nil
+		}})
+		sr := &runnerpb.StartRun{
+			ChatId: "chat-1",
+			UserId: "user-test-2",
+		}
+		opts := customEx.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		assert.Equal(t, "ai-studio-key-789", opts.Proxy.GeminiAPIKey)
+		assert.Equal(t, "ai-studio-key-789", opts.Proxy.EnvVars["GEMINI_API_KEY"])
+	})
+
+	t.Run("with empty user_id does not query keys", func(t *testing.T) {
+		t.Parallel()
+		sr := &runnerpb.StartRun{
+			ChatId: "chat-1",
+			UserId: "",
+		}
+		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		assert.Empty(t, opts.Proxy.EnvVars)
+	})
+}

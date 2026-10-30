@@ -379,9 +379,6 @@ export const en = {
     reloadAgents: "Reload Agents",
     reloadAgentsDesc: "Hot-reload agent configurations and workspaces without stopping the server.",
     reloading: "Reloading...",
-    reloadProxy: "Reload Proxy Config",
-    reloadProxyDesc:
-      "Re-read the standalone proxy configuration file and apply rules without restart.",
     restartServer: "Restart Server",
     restartServerDesc:
       "Gracefully terminate and restart the backend service (requires auto-restart container).",
@@ -390,6 +387,28 @@ export const en = {
     usageAndQuotaDesc:
       "View current token usage, credit balance, and resource consumption details.",
     checkQuota: "Check Quota",
+    proxySecrets: "Personal API Keys",
+    proxySecretsDesc:
+      "Manage your personal API keys and secrets (e.g. GEMINI_API_KEY, OPENAI_API_KEY) injected into agent sandboxes.",
+    proxySecretsAddKey: "Add Key",
+    proxySecretsEditKey: "Edit Key",
+    proxySecretsKeyName: "Key Name",
+    proxySecretsKeyNamePlaceholder: "e.g. GEMINI_API_KEY or OPENAI_API_KEY",
+    proxySecretsKeyNameInvalid:
+      "Key name must contain only letters, numbers, and underscores, and start with a letter or underscore",
+    proxySecretsKeyNameTooLong: "Key name must not exceed 128 characters",
+    proxySecretsKeyNameReserved: "Key name is reserved and cannot be configured",
+    proxySecretsKeyValue: "Secret Value",
+    proxySecretsKeyValuePlaceholder: "Enter secret value...",
+    proxySecretsEmpty: "No personal API keys configured yet.",
+    proxySecretsSaveSuccess: "Key saved successfully",
+    proxySecretsDeleteSuccess: "Key deleted successfully",
+    proxySecretsDeleteConfirm: "Are you sure you want to delete {key}?",
+    proxySecretsCancel: "Cancel",
+    proxySecretsSave: "Save",
+    proxySecretsDelete: "Delete",
+    proxySecretsEdit: "Edit",
+    proxySecretsLastUpdated: "Last updated",
     configAndDiagnostics: "Configuration & Diagnostics",
     editConfig: "Edit Configuration",
     editConfigDesc:
@@ -408,10 +427,6 @@ export const en = {
     reloadSuccessMessage: "Agent configuration reloaded successfully",
     reloadErrorTitle: "Reload Error",
     reloadErrorMessage: "Failed to reload agent configuration",
-    reloadProxySuccessTitle: "Reload Success",
-    reloadProxySuccessMessage: "Proxy configuration reloaded successfully",
-    reloadProxyErrorTitle: "Reload Error",
-    reloadProxyErrorMessage: "Failed to reload proxy configuration",
   },
   config: {
     title: "Configuration Editor",

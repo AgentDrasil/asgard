@@ -23,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
+	"github.com/AgentDrasil/asgard/backend/lib/kms"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
@@ -87,8 +88,10 @@ type Server struct {
 	dispatcher dispatch.Dispatcher
 	// queueParks (chatID -> queuePark) keeps queues whose consumer gave up from
 	// being restarted in a loop.
-	queueParks sync.Map
-	dirLocks   *dirlock.Manager
+	queueParks       sync.Map
+	dirLocks         *dirlock.Manager
+	cipher           kms.Cipher
+	userProxyKeyRepo *dbmodels.UserProxyKeyRepository
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -251,6 +254,21 @@ func (s *Server) AuthService() *auth.Service {
 	return s.auth
 }
 
+// WithCipher injects a cipher into the Server.
+func WithCipher(c kms.Cipher) ServerOption {
+	return func(s *Server) {
+		s.cipher = c
+	}
+}
+
+// UserProxyKeyRepo returns the Server's UserProxyKeyRepository.
+func (s *Server) UserProxyKeyRepo() *dbmodels.UserProxyKeyRepository {
+	if s == nil {
+		return nil
+	}
+	return s.userProxyKeyRepo
+}
+
 func (s *Server) requireRepo(w http.ResponseWriter) bool {
 	if s.repo == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -353,6 +371,22 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 
 	if s.compressionMetrics == nil {
 		s.compressionMetrics = NewCompressionMetricsStore("")
+	}
+
+	if s.cipher == nil {
+		var kmsKey string
+		if s.conf != nil {
+			kmsKey = s.conf.KMSKeyName
+		}
+		c, err := kms.NewAutoCipher(ctx, kmsKey, nil)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to initialize auto cipher")
+		} else {
+			s.cipher = c
+		}
+	}
+	if dbConn != nil && s.userProxyKeyRepo == nil {
+		s.userProxyKeyRepo = dbmodels.NewUserProxyKeyRepository(dbConn, s.cipher)
 	}
 
 	// Build the auth service once, before the initial reload; reload() only
@@ -569,6 +603,9 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/manage/proxy", s.handleGetManageProxy)
 	mux.HandleFunc("PUT /api/manage/proxy", s.handleSaveManageProxy)
 	mux.HandleFunc("POST /api/manage/proxy/reload", s.handleReloadManageProxy)
+	mux.HandleFunc("GET /api/user/proxy-keys", s.handleGetUserProxyKeys)
+	mux.HandleFunc("POST /api/user/proxy-keys", s.handleSaveUserProxyKey)
+	mux.HandleFunc("DELETE /api/user/proxy-keys/{key_name}", s.handleDeleteUserProxyKey)
 	mux.HandleFunc("GET /api/keybindings", s.handleGetKeybindings)
 	mux.HandleFunc("PUT /api/manage/keybindings", s.handleSaveManageKeybindings)
 	mux.HandleFunc("POST /api/manage/restart", s.handleRestart)

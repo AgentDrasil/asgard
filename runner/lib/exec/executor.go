@@ -190,6 +190,29 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 			return srv.serve(sockDir)
 		},
 	}
+	if sr.GetUserId() != "" && e.opts.Callbacks != nil {
+		if cbClient, err := e.opts.Callbacks(); err != nil {
+			log.Warn().Err(err).Str("user_id", sr.GetUserId()).Msg("failed to get callbacks client for proxy keys")
+		} else if cbClient != nil {
+			resp, err := cbClient.GetUserProxyKeys(ctx, &runnerpb.GetUserProxyKeysRequest{
+				Meta:   &runnerpb.CallMeta{RunId: sr.GetRunId()},
+				UserId: sr.GetUserId(),
+			})
+			if err != nil {
+				log.Warn().Err(err).Str("user_id", sr.GetUserId()).Msg("failed to query user proxy keys")
+			} else if resp != nil && len(resp.GetKeys()) > 0 {
+				if opts.Proxy.EnvVars == nil {
+					opts.Proxy.EnvVars = make(map[string]string)
+				}
+				for k, v := range resp.GetKeys() {
+					opts.Proxy.EnvVars[k] = v
+					if k == "GEMINI_API_KEY" {
+						opts.Proxy.GeminiAPIKey = v
+					}
+				}
+			}
+		}
+	}
 	if enabled := sr.GetEnabledProviders(); len(enabled) > 0 {
 		set := make(map[string]bool, len(enabled))
 		for _, p := range enabled {

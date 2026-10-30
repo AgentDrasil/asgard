@@ -49,6 +49,8 @@ type NodeContext struct {
 	// when true, agent and command node sandboxes may keep host ~/tmp,
 	// ~/data and database files visible instead of masking them.
 	AllowCrossSession bool
+	// UserSubject is the user owning the session.
+	UserSubject string
 	// SuspendQuota, when set, lets a runner park the run for a user decision
 	// when no CLI target has usable quota. It blocks until the user replies
 	// and returns the reply text (typically one of the offered options), or

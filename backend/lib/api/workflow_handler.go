@@ -226,11 +226,13 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 	// sandbox of the run (agent and command nodes share the same masking
 	// rules as plain single-agent chats).
 	allowCrossSession := false
+	var userSubject string
 	if s.repo != nil {
 		if session, serr := s.repo.GetSessionMeta(chatID); serr != nil {
 			log.Warn().Err(serr).Str("chat_id", chatID).Msg("failed to load session for cross-session access policy")
 		} else if session != nil {
 			allowCrossSession = session.AllowCrossSession
+			userSubject = session.UserSubject
 		}
 	}
 
@@ -258,6 +260,7 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 			RunDir:            req.RunDir,
 			Headless:          req.Headless,
 			AllowCrossSession: allowCrossSession,
+			UserSubject:       userSubject,
 			Metadata:          req.Metadata,
 		})
 		resultCh <- runResult{result: res, err: err}

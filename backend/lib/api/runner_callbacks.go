@@ -416,6 +416,48 @@ func (c *callbackService) RecordMetrics(ctx context.Context, req *runnerpb.Recor
 	return resp.(*runnerpb.RecordMetricsResponse), nil
 }
 
+// GetUserProxyKeys implements runnerpb.AgentCallbackServiceServer. Decrypts the user's proxy keys from DB and returns them.
+func (c *callbackService) GetUserProxyKeys(ctx context.Context, req *runnerpb.GetUserProxyKeysRequest) (*runnerpb.GetUserProxyKeysResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	runID := req.GetMeta().GetRunId()
+	if runID == "" {
+		return nil, status.Error(codes.InvalidArgument, "meta.run_id is required")
+	}
+	userID := req.GetUserId()
+	if userID == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
+	}
+	nodeID, ok := c.nodeID(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unknown runner")
+	}
+	if c.runs == nil {
+		return nil, status.Error(codes.FailedPrecondition, "run lookup unavailable")
+	}
+	info, ok := c.runs.ActiveRun(runID, nodeID)
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "run is not active on this runner")
+	}
+	if info.UserID != userID {
+		return nil, status.Error(codes.PermissionDenied, "user identity does not match active run")
+	}
+
+	if c.s == nil || c.s.userProxyKeyRepo == nil {
+		return &runnerpb.GetUserProxyKeysResponse{Keys: map[string]string{}}, nil
+	}
+	keys, err := c.s.userProxyKeyRepo.GetAllDecryptedKeys(ctx, userID)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", userID).Msg("failed to load decrypted proxy keys for user")
+		return nil, status.Errorf(codes.Internal, "failed to load proxy keys: %v", err)
+	}
+	if keys == nil {
+		keys = make(map[string]string)
+	}
+	return &runnerpb.GetUserProxyKeysResponse{Keys: keys}, nil
+}
+
 // responseCapture is an in-memory http.ResponseWriter, so the handlers' shared
 // response-writing code can serve an in-process call.
 type responseCapture struct {

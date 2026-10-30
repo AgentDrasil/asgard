@@ -29,6 +29,9 @@ import {
   getDirInfo,
   withRunner,
   RunnerRequestError,
+  getUserProxyKeys,
+  saveUserProxyKey,
+  deleteUserProxyKey,
 } from "./api";
 
 describe("API Library", () => {
@@ -955,6 +958,135 @@ describe("API Library", () => {
         vi.fn(async () => ({ ok: false, status: 500 })),
       );
       expect(await getRunners()).toBeNull();
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("user proxy keys API", () => {
+    it("getUserProxyKeys returns keys on 200 OK", async () => {
+      const mockKeys = [{ key_name: "GEMINI_API_KEY", updated_at: "2026-10-30T00:00:00Z" }];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => mockKeys,
+        })),
+      );
+      const res = await getUserProxyKeys();
+      expect(res).toEqual(mockKeys);
+      vi.unstubAllGlobals();
+    });
+
+    it("getUserProxyKeys reads error from JSON body on failure", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          json: async () => ({ error: "database error loading keys" }),
+        })),
+      );
+      await expect(getUserProxyKeys()).rejects.toThrow("database error loading keys");
+      vi.unstubAllGlobals();
+    });
+
+    it("getUserProxyKeys falls back to statusText when JSON parsing fails", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: false,
+          status: 502,
+          statusText: "Bad Gateway",
+          json: async () => {
+            throw new Error("not JSON");
+          },
+        })),
+      );
+      await expect(getUserProxyKeys()).rejects.toThrow(
+        "Failed to fetch user proxy keys: Bad Gateway",
+      );
+      vi.unstubAllGlobals();
+    });
+
+    it("getUserProxyKeys handles null JSON response on error without TypeError", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          json: async () => null,
+        })),
+      );
+      await expect(getUserProxyKeys()).rejects.toThrow(
+        "Failed to fetch user proxy keys: Internal Server Error",
+      );
+      vi.unstubAllGlobals();
+    });
+
+    it("saveUserProxyKey handles null JSON response on error without TypeError", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          json: async () => null,
+        })),
+      );
+      await expect(saveUserProxyKey("KEY", "val")).rejects.toThrow(
+        "Failed to save user proxy key: Internal Server Error",
+      );
+      vi.unstubAllGlobals();
+    });
+
+    it("deleteUserProxyKey handles null JSON response on error without TypeError", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<() => Promise<unknown>>(async () => ({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          json: async () => null,
+        })),
+      );
+      await expect(deleteUserProxyKey("KEY")).rejects.toThrow(
+        "Failed to delete user proxy key: Internal Server Error",
+      );
+      vi.unstubAllGlobals();
+    });
+
+    it("saveUserProxyKey posts key and value correctly", async () => {
+      const fetchSpy = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+
+      await saveUserProxyKey("MY_KEY", "secret-val");
+      expect(fetchSpy).toHaveBeenCalledWith("/api/user/proxy-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key_name: "MY_KEY", value: "secret-val" }),
+      });
+      vi.unstubAllGlobals();
+    });
+
+    it("deleteUserProxyKey calls DELETE with encoded key name", async () => {
+      const fetchSpy = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+
+      await deleteUserProxyKey("KEY_TO_DELETE");
+      expect(fetchSpy).toHaveBeenCalledWith("/api/user/proxy-keys/KEY_TO_DELETE", {
+        method: "DELETE",
+      });
       vi.unstubAllGlobals();
     });
   });

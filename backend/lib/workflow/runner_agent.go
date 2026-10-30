@@ -724,6 +724,7 @@ func (r *agentRunner) runWithQuotaDecisions(ctx context.Context, nctx *NodeConte
 		*attempts++
 		res, runErr := r.dispatcher.Run(ctx, dispatch.Request{
 			ChatID:     nctx.SessionID,
+			UserID:     nctx.UserSubject,
 			Agent:      agent,
 			Candidates: candidates,
 			Prompt:     prompt,

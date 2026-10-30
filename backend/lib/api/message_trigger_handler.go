@@ -232,6 +232,11 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 
 	wait := req.Wait || queryWait
 
+	var callerSubject string
+	if authReq != nil {
+		callerSubject = s.userSubject(authReq)
+	}
+
 	// A call-peer from the run holding this chat's guard is admitted under
 	// that guard instead of hitting the chat-wide 409.
 	if pc := peerCallFromContext(stopWith); pc != nil && pc.chatID == chatID {
@@ -263,7 +268,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			allowOpt = optional.Some(*req.AllowCrossSession)
 		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -341,7 +346,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			allowOpt = optional.Some(*req.AllowCrossSession)
 		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -460,7 +465,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		allowOpt = optional.Some(*req.AllowCrossSession)
 	}
 	if s.repo != nil {
-		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt); err != nil {
+		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 		}
 	}

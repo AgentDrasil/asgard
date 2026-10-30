@@ -638,6 +638,44 @@ func TestCommandForAgent_APIKeyInjection(t *testing.T) {
 	assert.Contains(t, argStr, "--setenv GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS my-compass-model")
 }
 
+func TestCommandForAgent_UserProxyEnvVarsInjection(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, subDir), 0755))
+	}
+
+	proxyOpt := ProxySandboxConfig{
+		EnvVars: map[string]string{
+			"MY_CUSTOM_TOKEN": "secret-token-xyz",
+			"ANOTHER_API_KEY": "val-123",
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "some-model"}
+	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
+	require.NoError(t, err)
+
+	argStr := strings.Join(cmd.Args, " ")
+	assert.Contains(t, argStr, "--setenv MY_CUSTOM_TOKEN secret-token-xyz")
+	assert.Contains(t, argStr, "--setenv ANOTHER_API_KEY val-123")
+
+	dashDashIdx := -1
+	myTokenIdx := -1
+	for i, arg := range cmd.Args {
+		if arg == "--" && dashDashIdx == -1 {
+			dashDashIdx = i
+		}
+		if arg == "MY_CUSTOM_TOKEN" {
+			myTokenIdx = i
+		}
+	}
+	require.NotEqual(t, -1, dashDashIdx)
+	require.NotEqual(t, -1, myTokenIdx)
+	assert.Less(t, myTokenIdx, dashDashIdx)
+}
+
 // TestCommandForAgent_ClaudeEnv verifies the claude sandbox relocates its
 // config into the bound ~/.claude directory instead of a single-file bind.
 func TestCommandForAgent_ClaudeEnv(t *testing.T) {

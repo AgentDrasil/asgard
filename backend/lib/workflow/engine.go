@@ -78,6 +78,8 @@ type RunContext struct {
 	// into every node sandbox (host ~/tmp, ~/data and database files stay
 	// visible instead of being masked).
 	AllowCrossSession bool
+	// UserSubject is the user owning the session.
+	UserSubject string
 	// TmpDir explicitly inherits the parent run's temp directory when
 	// non-empty (skips derivation and MkdirAll).
 	TmpDir string
@@ -1134,6 +1136,7 @@ func (e *Engine) Execute(ctx context.Context, defn *workflowspec.WorkflowDefinit
 					WorkflowMountDirs: wfMountDirs,
 					Headless:          rc.Headless || defn.NoHuman,
 					AllowCrossSession: rc.AllowCrossSession,
+					UserSubject:       rc.UserSubject,
 				}
 
 				// Quota suspension gateway: lets the agent runner park this

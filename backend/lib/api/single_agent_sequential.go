@@ -140,9 +140,14 @@ func (e *SingleAgentExecutor) executeSequential(
 		runToken := uuid.NewV7().String()
 		resultCh := make(chan seqRunResult, 1)
 		attempt++
+		var userID string
+		if session != nil {
+			userID = session.UserSubject
+		}
 		go func(mOpt optional.Option[string], attempt uint32) {
 			res, err := e.dispatcher.Run(ctx, dispatch.Request{
 				ChatID:     chatID,
+				UserID:     userID,
 				Agent:      e.agent,
 				Candidates: cliCandidates,
 				Prompt:     prompt,

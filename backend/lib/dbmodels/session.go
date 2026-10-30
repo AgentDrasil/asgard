@@ -113,6 +113,8 @@ type Session struct {
 	// RunnerNodeID is the runner every run of this chat executes on. It is
 	// set once, when the chat starts, and never changes afterwards.
 	RunnerNodeID string `gorm:"column:runner_node_id;index" json:"runnerId,omitempty"`
+	// UserSubject records the authenticated user subject who owns the session.
+	UserSubject string `gorm:"column:user_subject;type:varchar(255);index" json:"userSubject,omitempty"`
 	// Title of the session
 	Title string
 	// Messages of the session (not stored in DB, persisted in messages.jsonl)
@@ -546,9 +548,9 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, sta
 }
 
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
-// optionally updates the run directory and allow_cross_session. cliKey has the format "<cli>/<model>".
+// optionally updates the run directory, allow_cross_session, and user_subject. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
-func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string], allowCrossSessionOpt ...optional.Option[bool]) error {
+func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string], extraOpts ...any) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
@@ -566,8 +568,29 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 			}
 		}
 
-		if len(allowCrossSessionOpt) > 0 && allowCrossSessionOpt[0].IsSome() {
-			sessPtr.AllowCrossSession = allowCrossSessionOpt[0].Unwrap()
+		for _, opt := range extraOpts {
+			switch v := opt.(type) {
+			case optional.Option[bool]:
+				if v.IsSome() {
+					sessPtr.AllowCrossSession = v.Unwrap()
+				}
+			case *optional.Option[bool]:
+				if v != nil && v.IsSome() {
+					sessPtr.AllowCrossSession = v.Unwrap()
+				}
+			case optional.Option[string]:
+				if v.IsSome() && v.Unwrap() != "" {
+					sessPtr.UserSubject = v.Unwrap()
+				}
+			case *optional.Option[string]:
+				if v != nil && v.IsSome() && v.Unwrap() != "" {
+					sessPtr.UserSubject = v.Unwrap()
+				}
+			case string:
+				if v != "" {
+					sessPtr.UserSubject = v
+				}
+			}
 		}
 
 		if runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {

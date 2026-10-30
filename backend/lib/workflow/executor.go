@@ -26,6 +26,7 @@ type WorkflowRunParams struct {
 	// into every node sandbox (host ~/tmp, ~/data and database files stay
 	// visible instead of being masked).
 	AllowCrossSession bool
+	UserSubject       string
 	Metadata          map[string]any
 }
 
@@ -78,6 +79,7 @@ func (e *WorkflowExecutor) Execute(ctx context.Context, params WorkflowRunParams
 		WorkflowMountDirs: e.WorkflowMountDirs,
 		Headless:          params.Headless,
 		AllowCrossSession: params.AllowCrossSession,
+		UserSubject:       params.UserSubject,
 	}
 	if rc.RunDir == "" && params.RunDir != "" {
 

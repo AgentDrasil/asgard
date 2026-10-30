@@ -127,10 +127,11 @@ var NodeControlService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	AgentCallbackService_AskUser_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/AskUser"
-	AgentCallbackService_CallPeer_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/CallPeer"
-	AgentCallbackService_FindPeer_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/FindPeer"
-	AgentCallbackService_RecordMetrics_FullMethodName = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
+	AgentCallbackService_AskUser_FullMethodName          = "/asgard.runner.v1.AgentCallbackService/AskUser"
+	AgentCallbackService_CallPeer_FullMethodName         = "/asgard.runner.v1.AgentCallbackService/CallPeer"
+	AgentCallbackService_FindPeer_FullMethodName         = "/asgard.runner.v1.AgentCallbackService/FindPeer"
+	AgentCallbackService_RecordMetrics_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
+	AgentCallbackService_GetUserProxyKeys_FullMethodName = "/asgard.runner.v1.AgentCallbackService/GetUserProxyKeys"
 )
 
 // AgentCallbackServiceClient is the client API for AgentCallbackService service.
@@ -143,6 +144,7 @@ type AgentCallbackServiceClient interface {
 	CallPeer(ctx context.Context, in *CallPeerRequest, opts ...grpc.CallOption) (*CallPeerResponse, error)
 	FindPeer(ctx context.Context, in *FindPeerRequest, opts ...grpc.CallOption) (*FindPeerResponse, error)
 	RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error)
+	GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error)
 }
 
 type agentCallbackServiceClient struct {
@@ -193,6 +195,16 @@ func (c *agentCallbackServiceClient) RecordMetrics(ctx context.Context, in *Reco
 	return out, nil
 }
 
+func (c *agentCallbackServiceClient) GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserProxyKeysResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_GetUserProxyKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentCallbackServiceServer is the server API for AgentCallbackService service.
 // All implementations must embed UnimplementedAgentCallbackServiceServer
 // for forward compatibility.
@@ -203,6 +215,7 @@ type AgentCallbackServiceServer interface {
 	CallPeer(context.Context, *CallPeerRequest) (*CallPeerResponse, error)
 	FindPeer(context.Context, *FindPeerRequest) (*FindPeerResponse, error)
 	RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error)
+	GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error)
 	mustEmbedUnimplementedAgentCallbackServiceServer()
 }
 
@@ -224,6 +237,9 @@ func (UnimplementedAgentCallbackServiceServer) FindPeer(context.Context, *FindPe
 }
 func (UnimplementedAgentCallbackServiceServer) RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordMetrics not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserProxyKeys not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) mustEmbedUnimplementedAgentCallbackServiceServer() {}
 func (UnimplementedAgentCallbackServiceServer) testEmbeddedByValue()                              {}
@@ -318,6 +334,24 @@ func _AgentCallbackService_RecordMetrics_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentCallbackService_GetUserProxyKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserProxyKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).GetUserProxyKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_GetUserProxyKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).GetUserProxyKeys(ctx, req.(*GetUserProxyKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentCallbackService_ServiceDesc is the grpc.ServiceDesc for AgentCallbackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -340,6 +374,10 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RecordMetrics",
 			Handler:    _AgentCallbackService_RecordMetrics_Handler,
+		},
+		{
+			MethodName: "GetUserProxyKeys",
+			Handler:    _AgentCallbackService_GetUserProxyKeys_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -533,6 +533,14 @@ func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMe
 	return p.h.currentCallbacks().RecordMetrics(ctx, req)
 }
 
+func (p callbackProxy) GetUserProxyKeys(ctx context.Context, req *runnerpb.GetUserProxyKeysRequest) (*runnerpb.GetUserProxyKeysResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.GetUserProxyKeys(ctx, req)
+}
+
 func (h *Hub) currentCallbacks() runnerpb.AgentCallbackServiceServer {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -549,6 +557,7 @@ type RunInfo struct {
 	WorkflowNodeID string
 	RunToken       string
 	Attempt        uint32
+	UserID         string
 	// Done is closed once the run finished (result, loss or hub stop).
 	Done <-chan struct{}
 }
@@ -569,6 +578,7 @@ func (h *Hub) ActiveRun(runID, nodeID string) (RunInfo, bool) {
 		WorkflowNodeID: r.start.GetStatusScope().GetNodeId(),
 		RunToken:       r.start.GetStatusScope().GetRunToken(),
 		Attempt:        r.start.GetAttempt(),
+		UserID:         r.start.GetUserId(),
 		Done:           r.done,
 	}, true
 }

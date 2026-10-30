@@ -153,6 +153,7 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 	}
 	sr := &runnerpb.StartRun{
 		ChatId:    req.ChatID,
+		UserId:    req.UserID,
 		AgentId:   req.Agent.Config.ID,
 		AgentHash: req.Agent.Hash,
 		Prompt:    req.Prompt,

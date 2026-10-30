@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/kms"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -111,13 +113,17 @@ func newCallbackRig(t *testing.T, agents ...*agentspec.Agent) *callbackRig {
 		compressionMetrics: store,
 		ctx:                ctx,
 	}
+	key := sha256.Sum256([]byte("callback-rig-cipher-key-32-bytes!"))
+	c, _ := kms.NewAESGCMCipher(key[:])
+	server.cipher = c
+	server.userProxyKeyRepo = dbmodels.NewUserProxyKeyRepository(testDB, c)
 	server.mux = server.buildMuxLocked()
 
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha"}))
 
 	runs := &fakeRuns{}
 	done := make(chan struct{})
-	runs.add(runnerhub.RunInfo{RunID: rigRun, NodeID: rigNode, ChatID: rigChat, AgentID: "alpha", Done: done})
+	runs.add(runnerhub.RunInfo{RunID: rigRun, NodeID: rigNode, ChatID: rigChat, AgentID: "alpha", UserID: "user-42", Done: done})
 	svc := newCallbackService(server, runs)
 	svc.nodeID = func(ctx context.Context) (string, bool) {
 		id, ok := ctx.Value(testNodeKey{}).(string)
@@ -642,4 +648,67 @@ nodes:
 		_, running := rig.server.activeExecutions.Load(rigChat)
 		return !running
 	}, 10*time.Second, 20*time.Millisecond, "the peer run was not stopped")
+}
+
+func TestCallbackService_GetUserProxyKeys(t *testing.T) {
+	rig := newCallbackRig(t)
+	ctx := context.Background()
+
+	require.NotNil(t, rig.server.userProxyKeyRepo)
+	require.NoError(t, rig.server.userProxyKeyRepo.SaveKey(ctx, "user-42", "GEMINI_API_KEY", "gemini-secret-123"))
+	require.NoError(t, rig.server.userProxyKeyRepo.SaveKey(ctx, "user-42", "OPENAI_API_KEY", "sk-openai-456"))
+
+	t.Run("authorized runner and matching user returns keys", func(t *testing.T) {
+		resp, err := rig.svc.GetUserProxyKeys(rig.ctx(), &runnerpb.GetUserProxyKeysRequest{
+			Meta:   &runnerpb.CallMeta{RunId: rigRun},
+			UserId: "user-42",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, "gemini-secret-123", resp.GetKeys()["GEMINI_API_KEY"])
+		assert.Equal(t, "sk-openai-456", resp.GetKeys()["OPENAI_API_KEY"])
+	})
+
+	t.Run("unauthenticated runner returns Unauthenticated", func(t *testing.T) {
+		_, err := rig.svc.GetUserProxyKeys(context.Background(), &runnerpb.GetUserProxyKeysRequest{
+			Meta:   &runnerpb.CallMeta{RunId: rigRun},
+			UserId: "user-42",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("missing run_id returns InvalidArgument", func(t *testing.T) {
+		_, err := rig.svc.GetUserProxyKeys(rig.ctx(), &runnerpb.GetUserProxyKeysRequest{
+			UserId: "user-42",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("missing user_id returns InvalidArgument", func(t *testing.T) {
+		_, err := rig.svc.GetUserProxyKeys(rig.ctx(), &runnerpb.GetUserProxyKeysRequest{
+			Meta: &runnerpb.CallMeta{RunId: rigRun},
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("inactive run returns FailedPrecondition", func(t *testing.T) {
+		_, err := rig.svc.GetUserProxyKeys(rig.ctx(), &runnerpb.GetUserProxyKeysRequest{
+			Meta:   &runnerpb.CallMeta{RunId: "run-nonexistent"},
+			UserId: "user-42",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
+
+	t.Run("user identity mismatch returns PermissionDenied", func(t *testing.T) {
+		_, err := rig.svc.GetUserProxyKeys(rig.ctx(), &runnerpb.GetUserProxyKeysRequest{
+			Meta:   &runnerpb.CallMeta{RunId: rigRun},
+			UserId: "user-impersonator",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	})
 }

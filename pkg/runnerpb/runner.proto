@@ -291,6 +291,7 @@ message StartRun {
   repeated string run_dirs = 15;
   repeated string mount_dirs_readonly = 16;
   repeated string mount_dirs_readwrite = 17;
+  string user_id = 18;
 }
 
 message CancelRun {
@@ -316,6 +317,7 @@ service AgentCallbackService {
   rpc CallPeer(CallPeerRequest) returns (CallPeerResponse);
   rpc FindPeer(FindPeerRequest) returns (FindPeerResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
+  rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
 }
 
 message CallMeta {
@@ -377,6 +379,15 @@ message RecordMetricsRequest {
   repeated MetricsEvent events = 2;
 }
 message RecordMetricsResponse {}
+
+message GetUserProxyKeysRequest {
+  CallMeta meta = 1;
+  string user_id = 2;
+}
+
+message GetUserProxyKeysResponse {
+  map<string, string> keys = 1;
+}
 
 // ---------------------------------------------------------------------------
 // RunnerService: backend -> runner (runner hosted)

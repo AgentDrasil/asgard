@@ -811,6 +811,20 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
 
+	// Inject proxy environment variables into agent sandbox
+	if len(proxyOpts) > 0 && len(proxyOpts[0].EnvVars) > 0 {
+		keys := make([]string, 0, len(proxyOpts[0].EnvVars))
+		for k := range proxyOpts[0].EnvVars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if strings.TrimSpace(k) != "" {
+				args = append(args, "--setenv", k, proxyOpts[0].EnvVars[k])
+			}
+		}
+	}
+
 	// Build and mount the AW_AGENTS.md contract, and mount skills/ if present
 	// in agentPath. The contract is written to the chat tmpDir on the host and
 	// bind-mounted read-only at the single canonical sandbox path
