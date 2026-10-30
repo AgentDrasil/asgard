@@ -122,6 +122,7 @@ COPY plugins/notebook/go.mod plugins/notebook/go.sum* ./plugins/notebook/
 COPY runner/go.mod runner/go.sum* ./runner/
 COPY cmd/agent-validate/go.mod cmd/agent-validate/go.sum* ./cmd/agent-validate/
 COPY cmd/asgard/go.mod cmd/asgard/go.sum* ./cmd/asgard/
+COPY cmd/asgard-init/go.mod cmd/asgard-init/go.sum* ./cmd/asgard-init/
 COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
 COPY cmd/call-peer/go.mod cmd/call-peer/go.sum* ./cmd/call-peer/
 COPY cmd/find-peer/go.mod cmd/find-peer/go.sum* ./cmd/find-peer/
@@ -147,6 +148,7 @@ RUN (cd backend && go mod download) && \
     (cd runner && go mod download) && \
     (cd cmd/agent-validate && go mod download) && \
     (cd cmd/asgard && go mod download) && \
+    (cd cmd/asgard-init && go mod download) && \
     (cd cmd/ask-user && go mod download) && \
     (cd cmd/call-peer && go mod download) && \
     (cd cmd/find-peer && go mod download) && \
@@ -171,7 +173,7 @@ FROM go-builder AS go-build-backend
 ARG ASGARD_VERSION=dev
 
 RUN mkdir -p /app/bin && \
-    for name in asgard; do \
+    for name in asgard asgard-init; do \
     echo "Building $name..."; \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./cmd/$name"; \
     done
