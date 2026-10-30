@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
+	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/fakebash"
@@ -771,9 +772,27 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	// may be a chain of symlinks, resolves inside the sandbox.
 	if allCLIs {
 		if awConfig, err := awconfig.Path(); err == nil {
+			var resolvedDir string
 			if resolved, err := filepath.EvalSymlinks(awConfig); err == nil {
 				if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() {
 					args = append(args, "--ro-bind", resolved, queryConfigPath, "--setenv", awconfig.EnvPath, queryConfigPath)
+				}
+				resolvedDir = filepath.Dir(resolved)
+			}
+			opencodeCfg := opencode.ConfigPath()
+			if opencodeCfg == "" || func() bool { fi, err := os.Stat(opencodeCfg); return err != nil || fi.IsDir() }() {
+				if resolvedDir != "" {
+					candidate := filepath.Join(resolvedDir, "opencode.aw.yaml")
+					if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+						opencodeCfg = candidate
+					}
+				}
+			}
+			if opencodeCfg != "" {
+				if resolvedOpencode, err := filepath.EvalSymlinks(opencodeCfg); err == nil {
+					if fi, err := os.Stat(resolvedOpencode); err == nil && !fi.IsDir() {
+						args = append(args, "--ro-bind", resolvedOpencode, queryOpencodeConfigPath, "--setenv", opencode.EnvOpencodeAWConfig, queryOpencodeConfigPath)
+					}
 				}
 			}
 		}
@@ -853,7 +872,10 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 // queryConfigPath is where the query sandbox mounts the aw config. It lives
 // under the writable /session bind because /etc is read-only, so bwrap could
 // not create a mount point there.
-const queryConfigPath = "/session/aw-config.yaml"
+const (
+	queryConfigPath         = "/session/aw-config.yaml"
+	queryOpencodeConfigPath = "/session/opencode.aw.yaml"
+)
 
 // CommandForQuery creates an exec.Cmd that runs `aw <args...>` inside a
 // dedicated, ephemeral sandbox. It is used for read-only metadata queries

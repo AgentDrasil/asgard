@@ -19,6 +19,23 @@ import (
 )
 
 func loadAuthToken() string {
+	// 1. Check opencode.aw.yaml
+	if env, err := LoadEnv(); err == nil && env != nil {
+		for _, key := range []string{"ZAI_API_KEY", "ZHIPU_API_KEY", "OPENCODE_ZAI_API_KEY"} {
+			if val := strings.TrimSpace(env[key]); val != "" {
+				return val
+			}
+		}
+	}
+
+	// 2. Check os.Getenv
+	for _, key := range []string{"ZAI_API_KEY", "ZHIPU_API_KEY", "OPENCODE_ZAI_API_KEY"} {
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+			return val
+		}
+	}
+
+	// 3. Fall back to reading ~/.local/share/opencode/opencode.db
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -54,6 +71,9 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "opencode", "models")
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
+	}
+	if err := injectOpencodeEnv(cmd); err != nil {
+		return nil, fmt.Errorf("injecting opencode environment: %w", err)
 	}
 	var out bytes.Buffer
 	cmd.Stdout = &out

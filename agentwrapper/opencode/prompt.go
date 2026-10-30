@@ -110,6 +110,9 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
+	if err := injectOpencodeEnv(cmd); err != nil {
+		return nil, fmt.Errorf("injecting opencode environment: %w", err)
+	}
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf

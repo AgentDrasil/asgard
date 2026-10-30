@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
+	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
@@ -752,6 +753,36 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(linked, " "), "--ro-bind "+realCfg+" "+queryConfigPath) {
 		t.Error("symlinked aw config should be mounted from its resolved path")
+	}
+
+	// When opencode.aw.yaml is present in the aw config directory, it is mounted read-only at /session/opencode.aw.yaml
+	// and OPENCODE_AW_CONFIG is pointed to it to prevent shadowing from inherited host environments.
+	opencodeCfg := filepath.Join(filepath.Dir(awConfig), "opencode.aw.yaml")
+	if err := os.WriteFile(opencodeCfg, []byte("env:\n  OPENAI_API_KEY: sk-test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-oc", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(withOpencode, " "), "--ro-bind "+opencodeCfg+" "+queryOpencodeConfigPath+" --setenv "+opencode.EnvOpencodeAWConfig+" "+queryOpencodeConfigPath) {
+		t.Error("query sandbox should mount opencode.aw.yaml read-only alongside aw-config.yaml and set OPENCODE_AW_CONFIG")
+	}
+
+	// Symlink-resolved directory fallback: when opencode.aw.yaml is in the symlink target's directory
+	realOpencode := filepath.Join(filepath.Dir(realCfg), "opencode.aw.yaml")
+	if err := os.WriteFile(realOpencode, []byte("env:\n  KEY: dotfile-val\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(opencodeCfg); err != nil {
+		t.Fatal(err)
+	}
+	linkedWithOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-link-oc", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(linkedWithOpencode, " "), "--ro-bind "+realOpencode+" "+queryOpencodeConfigPath+" --setenv "+opencode.EnvOpencodeAWConfig+" "+queryOpencodeConfigPath) {
+		t.Error("query sandbox should mount opencode.aw.yaml from symlink resolved directory and set OPENCODE_AW_CONFIG")
 	}
 
 	one, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "claude"}, false, runDir, "", "q-one", "", "")
