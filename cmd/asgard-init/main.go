@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,9 +116,10 @@ func run(args []string) error {
 		data.WorkspaceMounts = append(data.WorkspaceMounts, *mountFlag)
 	}
 
+	var reader *bufio.Reader
 	// If interactive mode is enabled, run the interactive prompt wizard
 	if !*nonInteractiveFlag {
-		reader := bufio.NewReader(os.Stdin)
+		reader = bufio.NewReader(os.Stdin)
 		printWelcomeBanner()
 
 		targetDirInput := prompt(reader, "Deployment target directory", targetDir)
@@ -169,8 +171,77 @@ func run(args []string) error {
 		return err
 	}
 
+	PromptCLICredentials(reader, os.Stdout, targetDir, !*nonInteractiveFlag)
+
 	printInitSuccess(targetDir, data)
 	return nil
+}
+
+func isNonEmptyFile(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !fi.IsDir() && fi.Size() > 0
+}
+
+// CheckCLICredentials checks if oauth_creds.json or antigravity-oauth-token exists in targetDir/etcd-tree/credentials and is a non-empty file.
+func CheckCLICredentials(targetDir string) (string, bool) {
+	oauthPath := filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json")
+	if isNonEmptyFile(oauthPath) {
+		return oauthPath, true
+	}
+	tokenPath := filepath.Join(targetDir, "etcd-tree", "credentials", "antigravity-oauth-token")
+	if isNonEmptyFile(tokenPath) {
+		return tokenPath, true
+	}
+	return "", false
+}
+
+// PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials.
+// When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
+func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json")
+	if !interactive {
+		if foundPath, ok := CheckCLICredentials(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ CLI credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+			return true
+		}
+		return false
+	}
+
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	_, _ = fmt.Fprintf(w, "\n%s--- CLI Credential Setup (e.g. Gemini / Antigravity OAuth) ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your CLI credential file into %s%s%s.\n", colorYellow, credPath, colorReset)
+
+	for {
+		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		switch ans {
+		case "y", "yes":
+			if foundPath, ok := CheckCLICredentials(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ CLI credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+				return true
+			}
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty credential file found at %s (or antigravity-oauth-token).\n", colorRed+colorBold, colorReset, credPath)
+		case "s", "skip":
+			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it into etcd-tree/credentials/ later before running just publish.\n", colorYellow, colorReset)
+			return false
+		default:
+			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
+		}
+	}
 }
 
 func prompt(r *bufio.Reader, question, def string) string {

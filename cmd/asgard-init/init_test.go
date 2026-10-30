@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,6 +279,18 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, justStr, "cfgctl push ./etcd-tree")
 	assert.Contains(t, justStr, "publish: encrypt push")
 
+	// Verify .sops.yaml contains oauth_creds.json in path_regex and credentials rule precedes generic rule
+	sopsContent, err := os.ReadFile(filepath.Join(tempDir, "etcd-tree", ".sops.yaml"))
+	require.NoError(t, err)
+	sopsStr := string(sopsContent)
+	assert.Contains(t, sopsStr, "oauth_creds\\.json")
+	credRuleIdx := strings.Index(sopsStr, "credentials/.*")
+	genericRuleIdx := strings.Index(sopsStr, ".*\\.(yaml|yml|json)$")
+	require.True(t, credRuleIdx != -1 && genericRuleIdx != -1)
+	assert.True(t, credRuleIdx < genericRuleIdx, "credentials whole-file encryption rule must precede generic yaml/json rule to avoid shadowing")
+	assert.Contains(t, sopsStr, "refresh_token")
+	assert.Contains(t, sopsStr, "id_token")
+
 	// Overwrite guard test without Force
 	err = GenerateDeployment(tempDir, data)
 	require.Error(t, err)
@@ -379,4 +394,138 @@ func TestRunCommandNonInteractive(t *testing.T) {
 	workerBCert := filepath.Join(tempDir, "runners", "worker-b", "certs", "tls.crt")
 	_, err = os.Stat(workerBCert)
 	require.NoError(t, err)
+}
+
+func TestCheckCLICredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty directory returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		path, ok := CheckCLICredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("zero-byte oauth_creds.json returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		oauthFile := filepath.Join(credDir, "oauth_creds.json")
+		require.NoError(t, os.WriteFile(oauthFile, []byte(""), 0600))
+
+		path, ok := CheckCLICredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("valid oauth_creds.json returns true", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		oauthFile := filepath.Join(credDir, "oauth_creds.json")
+		require.NoError(t, os.WriteFile(oauthFile, []byte(`{"token":"abc"}`), 0600))
+
+		path, ok := CheckCLICredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, oauthFile, path)
+	})
+
+	t.Run("valid antigravity-oauth-token fallback returns true", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		tokenFile := filepath.Join(credDir, "antigravity-oauth-token")
+		require.NoError(t, os.WriteFile(tokenFile, []byte("tok123"), 0600))
+
+		path, ok := CheckCLICredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, tokenFile, path)
+	})
+}
+
+func TestPromptCLICredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-interactive skips gracefully when file missing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		var out bytes.Buffer
+		in := strings.NewReader("")
+
+		verified := PromptCLICredentials(in, &out, tempDir, false)
+		assert.False(t, verified)
+		assert.NotContains(t, out.String(), "CLI credential verified")
+	})
+
+	t.Run("non-interactive detects existing credential", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"xyz"}`), 0600))
+
+		var out bytes.Buffer
+		in := strings.NewReader("")
+
+		verified := PromptCLICredentials(in, &out, tempDir, false)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "CLI credential verified")
+	})
+
+	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"valid"}`), 0600))
+
+		var out bytes.Buffer
+		in := strings.NewReader("y\n")
+
+		verified := PromptCLICredentials(in, &out, tempDir, true)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "CLI credential verified successfully")
+	})
+
+	t.Run("interactive prompt skip on s", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		var out bytes.Buffer
+		in := strings.NewReader("s\n")
+
+		verified := PromptCLICredentials(in, &out, tempDir, true)
+		assert.False(t, verified)
+		assert.Contains(t, out.String(), "Skipped CLI credential setup")
+	})
+
+	t.Run("interactive retry: missing then placed then y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+
+		r, w := io.Pipe()
+		t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+
+		go func() {
+			// Write first 'y' -> file doesn't exist
+			_, _ = w.Write([]byte("y\n"))
+			time.Sleep(50 * time.Millisecond)
+			// Place credential file
+			_ = os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"oauth":1}`), 0600)
+			// Write second 'y' -> should now succeed
+			_, _ = w.Write([]byte("y\n"))
+		}()
+
+		var out bytes.Buffer
+		verified := PromptCLICredentials(r, &out, tempDir, true)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "No valid, non-empty credential file found")
+		assert.Contains(t, out.String(), "CLI credential verified successfully")
+	})
 }

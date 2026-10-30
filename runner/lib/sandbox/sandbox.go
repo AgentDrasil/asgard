@@ -7,11 +7,13 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 type Source interface {
 	SandboxConfig() (*config.Config, error)
 	OnTreeChange(fn func(*config.AsgardTreeConfig))
+	Tree() *config.AsgardTreeConfig
 }
 
 // Options configures Setup.
@@ -38,6 +41,8 @@ type Options struct {
 	SkipSSH bool
 	// NewProxy creates the proxy manager (default proxy.NewManager).
 	NewProxy func(cfg *proxy.Config, configPath string) (*proxy.ProxyManager, error)
+	// HomeDir overrides the user home directory for credential syncing (tests).
+	HomeDir string
 }
 
 // Sandbox holds the live sandbox configuration and the proxy manager.
@@ -83,25 +88,33 @@ func Setup(src Source, opts Options) *Sandbox {
 	}
 	// Register before reading the initial snapshot so no change is lost; every
 	// refresh re-reads the latest configuration instead of trusting the event.
-	src.OnTreeChange(func(*config.AsgardTreeConfig) { s.refresh() })
-	s.refresh()
+	src.OnTreeChange(func(tree *config.AsgardTreeConfig) { s.refresh(tree) })
+	s.refresh(src.Tree())
 	return s
 }
 
 // refresh reads the latest configuration from the source and applies it.
-func (s *Sandbox) refresh() {
+func (s *Sandbox) refresh(tree *config.AsgardTreeConfig) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
+	if tree == nil {
+		tree = s.src.Tree()
+	}
 	conf, err := s.src.SandboxConfig()
-	s.apply(conf, err)
+	s.apply(conf, tree, err)
 }
 
 // apply installs conf and brings the proxy manager in line with it.
-func (s *Sandbox) apply(conf *config.Config, err error) {
+func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
+	}
+	if tree != nil {
+		if syncErr := SyncCLICredentials(s.opts.HomeDir, &tree.Credentials); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync CLI credentials to home directory")
+		}
 	}
 	if err != nil {
 		s.cfgErr = fmt.Errorf("sandbox configuration unavailable: %w", err)
@@ -238,4 +251,102 @@ func (s *Sandbox) GitExec(ctx context.Context, spec runnerfs.GitExecSpec) (*exec
 	}
 	cmd.ExtraFiles = []*os.File{spec.WorkTree}
 	return cmd, nil
+}
+
+// SyncCLICredentials writes CLI credentials received from etcd to the runner user's home directory.
+func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
+	if creds == nil {
+		return nil
+	}
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+		}
+	}
+
+	geminiDir := filepath.Join(home, ".gemini")
+	oauthPath := filepath.Join(geminiDir, "oauth_creds.json")
+	if len(creds.OAuthCreds) > 0 {
+		if err := os.MkdirAll(geminiDir, 0700); err != nil {
+			return fmt.Errorf("create gemini directory %s: %w", geminiDir, err)
+		}
+		if err := os.Chmod(geminiDir, 0700); err != nil {
+			return fmt.Errorf("chmod gemini directory %s: %w", geminiDir, err)
+		}
+
+		existing, err := os.ReadFile(oauthPath)
+		if err != nil || !bytes.Equal(existing, creds.OAuthCreds) {
+			if err := atomicWriteFile(oauthPath, creds.OAuthCreds, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", oauthPath, err)
+			}
+		} else {
+			_ = os.Chmod(oauthPath, 0600)
+		}
+	} else {
+		// Credential revoked / cleared: remove file if it exists
+		if err := os.Remove(oauthPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", oauthPath, err)
+		}
+	}
+
+	agyDir := filepath.Join(geminiDir, "antigravity-cli")
+	agyPath := filepath.Join(agyDir, "antigravity-oauth-token")
+	if len(creds.AntigravityOAuthToken) > 0 {
+		if err := os.MkdirAll(agyDir, 0700); err != nil {
+			return fmt.Errorf("create antigravity-cli directory %s: %w", agyDir, err)
+		}
+		if err := os.Chmod(agyDir, 0700); err != nil {
+			return fmt.Errorf("chmod antigravity-cli directory %s: %w", agyDir, err)
+		}
+
+		existing, err := os.ReadFile(agyPath)
+		if err != nil || !bytes.Equal(existing, creds.AntigravityOAuthToken) {
+			if err := atomicWriteFile(agyPath, creds.AntigravityOAuthToken, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", agyPath, err)
+			}
+		} else {
+			_ = os.Chmod(agyPath, 0600)
+		}
+	} else {
+		// Credential revoked / cleared: remove file if it exists
+		if err := os.Remove(agyPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", agyPath, err)
+		}
+	}
+
+	return nil
+}
+
+func atomicWriteFile(target string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, filepath.Base(target)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, target)
 }

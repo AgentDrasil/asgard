@@ -15,6 +15,7 @@ type SimplestRawScope struct {
 // CredentialsScope maps standard credentials stored under credentials/.
 type CredentialsScope struct {
 	Auth                  []byte   `key:"auth.json"`
+	OAuthCreds            []byte   `key:"oauth_creds.json"`
 	AntigravityOAuthToken []byte   `key:"antigravity-oauth-token"`
 	GeminiAPIKey          string   `key:"gemini-api-key"`
 	XAIAPIKey             string   `key:"xai-api-key"`

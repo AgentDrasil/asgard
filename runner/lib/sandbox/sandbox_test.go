@@ -3,6 +3,7 @@ package sandbox
 import (
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 type fakeSource struct {
 	conf  *config.Config
+	tree  *config.AsgardTreeConfig
 	err   error
 	mu    sync.Mutex
 	fns   []func(*config.AsgardTreeConfig)
@@ -35,6 +37,11 @@ func (f *fakeSource) OnTreeChange(fn func(*config.AsgardTreeConfig)) {
 	f.mu.Lock()
 	f.fns = append(f.fns, fn)
 	f.mu.Unlock()
+}
+func (f *fakeSource) Tree() *config.AsgardTreeConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tree
 }
 
 func proxyConf(enabled bool) *config.Config {
@@ -113,7 +120,7 @@ func (f *fakeSource) fireRaw() {
 func (f *fakeSource) fire(tree *config.AsgardTreeConfig) {
 	conf, err := runnerconfig.SandboxConfigFromTree(tree)
 	f.mu.Lock()
-	f.conf, f.err = conf, err
+	f.conf, f.err, f.tree = conf, err, tree
 	f.mu.Unlock()
 	f.mu.Lock()
 	fns := slices.Clone(f.fns)
@@ -245,4 +252,224 @@ func TestCloseIsIdempotentAndIgnoresLateChanges(t *testing.T) {
 	src.fire(validTree(px))
 	assert.Nil(t, sb.pm)
 	assert.Equal(t, 1, created)
+}
+
+func TestSyncCLICredentials_Direct(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		creds      *config.CredentialsScope
+		wantOAuth  string
+		wantToken  string
+		checkOAuth bool
+		checkToken bool
+	}{
+		{
+			name:  "nil creds does nothing",
+			creds: nil,
+		},
+		{
+			name: "oauth creds written with 0600 mode and dir 0700",
+			creds: &config.CredentialsScope{
+				OAuthCreds: []byte(`{"access_token":"token-1"}`),
+			},
+			wantOAuth:  `{"access_token":"token-1"}`,
+			checkOAuth: true,
+		},
+		{
+			name: "antigravity token written with 0600 mode and dir 0700",
+			creds: &config.CredentialsScope{
+				AntigravityOAuthToken: []byte("token-agy-1"),
+			},
+			wantToken:  "token-agy-1",
+			checkToken: true,
+		},
+		{
+			name: "both credentials written together",
+			creds: &config.CredentialsScope{
+				OAuthCreds:            []byte(`{"access_token":"token-2"}`),
+				AntigravityOAuthToken: []byte("token-agy-2"),
+			},
+			wantOAuth:  `{"access_token":"token-2"}`,
+			wantToken:  "token-agy-2",
+			checkOAuth: true,
+			checkToken: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempHome := t.TempDir()
+			err := SyncCLICredentials(tempHome, tt.creds)
+			require.NoError(t, err)
+
+			if tt.checkOAuth {
+				oauthPath := filepath.Join(tempHome, ".gemini", "oauth_creds.json")
+				data, err := os.ReadFile(oauthPath)
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantOAuth, string(data))
+
+				info, err := os.Stat(oauthPath)
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+
+				dirInfo, err := os.Stat(filepath.Join(tempHome, ".gemini"))
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+			}
+
+			if tt.checkToken {
+				tokenPath := filepath.Join(tempHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+				data, err := os.ReadFile(tokenPath)
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantToken, string(data))
+
+				info, err := os.Stat(tokenPath)
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+
+				dirInfo, err := os.Stat(filepath.Join(tempHome, ".gemini", "antigravity-cli"))
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+			}
+		})
+	}
+}
+
+func TestSyncCLICredentials_OnTreeChange(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+
+	tree := validTree(proxy.Config{})
+	tree.Credentials.OAuthCreds = []byte(`{"access_token":"initial-token"}`)
+	tree.Credentials.AntigravityOAuthToken = []byte(`tok-initial`)
+
+	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
+	require.NoError(t, err)
+
+	src := &fakeSource{conf: initialConf, tree: tree}
+
+	sb := Setup(src, Options{SkipSSH: true, HomeDir: tempHome})
+	t.Cleanup(sb.Close)
+
+	require.NoError(t, sb.Ready())
+
+	// Verify ~/.gemini/oauth_creds.json written on initial setup
+	oauthPath := filepath.Join(tempHome, ".gemini", "oauth_creds.json")
+	oauthBytes, err := os.ReadFile(oauthPath)
+	require.NoError(t, err)
+	assert.Equal(t, `{"access_token":"initial-token"}`, string(oauthBytes))
+
+	oauthStat, err := os.Stat(oauthPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
+
+	geminiDirStat, err := os.Stat(filepath.Join(tempHome, ".gemini"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), geminiDirStat.Mode().Perm())
+
+	// Verify antigravity-oauth-token
+	agyPath := filepath.Join(tempHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	agyBytes, err := os.ReadFile(agyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-initial", string(agyBytes))
+
+	agyStat, err := os.Stat(agyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), agyStat.Mode().Perm())
+
+	// Now fire tree change with updated credentials
+	updatedTree := validTree(proxy.Config{})
+	updatedTree.Credentials.OAuthCreds = []byte(`{"access_token":"updated-token"}`)
+	updatedTree.Credentials.AntigravityOAuthToken = []byte(`tok-updated`)
+
+	src.fire(updatedTree)
+
+	// Verify updated ~/.gemini/oauth_creds.json
+	oauthBytes, err = os.ReadFile(oauthPath)
+	require.NoError(t, err)
+	assert.Equal(t, `{"access_token":"updated-token"}`, string(oauthBytes))
+
+	oauthStat, err = os.Stat(oauthPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
+
+	// Verify updated antigravity-oauth-token
+	agyBytes, err = os.ReadFile(agyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-updated", string(agyBytes))
+
+	agyStat, err = os.Stat(agyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), agyStat.Mode().Perm())
+
+	// Now fire tree change with cleared/revoked credentials
+	clearedTree := validTree(proxy.Config{})
+	clearedTree.Credentials.OAuthCreds = nil
+	clearedTree.Credentials.AntigravityOAuthToken = nil
+
+	src.fire(clearedTree)
+
+	// Verify both credential files are removed upon revocation
+	_, err = os.Stat(oauthPath)
+	assert.True(t, os.IsNotExist(err), "oauth_creds.json must be removed when credential is empty/cleared")
+
+	_, err = os.Stat(agyPath)
+	assert.True(t, os.IsNotExist(err), "antigravity-oauth-token must be removed when credential is empty/cleared")
+}
+
+func TestSyncCLICredentials_RevocationAndPermissionTightening(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	geminiDir := filepath.Join(tempHome, ".gemini")
+	agyDir := filepath.Join(geminiDir, "antigravity-cli")
+
+	// Pre-create directories with loose permissions 0755
+	require.NoError(t, os.MkdirAll(agyDir, 0755))
+	require.NoError(t, os.Chmod(geminiDir, 0755))
+	require.NoError(t, os.Chmod(agyDir, 0755))
+
+	// Write pre-existing credentials
+	oauthPath := filepath.Join(geminiDir, "oauth_creds.json")
+	agyPath := filepath.Join(agyDir, "antigravity-oauth-token")
+	require.NoError(t, os.WriteFile(oauthPath, []byte("old-oauth"), 0644))
+	require.NoError(t, os.WriteFile(agyPath, []byte("old-agy"), 0644))
+
+	// Sync with updated credentials
+	creds := &config.CredentialsScope{
+		OAuthCreds:            []byte("new-oauth"),
+		AntigravityOAuthToken: []byte("new-agy"),
+	}
+	require.NoError(t, SyncCLICredentials(tempHome, creds))
+
+	// Verify permissions tightened to 0700 on directories and 0600 on files
+	geminiStat, err := os.Stat(geminiDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), geminiStat.Mode().Perm())
+
+	agyDirStat, err := os.Stat(agyDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), agyDirStat.Mode().Perm())
+
+	oauthStat, err := os.Stat(oauthPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
+
+	// Sync with matching content: should succeed without error (no-op clobber protection)
+	require.NoError(t, SyncCLICredentials(tempHome, creds))
+
+	// Revoke: sync with empty credentials
+	emptyCreds := &config.CredentialsScope{}
+	require.NoError(t, SyncCLICredentials(tempHome, emptyCreds))
+
+	_, err = os.Stat(oauthPath)
+	assert.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(agyPath)
+	assert.True(t, os.IsNotExist(err))
 }
