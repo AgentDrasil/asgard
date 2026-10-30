@@ -11,6 +11,7 @@ import (
 	"github.com/moznion/go-optional"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 )
 
 // ChatSession represents a session response/request payload for the WebUI.
@@ -29,6 +30,7 @@ type ChatSession struct {
 	Messages          dbmodels.Messages        `json:"messages,omitempty"`
 	Artifacts         dbmodels.Artifacts       `json:"artifacts,omitempty"`
 	QueuedMessages    []dbmodels.QueuedMessage `json:"queuedMessages,omitempty"`
+	DirLock           *dirlock.Status          `json:"dirLock,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -175,6 +177,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		Messages:          sess.Messages,
 		Artifacts:         sess.Artifacts,
 		QueuedMessages:    queuedMsgs,
+		DirLock:           s.dirLockStatus(sess.ChatID),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -237,6 +240,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:         createdAtPtr,
 			UpdatedAt:         updatedAtPtr,
 			Artifacts:         sess.Artifacts,
+			DirLock:           s.dirLockStatus(sess.ChatID),
 		})
 	}
 
@@ -271,6 +275,10 @@ func (s *Server) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.dirLocks != nil {
+		s.dirLocks.ForceReleaseChat(id)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
@@ -296,6 +304,10 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to delete session: " + err.Error()})
 		return
+	}
+
+	if s.dirLocks != nil {
+		s.dirLocks.ForceReleaseChat(chatID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

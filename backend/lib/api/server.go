@@ -22,6 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
@@ -87,6 +88,7 @@ type Server struct {
 	// queueParks (chatID -> queuePark) keeps queues whose consumer gave up from
 	// being restarted in a loop.
 	queueParks sync.Map
+	dirLocks   *dirlock.Manager
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.
@@ -292,6 +294,14 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		voiceAuthURL:    DefaultGoogleAuthURL,
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
+	s.dirLocks = dirlock.NewManager(func(chatID string) {
+		s.PublishSessionEvent(chatID, SessionEvent{
+			Type: EventTypeStatus,
+			Payload: map[string]any{
+				"dirLock": s.dirLocks.StatusForChat(chatID),
+			},
+		})
+	})
 	s.runSingleAgentFn = s.runSingleAgent
 
 	for _, opt := range opts {
@@ -583,6 +593,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.handleStopSession)
 	mux.HandleFunc("POST /api/workflows/{runID}/stop", s.handleStopWorkflowRun)
 	mux.HandleFunc("POST /api/sessions/{id}/archive", s.handleArchiveSession)
+	mux.HandleFunc("POST /api/sessions/{id}/unlock", s.handleUnlockSession)
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
 	mux.HandleFunc("POST /api/sessions/{id}/attachments", s.handleSessionAttachmentsUpload)
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{filename}", s.handleSessionAttachmentDownload)

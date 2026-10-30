@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 )
 
@@ -129,6 +130,29 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeFSError(w, err)
 		return
+	}
+
+	if res.UnstashedCount == 0 && s.dirLocks != nil {
+		if st := s.dirLocks.StatusForChat(sessionID); st != nil && st.IsLocked && st.CanUnlock {
+			shouldUnlock := true
+			if s.repo != nil {
+				if meta, metaErr := s.repo.GetSessionMeta(sessionID); metaErr == nil && meta != nil {
+					if meta.HasUnrepliedAskUser() || meta.IsRunning() {
+						shouldUnlock = false
+					} else {
+						for _, a := range meta.Agents {
+							if a.Status == dbmodels.AgentStatusWaitingHuman || a.Status == dbmodels.AgentStatusRunning {
+								shouldUnlock = false
+								break
+							}
+						}
+					}
+				}
+			}
+			if shouldUnlock {
+				_, _ = s.dirLocks.UnlockIdle(sessionID)
+			}
+		}
 	}
 	commits := make([]GitCommit, 0, len(res.Commits))
 	for _, c := range res.Commits {

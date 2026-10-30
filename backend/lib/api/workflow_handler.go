@@ -164,6 +164,19 @@ func (s *Server) runWorkflow(ctx context.Context, agent *agentspec.Agent, chatID
 		return "failed", "", rdErr
 	}
 	req.RunDir = runDir
+
+	releaseLock, lockErr := s.acquireChatDirLock(ctx, chatID, agent, runDir)
+	if lockErr != nil {
+		s.emitWorkflowPreExecutionCleanup(chatID, agentID)
+		return "failed", "", lockErr
+	}
+	if releaseLock != nil {
+		defer func() {
+			keepUncommitted := status == "waiting_human" || s.hasUncommittedChanges(chatID, runDir)
+			releaseLock(keepUncommitted)
+		}()
+	}
+
 	if s.repo != nil && chatID != "" && agentID != "" {
 		if err := s.repo.UpdateAgentStatus(chatID, agentID, dbmodels.AgentStatusRunning); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Str("agent", agentID).Msg("failed to update workflow agent status to running")

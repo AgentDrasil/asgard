@@ -85,10 +85,10 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 
 	var session *dbmodels.Session
 	if e.repo != nil {
-		var err error
-		session, err = e.repo.GetSessionMeta(chatID)
-		if err != nil {
-			return "", fmt.Errorf("failed to get session: %w", err)
+		var metaErr error
+		session, metaErr = e.repo.GetSessionMeta(chatID)
+		if metaErr != nil {
+			return "", fmt.Errorf("failed to get session: %w", metaErr)
 		}
 	}
 
@@ -158,8 +158,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	}
 
 	if e.repo != nil {
-		if err := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); err != nil {
-			return "", fmt.Errorf("failed to pre-update agent session: %w", err)
+		if preErr := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); preErr != nil {
+			return "", fmt.Errorf("failed to pre-update agent session: %w", preErr)
 		}
 		// Save incoming message to session in DB
 		if prompt != "" {
@@ -202,8 +202,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 				Timestamp:    time.Now().UnixMilli(),
 				Attachments:  params.Attachments,
 			}
-			if err := e.repo.AppendMessage(chatID, userMsg); err != nil {
-				log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
+			if appendErr := e.repo.AppendMessage(chatID, userMsg); appendErr != nil {
+				log.Error().Err(appendErr).Str("chat_id", chatID).Msg("failed to append incoming message to repo")
 			} else if e.server != nil {
 				e.server.PublishSessionEvent(chatID, SessionEvent{
 					Type:    "message",
@@ -214,8 +214,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 
 		// Only update status if this is the primary/entry agent for the session
 		if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name || session.CurrentAgent == e.agent.Config.ID {
-			if err := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); err != nil {
-				return "", fmt.Errorf("failed to update agent status to running: %w", err)
+			if statusErr := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); statusErr != nil {
+				return "", fmt.Errorf("failed to update agent status to running: %w", statusErr)
 			}
 			if e.server != nil {
 				e.server.PublishSessionEvent(chatID, SessionEvent{
@@ -229,6 +229,32 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		if session == nil || session.Title == "" {
 			e.goGenerateTitle(ctx, chatID, prompt)
 		}
+	}
+
+	var releaseLock func(bool)
+	if e.server != nil && e.server.dirLocks != nil {
+		var lockErr error
+		releaseLock, lockErr = e.server.acquireChatDirLock(ctx, chatID, e.agent, normalizedRunDir)
+		if lockErr != nil {
+			return "", lockErr
+		}
+	}
+	if releaseLock != nil {
+		defer func() {
+			keepUncommitted := false
+			if !e.agent.Config.IsReadOnly() {
+				hasQueued := false
+				if err == nil && e.repo != nil {
+					if queued, qErr := e.repo.GetQueuedMessages(chatID); qErr == nil && len(queued) > 0 {
+						hasQueued = true
+					}
+				}
+				if hasQueued || (e.server != nil && e.server.hasUncommittedChanges(chatID, normalizedRunDir)) {
+					keepUncommitted = true
+				}
+			}
+			releaseLock(keepUncommitted)
+		}()
 	}
 
 	// ── Subscribe to status updates for this chat ─────────────────────────
@@ -248,7 +274,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		e.markAgentCompleted(ctx, chatID, err)
 	}()
 	augmentedPrompt := formatPromptWithAttachments(prompt, params.Attachments)
-	return e.executeSequential(ctx, augmentedPrompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
+	resp, err = e.executeSequential(ctx, augmentedPrompt, chatID, runDirOpt, modelOpt, sessionMode, session, statusCh)
+	return resp, err
 }
 
 // goGenerateTitle spawns a background goroutine that generates and persists a
@@ -277,6 +304,9 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 				Type:    "title",
 				Payload: map[string]any{"title": title},
 			})
+		}
+		if server != nil && server.dirLocks != nil {
+			server.dirLocks.UpdateChatTitle(chatID, title)
 		}
 	}
 
