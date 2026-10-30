@@ -1,0 +1,13 @@
+# Asgard Deployment Ignore
+# Private TLS keys
+tls/*.key
+tls/ca.key
+backend/certs/*.key
+runners/*/certs/*.key
+
+# Databases and persistent session runtime data
+etcd-data/
+backend/asgard/data/
+backend/asgard/logs/
+runners/*/asgard/
+runners/*/session-data/

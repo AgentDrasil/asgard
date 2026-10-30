@@ -1,0 +1,23 @@
+# SOPS configuration for Asgard dynamic configurations & credentials
+creation_rules:
+  - path_regex: .*\.(yaml|yml|json)$
+    encrypted_regex: "^(gemini_api_key|typesafe_api_key|api_key|apiKey|password|client_secret|secret|dsn|auth_token|token|vapid_key|private_key|key|access_token)$"
+{{- if .GCPKMS }}
+    gcp_kms: "{{ .GCPKMS }}"
+{{- else if .AgeRecipient }}
+    age: "{{ .AgeRecipient }}"
+{{- else }}
+    # SOPS encryption keys:
+    # gcp_kms: "projects/PROJECT_ID/locations/LOCATION/keyRings/KEYRING/cryptoKeys/KEY"
+    # age: "age1..."
+{{- end }}
+
+  - path_regex: (credentials/.*(antigravity-oauth-token|auth\.json|gemini-api-key|xai-api-key)|credentials/ssh/.*)$
+{{- if .GCPKMS }}
+    gcp_kms: "{{ .GCPKMS }}"
+{{- else if .AgeRecipient }}
+    age: "{{ .AgeRecipient }}"
+{{- else }}
+    # gcp_kms: "projects/PROJECT_ID/locations/LOCATION/keyRings/KEYRING/cryptoKeys/KEY"
+    # age: "age1..."
+{{- end }}

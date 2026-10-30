@@ -6,6 +6,7 @@ use (
 	./backend
 	./cmd/agent-validate
 	./cmd/asgard
+	./cmd/asgard-init
 	./cmd/ask-user
 	./cmd/call-peer
 	./cmd/find-peer

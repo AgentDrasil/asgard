@@ -1,0 +1,84 @@
+# ==============================================================================
+# Asgard Backend Configuration
+# Target etcd path: ${ETCD_PREFIX}/asgard/config.yaml
+# Published via cfgctl and loaded by Backend with dynamic watch support.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# REQUIRED SETTINGS
+# ------------------------------------------------------------------------------
+
+# Public base URL of the Asgard backend (required for OAuth/OIDC redirects)
+host: "{{ .Host }}"
+
+# HTTP port inside container
+port: {{ .BackendPort }}
+
+# Distributed Runner & mTLS Configuration
+# Asgard operates in a split architecture (Backend + Runner + etcd).
+# All Runner nodes authenticate to NodeControlService (:9311) via mTLS.
+runner:
+  tls_cert_file: "/certs/backend.crt"
+  tls_key_file: "/certs/backend.key"
+  client_ca_file: "/certs/client-ca.crt"
+  registry_port: {{ .RegistryPort }}
+  allowed_nodes:
+    - "{{ .InitialRunner }}"
+
+# Authentication Settings (OIDC / OAuth 2.0)
+# Asgard requires authentication to protect API and WebUI endpoints.
+auth:
+  issuer: "{{ .AuthIssuer }}"
+  client_id: "{{ .AuthClientID }}"
+  client_secret: "{{ .AuthClientSecret }}"
+  token_source: "{{ .AuthTokenSource }}"
+  token_audience: "{{ .AuthTokenAudience }}"
+
+# ------------------------------------------------------------------------------
+# OPTIONAL CORE SETTINGS (Uncomment and customize as needed)
+# ------------------------------------------------------------------------------
+
+# Enable debug logging (default: false)
+# debug: false
+
+# Database type: "sqlite" (default, stored at /asgard/data/data.db) or "pg" (PostgreSQL)
+# db: sqlite
+# dsn: "host=postgres user=asgard password=secret dbname=asgard port=5432 sslmode=disable"
+
+# Language preferences for agents (default: "English (US)")
+# chat_lang: "简体中文"
+# doc_lang: "简体中文"
+# comment_lang: "English (US)"
+# ui_lang: "en"
+
+# Enabled CLI providers (supported: agy, opencode, simplest; default: all enabled)
+# providers:
+#   - agy
+#   - opencode
+#   - simplest
+
+# Static WebUI directory path inside backend container
+# webui_path: /opt/asgard/webui
+
+# API keys and model overrides for internal automation
+# gemini_api_key: ""
+# gemini_model_for_chat_title: "gemini-3.1-flash-lite"
+# gemini_model_for_command_result_compass: "gemini-3.5-flash-lite"
+# typesafe_api_key: ""
+
+# Firebase WebPush notification credentials
+# firebase_webpush_web:
+#   api_key: ""
+#   auth_domain: ""
+#   project_id: ""
+#   storage_bucket: ""
+#   messaging_sender_id: ""
+#   app_id: ""
+#   vapid_key: ""
+
+# Role-based access control inside OIDC claims
+# auth:
+#   role_claim: "roles"
+#   required_role: "asgard-user"
+#   auth_code_options:
+#     access_type: "offline"

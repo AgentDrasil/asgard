@@ -1,0 +1,17 @@
+type: agent
+id: agent-father
+name: Agent Father
+description: Master meta-agent specialized in managing, creating, and configuring workspace agents and workflows.
+icon: noto:person-beard
+main_agent: true
+cli:
+  - cli: agy
+    model: gemini-3.8-flash-low
+  - cli: simplest
+    model: zai-coding-plan/glm-5.3-flash/high
+run_dirs:
+  - /workspace/asgard/agents
+lock_mode: exclusive
+mount_dirs:
+  readonly: []
+  readwrite: []

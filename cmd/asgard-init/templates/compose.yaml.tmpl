@@ -1,0 +1,60 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.21
+    container_name: asgard-etcd
+    command:
+      - etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --data-dir=/etcd-data
+    volumes:
+      - ./etcd-data:/etcd-data
+    restart: always
+
+  backend:
+    image: ghcr.io/agentdrasil/asgard-backend:main
+    container_name: asgard-backend
+    hostname: backend
+    networks:
+      default:
+        aliases:
+          - backend
+    environment:
+      - ETCD_ENDPOINTS={{ .EtcdEndpoints }}
+      - ETCD_PREFIX={{ .EtcdPrefix }}
+{{- if .GoogleApplicationCredentials }}
+      - GOOGLE_APPLICATION_CREDENTIALS={{ .GoogleApplicationCredentials }}
+{{- end }}
+    volumes:
+      - ./backend/asgard:/asgard
+      - ./backend/certs:/certs:ro
+    ports:
+      - "{{ .BackendPort }}:{{ .BackendPort }}"
+      - "{{ .RegistryPort }}:9311"
+    restart: always
+
+  {{ .InitialRunnerService }}:
+    image: ghcr.io/agentdrasil/asgard-runner:main
+    container_name: asgard-{{ .InitialRunner }}
+    hostname: {{ .InitialRunner }}
+    environment:
+      - ETCD_ENDPOINTS={{ .EtcdEndpoints }}
+      - ETCD_PREFIX={{ .EtcdPrefix }}
+{{- if .GoogleApplicationCredentials }}
+      - GOOGLE_APPLICATION_CREDENTIALS={{ .GoogleApplicationCredentials }}
+{{- end }}
+    security_opt:
+      - seccomp=unconfined
+    command:
+      - -backend
+      - backend:{{ .RegistryPort }}
+    volumes:
+      - ./runners/{{ .InitialRunner }}/certs:/certs:ro
+      - ./runners/{{ .InitialRunner }}/asgard:/asgard
+      - ./runners/{{ .InitialRunner }}/session-data:/session-data
+{{- range .WorkspaceMounts }}
+      - {{ . }}
+{{- end }}
+    depends_on:
+      - backend
+    restart: always

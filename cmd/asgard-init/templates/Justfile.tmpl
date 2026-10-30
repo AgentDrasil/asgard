@@ -1,0 +1,42 @@
+# ==============================================================================
+# Asgard Deployment Management Justfile
+# ==============================================================================
+
+# Start all containers in the background
+start:
+    docker compose up -d
+
+# Stop all running containers
+stop:
+    docker compose down
+
+# Restart all containers
+restart:
+    docker compose down
+    docker compose up -d
+
+# Check status of containers
+status:
+    docker compose ps
+
+# View backend logs (e.g. `just logs-backend` or `just logs-backend -f`)
+logs-backend +FLAGS='':
+    docker compose logs asgard-backend {{ "{{" }}FLAGS{{ "}}" }}
+
+# View runner logs (e.g. `just logs-runner` or `just logs-runner {{ .InitialRunner }} -f`)
+logs-runner RUNNER="{{ .InitialRunner }}" +FLAGS='':
+    docker compose logs asgard-runner-{{ "{{" }}RUNNER{{ "}}" }} {{ "{{" }}FLAGS{{ "}}" }}
+
+# Encrypt local etcd-tree configuration using cfgctl and SOPS
+encrypt:
+    cfgctl encrypt ./etcd-tree
+
+# Push etcd-tree configuration into etcd cluster
+push:
+    cfgctl push ./etcd-tree \
+        --prefix "{{ .EtcdPrefix }}" \
+        --endpoints "{{ .EtcdEndpoints }}" \
+        --prune
+
+# Encrypt and publish configuration to etcd in one step
+publish: encrypt push

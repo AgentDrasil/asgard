@@ -1,0 +1,26 @@
+
+  {{ .RunnerService }}:
+    image: ghcr.io/agentdrasil/asgard-runner:main
+    container_name: asgard-{{ .RunnerName }}
+    hostname: {{ .RunnerName }}
+    environment:
+      - ETCD_ENDPOINTS={{ .EtcdEndpoints }}
+      - ETCD_PREFIX={{ .EtcdPrefix }}
+{{- if .GoogleApplicationCredentials }}
+      - GOOGLE_APPLICATION_CREDENTIALS={{ .GoogleApplicationCredentials }}
+{{- end }}
+    security_opt:
+      - seccomp=unconfined
+    command:
+      - -backend
+      - backend:{{ .RegistryPort }}
+    volumes:
+      - ./runners/{{ .RunnerName }}/certs:/certs:ro
+      - ./runners/{{ .RunnerName }}/asgard:/asgard
+      - ./runners/{{ .RunnerName }}/session-data:/session-data
+{{- range .WorkspaceMounts }}
+      - {{ . }}
+{{- end }}
+    depends_on:
+      - backend
+    restart: always
