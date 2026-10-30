@@ -158,7 +158,11 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	}
 
 	// Start the command execution sandbox
-	cmdSandboxCmd, err := bwrap.CommandForCommandExec(runDir, sockDir, chatID, configPath, statusScope.AllowCrossSession, proxyCfg)
+	var agentCfg *agentspec.AgentConfig
+	if agent != nil {
+		agentCfg = &agent.Config
+	}
+	cmdSandboxCmd, err := bwrap.CommandForAgentCommandExec(agentCfg, runDir, "", sockDir, chatID, configPath, statusScope.AllowCrossSession, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}

@@ -649,6 +649,7 @@ func resolveEffectiveAgent(agent *agentspec.Agent, nctx *NodeContext) *agentspec
 	}
 	effectiveAgent := *agent
 	effectiveConfig := agent.Config
+	effectiveConfig.MountDirs = agent.Config.MountDirs.Clone()
 
 	if len(effectiveConfig.RunDirs) == 0 && len(nctx.WorkflowRunDirs) > 0 {
 		effectiveConfig.RunDirs = append([]string(nil), nctx.WorkflowRunDirs...)
@@ -656,7 +657,7 @@ func resolveEffectiveAgent(agent *agentspec.Agent, nctx *NodeContext) *agentspec
 	if len(effectiveConfig.MountDirs.ReadOnly) == 0 && len(nctx.WorkflowMountDirs.ReadOnly) > 0 {
 		effectiveConfig.MountDirs.ReadOnly = append([]string(nil), nctx.WorkflowMountDirs.ReadOnly...)
 	}
-	if len(effectiveConfig.MountDirs.ReadWrite) == 0 && len(nctx.WorkflowMountDirs.ReadWrite) > 0 {
+	if !effectiveConfig.IsReadOnly() && len(effectiveConfig.MountDirs.ReadWrite) == 0 && len(nctx.WorkflowMountDirs.ReadWrite) > 0 {
 		effectiveConfig.MountDirs.ReadWrite = append([]string(nil), nctx.WorkflowMountDirs.ReadWrite...)
 	}
 	effectiveAgent.Config = effectiveConfig

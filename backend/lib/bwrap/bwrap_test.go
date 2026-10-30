@@ -2,6 +2,7 @@ package bwrap
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
@@ -1192,4 +1194,309 @@ func TestReadonlyRootInMaskedDirIsRejected(t *testing.T) {
 	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "masks")
+}
+
+func TestBuildSandboxArgs_SubdirMasking_MaskOthers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := t.TempDir()
+	projA := filepath.Join(srcDir, "proj-a")
+	projB := filepath.Join(srcDir, "proj-b")
+	gitDir := filepath.Join(srcDir, ".git")
+
+	require.NoError(t, os.MkdirAll(projA, 0o755))
+	require.NoError(t, os.MkdirAll(projB, 0o755))
+	require.NoError(t, os.MkdirAll(gitDir, 0o755))
+
+	pnpmStore := filepath.Join(srcDir, ".pnpm-store")
+	// .pnpm-store is not created upfront on disk, but rule.KeepRW will pre-create it
+
+	cfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{srcDir},
+			MaskRules: map[string]*agentspec.SubdirMaskRule{
+				srcDir: {
+					Base:   srcDir,
+					Mode:   agentspec.MaskOthers,
+					KeepRW: []string{".pnpm-store"},
+				},
+			},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	require.NoError(t, err)
+
+	// 1. Literal keep_rw (.pnpm-store) was pre-created
+	fi, err := os.Stat(pnpmStore)
+	require.NoError(t, err)
+	assert.True(t, fi.IsDir())
+
+	// 2. Single mount for srcDir
+	srcBind := indexOfSeq(args, "--bind", srcDir, srcDir)
+	require.GreaterOrEqual(t, srcBind, 0, "srcDir should be bound read-write")
+
+	// 3. No second nested bind for projA
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", projA, projA), "projA should not have a nested second bind")
+
+	// 4. Sibling projB and .git are masked with --ro-bind
+	projBMask := indexOfSeq(args, "--ro-bind", projB, projB)
+	assert.Greater(t, projBMask, srcBind, "projB should be masked with --ro-bind after srcDir bind")
+
+	gitMask := indexOfSeq(args, "--ro-bind", gitDir, gitDir)
+	assert.Greater(t, gitMask, srcBind, ".git should be masked with --ro-bind after srcDir bind")
+
+	// 5. Active runDir and keep_rw are NOT masked
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", projA, projA), "active runDir must not be masked")
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", pnpmStore, pnpmStore), "keep_rw item must not be masked")
+}
+
+func TestBuildSandboxArgs_SubdirMasking_DeepNestedSpine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := t.TempDir()
+	otherGroup := filepath.Join(srcDir, "other-group")
+	groupDir := filepath.Join(srcDir, "group")
+	projA := filepath.Join(groupDir, "proj-a")
+	projB := filepath.Join(groupDir, "proj-b")
+
+	require.NoError(t, os.MkdirAll(otherGroup, 0o755))
+	require.NoError(t, os.MkdirAll(projA, 0o755))
+	require.NoError(t, os.MkdirAll(projB, 0o755))
+
+	cfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{srcDir},
+			MaskRules: map[string]*agentspec.SubdirMaskRule{
+				srcDir: {
+					Base: srcDir,
+					Mode: agentspec.MaskOthers,
+				},
+			},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	require.NoError(t, err)
+
+	srcBind := indexOfSeq(args, "--bind", srcDir, srcDir)
+	require.GreaterOrEqual(t, srcBind, 0)
+
+	// otherGroup and projB are masked
+	assert.Greater(t, indexOfSeq(args, "--ro-bind", otherGroup, otherGroup), srcBind)
+	assert.Greater(t, indexOfSeq(args, "--ro-bind", projB, projB), srcBind)
+
+	// group itself is not masked (it is an active ancestor)
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", groupDir, groupDir))
+
+	// projA is neither masked nor bound with a second --bind
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", projA, projA))
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", projA, projA))
+}
+
+func TestBuildSandboxArgs_SubdirMasking_MaskMatched(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := t.TempDir()
+	projA := filepath.Join(srcDir, "proj-a")
+	secretDir := filepath.Join(srcDir, "secret-data")
+	publicDir := filepath.Join(srcDir, "public-data")
+
+	require.NoError(t, os.MkdirAll(projA, 0o755))
+	require.NoError(t, os.MkdirAll(secretDir, 0o755))
+	require.NoError(t, os.MkdirAll(publicDir, 0o755))
+
+	cfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{srcDir},
+			MaskRules: map[string]*agentspec.SubdirMaskRule{
+				srcDir: {
+					Base:   srcDir,
+					Mode:   agentspec.MaskMatched,
+					MaskRO: []string{"^secret-.*$"},
+				},
+			},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	require.NoError(t, err)
+
+	srcBind := indexOfSeq(args, "--bind", srcDir, srcDir)
+	require.GreaterOrEqual(t, srcBind, 0)
+
+	// Matching secretDir is masked
+	assert.Greater(t, indexOfSeq(args, "--ro-bind", secretDir, secretDir), srcBind)
+
+	// Non-matching publicDir is NOT masked
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", publicDir, publicDir))
+	// projA is not masked
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", projA, projA))
+}
+
+func TestBuildSandboxArgs_SubdirMasking_SymlinkSafety(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := t.TempDir()
+	projA := filepath.Join(srcDir, "proj-a")
+	validTarget := filepath.Join(srcDir, "valid-target")
+	require.NoError(t, os.MkdirAll(projA, 0o755))
+	require.NoError(t, os.MkdirAll(validTarget, 0o755))
+
+	validLink := filepath.Join(srcDir, "valid-link")
+	require.NoError(t, os.Symlink(validTarget, validLink))
+
+	danglingLink := filepath.Join(srcDir, "dangling-link")
+	require.NoError(t, os.Symlink(filepath.Join(srcDir, "nonexistent"), danglingLink))
+
+	outsideDir := t.TempDir()
+	escapeLink := filepath.Join(srcDir, "escape-link")
+	require.NoError(t, os.Symlink(outsideDir, escapeLink))
+
+	// Non-regular files: Unix domain socket and a symlink pointing to it
+	sockPath := filepath.Join(srcDir, "test.sock")
+	ln, err := net.Listen("unix", sockPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	sockLink := filepath.Join(srcDir, "sock-link")
+	require.NoError(t, os.Symlink(sockPath, sockLink))
+
+	cfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{srcDir},
+			MaskRules: map[string]*agentspec.SubdirMaskRule{
+				srcDir: {
+					Base: srcDir,
+					Mode: agentspec.MaskOthers,
+				},
+			},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	require.NoError(t, err)
+
+	// In-tree valid symlink target is masked at link path
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", validTarget, validLink), 0)
+
+	// Dangling symlink is skipped (cannot be bound)
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", filepath.Join(srcDir, "nonexistent"), danglingLink))
+
+	// Escaping symlink pointing outside baseDir is skipped
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", outsideDir, escapeLink))
+
+	// Unix domain socket and symlink to socket are skipped (not regular file or dir)
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", sockPath, sockPath))
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", sockPath, sockLink))
+}
+
+func TestCommandForAgentCommandExec(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := t.TempDir()
+	projA := filepath.Join(srcDir, "proj-a")
+	projB := filepath.Join(srcDir, "proj-b")
+	require.NoError(t, os.MkdirAll(projA, 0o755))
+	require.NoError(t, os.MkdirAll(projB, 0o755))
+
+	roDir := t.TempDir()
+
+	cfg := &agentspec.AgentConfig{
+		MountDirs: agentspec.MountConfig{
+			ReadOnly:  []string{roDir},
+			ReadWrite: []string{srcDir},
+			MaskRules: map[string]*agentspec.SubdirMaskRule{
+				srcDir: {
+					Base: srcDir,
+					Mode: agentspec.MaskOthers,
+				},
+			},
+		},
+	}
+
+	cmd, err := CommandForAgentCommandExec(cfg, projA, "", "sock", "chat-1", "", false)
+	require.NoError(t, err)
+
+	// Verifies fakebashd sandbox mounts
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", roDir, roDir), 0, "fakebashd must receive readonlyDirs")
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", srcDir, srcDir), 0, "fakebashd must bind srcDir")
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", projB, projB), 0, "fakebashd must mask sibling projB")
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", projA, projA), "fakebashd must avoid nested bind on projA")
+}
+
+func TestReadOnlyLockMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	runDir := t.TempDir()
+	extraRunDir := t.TempDir()
+
+	cfg := &agentspec.AgentConfig{
+		ID:       "ro-agent",
+		Name:     "RO Agent",
+		LockMode: agentspec.LockModeReadOnly,
+		RunDirs:  []string{extraRunDir},
+	}
+
+	// 1. Agent sandbox verification
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+	chat := "chat-ro"
+	args, err := buildSandboxArgs(cfg, "", target, false, runDir, "sock", chat, "", "")
+	require.NoError(t, err)
+
+	// RunDirs and runDir are mounted read-only
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", extraRunDir, extraRunDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", runDir, runDir), 0)
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", extraRunDir, extraRunDir))
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", runDir, runDir))
+
+	// /tmp and /session remain writable (--bind)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
+
+	// Contract file was generated and contains ReadOnlyWorkspacePrompt
+	contractIdx := indexOfSeq(args, "--ro-bind")
+	require.GreaterOrEqual(t, contractIdx, 0)
+	var contractHostPath string
+	for i := 0; i < len(args)-2; i++ {
+		if args[i] == "--ro-bind" && args[i+2] == common.DefaultPath {
+			contractHostPath = args[i+1]
+			break
+		}
+	}
+	require.NotEmpty(t, contractHostPath, "contract file should be mounted at %s", common.DefaultPath)
+	contractContent, err := os.ReadFile(contractHostPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(contractContent), ReadOnlyWorkspacePrompt)
+
+	// 2. Command execution sandbox verification
+	cmd, err := CommandForAgentCommandExec(cfg, runDir, "", "sock", chat, "", false)
+	require.NoError(t, err)
+
+	// HOME is mounted read-only
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", home, home), 0)
+	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", home, home))
+
+	// RunDirs and runDir are mounted read-only
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", extraRunDir, extraRunDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", runDir, runDir), 0)
+
+	// /tmp and /session remain writable (--bind)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
+
+	// 3. Cross-session access cannot make data root RW in readonly mode
+	cmdAllow, err := CommandForAgentCommandExec(cfg, runDir, "", "sock", chat, "", true)
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(cmdAllow.Args, "--bind", runnerpaths.DataDir(), runnerpaths.DataDir()))
 }

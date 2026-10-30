@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,10 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
+
+// ReadOnlyWorkspacePrompt is appended to the contract prompt body when an agent
+// is configured with lock_mode: readonly.
+const ReadOnlyWorkspacePrompt = "IMPORTANT: This agent is running in READ-ONLY mode (`lock_mode: readonly`). The workspace directory and mounted project directories are mounted read-only; you are NOT allowed to modify or write files in the workspace. If you need to create temporary files, scripts, scratchpads, or run experiments that write to disk, use `/tmp` (which is writable and isolated to this session)."
 
 // buildContractBody assembles the CLI-agnostic prompt body for the AW_AGENTS.md
 // contract: the global language rules (if non-empty) followed by the agent's
@@ -60,6 +65,13 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 	body, err := buildContractBody(agentsMDPath, langRules)
 	if err != nil {
 		return "", err
+	}
+	if cfg != nil && cfg.IsReadOnly() {
+		if body != "" {
+			body += "\n\n" + ReadOnlyWorkspacePrompt
+		} else {
+			body = ReadOnlyWorkspacePrompt
+		}
 	}
 	contract := &common.Contract{Body: body}
 	if cfg != nil {
@@ -331,6 +343,204 @@ func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agen
 	return args, nil
 }
 
+const regexMetaChars = `^$*+?()[]{}|\`
+
+func containsRegexMeta(s string) bool {
+	return strings.ContainsAny(s, regexMetaChars)
+}
+
+func isLiteralSubdirName(p string) bool {
+	if p == "" || p == "." || p == ".." {
+		return false
+	}
+	if containsRegexMeta(p) {
+		return false
+	}
+	if filepath.IsAbs(p) {
+		return false
+	}
+	clean := filepath.Clean(p)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
+
+type compiledMaskPattern struct {
+	raw      string
+	isRegex  bool
+	matchRel bool
+	re       *regexp.Regexp
+}
+
+func compileMaskPatterns(patterns []string) []compiledMaskPattern {
+	if len(patterns) == 0 {
+		return nil
+	}
+	compiled := make([]compiledMaskPattern, 0, len(patterns))
+	for _, p := range patterns {
+		cp := compiledMaskPattern{
+			raw:      p,
+			isRegex:  containsRegexMeta(p),
+			matchRel: strings.Contains(p, "/"),
+		}
+		if cp.isRegex {
+			if re, err := regexp.Compile(p); err == nil {
+				cp.re = re
+			}
+		}
+		compiled = append(compiled, cp)
+	}
+	return compiled
+}
+
+func matchesCompiledMaskPatterns(name, relFromBase string, patterns []compiledMaskPattern) bool {
+	for _, p := range patterns {
+		if p.raw == name || p.raw == relFromBase {
+			return true
+		}
+		if p.isRegex && p.re != nil {
+			target := name
+			if p.matchRel {
+				target = relFromBase
+			}
+			if p.re.MatchString(target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchesMaskRulePatterns(name, relFromBase string, patterns []string) bool {
+	return matchesCompiledMaskPatterns(name, relFromBase, compileMaskPatterns(patterns))
+}
+
+type spineStep struct {
+	scanDir     string
+	activeChild string
+}
+
+func computeSpine(cleanBase, cleanRun string) []spineStep {
+	if cleanRun == cleanBase || !beneathAny([]string{cleanBase}, cleanRun) {
+		return []spineStep{{scanDir: cleanBase, activeChild: ""}}
+	}
+	rel, err := filepath.Rel(cleanBase, cleanRun)
+	if err != nil {
+		return []spineStep{{scanDir: cleanBase, activeChild: ""}}
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	var spine []spineStep
+	cur := cleanBase
+	for i := 0; i < len(parts); i++ {
+		active := filepath.Join(cur, parts[i])
+		if cur == cleanRun {
+			break
+		}
+		spine = append(spine, spineStep{
+			scanDir:     cur,
+			activeChild: active,
+		})
+		cur = active
+	}
+	return spine
+}
+
+func applySubdirMaskRule(args []string, baseDir string, rule *agentspec.SubdirMaskRule, runDir string) ([]string, error) {
+	if rule == nil {
+		return args, nil
+	}
+
+	cleanBase := filepath.Clean(baseDir)
+	cleanRun := filepath.Clean(runDir)
+
+	// 1. Pre-create literal keep_rw directories
+	for _, p := range rule.KeepRW {
+		if isLiteralSubdirName(p) {
+			targetDir := filepath.Join(cleanBase, p)
+			_ = os.MkdirAll(targetDir, 0755)
+		}
+	}
+
+	keepRWPatterns := compileMaskPatterns(rule.KeepRW)
+	maskROPatterns := compileMaskPatterns(rule.MaskRO)
+
+	// 2. Walk the ancestor spine from baseDir to runDir
+	spine := computeSpine(cleanBase, cleanRun)
+
+	for _, step := range spine {
+		entries, err := os.ReadDir(step.scanDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			itemPath := filepath.Join(step.scanDir, name)
+			relFromBase, err := filepath.Rel(cleanBase, itemPath)
+			if err != nil {
+				continue
+			}
+
+			// Step a: Active runDir branch check
+			if itemPath == cleanRun {
+				continue // skip (keep runDir RW!)
+			}
+			if step.activeChild != "" && itemPath == step.activeChild {
+				continue // skip masking itemPath itself (will descend into it)
+			}
+
+			// Step b: keep_rw check
+			if matchesCompiledMaskPatterns(name, relFromBase, keepRWPatterns) {
+				continue // skip (keep RW!)
+			}
+
+			// Step c: Mode evaluation
+			var shouldMask bool
+			switch rule.Mode {
+			case agentspec.MaskOthers:
+				shouldMask = true
+			case agentspec.MaskMatched:
+				shouldMask = matchesCompiledMaskPatterns(name, relFromBase, maskROPatterns)
+			}
+
+			if !shouldMask {
+				continue
+			}
+
+			// Step d: Symlink safety & --ro-bind
+			fi, err := os.Lstat(itemPath)
+			if err != nil {
+				continue
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				resolved, err := filepath.EvalSymlinks(itemPath)
+				if err != nil {
+					// dangling symlink cannot be bound by bwrap
+					continue
+				}
+				// bubblewrap follows symlinks at mount time, so mounting over an
+				// escaping symlink would either fail (if the target is not mounted
+				// in the sandbox) or clobber the external target's mount point.
+				if !beneathAny([]string{cleanBase}, resolved) {
+					continue
+				}
+				targetFi, err := os.Stat(resolved)
+				if err != nil || (!targetFi.IsDir() && !targetFi.Mode().IsRegular()) {
+					continue
+				}
+				args = append(args, "--ro-bind", resolved, itemPath)
+			} else {
+				if !fi.IsDir() && !fi.Mode().IsRegular() {
+					continue
+				}
+				args = append(args, "--ro-bind", itemPath, itemPath)
+			}
+		}
+	}
+
+	return args, nil
+}
+
 // buildSandboxArgs constructs the bubblewrap arguments up to and including the
 // "--" separator, i.e. everything except the command run inside the sandbox.
 func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
@@ -356,50 +566,106 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 		return nil, err
 	}
 
-	// Mount roles config run_dirs as read-write
-	if cfg != nil {
+	// Verify run directory exists
+	if _, err := os.Stat(runDir); err != nil {
+		return nil, fmt.Errorf("run directory %q does not exist: %w", runDir, err)
+	}
+
+	sessionTmp := runnerpaths.SessionTmpDir(chatID)
+	sessionDir := runnerpaths.SessionDir(chatID)
+
+	if cfg != nil && cfg.IsReadOnly() {
+		var roDirs []string
+		seenRO := make(map[string]bool)
 		for _, dir := range cfg.RunDirs {
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("run directory %q does not exist: %w", dir, err)
 			}
-			args = appendBind(args, readonlyDirs, dir)
-		}
-
-		// Mount additional directories from MountDirs. Readonly roots are
-		// bound below, after every read-write bind (a later bind of an
-		// ancestor would otherwise bury them); a missing one is skipped with
-		// a warning by appendReadonlyBinds, as in command sandboxes.
-		for _, dir := range cfg.MountDirs.ReadWrite {
-			if _, err := os.Stat(dir); err != nil {
-				return nil, fmt.Errorf("mount readwrite directory %q does not exist: %w", dir, err)
-			}
-			args = appendBind(args, readonlyDirs, dir)
-		}
-	}
-
-	// Ensure runDir is mounted as read-write
-	runDirMounted := false
-	if cfg != nil {
-		for _, dir := range cfg.RunDirs {
-			if dir == runDir {
-				runDirMounted = true
-				break
+			clean := filepath.Clean(dir)
+			if !seenRO[clean] {
+				seenRO[clean] = true
+				args = append(args, "--ro-bind", dir, dir)
+				roDirs = append(roDirs, dir)
 			}
 		}
-		if !runDirMounted {
-			for _, dir := range cfg.MountDirs.ReadWrite {
-				if dir == runDir {
-					runDirMounted = true
-					break
+		if !beneathAny([]string{sessionTmp, sessionDir}, runDir) && !beneathAny(roDirs, runDir) {
+			args = append(args, "--ro-bind", runDir, runDir)
+		}
+	} else {
+		var mountedRWDirs []string
+		type rwMountEntry struct {
+			dir      string
+			isRunDir bool
+			rule     *agentspec.SubdirMaskRule
+		}
+		var rwEntries []rwMountEntry
+
+		if cfg != nil {
+			seenRW := make(map[string]bool)
+
+			for _, dir := range cfg.RunDirs {
+				clean := filepath.Clean(dir)
+				if seenRW[clean] {
+					continue
+				}
+				seenRW[clean] = true
+				rwEntries = append(rwEntries, rwMountEntry{
+					dir:      dir,
+					isRunDir: true,
+					rule:     cfg.MountDirs.MaskRuleFor(dir),
+				})
+			}
+
+			for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
+				clean := filepath.Clean(entry.Path)
+				if seenRW[clean] {
+					continue
+				}
+				seenRW[clean] = true
+				rule := entry.MaskRules
+				if rule == nil {
+					rule = cfg.MountDirs.MaskRuleFor(entry.Path)
+				}
+				rwEntries = append(rwEntries, rwMountEntry{
+					dir:      entry.Path,
+					isRunDir: false,
+					rule:     rule,
+				})
+			}
+
+			// Pass 1: Bind all RW entries
+			for _, entry := range rwEntries {
+				if _, err := os.Stat(entry.dir); err != nil {
+					if entry.isRunDir {
+						return nil, fmt.Errorf("run directory %q does not exist: %w", entry.dir, err)
+					}
+					return nil, fmt.Errorf("mount readwrite directory %q does not exist: %w", entry.dir, err)
+				}
+				args = appendBind(args, readonlyDirs, entry.dir)
+				if !beneathAny(readonlyDirs, entry.dir) {
+					mountedRWDirs = append(mountedRWDirs, entry.dir)
 				}
 			}
 		}
-	}
-	if !runDirMounted {
-		if _, err := os.Stat(runDir); err == nil {
+
+		if !beneathAny(mountedRWDirs, runDir) {
 			args = appendBind(args, readonlyDirs, runDir)
-		} else {
-			return nil, fmt.Errorf("run directory %q does not exist: %w", runDir, err)
+			if !beneathAny(readonlyDirs, runDir) {
+				mountedRWDirs = append(mountedRWDirs, runDir)
+			}
+		}
+
+		// Pass 2: Apply subdir mask rules after all RW mounts (including runDir) are bound
+		if cfg != nil {
+			for _, entry := range rwEntries {
+				if entry.rule != nil {
+					var err error
+					args, err = applySubdirMaskRule(args, entry.dir, entry.rule, runDir)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
 		}
 	}
 
@@ -797,6 +1063,12 @@ func realAndLexical(p string) []string {
 	return out
 }
 
+// CommandForAgentCommandExec creates an exec.Cmd initialized to run fakebashd inside a bubblewrap sandbox
+// inheriting mounts, mask rules, and lock mode from the agent configuration.
+func CommandForAgentCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string, sockDir string, chatID string, configPath string, allowCrossSession bool, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+	return commandForCommandExec(cfg, runDir, cwd, sockDir, chatID, configPath, allowCrossSession, nil, proxyOpts...)
+}
+
 // CommandForCommandExecAt is CommandForCommandExec with the sandbox working
 // directory cwd given separately from the host directory runDir (empty cwd:
 // runDir). A chat's tmp/session dir is visible as /tmp/<rel> or /session/<rel>
@@ -805,6 +1077,10 @@ func realAndLexical(p string) []string {
 // read-only after the broader read-write binds (HOME, runDir), so they win, and
 // a runDir beneath one is never bound read-write.
 func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID string, configPath string, allowCrossSession bool, readonlyDirs []string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
+	return commandForCommandExec(nil, runDir, cwd, sockDir, chatID, configPath, allowCrossSession, readonlyDirs, proxyOpts...)
+}
+
+func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string, sockDir string, chatID string, configPath string, allowCrossSession bool, readonlyDirs []string, proxyOpts ...ProxySandboxConfig) (*exec.Cmd, error) {
 	if cwd == "" {
 		cwd = runDir
 	}
@@ -819,51 +1095,172 @@ func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID s
 		return nil, err
 	}
 
+	var mergedReadonlyDirs []string
+	if len(readonlyDirs) > 0 {
+		mergedReadonlyDirs = append(mergedReadonlyDirs, readonlyDirs...)
+	}
+	if cfg != nil && len(cfg.MountDirs.ReadOnly) > 0 {
+		mergedReadonlyDirs = append(mergedReadonlyDirs, cfg.MountDirs.ReadOnly...)
+	}
+
 	masked := []string{filepath.Join(home, ".ssh"), paths.ConfigDir()}
 	for _, cli := range agentwrapper.GetRegisteredCLIs() {
 		if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
 			masked = append(masked, spec.AuthDirectory(home))
 		}
 	}
-	if err := validateReadonlyRoots(readonlyDirs, masked); err != nil {
+	if err := validateReadonlyRoots(mergedReadonlyDirs, masked); err != nil {
 		return nil, err
 	}
 
-	// Bind runDir (when outside HOME) BEFORE the sensitive-mask block so that
-	// a non-HOME runDir subtree can never shadow the proxy/config masks.
-	if runDir != "" {
-		if _, err := os.Stat(runDir); err == nil {
-			// Skip the extra bind when runDir is inside HOME: HOME is already
-			// bind-mounted as a single mount, and a nested separate bind would
-			// give runDir a different st_dev, breaking hard links (pnpm would
-			// then relocate its store onto the project's "filesystem"). This
-			// requires runDir to be part of the HOME mount (not a separate
-			// container volume mounted under HOME).
-			if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
-				// Beneath a readonly root (also through a symlink alias) the
-				// path is mounted read-only so it exists and cannot be written.
-				args = appendBind(args, readonlyDirs, runDir)
+	sessionTmp := runnerpaths.SessionTmpDir(chatID)
+	sessionDir := runnerpaths.SessionDir(chatID)
+
+	type rwMountEntry struct {
+		dir      string
+		isRunDir bool
+		rule     *agentspec.SubdirMaskRule
+	}
+	var rwEntries []rwMountEntry
+
+	if cfg != nil && cfg.IsReadOnly() {
+		// Readonly mode: HOME is mounted read-only
+		args = append(args, "--ro-bind", home, home)
+
+		seenRO := make(map[string]bool)
+		for _, dir := range cfg.RunDirs {
+			clean := filepath.Clean(dir)
+			if seenRO[clean] {
+				continue
 			}
-			args = append(args, "--chdir", cwd)
+			seenRO[clean] = true
+			if beneathAny([]string{home, sessionTmp, sessionDir}, dir) {
+				continue
+			}
+			if _, err := os.Stat(dir); err == nil {
+				args = append(args, "--ro-bind", dir, dir)
+			}
+		}
+
+		if runDir != "" {
+			if _, err := os.Stat(runDir); err == nil {
+				if !beneathAny([]string{home, sessionTmp, sessionDir}, runDir) && !seenRO[filepath.Clean(runDir)] {
+					args = append(args, "--ro-bind", runDir, runDir)
+				}
+				args = append(args, "--chdir", cwd)
+			} else {
+				args = append(args, "--chdir", home)
+			}
 		} else {
 			args = append(args, "--chdir", home)
 		}
+	} else if cfg != nil {
+		seenRW := make(map[string]bool)
+
+		for _, dir := range cfg.RunDirs {
+			clean := filepath.Clean(dir)
+			if seenRW[clean] {
+				continue
+			}
+			seenRW[clean] = true
+			rwEntries = append(rwEntries, rwMountEntry{
+				dir:      dir,
+				isRunDir: true,
+				rule:     cfg.MountDirs.MaskRuleFor(dir),
+			})
+		}
+
+		for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
+			clean := filepath.Clean(entry.Path)
+			if seenRW[clean] {
+				continue
+			}
+			seenRW[clean] = true
+			rule := entry.MaskRules
+			if rule == nil {
+				rule = cfg.MountDirs.MaskRuleFor(entry.Path)
+			}
+			rwEntries = append(rwEntries, rwMountEntry{
+				dir:      entry.Path,
+				isRunDir: false,
+				rule:     rule,
+			})
+		}
+
+		mountedRWDirs := []string{home, sessionTmp, sessionDir}
+
+		for _, entry := range rwEntries {
+			if beneathAny([]string{home, sessionTmp, sessionDir}, entry.dir) {
+				continue
+			}
+			if _, err := os.Stat(entry.dir); err == nil {
+				args = appendBind(args, mergedReadonlyDirs, entry.dir)
+				if !beneathAny(mergedReadonlyDirs, entry.dir) {
+					mountedRWDirs = append(mountedRWDirs, entry.dir)
+				}
+			}
+		}
+
+		if runDir != "" {
+			if _, err := os.Stat(runDir); err == nil {
+				if !beneathAny(mountedRWDirs, runDir) {
+					args = appendBind(args, mergedReadonlyDirs, runDir)
+					if !beneathAny(mergedReadonlyDirs, runDir) {
+						mountedRWDirs = append(mountedRWDirs, runDir)
+					}
+				}
+				args = append(args, "--chdir", cwd)
+			} else {
+				args = append(args, "--chdir", home)
+			}
+		} else {
+			args = append(args, "--chdir", home)
+		}
+
+		// Bind HOME
+		args = append(args, "--bind", home, home)
 	} else {
-		args = append(args, "--chdir", home)
+		// cfg == nil
+		if runDir != "" {
+			if _, err := os.Stat(runDir); err == nil {
+				if !strings.HasPrefix(runDir, home+string(filepath.Separator)) {
+					args = appendBind(args, mergedReadonlyDirs, runDir)
+				}
+				args = append(args, "--chdir", cwd)
+			} else {
+				args = append(args, "--chdir", home)
+			}
+		} else {
+			args = append(args, "--chdir", home)
+		}
+
+		// Bind HOME
+		args = append(args, "--bind", home, home)
 	}
 
-	// Bind HOME
-	args = append(args, "--bind", home, home)
-
-	// If cross-session access is enabled, bind the entire cross-session data root.
-	if allowCrossSession {
+	// If cross-session access is enabled and agent is not readonly, bind the cross-session data root.
+	// In readonly mode, never bind the cross-session data root read-write.
+	if allowCrossSession && (cfg == nil || !cfg.IsReadOnly()) {
 		args = appendCrossSessionBindArgs(args)
 	} else {
 		args = appendCrossSessionMaskArgs(args, home)
 	}
 
+	// Apply subdir mask rules after all RW mounts (including HOME and cross-session root)
+	if cfg != nil && !cfg.IsReadOnly() {
+		for _, entry := range rwEntries {
+			if entry.rule != nil {
+				var err error
+				args, err = applySubdirMaskRule(args, entry.dir, entry.rule, runDir)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
 	// Readonly mounts come after the read-write binds above so they win.
-	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
+	if args, err = appendReadonlyBinds(args, mergedReadonlyDirs); err != nil {
 		return nil, err
 	}
 

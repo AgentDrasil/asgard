@@ -207,6 +207,21 @@ func TestResolveEffectiveAgent_TableDriven(t *testing.T) {
 				ReadWrite: []string{"/custom/rw"},
 			},
 		},
+		{
+			name: "readonly agent inherits workflow RunDirs and ReadOnly but does not inherit ReadWrite",
+			inputAgent: &agentspec.Agent{
+				Config: agentspec.AgentConfig{
+					ID:       "child-readonly",
+					Name:     "Child Readonly",
+					LockMode: agentspec.LockModeReadOnly,
+				},
+			},
+			wantRunDirs: []string{"/wf/rundir"},
+			wantMountDirs: agentspec.MountConfig{
+				ReadOnly:  []string{"/wf/ro"},
+				ReadWrite: nil,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -237,6 +252,48 @@ func TestResolveEffectiveAgent_NilHandling(t *testing.T) {
 	t.Parallel()
 
 	assert.Nil(t, resolveEffectiveAgent(nil, &NodeContext{}))
+}
+
+func TestResolveEffectiveAgent_ReadOnlyAndCloning(t *testing.T) {
+	t.Parallel()
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:       "ro-agent",
+			Name:     "RO Agent",
+			LockMode: agentspec.LockModeReadOnly,
+			MountDirs: agentspec.MountConfig{
+				ReadOnly: []string{"/orig/ro"},
+				MaskRules: map[string]*agentspec.SubdirMaskRule{
+					"/orig/ro": {
+						Base:   "/orig/ro",
+						Mode:   agentspec.MaskOthers,
+						KeepRW: []string{"keep"},
+					},
+				},
+			},
+		},
+	}
+
+	nctx := &NodeContext{
+		WorkflowRunDirs: []string{"/wf/run"},
+		WorkflowMountDirs: workflowspec.MountDirsConfig{
+			ReadOnly:  []string{"/wf/ro"},
+			ReadWrite: []string{"/wf/rw"},
+		},
+	}
+
+	effective := resolveEffectiveAgent(agent, nctx)
+	require.NotNil(t, effective)
+	assert.True(t, effective.Config.IsReadOnly())
+	assert.Equal(t, []string{"/wf/run"}, effective.Config.RunDirs)
+	assert.Equal(t, []string{"/orig/ro"}, effective.Config.MountDirs.ReadOnly)
+	assert.Empty(t, effective.Config.MountDirs.ReadWrite)
+
+	// Ensure deep copy / clone
+	require.NotNil(t, effective.Config.MountDirs.MaskRules)
+	effective.Config.MountDirs.MaskRules["/orig/ro"].KeepRW[0] = "mutated"
+	assert.Equal(t, "keep", agent.Config.MountDirs.MaskRules["/orig/ro"].KeepRW[0])
 }
 
 func TestEntryValidation(t *testing.T) {
