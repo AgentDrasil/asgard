@@ -151,11 +151,12 @@ func (s *Server) checkWorkspaceRunDir(chatID, runDir string) (int, string) {
 	if !filepath.IsAbs(clean) {
 		return http.StatusForbidden, "access denied: session run dir is not an allowed directory"
 	}
-	// Runner-side per-chat dirs: <anything>/asgard/data/{tmp,sessions}/<chat>[/...].
+	// Runner-side per-chat dirs: /session-data/{tmp,sessions}/<chat>[/...] or legacy /asgard/data/
 	for _, ns := range []string{"tmp", "sessions"} {
-		marker := "/asgard/data/" + ns + "/" + chatID
-		if strings.HasSuffix(clean, marker) || strings.Contains(clean, marker+"/") {
-			return 0, ""
+		for _, prefix := range []string{"/session-data/" + ns + "/" + chatID, "/asgard/data/" + ns + "/" + chatID} {
+			if strings.HasSuffix(clean, prefix) || strings.Contains(clean, prefix+"/") {
+				return 0, ""
+			}
 		}
 	}
 	if list, ok := s.sessionAgents(chatID); ok && run.IsAllowedDir(clean, agents.AllowedDirs(list, false)) {

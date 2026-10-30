@@ -17,6 +17,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestRun(t *testing.T) {
@@ -175,7 +176,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("unexpected error with fallback runDir: %v", err)
 	}
 	// Verify that the run directory was created inside $HOME/tmp (which is tmpDir/tmp in our test env)
-	tmpPath := filepath.Join(tmpDir, "asgard", "data", "tmp")
+	tmpPath := runnerpaths.TmpDir()
 	files, err := os.ReadDir(tmpPath)
 	if err != nil {
 		t.Fatalf("failed to read tmp dir: %v", err)
@@ -234,7 +235,7 @@ func TestRun(t *testing.T) {
 	if !strings.Contains(string(out), "mock bwrap execution succeeded") {
 		t.Errorf("expected mock output, got: %q", string(out))
 	}
-	langPromptPath := filepath.Join(tmpDir, "asgard", "data", "tmp", "test-chat-lang", ".aw_agents.md")
+	langPromptPath := filepath.Join(runnerpaths.SessionTmpDir("test-chat-lang"), ".aw_agents.md")
 	langPromptContent, err := os.ReadFile(langPromptPath)
 	if err != nil {
 		t.Fatalf("failed to read generated prompt file: %v", err)

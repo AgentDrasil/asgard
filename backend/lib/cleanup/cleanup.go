@@ -15,7 +15,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -114,7 +114,7 @@ func (cs *Scheduler) localRoots() runnerfs.CleanupRoots {
 	r := runnerfs.DefaultCleanupRoots()
 	if cs.tmpBase != "" {
 		r.Tmp = cs.tmpBase
-		r.CA = filepath.Join(cs.tmpBase, paths.CABundleDirName)
+		r.CA = filepath.Join(cs.tmpBase, runnerpaths.CABundleDirName)
 	}
 	if cs.sessionBase != "" {
 		r.Sessions = cs.sessionBase

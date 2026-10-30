@@ -23,7 +23,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/fakebash/pb"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // SandboxSpec describes one sandboxed command.
@@ -76,7 +76,7 @@ func RunDirect(ctx context.Context, command, dir string, env []string, stdout, s
 // fakebashd gRPC daemon: the host dials the socket directory bind-mounted at
 // /fakebash.
 func RunSandboxed(ctx context.Context, spec SandboxSpec, stdout, stderr io.Writer) (int, error) {
-	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
+	sockDir := runnerpaths.SockDir("fakebash-sock-" + uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0o755); err != nil {
 		return -1, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}

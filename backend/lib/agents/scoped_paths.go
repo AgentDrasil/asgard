@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // chatIDRegex enforces alphanumeric characters, hyphens, and underscores up to 64 characters long.
@@ -24,7 +24,7 @@ func GetSessionTmpBaseDir(chatID string) string {
 
 // GetSessionScopedBaseDir returns the host base directory for the given session
 // namespace ("tmp" or "session") without creating it (e.g.
-// ~/asgard/data/tmp/<chatID> or ~/asgard/data/sessions/<chatID>; the "session"
+// /session-data/tmp/<chatID> or /session-data/sessions/<chatID>; the "session"
 // namespace is backed by the directory the sandbox binds as /session, see
 // bwrap.setupSessionDir).
 func GetSessionScopedBaseDir(ns string, chatID string) string {
@@ -35,12 +35,12 @@ func GetSessionScopedBaseDir(ns string, chatID string) string {
 }
 
 // scopedNsHostRoot maps a sandbox namespace to its host root directory:
-// "tmp" → ~/asgard/data/tmp, "session" → ~/asgard/data/sessions.
+// "tmp" → /session-data/tmp, "session" → /session-data/sessions.
 func scopedNsHostRoot(ns string) string {
 	if ns == "session" {
-		return paths.SessionsDir()
+		return runnerpaths.SessionsDir()
 	}
-	return paths.TmpDir()
+	return runnerpaths.TmpDir()
 }
 
 // NormalizeSessionRunDir normalizes the given run directory for a session.

@@ -1,26 +1,37 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+func createFakeCerts(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(EnvCertsDir, dir)
+	require.NoError(t, os.WriteFile(TLSCertPath(), []byte("fake cert"), 0644))
+	require.NoError(t, os.WriteFile(TLSKeyPath(), []byte("fake key"), 0600))
+	require.NoError(t, os.WriteFile(CAPath(), []byte("fake ca"), 0644))
+}
+
 func TestParseBootstrap(t *testing.T) {
-	t.Parallel()
+	createFakeCerts(t)
+
 	env := map[string]string{
 		EnvBackend: "backend.example:9311",
-		EnvTLSCert: "/c.crt",
-		EnvTLSKey:  "/c.key",
-		EnvCA:      "/ca.crt",
 	}
 	getenv := func(k string) string { return env[k] }
 
 	b, err := ParseBootstrap(nil, getenv)
 	require.NoError(t, err)
 	assert.Equal(t, "backend.example:9311", b.Backend)
-	assert.Equal(t, "/ca.crt", b.CA)
+	assert.Equal(t, TLSCertPath(), b.TLSCert)
+	assert.Equal(t, TLSKeyPath(), b.TLSKey)
+	assert.Equal(t, CAPath(), b.CA)
 
 	b, err = ParseBootstrap([]string{"-backend", "other:1", "-server-name", "x"}, getenv)
 	require.NoError(t, err)
@@ -34,9 +45,23 @@ func TestParseBootstrap(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid backend address")
 }
 
+func TestParseBootstrap_MissingTLSFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	b := &Bootstrap{
+		Backend: "backend.example:9311",
+		TLSCert: filepath.Join(tmpDir, "tls.crt"),
+		TLSKey:  filepath.Join(tmpDir, "tls.key"),
+		CA:      filepath.Join(tmpDir, "ca.crt"),
+	}
+	err := b.Validate()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "missing required TLS file")
+}
+
 func TestParseBootstrapUnsandboxedCommandsIsOptIn(t *testing.T) {
-	t.Parallel()
-	env := map[string]string{EnvBackend: "b:1", EnvTLSCert: "/c", EnvTLSKey: "/k", EnvCA: "/ca"}
+	createFakeCerts(t)
+
+	env := map[string]string{EnvBackend: "b:1"}
 	parse := func(extra map[string]string, args ...string) bool {
 		getenv := func(k string) string {
 			if v, ok := extra[k]; ok {

@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func createMultipartRequest(t *testing.T, targetURL string, files map[string][]byte) (*http.Request, string) {
@@ -99,7 +100,7 @@ func TestSessionAttachmentsUpload_Success(t *testing.T) {
 		assert.Equal(t, "/tmp/attachments/"+att.Name, att.Path)
 		assert.Greater(t, att.Size, int64(0))
 
-		savedPath := filepath.Join(tempHome, "asgard", "data", "tmp", chatID, "attachments", att.Name)
+		savedPath := filepath.Join(runnerpaths.AttachmentsDir(chatID), att.Name)
 		info, statErr := os.Stat(savedPath)
 		require.NoError(t, statErr)
 		assert.Equal(t, att.Size, info.Size())
@@ -140,7 +141,7 @@ func TestSessionAttachmentsUpload_Sanitization(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, attachments, 3)
 
-	storageDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID, "attachments")
+	storageDir := runnerpaths.AttachmentsDir(chatID)
 	for _, att := range attachments {
 		assert.False(t, strings.Contains(att.Name, "/"))
 		assert.False(t, strings.Contains(att.Name, "\\"))
@@ -151,8 +152,8 @@ func TestSessionAttachmentsUpload_Sanitization(t *testing.T) {
 	}
 
 	// Verify no files escaped to parent directories
-	assert.NoFileExists(t, filepath.Join(tempHome, "asgard", "data", "tmp", "etc", "passwd"))
-	assert.NoFileExists(t, filepath.Join(tempHome, "asgard", "data", "tmp", "passwd"))
+	assert.NoFileExists(t, filepath.Join(runnerpaths.TmpDir(), "etc", "passwd"))
+	assert.NoFileExists(t, filepath.Join(runnerpaths.TmpDir(), "passwd"))
 }
 
 func TestSessionAttachmentsUpload_AtomicDeduplication(t *testing.T) {
@@ -199,7 +200,7 @@ func TestSessionAttachmentsUpload_AtomicDeduplication(t *testing.T) {
 	assert.Equal(t, "/tmp/attachments/report-1.pdf", atts2[0].Path)
 
 	// Verify both files exist with distinct contents
-	storageDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID, "attachments")
+	storageDir := runnerpaths.AttachmentsDir(chatID)
 	c1, err := os.ReadFile(filepath.Join(storageDir, "report.pdf"))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("%PDF-1.4 first upload"), c1)
@@ -356,7 +357,7 @@ func TestSessionAttachmentDownload_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	storageDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID, "attachments")
+	storageDir := runnerpaths.AttachmentsDir(chatID)
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
 
 	content := []byte("plain text attachment content for download")

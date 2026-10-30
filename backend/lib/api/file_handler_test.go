@@ -16,6 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestWorkspaceFileHandler(t *testing.T) {
@@ -116,9 +117,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Read Tmp File", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -162,9 +161,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Read Tmp File - Unauthorized Denied", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -320,9 +317,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Read Tmp File with tmp/ relative prefix (fallback)", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -350,9 +345,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Read Tmp File with explicit scope=tmp", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -426,9 +419,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Legacy tmp/ path in session artifacts authorized after fallback", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -480,9 +471,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Coexisting workspace tmp and session tmp returns workspace by default", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+		sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 		err = os.MkdirAll(sessionTmpDir, 0755)
 		require.NoError(t, err)
 
@@ -527,9 +516,7 @@ func TestWorkspaceFileHandler(t *testing.T) {
 
 	t.Run("Session namespace artifact authorized via /session path", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		sessionNsDir := filepath.Join(home, "asgard", "data", "sessions", chatID)
+		sessionNsDir := runnerpaths.SessionDir(chatID)
 		require.NoError(t, os.MkdirAll(sessionNsDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(sessionNsDir, "report.md"), []byte("session ns report"), 0644))
 

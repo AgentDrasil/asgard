@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 var sqlLikeReplacer = strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")
@@ -187,11 +187,11 @@ type Agent struct {
 }
 
 func defaultSessionDir(chatID string) string {
-	return paths.SessionDir(chatID)
+	return runnerpaths.SessionDir(chatID)
 }
 
 func defaultCABundleDir(chatID string) string {
-	return paths.CABundleDir(chatID)
+	return runnerpaths.CABundleDir(chatID)
 }
 
 type SessionRepository struct {

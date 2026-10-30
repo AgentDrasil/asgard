@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestSessionHandler(t *testing.T) {
@@ -63,9 +64,7 @@ func TestSessionHandler(t *testing.T) {
 	var createdSession ChatSession
 	err = json.Unmarshal(rrPost.Body.Bytes(), &createdSession)
 	require.NoError(t, err)
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	expectedSessionTmp := filepath.Join(home, "asgard", "data", "tmp", createdSession.ChatID)
+	expectedSessionTmp := runnerpaths.SessionTmpDir(createdSession.ChatID)
 
 	assert.NotEmpty(t, createdSession.ChatID)
 	assert.Equal(t, "agent-alpha", createdSession.CurrentAgent)

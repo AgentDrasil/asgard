@@ -38,19 +38,26 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
 (single source of truth: [`pkg/paths`](pkg/paths/paths.go)):
 
 ```
-~/asgard/
+/asgard/                    # Shared root (backend & runner)
 ├── config/                 # config.yaml, proxy.yaml, keys.yaml, ca/{ca.crt,ca.key}
 ├── agents/                 # agent definitions
 ├── teams.yaml              # agent team definitions
-├── logs/                   # service and CLI logs
-└── data/
-    ├── sessions/<chatID>/  # persistent per-session data  → sandbox /session
-    ├── tmp/<chatID>/       # per-session scratch data      → sandbox /tmp
+├── agents-cache/           # agent definitions materialized from etcd
+├── logs/                   # backend service logs
+└── data/                   # backend only
     ├── avatars/            # cached OIDC user avatars (served locally)
     └── data.db             # SQLite database (+ -wal/-shm)
+
+/session-data/              # Runner: cross-session scratch & persistent storage
+├── sessions/<chatID>/      # persistent per-session data  → sandbox /session
+├── tmp/<chatID>/           # per-session scratch data      → sandbox /tmp
+└── logs/                   # runner and sandbox tool logs
+
+/certs/                     # Runner TLS: tls.crt, tls.key, ca.crt (fixed, read-only)
+/data/                      # Workspaces, mounted by docker compose (run_dirs / mount_dirs)
 ```
 
-The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `data/sessions` and `data/tmp` (the chat directories) live on the **runner** that owns the chat.
+The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `/session-data/sessions` and `/session-data/tmp` (the chat directories) live on the **runner** that owns the chat.
 
 The SQLite database path is fixed (`dsn` is only used for `db: pg`). `aw`'s own
 `~/.config/aw/config.yaml` and the web UI static asset path (`webui_path`) are
@@ -96,8 +103,8 @@ graph TD
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
-Both sandboxes bind-mount per-chat directories of the runner host: `~/asgard/data/tmp/<chat-id>` at `/tmp` and `~/asgard/data/sessions/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
-The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`~/asgard/data/sessions/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
+Both sandboxes bind-mount per-chat directories of the runner host: `/session-data/tmp/<chat-id>` at `/tmp` and `/session-data/sessions/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
+The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`/session-data/sessions/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
 *   **Agent Sandbox**: Runs the agent wrapper process (`aw`).
     *   This sandbox has access to the agent's authentication credentials (e.g., `~/.gemini`, `~/.claude` or `~/.config/opencode`) so it can make API calls to LLM providers.
@@ -205,11 +212,13 @@ TLS 1.3 is required. The runner re-reads its certificate files on every reconnec
 | Flag | Environment | Meaning |
 |---|---|---|
 | `-backend` | `ASGARD_RUNNER_BACKEND` | backend registry address `host:port` (required) |
-| `-tls-cert` | `ASGARD_RUNNER_TLS_CERT` | client certificate PEM; CN = node id (required) |
-| `-tls-key` | `ASGARD_RUNNER_TLS_KEY` | client private key PEM (required) |
-| `-ca` | `ASGARD_RUNNER_CA` | CA bundle verifying the backend (required) |
 | `-server-name` | `ASGARD_RUNNER_SERVER_NAME` | name checked in the backend certificate (default: host of `-backend`) |
 | `-allow-unsandboxed-commands` | `ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS` | **insecure, development only**: lets workflow command nodes with `sandbox: false` run without bubblewrap |
+
+The runner reads TLS certificates from fixed paths inside `/certs`:
+- Client certificate: `/certs/tls.crt` (CN is runner node id)
+- Client key: `/certs/tls.key`
+- CA certificate: `/certs/ca.crt`
 
 The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions, proxy and credential config), and the agent CLIs and credentials (`~/.claude`, `~/.gemini`, ...) of the user it runs as. Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
 
@@ -225,9 +234,9 @@ Two images are built from the `Dockerfile` (CI pushes both): `ghcr.io/agentdrasi
 ```bash
 docker run --security-opt seccomp=unconfined \
   -e ETCD_ENDPOINTS=http://etcd:2379 \
-  -v ./certs:/certs:ro -v ./runner-asgard:/home/user/asgard \
+  -v ./certs:/certs:ro -v ./runner-asgard:/asgard -v ./session-data:/session-data \
   ghcr.io/agentdrasil/asgard-runner:main \
-  -backend backend:9311 -tls-cert /certs/runner-1.crt -tls-key /certs/runner-1.key -ca /certs/ca.crt
+  -backend backend:9311
 ```
 
 See [examples/compose.prod.example.yaml](examples/compose.prod.example.yaml) for a backend plus runner compose file.
@@ -237,7 +246,13 @@ Builds are stamped with a version `YYYY-MM-DD-HH-MM-SS:abc123ed` (UTC build time
 ### Upgrading a single-machine install
 
 1. Add the `runner` section above and list the runner id in `runner.allowed_nodes`.
-2. Generate the certificates and start a runner on the same host (or a new one), with the node id from the list. Mount the existing `~/asgard` data directory into the runner: it owns `data/sessions` and `data/tmp` now.
+2. Generate certificates in `./certs` (`tls.crt`, `tls.key`, `ca.crt`) and start a runner on the same host (or a new one), with the node id from the list. If upgrading from an older layout where chat data lived under `~/asgard/data/{sessions,tmp}` (or `./runner-asgard/data/{sessions,tmp}`), move those directories into the new `/session-data` volume:
+   ```bash
+   mkdir -p ./session-data
+   mv ./runner-asgard/data/sessions ./session-data/sessions
+   mv ./runner-asgard/data/tmp ./session-data/tmp
+   ```
+   The runner owns `/session-data/sessions` and `/session-data/tmp` now.
 3. Move the agent definitions and `teams.yaml` into etcd (`agents/…`, see above).
 4. At startup the backend binds every existing chat without a runner to the **first** entry of `allowed_nodes` (`BackfillRunnerNodeID`; cron sessions take the runner from the workflow). Put the runner that holds the old chat data first.
 5. Scheduled workflows of global agents need `runner_id`.
@@ -260,7 +275,7 @@ Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestr
 ### Key Capabilities
 - **Fork-Join Parallel Scheduling**: Concurrently executes independent DAG nodes and aggregates results.
 - **Heterogeneous Node Types**:
-  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `~/asgard/data/sessions/<chat-id>`).
+  - `agent`: Runs CLI-based coding agents (e.g. `agy-coder`) with session policy inheritance (`inherit` or `fresh`). Agent nodes take no `prompt` field; each agent is single-responsibility (one agent per node role, no cross-node reuse) with its instructions in `AGENTS.md`. The node marked `entry: true` receives the raw user input as its prompt; other fresh nodes get a kickoff directive and work off files produced by earlier nodes; resumed sessions get a follow-up directive. Scratch files in `AGENTS.md` use `/tmp/...` paths directly (the session tmp directory is bind-mounted at `/tmp` inside the sandbox); persistent per-chat files can use `/session/...` (bind-mounted from `/session-data/sessions/<chat-id>`).
   - `command`: Executes sandboxed or direct bash shell commands.
   - `llm`: Invokes raw LLM models (e.g. `gemini-3.5-flash`) for fast classification or summarization.
   - `human`: Pauses workflow execution for user review via WebUI / AskUser, persisting state across server restarts.

@@ -32,7 +32,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	backendpaths "github.com/AgentDrasil/asgard/pkg/paths/backend"
 )
 
 const (
@@ -157,7 +157,7 @@ func New(ctx context.Context, cfg *Config, baseURL string) (*Service, error) {
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		cookieSecure: base.Scheme == "https",
 		states:       map[string]stateEntry{},
-		avatars:      newAvatarStore(paths.AvatarsDir()),
+		avatars:      newAvatarStore(backendpaths.AvatarsDir()),
 	}
 
 	if _, err := s.ensureProvider(ctx); err != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // buildContractBody assembles the CLI-agnostic prompt body for the AW_AGENTS.md
@@ -78,12 +79,12 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 }
 
 // setupTmpDir determines the host directory for sandbox /tmp
-// (~/asgard/data/tmp/<chatID>) and ensures it exists.
+// (/session-data/tmp/<chatID>) and ensures it exists.
 func setupTmpDir(chatID string) (string, error) {
 	if chatID == "" {
 		chatID = "default"
 	}
-	tmpDir := paths.SessionTmpDir(chatID)
+	tmpDir := runnerpaths.SessionTmpDir(chatID)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
@@ -91,12 +92,12 @@ func setupTmpDir(chatID string) (string, error) {
 }
 
 // setupSessionDir determines the host directory for sandbox /session
-// (~/asgard/data/sessions/<chatID>) and ensures it exists.
+// (/session-data/sessions/<chatID>) and ensures it exists.
 func setupSessionDir(chatID string) (string, error) {
 	if chatID == "" {
 		chatID = "default"
 	}
-	sessionDir := paths.SessionDir(chatID)
+	sessionDir := runnerpaths.SessionDir(chatID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return "", fmt.Errorf("creating session directory %q: %w", sessionDir, err)
 	}
@@ -282,12 +283,23 @@ func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) 
 	return args
 }
 
-// appendCrossSessionMaskArgs masks the host runtime-data root (~/asgard/data),
-// which contains every session's tmp/session directories and the SQLite
-// database, when allowCrossSession is false. The current session's /tmp and
-// /session are separate bind mounts and stay visible.
-func appendCrossSessionMaskArgs(args []string) []string {
-	args = append(args, "--tmpfs", paths.DataDir())
+// appendCrossSessionBindArgs mounts the cross-session data root (/session-data)
+// into the sandbox when allowCrossSession is true.
+func appendCrossSessionBindArgs(args []string) []string {
+	dataDir := runnerpaths.DataDir()
+	if _, err := os.Stat(dataDir); err == nil {
+		args = append(args, "--bind", dataDir, dataDir)
+	}
+	return args
+}
+
+// appendCrossSessionMaskArgs hides the cross-session data root when it lies beneath
+// home (e.g. in development/unprivileged fallback layout) to prevent leaking other sessions.
+func appendCrossSessionMaskArgs(args []string, home string) []string {
+	dataDir := runnerpaths.DataDir()
+	if beneathAny([]string{home}, dataDir) {
+		args = append(args, "--tmpfs", dataDir)
+	}
 	return args
 }
 
@@ -392,7 +404,7 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	}
 
 	// Bind logs directory
-	logDir := paths.LogsDir()
+	logDir := runnerpaths.LogsDir()
 	if err := os.MkdirAll(logDir, 0755); err == nil {
 		args = append(args, "--bind", logDir, logDir)
 	}
@@ -593,8 +605,8 @@ const queryConfigPath = "/session/aw-config.yaml"
 func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
 	chatID := fmt.Sprintf("aw-query-%d-%d", os.Getpid(), time.Now().UnixNano())
 	cleanup := func() {
-		_ = os.RemoveAll(paths.SessionDir(chatID))
-		_ = os.RemoveAll(paths.SessionTmpDir(chatID))
+		_ = os.RemoveAll(runnerpaths.SessionDir(chatID))
+		_ = os.RemoveAll(runnerpaths.SessionTmpDir(chatID))
 	}
 	runDir, err := setupSessionDir(chatID)
 	if err != nil {
@@ -636,7 +648,7 @@ func appendProxyArgs(args []string, chatID string, proxyCfg ProxySandboxConfig) 
 	if cID == "" {
 		cID = "default"
 	}
-	mergedBundlePath := filepath.Join(paths.CABundleDir(cID), "merged-ca-certificates.crt")
+	mergedBundlePath := filepath.Join(runnerpaths.CABundleDir(cID), "merged-ca-certificates.crt")
 	if err := proxy.MergeCACert("/etc/ssl/certs/ca-certificates.crt", proxyCfg.CACert, mergedBundlePath); err != nil {
 		return nil, fmt.Errorf("merging CA cert bundle: %w", err)
 	}
@@ -677,15 +689,14 @@ func CommandForCommandExec(runDir string, sockDir string, chatID string, configP
 
 // SandboxCwd returns the path at which the host directory dir is visible
 // inside a command sandbox of chatID: the chat's tmp and session dirs are
-// mounted at /tmp and /session, anything else under the host runtime-data root
-// (~/asgard/data) is masked unless allowCrossSession (an operator readonly
-// mount beneath it is re-mounted after the mask), and every other
-// directory keeps its path (CommandForCommandExecAt binds it there).
+// mounted at /tmp and /session, anything else under the host cross-session data root
+// (/session-data) is not mounted unless allowCrossSession (or explicitly mounted read-only),
+// and every other directory keeps its path (CommandForCommandExecAt binds it there).
 func SandboxCwd(chatID, dir string, allowCrossSession bool, readonlyDirs []string) (string, error) {
 	dir = filepath.Clean(dir)
 	for _, m := range []struct{ host, mount string }{
-		{paths.SessionTmpDir(chatID), "/tmp"},
-		{paths.SessionDir(chatID), "/session"},
+		{runnerpaths.SessionTmpDir(chatID), "/tmp"},
+		{runnerpaths.SessionDir(chatID), "/session"},
 	} {
 		for _, base := range realAndLexical(m.host) {
 			if rel, err := filepath.Rel(base, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
@@ -694,9 +705,9 @@ func SandboxCwd(chatID, dir string, allowCrossSession bool, readonlyDirs []strin
 		}
 	}
 	if !allowCrossSession && !beneathAny(readonlyDirs, dir) {
-		for _, base := range realAndLexical(paths.DataDir()) {
+		for _, base := range realAndLexical(runnerpaths.DataDir()) {
 			if rel, err := filepath.Rel(base, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
-				return "", fmt.Errorf("directory %q is not visible in the sandbox (the runtime data directory is masked)", dir)
+				return "", fmt.Errorf("directory %q is not visible in the sandbox (the cross-session data directory is not mounted)", dir)
 			}
 		}
 	}
@@ -757,18 +768,6 @@ func appendBind(args []string, readonlyDirs []string, dir string) []string {
 		return append(args, "--ro-bind", dir, dir)
 	}
 	return append(args, "--bind", dir, dir)
-}
-
-// splitUnderDataRoot separates the dirs at or beneath the runtime-data root.
-func splitUnderDataRoot(dirs []string) (other, under []string) {
-	for _, d := range dirs {
-		if filepath.IsAbs(d) && beneathAny([]string{paths.DataDir()}, d) {
-			under = append(under, d)
-		} else {
-			other = append(other, d)
-		}
-	}
-	return other, under
 }
 
 // beneathAny reports whether p is one of dirs or lies beneath one.
@@ -856,16 +855,15 @@ func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID s
 	// Bind HOME
 	args = append(args, "--bind", home, home)
 
-	// Readonly mounts come after the read-write binds above so they win.
-	// Roots under the runtime-data root are re-mounted after the mask below
-	// (unless the mask is off), so the operator's explicit mount stays
-	// visible, read-only.
-	var maskedRO []string
-	normalRO := readonlyDirs
-	if !allowCrossSession {
-		normalRO, maskedRO = splitUnderDataRoot(readonlyDirs)
+	// If cross-session access is enabled, bind the entire cross-session data root.
+	if allowCrossSession {
+		args = appendCrossSessionBindArgs(args)
+	} else {
+		args = appendCrossSessionMaskArgs(args, home)
 	}
-	if args, err = appendReadonlyBinds(args, normalRO); err != nil {
+
+	// Readonly mounts come after the read-write binds above so they win.
+	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
 		return nil, err
 	}
 
@@ -896,14 +894,6 @@ func CommandForCommandExecAt(runDir string, cwd string, sockDir string, chatID s
 		proxyConfigPath = proxyOpts[0].ProxyConfigPath
 	}
 	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
-
-	// Filter out the host runtime-data root (~/asgard/data) unless cross-session debugging is allowed
-	if !allowCrossSession {
-		args = appendCrossSessionMaskArgs(args)
-		if args, err = appendReadonlyBinds(args, maskedRO); err != nil {
-			return nil, err
-		}
-	}
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
 	if len(proxyOpts) > 0 && proxyOpts[0].Enabled {
@@ -986,7 +976,6 @@ func GitSandboxArgs(spec GitSandboxSpec) ([]string, error) {
 
 	args = appendConfigMaskArgs(args, spec.ConfigPath)
 	args = appendProxySensitiveMaskArgs(args, spec.Proxy.CAKey, spec.Proxy.ProxyConfigPath)
-	args = appendCrossSessionMaskArgs(args)
 	if spec.Network && spec.Proxy.Enabled {
 		args, err = appendProxyArgs(args, spec.ChatID, spec.Proxy)
 		if err != nil {

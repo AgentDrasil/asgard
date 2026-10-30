@@ -16,7 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func IsAllowedDir(path string, allowedDirs []string) bool {
@@ -31,14 +31,14 @@ func IsAllowedDir(path string, allowedDirs []string) bool {
 			return true
 		}
 		// If allowedDirs contains "/tmp" or "tmp", also allow subdirectories under the host
-		// session tmp root (~/asgard/data/tmp); likewise "/session"/"session" allows
-		// subdirectories under the host sessions root (~/asgard/data/sessions).
+		// session tmp root (/session-data/tmp); likewise "/session"/"session" allows
+		// subdirectories under the host sessions root (/session-data/sessions).
 		var nsUserBase string
 		switch dir {
 		case "/tmp", "tmp":
-			nsUserBase = paths.TmpDir()
+			nsUserBase = runnerpaths.TmpDir()
 		case "/session", "session":
-			nsUserBase = paths.SessionsDir()
+			nsUserBase = runnerpaths.SessionsDir()
 		}
 		if nsUserBase != "" && (path == nsUserBase || strings.HasPrefix(path, nsUserBase+string(filepath.Separator))) {
 			return true
@@ -59,7 +59,7 @@ func resolveRunDir(agent *agentspec.Agent, runDirOpt optional.Option[string]) (s
 	if len(agent.Config.RunDirs) > 0 && agent.Config.RunDirs[0] != "" {
 		return agent.Config.RunDirs[0], nil
 	}
-	tmpDir := paths.TmpDir()
+	tmpDir := runnerpaths.TmpDir()
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("creating tmp directory %q: %w", tmpDir, err)
 	}
@@ -135,7 +135,7 @@ func OptionsFromConfig(conf *config.Config) Options {
 
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
 func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, opts Options) ([]byte, error) {
-	sockDir := paths.SockDir("fakebash-sock-" + uuid.NewV7().String())
+	sockDir := runnerpaths.SockDir("fakebash-sock-" + uuid.NewV7().String())
 	if err := os.MkdirAll(sockDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sock directory %q: %w", sockDir, err)
 	}

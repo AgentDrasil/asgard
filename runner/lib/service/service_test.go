@@ -23,7 +23,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -33,11 +33,13 @@ const chat = "chat1"
 // temp dir and returns a client plus the workspace dir.
 func startService(t *testing.T, opts Options) (runnerpb.RunnerServiceClient, string) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	h := t.TempDir()
+	t.Setenv("HOME", h)
+	t.Setenv(runnerpaths.EnvDataDir, filepath.Join(h, "session-data"))
 	ws := filepath.Join(t.TempDir(), "ws")
 	require.NoError(t, os.MkdirAll(ws, 0o755))
-	require.NoError(t, os.MkdirAll(paths.SessionTmpDir(chat), 0o755))
-	require.NoError(t, os.MkdirAll(paths.SessionDir(chat), 0o755))
+	require.NoError(t, os.MkdirAll(runnerpaths.SessionTmpDir(chat), 0o755))
+	require.NoError(t, os.MkdirAll(runnerpaths.SessionDir(chat), 0o755))
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -78,7 +80,7 @@ func readAll(t *testing.T, st grpc.ServerStreamingClient[runnerpb.ReadFileChunk]
 func TestReadFileRangesScopeAndTraversal(t *testing.T) {
 	cl, ws := startService(t, Options{})
 	require.NoError(t, os.WriteFile(filepath.Join(ws, "a.txt"), []byte("0123456789"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(paths.SessionTmpDir(chat), "t.txt"), []byte("tmp"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(runnerpaths.SessionTmpDir(chat), "t.txt"), []byte("tmp"), 0o644))
 	secret := filepath.Join(t.TempDir(), "secret.txt")
 	require.NoError(t, os.WriteFile(secret, []byte("s"), 0o644))
 	require.NoError(t, os.Symlink(secret, filepath.Join(ws, "link.txt")))
@@ -168,7 +170,7 @@ func TestWriteAppendStatRemove(t *testing.T) {
 		_, err = cl.AppendFile(t.Context(), &runnerpb.AppendFileRequest{Ref: sref, Mkdir: true, Data: []byte("x\n"), Sync: true, RequestId: id})
 		require.NoError(t, err)
 	}
-	got, err = os.ReadFile(filepath.Join(paths.SessionDir(chat), "messages.jsonl"))
+	got, err = os.ReadFile(filepath.Join(runnerpaths.SessionDir(chat), "messages.jsonl"))
 	require.NoError(t, err)
 	assert.Equal(t, "x\nx\nx\n", string(got), "r1 retry is not applied twice")
 
@@ -203,12 +205,12 @@ func TestAttachmentsRoundTripRangesAndCaps(t *testing.T) {
 	r3, err := put("a", "n.txt", strings.NewReader("0123456789"))
 	require.NoError(t, err)
 	assert.Equal(t, r1, r3, "retry with the same request_id returns the original result")
-	entries, _ := os.ReadDir(paths.AttachmentsDir(chat))
+	entries, _ := os.ReadDir(runnerpaths.AttachmentsDir(chat))
 	assert.Len(t, entries, 2)
 
 	_, err = put("big", "big.bin", bytes.NewReader(make([]byte, runnerfs.MaxAttachmentSize+1)))
 	assert.Equal(t, runnerfs.CodeTooLarge, runnerfs.CodeOf(err))
-	assert.NoFileExists(t, filepath.Join(paths.AttachmentsDir(chat), "big.bin"))
+	assert.NoFileExists(t, filepath.Join(runnerpaths.AttachmentsDir(chat), "big.bin"))
 
 	f, err := fs.OpenAttachment(t.Context(), "n.txt")
 	require.NoError(t, err)

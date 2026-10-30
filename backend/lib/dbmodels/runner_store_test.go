@@ -14,7 +14,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // localResolver serves every chat from this host's layout through runnerfs,
@@ -61,7 +61,7 @@ func TestSessionRepository_TranscriptThroughRunnerFS(t *testing.T) {
 	assert.Equal(t, "yes", sess.Messages[1].ReplyText)
 
 	// The runner's copy is the file the sandbox reads as /session/messages.jsonl.
-	assert.FileExists(t, filepath.Join(paths.SessionDir(chat), "messages.jsonl"))
+	assert.FileExists(t, filepath.Join(runnerpaths.SessionDir(chat), "messages.jsonl"))
 	// The backend never created its own per-chat directory.
 	assert.NoDirExists(t, filepath.Join(sentinel, chat))
 
@@ -106,7 +106,7 @@ func TestWorkflowRunRepository_OffloadThroughRunnerFS(t *testing.T) {
 
 	assert.Equal(t, "/session/workflows/run-1/dag_spec.yaml", run.DAGSpecPath)
 	assert.Equal(t, "/session/workflows/run-1/input.txt", run.InputPath)
-	data, err := os.ReadFile(filepath.Join(paths.SessionDir("chat-wf-1"), "workflows", "run-1", "nodes", "n1.log"))
+	data, err := os.ReadFile(filepath.Join(runnerpaths.SessionDir("chat-wf-1"), "workflows", "run-1", "nodes", "n1.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "node output", string(data))
 	assert.NoDirExists(t, filepath.Join(sentinel, "chat-wf-1"))
@@ -121,7 +121,7 @@ func TestWorkflowRunRepository_OffloadThroughRunnerFS(t *testing.T) {
 	assert.Equal(t, "node output", hydrated["n1"].Output)
 
 	// A missing offloaded file keeps its typed error through the runner.
-	require.NoError(t, os.Remove(filepath.Join(paths.SessionDir("chat-wf-1"), "workflows", "run-1", "input.txt")))
+	require.NoError(t, os.Remove(filepath.Join(runnerpaths.SessionDir("chat-wf-1"), "workflows", "run-1", "input.txt")))
 	_, err = repo.GetRun("run-1")
 	assert.ErrorIs(t, err, ErrOffloadedFileMissing)
 }

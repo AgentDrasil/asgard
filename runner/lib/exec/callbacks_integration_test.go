@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/api"
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -53,6 +54,7 @@ func newCallbackStack(t *testing.T) *callbackStack {
 
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	require.NoError(t, testDB.Create(&dbmodels.RunnerAssignment{NodeID: "runner-1", UserSubject: "test-user"}).Error)
 	caller := testAgent("a", "h1", "")
 	caller.Config.RunDirs = []string{sharedRunDir}
 	server, err := api.New(&config.Config{AgentDir: t.TempDir()}, testDB,
@@ -166,7 +168,9 @@ func TestSandboxCallPeerIntoOwnChatSucceeds(t *testing.T) {
 	body, err := json.Marshal(map[string]any{"prompt": "PEERME", "chatId": "chat-int", "wait": true})
 	require.NoError(t, err)
 	rr := httptest.NewRecorder()
-	st.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/agents/a/message", bytes.NewReader(body)))
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/a/message", bytes.NewReader(body))
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{Subject: "test-user"}))
+	st.server.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 
 	var resp struct {

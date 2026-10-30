@@ -23,7 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -283,7 +283,7 @@ func TestRunCommandOutputFileArtifact(t *testing.T) {
 	a := o.exit.GetArtifacts()[0]
 	assert.Equal(t, "sub/out.txt", a.GetName())
 	assert.Equal(t, "/tmp/sub/out.txt", a.GetViewerPath())
-	assert.Equal(t, filepath.Join(paths.SessionTmpDir(chat), "sub", "out.txt"), a.GetAbsPath())
+	assert.Equal(t, filepath.Join(runnerpaths.SessionTmpDir(chat), "sub", "out.txt"), a.GetAbsPath())
 
 	// Not produced: no artifact.
 	req = unsandboxed(ws, "true")
@@ -314,11 +314,11 @@ func TestRunCommandOutputFileArtifact(t *testing.T) {
 }
 
 func TestRunCommandEnvironment(t *testing.T) {
-	t.Setenv("ASGARD_RUNNER_TLS_KEY", "/secret/key.pem")
+	t.Setenv("ASGARD_RUNNER_CERTS_DIR", "/secret/certs")
 	cl, ws := startCmdService(t, Options{AllowUnsandboxed: true}, nil)
-	o := runCmd(t, cl, unsandboxed(ws, `echo "[$ASGARD_RUNNER_TLS_KEY] $ASGARD_CHAT_ID $ASGARD_TMP_DIR"`))
+	o := runCmd(t, cl, unsandboxed(ws, `echo "[$ASGARD_RUNNER_CERTS_DIR] $ASGARD_CHAT_ID $ASGARD_TMP_DIR"`))
 	require.NoError(t, o.err)
-	assert.Equal(t, "[] "+chat+" "+paths.SessionTmpDir(chat)+"\n", o.stdout)
+	assert.Equal(t, "[] "+chat+" "+runnerpaths.SessionTmpDir(chat)+"\n", o.stdout)
 }
 
 func TestRunCommandResumeAndIdempotentAttach(t *testing.T) {
@@ -508,22 +508,29 @@ func TestRunCommandTimeoutKillsAndReportsExitMinusOne(t *testing.T) {
 }
 
 func TestRunCommandTooManyCommands(t *testing.T) {
-	cl, ws := startCmdService(t, Options{AllowUnsandboxed: true}, func(s *Service) {
+	cl, ws := startCmdService(t, Options{AllowUnsandboxed: true, DetachGrace: 50 * time.Millisecond}, func(s *Service) {
 		s.cmds = newCmdRegistry(0, 1)
 	})
-	req := unsandboxed(ws, "sleep 300")
+	req := unsandboxed(ws, "echo ready; sleep 10")
 	req.RequestId = "r1"
+	req.TimeoutSeconds = 5
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	st, err := cl.RunCommand(ctx, req)
 	require.NoError(t, err)
-	_ = st
-	time.Sleep(200 * time.Millisecond)
+	frame, err := st.Recv()
+	require.NoError(t, err)
+	require.NotNil(t, frame.GetStdout())
+
 	second := unsandboxed(ws, "true")
 	second.RequestId = "r2"
 	o := runCmd(t, cl, second)
 	assert.Equal(t, codes.ResourceExhausted, status.Code(o.err))
-	// Dropping the stream (no reattach) lets the grace period kill the sleeper.
+
+	cSt, err := cl.RunCommand(t.Context(), &runnerpb.RunCommandRequest{ChatId: req.ChatId, RequestId: "r1", Cancel: true})
+	if err == nil {
+		_, _ = cSt.Recv()
+	}
 	cancel()
 }
 
@@ -579,7 +586,7 @@ func TestRunCommandSandboxCwdIsTheSandboxView(t *testing.T) {
 		}
 	})
 	// The agent lists an allowed root under the runtime data dir, too.
-	shared = filepath.Join(paths.DataDir(), "shared")
+	shared = filepath.Join(runnerpaths.DataDir(), "shared")
 	wsDir = ws
 	run := func(runDir *runnerpb.DirRef, wd string, cross bool) cmdOut {
 		got = cmdexec.SandboxSpec{}
@@ -592,7 +599,7 @@ func TestRunCommandSandboxCwdIsTheSandboxView(t *testing.T) {
 		o := run(tmpRef, wd, false)
 		require.NoError(t, o.err, wd)
 		assert.Equal(t, want, got.Cwd, wd)
-		assert.True(t, strings.HasPrefix(got.Dir, paths.DataDir()), "Dir stays the host path: %s", got.Dir)
+		assert.True(t, strings.HasPrefix(got.Dir, runnerpaths.DataDir()), "Dir stays the host path: %s", got.Dir)
 		assert.DirExists(t, got.Dir)
 	}
 	// A run dir that is the chat's tmp dir with a relative working dir.

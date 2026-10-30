@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func viewerPaths(arts []StatusArtifact) []string {
@@ -24,7 +24,7 @@ func viewerPaths(arts []StatusArtifact) []string {
 func TestStatusArtifacts(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	const chat = "chat-1"
-	tmp, sess := paths.SessionTmpDir(chat), paths.SessionDir(chat)
+	tmp, sess := runnerpaths.SessionTmpDir(chat), runnerpaths.SessionDir(chat)
 	require.NoError(t, os.MkdirAll(filepath.Join(tmp, "plan"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmp, "plan", "a.md"), []byte("x"), 0o644))
 	require.NoError(t, os.MkdirAll(sess, 0o755))

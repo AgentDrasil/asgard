@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func IsDebugEnabled() bool {
@@ -28,7 +29,7 @@ func IsDebugEnabled() bool {
 }
 
 func SetupLogger(appName string) {
-	logDir := paths.LogsDir()
+	logDir := runnerpaths.LogsDir()
 	var logDest io.Writer = os.Stderr
 	if err := os.MkdirAll(logDir, 0755); err == nil {
 		logFile, err := os.OpenFile(filepath.Join(logDir, appName+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

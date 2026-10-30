@@ -25,7 +25,7 @@ services:
       - ETCD_ENDPOINTS=http://etcd:2379
     volumes:
       # Backend state (config incl. runner section, logs, SQLite db).
-      - ./asgard:/home/user/asgard
+      - ./asgard:/asgard
       # Server certificate/key and the CA verifying runner certificates.
       - ./certs:/certs:ro
       - ./ssh:/home/user/.ssh:ro
@@ -48,18 +48,14 @@ services:
     command:
       - -backend
       - backend:9311
-      - -tls-cert
-      - /certs/runner-1.crt # CN=runner-1, listed in runner.allowed_nodes
-      - -tls-key
-      - /certs/runner-1.key
-      - -ca
-      - /certs/ca.crt
     volumes:
-      # The runner owns the chat directories (data/sessions, data/tmp) and the
-      # agent CLI credentials. Keep /certs outside $HOME so agents cannot read
-      # the TLS key; root paths must be real paths (no symlinks).
-      - ./runner-asgard:/home/user/asgard
+      # Fixed TLS mount: runner expects /certs/tls.crt, /certs/tls.key, /certs/ca.crt.
       - ./certs:/certs:ro
-      - ~/src:/home/user/src
+      # Agent definitions and cache:
+      - ./runner-asgard:/asgard
+      # Per-session scratch and persistent data, logs:
+      - ./session-data:/session-data
+      # Workspaces mounted under /data:
+      - ~/src:/data/src
       - ./ssh:/home/user/.ssh:ro
     restart: always

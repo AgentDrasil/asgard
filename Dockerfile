@@ -202,7 +202,7 @@ RUN mkdir -p /app/bin && \
 #   docker run --security-opt seccomp=unconfined \
 #     -v ./certs:/certs:ro -v /srv/asgard:/srv/asgard \
 #     ghcr.io/agentdrasil/asgard-runner:main \
-#     -backend backend:9311 -tls-cert /certs/tls.crt -tls-key /certs/tls.key -ca /certs/ca.crt
+#     -backend backend:9311
 FROM base_devtool AS runner
 
 ARG USER_UID
@@ -212,6 +212,10 @@ RUN groupadd -g ${USER_GID} user && \
     useradd -u ${USER_UID} -g user -m -s /bin/bash user
 
 COPY --from=go-build-runner /app/bin/* /bin/
+
+# Fixed runner layout: /asgard (agent cache), /session-data (per-session tmp and
+# session directories, logs), /certs (TLS credentials).
+RUN mkdir -p /asgard /session-data /certs && chown user:user /asgard /session-data /certs
 
 USER user
 WORKDIR /home/user
@@ -248,6 +252,9 @@ RUN groupadd -g ${USER_GID} user && \
 
 COPY --from=go-build-backend /app/bin/* /bin/
 COPY --from=webui-builder /webui/dist /opt/asgard/webui
+
+# Fixed backend layout: /asgard (config, logs, data).
+RUN mkdir -p /asgard && chown user:user /asgard
 
 USER user
 WORKDIR /home/user

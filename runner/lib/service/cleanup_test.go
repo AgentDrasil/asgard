@@ -16,7 +16,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -28,7 +28,7 @@ func exists(p string) bool {
 // mkChatDirs creates the three per-chat dirs of id, each holding a file.
 func mkChatDirs(t *testing.T, id string) []string {
 	t.Helper()
-	dirs := []string{paths.SessionTmpDir(id), paths.SessionDir(id), paths.CABundleDir(id)}
+	dirs := []string{runnerpaths.SessionTmpDir(id), runnerpaths.SessionDir(id), runnerpaths.CABundleDir(id)}
 	for _, d := range dirs {
 		put(t, filepath.Join(d, "f.txt"), "x")
 	}
@@ -62,9 +62,9 @@ func TestCleanupRemovesChatDirsOnly(t *testing.T) {
 
 func TestCleanupRejectsBadChatIDs(t *testing.T) {
 	cl, _ := startService(t, Options{})
-	victim := filepath.Join(paths.DataDir(), "victim")
+	victim := filepath.Join(runnerpaths.DataDir(), "victim")
 	put(t, filepath.Join(victim, "keep.txt"), "x")
-	put(t, filepath.Join(paths.TmpDir(), "..", "victim2", "keep.txt"), "x")
+	put(t, filepath.Join(runnerpaths.TmpDir(), "..", "victim2", "keep.txt"), "x")
 	mkChatDirs(t, "good")
 
 	bad := []string{"../victim", "..", ".", "", "a/b", "/etc", strings.Repeat("a", 65), "../../victim2"}
@@ -79,8 +79,8 @@ func TestCleanupRejectsBadChatIDs(t *testing.T) {
 	}
 	assert.False(t, failed["good"])
 	assert.True(t, exists(filepath.Join(victim, "keep.txt")))
-	assert.True(t, exists(filepath.Join(paths.DataDir(), "victim2", "keep.txt")))
-	assert.False(t, exists(paths.SessionDir("good")))
+	assert.True(t, exists(filepath.Join(runnerpaths.DataDir(), "victim2", "keep.txt")))
+	assert.False(t, exists(runnerpaths.SessionDir("good")))
 }
 
 func TestCleanupDoesNotFollowSymlinks(t *testing.T) {
@@ -89,16 +89,16 @@ func TestCleanupDoesNotFollowSymlinks(t *testing.T) {
 	put(t, filepath.Join(outside, "secret.txt"), "x")
 
 	// The chat dir itself is a symlink out; another one hides a link inside.
-	require.NoError(t, os.MkdirAll(paths.TmpDir(), 0o755))
-	require.NoError(t, os.Symlink(outside, paths.SessionTmpDir("linked")))
-	require.NoError(t, os.MkdirAll(paths.SessionDir("inner"), 0o755))
-	require.NoError(t, os.Symlink(outside, filepath.Join(paths.SessionDir("inner"), "escape")))
+	require.NoError(t, os.MkdirAll(runnerpaths.TmpDir(), 0o755))
+	require.NoError(t, os.Symlink(outside, runnerpaths.SessionTmpDir("linked")))
+	require.NoError(t, os.MkdirAll(runnerpaths.SessionDir("inner"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(runnerpaths.SessionDir("inner"), "escape")))
 
 	resp, err := cl.Cleanup(context.Background(), &runnerpb.CleanupRequest{ChatIds: []string{"linked", "inner"}})
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetFailures())
-	assert.False(t, exists(paths.SessionTmpDir("linked")))
-	assert.False(t, exists(paths.SessionDir("inner")))
+	assert.False(t, exists(runnerpaths.SessionTmpDir("linked")))
+	assert.False(t, exists(runnerpaths.SessionDir("inner")))
 	assert.True(t, exists(filepath.Join(outside, "secret.txt")), "symlink target must survive")
 }
 
@@ -116,12 +116,12 @@ func TestCleanupIdempotentByRequestID(t *testing.T) {
 	retry, err := cl.Cleanup(context.Background(), req)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, retry.GetRemoved())
-	assert.True(t, exists(paths.SessionDir("c1")))
+	assert.True(t, exists(runnerpaths.SessionDir("c1")))
 
 	req2 := &runnerpb.CleanupRequest{ChatIds: []string{"c1"}, RequestId: "req-2"}
 	_, err = cl.Cleanup(context.Background(), req2)
 	require.NoError(t, err)
-	assert.False(t, exists(paths.SessionDir("c1")))
+	assert.False(t, exists(runnerpaths.SessionDir("c1")))
 }
 
 func TestCleanupOrphanSweepHonorsKeepAndCutoff(t *testing.T) {
@@ -133,12 +133,12 @@ func TestCleanupOrphanSweepHonorsKeepAndCutoff(t *testing.T) {
 		mkChatDirs(t, id)
 	}
 	for _, id := range []string{"oldKept", "oldOrphan"} {
-		for _, d := range []string{paths.SessionTmpDir(id), paths.SessionDir(id), paths.CABundleDir(id)} {
+		for _, d := range []string{runnerpaths.SessionTmpDir(id), runnerpaths.SessionDir(id), runnerpaths.CABundleDir(id)} {
 			age(t, d, old)
 		}
 	}
 	// A recent file inside an old dir keeps the whole dir.
-	for _, d := range []string{paths.SessionTmpDir("oldWithNewFile"), paths.SessionDir("oldWithNewFile"), paths.CABundleDir("oldWithNewFile")} {
+	for _, d := range []string{runnerpaths.SessionTmpDir("oldWithNewFile"), runnerpaths.SessionDir("oldWithNewFile"), runnerpaths.CABundleDir("oldWithNewFile")} {
 		age(t, d, old)
 		now := time.Now()
 		require.NoError(t, os.Chtimes(filepath.Join(d, "f.txt"), now, now))
@@ -147,8 +147,8 @@ func TestCleanupOrphanSweepHonorsKeepAndCutoff(t *testing.T) {
 	outside := t.TempDir()
 	put(t, filepath.Join(outside, "f.txt"), "x")
 	age(t, outside, old)
-	require.NoError(t, os.Symlink(outside, filepath.Join(paths.TmpDir(), "linkToOutside")))
-	put(t, filepath.Join(paths.TmpDir(), "plain.txt"), "x")
+	require.NoError(t, os.Symlink(outside, filepath.Join(runnerpaths.TmpDir(), "linkToOutside")))
+	put(t, filepath.Join(runnerpaths.TmpDir(), "plain.txt"), "x")
 
 	resp, err := cl.Cleanup(context.Background(), &runnerpb.CleanupRequest{
 		CutoffUnixNano: cutoff.UnixNano(), KeepChatIds: []string{"oldKept"},
@@ -157,28 +157,28 @@ func TestCleanupOrphanSweepHonorsKeepAndCutoff(t *testing.T) {
 	assert.Empty(t, resp.GetFailures())
 	assert.EqualValues(t, 3, resp.GetRemoved())
 
-	assert.False(t, exists(paths.SessionTmpDir("oldOrphan")))
-	assert.False(t, exists(paths.SessionDir("oldOrphan")))
-	assert.False(t, exists(paths.CABundleDir("oldOrphan")))
+	assert.False(t, exists(runnerpaths.SessionTmpDir("oldOrphan")))
+	assert.False(t, exists(runnerpaths.SessionDir("oldOrphan")))
+	assert.False(t, exists(runnerpaths.CABundleDir("oldOrphan")))
 	for _, id := range []string{"oldKept", "newOrphan", "oldWithNewFile"} {
-		assert.True(t, exists(paths.SessionTmpDir(id)), id)
-		assert.True(t, exists(paths.SessionDir(id)), id)
-		assert.True(t, exists(paths.CABundleDir(id)), id)
+		assert.True(t, exists(runnerpaths.SessionTmpDir(id)), id)
+		assert.True(t, exists(runnerpaths.SessionDir(id)), id)
+		assert.True(t, exists(runnerpaths.CABundleDir(id)), id)
 	}
 	// The CA container itself is never swept as an orphan of tmp.
-	assert.True(t, exists(paths.CABundleBaseDir()))
+	assert.True(t, exists(runnerpaths.CABundleBaseDir()))
 	assert.True(t, exists(filepath.Join(outside, "f.txt")))
-	assert.True(t, exists(filepath.Join(paths.TmpDir(), "plain.txt")))
+	assert.True(t, exists(filepath.Join(runnerpaths.TmpDir(), "plain.txt")))
 }
 
 func TestCleanupNoSweepWithoutCutoff(t *testing.T) {
 	cl, _ := startService(t, Options{})
 	mkChatDirs(t, "old")
-	age(t, paths.SessionDir("old"), time.Now().Add(-1000*time.Hour))
+	age(t, runnerpaths.SessionDir("old"), time.Now().Add(-1000*time.Hour))
 	resp, err := cl.Cleanup(context.Background(), &runnerpb.CleanupRequest{})
 	require.NoError(t, err)
 	assert.Zero(t, resp.GetRemoved())
-	assert.True(t, exists(paths.SessionDir("old")))
+	assert.True(t, exists(runnerpaths.SessionDir("old")))
 }
 
 func TestCleanupReportsFailures(t *testing.T) {
@@ -188,7 +188,7 @@ func TestCleanupReportsFailures(t *testing.T) {
 	cl, _ := startService(t, Options{})
 	mkChatDirs(t, "stuck")
 	mkChatDirs(t, "fine")
-	locked := filepath.Join(paths.SessionDir("stuck"), "locked")
+	locked := filepath.Join(runnerpaths.SessionDir("stuck"), "locked")
 	put(t, filepath.Join(locked, "f.txt"), "x")
 	require.NoError(t, os.Chmod(locked, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
@@ -198,17 +198,17 @@ func TestCleanupReportsFailures(t *testing.T) {
 	require.Len(t, resp.GetFailures(), 1)
 	assert.Equal(t, "stuck", resp.GetFailures()[0].GetChatId())
 	assert.NotEmpty(t, resp.GetFailures()[0].GetError())
-	assert.False(t, exists(paths.SessionDir("fine")))
+	assert.False(t, exists(runnerpaths.SessionDir("fine")))
 }
 
 func TestCleanupOrphanTmpSweeps(t *testing.T) {
 	cl, _ := startService(t, Options{})
-	wf := filepath.Join(paths.SessionDir("c1"), "workflows", "run1")
+	wf := filepath.Join(runnerpaths.SessionDir("c1"), "workflows", "run1")
 	put(t, filepath.Join(wf, ".dag_spec.yaml.123.tmp"), "x")
 	put(t, filepath.Join(wf, "nodes", ".n1.log.9.tmp"), "x")
 	put(t, filepath.Join(wf, "dag_spec.yaml"), "x")
 	put(t, filepath.Join(wf, "other.tmp"), "x") // no leading dot: kept
-	put(t, filepath.Join(paths.SessionDir("c1"), ".top.tmp"), "x")
+	put(t, filepath.Join(runnerpaths.SessionDir("c1"), ".top.tmp"), "x")
 	outside := t.TempDir()
 	put(t, filepath.Join(outside, ".x.tmp"), "x")
 	require.NoError(t, os.Symlink(outside, filepath.Join(wf, "link")))
@@ -234,7 +234,7 @@ func TestCleanupOrphanTmpSweeps(t *testing.T) {
 	assert.False(t, exists(filepath.Join(wf, "nodes", ".n1.log.9.tmp")))
 	assert.True(t, exists(filepath.Join(wf, "dag_spec.yaml")))
 	assert.True(t, exists(filepath.Join(wf, "other.tmp")))
-	assert.True(t, exists(filepath.Join(paths.SessionDir("c1"), ".top.tmp")), "outside the swept dir")
+	assert.True(t, exists(filepath.Join(runnerpaths.SessionDir("c1"), ".top.tmp")), "outside the swept dir")
 	assert.True(t, exists(filepath.Join(outside, ".x.tmp")), "symlink target must survive")
 
 	// Absolute refs are refused outright.

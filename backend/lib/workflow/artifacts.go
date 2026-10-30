@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // scopedDirRefRe matches `${tmp_dir}/...` and `${session_dir}/...` references
@@ -19,17 +19,17 @@ var scopedDirRefRe = regexp.MustCompile(`\$\{(tmp_dir|session_dir)\}(/[^\s"'` + 
 var absPathRe = regexp.MustCompile(`/(?:[A-Za-z0-9._~@+-]+/)*[A-Za-z0-9._~@+-]+`)
 
 // DefaultTmpDir returns the per-run temporary directory for a session:
-// ~/asgard/data/tmp/<sessionID>, the same host directory the sandbox binds as
+// /session-data/tmp/<sessionID>, the same host directory the sandbox binds as
 // /tmp (see bwrap.setupTmpDir).
 func DefaultTmpDir(sessionID string) string {
-	return paths.SessionTmpDir(sessionID)
+	return runnerpaths.SessionTmpDir(sessionID)
 }
 
 // DefaultSessionDir returns the per-run session directory for a session:
-// ~/asgard/data/sessions/<sessionID>, the same host directory the sandbox binds
+// /session-data/sessions/<sessionID>, the same host directory the sandbox binds
 // as /session (see bwrap.setupSessionDir).
 func DefaultSessionDir(sessionID string) string {
-	return paths.SessionDir(sessionID)
+	return runnerpaths.SessionDir(sessionID)
 }
 
 // ExtractArtifactPaths collects artifact file paths referenced by a human

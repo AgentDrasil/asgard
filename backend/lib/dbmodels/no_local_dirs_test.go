@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/db"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // With runners the backend's own ~/asgard/data/{tmp,sessions} stay empty:
@@ -32,12 +32,12 @@ func TestBackendCreatesNoLocalChatDirs(t *testing.T) {
 
 	// A local dir of the same chat (e.g. a co-located runner's) survives the
 	// record deletion.
-	local := paths.SessionDir("chat-legacy")
+	local := runnerpaths.SessionDir("chat-legacy")
 	require.NoError(t, os.MkdirAll(local, 0o755))
 	require.NoError(t, repo.DeleteSessionRecord("chat-legacy"))
 	assert.DirExists(t, local)
 
-	for _, d := range []string{paths.SessionTmpDir("chat-legacy"), filepath.Join(local, "workflows"), paths.CABundleDir("chat-legacy")} {
+	for _, d := range []string{runnerpaths.SessionTmpDir("chat-legacy"), filepath.Join(local, "workflows"), runnerpaths.CABundleDir("chat-legacy")} {
 		assert.NoDirExists(t, d)
 	}
 	// The legacy columns are left untouched (no destructive migration).

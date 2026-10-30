@@ -22,7 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -78,7 +78,7 @@ func TestAPIOverRunnerService(t *testing.T) {
 	require.Len(t, atts, 1)
 	assert.Equal(t, "data.txt", atts[0].Name)
 	assert.Equal(t, "text/plain; charset=utf-8", atts[0].MimeType)
-	assert.FileExists(t, filepath.Join(paths.AttachmentsDir(chat), "data.txt"))
+	assert.FileExists(t, filepath.Join(runnerpaths.AttachmentsDir(chat), "data.txt"))
 
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+chat+"/attachments/data.txt", nil)
 	req.Header.Set("Range", "bytes=3-5")
@@ -246,7 +246,7 @@ func TestAPITtydOverRunnerService(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	repo := dbmodels.NewSessionRepository(testDB)
-	work := filepath.Join(paths.SessionTmpDir(chat), "work")
+	work := filepath.Join(runnerpaths.SessionTmpDir(chat), "work")
 	require.NoError(t, os.MkdirAll(work, 0o755))
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chat, Title: "t", RunDir: work, RunnerNodeID: "r1"}))
 	ts := httptest.NewServer(srv)
@@ -332,7 +332,7 @@ func TestTranscriptAndWorkflowStoreOverRunnerService(t *testing.T) {
 	assert.True(t, got.Messages[1].Replied)
 	assert.Equal(t, "yes", got.Messages[1].ReplyText)
 
-	raw, err := os.ReadFile(filepath.Join(paths.SessionDir(chat), "messages.jsonl"))
+	raw, err := os.ReadFile(filepath.Join(runnerpaths.SessionDir(chat), "messages.jsonl"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), `"content":"hello"`)
 
@@ -340,7 +340,7 @@ func TestTranscriptAndWorkflowStoreOverRunnerService(t *testing.T) {
 	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
 	wfRepo.SetFSResolver(resolve)
 	require.NoError(t, wfRepo.SaveRun(&dbmodels.WorkflowRun{RunID: "run-e2e", SessionID: chat, Status: dbmodels.WorkflowStatusRunning, DAGSpec: "name: x\n", Input: "in"}))
-	assert.FileExists(t, filepath.Join(paths.SessionDir(chat), "workflows", "run-e2e", "dag_spec.yaml"))
+	assert.FileExists(t, filepath.Join(runnerpaths.SessionDir(chat), "workflows", "run-e2e", "dag_spec.yaml"))
 	run, err := wfRepo.GetRun("run-e2e")
 	require.NoError(t, err)
 	assert.Equal(t, "name: x\n", run.DAGSpec)

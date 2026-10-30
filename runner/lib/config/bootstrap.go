@@ -11,20 +11,34 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 const (
 	EnvBackend    = "ASGARD_RUNNER_BACKEND"
-	EnvTLSCert    = "ASGARD_RUNNER_TLS_CERT"
-	EnvTLSKey     = "ASGARD_RUNNER_TLS_KEY"
-	EnvCA         = "ASGARD_RUNNER_CA"
 	EnvServerName = "ASGARD_RUNNER_SERVER_NAME"
 	// EnvAllowUnsandboxedCommands opts the runner in to workflow command
 	// nodes that run without the bubblewrap sandbox ("1" or "true").
 	EnvAllowUnsandboxedCommands = "ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS"
+
+	// Fixed TLS credential paths inside the runner container.
+	DefaultCertsDir = "/certs"
+	EnvCertsDir     = "ASGARD_RUNNER_CERTS_DIR"
 )
+
+// CertsDir returns the directory holding TLS certificates.
+func CertsDir() string {
+	if d := os.Getenv(EnvCertsDir); d != "" {
+		return d
+	}
+	return DefaultCertsDir
+}
+
+func TLSCertPath() string { return filepath.Join(CertsDir(), "tls.crt") }
+func TLSKeyPath() string  { return filepath.Join(CertsDir(), "tls.key") }
+func CAPath() string      { return filepath.Join(CertsDir(), "ca.crt") }
 
 // Bootstrap is the configuration a runner needs before it can reach etcd or
 // the backend.
@@ -50,12 +64,13 @@ type Bootstrap struct {
 // ParseBootstrap reads the bootstrap settings from args (flags) with env as
 // the fallback for flags that are not given.
 func ParseBootstrap(args []string, getenv func(string) string) (*Bootstrap, error) {
-	b := &Bootstrap{}
+	b := &Bootstrap{
+		TLSCert: TLSCertPath(),
+		TLSKey:  TLSKeyPath(),
+		CA:      CAPath(),
+	}
 	fs := flag.NewFlagSet("asgard-runner", flag.ContinueOnError)
 	fs.StringVar(&b.Backend, "backend", getenv(EnvBackend), "backend runner registry address (host:port) [$"+EnvBackend+"]")
-	fs.StringVar(&b.TLSCert, "tls-cert", getenv(EnvTLSCert), "client certificate PEM; its CN is the node id [$"+EnvTLSCert+"]")
-	fs.StringVar(&b.TLSKey, "tls-key", getenv(EnvTLSKey), "client private key PEM [$"+EnvTLSKey+"]")
-	fs.StringVar(&b.CA, "ca", getenv(EnvCA), "CA bundle PEM verifying the backend [$"+EnvCA+"]")
 	fs.StringVar(&b.ServerName, "server-name", getenv(EnvServerName), "expected backend certificate name (default: host of -backend) [$"+EnvServerName+"]")
 	allowUnsandboxed, _ := strconv.ParseBool(getenv(EnvAllowUnsandboxedCommands))
 	fs.BoolVar(&b.AllowUnsandboxedCommands, "allow-unsandboxed-commands", allowUnsandboxed, "let workflow command nodes with sandbox: false run without the sandbox (insecure; development only) [$"+EnvAllowUnsandboxedCommands+"]")
@@ -70,19 +85,20 @@ func ParseBootstrap(args []string, getenv func(string) string) (*Bootstrap, erro
 
 // Validate checks that every required setting is present.
 func (b *Bootstrap) Validate() error {
-	var missing []string
-	for _, f := range []struct{ name, val string }{
-		{"backend", b.Backend}, {"tls-cert", b.TLSCert}, {"tls-key", b.TLSKey}, {"ca", b.CA},
-	} {
-		if strings.TrimSpace(f.val) == "" {
-			missing = append(missing, "-"+f.name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("missing required settings: %s", strings.Join(missing, ", "))
+	if strings.TrimSpace(b.Backend) == "" {
+		return errors.New("missing required setting: -backend")
 	}
 	if _, _, err := net.SplitHostPort(b.Backend); err != nil {
 		return fmt.Errorf("invalid backend address %q: %w", b.Backend, err)
+	}
+	for _, f := range []struct{ name, path string }{
+		{"client certificate", b.TLSCert},
+		{"client private key", b.TLSKey},
+		{"CA certificate", b.CA},
+	} {
+		if _, err := os.Stat(f.path); err != nil {
+			return fmt.Errorf("missing required TLS file (%s): %w", f.name, err)
+		}
 	}
 	return nil
 }

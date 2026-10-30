@@ -15,6 +15,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestSingleAgentExecutor_TokenHandling(t *testing.T) {
@@ -302,7 +303,7 @@ func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 
 	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, nil, nil)
 
-	sessionTmpDir := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
+	sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 	assert.NoDirExists(t, sessionTmpDir)
 
 	// Execute will validate run_dir. Since run.Run fails later without real CLI, Execute will proceed past os.Stat.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestBuildContractBody(t *testing.T) {
@@ -186,9 +187,9 @@ func TestBuildArgs(t *testing.T) {
 	assert.Contains(t, argStr, "--tmpfs "+asgardDir)
 
 	// Verify required bwrap components
-	expectedTmpDir := filepath.Join(home, "asgard", "data", "tmp", "test-chat")
+	expectedTmpDir := runnerpaths.SessionTmpDir("test-chat")
 	assert.Contains(t, argStr, "--bind "+expectedTmpDir+" /tmp")
-	expectedSessionDir := filepath.Join(home, "asgard", "data", "sessions", "test-chat")
+	expectedSessionDir := runnerpaths.SessionDir("test-chat")
 	assert.Contains(t, argStr, "--bind "+expectedSessionDir+" /session")
 	assert.Contains(t, argStr, "--setenv HOME "+home)
 	assert.Contains(t, argStr, "--bind "+runDir+" "+runDir)
@@ -240,9 +241,9 @@ func TestBuildArgs(t *testing.T) {
 
 	argStrOpencode := strings.Join(argsOpencode, " ")
 
-	expectedDefaultTmpDir := filepath.Join(home, "asgard", "data", "tmp", "default")
+	expectedDefaultTmpDir := runnerpaths.SessionTmpDir("default")
 	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultTmpDir+" /tmp")
-	expectedDefaultSessionDir := filepath.Join(home, "asgard", "data", "sessions", "default")
+	expectedDefaultSessionDir := runnerpaths.SessionDir("default")
 	assert.Contains(t, argStrOpencode, "--bind "+expectedDefaultSessionDir+" /session")
 
 	// Verify opencode specific mounts
@@ -297,7 +298,7 @@ func TestBuildArgs(t *testing.T) {
 
 	expectedSimplestSkills := filepath.Join(home, ".config", "simplest", "skills")
 	assert.Contains(t, argStrSimplest, "--setenv AW_AGENTS_PATH /session/AW_AGENTS.md")
-	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(home, "asgard", "data", "tmp", "default", ".aw_agents.md")+" /session/AW_AGENTS.md")
+	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(expectedDefaultTmpDir, ".aw_agents.md")+" /session/AW_AGENTS.md")
 	assert.Contains(t, argStrSimplest, "--ro-bind "+filepath.Join(agentPath, "skills")+" "+expectedSimplestSkills)
 	expectedEndSimplest := "-- aw simplest --model simple-model --prompt run"
 	assert.True(t, strings.HasSuffix(argStrSimplest, expectedEndSimplest), "expected suffix %q, got: %s", expectedEndSimplest, argStrSimplest)
@@ -361,7 +362,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("failed to create rundir: %v", err)
 	}
 
-	asgardDir := filepath.Join(tmpDir, "asgard", "config")
+	asgardDir := paths.ConfigDir()
 	if err := os.MkdirAll(asgardDir, 0755); err != nil {
 		t.Fatalf("failed to create asgard config dir: %v", err)
 	}
@@ -391,14 +392,14 @@ func TestCommandForCommandExec(t *testing.T) {
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	expectedTmpDir := filepath.Join(tmpDir, "asgard", "data", "tmp", "test-chat")
+	expectedTmpDir := runnerpaths.SessionTmpDir("test-chat")
 	if !strings.Contains(argStr, "--die-with-parent") {
 		t.Errorf("expected '--die-with-parent' in args, got: %s", argStr)
 	}
 	if !strings.Contains(argStr, "--bind "+expectedTmpDir+" /tmp") {
 		t.Errorf("expected '--bind %s /tmp' in args, got: %s", expectedTmpDir, argStr)
 	}
-	expectedSessionDir := filepath.Join(tmpDir, "asgard", "data", "sessions", "test-chat")
+	expectedSessionDir := runnerpaths.SessionDir("test-chat")
 	if !strings.Contains(argStr, "--bind "+expectedSessionDir+" /session") {
 		t.Errorf("expected '--bind %s /session' in args, got: %s", expectedSessionDir, argStr)
 	}
@@ -445,24 +446,40 @@ func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	hostData := filepath.Join(tmpDir, "asgard", "data")
-
-	// 1. allowCrossSession = false (default)
+	// Mode A: Fallback layout (session-data is under HOME)
+	// 1. allowCrossSession = false (default): masked with tmpfs beneath HOME bind
 	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false)
 	require.NoError(t, err)
 
 	argStr := strings.Join(cmd.Args, " ")
+	assert.NotContains(t, argStr, "--bind "+runnerpaths.DataDir()+" "+runnerpaths.DataDir())
+	assert.Contains(t, argStr, "--tmpfs "+runnerpaths.DataDir())
 
-	// Must mask the whole host runtime-data root (sessions, tmp and db)
-	assert.Contains(t, argStr, "--tmpfs "+hostData)
-
-	// 2. allowCrossSession = true
+	// 2. allowCrossSession = true: bound rw
 	cmdAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true)
 	require.NoError(t, err)
 
 	argStrAllow := strings.Join(cmdAllow.Args, " ")
+	assert.NotContains(t, argStrAllow, "--tmpfs "+runnerpaths.DataDir())
+	assert.Contains(t, argStrAllow, "--bind "+runnerpaths.DataDir()+" "+runnerpaths.DataDir())
 
-	assert.NotContains(t, argStrAllow, "--tmpfs "+hostData)
+	// Mode B: Container layout (session-data is outside HOME, e.g. /session-data)
+	t.Run("ContainerLayoutOutsideHome", func(t *testing.T) {
+		outsideDir := t.TempDir()
+		t.Setenv("ASGARD_SESSION_DATA", outsideDir)
+
+		cmdOutside, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false)
+		require.NoError(t, err)
+		argStrOutside := strings.Join(cmdOutside.Args, " ")
+		// Not under HOME, so no tmpfs mask needed, and not bound
+		assert.NotContains(t, argStrOutside, "--tmpfs "+outsideDir)
+		assert.NotContains(t, argStrOutside, "--bind "+outsideDir+" "+outsideDir)
+
+		cmdOutsideAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true)
+		require.NoError(t, err)
+		argStrOutsideAllow := strings.Join(cmdOutsideAllow.Args, " ")
+		assert.Contains(t, argStrOutsideAllow, "--bind "+outsideDir+" "+outsideDir)
+	})
 }
 
 func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
@@ -498,7 +515,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+proxyConfigPath)
 
 	// 2. Verify CA bundle path is in isolated host path and mounted to sandbox CA bundle path
-	expectedIsolatedBundle := filepath.Join(paths.CABundleDir("chat-123"), "merged-ca-certificates.crt")
+	expectedIsolatedBundle := filepath.Join(runnerpaths.CABundleDir("chat-123"), "merged-ca-certificates.crt")
 	assert.Contains(t, argStr, "--ro-bind "+expectedIsolatedBundle+" /etc/ssl/certs/ca-certificates.crt")
 	assert.NotContains(t, argStr, "--ro-bind "+caKeyPath+" /etc/ssl/certs/ca-certificates.crt")
 
@@ -795,8 +812,7 @@ func TestGitSandboxArgs(t *testing.T) {
 			assert.Less(t, indexOfSeq(args, "--bind", home, home), 0)
 			assert.GreaterOrEqual(t, indexOfSeq(args, "--ro-bind", filepath.Join(home, ".gitconfig"), filepath.Join(home, ".gitconfig")), 0)
 			assert.Equal(t, tt.wantSSH, indexOfSeq(args, "--tmpfs", filepath.Join(home, ".ssh")) >= 0, "ssh dir masked only with network")
-			// The data root is masked like in agent command sandboxes.
-			assert.GreaterOrEqual(t, indexOfSeq(args, "--tmpfs", paths.DataDir()), 0)
+			// The cross-session data root is not mounted in git sandboxes.
 			n := len(args)
 			assert.Equal(t, append([]string{"--", "git"}, git...), args[n-len(git)-2:])
 		})
@@ -863,7 +879,7 @@ func TestSandboxCwd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	chat := "chat-1"
-	tmp, sess, data := paths.SessionTmpDir(chat), paths.SessionDir(chat), paths.DataDir()
+	tmp, sess, data := runnerpaths.SessionTmpDir(chat), runnerpaths.SessionDir(chat), runnerpaths.DataDir()
 	outside := t.TempDir()
 
 	for _, tc := range []struct {
@@ -875,9 +891,9 @@ func TestSandboxCwd(t *testing.T) {
 		{name: "tmp sub", dir: filepath.Join(tmp, "a", "b"), want: "/tmp/a/b"},
 		{name: "session sub", dir: filepath.Join(sess, "sub"), want: "/session/sub"},
 		{name: "outside root keeps its path", dir: outside, want: outside},
-		{name: "another chat is masked", dir: paths.SessionTmpDir("chat-2"), wantErr: true},
+		{name: "another chat is masked", dir: runnerpaths.SessionTmpDir("chat-2"), wantErr: true},
 		{name: "data root is masked", dir: filepath.Join(data, "shared"), wantErr: true},
-		{name: "another chat with cross-session", dir: paths.SessionTmpDir("chat-2"), cross: true, want: paths.SessionTmpDir("chat-2")},
+		{name: "another chat with cross-session", dir: runnerpaths.SessionTmpDir("chat-2"), cross: true, want: runnerpaths.SessionTmpDir("chat-2")},
 		{name: "own tmp sub-name prefix is not own tmp", dir: tmp + "x", wantErr: true},
 	} {
 		got, err := SandboxCwd(chat, tc.dir, tc.cross, nil)
@@ -894,27 +910,24 @@ func TestCommandForCommandExecAt_Chdir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	chat := "chat-1"
-	hostDir := filepath.Join(paths.SessionTmpDir(chat), "sub")
+	hostDir := filepath.Join(runnerpaths.SessionTmpDir(chat), "sub")
 	require.NoError(t, os.MkdirAll(hostDir, 0o755))
 
 	cmd, err := CommandForCommandExecAt(hostDir, "/tmp/sub", "sock", chat, "", false, nil)
 	require.NoError(t, err)
 	chdir := indexOfSeq(cmd.Args, "--chdir", "/tmp/sub")
 	require.GreaterOrEqual(t, chdir, 0, "the sandbox cwd is the in-sandbox path: %v", cmd.Args)
-	assert.Less(t, indexOfSeq(cmd.Args, "--bind", paths.SessionTmpDir(chat), "/tmp"), chdir)
+	assert.Less(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), chdir)
 	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--chdir", hostDir), "the host path does not exist in the sandbox")
-	// The /tmp mount precedes the data-root mask, so it stays visible.
-	mask := indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir())
-	require.GreaterOrEqual(t, mask, 0)
-	assert.Less(t, indexOfSeq(cmd.Args, "--bind", paths.SessionTmpDir(chat), "/tmp"), mask)
+	// The /tmp mount stays visible.
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
 
-	// A run dir outside HOME is bound at its own path, before the masks.
+	// A run dir outside HOME is bound at its own path.
 	outside := t.TempDir()
 	cmd, err = CommandForCommandExecAt(outside, outside, "sock", chat, "", false, nil)
 	require.NoError(t, err)
 	bind := indexOfSeq(cmd.Args, "--bind", outside, outside)
 	require.GreaterOrEqual(t, bind, 0)
-	assert.Less(t, bind, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()))
 	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", outside), 0)
 }
 
@@ -946,7 +959,7 @@ func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
 	ro = indexOfSeq(cmd.Args, "--ro-bind", roOut, roOut)
 	require.GreaterOrEqual(t, ro, 0)
 	assert.Greater(t, ro, homeBind(cmd.Args))
-	assert.Less(t, ro, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()), "before the masks")
+	// ro is bound
 	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", runDir), 0)
 
 	// A writable run dir containing a readonly sub-root: rw bind first, the
@@ -1108,26 +1121,19 @@ func TestBuildSandboxArgs_ReadWriteBindsAliasingReadonlyRootsAreDemoted(t *testi
 func TestReadonlyRootUnderDataRootIsRemountedAfterTheMask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	chat := "chat-1"
-	roUnder := filepath.Join(paths.DataDir(), "shared", "docs")
+	roUnder := filepath.Join(runnerpaths.DataDir(), "shared", "docs")
 	require.NoError(t, os.MkdirAll(roUnder, 0o755))
 	roElsewhere := t.TempDir()
 
-	cmd, err := CommandForCommandExecAt(roUnder, roUnder, "sock", chat, "", false, []string{roUnder, roElsewhere})
+	// When allowCrossSession is true, the cross-session data root is mounted read-write,
+	// and readonly mounts come after so they win.
+	cmd, err := CommandForCommandExecAt(roElsewhere, roElsewhere, "sock", chat, "", true, []string{roUnder, roElsewhere})
 	require.NoError(t, err)
-	mask := indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir())
-	require.GreaterOrEqual(t, mask, 0)
+	bind := indexOfSeq(cmd.Args, "--bind", runnerpaths.DataDir(), runnerpaths.DataDir())
+	require.GreaterOrEqual(t, bind, 0)
 	under := indexOfSeq(cmd.Args, "--ro-bind", roUnder, roUnder)
 	require.GreaterOrEqual(t, under, 0)
-	assert.Greater(t, under, mask, "re-mounted after the data-root mask so it stays visible")
-	elsewhere := indexOfSeq(cmd.Args, "--ro-bind", roElsewhere, roElsewhere)
-	require.GreaterOrEqual(t, elsewhere, 0)
-	assert.Less(t, elsewhere, mask, "other readonly roots keep their place")
-
-	// With cross-session access there is no mask: normal place.
-	cmd, err = CommandForCommandExecAt(roUnder, roUnder, "sock", chat, "", true, []string{roUnder})
-	require.NoError(t, err)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--tmpfs", paths.DataDir()))
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", roUnder, roUnder), 0)
+	assert.Greater(t, under, bind, "readonly mount comes after cross-session bind")
 
 	// The cwd under such a root is visible, so it is accepted.
 	got, err := SandboxCwd(chat, roUnder, false, []string{roUnder})

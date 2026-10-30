@@ -10,13 +10,13 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/pkg/metrics"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	backendpaths "github.com/AgentDrasil/asgard/pkg/paths/backend"
 )
 
 // compressionMetricsFile is the durable home of the aggregate tally, kept
 // alongside the other runtime data so it survives backend restarts.
 func compressionMetricsFile() string {
-	return filepath.Join(paths.DataDir(), "compression-metrics.json")
+	return filepath.Join(backendpaths.DataDir(), "compression-metrics.json")
 }
 
 // CompressionCounters is the cumulative tally of command-output compression

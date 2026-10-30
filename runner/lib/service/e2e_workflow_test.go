@@ -10,7 +10,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -44,7 +44,7 @@ func TestWorkflowFileOpsOverRunnerService(t *testing.T) {
 
 	res := run(filepath.Join(ws, "items.txt"))
 	require.Equal(t, workflow.RunStatusCompleted, res.Status)
-	out, err := os.ReadFile(filepath.Join(paths.SessionTmpDir(chat), "out", "results.jsonl"))
+	out, err := os.ReadFile(filepath.Join(runnerpaths.SessionTmpDir(chat), "out", "results.jsonl"))
 	require.NoError(t, err)
 	assert.Contains(t, string(out), `"item":"one"`)
 	assert.Contains(t, string(out), `"item":"two"`)
@@ -55,7 +55,7 @@ func TestWorkflowFileOpsOverRunnerService(t *testing.T) {
 	require.NoError(t, os.WriteFile(outside, []byte("leak\n"), 0o644))
 	res = run(outside)
 	require.Equal(t, workflow.RunStatusCompleted, res.Status)
-	out, err = os.ReadFile(filepath.Join(paths.SessionTmpDir(chat), "out", "results.jsonl"))
+	out, err = os.ReadFile(filepath.Join(runnerpaths.SessionTmpDir(chat), "out", "results.jsonl"))
 	require.NoError(t, err)
 	assert.Empty(t, out)
 
@@ -108,7 +108,7 @@ nodes:
 	require.NoError(t, err)
 	assert.Equal(t, "hello\n"+realWS+"\n", produce.Output)
 	assert.Equal(t, map[string]string{"res/out.txt": "/tmp/res/out.txt"}, produce.Artifacts)
-	data, err := os.ReadFile(filepath.Join(paths.SessionTmpDir(chat), "res", "out.txt"))
+	data, err := os.ReadFile(filepath.Join(runnerpaths.SessionTmpDir(chat), "res", "out.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "data\n", string(data))
 

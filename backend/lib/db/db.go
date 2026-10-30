@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	backendpaths "github.com/AgentDrasil/asgard/pkg/paths/backend"
 )
 
 func gormConfig(prepareStmt bool) *gorm.Config {
@@ -52,7 +52,7 @@ func newSQLiteDB(dsn string) (*gorm.DB, error) {
 // configurable.
 func NewDB(conf *config.Config) (*gorm.DB, error) {
 	if conf.DB == "sqlite" {
-		return newSQLiteDB(paths.DBFile())
+		return newSQLiteDB(backendpaths.DBFile())
 	}
 	return gorm.Open(postgres.Open(conf.DSN), gormConfig(true))
 }

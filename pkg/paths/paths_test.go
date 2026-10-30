@@ -8,41 +8,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPaths_RootAndSubdirs(t *testing.T) {
-	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
-
-	expectedRoot := filepath.Join(tempHome, "asgard")
-	assert.Equal(t, expectedRoot, Root())
-	assert.Equal(t, filepath.Join(expectedRoot, "config"), ConfigDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "config", "config.yaml"), ConfigFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "config", "proxy.yaml"), ProxyConfigFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "config", "keys.yaml"), KeysFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "config", "ca", "ca.crt"), CACertFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "config", "ca", "ca.key"), CAKeyFile())
-	assert.Equal(t, expectedRoot, AgentsRoot())
-	assert.Equal(t, filepath.Join(expectedRoot, "agents"), AgentsDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "teams.yaml"), TeamsFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "logs"), LogsDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "data"), DataDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "data.db"), DBFile())
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "sessions"), SessionsDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "sessions", "chat-1"), SessionDir("chat-1"))
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp"), TmpDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "chat-1"), SessionTmpDir("chat-1"))
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "chat-1", "attachments"), AttachmentsDir("chat-1"))
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "tmp", "sock-name"), SockDir("sock-name"))
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache"), AgentsCacheDir())
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache", "coder@abc123"), AgentCacheDir("coder", "abc123"))
-	assert.Equal(t, filepath.Join(expectedRoot, "data", "agents-cache", "runners", "n1", "coder@abc123"), RunnerAgentCacheDir("n1", "coder", "abc123"))
+func TestPaths_RootOverride(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(EnvRoot, root)
+	assert.Equal(t, root, Root())
+	assert.Equal(t, filepath.Join(root, "config"), ConfigDir())
+	assert.Equal(t, filepath.Join(root, "config", "config.yaml"), ConfigFile())
+	assert.Equal(t, filepath.Join(root, "config", "proxy.yaml"), ProxyConfigFile())
+	assert.Equal(t, filepath.Join(root, "config", "keys.yaml"), KeysFile())
+	assert.Equal(t, filepath.Join(root, "config", "ca", "ca.crt"), CACertFile())
+	assert.Equal(t, filepath.Join(root, "config", "ca", "ca.key"), CAKeyFile())
+	assert.Equal(t, root, AgentsRoot())
+	assert.Equal(t, filepath.Join(root, "agents"), AgentsDir())
+	assert.Equal(t, filepath.Join(root, "teams.yaml"), TeamsFile())
+	assert.Equal(t, filepath.Join(root, "agents-cache"), AgentsCacheDir())
+	assert.Equal(t, filepath.Join(root, "agents-cache", "coder@abc123"), AgentCacheDir("coder", "abc123"))
+	assert.Equal(t, filepath.Join(root, "agents-cache", "runners", "n1", "coder@abc123"), RunnerAgentCacheDir("n1", "coder", "abc123"))
 }
 
-func TestPaths_CABundle(t *testing.T) {
-	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
-
-	require.Equal(t, ".asgard-ca", CABundleDirName)
-	expectedBase := filepath.Join(tempHome, "asgard", "data", "tmp", ".asgard-ca")
-	assert.Equal(t, expectedBase, CABundleBaseDir())
-	assert.Equal(t, filepath.Join(expectedBase, "chat-xyz"), CABundleDir("chat-xyz"))
+func TestPaths_Fallback(t *testing.T) {
+	r := Root()
+	require.NotEmpty(t, r)
 }

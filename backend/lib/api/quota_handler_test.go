@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -132,11 +132,11 @@ func TestCreateRunnerBoundSessionCreatesNoLocalDirs(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 	var created ChatSession
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
-	assert.NoDirExists(t, paths.SessionTmpDir(created.ChatID))
-	assert.NoDirExists(t, paths.SessionDir(created.ChatID))
-	assert.NoDirExists(t, paths.CABundleDir(created.ChatID))
-	if _, err := os.Stat(paths.TmpDir()); err == nil {
-		entries, _ := os.ReadDir(paths.TmpDir())
+	assert.NoDirExists(t, runnerpaths.SessionTmpDir(created.ChatID))
+	assert.NoDirExists(t, runnerpaths.SessionDir(created.ChatID))
+	assert.NoDirExists(t, runnerpaths.CABundleDir(created.ChatID))
+	if _, err := os.Stat(runnerpaths.TmpDir()); err == nil {
+		entries, _ := os.ReadDir(runnerpaths.TmpDir())
 		assert.Empty(t, entries)
 	}
 }

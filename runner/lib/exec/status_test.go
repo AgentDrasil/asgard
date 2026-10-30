@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -89,7 +89,7 @@ func TestStatusSocketEmitsRunEvents(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.GetMetadataJson(), &meta))
 	assert.Equal(t, "m1", meta["model"])
 
-	tmp, sess := paths.SessionTmpDir("chat-1"), paths.SessionDir("chat-1")
+	tmp, sess := runnerpaths.SessionTmpDir("chat-1"), runnerpaths.SessionDir("chat-1")
 	require.Len(t, first.GetArtifacts(), 3)
 	assert.Equal(t, "/tmp/plan/a.md", first.GetArtifacts()[0].GetViewerPath())
 	assert.Equal(t, filepath.Join(tmp, "plan/a.md"), first.GetArtifacts()[0].GetAbsPath())

@@ -26,6 +26,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
 )
@@ -221,7 +222,7 @@ func startStackWith(t *testing.T, ex *Executor, mutate func(*runnerhub.Options))
 
 func integrationStartRun(t *testing.T, runID, prompt string) *runnerpb.StartRun {
 	t.Helper()
-	tmp := paths.SessionTmpDir("chat-int")
+	tmp := runnerpaths.SessionTmpDir("chat-int")
 	require.NoError(t, os.MkdirAll(tmp, 0o755))
 	return &runnerpb.StartRun{
 		RunId:      runID,

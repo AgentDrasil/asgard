@@ -18,7 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -108,7 +108,7 @@ func TestSchedulerCleansThroughRunners(t *testing.T) {
 		return d
 	}
 	gone := []string{mkLocal(tmpBase, "expOnA"), mkLocal(sessBase, "expOnA"), mkLocal(sessBase, "expUnbound"),
-		mkLocal(filepath.Join(tmpBase, paths.CABundleDirName), "expOnA"), mkLocal(sessBase, "oldOrphan")}
+		mkLocal(filepath.Join(tmpBase, runnerpaths.CABundleDirName), "expOnA"), mkLocal(sessBase, "oldOrphan")}
 	stay := []string{mkLocal(sessBase, "expOnB"), mkLocal(sessBase, "newOrphan"), mkLocal(tmpBase, "recentOnA")}
 	require.NoError(t, os.Chtimes(gone[4], old, old))
 	outside := t.TempDir()

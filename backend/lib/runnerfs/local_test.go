@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -294,8 +295,8 @@ func TestLocalRootUnderSymlinkIsRejected(t *testing.T) {
 func TestRunDirRefMapsChatDirsAcrossHomes(t *testing.T) {
 	for _, home := range []string{t.TempDir(), t.TempDir()} {
 		t.Setenv("HOME", home)
-		tmp := filepath.Join(home, "asgard", "data", "tmp", testChat)
-		sess := filepath.Join(home, "asgard", "data", "sessions", testChat)
+		tmp := runnerpaths.SessionTmpDir(testChat)
+		sess := runnerpaths.SessionDir(testChat)
 		ref := RunDirRef(testChat, tmp)
 		assert.Equal(t, runnerpb.FileScope_FILE_SCOPE_TMP, ref.GetScope())
 		assert.Empty(t, ref.GetRelOrPath())
@@ -303,7 +304,7 @@ func TestRunDirRefMapsChatDirsAcrossHomes(t *testing.T) {
 		assert.Equal(t, runnerpb.FileScope_FILE_SCOPE_SESSION, ref.GetScope())
 		assert.Equal(t, "sub", ref.GetRelOrPath())
 		// Another chat's dir, or a foreign host path, stays absolute.
-		other := RunDirRef(testChat, filepath.Join(home, "asgard", "data", "tmp", "other"))
+		other := RunDirRef(testChat, runnerpaths.SessionTmpDir("other"))
 		assert.Equal(t, runnerpb.FileScope_FILE_SCOPE_ABSOLUTE, other.GetScope())
 		assert.Nil(t, RunDirRef(testChat, ""))
 	}
@@ -393,7 +394,7 @@ func TestLocalMkdir(t *testing.T) {
 	// Namespace dirs are created on demand, including the root itself.
 	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: ws, Path: "/tmp"}, ""))
 	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: ws, Path: "/session/x/y"}, ""))
-	assert.DirExists(t, filepath.Join(os.Getenv("HOME"), "asgard", "data", "sessions", testChat, "x", "y"))
+	assert.DirExists(t, filepath.Join(runnerpaths.SessionDir(testChat), "x", "y"))
 
 	// Confinement: escapes, symlinks and outside roots are refused.
 	require.NoError(t, os.Symlink(outside, filepath.Join(ws, "link")))

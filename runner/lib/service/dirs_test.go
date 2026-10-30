@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -81,7 +82,7 @@ func TestTreePagingScopeAndTraversal(t *testing.T) {
 	}
 
 	// TMP-scoped dir refs resolve in the chat's own tmp dir.
-	put(t, filepath.Join(os.Getenv("HOME"), "asgard", "data", "tmp", chat, "t.txt"), "t")
+	put(t, filepath.Join(runnerpaths.SessionTmpDir(chat), "t.txt"), "t")
 	resp, err := cl.Tree(t.Context(), &runnerpb.TreeRequest{SessionId: chat, RunDir: &runnerpb.DirRef{Scope: runnerpb.FileScope_FILE_SCOPE_TMP}})
 	require.NoError(t, err)
 	require.Len(t, resp.GetEntries(), 1)

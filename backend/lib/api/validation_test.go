@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestIsValidChatID(t *testing.T) {
@@ -38,7 +40,7 @@ func TestNormalizeSessionRunDir(t *testing.T) {
 	t.Setenv("HOME", tempHome)
 
 	chatID := "session-123"
-	expectedSessionTmp := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
+	expectedSessionTmp := runnerpaths.SessionTmpDir(chatID)
 
 	// /tmp -> ~/tmp/<chatID>
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("/tmp", chatID))
@@ -71,12 +73,12 @@ func TestNormalizeSessionRunDir(t *testing.T) {
 	// Cross-session path re-anchoring:
 	// A path from an old session under ~/tmp/<oldChatID> or ~/data/<oldChatID> must be re-anchored to chatID
 	oldChatID := "session-old-456"
-	oldSessionTmp := filepath.Join(tempHome, "asgard", "data", "tmp", oldChatID)
+	oldSessionTmp := runnerpaths.SessionTmpDir(oldChatID)
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir(oldSessionTmp, chatID))
 	assert.Equal(t, filepath.Join(expectedSessionTmp, "sub"), NormalizeSessionRunDir(filepath.Join(oldSessionTmp, "sub"), chatID))
 
-	expectedSessionData := filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
-	oldSessionData := filepath.Join(tempHome, "asgard", "data", "sessions", oldChatID)
+	expectedSessionData := runnerpaths.SessionDir(chatID)
+	oldSessionData := runnerpaths.SessionDir(oldChatID)
 	assert.Equal(t, expectedSessionData, NormalizeSessionRunDir(oldSessionData, chatID))
 	assert.Equal(t, filepath.Join(expectedSessionData, "nested"), NormalizeSessionRunDir(filepath.Join(oldSessionData, "nested"), chatID))
 
@@ -168,7 +170,7 @@ func TestNormalizeSessionRunDir_Extended(t *testing.T) {
 	t.Setenv("HOME", tempHome)
 
 	chatID := "session-123"
-	expectedSessionTmp := filepath.Join(tempHome, "asgard", "data", "tmp", chatID)
+	expectedSessionTmp := runnerpaths.SessionTmpDir(chatID)
 
 	// Relative narrow forms
 	assert.Equal(t, expectedSessionTmp, NormalizeSessionRunDir("tmp", chatID))
@@ -194,7 +196,7 @@ func TestSessionNamespacePaths(t *testing.T) {
 	t.Setenv("HOME", tempHome)
 
 	chatID := "session-123"
-	expectedSessionDir := filepath.Join(tempHome, "asgard", "data", "sessions", chatID)
+	expectedSessionDir := runnerpaths.SessionDir(chatID)
 
 	assert.Equal(t, expectedSessionDir, GetSessionScopedBaseDir("session", chatID))
 

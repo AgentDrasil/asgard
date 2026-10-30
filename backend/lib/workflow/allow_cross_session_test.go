@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -209,15 +210,16 @@ exit 0
 		return string(data)
 	}
 
-	hostData := filepath.Join(home, "asgard", "data")
+	crossBase := runnerpaths.DataDir()
+	bindTarget := "--bind\n" + crossBase + "\n" + crossBase
 
-	t.Run("masked when flag is false", func(t *testing.T) {
+	t.Run("unmounted when flag is false", func(t *testing.T) {
 		args := runNode(t, false)
-		assert.Contains(t, args, "--tmpfs\n"+hostData)
+		assert.NotContains(t, args, bindTarget)
 	})
 
-	t.Run("unmasked when flag is true", func(t *testing.T) {
+	t.Run("mounted when flag is true", func(t *testing.T) {
 		args := runNode(t, true)
-		assert.NotContains(t, args, "--tmpfs\n"+hostData)
+		assert.Contains(t, args, bindTarget)
 	})
 }

@@ -12,19 +12,19 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // CleanupRoots are the runner-local roots that hold per-chat directories:
 // <Tmp>/<chat>, <Sessions>/<chat> and <CA>/<chat> (the merged CA bundle).
-// CA normally lies inside Tmp (paths.CABundleDirName).
+// CA normally lies inside Tmp (runnerpaths.CABundleDirName).
 type CleanupRoots struct {
 	Tmp, Sessions, CA string
 }
 
 // DefaultCleanupRoots are the runner's own data dirs.
 func DefaultCleanupRoots() CleanupRoots {
-	return CleanupRoots{Tmp: paths.TmpDir(), Sessions: paths.SessionsDir(), CA: paths.CABundleBaseDir()}
+	return CleanupRoots{Tmp: runnerpaths.TmpDir(), Sessions: runnerpaths.SessionsDir(), CA: runnerpaths.CABundleBaseDir()}
 }
 
 // CleanupTmpSweep removes dangling atomic-write temp files (`.<base>.*.tmp`)

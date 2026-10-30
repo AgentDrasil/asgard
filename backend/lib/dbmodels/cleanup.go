@@ -10,16 +10,16 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 // CleanExpiredSessionsOptions contains configuration for session cleanup.
 type CleanExpiredSessionsOptions struct {
 	Cutoff time.Time
-	// TmpBase overrides the session temporary root; defaults to paths.TmpDir().
+	// TmpBase overrides the session temporary root; defaults to runnerpaths.TmpDir().
 	// It exists only to isolate tests.
 	TmpBase string
-	// SessionBase overrides the persistent session root; defaults to paths.SessionsDir().
+	// SessionBase overrides the persistent session root; defaults to runnerpaths.SessionsDir().
 	// It exists only to isolate tests.
 	SessionBase string
 }
@@ -78,9 +78,9 @@ func (r *SessionRepository) WorkflowChatsByRunner() (map[string][]string, error)
 }
 
 // CleanExpiredSessions is the runner-less cleanup: it deletes inactive, non-running sessions and their corresponding
-// session directories (~/asgard/data/tmp/<chatID> and
-// ~/asgard/data/sessions/<chatID>, plus the per-chat merged CA bundle dir
-// ~/asgard/data/tmp/.asgard-ca/<chatID>) older than cutoff on THIS host. Only
+// session directories (/session-data/tmp/<chatID> and
+// /session-data/sessions/<chatID>, plus the per-chat merged CA bundle dir
+// /session-data/tmp/.asgard-ca/<chatID>) older than cutoff on THIS host. Only
 // the runner-less (development) setup uses it: with runners configured the
 // directories live on the runners and backend/lib/cleanup asks them to clean
 // up (Cleanup RPC) instead of touching any local directory.
@@ -92,11 +92,11 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 
 	tmpDir := opts.TmpBase
 	if tmpDir == "" {
-		tmpDir = paths.TmpDir()
+		tmpDir = runnerpaths.TmpDir()
 	}
 	sessionDir := opts.SessionBase
 	if sessionDir == "" {
-		sessionDir = paths.SessionsDir()
+		sessionDir = runnerpaths.SessionsDir()
 	}
 
 	cleanupBases := make([]string, 0, 2)
@@ -150,7 +150,7 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 			// The CA bundle container (~/tmp/.asgard-ca) holds one subdirectory per
 			// chat; sweep each chat bundle individually so bundles of live chats are
 			// never removed wholesale.
-			if base == tmpDir && entry.Name() == paths.CABundleDirName {
+			if base == tmpDir && entry.Name() == runnerpaths.CABundleDirName {
 				caEntries, err := os.ReadDir(dirPath)
 				if err != nil {
 					continue

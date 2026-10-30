@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -22,9 +22,9 @@ func ResolveDirRef(chatID string, ref *runnerpb.DirRef) (string, error) {
 		if chatID == "" || !filepath.IsLocal(chatID) {
 			return "", fmt.Errorf("invalid chat id %q for %s dir", chatID, ref.GetScope())
 		}
-		base := paths.SessionTmpDir(chatID)
+		base := runnerpaths.SessionTmpDir(chatID)
 		if ref.GetScope() == runnerpb.FileScope_FILE_SCOPE_SESSION {
-			base = paths.SessionDir(chatID)
+			base = runnerpaths.SessionDir(chatID)
 		}
 		if rel == "" {
 			return base, nil
@@ -54,8 +54,8 @@ func DirRefFor(chatID, abs string) *runnerpb.DirRef {
 			scope runnerpb.FileScope
 			base  string
 		}{
-			{runnerpb.FileScope_FILE_SCOPE_TMP, paths.SessionTmpDir(chatID)},
-			{runnerpb.FileScope_FILE_SCOPE_SESSION, paths.SessionDir(chatID)},
+			{runnerpb.FileScope_FILE_SCOPE_TMP, runnerpaths.SessionTmpDir(chatID)},
+			{runnerpb.FileScope_FILE_SCOPE_SESSION, runnerpaths.SessionDir(chatID)},
 		} {
 			if abs == c.base {
 				return &runnerpb.DirRef{Scope: c.scope}

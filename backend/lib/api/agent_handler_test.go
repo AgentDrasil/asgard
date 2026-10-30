@@ -16,6 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
 func TestHandleAgents(t *testing.T) {
@@ -148,11 +149,9 @@ func TestRecordStatusUpdateArtifactFiltering(t *testing.T) {
 
 func TestRecordStatusUpdate_TmpPathDisambiguation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
 
 	testDB := db.NewDBForTest(t)
-	err = dbmodels.AutoMigrate(testDB)
+	err := dbmodels.AutoMigrate(testDB)
 	require.NoError(t, err)
 
 	repo := dbmodels.NewSessionRepository(testDB)
@@ -175,7 +174,7 @@ func TestRecordStatusUpdate_TmpPathDisambiguation(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1. Session tmp file exists
-	sessionTmpDir := filepath.Join(home, "asgard", "data", "tmp", chatID)
+	sessionTmpDir := runnerpaths.SessionTmpDir(chatID)
 	require.NoError(t, os.MkdirAll(sessionTmpDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(sessionTmpDir, "code_review.md"), []byte("# Review"), 0644))
 

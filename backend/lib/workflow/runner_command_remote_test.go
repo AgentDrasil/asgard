@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
-	"github.com/AgentDrasil/asgard/pkg/paths"
+	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -143,8 +143,8 @@ func TestCommandRunnerOnRunnerSpec(t *testing.T) {
 		assert.True(t, spec.AllowCrossSession)
 		assert.Equal(t, 90*time.Second, spec.Timeout)
 		assert.Equal(t, "/runner/ws", spec.RunDir)
-		assert.NotContains(t, spec.Command, paths.SessionTmpDir("sess-remote"))
-		assert.NotContains(t, spec.Command, paths.SessionDir("sess-remote"))
+		assert.NotContains(t, spec.Command, runnerpaths.SessionTmpDir("sess-remote"))
+		assert.NotContains(t, spec.Command, runnerpaths.SessionDir("sess-remote"))
 	})
 
 	t.Run("unsandboxed commands get the runner's own paths from the environment", func(t *testing.T) {
