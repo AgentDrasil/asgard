@@ -156,4 +156,105 @@ func TestApplyOverlay(t *testing.T) {
 		_ = applyOverlay(base, &runnerpb.StartRun{RunDirs: []string{"/x"}})
 		assert.Equal(t, []string{"/cfg-run"}, base.Config.RunDirs)
 	})
+	t.Run("deep copies mask rules and readwrite entries when not overridden", func(t *testing.T) {
+		t.Parallel()
+		agent := testAgent("a", "h", "")
+		agent.Config.MountDirs.ReadWrite = []string{"/rw"}
+		agent.Config.MountDirs.ReadWriteEntries = []agentspec.MountPathEntry{
+			{
+				Path: "/rw",
+				MaskRules: &agentspec.SubdirMaskRule{
+					Base:   "/rw",
+					Mode:   agentspec.MaskOthers,
+					KeepRW: []string{".pnpm-store"},
+				},
+			},
+		}
+		agent.Config.MountDirs.MaskRules = map[string]*agentspec.SubdirMaskRule{
+			"/rw": {
+				Base:   "/rw",
+				Mode:   agentspec.MaskOthers,
+				KeepRW: []string{".pnpm-store"},
+			},
+		}
+
+		got := applyOverlay(agent, &runnerpb.StartRun{})
+		require.NotNil(t, got.Config.MountDirs.MaskRules)
+		require.NotNil(t, got.Config.MountDirs.MaskRules["/rw"])
+		assert.Equal(t, []string{".pnpm-store"}, got.Config.MountDirs.MaskRules["/rw"].KeepRW)
+
+		got.Config.MountDirs.MaskRules["/rw"].KeepRW[0] = "mutated"
+		got.Config.MountDirs.ReadWriteEntries[0].Path = "/mutated"
+
+		assert.Equal(t, []string{".pnpm-store"}, agent.Config.MountDirs.MaskRules["/rw"].KeepRW)
+		assert.Equal(t, "/rw", agent.Config.MountDirs.ReadWriteEntries[0].Path)
+	})
+	t.Run("preserves mask rules and readwrite entries when sr.MountDirsReadwrite contains the same path", func(t *testing.T) {
+		t.Parallel()
+		agent := testAgent("a", "h", "")
+		agent.Config.MountDirs.ReadWrite = []string{"/rw"}
+		agent.Config.MountDirs.ReadWriteEntries = []agentspec.MountPathEntry{
+			{
+				Path: "/rw",
+				MaskRules: &agentspec.SubdirMaskRule{
+					Base:   "/rw",
+					Mode:   agentspec.MaskOthers,
+					KeepRW: []string{".pnpm-store"},
+				},
+			},
+		}
+		agent.Config.MountDirs.MaskRules = map[string]*agentspec.SubdirMaskRule{
+			"/rw": {
+				Base:   "/rw",
+				Mode:   agentspec.MaskOthers,
+				KeepRW: []string{".pnpm-store"},
+			},
+		}
+
+		got := applyOverlay(agent, &runnerpb.StartRun{MountDirsReadwrite: []string{"/rw"}})
+		require.NotNil(t, got.Config.MountDirs.MaskRules)
+		require.NotNil(t, got.Config.MountDirs.MaskRules["/rw"])
+		assert.Equal(t, []string{".pnpm-store"}, got.Config.MountDirs.MaskRules["/rw"].KeepRW)
+		require.Len(t, got.Config.MountDirs.ReadWriteEntries, 1)
+		assert.Equal(t, "/rw", got.Config.MountDirs.ReadWriteEntries[0].Path)
+	})
+	t.Run("drops mask rules and readwrite entries when sr.MountDirsReadwrite overrides with different path", func(t *testing.T) {
+		t.Parallel()
+		agent := testAgent("a", "h", "")
+		agent.Config.MountDirs.ReadWrite = []string{"/rw"}
+		agent.Config.MountDirs.ReadWriteEntries = []agentspec.MountPathEntry{
+			{
+				Path: "/rw",
+				MaskRules: &agentspec.SubdirMaskRule{
+					Base: "/rw",
+					Mode: agentspec.MaskOthers,
+				},
+			},
+		}
+		agent.Config.MountDirs.MaskRules = map[string]*agentspec.SubdirMaskRule{
+			"/rw": {
+				Base: "/rw",
+				Mode: agentspec.MaskOthers,
+			},
+		}
+
+		got := applyOverlay(agent, &runnerpb.StartRun{MountDirsReadwrite: []string{"/other-rw"}})
+		assert.Equal(t, []string{"/other-rw"}, got.Config.MountDirs.ReadWrite)
+		assert.Empty(t, got.Config.MountDirs.ReadWriteEntries)
+		assert.Nil(t, got.Config.MountDirs.MaskRules)
+		assert.NotNil(t, agent.Config.MountDirs.MaskRules["/rw"])
+	})
+	t.Run("ignores sr.MountDirsReadwrite when agent has LockModeReadOnly", func(t *testing.T) {
+		t.Parallel()
+		agent := testAgent("a", "h", "")
+		agent.Config.LockMode = agentspec.LockModeReadOnly
+		agent.Config.MountDirs.ReadOnly = []string{"/ro"}
+
+		got := applyOverlay(agent, &runnerpb.StartRun{MountDirsReadwrite: []string{"/attempted-rw"}})
+		assert.True(t, got.Config.IsReadOnly())
+		assert.Empty(t, got.Config.MountDirs.ReadWrite)
+		assert.Empty(t, got.Config.MountDirs.ReadWriteEntries)
+		assert.Nil(t, got.Config.MountDirs.MaskRules)
+		assert.Equal(t, []string{"/ro"}, got.Config.MountDirs.ReadOnly)
+	})
 }

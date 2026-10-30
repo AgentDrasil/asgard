@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -68,14 +69,53 @@ func lookupAgent(src AgentSource, sr *runnerpb.StartRun) (*agentspec.Agent, stri
 // run_dirs and mount dirs applied; empty lists keep the agent config's values.
 func applyOverlay(agent *agentspec.Agent, sr *runnerpb.StartRun) *agentspec.Agent {
 	out := *agent
+	out.Config.MountDirs = agent.Config.MountDirs.Clone()
 	if len(sr.GetRunDirs()) > 0 {
 		out.Config.RunDirs = append([]string(nil), sr.GetRunDirs()...)
 	}
 	if len(sr.GetMountDirsReadonly()) > 0 {
 		out.Config.MountDirs.ReadOnly = append([]string(nil), sr.GetMountDirsReadonly()...)
 	}
-	if len(sr.GetMountDirsReadwrite()) > 0 {
+
+	if out.Config.IsReadOnly() {
+		// A readonly agent never gets RW mounts from overlay or agent config
+		out.Config.MountDirs.ReadWrite = nil
+		out.Config.MountDirs.ReadWriteEntries = nil
+		out.Config.MountDirs.MaskRules = nil
+	} else if len(sr.GetMountDirsReadwrite()) > 0 {
 		out.Config.MountDirs.ReadWrite = append([]string(nil), sr.GetMountDirsReadwrite()...)
+		rwSet := make(map[string]bool, len(sr.GetMountDirsReadwrite()))
+		for _, rw := range sr.GetMountDirsReadwrite() {
+			rwSet[filepath.Clean(rw)] = true
+		}
+
+		if len(out.Config.MountDirs.ReadWriteEntries) > 0 {
+			var filteredEntries []agentspec.MountPathEntry
+			for _, entry := range out.Config.MountDirs.ReadWriteEntries {
+				if rwSet[filepath.Clean(entry.Path)] {
+					filteredEntries = append(filteredEntries, entry)
+				}
+			}
+			out.Config.MountDirs.ReadWriteEntries = filteredEntries
+		}
+
+		if len(out.Config.MountDirs.MaskRules) > 0 {
+			filteredMaskRules := make(map[string]*agentspec.SubdirMaskRule)
+			for base, rule := range out.Config.MountDirs.MaskRules {
+				cleanBase := filepath.Clean(base)
+				if rule != nil && rule.Base != "" {
+					cleanBase = filepath.Clean(rule.Base)
+				}
+				if rwSet[cleanBase] {
+					filteredMaskRules[base] = rule
+				}
+			}
+			if len(filteredMaskRules) > 0 {
+				out.Config.MountDirs.MaskRules = filteredMaskRules
+			} else {
+				out.Config.MountDirs.MaskRules = nil
+			}
+		}
 	}
 	return &out
 }
