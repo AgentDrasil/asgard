@@ -494,11 +494,13 @@ describe("DashboardView.vue", () => {
       expect(root.textContent).toContain("Recently Done Task");
 
       // Defensive path: When polling throws/rejects, it should catch silently without error toast
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       getSessionsSpy.mockRejectedValueOnce(new Error("Network error"));
       await vi.advanceTimersByTimeAsync(5000);
       expect(getSessionsSpy).toHaveBeenCalledTimes(3);
       expect(mockToastError).not.toHaveBeenCalled();
       expect(root.textContent).toContain("Old Completed Task");
+      consoleErrorSpy.mockRestore();
 
       // Clean unmount stops interval
       app.unmount();

@@ -14,13 +14,18 @@ vi.mock("@iconify/vue", () => ({
   },
 }));
 
-vi.mock("../lib/api", () => ({
-  getDirInfo: vi
-    .fn<(...args: any[]) => Promise<any>>()
-    .mockResolvedValue({ gitRoot: "/home/user/project" }),
-  uploadAttachment: vi.fn<(...args: any[]) => Promise<any>>(),
-  getFileContent: vi.fn<(...args: any[]) => Promise<any>>(),
-}));
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    ...actual,
+    getDirInfo: vi
+      .fn<(...args: any[]) => Promise<any>>()
+      .mockResolvedValue({ gitRoot: "/home/user/project" }),
+    uploadAttachment: vi.fn<(...args: any[]) => Promise<any>>(),
+    getFileContent: vi.fn<(...args: any[]) => Promise<any>>(),
+    isAuthEnabled: vi.fn<() => boolean>(() => false),
+  };
+});
 
 describe("ChatArea.vue", () => {
   let root: HTMLElement;

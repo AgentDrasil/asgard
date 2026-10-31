@@ -76,6 +76,7 @@ vi.mock("./lib/api", async (importOriginal) => {
       .fn<() => Promise<{ overrides: Record<string, unknown> }>>()
       .mockResolvedValue({ overrides: {} }),
     reloadAgents: vi.fn<() => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    getRunners: vi.fn<() => Promise<null>>().mockResolvedValue(null),
   };
 });
 

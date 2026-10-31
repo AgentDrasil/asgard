@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, readonly, ref, shallowRef } from "vue";
+import { getCurrentInstance, onMounted, onUnmounted, readonly, ref, shallowRef } from "vue";
 import { createHighlighter, type Highlighter } from "shiki";
 
 // Mapping DaisyUI / App themes to standard Shiki themes
@@ -226,19 +226,27 @@ export const highlightHtmlCodeBlocks = (html: string, blockClasses: string[] = [
 };
 
 export function useShiki() {
-  onMounted(() => {
-    ensureThemeObserver();
+  if (getCurrentInstance()) {
+    onMounted(() => {
+      ensureThemeObserver();
+      if (!isReady.value && !highlighterPromise) {
+        // Kick off loading; failures are swallowed so consumers fall back to a
+        // plain <pre> while a later interaction can retry.
+        getHighlighter().catch(() => {
+          /* ignored */
+        });
+      }
+    });
+    onUnmounted(() => {
+      releaseThemeObserver();
+    });
+  } else {
     if (!isReady.value && !highlighterPromise) {
-      // Kick off loading; failures are swallowed so consumers fall back to a
-      // plain <pre> while a later interaction can retry.
       getHighlighter().catch(() => {
         /* ignored */
       });
     }
-  });
-  onUnmounted(() => {
-    releaseThemeObserver();
-  });
+  }
 
   return {
     isReady: readonly(isReady),

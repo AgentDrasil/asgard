@@ -523,6 +523,7 @@ describe("useSessionStore", () => {
       { id: "agent-1", name: "Coder", description: "", run_dirs: [] },
     ]);
 
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(api, "createSession").mockResolvedValue(mockCreatedSession);
     const uploadSpy = vi.spyOn(api, "uploadAttachment").mockImplementation(async (_id, file) => {
       if (file.name === "fail.txt") {
@@ -590,6 +591,7 @@ describe("useSessionStore", () => {
         },
       ],
     });
+    consoleSpy.mockRestore();
   });
 
   it("should handle 409 conflict when session is already running", async () => {

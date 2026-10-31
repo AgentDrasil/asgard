@@ -35,6 +35,8 @@ describe("SettingsView.vue", () => {
     mockBack.mockReset();
     setLocale("en");
 
+    vi.spyOn(api, "getRunners").mockResolvedValue(null);
+    vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([]);
     vi.spyOn(api, "getSystemLogs").mockResolvedValue([
       {
         id: 1,

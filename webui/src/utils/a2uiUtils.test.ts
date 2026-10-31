@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   isA2UIManifestPath,
   isA2UIManifest,
@@ -10,6 +10,9 @@ import {
 } from "./a2uiUtils";
 
 describe("a2uiUtils", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   describe("isA2UIManifestPath", () => {
     it("recognizes standard ui_manifest.json filenames", () => {
       expect(isA2UIManifestPath("ui_manifest.json")).toBe(true);
@@ -126,8 +129,10 @@ describe("a2uiUtils", () => {
     });
 
     it("returns null on invalid JSON", () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       expect(parseA2UIManifest("not a json string")).toBeNull();
       expect(parseA2UIManifest(null)).toBeNull();
+      consoleErrorSpy.mockRestore();
     });
   });
 

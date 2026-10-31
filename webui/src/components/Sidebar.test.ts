@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import Sidebar from "./Sidebar.vue";
+import * as api from "../lib/api";
 import { i18n, setLocale } from "../i18n";
 import type { ChatSession } from "../types";
 
@@ -42,6 +43,7 @@ describe("Sidebar.vue", () => {
     mockPush.mockReset();
     mockCurrentRoute = { path: "/chat/123" };
     setLocale("en", false);
+    vi.spyOn(api, "getRunners").mockResolvedValue(null);
     root = document.createElement("div");
     document.body.appendChild(root);
   });
