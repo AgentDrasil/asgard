@@ -378,7 +378,7 @@ func TestAddRunner(t *testing.T) {
 }
 
 func TestRunCommandNonInteractive(t *testing.T) {
-	t.Parallel()
+	t.Setenv("ASGARD_INIT_SKIP_CFGCTL_CHECK", "1")
 
 	tempDir := t.TempDir()
 
