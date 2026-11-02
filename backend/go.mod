@@ -3,6 +3,7 @@ module github.com/AgentDrasil/asgard/backend
 go 1.27.1
 
 require (
+	cloud.google.com/go/kms v1.36.1
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/fakebash v0.0.0
 	github.com/AgentDrasil/asgard/llms v0.0.0
@@ -19,6 +20,7 @@ require (
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/go-co-op/gocron/v2 v2.23.0
 	github.com/goccy/go-yaml v1.19.2
+	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/yamux v0.1.2
 	github.com/josexy/mitmproxy-go v1.2.1
@@ -45,7 +47,6 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	cloud.google.com/go/iam v1.15.1 // indirect
-	cloud.google.com/go/kms v1.36.1 // indirect
 	cloud.google.com/go/longrunning v1.4.1 // indirect
 	cloud.google.com/go/monitoring v1.32.1 // indirect
 	cloud.google.com/go/storage v1.70.0 // indirect
@@ -113,7 +114,6 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.24 // indirect
-	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
 	github.com/goware/prefixer v0.0.0-20160118172347-395022866408 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.33.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
