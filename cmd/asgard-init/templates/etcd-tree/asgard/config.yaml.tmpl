@@ -51,11 +51,18 @@ auth:
 # comment_lang: "English (US)"
 # ui_lang: "en"
 
-# Enabled CLI providers (supported: agy, opencode, simplest; default: all enabled)
+# Enabled CLI providers (supported: agy, claude, opencode, simplest; default: all enabled)
+{{- if .Providers }}
+providers:
+{{- range .Providers }}
+  - {{ . }}
+{{- end }}
+{{- else }}
 # providers:
 #   - agy
 #   - opencode
 #   - simplest
+{{- end }}
 
 # Static WebUI directory path inside backend container
 # webui_path: /opt/asgard/webui

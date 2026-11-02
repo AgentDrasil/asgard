@@ -178,4 +178,5 @@ type AsgardTreeConfig struct {
 	AW          awconfig.Config  `key:"aw/config.yaml"`
 	Simplest    SimplestRawScope `key:"simplest/"`
 	Credentials CredentialsScope `key:"credentials/"`
+	OpencodeAW  []byte           `key:"aw/opencode.aw.yaml"`
 }

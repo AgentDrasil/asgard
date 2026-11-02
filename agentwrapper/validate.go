@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/simplest"
 )
 
@@ -55,11 +56,29 @@ func ValidateClaudeSetup() error {
 }
 
 // ValidateOpencodeSetup verifies that opencode is correctly set up on the user's system.
-// It checks that ~/.local/share/opencode/opencode.db exists.
+// It checks if opencode.aw.yaml exists and has auth/env keys (or opencode.LoadEnv() has any key),
+// or if ~/.local/share/opencode/opencode.db exists.
 func ValidateOpencodeSetup() error {
 	home, err := homeDirFn()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	if env, err := opencode.LoadEnv(); err != nil {
+		return fmt.Errorf("opencode setup validation failed: %w", err)
+	} else if len(env) > 0 {
+		return nil
+	}
+
+	awConfigPath := filepath.Join(home, ".config", "aw", "opencode.aw.yaml")
+	if data, err := os.ReadFile(awConfigPath); err == nil {
+		env, err := opencode.ParseEnvConfig(data)
+		if err != nil {
+			return fmt.Errorf("opencode setup validation failed: %w", err)
+		}
+		if len(env) > 0 {
+			return nil
+		}
 	}
 
 	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")

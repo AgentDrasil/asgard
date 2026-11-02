@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,6 +25,13 @@ const (
 	colorCyan   = "\033[36m"
 	colorBold   = "\033[1m"
 )
+
+var supportedProviders = map[string]bool{
+	"agy":      true,
+	"claude":   true,
+	"opencode": true,
+	"simplest": true,
+}
 
 // checkCfgctl verifies that cfgctl is present in PATH.
 var checkCfgctl = func() error {
@@ -62,6 +70,7 @@ func run(args []string) error {
 		mountFlag            = fs.String("mount", "", "Workspace mount in format <host_path>:<container_path> (e.g. /home/user/src:/data/src)")
 		gcpKmsFlag           = fs.String("gcp-kms", "", "Google Cloud KMS key resource ID for SOPS")
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
+		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
 		addNewRunnerFlag     = fs.String("add-new-runner", "", "Add a new runner to an existing deployment")
 	)
 
@@ -97,6 +106,26 @@ func run(args []string) error {
 	}
 
 	// Normal initialization mode
+	var cliProviders []string
+	if *providersFlag != "" {
+		seen := make(map[string]bool)
+		for _, p := range strings.Split(*providersFlag, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				if !supportedProviders[p] {
+					return fmt.Errorf("invalid provider %q: supported providers are agy, claude, opencode, simplest", p)
+				}
+				if !seen[p] {
+					seen[p] = true
+					cliProviders = append(cliProviders, p)
+				}
+			}
+		}
+		if len(cliProviders) == 0 {
+			return fmt.Errorf("no valid providers specified in --providers flag")
+		}
+	}
+
 	data := &ConfigData{
 		Host:             *hostFlag,
 		BackendPort:      *portFlag,
@@ -163,6 +192,36 @@ func run(args []string) error {
 		fmt.Printf("\n%sWarning:%s auth.client_secret is set to placeholder %q. Remember to update it with your real OIDC provider credentials.\n", colorYellow+colorBold, colorReset, data.AuthClientSecret)
 	}
 
+	// In interactive mode, ensure directories exist and prompt for providers and SSH
+	if !*nonInteractiveFlag {
+		dirs := []string{
+			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
+			filepath.Join(targetDir, "etcd-tree", "aw"),
+			filepath.Join(targetDir, "etcd-tree", "simplest"),
+		}
+		for _, d := range dirs {
+			_ = os.MkdirAll(d, 0755)
+		}
+
+		if len(cliProviders) > 0 {
+			data.Providers = cliProviders
+		} else {
+			data.Providers = PromptProviderSetup(reader, os.Stdout, targetDir, true)
+		}
+		PromptSSHCredentials(reader, os.Stdout, targetDir, true)
+	} else {
+		if len(cliProviders) > 0 {
+			data.Providers = cliProviders
+		} else {
+			data.Providers = []string{"agy", "claude", "opencode", "simplest"}
+		}
+	}
+
+	if len(data.Providers) == 0 {
+		data.Providers = []string{"agy"}
+	}
+
 	// Validate target directory and generate deployment
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("create directory %s: %w", targetDir, err)
@@ -172,8 +231,13 @@ func run(args []string) error {
 		return err
 	}
 
-	PromptCLICredentials(reader, os.Stdout, targetDir, !*nonInteractiveFlag)
-	PromptSSHCredentials(reader, os.Stdout, targetDir, !*nonInteractiveFlag)
+	if *nonInteractiveFlag {
+		PromptCLICredentials(reader, os.Stdout, targetDir, false)
+		PromptClaudeCredentials(reader, os.Stdout, targetDir, false)
+		PromptOpencodeConfig(reader, os.Stdout, targetDir, false)
+		PromptSimplestConfig(reader, os.Stdout, targetDir, false)
+		PromptSSHCredentials(reader, os.Stdout, targetDir, false)
+	}
 
 	printInitSuccess(targetDir, data)
 	return nil
@@ -211,6 +275,248 @@ func CheckClaudeCredentials(targetDir string) (string, bool) {
 		return rootPath, true
 	}
 	return "", false
+}
+
+// CheckOpencodeConfig checks if opencode.aw.yaml exists in targetDir/etcd-tree/aw and contains non-comment content.
+func CheckOpencodeConfig(targetDir string) (string, bool) {
+	path := filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return "", false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			_ = os.Chmod(path, 0600)
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// CheckSimplestConfig checks if key.yaml exists in targetDir/etcd-tree/simplest and contains non-comment content.
+func CheckSimplestConfig(targetDir string) (string, bool) {
+	keyPath := filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml")
+	data, err := os.ReadFile(keyPath)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return "", false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			_ = os.Chmod(keyPath, 0600)
+			return keyPath, true
+		}
+	}
+	return "", false
+}
+
+// PromptCLIActivation asks the user whether to activate a CLI provider even if credentials were skipped.
+func PromptCLIActivation(r io.Reader, w io.Writer, cliName string) bool {
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+
+	_, _ = fmt.Fprintf(w, "%sActivate %s anyway? [y/N]:%s ", colorBold, cliName, colorReset)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	return ans == "y" || ans == "yes"
+}
+
+// PromptClaudeCredentials prompts the user to place their Claude credentials into etcd-tree/credentials/claude/.credentials.json.
+func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json")
+	if !interactive {
+		if foundPath, ok := CheckClaudeCredentials(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ Claude credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+			return true
+		}
+		return false
+	}
+
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	_, _ = fmt.Fprintf(w, "\n%s--- Claude CLI Credential Setup ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your Claude credential file into %s%s%s (or etcd-tree/credentials/.credentials.json).\n", colorYellow, credPath, colorReset)
+
+	for {
+		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		switch ans {
+		case "y", "yes":
+			if foundPath, ok := CheckClaudeCredentials(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ Claude credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+				return true
+			}
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty Claude credential file found at %s (or etcd-tree/credentials/.credentials.json).\n", colorRed+colorBold, colorReset, credPath)
+		case "s", "skip":
+			_, _ = fmt.Fprintf(w, "%sSkipped Claude credential setup.%s You can place it into etcd-tree/credentials/claude/ later before running just publish.\n", colorYellow, colorReset)
+			return false
+		default:
+			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
+		}
+	}
+}
+
+// PromptOpencodeConfig prompts the user to configure their OpenCode configuration in etcd-tree/aw/opencode.aw.yaml.
+func PromptOpencodeConfig(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
+	cfgPath := filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml")
+	if !interactive {
+		if foundPath, ok := CheckOpencodeConfig(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ OpenCode configuration verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+			return true
+		}
+		return false
+	}
+
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	_, _ = fmt.Fprintf(w, "\n%s--- OpenCode Configuration Setup ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please configure your OpenCode environment keys in %s%s%s.\n", colorYellow, cfgPath, colorReset)
+
+	for {
+		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		switch ans {
+		case "y", "yes":
+			if foundPath, ok := CheckOpencodeConfig(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ OpenCode configuration verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+				return true
+			}
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, uncommented configuration found at %s.\n", colorRed+colorBold, colorReset, cfgPath)
+		case "s", "skip":
+			_, _ = fmt.Fprintf(w, "%sSkipped OpenCode configuration setup.%s You can configure it in etcd-tree/aw/opencode.aw.yaml later before running just publish.\n", colorYellow, colorReset)
+			return false
+		default:
+			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
+		}
+	}
+}
+
+// PromptSimplestConfig prompts the user to configure API keys in etcd-tree/simplest/key.yaml.
+func PromptSimplestConfig(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
+	cfgPath := filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml")
+	if !interactive {
+		if foundPath, ok := CheckSimplestConfig(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ Simplest configuration verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+			return true
+		}
+		return false
+	}
+
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	_, _ = fmt.Fprintf(w, "\n%s--- Simplest Provider Configuration Setup ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please configure provider API keys in %s%s%s.\n", colorYellow, cfgPath, colorReset)
+
+	for {
+		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		switch ans {
+		case "y", "yes":
+			if foundPath, ok := CheckSimplestConfig(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ Simplest configuration verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+				return true
+			}
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, uncommented API keys found at %s.\n", colorRed+colorBold, colorReset, cfgPath)
+		case "s", "skip":
+			_, _ = fmt.Fprintf(w, "%sSkipped Simplest configuration setup.%s You can configure it in etcd-tree/simplest/key.yaml later before running just publish.\n", colorYellow, colorReset)
+			return false
+		default:
+			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
+		}
+	}
+}
+
+func promptProviderWithActivation(
+	r io.Reader,
+	w io.Writer,
+	targetDir string,
+	interactive bool,
+	cliName string,
+	promptCredFn func(io.Reader, io.Writer, string, bool) bool,
+) bool {
+	if promptCredFn(r, w, targetDir, interactive) {
+		return true
+	}
+	if !interactive {
+		return false
+	}
+	return PromptCLIActivation(r, w, cliName)
+}
+
+// PromptProviderSetup prompts for CLI credential setup and provider activation for each supported provider.
+func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive bool) []string {
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+
+	var providers []string
+	if promptProviderWithActivation(reader, w, targetDir, interactive, "agy", PromptCLICredentials) {
+		providers = append(providers, "agy")
+	}
+	if promptProviderWithActivation(reader, w, targetDir, interactive, "claude", PromptClaudeCredentials) {
+		providers = append(providers, "claude")
+	}
+	if promptProviderWithActivation(reader, w, targetDir, interactive, "opencode", PromptOpencodeConfig) {
+		providers = append(providers, "opencode")
+	}
+	if promptProviderWithActivation(reader, w, targetDir, interactive, "simplest", PromptSimplestConfig) {
+		providers = append(providers, "simplest")
+	}
+
+	if len(providers) == 0 {
+		_, _ = fmt.Fprintf(w, "\n%sWarning:%s At least one provider must be enabled for Asgard to function.\n", colorYellow+colorBold, colorReset)
+		if _, ok := CheckSimplestConfig(targetDir); ok {
+			providers = append(providers, "simplest")
+		} else {
+			providers = append(providers, "agy")
+		}
+	}
+	return providers
 }
 
 // PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials.

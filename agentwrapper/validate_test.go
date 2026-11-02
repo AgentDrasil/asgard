@@ -71,6 +71,11 @@ func TestValidateOpencodeSetup(t *testing.T) {
 		homeDirFn = origHomeDirFn
 	})
 
+	t.Setenv("HOME", tempDir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_AW_CONFIG", "")
+	t.Setenv("AW_CONFIG", "")
+
 	// 1. Missing opencode.db
 	err := ValidateOpencodeSetup()
 	if err == nil {
@@ -93,6 +98,35 @@ func TestValidateOpencodeSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error with opencode.db, got: %v", err)
 	}
+
+	// Remove db to test opencode.aw.yaml paths
+	require.NoError(t, os.Remove(dbPath))
+
+	// 3. Fallback when opencode.aw.yaml exists but only has comments/empty
+	awDir := filepath.Join(tempDir, ".config", "aw")
+	require.NoError(t, os.MkdirAll(awDir, 0755))
+	awPath := filepath.Join(awDir, "opencode.aw.yaml")
+	require.NoError(t, os.WriteFile(awPath, []byte("# empty config\n# env:\n"), 0600))
+	err = ValidateOpencodeSetup()
+	assert.Error(t, err, "expected error when opencode.aw.yaml only has comments and db is missing")
+
+	// 4. Success when opencode.aw.yaml has keys
+	require.NoError(t, os.WriteFile(awPath, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"sk-test\"\n"), 0600))
+	err = ValidateOpencodeSetup()
+	assert.NoError(t, err, "expected success when opencode.aw.yaml has valid env keys")
+
+	// 5. Success with OPENCODE_AW_CONFIG env var override
+	customAWPath := filepath.Join(tempDir, "custom.aw.yaml")
+	require.NoError(t, os.WriteFile(customAWPath, []byte("ZHIPU_API_KEY: \"test-zhipu\"\n"), 0600))
+	t.Setenv("OPENCODE_AW_CONFIG", customAWPath)
+	err = ValidateOpencodeSetup()
+	assert.NoError(t, err, "expected success via OPENCODE_AW_CONFIG")
+
+	// 6. Error when opencode.aw.yaml has invalid YAML syntax
+	require.NoError(t, os.WriteFile(customAWPath, []byte("invalid: yaml: :"), 0600))
+	err = ValidateOpencodeSetup()
+	assert.Error(t, err, "expected error on malformed YAML")
+	assert.Contains(t, err.Error(), "opencode setup validation failed")
 }
 
 func TestValidateOpencodeSetup_MissingAuth_ErrorContainsDockerExecHint(t *testing.T) {
@@ -104,6 +138,11 @@ func TestValidateOpencodeSetup_MissingAuth_ErrorContainsDockerExecHint(t *testin
 	t.Cleanup(func() {
 		homeDirFn = origHomeDirFn
 	})
+
+	t.Setenv("HOME", tempDir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_AW_CONFIG", "")
+	t.Setenv("AW_CONFIG", "")
 
 	err := ValidateOpencodeSetup()
 	require.Error(t, err)

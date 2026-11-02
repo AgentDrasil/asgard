@@ -46,6 +46,9 @@ agents:
   - agy:
       - gemini.*
 `),
+		"aw/opencode.aw.yaml": []byte(`env:
+  OPENCODE_ZAI_API_KEY: "test-zai-key"
+`),
 		"simplest/key.yaml": []byte(`
 providers:
   google:
@@ -97,6 +100,7 @@ providers:
 
 	// Validate AW
 	assert.True(t, cfg.AW.IsModelAllowed("agy", "gemini-1.5-pro"))
+	assert.Equal(t, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"test-zai-key\"\n"), cfg.OpencodeAW)
 
 	// Validate simplest raw scope
 	assert.NotEmpty(t, cfg.Simplest.Key)

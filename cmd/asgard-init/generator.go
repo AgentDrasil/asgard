@@ -37,6 +37,7 @@ type ConfigData struct {
 	RunnerName                   string
 	RunnerService                string
 	WorkspaceMounts              []string
+	Providers                    []string
 	GCPKMS                       string
 	AgeRecipient                 string
 	GoogleApplicationCredentials string
@@ -219,6 +220,7 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		{"templates/etcd-tree/asgard/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "config.yaml"), 0600},
 		{"templates/etcd-tree/asgard/proxy.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "proxy.yaml"), 0644},
 		{"templates/etcd-tree/aw/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "config.yaml"), 0644},
+		{"templates/etcd-tree/aw/opencode.aw.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml"), 0600},
 		{"templates/etcd-tree/simplest/key.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml"), 0600},
 		{"templates/etcd-tree/simplest/models.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "models.yaml"), 0644},
 		{"templates/etcd-tree/simplest/providers.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "providers.yaml"), 0644},
@@ -230,6 +232,9 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	}
 
 	for _, item := range templateMap {
+		if (item.tmpl == "templates/etcd-tree/aw/opencode.aw.yaml.tmpl" || item.tmpl == "templates/etcd-tree/simplest/key.yaml.tmpl") && isNonEmptyFile(item.dest) {
+			continue
+		}
 		if err := renderTemplate(item.tmpl, item.dest, data, item.perm); err != nil {
 			return fmt.Errorf("failed to render %s -> %s: %w", item.tmpl, item.dest, err)
 		}

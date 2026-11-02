@@ -125,6 +125,9 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 		if syncErr := SyncCLICredentials(s.opts.HomeDir, &tree.Credentials); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync CLI credentials to home directory")
 		}
+		if syncErr := SyncOpencodeAW(s.opts.HomeDir, tree.OpencodeAW); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync opencode.aw.yaml to home directory")
+		}
 
 		hasKeys := tree.Credentials.SSH.HasKeys()
 		currFP := tree.Credentials.SSH.Fingerprint()
@@ -380,6 +383,47 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		// Credential revoked / cleared: remove file if it exists
 		if err := os.Remove(claudePath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", claudePath, err)
+		}
+	}
+
+	return nil
+}
+
+// SyncOpencodeAW writes opencode.aw.yaml received from etcd to ~/.config/aw/opencode.aw.yaml.
+func SyncOpencodeAW(home string, content []byte) error {
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+		}
+	}
+
+	awDir := filepath.Join(home, ".config", "aw")
+	awPath := filepath.Join(awDir, "opencode.aw.yaml")
+
+	if len(content) > 0 {
+		if err := os.MkdirAll(awDir, 0700); err != nil {
+			return fmt.Errorf("create aw directory %s: %w", awDir, err)
+		}
+		if err := os.Chmod(awDir, 0700); err != nil {
+			return fmt.Errorf("chmod aw directory %s: %w", awDir, err)
+		}
+
+		existing, err := os.ReadFile(awPath)
+		if err != nil || !bytes.Equal(existing, content) {
+			if err := atomicWriteFile(awPath, content, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", awPath, err)
+			}
+		} else {
+			_ = os.Chmod(awPath, 0600)
+		}
+	} else {
+		if err := os.Remove(awPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", awPath, err)
 		}
 	}
 

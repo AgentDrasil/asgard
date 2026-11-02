@@ -225,6 +225,7 @@ func TestGenerateDeployment(t *testing.T) {
 		"etcd-tree/asgard/config.yaml",
 		"etcd-tree/asgard/proxy.yaml",
 		"etcd-tree/aw/config.yaml",
+		"etcd-tree/aw/opencode.aw.yaml",
 		"etcd-tree/simplest/key.yaml",
 		"etcd-tree/simplest/models.yaml",
 		"etcd-tree/simplest/providers.yaml",
@@ -246,6 +247,14 @@ func TestGenerateDeployment(t *testing.T) {
 	authJSONInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", "auth.json"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), authJSONInfo.Mode().Perm())
+
+	opencodeAWInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "aw", "opencode.aw.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), opencodeAWInfo.Mode().Perm())
+
+	simplestKeyInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "simplest", "key.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), simplestKeyInfo.Mode().Perm())
 
 	cfgInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
 	require.NoError(t, err)
@@ -321,6 +330,8 @@ func TestGenerateDeployment(t *testing.T) {
 	sopsStr := string(sopsContent)
 	assert.Contains(t, sopsStr, "oauth_creds\\.json")
 	assert.Contains(t, sopsStr, `\.credentials\.json`)
+	assert.Contains(t, sopsStr, `aw/opencode\.aw\.yaml`)
+	assert.Contains(t, sopsStr, `simplest/key\.yaml`)
 	credRuleIdx := strings.Index(sopsStr, "credentials/.*")
 	genericRuleIdx := strings.Index(sopsStr, ".*\\.(yaml|yml|json)$")
 	require.True(t, credRuleIdx != -1 && genericRuleIdx != -1)
@@ -328,15 +339,25 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, sopsStr, "refresh_token")
 	assert.Contains(t, sopsStr, "id_token")
 
+	// Verify commented providers when data.Providers is empty
+	configContent, err = os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(configContent), "# providers:")
+
 	// Overwrite guard test without Force
 	err = GenerateDeployment(tempDir, data)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "existing Asgard deployment detected")
 
-	// Overwrite guard test with Force
+	// Overwrite guard test with Force and custom providers
 	data.Force = true
+	data.Providers = []string{"agy", "opencode"}
 	err = GenerateDeployment(tempDir, data)
 	require.NoError(t, err)
+
+	configContent, err = os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(configContent), "providers:\n  - agy\n  - opencode")
 }
 
 func TestAddRunner(t *testing.T) {
@@ -419,6 +440,26 @@ func TestRunCommandNonInteractive(t *testing.T) {
 	info, err := os.Stat(filepath.Join(tempDir, "compose.yaml"))
 	require.NoError(t, err)
 	assert.False(t, info.IsDir())
+
+	// Verify default providers in config.yaml
+	cfgData, err := os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cfgData), "providers:\n  - agy\n  - claude\n  - opencode\n  - simplest")
+
+	// Test non-interactive with specific --providers flag
+	tempDirCustom := t.TempDir()
+	customArgs := []string{
+		"--non-interactive",
+		"--dir", tempDirCustom,
+		"--providers", "opencode,simplest",
+	}
+	err = run(customArgs)
+	require.NoError(t, err)
+	customCfgData, err := os.ReadFile(filepath.Join(tempDirCustom, "etcd-tree", "asgard", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(customCfgData), "providers:\n  - opencode\n  - simplest")
+	assert.NotContains(t, string(customCfgData), "  - agy")
+	assert.NotContains(t, string(customCfgData), "  - claude")
 
 	// Now test --add-new-runner flag
 	addArgs := []string{
@@ -903,4 +944,375 @@ func TestPromptSSHCredentials(t *testing.T) {
 		assert.Contains(t, out.String(), "Invalid input \"what?\"")
 		assert.Contains(t, out.String(), "Skipped SSH credentials setup")
 	})
+}
+
+func TestCheckOpencodeConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing file returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		path, ok := CheckOpencodeConfig(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("empty file returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("   \n\n"), 0600))
+		path, ok := CheckOpencodeConfig(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("commented-only file returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("# comment\n# env:\n#   KEY: val\n"), 0600))
+		path, ok := CheckOpencodeConfig(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("file with uncommented keys returns true and tightens permissions to 0600", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		targetPath := filepath.Join(awDir, "opencode.aw.yaml")
+		require.NoError(t, os.WriteFile(targetPath, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"sk-123\"\n"), 0644))
+		path, ok := CheckOpencodeConfig(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, targetPath, path)
+		info, err := os.Stat(targetPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	})
+}
+
+func TestCheckSimplestConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing file returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		path, ok := CheckSimplestConfig(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("commented-only file returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("# openai: sk-...\n"), 0600))
+		path, ok := CheckSimplestConfig(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("file with uncommented keys returns true and tightens permissions to 0600", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		targetPath := filepath.Join(simplestDir, "key.yaml")
+		require.NoError(t, os.WriteFile(targetPath, []byte("openai: \"sk-12345\"\n"), 0644))
+		path, ok := CheckSimplestConfig(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, targetPath, path)
+		info, err := os.Stat(targetPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	})
+}
+
+func TestPromptCLIActivation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("yes activates", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		assert.True(t, PromptCLIActivation(strings.NewReader("y\n"), &out, "opencode"))
+		assert.Contains(t, out.String(), "Activate opencode anyway? [y/N]:")
+	})
+
+	t.Run("uppercase YES activates", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		assert.True(t, PromptCLIActivation(strings.NewReader("YES\n"), &out, "claude"))
+	})
+
+	t.Run("no does not activate", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		assert.False(t, PromptCLIActivation(strings.NewReader("n\n"), &out, "agy"))
+	})
+
+	t.Run("empty enter does not activate", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		assert.False(t, PromptCLIActivation(strings.NewReader("\n"), &out, "simplest"))
+	})
+
+	t.Run("EOF does not activate", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		assert.False(t, PromptCLIActivation(strings.NewReader(""), &out, "opencode"))
+	})
+}
+
+func TestPromptClaudeCredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-interactive detects existing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		claudeDir := filepath.Join(tempDir, "etcd-tree", "credentials", "claude")
+		require.NoError(t, os.MkdirAll(claudeDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"c"}`), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptClaudeCredentials(strings.NewReader(""), &out, tempDir, false))
+		assert.Contains(t, out.String(), "Claude credential verified:")
+	})
+
+	t.Run("interactive prompt skip on s", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		var out bytes.Buffer
+		assert.False(t, PromptClaudeCredentials(strings.NewReader("s\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "Skipped Claude credential setup")
+	})
+
+	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		claudeDir := filepath.Join(tempDir, "etcd-tree", "credentials", "claude")
+		require.NoError(t, os.MkdirAll(claudeDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"c"}`), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptClaudeCredentials(strings.NewReader("y\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "Claude credential verified successfully:")
+	})
+}
+
+func TestPromptOpencodeConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-interactive detects existing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  API_KEY: \"sk-1\"\n"), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptOpencodeConfig(strings.NewReader(""), &out, tempDir, false))
+		assert.Contains(t, out.String(), "OpenCode configuration verified:")
+	})
+
+	t.Run("interactive prompt skip on s", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		var out bytes.Buffer
+		assert.False(t, PromptOpencodeConfig(strings.NewReader("s\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "Skipped OpenCode configuration setup")
+	})
+
+	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  API_KEY: \"sk-1\"\n"), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptOpencodeConfig(strings.NewReader("y\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "OpenCode configuration verified successfully:")
+	})
+}
+
+func TestPromptSimplestConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-interactive detects existing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("openai: \"sk-test\"\n"), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptSimplestConfig(strings.NewReader(""), &out, tempDir, false))
+		assert.Contains(t, out.String(), "Simplest configuration verified:")
+	})
+
+	t.Run("interactive prompt skip on s", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		var out bytes.Buffer
+		assert.False(t, PromptSimplestConfig(strings.NewReader("s\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "Skipped Simplest configuration setup")
+	})
+
+	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("openai: \"sk-test\"\n"), 0600))
+
+		var out bytes.Buffer
+		assert.True(t, PromptSimplestConfig(strings.NewReader("y\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "Simplest configuration verified successfully:")
+	})
+}
+
+func TestPromptProviderSetup(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all verified with credentials", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		// Prepare all credential files
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		claudeDir := filepath.Join(credDir, "claude")
+		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+
+		require.NoError(t, os.MkdirAll(claudeDir, 0755))
+		require.NoError(t, os.MkdirAll(awDir, 0755))
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+
+		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"tok":"1"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"tok":"2"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  K: V\n"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
+
+		in := strings.NewReader("y\ny\ny\ny\n")
+		var out bytes.Buffer
+
+		providers := PromptProviderSetup(in, &out, tempDir, true)
+		assert.Equal(t, []string{"agy", "claude", "opencode", "simplest"}, providers)
+	})
+
+	t.Run("skip credential but activate anyway vs decline activation", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		// Scenario:
+		// 1. agy: skip ('s'), activate anyway? yes ('y') -> activated
+		// 2. claude: skip ('s'), activate anyway? no ('n') -> not activated
+		// 3. opencode: skip ('s'), activate anyway? yes ('y') -> activated
+		// 4. simplest: skip ('s'), activate anyway? no ('n') -> not activated
+		in := strings.NewReader("s\ny\ns\nn\ns\ny\ns\nn\n")
+		var out bytes.Buffer
+
+		providers := PromptProviderSetup(in, &out, tempDir, true)
+		assert.Equal(t, []string{"agy", "opencode"}, providers)
+	})
+
+	t.Run("decline all providers warns and falls back to agy", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		// Decline all 4 providers:
+		in := strings.NewReader("s\nn\ns\nn\ns\nn\ns\nn\n")
+		var out bytes.Buffer
+
+		providers := PromptProviderSetup(in, &out, tempDir, true)
+		assert.Equal(t, []string{"agy"}, providers)
+		assert.Contains(t, out.String(), "At least one provider must be enabled for Asgard to function.")
+	})
+
+	t.Run("decline all providers warns and falls back to simplest when simplest config exists", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
+
+		// agy: skip & decline
+		// claude: skip & decline
+		// opencode: skip & decline
+		// simplest: skip & decline
+		in := strings.NewReader("s\nn\ns\nn\ns\nn\ns\nn\n")
+		var out bytes.Buffer
+
+		providers := PromptProviderSetup(in, &out, tempDir, true)
+		assert.Equal(t, []string{"simplest"}, providers)
+		assert.Contains(t, out.String(), "At least one provider must be enabled for Asgard to function.")
+	})
+}
+
+func TestProvidersFlagValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid providers accepted", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--dir", tempDir, "--non-interactive", "--providers", "agy,opencode,simplest"})
+		require.NoError(t, err)
+
+		cfgData, err := os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(cfgData), "providers:\n  - agy\n  - opencode\n  - simplest")
+	})
+
+	t.Run("invalid provider rejected", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--dir", tempDir, "--non-interactive", "--providers", "agy,unknown_provider"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `invalid provider "unknown_provider": supported providers are agy, claude, opencode, simplest`)
+	})
+
+	t.Run("empty providers flag rejected", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--dir", tempDir, "--non-interactive", "--providers", " , "})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no valid providers specified in --providers flag")
+	})
+}
+
+func TestGenerateDeployment_PreservesExistingConfigs(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	awDir := filepath.Join(tempDir, "etcd-tree", "aw")
+	simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+	require.NoError(t, os.MkdirAll(awDir, 0755))
+	require.NoError(t, os.MkdirAll(simplestDir, 0755))
+
+	opencodeAWPath := filepath.Join(awDir, "opencode.aw.yaml")
+	simplestKeyPath := filepath.Join(simplestDir, "key.yaml")
+
+	require.NoError(t, os.WriteFile(opencodeAWPath, []byte("# custom opencode config\nCUSTOM: 1\n"), 0600))
+	require.NoError(t, os.WriteFile(simplestKeyPath, []byte("# custom simplest key\ngemini: AIza-custom\n"), 0600))
+
+	cfg := &ConfigData{
+		Host:        "localhost",
+		BackendPort: 7000,
+		Force:       true,
+	}
+	require.NoError(t, GenerateDeployment(tempDir, cfg))
+
+	awData, err := os.ReadFile(opencodeAWPath)
+	require.NoError(t, err)
+	assert.Equal(t, "# custom opencode config\nCUSTOM: 1\n", string(awData))
+
+	keyData, err := os.ReadFile(simplestKeyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "# custom simplest key\ngemini: AIza-custom\n", string(keyData))
 }
