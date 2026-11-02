@@ -47,6 +47,10 @@ var checkCfgctl = func() error {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if errors.Is(err, ErrPromptCancelled) {
+			fmt.Printf("\n%sOperation cancelled.%s\n", colorYellow, colorReset)
+			os.Exit(130)
+		}
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", colorRed+colorBold, colorReset, err)
 		os.Exit(1)
 	}
@@ -149,41 +153,78 @@ func run(args []string) error {
 	var reader *bufio.Reader
 	// If interactive mode is enabled, run the interactive prompt wizard
 	if !*nonInteractiveFlag {
-		reader = bufio.NewReader(os.Stdin)
+		defaultStdinReader = bufio.NewReader(os.Stdin)
+		reader = defaultStdinReader
 		printWelcomeBanner()
 
-		targetDirInput := prompt(reader, "Deployment target directory", targetDir)
+		targetDirInput, err := prompt(reader, "Deployment target directory", targetDir)
+		if err != nil {
+			return err
+		}
 		targetDir, err = filepath.Abs(targetDirInput)
 		if err != nil {
 			return fmt.Errorf("resolve target directory: %w", err)
 		}
 
-		data.Host = prompt(reader, "Asgard public base URL (host)", data.Host)
-		portStr := prompt(reader, "Backend HTTP port", strconv.Itoa(data.BackendPort))
+		data.Host, err = prompt(reader, "Asgard public base URL (host)", data.Host)
+		if err != nil {
+			return err
+		}
+		portStr, err := prompt(reader, "Backend HTTP port", strconv.Itoa(data.BackendPort))
+		if err != nil {
+			return err
+		}
 		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
 			data.BackendPort = p
 		}
 
-		data.EtcdEndpoints = prompt(reader, "Etcd endpoints", data.EtcdEndpoints)
-		data.EtcdPrefix = prompt(reader, "Etcd prefix", data.EtcdPrefix)
+		data.EtcdEndpoints, err = prompt(reader, "Etcd endpoints", data.EtcdEndpoints)
+		if err != nil {
+			return err
+		}
+		data.EtcdPrefix, err = prompt(reader, "Etcd prefix", data.EtcdPrefix)
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("\n%s--- Authentication (OIDC) Settings (Required) ---%s\n", colorCyan+colorBold, colorReset)
-		data.AuthIssuer = prompt(reader, "OIDC Issuer URL", data.AuthIssuer)
-		data.AuthClientID = prompt(reader, "OIDC Client ID", data.AuthClientID)
-		data.AuthClientSecret = prompt(reader, "OIDC Client Secret", data.AuthClientSecret)
+		data.AuthIssuer, err = prompt(reader, "OIDC Issuer URL", data.AuthIssuer)
+		if err != nil {
+			return err
+		}
+		data.AuthClientID, err = prompt(reader, "OIDC Client ID", data.AuthClientID)
+		if err != nil {
+			return err
+		}
+		data.AuthClientSecret, err = prompt(reader, "OIDC Client Secret", data.AuthClientSecret, WithSecret(true))
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("\n%s--- Runner Node Settings ---%s\n", colorCyan+colorBold, colorReset)
-		data.InitialRunner = prompt(reader, "Initial runner node ID", data.InitialRunner)
+		data.InitialRunner, err = prompt(reader, "Initial runner node ID", data.InitialRunner)
+		if err != nil {
+			return err
+		}
 
-		workspaceMount := prompt(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/data/src)", "")
+		workspaceMount, err := prompt(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/data/src)", "")
+		if err != nil {
+			return err
+		}
 		if workspaceMount != "" {
 			data.WorkspaceMounts = []string{workspaceMount}
 		}
 
 		fmt.Printf("\n%s--- SOPS Encryption Settings (Optional) ---%s\n", colorCyan+colorBold, colorReset)
-		data.GCPKMS = prompt(reader, "GCP KMS key resource ID (leave empty if not using GCP KMS)", data.GCPKMS)
+		data.GCPKMS, err = prompt(reader, "GCP KMS key resource ID (leave empty if not using GCP KMS)", data.GCPKMS)
+		if err != nil {
+			return err
+		}
 		if data.GCPKMS == "" {
-			data.AgeRecipient = prompt(reader, "Age recipient public key (leave empty to configure manually later)", data.AgeRecipient)
+			data.AgeRecipient, err = prompt(reader, "Age recipient public key (leave empty to configure manually later)", data.AgeRecipient)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -667,23 +708,6 @@ func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, intera
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
 		}
 	}
-}
-
-func prompt(r *bufio.Reader, question, def string) string {
-	if def != "" {
-		fmt.Printf("%s%s%s [%s%s%s]: ", colorBold, question, colorReset, colorYellow, def, colorReset)
-	} else {
-		fmt.Printf("%s%s%s: ", colorBold, question, colorReset)
-	}
-	line, err := r.ReadString('\n')
-	if err != nil {
-		return def
-	}
-	val := strings.TrimSpace(line)
-	if val == "" {
-		return def
-	}
-	return val
 }
 
 func printWelcomeBanner() {

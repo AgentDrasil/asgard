@@ -1,8 +1,10 @@
 config.yaml
 tmp
 build
+/asgard-init
 cmd/agent-validate/agent-validate
 cmd/asgard/asgard
+cmd/asgard-init/asgard-init
 cmd/ask-user/ask-user
 cmd/call-peer/call-peer
 cmd/find-peer/find-peer
