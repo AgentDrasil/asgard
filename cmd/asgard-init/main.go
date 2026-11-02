@@ -200,6 +200,19 @@ func CheckCLICredentials(targetDir string) (string, bool) {
 	return "", false
 }
 
+// CheckClaudeCredentials checks if claude/.credentials.json or .credentials.json exists in targetDir/etcd-tree/credentials and is a non-empty file.
+func CheckClaudeCredentials(targetDir string) (string, bool) {
+	claudePath := filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json")
+	if isNonEmptyFile(claudePath) {
+		return claudePath, true
+	}
+	rootPath := filepath.Join(targetDir, "etcd-tree", "credentials", ".credentials.json")
+	if isNonEmptyFile(rootPath) {
+		return rootPath, true
+	}
+	return "", false
+}
+
 // PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials.
 // When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
 func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {

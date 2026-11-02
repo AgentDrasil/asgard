@@ -357,6 +357,32 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		}
 	}
 
+	claudeData := creds.GetClaudeCredentials()
+	claudeDir := filepath.Join(home, ".claude")
+	claudePath := filepath.Join(claudeDir, ".credentials.json")
+	if len(claudeData) > 0 {
+		if err := os.MkdirAll(claudeDir, 0700); err != nil {
+			return fmt.Errorf("create claude directory %s: %w", claudeDir, err)
+		}
+		if err := os.Chmod(claudeDir, 0700); err != nil {
+			return fmt.Errorf("chmod claude directory %s: %w", claudeDir, err)
+		}
+
+		existing, err := os.ReadFile(claudePath)
+		if err != nil || !bytes.Equal(existing, claudeData) {
+			if err := atomicWriteFile(claudePath, claudeData, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", claudePath, err)
+			}
+		} else {
+			_ = os.Chmod(claudePath, 0600)
+		}
+	} else {
+		// Credential revoked / cleared: remove file if it exists
+		if err := os.Remove(claudePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", claudePath, err)
+		}
+	}
+
 	return nil
 }
 
