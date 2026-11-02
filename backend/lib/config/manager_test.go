@@ -60,7 +60,16 @@ providers:
 		"credentials/xai-api-key":             []byte("test-xai-secret"),
 		"credentials/ssh/key":                 []byte("ssh-rsa AAAAB3NzaC1yc2E..."),
 		"credentials/ssh/key.pub":             []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"),
+		"credentials/ssh/id_ed25519":          []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_ed25519.pub":      []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"),
+		"credentials/ssh/id_rsa":              []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nrsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_rsa.pub":          []byte("ssh-rsa AAAAB3NzaC1yc2E... id_rsa-pub"),
+		"credentials/ssh/id_ecdsa":            []byte("-----BEGIN OPENSSH PRIVATE KEY-----\necdsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_ecdsa.pub":        []byte("ecdsa-sha2-nistp256 AAAAE2VjZHNh... id_ecdsa-pub"),
+		"credentials/ssh/id_dsa":              []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ndsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_dsa.pub":          []byte("ssh-dss AAAAB3NzaC1kc3M... id_dsa-pub"),
 		"credentials/ssh/config":              []byte("Host *\n  ServerAliveInterval 60\n"),
+		"credentials/ssh/known_hosts":         []byte("github.com ssh-rsa AAAAB3NzaC1yc2E..."),
 	}
 
 	src := configlib.NewMemSource(kvs)
@@ -100,5 +109,91 @@ providers:
 	assert.Equal(t, []byte("test-oauth-token"), cfg.Credentials.AntigravityOAuthToken)
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E..."), cfg.Credentials.SSH.Key)
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"), cfg.Credentials.SSH.KeyPub)
+	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdEd25519)
+	assert.Equal(t, []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"), cfg.Credentials.SSH.IdEd25519Pub)
+	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nrsa-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdRSA)
+	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E... id_rsa-pub"), cfg.Credentials.SSH.IdRSAPub)
+	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\necdsa-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdECDSA)
+	assert.Equal(t, []byte("ecdsa-sha2-nistp256 AAAAE2VjZHNh... id_ecdsa-pub"), cfg.Credentials.SSH.IdECDSAPub)
+	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ndsa-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdDSA)
+	assert.Equal(t, []byte("ssh-dss AAAAB3NzaC1kc3M... id_dsa-pub"), cfg.Credentials.SSH.IdDSAPub)
 	assert.Equal(t, []byte("Host *\n  ServerAliveInterval 60\n"), cfg.Credentials.SSH.Config)
+	assert.Equal(t, []byte("github.com ssh-rsa AAAAB3NzaC1yc2E..."), cfg.Credentials.SSH.KnownHosts)
+
+	// Validate SSH helper methods
+	assert.True(t, cfg.Credentials.SSH.HasKeys())
+	privKeys := cfg.Credentials.SSH.PrivateKeys()
+	assert.Len(t, privKeys, 5) // key, id_ed25519, id_rsa, id_ecdsa, id_dsa
+	assert.Contains(t, privKeys, "key")
+	assert.Contains(t, privKeys, "id_ed25519")
+	assert.Contains(t, privKeys, "id_rsa")
+	assert.Contains(t, privKeys, "id_ecdsa")
+	assert.Contains(t, privKeys, "id_dsa")
+
+	allFiles := cfg.Credentials.SSH.AllFiles()
+	assert.Len(t, allFiles, 12)
+	assert.Contains(t, allFiles, "key")
+	assert.Contains(t, allFiles, "key.pub")
+	assert.Contains(t, allFiles, "id_ed25519")
+	assert.Contains(t, allFiles, "id_ed25519.pub")
+	assert.Contains(t, allFiles, "id_rsa")
+	assert.Contains(t, allFiles, "id_rsa.pub")
+	assert.Contains(t, allFiles, "id_ecdsa")
+	assert.Contains(t, allFiles, "id_ecdsa.pub")
+	assert.Contains(t, allFiles, "id_dsa")
+	assert.Contains(t, allFiles, "id_dsa.pub")
+	assert.Contains(t, allFiles, "config")
+	assert.Contains(t, allFiles, "known_hosts")
+
+	fp := cfg.Credentials.SSH.Fingerprint()
+	assert.NotEmpty(t, fp)
+	assert.Len(t, fp, 32)
+	// Deterministic fingerprint
+	assert.Equal(t, fp, cfg.Credentials.SSH.Fingerprint())
+}
+
+func TestSSHScope_HelperMethods(t *testing.T) {
+	// Nil receiver tests
+	var nilScope *SSHScope
+	assert.Empty(t, nilScope.AllFiles())
+	assert.Empty(t, nilScope.PrivateKeys())
+	assert.False(t, nilScope.HasKeys())
+	assert.Nil(t, nilScope.Fingerprint())
+
+	// Empty struct tests
+	emptyScope := &SSHScope{}
+	assert.Empty(t, emptyScope.AllFiles())
+	assert.Empty(t, emptyScope.PrivateKeys())
+	assert.False(t, emptyScope.HasKeys())
+	assert.Nil(t, emptyScope.Fingerprint())
+
+	// Subset of keys: ed25519 only
+	edScope := &SSHScope{
+		IdEd25519:    []byte("ed25519-private"),
+		IdEd25519Pub: []byte("ed25519-public"),
+		Config:       []byte("Host github.com"),
+	}
+	assert.True(t, edScope.HasKeys())
+	assert.Equal(t, map[string][]byte{"id_ed25519": []byte("ed25519-private")}, edScope.PrivateKeys())
+	all := edScope.AllFiles()
+	assert.Len(t, all, 3)
+	assert.Equal(t, []byte("ed25519-private"), all["id_ed25519"])
+	assert.Equal(t, []byte("ed25519-public"), all["id_ed25519.pub"])
+	assert.Equal(t, []byte("Host github.com"), all["config"])
+
+	fp1 := edScope.Fingerprint()
+	assert.Len(t, fp1, 32)
+
+	// Mutating content changes fingerprint
+	edScope2 := &SSHScope{
+		IdEd25519:    []byte("ed25519-private-changed"),
+		IdEd25519Pub: []byte("ed25519-public"),
+		Config:       []byte("Host github.com"),
+	}
+	assert.NotEqual(t, fp1, edScope2.Fingerprint())
+
+	// Length-prefix encoding: keys with different lengths/boundaries produce distinct fingerprints
+	scopeA := &SSHScope{Key: []byte("foo"), KeyPub: []byte("bar")}
+	scopeB := &SSHScope{Key: []byte("fo"), KeyPub: []byte("obar")}
+	assert.NotEqual(t, scopeA.Fingerprint(), scopeB.Fingerprint())
 }

@@ -10,12 +10,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type syncWriter struct {
+	onWrite func([]byte)
+	writeFn func([]byte) (int, error)
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	if s.onWrite != nil {
+		s.onWrite(p)
+	}
+	if s.writeFn != nil {
+		return s.writeFn(p)
+	}
+	return len(p), nil
+}
 
 func TestTLSGeneration(t *testing.T) {
 	t.Parallel()
@@ -292,8 +308,9 @@ func TestGenerateDeployment(t *testing.T) {
 	// Verify .gitignore ignores plaintext staged credentials
 	gitignoreContent, err := os.ReadFile(filepath.Join(tempDir, ".gitignore"))
 	require.NoError(t, err)
-	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/ssh/key")
-	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/ssh/config")
+	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/ssh/*")
+	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/*.sops.json")
+	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/.gitkeep")
 	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/antigravity-oauth-token")
 
 	// Verify .sops.yaml contains oauth_creds.json in path_regex and credentials rule precedes generic rule
@@ -553,8 +570,9 @@ func TestCheckSSHCredentials(t *testing.T) {
 	t.Run("empty directory returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		ok := CheckSSHCredentials(tempDir)
+		keys, ok := CheckSSHCredentials(tempDir)
 		assert.False(t, ok)
+		assert.Nil(t, keys)
 	})
 
 	t.Run("zero-byte key returns false", func(t *testing.T) {
@@ -562,33 +580,36 @@ func TestCheckSSHCredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		keyFile := filepath.Join(sshDir, "key")
+		keyFile := filepath.Join(sshDir, "id_ed25519")
 		require.NoError(t, os.WriteFile(keyFile, []byte(""), 0600))
 
-		ok := CheckSSHCredentials(tempDir)
+		keys, ok := CheckSSHCredentials(tempDir)
 		assert.False(t, ok)
+		assert.Nil(t, keys)
 	})
 
 	t.Run("key is a directory returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		keyDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh", "key")
+		keyDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh", "id_ed25519")
 		require.NoError(t, os.MkdirAll(keyDir, 0755))
 
-		ok := CheckSSHCredentials(tempDir)
+		keys, ok := CheckSSHCredentials(tempDir)
 		assert.False(t, ok)
+		assert.Nil(t, keys)
 	})
 
-	t.Run("valid non-empty key returns true", func(t *testing.T) {
+	t.Run("valid non-empty id_ed25519 returns true", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		keyFile := filepath.Join(sshDir, "key")
+		keyFile := filepath.Join(sshDir, "id_ed25519")
 		require.NoError(t, os.WriteFile(keyFile, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----"), 0600))
 
-		ok := CheckSSHCredentials(tempDir)
+		keys, ok := CheckSSHCredentials(tempDir)
 		assert.True(t, ok)
+		assert.Equal(t, []string{"id_ed25519"}, keys)
 	})
 
 	t.Run("valid key with loose 0644 permissions is tightened to 0600", func(t *testing.T) {
@@ -596,15 +617,63 @@ func TestCheckSSHCredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		keyFile := filepath.Join(sshDir, "key")
-		require.NoError(t, os.WriteFile(keyFile, []byte("my-private-key"), 0644))
+		keyFile := filepath.Join(sshDir, "id_ed25519")
+		require.NoError(t, os.WriteFile(keyFile, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nmy-private-key"), 0644))
 
-		ok := CheckSSHCredentials(tempDir)
+		keys, ok := CheckSSHCredentials(tempDir)
 		assert.True(t, ok)
+		assert.Equal(t, []string{"id_ed25519"}, keys)
 
 		stat, err := os.Stat(keyFile)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0600), stat.Mode().Perm())
+	})
+
+	t.Run("key without BEGIN header returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
+		require.NoError(t, os.MkdirAll(sshDir, 0755))
+		keyFile := filepath.Join(sshDir, "id_ed25519")
+		require.NoError(t, os.WriteFile(keyFile, []byte("not-a-valid-pem-or-openssh-key"), 0600))
+
+		keys, ok := CheckSSHCredentials(tempDir)
+		assert.False(t, ok)
+		assert.Nil(t, keys)
+	})
+
+	t.Run("multiple keys found, non-private files ignored, unsupported files warned", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
+		require.NoError(t, os.MkdirAll(sshDir, 0755))
+
+		// Valid private keys with BEGIN header (loose permissions)
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("-----BEGIN RSA PRIVATE KEY-----\nrsa"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "key"), []byte("-----BEGIN PRIVATE KEY-----\nkey"), 0644))
+
+		// Non-private files should be ignored without warning
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("pub-data"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519.sops.json"), []byte("{}"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "config"), []byte("Host *"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte("hosts"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, ".gitkeep"), []byte(""), 0644))
+
+		// Unsupported file names (including authorized_keys and id_custom) should trigger warning and not be synced
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "authorized_keys"), []byte("ssh-ed25519 ..."), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_custom"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ncustom"), 0644))
+
+		keys, ok := CheckSSHCredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, []string{"id_ed25519", "id_rsa", "key"}, keys)
+
+		// Check all private keys were chmodded to 0600
+		for _, name := range keys {
+			stat, err := os.Stat(filepath.Join(sshDir, name))
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0600), stat.Mode().Perm())
+		}
 	})
 }
 
@@ -622,12 +691,12 @@ func TestPromptSSHCredentials(t *testing.T) {
 		assert.NotContains(t, out.String(), "SSH credentials verified")
 	})
 
-	t.Run("non-interactive detects existing key", func(t *testing.T) {
+	t.Run("non-interactive detects existing id_ed25519 key", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "key"), []byte("my-private-key"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nmy-private-key"), 0600))
 
 		var out bytes.Buffer
 		reader := bufio.NewReader(strings.NewReader(""))
@@ -635,14 +704,16 @@ func TestPromptSSHCredentials(t *testing.T) {
 		verified := PromptSSHCredentials(reader, &out, tempDir, false)
 		assert.True(t, verified)
 		assert.Contains(t, out.String(), "SSH credentials verified")
+		assert.Contains(t, out.String(), "id_ed25519")
 	})
 
-	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+	t.Run("interactive prompt verify success on y with multiple keys", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "key"), []byte("my-private-key"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nmy-private-key"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("-----BEGIN RSA PRIVATE KEY-----\nmy-rsa-key"), 0600))
 
 		var out bytes.Buffer
 		reader := bufio.NewReader(strings.NewReader("y\n"))
@@ -650,6 +721,7 @@ func TestPromptSSHCredentials(t *testing.T) {
 		verified := PromptSSHCredentials(reader, &out, tempDir, true)
 		assert.True(t, verified)
 		assert.Contains(t, out.String(), "SSH credentials verified successfully")
+		assert.Contains(t, out.String(), "id_ed25519, id_rsa")
 	})
 
 	t.Run("interactive prompt verify success on Y (uppercase)", func(t *testing.T) {
@@ -657,7 +729,7 @@ func TestPromptSSHCredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
 		require.NoError(t, os.MkdirAll(sshDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "key"), []byte("my-private-key"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nmy-private-key"), 0600))
 
 		var out bytes.Buffer
 		reader := bufio.NewReader(strings.NewReader("Y\n"))
@@ -665,6 +737,7 @@ func TestPromptSSHCredentials(t *testing.T) {
 		verified := PromptSSHCredentials(reader, &out, tempDir, true)
 		assert.True(t, verified)
 		assert.Contains(t, out.String(), "SSH credentials verified successfully")
+		assert.Contains(t, out.String(), "id_ed25519")
 	})
 
 	t.Run("interactive prompt skip on s", func(t *testing.T) {
@@ -688,22 +761,51 @@ func TestPromptSSHCredentials(t *testing.T) {
 		r, w := io.Pipe()
 		t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
 
+		errSeen := make(chan struct{}, 1)
+		var outBuf bytes.Buffer
+		var outMu sync.Mutex
+
+		outWriter := &syncWriter{
+			onWrite: func(p []byte) {
+				if strings.Contains(string(p), "No valid") {
+					select {
+					case errSeen <- struct{}{}:
+					default:
+					}
+				}
+			},
+			writeFn: func(p []byte) (int, error) {
+				outMu.Lock()
+				defer outMu.Unlock()
+				return outBuf.Write(p)
+			},
+		}
+
 		go func() {
 			// Write first 'y' -> file doesn't exist
 			_, _ = w.Write([]byte("y\n"))
-			time.Sleep(50 * time.Millisecond)
+			// Wait until error message is output before creating the file
+			select {
+			case <-errSeen:
+			case <-time.After(2 * time.Second):
+			}
 			// Place credential key file
-			_ = os.WriteFile(filepath.Join(sshDir, "key"), []byte("ssh-rsa test-key"), 0600)
+			_ = os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519 test-key"), 0600)
 			// Write second 'y' -> should now succeed
 			_, _ = w.Write([]byte("y\n"))
 		}()
 
-		var out bytes.Buffer
 		reader := bufio.NewReader(r)
-		verified := PromptSSHCredentials(reader, &out, tempDir, true)
+		verified := PromptSSHCredentials(reader, outWriter, tempDir, true)
 		assert.True(t, verified)
-		assert.Contains(t, out.String(), "No valid, non-empty SSH private key found")
-		assert.Contains(t, out.String(), "SSH credentials verified successfully")
+
+		outMu.Lock()
+		outStr := outBuf.String()
+		outMu.Unlock()
+
+		assert.Contains(t, outStr, "No valid, non-empty SSH private key found")
+		assert.Contains(t, outStr, "SSH credentials verified successfully")
+		assert.Contains(t, outStr, "id_ed25519")
 	})
 
 	t.Run("interactive invalid input then skip", func(t *testing.T) {

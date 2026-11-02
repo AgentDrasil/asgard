@@ -211,6 +211,12 @@ func appendSSHSandboxArgs(args []string, home string) []string {
 		args = append(args, "--ro-bind", sshConfigPath, sshConfigPath)
 	}
 
+	// If host ~/.ssh/known_hosts exists, mount it read-only
+	knownHostsPath := filepath.Join(sshDir, "known_hosts")
+	if _, err := os.Stat(knownHostsPath); err == nil {
+		args = append(args, "--ro-bind", knownHostsPath, knownHostsPath)
+	}
+
 	// Mount *.pub public keys read-only so ssh can compute key fingerprints for IdentitiesOnly=yes via ssh-agent
 	entries, err := os.ReadDir(sshDir)
 	if err == nil {

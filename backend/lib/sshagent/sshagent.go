@@ -129,7 +129,7 @@ func AddKeysFromDir(sshDir string) error {
 // ClearKeys removes identities from the running ssh-agent.
 // To avoid wiping out unrelated identities on an inherited or forwarded agent,
 // it only runs `ssh-add -D` if the agent was spawned by Asgard (DedicatedSocketPath).
-// If an external agent is in use, it removes ~/.ssh/key specifically via RemoveKey.
+// If an external agent is in use, it iterates ~/.ssh/ and removes any private keys via RemoveKey.
 func ClearKeys() error {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
@@ -147,9 +147,20 @@ func ClearKeys() error {
 	if sock != DedicatedSocketPath {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			keyPath := filepath.Join(home, ".ssh", "key")
-			if _, err := os.Stat(keyPath); err == nil {
-				return RemoveKey(keyPath)
+			sshDir := filepath.Join(home, ".ssh")
+			entries, err := os.ReadDir(sshDir)
+			if err == nil {
+				for _, entry := range entries {
+					if entry.IsDir() {
+						continue
+					}
+					name := entry.Name()
+					if strings.HasSuffix(name, ".pub") || name == "config" || name == "known_hosts" || name == "authorized_keys" {
+						continue
+					}
+					keyPath := filepath.Join(sshDir, name)
+					_ = RemoveKey(keyPath)
+				}
 			}
 		}
 		return nil

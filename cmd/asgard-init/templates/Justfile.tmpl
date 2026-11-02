@@ -30,11 +30,14 @@ logs-runner RUNNER="{{ .InitialRunner }}" +FLAGS='':
 # Encrypt local etcd-tree configuration using cfgctl and SOPS
 encrypt:
     cfgctl encrypt ./etcd-tree
-    @for f in ./etcd-tree/credentials/ssh/key ./etcd-tree/credentials/ssh/key.pub ./etcd-tree/credentials/ssh/config ./etcd-tree/credentials/antigravity-oauth-token; do \
-        if [ -f "$$f" ] && [ ! -f "$$f.sops.json" ]; then \
+    @for f in ./etcd-tree/credentials/ssh/*; do \
+        if [ -f "$$f" ] && [ "$${f##*.sops.json}" != "" ] && [ ! -f "$$f.sops.json" ]; then \
             sops --input-type binary --output-type json -e "$$f" > "$$f.sops.json"; \
         fi \
     done
+    @if [ -f ./etcd-tree/credentials/antigravity-oauth-token ] && [ ! -f ./etcd-tree/credentials/antigravity-oauth-token.sops.json ]; then \
+        sops --input-type binary --output-type json -e ./etcd-tree/credentials/antigravity-oauth-token > ./etcd-tree/credentials/antigravity-oauth-token.sops.json; \
+    fi
 
 # Push etcd-tree configuration into etcd cluster
 push:

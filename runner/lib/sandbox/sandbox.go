@@ -71,8 +71,8 @@ type Sandbox struct {
 
 	// lastSSHSynced tracks whether SSH credentials have been synced from etcd.
 	lastSSHSynced bool
-	// lastSSHKey tracks the last synced SSH private key bytes to detect actual changes.
-	lastSSHKey []byte
+	// lastSSHFingerprint tracks the last synced SSH credentials fingerprint to detect actual changes.
+	lastSSHFingerprint []byte
 }
 
 // Setup performs the backend's startup steps for sandboxes (ssh-agent, proxy
@@ -126,10 +126,10 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 			log.Warn().Err(syncErr).Msg("failed to sync CLI credentials to home directory")
 		}
 
-		currKey := tree.Credentials.SSH.Key
-		hasKey := len(currKey) > 0
-		keyChanged := hasKey && (!s.lastSSHSynced || !bytes.Equal(s.lastSSHKey, currKey))
-		keyRevoked := !hasKey && s.lastSSHSynced
+		hasKeys := tree.Credentials.SSH.HasKeys()
+		currFP := tree.Credentials.SSH.Fingerprint()
+		keyChanged := hasKeys && (!s.lastSSHSynced || !bytes.Equal(s.lastSSHFingerprint, currFP))
+		keyRevoked := !hasKeys && s.lastSSHSynced
 
 		if keyRevoked && !s.opts.SkipSSH && s.opts.ClearSSH != nil {
 			if err := s.opts.ClearSSH(); err != nil {
@@ -142,7 +142,7 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 		} else {
 			if keyChanged {
 				s.lastSSHSynced = true
-				s.lastSSHKey = bytes.Clone(currKey)
+				s.lastSSHFingerprint = bytes.Clone(currFP)
 				if !s.opts.SkipSSH && s.opts.SetupSSH != nil {
 					if err := s.opts.SetupSSH(); err != nil {
 						log.Warn().Err(err).Msg("failed to re-add SSH keys to ssh-agent")
@@ -150,7 +150,7 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 				}
 			} else if keyRevoked {
 				s.lastSSHSynced = false
-				s.lastSSHKey = nil
+				s.lastSSHFingerprint = nil
 			}
 		}
 	}
@@ -360,6 +360,21 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 	return nil
 }
 
+var managedSSHFiles = []string{
+	"key",
+	"key.pub",
+	"id_ed25519",
+	"id_ed25519.pub",
+	"id_rsa",
+	"id_rsa.pub",
+	"id_ecdsa",
+	"id_ecdsa.pub",
+	"id_dsa",
+	"id_dsa.pub",
+	"config",
+	"known_hosts",
+}
+
 // SyncSSHCredentials writes SSH credentials received from etcd to the runner user's ~/.ssh directory.
 func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 	if home == "" {
@@ -374,20 +389,14 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 	}
 
 	sshDir := filepath.Join(home, ".ssh")
-	keyPath := filepath.Join(sshDir, "key")
-	pubPath := filepath.Join(sshDir, "key.pub")
-	configPath := filepath.Join(sshDir, "config")
 
-	if ssh == nil || len(ssh.Key) == 0 {
-		// Revocation: if key exists in ~/.ssh, remove it along with key.pub and config if previously synced.
-		if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", keyPath, err)
-		}
-		if err := os.Remove(pubPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", pubPath, err)
-		}
-		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", configPath, err)
+	if ssh == nil || (!ssh.HasKeys() && len(ssh.Config) == 0 && len(ssh.KnownHosts) == 0) {
+		// Revocation: remove any known managed files in ~/.ssh/
+		for _, name := range managedSSHFiles {
+			target := filepath.Join(sshDir, name)
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove %s: %w", target, err)
+			}
 		}
 		return nil
 	}
@@ -399,42 +408,33 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 		return fmt.Errorf("chmod ssh directory %s: %w", sshDir, err)
 	}
 
-	existingKey, err := os.ReadFile(keyPath)
-	if err != nil || !bytes.Equal(existingKey, ssh.Key) {
-		if err := atomicWriteFile(keyPath, ssh.Key, 0600); err != nil {
-			return fmt.Errorf("write %s: %w", keyPath, err)
-		}
-	} else {
-		_ = os.Chmod(keyPath, 0600)
-	}
+	allFiles := ssh.AllFiles()
+	privKeys := ssh.PrivateKeys()
 
-	if len(ssh.KeyPub) > 0 {
-		existingPub, err := os.ReadFile(pubPath)
-		if err != nil || !bytes.Equal(existingPub, ssh.KeyPub) {
-			if err := atomicWriteFile(pubPath, ssh.KeyPub, 0644); err != nil {
-				return fmt.Errorf("write %s: %w", pubPath, err)
+	for name, data := range allFiles {
+		targetPath := filepath.Join(sshDir, name)
+		perm := os.FileMode(0644)
+		if _, isPriv := privKeys[name]; isPriv {
+			perm = 0600
+		}
+
+		existing, err := os.ReadFile(targetPath)
+		if err != nil || !bytes.Equal(existing, data) {
+			if err := atomicWriteFile(targetPath, data, perm); err != nil {
+				return fmt.Errorf("write %s: %w", targetPath, err)
 			}
 		} else {
-			_ = os.Chmod(pubPath, 0644)
-		}
-	} else {
-		if err := os.Remove(pubPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", pubPath, err)
+			_ = os.Chmod(targetPath, perm)
 		}
 	}
 
-	if len(ssh.Config) > 0 {
-		existingConfig, err := os.ReadFile(configPath)
-		if err != nil || !bytes.Equal(existingConfig, ssh.Config) {
-			if err := atomicWriteFile(configPath, ssh.Config, 0644); err != nil {
-				return fmt.Errorf("write %s: %w", configPath, err)
+	// Any managed file that is NOT present in ssh.AllFiles() should be deleted if it exists.
+	for _, name := range managedSSHFiles {
+		if _, ok := allFiles[name]; !ok {
+			target := filepath.Join(sshDir, name)
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove %s: %w", target, err)
 			}
-		} else {
-			_ = os.Chmod(configPath, 0644)
-		}
-	} else {
-		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", configPath, err)
 		}
 	}
 

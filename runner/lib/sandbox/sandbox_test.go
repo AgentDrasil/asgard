@@ -742,3 +742,155 @@ func TestSyncSSHCredentials_RevocationAndPermissionTightening(t *testing.T) {
 	_, err = os.Stat(keyPath)
 	assert.True(t, os.IsNotExist(err))
 }
+
+func TestSyncSSHCredentials_MultiKey(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	sshDir := filepath.Join(tempHome, ".ssh")
+
+	ssh := &config.SSHScope{
+		IdEd25519:    []byte("ed25519-priv"),
+		IdEd25519Pub: []byte("ed25519-pub"),
+		IdRSA:        []byte("rsa-priv"),
+		IdRSAPub:     []byte("rsa-pub"),
+		IdECDSA:      []byte("ecdsa-priv"),
+		IdECDSAPub:   []byte("ecdsa-pub"),
+		IdDSA:        []byte("dsa-priv"),
+		IdDSAPub:     []byte("dsa-pub"),
+		Config:       []byte("Host *"),
+		KnownHosts:   []byte("github.com ssh-rsa ..."),
+	}
+
+	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
+
+	dirStat, err := os.Stat(sshDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirStat.Mode().Perm())
+
+	// Private keys must be 0600
+	for _, priv := range []string{"id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"} {
+		p := filepath.Join(sshDir, priv)
+		stat, err := os.Stat(p)
+		require.NoError(t, err, "missing %s", priv)
+		assert.Equal(t, os.FileMode(0600), stat.Mode().Perm(), "%s must be 0600", priv)
+	}
+
+	// Public keys, config, known_hosts must be 0644
+	for _, pub := range []string{"id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub", "id_dsa.pub", "config", "known_hosts"} {
+		p := filepath.Join(sshDir, pub)
+		stat, err := os.Stat(p)
+		require.NoError(t, err, "missing %s", pub)
+		assert.Equal(t, os.FileMode(0644), stat.Mode().Perm(), "%s must be 0644", pub)
+	}
+
+	// Remove some keys (e.g. keep only id_ed25519 and config)
+	subsetSSH := &config.SSHScope{
+		IdEd25519:    []byte("ed25519-priv"),
+		IdEd25519Pub: []byte("ed25519-pub"),
+		Config:       []byte("Host *"),
+	}
+	require.NoError(t, SyncSSHCredentials(tempHome, subsetSSH))
+
+	// id_ed25519 and config should still exist
+	_, err = os.Stat(filepath.Join(sshDir, "id_ed25519"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(sshDir, "config"))
+	require.NoError(t, err)
+
+	// Deleted managed files should be gone
+	for _, deleted := range []string{"id_rsa", "id_rsa.pub", "id_ecdsa", "id_ecdsa.pub", "id_dsa", "id_dsa.pub", "known_hosts"} {
+		p := filepath.Join(sshDir, deleted)
+		_, err = os.Stat(p)
+		assert.True(t, os.IsNotExist(err), "%s should have been removed", deleted)
+	}
+
+	// Complete revocation
+	require.NoError(t, SyncSSHCredentials(tempHome, &config.SSHScope{}))
+	for _, m := range managedSSHFiles {
+		p := filepath.Join(sshDir, m)
+		_, err = os.Stat(p)
+		assert.True(t, os.IsNotExist(err), "%s should have been removed on revocation", m)
+	}
+}
+
+func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+
+	tree := validTree(proxy.Config{})
+	tree.Credentials.SSH.IdEd25519 = []byte("initial-ed25519-priv")
+	tree.Credentials.SSH.IdEd25519Pub = []byte("initial-ed25519-pub")
+
+	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
+	require.NoError(t, err)
+
+	src := &fakeSource{conf: initialConf, tree: tree}
+
+	var setupSSHCount int
+	var clearSSHCount int
+	var mu sync.Mutex
+	sb := Setup(src, Options{
+		SkipSSH: false,
+		HomeDir: tempHome,
+		SetupSSH: func() error {
+			mu.Lock()
+			setupSSHCount++
+			mu.Unlock()
+			return nil
+		},
+		ClearSSH: func() error {
+			mu.Lock()
+			clearSSHCount++
+			mu.Unlock()
+			return nil
+		},
+	})
+	t.Cleanup(sb.Close)
+
+	require.NoError(t, sb.Ready())
+
+	mu.Lock()
+	assert.Equal(t, 2, setupSSHCount, "SetupSSH called on startup and initial credential sync")
+	assert.Equal(t, 0, clearSSHCount)
+	mu.Unlock()
+
+	// Add an RSA key alongside ed25519
+	updatedTree := validTree(proxy.Config{})
+	updatedTree.Credentials.SSH.IdEd25519 = []byte("initial-ed25519-priv")
+	updatedTree.Credentials.SSH.IdEd25519Pub = []byte("initial-ed25519-pub")
+	updatedTree.Credentials.SSH.IdRSA = []byte("added-rsa-priv")
+	updatedTree.Credentials.SSH.IdRSAPub = []byte("added-rsa-pub")
+
+	src.fire(updatedTree)
+
+	mu.Lock()
+	assert.Equal(t, 3, setupSSHCount, "SetupSSH should be called when private key added")
+	assert.Equal(t, 0, clearSSHCount)
+	mu.Unlock()
+
+	// Verify both exist on disk
+	sshDir := filepath.Join(tempHome, ".ssh")
+	_, err = os.Stat(filepath.Join(sshDir, "id_ed25519"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(sshDir, "id_rsa"))
+	require.NoError(t, err)
+
+	// Revoke all private keys
+	revokedTree := validTree(proxy.Config{})
+	revokedTree.Credentials.SSH = config.SSHScope{}
+
+	src.fire(revokedTree)
+
+	mu.Lock()
+	assert.Equal(t, 3, setupSSHCount)
+	assert.Equal(t, 1, clearSSHCount, "ClearSSH must be called when all private keys are revoked")
+	mu.Unlock()
+
+	// Files removed
+	_, err = os.Stat(filepath.Join(sshDir, "id_ed25519"))
+	assert.True(t, os.IsNotExist(err))
+	_, err = os.Stat(filepath.Join(sshDir, "id_rsa"))
+	assert.True(t, os.IsNotExist(err))
+}

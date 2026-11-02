@@ -13,6 +13,7 @@ runners/*/asgard/
 runners/*/session-data/
 
 # Plaintext credentials staged for etcd encryption
-etcd-tree/credentials/ssh/key
-etcd-tree/credentials/ssh/config
+etcd-tree/credentials/ssh/*
+!etcd-tree/credentials/ssh/*.sops.json
+!etcd-tree/credentials/ssh/.gitkeep
 etcd-tree/credentials/antigravity-oauth-token

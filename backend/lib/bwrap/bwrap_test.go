@@ -1569,3 +1569,27 @@ func TestReadOnlyLockMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, -1, indexOfSeq(cmdAllow.Args, "--bind", runnerpaths.DataDir(), runnerpaths.DataDir()))
 }
+
+func TestAppendSSHSandboxArgs_KnownHosts(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+
+	// Without known_hosts or config
+	args := appendSSHSandboxArgs(nil, home)
+	knownHostsPath := filepath.Join(sshDir, "known_hosts")
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--tmpfs", sshDir), 0)
+	assert.Equal(t, -1, indexOfSeq(args, "--ro-bind", knownHostsPath, knownHostsPath))
+
+	// With known_hosts and config
+	require.NoError(t, os.WriteFile(knownHostsPath, []byte("github.com ssh-rsa AAAAB3..."), 0644))
+	configPath := filepath.Join(sshDir, "config")
+	require.NoError(t, os.WriteFile(configPath, []byte("Host *"), 0644))
+
+	argsWithKnownHosts := appendSSHSandboxArgs(nil, home)
+	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--tmpfs", sshDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--ro-bind", configPath, configPath), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--ro-bind", knownHostsPath, knownHostsPath), 0)
+}

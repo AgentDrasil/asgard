@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -245,26 +246,75 @@ func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactiv
 	}
 }
 
-// CheckSSHCredentials checks whether etcd-tree/credentials/ssh/key exists and is a non-empty file.
-// It also ensures the file's permissions are tightened to 0600.
-func CheckSSHCredentials(targetDir string) bool {
-	keyPath := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh", "key")
-	if isNonEmptyFile(keyPath) {
-		_ = os.Chmod(keyPath, 0600)
-		return true
+// CheckSSHCredentials checks whether valid SSH private keys exist in targetDir/etcd-tree/credentials/ssh/.
+// A valid private key MUST be in supportedPrivateKeys, is a regular file, and its content should start with (or contain) "-----BEGIN ".
+// If an unsupported file is found (not ending in .pub, not .sops.json, not config, not known_hosts, not .gitkeep),
+// a warning is printed to the user that the filename is not in supported list {key, id_ed25519, id_rsa, id_ecdsa, id_dsa} and won't be synced to runner.
+// It tightens every valid private key's permissions to 0600, and returns the sorted list of key names.
+func CheckSSHCredentials(targetDir string) ([]string, bool) {
+	sshDir := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh")
+	entries, err := os.ReadDir(sshDir)
+	if err != nil {
+		return nil, false
 	}
-	return false
+
+	supportedPrivateKeys := map[string]bool{
+		"key":        true,
+		"id_ed25519": true,
+		"id_rsa":     true,
+		"id_ecdsa":   true,
+		"id_dsa":     true,
+	}
+
+	var foundKeys []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".pub") || strings.HasSuffix(name, ".sops.json") {
+			continue
+		}
+		switch name {
+		case "config", "known_hosts", ".gitkeep":
+			continue
+		}
+
+		if !supportedPrivateKeys[name] {
+			fmt.Printf("\n%sWarning:%s %s is not in supported list {key, id_ed25519, id_rsa, id_ecdsa, id_dsa} and won't be synced to runner.\n", colorYellow+colorBold, colorReset, name)
+			continue
+		}
+
+		keyPath := filepath.Join(sshDir, name)
+		fi, err := os.Stat(keyPath)
+		if err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
+			continue
+		}
+
+		data, err := os.ReadFile(keyPath)
+		if err != nil || !strings.Contains(string(data), "-----BEGIN ") {
+			continue
+		}
+
+		_ = os.Chmod(keyPath, 0600)
+		foundKeys = append(foundKeys, name)
+	}
+
+	if len(foundKeys) == 0 {
+		return nil, false
+	}
+
+	sort.Strings(foundKeys)
+	return foundKeys, true
 }
 
-// PromptSSHCredentials prompts the user to place their SSH private key (and optional key.pub / config) into etcd-tree/credentials/ssh/.
-// When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
+// PromptSSHCredentials prompts the user to place their SSH private key (and optional *.pub / config) into etcd-tree/credentials/ssh/.
+// When interactive is false, it does not block on r and checks if valid keys exist or skips gracefully.
 func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, interactive bool) bool {
 	sshDir := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh")
-	sshKeyPath := filepath.Join(sshDir, "key")
 	if !interactive {
-		if CheckSSHCredentials(targetDir) {
-			_ = os.Chmod(sshKeyPath, 0600)
-			_, _ = fmt.Fprintf(w, "\n%s✔ SSH credentials verified:%s %s\n", colorGreen+colorBold, colorReset, sshKeyPath)
+		if keys, ok := CheckSSHCredentials(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ SSH credentials verified:%s %s\n", colorGreen+colorBold, colorReset, strings.Join(keys, ", "))
 			return true
 		}
 		return false
@@ -275,7 +325,7 @@ func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, intera
 	}
 
 	_, _ = fmt.Fprintf(w, "\n%s--- SSH Credentials Setup ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your SSH private key (and optional key.pub / config) into %s%s/%s (e.g. key, key.pub, config).\n", colorYellow, sshDir, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your SSH private key (and optional *.pub / config) into %s%s/%s (e.g. id_ed25519, id_rsa, key).\n", colorYellow, sshDir, colorReset)
 
 	for {
 		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
@@ -286,12 +336,11 @@ func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, intera
 		ans := strings.ToLower(strings.TrimSpace(line))
 		switch ans {
 		case "y", "yes":
-			if CheckSSHCredentials(targetDir) {
-				_ = os.Chmod(sshKeyPath, 0600)
-				_, _ = fmt.Fprintf(w, "%s✔ SSH credentials verified successfully:%s %s\n", colorGreen+colorBold, colorReset, sshKeyPath)
+			if keys, ok := CheckSSHCredentials(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ SSH credentials verified successfully:%s %s\n", colorGreen+colorBold, colorReset, strings.Join(keys, ", "))
 				return true
 			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty SSH private key found at %s.\n", colorRed+colorBold, colorReset, sshKeyPath)
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty SSH private key found in %s (e.g. id_ed25519, id_rsa, key).\n", colorRed+colorBold, colorReset, sshDir)
 		case "s", "skip":
 			_, _ = fmt.Fprintf(w, "%sSkipped SSH credentials setup.%s You can place it into %s/ later before running just publish.\n", colorYellow, colorReset, sshDir)
 			return false
