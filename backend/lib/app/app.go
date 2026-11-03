@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	backendpaths "github.com/AgentDrasil/asgard/pkg/paths/backend"
 )
 
 // Option mutates the Options during App initialization.
@@ -236,6 +239,7 @@ func New(opts ...Option) (*App, error) {
 					return
 				}
 				log.Info().Msg("etcd configuration update detected, reloading proxy and main config")
+				syncGCPSAKey(&newTree.Credentials)
 				newProxy := newTree.Asgard.Proxy
 				conf.SetProxy(&newProxy)
 				reloadRunnerConfig(conf, newTree.Asgard.Config.Runner, diagnostics, hubHolder.Load())
@@ -265,6 +269,7 @@ func New(opts ...Option) (*App, error) {
 		if treeCfg == nil {
 			return nil, fmt.Errorf("etcd configuration snapshot is nil")
 		}
+		syncGCPSAKey(&treeCfg.Credentials)
 		mainCfg := treeCfg.Asgard.Config.Clone()
 		conf = mainCfg
 		if treeCfg.Asgard.Proxy.Enable || len(treeCfg.Asgard.Proxy.Rules) > 0 {
@@ -679,4 +684,39 @@ func Run(ctx context.Context, opts ...Option) error {
 		return startErr
 	}
 	return stopErr
+}
+
+func syncGCPSAKey(creds *config.CredentialsScope) {
+	if creds == nil {
+		return
+	}
+	saPath := filepath.Join(backendpaths.DataDir(), "gcp-sa.json")
+	if len(creds.GCPSAKey) > 0 {
+		if err := os.MkdirAll(backendpaths.DataDir(), 0755); err != nil {
+			log.Warn().Err(err).Msg("failed to create data directory for gcp-sa.json")
+			return
+		}
+		existing, err := os.ReadFile(saPath)
+		if err != nil || !bytes.Equal(existing, creds.GCPSAKey) {
+			tmp := saPath + ".tmp"
+			if err := os.WriteFile(tmp, creds.GCPSAKey, 0600); err != nil {
+				log.Warn().Err(err).Msg("failed to write temporary gcp-sa.json")
+				return
+			}
+			if err := os.Rename(tmp, saPath); err != nil {
+				log.Warn().Err(err).Msg("failed to replace gcp-sa.json")
+				return
+			}
+		} else {
+			_ = os.Chmod(saPath, 0600)
+		}
+		_ = os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", saPath)
+	} else {
+		if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == saPath {
+			_ = os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+		}
+		if err := os.Remove(saPath); err != nil && !os.IsNotExist(err) {
+			log.Warn().Err(err).Msg("failed to remove revoked gcp-sa.json")
+		}
+	}
 }

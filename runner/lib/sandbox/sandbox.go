@@ -386,6 +386,35 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		}
 	}
 
+	configDir := filepath.Join(home, ".config")
+	gcpsaPath := filepath.Join(configDir, "gcp-sa.json")
+	if len(creds.GCPSAKey) > 0 {
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			return fmt.Errorf("create config directory %s: %w", configDir, err)
+		}
+		if err := os.Chmod(configDir, 0700); err != nil {
+			return fmt.Errorf("chmod config directory %s: %w", configDir, err)
+		}
+
+		existing, err := os.ReadFile(gcpsaPath)
+		if err != nil || !bytes.Equal(existing, creds.GCPSAKey) {
+			if err := atomicWriteFile(gcpsaPath, creds.GCPSAKey, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", gcpsaPath, err)
+			}
+		} else {
+			_ = os.Chmod(gcpsaPath, 0600)
+		}
+		_ = os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", gcpsaPath)
+	} else {
+		// Credential revoked / cleared: remove file if it exists and unset env if pointing to it
+		if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == gcpsaPath {
+			_ = os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+		}
+		if err := os.Remove(gcpsaPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", gcpsaPath, err)
+		}
+	}
+
 	return nil
 }
 

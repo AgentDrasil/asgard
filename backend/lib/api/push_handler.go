@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2/google"
+
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 )
 
 var (
@@ -22,6 +25,7 @@ var (
 	fcmClientMu     sync.Mutex
 	cachedFcmClient *http.Client
 	cachedProjectID string
+	cachedSaPath    string
 	cachedFcmInit   bool
 )
 
@@ -33,33 +37,57 @@ type serviceAccountFile struct {
 	ProjectID string `json:"project_id"`
 }
 
-func getFCMClient() (*http.Client, string) {
+func getFCMClient(cfg *config.FirebaseWebpushWebConfig) (*http.Client, string) {
 	fcmClientMu.Lock()
 	defer fcmClientMu.Unlock()
 
-	if cachedFcmInit {
+	var saPath string
+	if cfg != nil {
+		saPath = strings.TrimSpace(cfg.ServiceAccountFile)
+	}
+
+	if cachedFcmInit && cachedSaPath == saPath {
 		return cachedFcmClient, cachedProjectID
 	}
 
+	cachedSaPath = saPath
 	cachedFcmInit = true
-	saPath, saData, projectID, saErr := findServiceAccountFile()
+	cachedFcmClient = nil
+	cachedProjectID = ""
 
+	if saPath == "" {
+		log.Warn().Msg("FCM Service Account JSON not configured (set firebase_webpush_web.service_account_file in config). Falling back to direct HTTP post.")
+		cachedFcmClient = &http.Client{Timeout: 10 * time.Second}
+		return cachedFcmClient, cachedProjectID
+	}
+
+	foundPath, saData, projectID, saErr := findServiceAccountFile(cfg)
 	if saErr == nil {
 		ctx := context.Background()
 		jwtCfg, err := google.JWTConfigFromJSON(saData, "https://www.googleapis.com/auth/firebase.messaging")
 		if err == nil {
 			cachedFcmClient = jwtCfg.Client(ctx)
 			cachedProjectID = projectID
-			log.Info().Str("service_account", saPath).Str("project_id", projectID).Msg("FCM HTTP v1 authenticated client initialized")
+			log.Info().Str("service_account", foundPath).Str("project_id", projectID).Msg("FCM HTTP v1 authenticated client initialized")
 		} else {
 			log.Warn().Err(err).Msg("Failed to parse Service Account JSON for FCM OAuth2")
+			cachedFcmClient = &http.Client{Timeout: 10 * time.Second}
 		}
 	} else {
-		log.Warn().Msg("Service account JSON file not found (place 'service-account.json' at ~/.config/service-account.json or set FCM_SERVICE_ACCOUNT_FILE). Falling back to direct HTTP post.")
+		log.Warn().Err(saErr).Str("service_account_file", saPath).Msg("Failed to load FCM Service Account JSON. Falling back to direct HTTP post.")
 		cachedFcmClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
 	return cachedFcmClient, cachedProjectID
+}
+
+func resetFCMClientForTest() {
+	fcmClientMu.Lock()
+	defer fcmClientMu.Unlock()
+	cachedFcmInit = false
+	cachedFcmClient = nil
+	cachedProjectID = ""
+	cachedSaPath = ""
 }
 
 func (s *Server) handleRegisterPushToken(w http.ResponseWriter, r *http.Request) {
@@ -78,40 +106,33 @@ func (s *Server) handleRegisterPushToken(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func findServiceAccountFile() (path string, data []byte, projectID string, err error) {
-	candidates := []string{
-		os.Getenv("FCM_SERVICE_ACCOUNT_FILE"),
-		os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		"./service-account.json",
-		"./config/service-account.json",
+func findServiceAccountFile(cfg *config.FirebaseWebpushWebConfig) (path string, data []byte, projectID string, err error) {
+	if cfg == nil || strings.TrimSpace(cfg.ServiceAccountFile) == "" {
+		return "", nil, "", errors.New("service_account_file not configured")
 	}
-
-	if home, e := os.UserHomeDir(); e == nil {
-		candidates = append(candidates,
-			filepath.Join(home, ".config", "service-account.json"),
-			filepath.Join(home, ".gemini", "service-account.json"),
-		)
+	path = strings.TrimSpace(cfg.ServiceAccountFile)
+	b, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return path, nil, "", readErr
 	}
-
-	for _, c := range candidates {
-		if c == "" {
-			continue
-		}
-		b, readErr := os.ReadFile(c)
-		if readErr == nil {
-			var sa serviceAccountFile
-			if jsonErr := json.Unmarshal(b, &sa); jsonErr == nil && sa.ProjectID != "" {
-				return c, b, sa.ProjectID, nil
-			}
-		}
+	var sa serviceAccountFile
+	if jsonErr := json.Unmarshal(b, &sa); jsonErr != nil {
+		return path, nil, "", jsonErr
 	}
-	return "", nil, "", os.ErrNotExist
+	if sa.ProjectID == "" {
+		return path, nil, "", errors.New("service account JSON missing project_id")
+	}
+	return path, b, sa.ProjectID, nil
 }
 
-func CheckPushNotificationSetup() {
-	saPath, _, projectID, err := findServiceAccountFile()
+func CheckPushNotificationSetup(cfg *config.FirebaseWebpushWebConfig) {
+	if cfg == nil || strings.TrimSpace(cfg.ServiceAccountFile) == "" {
+		log.Warn().Msg("FCM Service Account JSON not configured! Web Push notifications will not work until service_account_file is provided under firebase_webpush_web.")
+		return
+	}
+	saPath, _, projectID, err := findServiceAccountFile(cfg)
 	if err != nil {
-		log.Warn().Msg("FCM Service Account JSON not found! Web Push notifications will not work until service-account.json is provided (checked ~/.config/service-account.json, ./service-account.json, or FCM_SERVICE_ACCOUNT_FILE).")
+		log.Warn().Err(err).Str("service_account_file", saPath).Msg("FCM Service Account JSON failed to load")
 	} else {
 		log.Info().Str("path", saPath).Str("project_id", projectID).Msg("FCM Service Account JSON loaded successfully")
 	}
@@ -133,7 +154,11 @@ func (s *Server) SendPushNotification(chatID string, questionText string, agentN
 			return
 		}
 
-		httpClient, projectID := getFCMClient()
+		var cfg *config.FirebaseWebpushWebConfig
+		if s != nil && s.conf != nil {
+			cfg = s.conf.FirebaseWebpushWeb
+		}
+		httpClient, projectID := getFCMClient(cfg)
 		if httpClient == nil {
 			return
 		}

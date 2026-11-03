@@ -25,6 +25,7 @@ type CredentialsScope struct {
 	ClaudeRoot            []byte   `key:".credentials.json"`
 	GeminiAPIKey          string   `key:"gemini-api-key"`
 	XAIAPIKey             string   `key:"xai-api-key"`
+	GCPSAKey              []byte   `key:"gcp-sa.json"`
 	SSH                   SSHScope `key:"ssh/"`
 }
 

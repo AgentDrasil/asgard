@@ -807,6 +807,12 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
 
+	// Mask GCP SA key if present to prevent leaking credentials to command sandboxes
+	gcpSAPath := filepath.Join(home, ".config", "gcp-sa.json")
+	if fi, err := os.Stat(gcpSAPath); err == nil && !fi.IsDir() {
+		args = append(args, "--ro-bind", "/dev/null", gcpSAPath)
+	}
+
 	// Append config file and proxy sensitive file masking after all directory mounts
 	// to prevent subsequent binds from shadowing /dev/null masking (D1/R1/N2)
 	args = appendConfigMaskArgs(args, configPath)
@@ -1138,7 +1144,7 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 		mergedReadonlyDirs = append(mergedReadonlyDirs, cfg.MountDirs.ReadOnly...)
 	}
 
-	masked := []string{filepath.Join(home, ".ssh"), paths.ConfigDir()}
+	masked := []string{filepath.Join(home, ".ssh"), paths.ConfigDir(), filepath.Join(home, ".config", "gcp-sa.json")}
 	for _, cli := range agentwrapper.GetRegisteredCLIs() {
 		if spec := agentwrapper.GetSandboxSpec(cli); spec != nil {
 			masked = append(masked, spec.AuthDirectory(home))
@@ -1313,6 +1319,12 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 	}
 	// Append unified SSH sandbox mounts and environment variables
 	args = appendSSHSandboxArgs(args, home)
+
+	// Mask GCP SA key if present to prevent leaking credentials to command sandboxes
+	gcpSAPath := filepath.Join(home, ".config", "gcp-sa.json")
+	if fi, err := os.Stat(gcpSAPath); err == nil && !fi.IsDir() {
+		args = append(args, "--ro-bind", "/dev/null", gcpSAPath)
+	}
 
 	// Authoritative late masking of config file and proxy sensitive files
 	// (ca.key and proxy config) after all directory binds (D1/R1/N2)

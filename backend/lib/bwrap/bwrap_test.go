@@ -387,6 +387,10 @@ func TestCommandForCommandExec(t *testing.T) {
 	if err := os.WriteFile(simplestModelsFile, []byte("models: []"), 0644); err != nil {
 		t.Fatalf("failed to create simplest models.yaml: %v", err)
 	}
+	gcpsaFile := filepath.Join(tmpDir, ".config", "gcp-sa.json")
+	if err := os.WriteFile(gcpsaFile, []byte(`{"type":"service_account"}`), 0600); err != nil {
+		t.Fatalf("failed to create fake gcp-sa.json: %v", err)
+	}
 
 	cmd, err := CommandForCommandExec(runcfgRunDir, "test-sock-dir", "test-chat", configPath, true)
 	if err != nil {
@@ -420,6 +424,9 @@ func TestCommandForCommandExec(t *testing.T) {
 	}
 	if !strings.Contains(argStr, "--ro-bind /dev/null "+simplestKeyFile) {
 		t.Errorf("expected simplest key file masking ro-bind /dev/null, got: %s", argStr)
+	}
+	if !strings.Contains(argStr, "--ro-bind /dev/null "+gcpsaFile) {
+		t.Errorf("expected gcp-sa.json masking ro-bind /dev/null, got: %s", argStr)
 	}
 	if strings.Contains(argStr, "--tmpfs "+simplestDir) {
 		t.Errorf("simplest dir must NOT be masked with tmpfs so models.yaml remains readable, got: %s", argStr)

@@ -29,6 +29,7 @@ firebase_webpush_web:
   messaging_sender_id: "<FIREBASE_MESSAGING_SENDER_ID>"
   app_id: "<FIREBASE_APP_ID>"
   vapid_key: "<FIREBASE_CLOUD_MESSAGING_PUBLIC_KEY>"
+  # service_account_file: ""
 # Runner listener (required to run agents; see README "Deploying the Backend
 # and Runners"). Runners dial in over mTLS; the client certificate CN is the
 # runner's node id and must be listed in allowed_nodes.

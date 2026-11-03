@@ -629,6 +629,47 @@ func TestSyncCLICredentials_Claude_CreationUpdateRevocation(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "claude .credentials.json must be removed on revocation")
 }
 
+func TestSyncCLICredentials_GCPSAKey(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	saPath := filepath.Join(tempHome, ".config", "gcp-sa.json")
+
+	// 1. Sync GCP SA key
+	creds := &config.CredentialsScope{
+		GCPSAKey: []byte(`{"project_id":"test-sa-proj"}`),
+	}
+	err := SyncCLICredentials(tempHome, creds)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(saPath)
+	require.NoError(t, err)
+	assert.Equal(t, `{"project_id":"test-sa-proj"}`, string(data))
+
+	info, err := os.Stat(saPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+
+	dirInfo, err := os.Stat(filepath.Join(tempHome, ".config"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+
+	// 2. Permission tightening
+	require.NoError(t, os.Chmod(saPath, 0644))
+	err = SyncCLICredentials(tempHome, creds)
+	require.NoError(t, err)
+	info, err = os.Stat(saPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+
+	// 3. Revocation: empty key removes file
+	emptyCreds := &config.CredentialsScope{}
+	err = SyncCLICredentials(tempHome, emptyCreds)
+	require.NoError(t, err)
+	_, err = os.Stat(saPath)
+	assert.True(t, os.IsNotExist(err), "gcp-sa.json must be removed on revocation")
+}
+
 func TestSyncOpencodeAW(t *testing.T) {
 	t.Parallel()
 

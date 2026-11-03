@@ -428,7 +428,11 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		workflowEngine.SetHumanSuspender(s.suspendWorkflowHuman)
 	}
 
-	CheckPushNotificationSetup()
+	var pushCfg *config.FirebaseWebpushWebConfig
+	if s.conf != nil {
+		pushCfg = s.conf.FirebaseWebpushWeb
+	}
+	CheckPushNotificationSetup(pushCfg)
 
 	cronMgr, err := trigger.NewWorkflowCronManager(repo, s.runWorkflowCronTrigger)
 	if err != nil {

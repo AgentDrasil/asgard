@@ -45,6 +45,8 @@ var checkCfgctl = func() error {
 	return nil
 }
 
+var promptUser = prompt
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, ErrPromptCancelled) {
@@ -76,6 +78,8 @@ func run(args []string) error {
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
 		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
 		addNewRunnerFlag     = fs.String("add-new-runner", "", "Add a new runner to an existing deployment")
+		gcpSAKeyFlag         = fs.String("gcp-sa-key", "", "GCP Service Account JSON key file path for GCP KMS")
+		resumeFlag           = fs.Bool("resume", false, "Resume deployment setup from saved state")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -84,6 +88,11 @@ func run(args []string) error {
 		}
 		return err
 	}
+
+	explicitFlags := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) {
+		explicitFlags[f.Name] = true
+	})
 
 	// Mandatory check: cfgctl must be installed
 	if err := checkCfgctl(); err != nil {
@@ -130,6 +139,12 @@ func run(args []string) error {
 		}
 	}
 
+	if *gcpSAKeyFlag != "" {
+		if err := validateJSONFile(*gcpSAKeyFlag); err != nil {
+			return fmt.Errorf("invalid --gcp-sa-key: %w", err)
+		}
+	}
+
 	data := &ConfigData{
 		Host:             *hostFlag,
 		BackendPort:      *portFlag,
@@ -142,6 +157,7 @@ func run(args []string) error {
 		AuthTokenSource:  "access_token",
 		InitialRunner:    *runnerFlag,
 		GCPKMS:           *gcpKmsFlag,
+		GCPSAKey:         *gcpSAKeyFlag,
 		AgeRecipient:     *ageFlag,
 		Force:            *forceFlag,
 	}
@@ -150,81 +166,262 @@ func run(args []string) error {
 		data.WorkspaceMounts = append(data.WorkspaceMounts, *mountFlag)
 	}
 
+	// State persistence & resume check
+	statePath, loadedState, loadErr := loadState(targetDir)
+	var state *InitState
+
+	if *resumeFlag {
+		if loadErr != nil || loadedState == nil {
+			return fmt.Errorf("no saved state file found to resume (checked %s and cwd)", filepath.Join(targetDir, stateFileName))
+		}
+		state = loadedState
+		fmt.Printf("%s✔ Resuming from saved state:%s %s\n", colorGreen+colorBold, colorReset, statePath)
+	} else if !*nonInteractiveFlag && loadErr == nil && loadedState != nil {
+		if defaultStdinReader == nil {
+			defaultStdinReader = bufio.NewReader(os.Stdin)
+		}
+		resumeAns, err := promptUser(defaultStdinReader, "Saved deployment state detected. Resume previous session? [Y/n]", "Y")
+		if err != nil {
+			return err
+		}
+		resumeAns = strings.ToLower(strings.TrimSpace(resumeAns))
+		if resumeAns == "" || resumeAns == "y" || resumeAns == "yes" {
+			state = loadedState
+			fmt.Printf("%s✔ Resuming from saved state:%s %s\n", colorGreen+colorBold, colorReset, statePath)
+		} else {
+			removeState(targetDir)
+			state = newInitState()
+		}
+	} else {
+		state = newInitState()
+	}
+
+	// Restore answered fields into data and targetDir, honoring explicit CLI flags
+	if !explicitFlags["dir"] && state.TargetDir != "" {
+		targetDir = state.TargetDir
+	}
+	if !explicitFlags["host"] && state.Host != "" {
+		data.Host = state.Host
+	}
+	if !explicitFlags["port"] && state.BackendPort != 0 {
+		data.BackendPort = state.BackendPort
+	}
+	if !explicitFlags["etcd-endpoints"] && state.EtcdEndpoints != "" {
+		data.EtcdEndpoints = state.EtcdEndpoints
+	}
+	if !explicitFlags["etcd-prefix"] && state.EtcdPrefix != "" {
+		data.EtcdPrefix = state.EtcdPrefix
+	}
+	if !explicitFlags["auth-issuer"] && state.AuthIssuer != "" {
+		data.AuthIssuer = state.AuthIssuer
+	}
+	if !explicitFlags["auth-client-id"] && state.AuthClientID != "" {
+		data.AuthClientID = state.AuthClientID
+	}
+	if !explicitFlags["auth-client-secret"] && state.AuthClientSecret != "" {
+		data.AuthClientSecret = state.AuthClientSecret
+	}
+	if !explicitFlags["runner"] && state.InitialRunner != "" {
+		data.InitialRunner = state.InitialRunner
+	}
+	if !explicitFlags["mount"] && len(state.WorkspaceMounts) > 0 {
+		data.WorkspaceMounts = state.WorkspaceMounts
+	}
+	if !explicitFlags["gcp-kms"] && state.GCPKMS != "" {
+		data.GCPKMS = state.GCPKMS
+	}
+	if !explicitFlags["gcp-sa-key"] && state.GCPSAKey != "" {
+		data.GCPSAKey = state.GCPSAKey
+	}
+	if !explicitFlags["age"] && state.AgeRecipient != "" {
+		data.AgeRecipient = state.AgeRecipient
+	}
+	if !explicitFlags["providers"] && len(state.Providers) > 0 {
+		data.Providers = state.Providers
+	}
+	if *gcpSAKeyFlag != "" {
+		data.GCPSAKey = *gcpSAKeyFlag
+	}
+
 	var reader *bufio.Reader
 	// If interactive mode is enabled, run the interactive prompt wizard
 	if !*nonInteractiveFlag {
-		defaultStdinReader = bufio.NewReader(os.Stdin)
+		if defaultStdinReader == nil {
+			defaultStdinReader = bufio.NewReader(os.Stdin)
+		}
 		reader = defaultStdinReader
-		printWelcomeBanner()
-
-		targetDirInput, err := prompt(reader, "Deployment target directory", targetDir)
-		if err != nil {
-			return err
-		}
-		targetDir, err = filepath.Abs(targetDirInput)
-		if err != nil {
-			return fmt.Errorf("resolve target directory: %w", err)
+		if !state.IsCompleted("target_dir") {
+			printWelcomeBanner()
 		}
 
-		data.Host, err = prompt(reader, "Asgard public base URL (host)", data.Host)
-		if err != nil {
-			return err
-		}
-		portStr, err := prompt(reader, "Backend HTTP port", strconv.Itoa(data.BackendPort))
-		if err != nil {
-			return err
-		}
-		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
-			data.BackendPort = p
-		}
-
-		data.EtcdEndpoints, err = prompt(reader, "Etcd endpoints", data.EtcdEndpoints)
-		if err != nil {
-			return err
-		}
-		data.EtcdPrefix, err = prompt(reader, "Etcd prefix", data.EtcdPrefix)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("\n%s--- Authentication (OIDC) Settings (Required) ---%s\n", colorCyan+colorBold, colorReset)
-		data.AuthIssuer, err = prompt(reader, "OIDC Issuer URL", data.AuthIssuer)
-		if err != nil {
-			return err
-		}
-		data.AuthClientID, err = prompt(reader, "OIDC Client ID", data.AuthClientID)
-		if err != nil {
-			return err
-		}
-		data.AuthClientSecret, err = prompt(reader, "OIDC Client Secret", data.AuthClientSecret, WithSecret(true))
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("\n%s--- Runner Node Settings ---%s\n", colorCyan+colorBold, colorReset)
-		data.InitialRunner, err = prompt(reader, "Initial runner node ID", data.InitialRunner)
-		if err != nil {
-			return err
-		}
-
-		workspaceMount, err := prompt(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/data/src)", "")
-		if err != nil {
-			return err
-		}
-		if workspaceMount != "" {
-			data.WorkspaceMounts = []string{workspaceMount}
-		}
-
-		fmt.Printf("\n%s--- SOPS Encryption Settings (Optional) ---%s\n", colorCyan+colorBold, colorReset)
-		data.GCPKMS, err = prompt(reader, "GCP KMS key resource ID (leave empty if not using GCP KMS)", data.GCPKMS)
-		if err != nil {
-			return err
-		}
-		if data.GCPKMS == "" {
-			data.AgeRecipient, err = prompt(reader, "Age recipient public key (leave empty to configure manually later)", data.AgeRecipient)
+		if !state.IsCompleted("target_dir") {
+			targetDirInput, err := promptUser(reader, "Deployment target directory", targetDir)
 			if err != nil {
 				return err
 			}
+			targetDir, err = filepath.Abs(targetDirInput)
+			if err != nil {
+				return fmt.Errorf("resolve target directory: %w", err)
+			}
+			state.TargetDir = targetDir
+			state.MarkCompleted("target_dir")
+			_ = state.Save(targetDir)
+		} else {
+			targetDir = state.TargetDir
+		}
+
+		if !state.IsCompleted("host") {
+			data.Host, err = promptUser(reader, "Asgard public base URL (host)", data.Host)
+			if err != nil {
+				return err
+			}
+			state.Host = data.Host
+			state.MarkCompleted("host")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("port") {
+			portStr, err := promptUser(reader, "Backend HTTP port", strconv.Itoa(data.BackendPort))
+			if err != nil {
+				return err
+			}
+			if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+				data.BackendPort = p
+			}
+			state.BackendPort = data.BackendPort
+			state.MarkCompleted("port")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("etcd_endpoints") {
+			data.EtcdEndpoints, err = promptUser(reader, "Etcd endpoints", data.EtcdEndpoints)
+			if err != nil {
+				return err
+			}
+			state.EtcdEndpoints = data.EtcdEndpoints
+			state.MarkCompleted("etcd_endpoints")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("etcd_prefix") {
+			data.EtcdPrefix, err = promptUser(reader, "Etcd prefix", data.EtcdPrefix)
+			if err != nil {
+				return err
+			}
+			state.EtcdPrefix = data.EtcdPrefix
+			state.MarkCompleted("etcd_prefix")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("auth_issuer") || !state.IsCompleted("auth_client_id") || !state.IsCompleted("auth_client_secret") {
+			fmt.Printf("\n%s--- Authentication (OIDC) Settings (Required) ---%s\n", colorCyan+colorBold, colorReset)
+		}
+
+		if !state.IsCompleted("auth_issuer") {
+			data.AuthIssuer, err = promptUser(reader, "OIDC Issuer URL", data.AuthIssuer)
+			if err != nil {
+				return err
+			}
+			state.AuthIssuer = data.AuthIssuer
+			state.MarkCompleted("auth_issuer")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("auth_client_id") {
+			data.AuthClientID, err = promptUser(reader, "OIDC Client ID", data.AuthClientID)
+			if err != nil {
+				return err
+			}
+			state.AuthClientID = data.AuthClientID
+			state.MarkCompleted("auth_client_id")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("auth_client_secret") {
+			data.AuthClientSecret, err = promptUser(reader, "OIDC Client Secret", data.AuthClientSecret, WithSecret(true))
+			if err != nil {
+				return err
+			}
+			state.AuthClientSecret = data.AuthClientSecret
+			state.MarkCompleted("auth_client_secret")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("initial_runner") || !state.IsCompleted("workspace_mount") {
+			fmt.Printf("\n%s--- Runner Node Settings ---%s\n", colorCyan+colorBold, colorReset)
+		}
+
+		if !state.IsCompleted("initial_runner") {
+			data.InitialRunner, err = promptUser(reader, "Initial runner node ID", data.InitialRunner)
+			if err != nil {
+				return err
+			}
+			state.InitialRunner = data.InitialRunner
+			state.MarkCompleted("initial_runner")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("workspace_mount") {
+			defaultMount := ""
+			if len(data.WorkspaceMounts) > 0 {
+				defaultMount = strings.Join(data.WorkspaceMounts, ",")
+			}
+			workspaceMount, err := promptUser(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/data/src)", defaultMount)
+			if err != nil {
+				return err
+			}
+			if workspaceMount != "" {
+				var mounts []string
+				for _, m := range strings.Split(workspaceMount, ",") {
+					if trimmed := strings.TrimSpace(m); trimmed != "" {
+						mounts = append(mounts, trimmed)
+					}
+				}
+				data.WorkspaceMounts = mounts
+			} else {
+				data.WorkspaceMounts = nil
+			}
+			state.WorkspaceMounts = data.WorkspaceMounts
+			state.MarkCompleted("workspace_mount")
+			_ = state.Save(targetDir)
+		}
+
+		if !state.IsCompleted("sops") {
+			fmt.Printf("\n%s--- SOPS Encryption Settings (Optional) ---%s\n", colorCyan+colorBold, colorReset)
+			data.GCPKMS, err = promptUser(reader, "GCP KMS key resource ID (leave empty if not using GCP KMS)", data.GCPKMS)
+			if err != nil {
+				return err
+			}
+			state.GCPKMS = data.GCPKMS
+
+			if data.GCPKMS != "" {
+				for {
+					saKeyInput, err := promptUser(reader, "GCP Service Account JSON key file path (leave empty if using host/ADC credentials)", data.GCPSAKey)
+					if err != nil {
+						return err
+					}
+					saKeyInput = strings.TrimSpace(saKeyInput)
+					if saKeyInput == "" {
+						data.GCPSAKey = ""
+						break
+					}
+					if err := validateJSONFile(saKeyInput); err != nil {
+						fmt.Printf("%sError:%s %v\n", colorRed+colorBold, colorReset, err)
+						continue
+					}
+					data.GCPSAKey = saKeyInput
+					break
+				}
+				state.GCPSAKey = data.GCPSAKey
+			} else {
+				data.AgeRecipient, err = promptUser(reader, "Age recipient public key (leave empty to configure manually later)", data.AgeRecipient)
+				if err != nil {
+					return err
+				}
+				state.AgeRecipient = data.AgeRecipient
+			}
+			state.MarkCompleted("sops")
+			_ = state.Save(targetDir)
 		}
 	}
 
@@ -245,16 +442,25 @@ func run(args []string) error {
 			_ = os.MkdirAll(d, 0755)
 		}
 
-		if len(cliProviders) > 0 {
-			data.Providers = cliProviders
-		} else {
-			data.Providers = PromptProviderSetup(reader, os.Stdout, targetDir, true)
+		if !state.IsCompleted("providers") {
+			if len(cliProviders) > 0 {
+				data.Providers = cliProviders
+			} else {
+				data.Providers = PromptProviderSetup(reader, os.Stdout, targetDir, true)
+			}
+			state.Providers = data.Providers
+			state.MarkCompleted("providers")
+			_ = state.Save(targetDir)
 		}
-		PromptSSHCredentials(reader, os.Stdout, targetDir, true)
+		if !state.IsCompleted("ssh") {
+			PromptSSHCredentials(reader, os.Stdout, targetDir, true)
+			state.MarkCompleted("ssh")
+			_ = state.Save(targetDir)
+		}
 	} else {
 		if len(cliProviders) > 0 {
 			data.Providers = cliProviders
-		} else {
+		} else if len(data.Providers) == 0 {
 			data.Providers = []string{"agy", "claude", "opencode", "simplest"}
 		}
 	}
@@ -271,6 +477,9 @@ func run(args []string) error {
 	if err := GenerateDeployment(targetDir, data); err != nil {
 		return err
 	}
+
+	// Clean up temporary init state on successful generation
+	removeState(targetDir)
 
 	if *nonInteractiveFlag {
 		PromptCLICredentials(reader, os.Stdout, targetDir, false)

@@ -17,13 +17,14 @@ import (
 )
 
 type FirebaseWebpushWebConfig struct {
-	APIKey            string `yaml:"api_key" json:"apiKey"`
-	AuthDomain        string `yaml:"auth_domain" json:"authDomain"`
-	ProjectID         string `yaml:"project_id" json:"projectId"`
-	StorageBucket     string `yaml:"storage_bucket" json:"storageBucket"`
-	MessagingSenderID string `yaml:"messaging_sender_id" json:"messagingSenderId"`
-	AppID             string `yaml:"app_id" json:"appId"`
-	VapidKey          string `yaml:"vapid_key" json:"vapidKey"`
+	APIKey             string `yaml:"api_key" json:"apiKey"`
+	AuthDomain         string `yaml:"auth_domain" json:"authDomain"`
+	ProjectID          string `yaml:"project_id" json:"projectId"`
+	StorageBucket      string `yaml:"storage_bucket" json:"storageBucket"`
+	MessagingSenderID  string `yaml:"messaging_sender_id" json:"messagingSenderId"`
+	AppID              string `yaml:"app_id" json:"appId"`
+	VapidKey           string `yaml:"vapid_key" json:"vapidKey"`
+	ServiceAccountFile string `yaml:"service_account_file,omitempty" json:"-"`
 }
 
 const DefaultLanguage = "English (US)"

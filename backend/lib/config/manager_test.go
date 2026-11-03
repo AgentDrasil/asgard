@@ -63,6 +63,7 @@ providers:
 		"credentials/.credentials.json":        []byte(`{"claude_root_token":"test-claude-root"}`),
 		"credentials/gemini-api-key":           []byte("test-gemini-secret"),
 		"credentials/xai-api-key":              []byte("test-xai-secret"),
+		"credentials/gcp-sa.json":              []byte(`{"project_id":"test-sa-proj"}`),
 		"credentials/ssh/key":                  []byte("ssh-rsa AAAAB3NzaC1yc2E..."),
 		"credentials/ssh/key.pub":              []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"),
 		"credentials/ssh/id_ed25519":           []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"),
@@ -110,6 +111,7 @@ providers:
 	// Validate credentials scope
 	assert.Equal(t, "test-gemini-secret", cfg.Credentials.GeminiAPIKey)
 	assert.Equal(t, "test-xai-secret", cfg.Credentials.XAIAPIKey)
+	assert.Equal(t, []byte(`{"project_id":"test-sa-proj"}`), cfg.Credentials.GCPSAKey)
 	assert.Equal(t, []byte(`{"type":"test"}`), cfg.Credentials.Auth)
 	assert.Equal(t, []byte(`{"client_id":"test-id","client_secret":"test-secret"}`), cfg.Credentials.OAuthCreds)
 	assert.Equal(t, []byte("test-oauth-token"), cfg.Credentials.AntigravityOAuthToken)

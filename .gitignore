@@ -12,3 +12,4 @@ cmd/show-output/show-output
 cmd/tester/tester
 
 .claude/worktrees
+.asgard-init-state.json

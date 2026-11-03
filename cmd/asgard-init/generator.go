@@ -39,6 +39,7 @@ type ConfigData struct {
 	WorkspaceMounts              []string
 	Providers                    []string
 	GCPKMS                       string
+	GCPSAKey                     string
 	AgeRecipient                 string
 	GoogleApplicationCredentials string
 	Force                        bool
@@ -205,6 +206,18 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	}
 	if err := copyFile(caCertPath, filepath.Join(runnerCertsDir, "ca.crt"), 0644); err != nil {
 		return err
+	}
+
+	// 3b. Copy GCP Service Account key if provided or present
+	// 3b. Copy GCP Service Account key to etcd-tree/credentials/gcp-sa.json if provided
+	etcdTreeSAKey := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	if data.GCPSAKey != "" {
+		if err := copyGCPSAKey(targetDir, data.GCPSAKey); err != nil {
+			return fmt.Errorf("copy GCP service account key: %w", err)
+		}
+		data.GCPSAKey = "./etcd-tree/credentials/gcp-sa.json"
+	} else if fileExists(etcdTreeSAKey) {
+		data.GCPSAKey = "./etcd-tree/credentials/gcp-sa.json"
 	}
 
 	// 4. Render template files
@@ -422,6 +435,7 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 
 	etcdEndpoints := "http://etcd:2379"
 	etcdPrefix := "/asgard/configs"
+	googleAppCreds := ""
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "- ETCD_ENDPOINTS=") {
@@ -439,15 +453,23 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 			}
 			etcdPrefix = strings.Trim(val, `"' `)
 		}
+		if strings.HasPrefix(trimmed, "- GOOGLE_APPLICATION_CREDENTIALS=") {
+			val := strings.TrimPrefix(trimmed, "- GOOGLE_APPLICATION_CREDENTIALS=")
+			if hashIdx := strings.Index(val, "#"); hashIdx != -1 {
+				val = strings.TrimSpace(val[:hashIdx])
+			}
+			googleAppCreds = strings.Trim(val, `"' `)
+		}
 	}
 
 	svcData := &ConfigData{
-		RunnerName:      runnerName,
-		RunnerService:   svcName,
-		RegistryPort:    9311,
-		EtcdEndpoints:   etcdEndpoints,
-		EtcdPrefix:      etcdPrefix,
-		WorkspaceMounts: workspaceMounts,
+		RunnerName:                   runnerName,
+		RunnerService:                svcName,
+		RegistryPort:                 9311,
+		EtcdEndpoints:                etcdEndpoints,
+		EtcdPrefix:                   etcdPrefix,
+		WorkspaceMounts:              workspaceMounts,
+		GoogleApplicationCredentials: googleAppCreds,
 	}
 
 	contentTmpl, err := templateFS.ReadFile("templates/runner-service.yaml.tmpl")
@@ -467,4 +489,22 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 
 	newContent := strings.TrimRight(content, "\n") + "\n" + buf.String()
 	return os.WriteFile(composeFile, []byte(newContent), 0644)
+}
+
+// copyGCPSAKey copies the GCP Service Account key to etcd-tree/credentials/gcp-sa.json (0600)
+// for distribution to backend and runners via etcd.
+func copyGCPSAKey(targetDir string, saKeyPath string) error {
+	saKeyPath = strings.TrimSpace(saKeyPath)
+	etcdTreeDst := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+
+	if saKeyPath != "" {
+		resolved := resolvePath(saKeyPath)
+		if err := validateJSONFile(resolved); err != nil {
+			return err
+		}
+		if err := copyFile(resolved, etcdTreeDst, 0600); err != nil {
+			return fmt.Errorf("copy SA key to etcd-tree: %w", err)
+		}
+	}
+	return nil
 }
