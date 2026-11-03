@@ -605,6 +605,74 @@ func TestCheckClaudeCredentials(t *testing.T) {
 	})
 }
 
+func TestCheckGCPSACredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty directory returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("zero-byte gcp-sa.json returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(""), 0600))
+
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("invalid json returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte("{invalid-json"), 0600))
+
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("missing project_id returns false", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account"}`), 0600))
+
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
+	})
+
+	t.Run("valid gcp-sa.json returns true and tightens permissions to 0600", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0644))
+
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, saFile, path)
+
+		fi, err := os.Stat(saFile)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+	})
+}
+
 func TestPromptCLICredentials(t *testing.T) {
 	t.Parallel()
 
@@ -1101,6 +1169,91 @@ func TestPromptClaudeCredentials(t *testing.T) {
 		var out bytes.Buffer
 		assert.True(t, PromptClaudeCredentials(strings.NewReader("y\n"), &out, tempDir, true))
 		assert.Contains(t, out.String(), "Claude credential verified successfully:")
+	})
+}
+
+func TestPromptGCPSACredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-interactive skips gracefully when file missing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		var out bytes.Buffer
+		in := strings.NewReader("")
+
+		verified := PromptGCPSACredentials(in, &out, tempDir, false)
+		assert.False(t, verified)
+		assert.NotContains(t, out.String(), "GCP Service Account key verified")
+	})
+
+	t.Run("non-interactive detects existing key", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0600))
+
+		var out bytes.Buffer
+		in := strings.NewReader("")
+
+		verified := PromptGCPSACredentials(in, &out, tempDir, false)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "GCP Service Account key verified:")
+	})
+
+	t.Run("interactive prompt verify success on y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0600))
+
+		var out bytes.Buffer
+		in := strings.NewReader("y\n")
+
+		verified := PromptGCPSACredentials(in, &out, tempDir, true)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "GCP Service Account key verified successfully:")
+	})
+
+	t.Run("interactive prompt skip on s", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		var out bytes.Buffer
+		in := strings.NewReader("s\n")
+
+		verified := PromptGCPSACredentials(in, &out, tempDir, true)
+		assert.False(t, verified)
+		assert.Contains(t, out.String(), "Skipped GCP Service Account key setup")
+	})
+
+	t.Run("interactive retry: missing then placed then y", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+
+		r, w := io.Pipe()
+		t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+
+		go func() {
+			// Write first 'y' -> file doesn't exist
+			_, _ = w.Write([]byte("y\n"))
+			time.Sleep(50 * time.Millisecond)
+			// Place valid credential file
+			_ = os.WriteFile(filepath.Join(credDir, "gcp-sa.json"), []byte(`{"type":"service_account","project_id":"retry-proj"}`), 0600)
+			// Write second 'y' -> should now succeed
+			_, _ = w.Write([]byte("y\n"))
+		}()
+
+		var out bytes.Buffer
+		verified := PromptGCPSACredentials(r, &out, tempDir, true)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "No valid GCP Service Account JSON key file found")
+		assert.Contains(t, out.String(), "GCP Service Account key verified successfully:")
 	})
 }
 

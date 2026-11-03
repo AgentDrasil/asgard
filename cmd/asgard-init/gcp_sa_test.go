@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,10 +98,12 @@ func TestGCPSAKey_FlagValidation(t *testing.T) {
 func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 	// Not t.Parallel() because tests mutate shared defaultStdinReader
 
-	t.Run("interactive prompt enters valid key", func(t *testing.T) {
+	t.Run("interactive prompt enters y when key is pre-placed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		deployDir := filepath.Join(tempDir, "deploy")
-		saKey := createFakeGCPKeyJSON(t, tempDir, "interactive-sa.json")
+		credDir := filepath.Join(deployDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		createFakeGCPKeyJSON(t, credDir, "gcp-sa.json")
 
 		// Simulation inputs for prompts:
 		// 1. targetDir -> deployDir
@@ -112,7 +117,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		// 9. runner -> default
 		// 10. workspace mount -> empty
 		// 11. GCP KMS -> projects/p/locations/l/keyRings/r/cryptoKeys/k
-		// 12. GCP SA key -> saKey
+		// 12. GCP SA key -> y (verify placed key)
 		// 13. providers (agy: skip/decline, claude: s/n, opencode: s/n, simplest: s/n -> fallback agy)
 		// 14. ssh -> s
 		inputs := []string{
@@ -127,7 +132,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 			"",
 			"",
 			"projects/p/locations/l/keyRings/r/cryptoKeys/k",
-			saKey,
+			"y",
 			"s", "n", "s", "n", "s", "n", "s", "n",
 			"s",
 		}
@@ -136,7 +141,6 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		defaultStdinReader = nil
 
 		// Run wizard via run
-		// We set stdin using defaultStdinReader
 		r := strings.NewReader(strings.Join(inputs, "\n") + "\n")
 		defaultStdinReader = bufioNewReader(r)
 
@@ -150,7 +154,42 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 	})
 
-	t.Run("interactive prompt leaves SA key empty when using host ADC", func(t *testing.T) {
+	t.Run("interactive prompt with --gcp-sa-key flag automatically copied and verified on y", func(t *testing.T) {
+		tempDir := t.TempDir()
+		deployDir := filepath.Join(tempDir, "deploy-flag")
+		saKey := createFakeGCPKeyJSON(t, tempDir, "interactive-sa.json")
+
+		inputs := []string{
+			deployDir,
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"projects/p/locations/l/keyRings/r/cryptoKeys/k",
+			"y", // press 'y' to verify key that was passed via CLI flag and copied
+			"s", "n", "s", "n", "s", "n", "s", "n",
+			"s",
+		}
+		origStdin := defaultStdinReader
+		t.Cleanup(func() { defaultStdinReader = origStdin })
+		defaultStdinReader = bufioNewReader(strings.NewReader(strings.Join(inputs, "\n") + "\n"))
+
+		err := run([]string{"--dir", deployDir, "--gcp-sa-key", saKey})
+		require.NoError(t, err)
+
+		etcdTreeKey := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp-sa.json")
+		require.FileExists(t, etcdTreeKey)
+		info, err := os.Stat(etcdTreeKey)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	})
+
+	t.Run("interactive prompt leaves SA key empty when skipped with s", func(t *testing.T) {
 		tempDir := t.TempDir()
 		deployDir := filepath.Join(tempDir, "deploy-empty-sa")
 
@@ -166,7 +205,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 			"",
 			"",
 			"projects/p/locations/l/keyRings/r/cryptoKeys/k",
-			"", // leave empty!
+			"s", // skip SA key!
 			"s", "n", "s", "n", "s", "n", "s", "n",
 			"s",
 		}
@@ -181,6 +220,61 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		// etcd-tree/credentials/gcp-sa.json should not exist
 		etcdTreeKey := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp-sa.json")
 		assert.NoFileExists(t, etcdTreeKey)
+	})
+}
+
+func TestPromptGCPSACredentials_Interactive(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interactive y with missing file retried then success", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+
+		r, w := io.Pipe()
+		t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+
+		go func() {
+			_, _ = w.Write([]byte("y\n"))
+			time.Sleep(50 * time.Millisecond)
+			createFakeGCPKeyJSON(t, credDir, "gcp-sa.json")
+			_, _ = w.Write([]byte("y\n"))
+		}()
+
+		var out bytes.Buffer
+		verified := PromptGCPSACredentials(r, &out, tempDir, true)
+		assert.True(t, verified)
+		assert.Contains(t, out.String(), "No valid GCP Service Account JSON key file found")
+		assert.Contains(t, out.String(), "GCP Service Account key verified successfully:")
+	})
+
+	t.Run("interactive s skips", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		var out bytes.Buffer
+		in := strings.NewReader("s\n")
+
+		verified := PromptGCPSACredentials(in, &out, tempDir, true)
+		assert.False(t, verified)
+		assert.Contains(t, out.String(), "Skipped GCP Service Account key setup")
+	})
+
+	t.Run("non-interactive existing vs missing", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		var out bytes.Buffer
+		assert.False(t, PromptGCPSACredentials(strings.NewReader(""), &out, tempDir, false))
+
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		createFakeGCPKeyJSON(t, credDir, "gcp-sa.json")
+
+		out.Reset()
+		assert.True(t, PromptGCPSACredentials(strings.NewReader(""), &out, tempDir, false))
+		assert.Contains(t, out.String(), "GCP Service Account key verified:")
 	})
 }
 

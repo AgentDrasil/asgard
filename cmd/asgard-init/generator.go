@@ -498,11 +498,32 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 	etcdTreeDst := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
 
 	if saKeyPath != "" {
-		resolved := resolvePath(saKeyPath)
-		if err := validateJSONFile(resolved); err != nil {
+		absDst, _ := filepath.Abs(etcdTreeDst)
+		var absResolved string
+		if filepath.IsAbs(saKeyPath) {
+			absResolved = filepath.Clean(saKeyPath)
+		} else {
+			targetResolved, _ := filepath.Abs(filepath.Join(targetDir, saKeyPath))
+			if targetResolved == absDst {
+				absResolved = absDst
+			} else {
+				absResolved, _ = filepath.Abs(resolvePath(saKeyPath))
+			}
+		}
+
+		if absResolved == absDst {
+			if fileExists(etcdTreeDst) {
+				if err := validateJSONFile(etcdTreeDst); err != nil {
+					return err
+				}
+				_ = os.Chmod(etcdTreeDst, 0600)
+				return nil
+			}
+		}
+		if err := validateJSONFile(absResolved); err != nil {
 			return err
 		}
-		if err := copyFile(resolved, etcdTreeDst, 0600); err != nil {
+		if err := copyFile(absResolved, etcdTreeDst, 0600); err != nil {
 			return fmt.Errorf("copy SA key to etcd-tree: %w", err)
 		}
 	}

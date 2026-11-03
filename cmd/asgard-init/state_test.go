@@ -218,3 +218,40 @@ func TestState_InteractiveResumePrompt_DeclineStartsFresh(t *testing.T) {
 	// State file cleaned up
 	assert.NoFileExists(t, statePath)
 }
+
+func TestState_CtrlCOnFirstPrompt_SavesStateToCwdAndTargetDir(t *testing.T) {
+	tempDir := t.TempDir()
+	deployDir := filepath.Join(tempDir, "deploy-ctrlc")
+
+	origStdin := defaultStdinReader
+	origPromptUser := promptUser
+	t.Cleanup(func() {
+		defaultStdinReader = origStdin
+		promptUser = origPromptUser
+		removeState(deployDir)
+	})
+
+	// Abort on the very first prompt
+	promptUser = func(r io.Reader, question, def string, opts ...PromptOption) (string, error) {
+		return "", ErrPromptCancelled
+	}
+	defaultStdinReader = bufioNewReader(strings.NewReader("\n"))
+
+	err := run([]string{"--dir", deployDir, "--host", "https://preconfigured.test"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPromptCancelled)
+
+	// State file should exist in deployDir AND in cwd
+	deployStatePath := filepath.Join(deployDir, stateFileName)
+	require.FileExists(t, deployStatePath)
+
+	cwd, cwdErr := os.Getwd()
+	require.NoError(t, cwdErr)
+	cwdStatePath := filepath.Join(cwd, stateFileName)
+	require.FileExists(t, cwdStatePath)
+
+	// Check saved data has initial flags/defaults
+	data, err := os.ReadFile(cwdStatePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "https://preconfigured.test")
+}

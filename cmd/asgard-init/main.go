@@ -50,7 +50,6 @@ var promptUser = prompt
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, ErrPromptCancelled) {
-			fmt.Printf("\n%sOperation cancelled.%s\n", colorYellow, colorReset)
 			os.Exit(130)
 		}
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", colorRed+colorBold, colorReset, err)
@@ -58,7 +57,28 @@ func main() {
 	}
 }
 
-func run(args []string) error {
+func run(args []string) (err error) {
+	var (
+		targetDir string
+		state     *InitState
+	)
+	defer func() {
+		if err != nil && errors.Is(err, ErrPromptCancelled) {
+			if state != nil {
+				_ = state.Save(targetDir)
+				savedPath := filepath.Join(targetDir, stateFileName)
+				if cwd, cwdErr := os.Getwd(); cwdErr == nil && cwd != "" {
+					savedPath = filepath.Join(cwd, stateFileName)
+				}
+				fmt.Printf("\n%sOperation cancelled.%s\n", colorYellow, colorReset)
+				fmt.Printf("Current setup saved to: %s%s%s\n", colorCyan, savedPath, colorReset)
+				fmt.Printf("Resume anytime with: %sasgard-init --resume%s\n\n", colorCyan+colorBold, colorReset)
+			} else {
+				fmt.Printf("\n%sOperation cancelled.%s\n", colorYellow, colorReset)
+			}
+		}
+	}()
+
 	fs := flag.NewFlagSet("asgard-init", flag.ContinueOnError)
 
 	var (
@@ -99,7 +119,7 @@ func run(args []string) error {
 		return err
 	}
 
-	targetDir, err := filepath.Abs(*dirFlag)
+	targetDir, err = filepath.Abs(*dirFlag)
 	if err != nil {
 		return fmt.Errorf("resolve target directory: %w", err)
 	}
@@ -168,7 +188,6 @@ func run(args []string) error {
 
 	// State persistence & resume check
 	statePath, loadedState, loadErr := loadState(targetDir)
-	var state *InitState
 
 	if *resumeFlag {
 		if loadErr != nil || loadedState == nil {
@@ -250,19 +269,42 @@ func run(args []string) error {
 			defaultStdinReader = bufio.NewReader(os.Stdin)
 		}
 		reader = defaultStdinReader
+
+		// Immediately save initial state (flags/defaults) upon wizard start
+		state.TargetDir = targetDir
+		state.Host = data.Host
+		state.BackendPort = data.BackendPort
+		state.EtcdEndpoints = data.EtcdEndpoints
+		state.EtcdPrefix = data.EtcdPrefix
+		state.AuthIssuer = data.AuthIssuer
+		state.AuthClientID = data.AuthClientID
+		state.AuthClientSecret = data.AuthClientSecret
+		state.InitialRunner = data.InitialRunner
+		state.WorkspaceMounts = data.WorkspaceMounts
+		state.GCPKMS = data.GCPKMS
+		state.GCPSAKey = data.GCPSAKey
+		state.AgeRecipient = data.AgeRecipient
+		state.Providers = data.Providers
+		_ = state.Save(targetDir)
+
 		if !state.IsCompleted("target_dir") {
 			printWelcomeBanner()
 		}
 
 		if !state.IsCompleted("target_dir") {
+			oldTargetDir := targetDir
 			targetDirInput, err := promptUser(reader, "Deployment target directory", targetDir)
 			if err != nil {
 				return err
 			}
-			targetDir, err = filepath.Abs(targetDirInput)
+			newTargetDir, err := filepath.Abs(targetDirInput)
 			if err != nil {
 				return fmt.Errorf("resolve target directory: %w", err)
 			}
+			if oldTargetDir != "" && oldTargetDir != newTargetDir {
+				_ = os.Remove(filepath.Join(oldTargetDir, stateFileName))
+			}
+			targetDir = newTargetDir
 			state.TargetDir = targetDir
 			state.MarkCompleted("target_dir")
 			_ = state.Save(targetDir)
@@ -394,26 +436,7 @@ func run(args []string) error {
 			}
 			state.GCPKMS = data.GCPKMS
 
-			if data.GCPKMS != "" {
-				for {
-					saKeyInput, err := promptUser(reader, "GCP Service Account JSON key file path (leave empty if using host/ADC credentials)", data.GCPSAKey)
-					if err != nil {
-						return err
-					}
-					saKeyInput = strings.TrimSpace(saKeyInput)
-					if saKeyInput == "" {
-						data.GCPSAKey = ""
-						break
-					}
-					if err := validateJSONFile(saKeyInput); err != nil {
-						fmt.Printf("%sError:%s %v\n", colorRed+colorBold, colorReset, err)
-						continue
-					}
-					data.GCPSAKey = saKeyInput
-					break
-				}
-				state.GCPSAKey = data.GCPSAKey
-			} else {
+			if data.GCPKMS == "" {
 				data.AgeRecipient, err = promptUser(reader, "Age recipient public key (leave empty to configure manually later)", data.AgeRecipient)
 				if err != nil {
 					return err
@@ -421,6 +444,27 @@ func run(args []string) error {
 				state.AgeRecipient = data.AgeRecipient
 			}
 			state.MarkCompleted("sops")
+			_ = state.Save(targetDir)
+		}
+
+		if data.GCPKMS != "" && !state.IsCompleted("gcp_sa_key") {
+			credDir := filepath.Join(targetDir, "etcd-tree", "credentials")
+			if err := os.MkdirAll(credDir, 0755); err != nil {
+				return fmt.Errorf("create credentials directory %s: %w", credDir, err)
+			}
+			if *gcpSAKeyFlag != "" {
+				if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
+					return err
+				}
+			}
+			if PromptGCPSACredentials(reader, os.Stdout, targetDir, true) {
+				data.GCPSAKey = filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+				state.GCPSAKey = data.GCPSAKey
+			} else {
+				data.GCPSAKey = ""
+				state.GCPSAKey = ""
+			}
+			state.MarkCompleted("gcp_sa_key")
 			_ = state.Save(targetDir)
 		}
 	}
@@ -474,6 +518,12 @@ func run(args []string) error {
 		return fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 
+	if *nonInteractiveFlag && *gcpSAKeyFlag != "" {
+		if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
+			return err
+		}
+	}
+
 	if err := GenerateDeployment(targetDir, data); err != nil {
 		return err
 	}
@@ -487,6 +537,7 @@ func run(args []string) error {
 		PromptOpencodeConfig(reader, os.Stdout, targetDir, false)
 		PromptSimplestConfig(reader, os.Stdout, targetDir, false)
 		PromptSSHCredentials(reader, os.Stdout, targetDir, false)
+		PromptGCPSACredentials(reader, os.Stdout, targetDir, false)
 	}
 
 	printInitSuccess(targetDir, data)
@@ -525,6 +576,21 @@ func CheckClaudeCredentials(targetDir string) (string, bool) {
 		return rootPath, true
 	}
 	return "", false
+}
+
+// CheckGCPSACredentials checks whether filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+// exists, is non-empty, and passes validateJSONFile (valid JSON with project_id).
+// If valid, tightens permissions to 0600 and returns (path, true).
+func CheckGCPSACredentials(targetDir string) (string, bool) {
+	saPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	if !isNonEmptyFile(saPath) {
+		return "", false
+	}
+	if err := validateJSONFile(saPath); err != nil {
+		return "", false
+	}
+	_ = os.Chmod(saPath, 0600)
+	return saPath, true
 }
 
 // CheckOpencodeConfig checks if opencode.aw.yaml exists in targetDir/etcd-tree/aw and contains non-comment content.
@@ -619,6 +685,52 @@ func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interac
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty Claude credential file found at %s (or etcd-tree/credentials/.credentials.json).\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
 			_, _ = fmt.Fprintf(w, "%sSkipped Claude credential setup.%s You can place it into etcd-tree/credentials/claude/ later before running just publish.\n", colorYellow, colorReset)
+			return false
+		default:
+			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
+		}
+	}
+}
+
+// PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into etcd-tree/credentials/gcp-sa.json.
+func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	if !interactive {
+		if foundPath, ok := CheckGCPSACredentials(targetDir); ok {
+			_, _ = fmt.Fprintf(w, "\n%s✔ GCP Service Account key verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+			return true
+		}
+		return false
+	}
+
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+
+	_, _ = fmt.Fprintf(w, "\n%s--- GCP Service Account Key Setup (for GCP KMS) ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your GCP Service Account JSON key file into %s%s%s.\n", colorYellow, credPath, colorReset)
+
+	for {
+		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		switch ans {
+		case "y", "yes":
+			if foundPath, ok := CheckGCPSACredentials(targetDir); ok {
+				_, _ = fmt.Fprintf(w, "%s✔ GCP Service Account key verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
+				return true
+			}
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid GCP Service Account JSON key file found at %s (must be valid JSON with project_id).\n", colorRed+colorBold, colorReset, credPath)
+		case "s", "skip":
+			_, _ = fmt.Fprintf(w, "%sSkipped GCP Service Account key setup.%s You can place it into etcd-tree/credentials/gcp-sa.json later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)

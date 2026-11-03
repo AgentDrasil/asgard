@@ -49,31 +49,51 @@ func (s *InitState) IsCompleted(step string) bool {
 	return s.CompletedSteps[step]
 }
 
-// Save writes the state to targetDir/.asgard-init-state.json (or cwd if targetDir is empty).
+// Save writes the state to targetDir/.asgard-init-state.json and cwd/.asgard-init-state.json.
 func (s *InitState) Save(targetDir string) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal init state: %w", err)
 	}
 
-	var statePath string
+	cwd, cwdErr := os.Getwd()
+	targets := make([]string, 0, 2)
+
 	if targetDir != "" {
-		statePath = filepath.Join(targetDir, stateFileName)
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		statePath = filepath.Join(cwd, stateFileName)
+		targetPath := filepath.Join(targetDir, stateFileName)
+		targets = append(targets, targetPath)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
-		return fmt.Errorf("create state directory: %w", err)
+	if cwdErr == nil && cwd != "" {
+		cwdPath := filepath.Join(cwd, stateFileName)
+		absCwd, err1 := filepath.Abs(cwdPath)
+		alreadyIncluded := false
+		for _, t := range targets {
+			if absT, err2 := filepath.Abs(t); err1 == nil && err2 == nil && absT == absCwd {
+				alreadyIncluded = true
+				break
+			}
+		}
+		if !alreadyIncluded {
+			targets = append(targets, cwdPath)
+		}
 	}
-	if err := os.WriteFile(statePath, data, 0600); err != nil {
-		return fmt.Errorf("write state file %s: %w", statePath, err)
+
+	var firstErr error
+	for _, p := range targets {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("create state directory: %w", err)
+			}
+			continue
+		}
+		if err := os.WriteFile(p, data, 0600); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("write state file %s: %w", p, err)
+			}
+		}
 	}
-	return nil
+	return firstErr
 }
 
 // loadState attempts to read an existing state file from targetDir or cwd.
@@ -82,9 +102,10 @@ func loadState(targetDir string) (string, *InitState, error) {
 	if targetDir != "" {
 		candidates = append(candidates, filepath.Join(targetDir, stateFileName))
 	}
+	var cwdPath string
 	cwd, err := os.Getwd()
 	if err == nil {
-		cwdPath := filepath.Join(cwd, stateFileName)
+		cwdPath = filepath.Join(cwd, stateFileName)
 		if len(candidates) == 0 || candidates[0] != cwdPath {
 			candidates = append(candidates, cwdPath)
 		}
@@ -95,6 +116,11 @@ func loadState(targetDir string) (string, *InitState, error) {
 		if err == nil && len(data) > 0 {
 			var state InitState
 			if jsonErr := json.Unmarshal(data, &state); jsonErr == nil {
+				// If checking cwd fallback but a non-default targetDir was explicitly requested,
+				// do not load a state from an unrelated target directory.
+				if p == cwdPath && targetDir != "" && targetDir != cwd && state.TargetDir != "" && state.TargetDir != targetDir {
+					continue
+				}
 				if state.CompletedSteps == nil {
 					state.CompletedSteps = make(map[string]bool)
 				}
