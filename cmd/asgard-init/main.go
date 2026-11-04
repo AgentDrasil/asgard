@@ -485,18 +485,14 @@ func run(args []string) (err error) {
 		}
 
 		if data.GCPKMS != "" && !state.IsCompleted("gcp_sa_key") {
-			credDir := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp")
-			if err := os.MkdirAll(credDir, 0700); err != nil {
-				return fmt.Errorf("create credentials directory %s: %w", credDir, err)
-			}
-			_ = os.Chmod(credDir, 0700)
-			if *gcpSAKeyFlag != "" {
+			MigrateLegacyGCPSAKey(targetDir)
+			if *gcpSAKeyFlag != "" && !isMigratedLegacyGCPRef(targetDir, *gcpSAKeyFlag) {
 				if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
 					return err
 				}
 			}
 			if PromptGCPSACredentials(reader, os.Stdout, targetDir, true) {
-				data.GCPSAKey = filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+				data.GCPSAKey = filepath.Join(targetDir, GCPSAKeyFile)
 				state.GCPSAKey = data.GCPSAKey
 			} else {
 				data.GCPSAKey = ""
@@ -534,7 +530,6 @@ func run(args []string) (err error) {
 			filepath.Join(targetDir, "etcd-tree", "credentials"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 		}
 		if data.IsProviderEnabled("opencode") || dirExists(filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")) {
@@ -588,7 +583,7 @@ func run(args []string) (err error) {
 		return fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 
-	if *nonInteractiveFlag && *gcpSAKeyFlag != "" {
+	if *nonInteractiveFlag && *gcpSAKeyFlag != "" && !isMigratedLegacyGCPRef(targetDir, *gcpSAKeyFlag) {
 		if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
 			return err
 		}
@@ -665,11 +660,11 @@ func CheckClaudeCredentials(targetDir string) (string, bool) {
 	return "", false
 }
 
-// CheckGCPSACredentials checks whether filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+// CheckGCPSACredentials checks whether filepath.Join(targetDir, GCPSAKeyFile)
 // exists, is non-empty, and passes validateJSONFile (valid JSON with project_id).
 // If valid, tightens permissions to 0600 and returns (path, true).
 func CheckGCPSACredentials(targetDir string) (string, bool) {
-	saPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+	saPath := filepath.Join(targetDir, GCPSAKeyFile)
 	if !isNonEmptyFile(saPath) {
 		return "", false
 	}
@@ -779,9 +774,9 @@ func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interac
 	}
 }
 
-// PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into etcd-tree/credentials/gcp/gcp-sa.json.
+// PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into <dir>/gcp-sa.json (local file mounted into containers, never pushed to etcd).
 func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+	credPath := filepath.Join(targetDir, GCPSAKeyFile)
 	if !interactive {
 		if foundPath, ok := CheckGCPSACredentials(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ GCP Service Account key verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -817,7 +812,7 @@ func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interact
 			}
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid GCP Service Account JSON key file found at %s (must be valid JSON with project_id).\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped GCP Service Account key setup.%s You can place it into etcd-tree/credentials/gcp/gcp-sa.json later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped GCP Service Account key setup.%s Place it at ./gcp-sa.json and re-run asgard-init (to add the container mount) before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)

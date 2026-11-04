@@ -16,6 +16,9 @@
       - backend:{{ .RegistryPort }}
     volumes:
       - ./runners/{{ .RunnerName }}/certs:/certs:ro
+{{- if .GCPSAKey }}
+      - {{ .GCPSAKey }}:/secrets/gcp-sa.json:ro
+{{- end }}
       - ./runners/{{ .RunnerName }}/asgard:/asgard
       - ./runners/{{ .RunnerName }}/session-data:/session-data
 {{- range .WorkspaceMounts }}

@@ -140,7 +140,6 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "etcd-tree", "credentials"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 	}
 	opencodeCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")
@@ -249,15 +248,20 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		return err
 	}
 
-	// 3b. Copy GCP Service Account key to etcd-tree/credentials/gcp/gcp-sa.json if provided
-	etcdTreeSAKey := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-	if data.GCPSAKey != "" {
+	// 3b. Place the GCP Service Account key at <targetDir>/gcp-sa.json if provided.
+	// It is deliberately kept out of etcd-tree: the key is required to decrypt
+	// the etcd content (GCP KMS), so it must be mounted from a local file.
+	MigrateLegacyGCPSAKey(targetDir)
+	localSAKey := filepath.Join(targetDir, GCPSAKeyFile)
+	// A resumed state may still point at the legacy etcd-tree path that was just migrated.
+	if data.GCPSAKey != "" && !isMigratedLegacyGCPRef(targetDir, data.GCPSAKey) {
 		if err := copyGCPSAKey(targetDir, data.GCPSAKey); err != nil {
 			return fmt.Errorf("copy GCP service account key: %w", err)
 		}
-		data.GCPSAKey = "./etcd-tree/credentials/gcp/gcp-sa.json"
-	} else if fileExists(etcdTreeSAKey) {
-		data.GCPSAKey = "./etcd-tree/credentials/gcp/gcp-sa.json"
+	}
+	if fileExists(localSAKey) {
+		data.GCPSAKey = "./" + GCPSAKeyFile
+		data.GoogleApplicationCredentials = GCPSAKeyContainerPath
 	}
 
 	// 4. Render template files
@@ -269,6 +273,7 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		{"templates/compose.yaml.tmpl", filepath.Join(targetDir, "compose.yaml"), 0644},
 		{"templates/Justfile.tmpl", filepath.Join(targetDir, "Justfile"), 0644},
 		{"templates/gitignore.tmpl", filepath.Join(targetDir, ".gitignore"), 0644},
+		{"templates/etcd-tree/cfgctlignore.tmpl", filepath.Join(targetDir, "etcd-tree", ".cfgctlignore"), 0644},
 		{"templates/etcd-tree/sops.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", ".sops.yaml"), 0644},
 		{"templates/etcd-tree/asgard/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "config.yaml"), 0600},
 		{"templates/etcd-tree/aw/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "config.yaml"), 0644},
@@ -517,7 +522,13 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 		}
 	}
 
+	svcGCPSAKey := ""
+	if strings.Contains(content, "./"+GCPSAKeyFile+":"+GCPSAKeyContainerPath) {
+		svcGCPSAKey = "./" + GCPSAKeyFile
+	}
+
 	svcData := &ConfigData{
+		GCPSAKey:                     svcGCPSAKey,
 		RunnerName:                   runnerName,
 		RunnerService:                svcName,
 		RegistryPort:                 9311,
@@ -546,14 +557,45 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 	return os.WriteFile(composeFile, []byte(newContent), 0644)
 }
 
-// copyGCPSAKey copies the GCP Service Account key to etcd-tree/credentials/gcp/gcp-sa.json (0600)
-// for distribution to backend and runners via etcd.
+// GCPSAKeyFile is the local (never published to etcd) GCP SA key file name
+// inside the deployment directory.
+const GCPSAKeyFile = "gcp-sa.json"
+
+// GCPSAKeyContainerPath is where compose mounts the local SA key (read-only).
+// It is not under /asgard/data, which the backend manages itself.
+const GCPSAKeyContainerPath = "/secrets/gcp-sa.json"
+
+// isMigratedLegacyGCPRef reports whether ref points into the legacy etcd-tree
+// credentials location whose key has already been moved to <targetDir>/gcp-sa.json.
+func isMigratedLegacyGCPRef(targetDir, ref string) bool {
+	return strings.Contains(filepath.ToSlash(ref), "etcd-tree/credentials/") &&
+		fileExists(filepath.Join(targetDir, GCPSAKeyFile))
+}
+
+// MigrateLegacyGCPSAKey moves a SA key previously staged under etcd-tree to
+// <targetDir>/gcp-sa.json so it is no longer pushed to etcd.
+func MigrateLegacyGCPSAKey(targetDir string) {
+	dst := filepath.Join(targetDir, GCPSAKeyFile)
+	for _, old := range []string{
+		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json"),
+	} {
+		if fileExists(old) && !fileExists(dst) {
+			if err := copyFile(old, dst, 0600); err == nil {
+				_ = os.Remove(old)
+			}
+		}
+	}
+}
+
+// copyGCPSAKey copies the GCP Service Account key to <targetDir>/gcp-sa.json (0600),
+// which compose mounts read-only into the backend and runners.
 func copyGCPSAKey(targetDir string, saKeyPath string) error {
 	saKeyPath = strings.TrimSpace(saKeyPath)
-	etcdTreeDst := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+	localDst := filepath.Join(targetDir, GCPSAKeyFile)
 
 	if saKeyPath != "" {
-		absDst, _ := filepath.Abs(etcdTreeDst)
+		absDst, _ := filepath.Abs(localDst)
 		var absResolved string
 		if filepath.IsAbs(saKeyPath) {
 			absResolved = filepath.Clean(saKeyPath)
@@ -567,23 +609,19 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 		}
 
 		if absResolved == absDst {
-			if fileExists(etcdTreeDst) {
-				if err := validateJSONFile(etcdTreeDst); err != nil {
+			if fileExists(localDst) {
+				if err := validateJSONFile(localDst); err != nil {
 					return err
 				}
-				_ = os.Chmod(etcdTreeDst, 0600)
+				_ = os.Chmod(localDst, 0600)
 				return nil
 			}
 		}
 		if err := validateJSONFile(absResolved); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(etcdTreeDst), 0700); err != nil {
-			return fmt.Errorf("create gcp credentials directory: %w", err)
-		}
-		_ = os.Chmod(filepath.Dir(etcdTreeDst), 0700)
-		if err := copyFile(absResolved, etcdTreeDst, 0600); err != nil {
-			return fmt.Errorf("copy SA key to etcd-tree: %w", err)
+		if err := copyFile(absResolved, localDst, 0600); err != nil {
+			return fmt.Errorf("copy SA key to %s: %w", localDst, err)
 		}
 	}
 	return nil
@@ -591,6 +629,7 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 
 // MigrateLegacyCredentials migrates legacy root credential files into dedicated provider subfolders.
 func MigrateLegacyCredentials(targetDir string) {
+	MigrateLegacyGCPSAKey(targetDir)
 	legacyMigrations := []struct {
 		oldPath string
 		newPath string
@@ -606,10 +645,6 @@ func MigrateLegacyCredentials(targetDir string) {
 		{
 			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", ".credentials.json"),
 			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json"),
-		},
-		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"),
 		},
 		{
 			oldPath: filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml"),

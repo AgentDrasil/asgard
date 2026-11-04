@@ -24,3 +24,4 @@ etcd-tree/credentials/gcp/*
 !etcd-tree/credentials/gcp/.gitkeep
 etcd-tree/credentials/gcp-sa.json
 backend/asgard/gcp-sa.json
+/gcp-sa.json

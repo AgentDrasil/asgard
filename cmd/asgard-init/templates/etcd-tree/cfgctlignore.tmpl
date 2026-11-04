@@ -1,0 +1,5 @@
+# Never publish the GCP SA key via etcd: it is needed to decrypt etcd content
+# (GCP KMS bootstrap). It is mounted into containers from the local file
+# ./gcp-sa.json instead.
+credentials/gcp/
+credentials/gcp-sa.json

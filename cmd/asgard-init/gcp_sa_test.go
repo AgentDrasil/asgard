@@ -80,17 +80,17 @@ func TestGCPSAKey_FlagValidation(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			// Verify key was copied to etcd-tree/credentials/gcp/gcp-sa.json with 0600 permissions
-			etcdTreeKey := filepath.Join(outDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-			require.FileExists(t, etcdTreeKey)
-			info, err := os.Stat(etcdTreeKey)
+			// Verify key was copied to <dir>/gcp-sa.json with 0600 permissions
+			localKey := filepath.Join(outDir, "gcp-sa.json")
+			require.FileExists(t, localKey)
+			info, err := os.Stat(localKey)
 			require.NoError(t, err)
 			assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 
 			// Verify Justfile has GOOGLE_APPLICATION_CREDENTIALS export
 			justfileData, err := os.ReadFile(filepath.Join(outDir, "Justfile"))
 			require.NoError(t, err)
-			assert.Contains(t, string(justfileData), `export GOOGLE_APPLICATION_CREDENTIALS := "./etcd-tree/credentials/gcp/gcp-sa.json"`)
+			assert.Contains(t, string(justfileData), `export GOOGLE_APPLICATION_CREDENTIALS := "./gcp-sa.json"`)
 		})
 	}
 }
@@ -101,7 +101,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 	t.Run("interactive prompt enters y when key is pre-placed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		deployDir := filepath.Join(tempDir, "deploy")
-		credDir := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp")
+		credDir := deployDir
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		createFakeGCPKeyJSON(t, credDir, "gcp-sa.json")
 
@@ -149,9 +149,9 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		err := run([]string{"--dir", deployDir})
 		require.NoError(t, err)
 
-		etcdTreeKey := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-		require.FileExists(t, etcdTreeKey)
-		info, err := os.Stat(etcdTreeKey)
+		localKey := filepath.Join(deployDir, "gcp-sa.json")
+		require.FileExists(t, localKey)
+		info, err := os.Stat(localKey)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 	})
@@ -185,9 +185,9 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		err := run([]string{"--dir", deployDir, "--gcp-sa-key", saKey})
 		require.NoError(t, err)
 
-		etcdTreeKey := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-		require.FileExists(t, etcdTreeKey)
-		info, err := os.Stat(etcdTreeKey)
+		localKey := filepath.Join(deployDir, "gcp-sa.json")
+		require.FileExists(t, localKey)
+		info, err := os.Stat(localKey)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 	})
@@ -221,9 +221,9 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		err := run([]string{"--dir", deployDir})
 		require.NoError(t, err)
 
-		// etcd-tree/credentials/gcp/gcp-sa.json should not exist
-		etcdTreeKey := filepath.Join(deployDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-		assert.NoFileExists(t, etcdTreeKey)
+		// <dir>/gcp-sa.json should not exist
+		localKey := filepath.Join(deployDir, "gcp-sa.json")
+		assert.NoFileExists(t, localKey)
 	})
 }
 
@@ -233,7 +233,7 @@ func TestPromptGCPSACredentials_Interactive(t *testing.T) {
 	t.Run("interactive y with missing file retried then success", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
+		credDir := tempDir
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 
 		r, w := io.Pipe()
@@ -272,7 +272,7 @@ func TestPromptGCPSACredentials_Interactive(t *testing.T) {
 		var out bytes.Buffer
 		assert.False(t, PromptGCPSACredentials(strings.NewReader(""), &out, tempDir, false))
 
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
+		credDir := tempDir
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		createFakeGCPKeyJSON(t, credDir, "gcp-sa.json")
 
@@ -288,26 +288,26 @@ func TestAddRunner_PreservesGCPSAKey(t *testing.T) {
 	tempDir := t.TempDir()
 	saKey := createFakeGCPKeyJSON(t, tempDir, "base-sa.json")
 
-	// Generate initial deployment with SA key in etcd-tree
+	// Generate initial deployment with a local SA key
 	err := run([]string{"--dir", tempDir, "--non-interactive", "--gcp-sa-key", saKey})
 	require.NoError(t, err)
 
-	etcdKey := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-	require.FileExists(t, etcdKey)
+	localKey := filepath.Join(tempDir, "gcp-sa.json")
+	require.FileExists(t, localKey)
 
 	// Add new runner
 	err = run([]string{"--dir", tempDir, "--add-new-runner", "runner-worker-2"})
 	require.NoError(t, err)
 
-	// Verify etcd-tree/credentials/gcp/gcp-sa.json remains intact with 0600 permissions
-	require.FileExists(t, etcdKey)
-	info, err := os.Stat(etcdKey)
+	// Verify <dir>/gcp-sa.json remains intact with 0600 permissions
+	require.FileExists(t, localKey)
+	info, err := os.Stat(localKey)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 
 	origContent, err := os.ReadFile(saKey)
 	require.NoError(t, err)
-	copiedContent, err := os.ReadFile(etcdKey)
+	copiedContent, err := os.ReadFile(localKey)
 	require.NoError(t, err)
 	assert.Equal(t, origContent, copiedContent)
 }
@@ -346,4 +346,105 @@ func TestAppendRunnerService_PreservesGoogleAppCreds(t *testing.T) {
 
 func bufioNewReader(r *strings.Reader) *bufio.Reader {
 	return bufio.NewReader(r)
+}
+
+func TestGCPSAKey_LocalMountNotInEtcdTree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	saKey := createFakeGCPKeyJSON(t, tempDir, "base-sa.json")
+	outDir := filepath.Join(tempDir, "out")
+	require.NoError(t, run([]string{"--dir", outDir, "--non-interactive", "--gcp-sa-key", saKey}))
+
+	// Key is a local file, never staged inside etcd-tree.
+	require.FileExists(t, filepath.Join(outDir, "gcp-sa.json"))
+	assert.NoFileExists(t, filepath.Join(outDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"))
+
+	compose, err := os.ReadFile(filepath.Join(outDir, "compose.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, strings.Count(string(compose), "- ./gcp-sa.json:/secrets/gcp-sa.json:ro"))
+	assert.Equal(t, 2, strings.Count(string(compose), "- GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json"))
+
+	ignore, err := os.ReadFile(filepath.Join(outDir, "etcd-tree", ".cfgctlignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(ignore), "credentials/gcp/")
+	assert.Contains(t, string(ignore), "credentials/gcp-sa.json")
+
+	// A newly added runner gets the same mount.
+	require.NoError(t, run([]string{"--dir", outDir, "--add-new-runner", "runner-2"}))
+	compose, err = os.ReadFile(filepath.Join(outDir, "compose.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, 3, strings.Count(string(compose), "- ./gcp-sa.json:/secrets/gcp-sa.json:ro"))
+	assert.Equal(t, 3, strings.Count(string(compose), "- GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json"))
+}
+
+func TestMigrateLegacyGCPSAKey_MovesOutOfEtcdTree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	legacy := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0700))
+	require.NoError(t, os.WriteFile(legacy, []byte(`{"project_id":"p"}`), 0600))
+
+	MigrateLegacyGCPSAKey(tempDir)
+
+	assert.NoFileExists(t, legacy)
+	data, err := os.ReadFile(filepath.Join(tempDir, "gcp-sa.json"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"project_id":"p"}`, string(data))
+
+	// The older flat legacy location is migrated too, and an existing local key wins.
+	other := t.TempDir()
+	flat := filepath.Join(other, "etcd-tree", "credentials", "gcp-sa.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(flat), 0700))
+	require.NoError(t, os.WriteFile(flat, []byte(`{"project_id":"flat"}`), 0600))
+	MigrateLegacyGCPSAKey(other)
+	assert.NoFileExists(t, flat)
+	data, err = os.ReadFile(filepath.Join(other, "gcp-sa.json"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"project_id":"flat"}`, string(data))
+}
+
+func TestJustfileExportsGCPCredsWhenKMSConfiguredWithoutKey(t *testing.T) {
+	t.Parallel()
+
+	outDir := t.TempDir()
+	require.NoError(t, run([]string{"--dir", outDir, "--non-interactive", "--gcp-kms", "projects/p/locations/l/keyRings/r/cryptoKeys/k"}))
+
+	justfile, err := os.ReadFile(filepath.Join(outDir, "Justfile"))
+	require.NoError(t, err)
+	assert.Contains(t, string(justfile), `export GOOGLE_APPLICATION_CREDENTIALS := "./gcp-sa.json"`)
+	// No key yet: compose must not bind-mount a missing file (docker would create a directory).
+	compose, err := os.ReadFile(filepath.Join(outDir, "compose.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(compose), "/secrets/gcp-sa.json")
+}
+
+func TestGenerateDeployment_LegacyKeyPathReference(t *testing.T) {
+	outDir := t.TempDir()
+	legacyDir := filepath.Join(outDir, "etcd-tree", "credentials", "gcp")
+	require.NoError(t, os.MkdirAll(legacyDir, 0700))
+	legacy := createFakeGCPKeyJSON(t, legacyDir, "gcp-sa.json")
+
+	// A resumed state / old flag may still reference the legacy etcd-tree path.
+	require.NoError(t, run([]string{"--dir", outDir, "--non-interactive", "--gcp-sa-key", legacy}))
+
+	assert.NoFileExists(t, legacy)
+	require.FileExists(t, filepath.Join(outDir, "gcp-sa.json"))
+	compose, err := os.ReadFile(filepath.Join(outDir, "compose.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(compose), "- ./gcp-sa.json:/secrets/gcp-sa.json:ro")
+}
+
+func TestCheckGCPSACredentials_DetectsMigratedLegacyKey(t *testing.T) {
+	t.Parallel()
+
+	outDir := t.TempDir()
+	legacyDir := filepath.Join(outDir, "etcd-tree", "credentials", "gcp")
+	require.NoError(t, os.MkdirAll(legacyDir, 0700))
+	createFakeGCPKeyJSON(t, legacyDir, "gcp-sa.json")
+
+	MigrateLegacyGCPSAKey(outDir)
+	_, ok := CheckGCPSACredentials(outDir)
+	assert.True(t, ok)
 }

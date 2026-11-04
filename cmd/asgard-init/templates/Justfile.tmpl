@@ -1,12 +1,9 @@
 # ==============================================================================
 # Asgard Deployment Management Justfile
 # ==============================================================================
-{{- if .GCPSAKey }}
+{{- if or .GCPSAKey .GCPKMS }}
 
-export GOOGLE_APPLICATION_CREDENTIALS := "./etcd-tree/credentials/gcp/gcp-sa.json"
-{{- else if .GoogleApplicationCredentials }}
-
-export GOOGLE_APPLICATION_CREDENTIALS := "./backend/asgard/gcp-sa.json"
+export GOOGLE_APPLICATION_CREDENTIALS := "./gcp-sa.json"
 {{- end }}
 
 # Start all containers in the background
