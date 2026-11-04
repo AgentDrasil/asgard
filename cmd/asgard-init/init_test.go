@@ -223,7 +223,6 @@ func TestGenerateDeployment(t *testing.T) {
 		".gitignore",
 		"etcd-tree/.sops.yaml",
 		"etcd-tree/asgard/config.yaml",
-		"etcd-tree/asgard/proxy.yaml",
 		"etcd-tree/aw/config.yaml",
 		"etcd-tree/credentials/opencode/opencode.aw.yaml",
 		"etcd-tree/credentials/simplest/key.yaml",
@@ -242,6 +241,8 @@ func TestGenerateDeployment(t *testing.T) {
 		require.NoError(t, err, "file must exist: %s", rel)
 		assert.False(t, info.IsDir(), "path should be file: %s", rel)
 	}
+
+	assert.NoFileExists(t, filepath.Join(tempDir, "etcd-tree", "asgard", "proxy.yaml"))
 
 	// Verify permissions on sensitive files and credential directories
 	for _, credSubDir := range []string{"credentials", "credentials/agy", "credentials/claude", "credentials/gcp", "credentials/opencode", "credentials/simplest", "credentials/ssh"} {
@@ -485,6 +486,33 @@ func TestRunCommandNonInteractive(t *testing.T) {
 	workerBCert := filepath.Join(tempDir, "runners", "worker-b", "certs", "tls.crt")
 	_, err = os.Stat(workerBCert)
 	require.NoError(t, err)
+}
+
+func TestProvidersSelectiveGeneration(t *testing.T) {
+	t.Setenv("ASGARD_INIT_SKIP_CFGCTL_CHECK", "1")
+
+	tempDir := t.TempDir()
+	args := []string{
+		"--non-interactive",
+		"--dir", tempDir,
+		"--providers", "agy,claude",
+	}
+
+	err := run(args)
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cfgData), "providers:\n  - agy\n  - claude")
+	assert.NotContains(t, string(cfgData), "  - opencode")
+	assert.NotContains(t, string(cfgData), "  - simplest")
+
+	// Verify omitted provider files and directories are NOT generated
+	assert.NoFileExists(t, filepath.Join(tempDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"))
+	assert.NoDirExists(t, filepath.Join(tempDir, "etcd-tree", "credentials", "opencode"))
+	assert.NoFileExists(t, filepath.Join(tempDir, "etcd-tree", "credentials", "simplest", "key.yaml"))
+	assert.NoDirExists(t, filepath.Join(tempDir, "etcd-tree", "credentials", "simplest"))
+	assert.NoDirExists(t, filepath.Join(tempDir, "etcd-tree", "simplest"))
 }
 
 func TestCheckCLICredentials(t *testing.T) {
@@ -1504,6 +1532,24 @@ func TestGenerateDeployment_PreservesExistingConfigs(t *testing.T) {
 	keyData, err := os.ReadFile(simplestKeyPath)
 	require.NoError(t, err)
 	assert.Equal(t, "# custom simplest key\ngemini: AIza-custom\n", string(keyData))
+
+	// Re-run with providers restricted to only "agy" (deselected opencode & simplest)
+	cfgRestricted := &ConfigData{
+		Host:        "localhost",
+		BackendPort: 7000,
+		Providers:   []string{"agy"},
+		Force:       true,
+	}
+	require.NoError(t, GenerateDeployment(tempDir, cfgRestricted))
+
+	// Verify existing files and directories were preserved despite being deselected
+	awDataRestricted, err := os.ReadFile(opencodeAWPath)
+	require.NoError(t, err)
+	assert.Equal(t, "# custom opencode config\nCUSTOM: 1\n", string(awDataRestricted))
+
+	keyDataRestricted, err := os.ReadFile(simplestKeyPath)
+	require.NoError(t, err)
+	assert.Equal(t, "# custom simplest key\ngemini: AIza-custom\n", string(keyDataRestricted))
 }
 
 func TestMigrateLegacyCredentials(t *testing.T) {

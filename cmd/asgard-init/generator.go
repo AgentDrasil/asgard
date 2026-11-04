@@ -47,6 +47,18 @@ type ConfigData struct {
 	Force                        bool
 }
 
+func (c *ConfigData) IsProviderEnabled(name string) bool {
+	if c == nil || len(c.Providers) == 0 {
+		return true
+	}
+	for _, p := range c.Providers {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
 func runnerServiceName(name string) string {
 	if strings.HasPrefix(name, "runner-") {
 		return name
@@ -109,9 +121,12 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "runners", data.InitialRunner, "certs"),
 		filepath.Join(targetDir, "etcd-tree", "asgard"),
 		filepath.Join(targetDir, "etcd-tree", "aw"),
-		filepath.Join(targetDir, "etcd-tree", "simplest"),
 		filepath.Join(targetDir, "etcd-tree", "agents", "agent-father"),
 		filepath.Join(targetDir, "etcd-tree", "agents", "default-agent"),
+	}
+	simplestDir := filepath.Join(targetDir, "etcd-tree", "simplest")
+	if data.IsProviderEnabled("simplest") || dirExists(simplestDir) {
+		dirs = append(dirs, simplestDir)
 	}
 
 	for _, d := range dirs {
@@ -126,9 +141,15 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "opencode"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "simplest"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
+	}
+	opencodeCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")
+	if data.IsProviderEnabled("opencode") || dirExists(opencodeCredDir) {
+		credDirs = append(credDirs, opencodeCredDir)
+	}
+	simplestCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "simplest")
+	if data.IsProviderEnabled("simplest") || dirExists(simplestCredDir) {
+		credDirs = append(credDirs, simplestCredDir)
 	}
 	for _, cd := range credDirs {
 		if err := os.MkdirAll(cd, 0700); err != nil {
@@ -250,7 +271,6 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		{"templates/gitignore.tmpl", filepath.Join(targetDir, ".gitignore"), 0644},
 		{"templates/etcd-tree/sops.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", ".sops.yaml"), 0644},
 		{"templates/etcd-tree/asgard/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "config.yaml"), 0600},
-		{"templates/etcd-tree/asgard/proxy.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "proxy.yaml"), 0644},
 		{"templates/etcd-tree/aw/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "config.yaml"), 0644},
 		{"templates/etcd-tree/credentials/opencode/opencode.aw.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"), 0600},
 		{"templates/etcd-tree/credentials/simplest/key.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml"), 0600},
@@ -264,8 +284,19 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	}
 
 	for _, item := range templateMap {
-		if (item.tmpl == "templates/etcd-tree/credentials/opencode/opencode.aw.yaml.tmpl" || item.tmpl == "templates/etcd-tree/credentials/simplest/key.yaml.tmpl") && isNonEmptyFile(item.dest) {
-			continue
+		switch item.tmpl {
+		case "templates/etcd-tree/credentials/opencode/opencode.aw.yaml.tmpl":
+			if !data.IsProviderEnabled("opencode") || isNonEmptyFile(item.dest) {
+				continue
+			}
+		case "templates/etcd-tree/credentials/simplest/key.yaml.tmpl":
+			if !data.IsProviderEnabled("simplest") || isNonEmptyFile(item.dest) {
+				continue
+			}
+		case "templates/etcd-tree/simplest/models.yaml.tmpl", "templates/etcd-tree/simplest/providers.yaml.tmpl":
+			if !data.IsProviderEnabled("simplest") {
+				continue
+			}
 		}
 		if err := renderTemplate(item.tmpl, item.dest, data, item.perm); err != nil {
 			return fmt.Errorf("failed to render %s -> %s: %w", item.tmpl, item.dest, err)
@@ -359,6 +390,11 @@ func AddRunner(targetDir string, runnerName string, workspaceMounts []string) er
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 func renderTemplate(tmplPath, destPath string, data any, perm os.FileMode) error {

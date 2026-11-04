@@ -177,6 +177,7 @@ func run(args []string) (err error) {
 		AuthClientSecret: *authClientSecretFlag,
 		AuthTokenSource:  "access_token",
 		InitialRunner:    *runnerFlag,
+		Providers:        cliProviders,
 		GCPKMS:           *gcpKmsFlag,
 		GCPSAKey:         *gcpSAKeyFlag,
 		AgeRecipient:     *ageFlag,
@@ -514,30 +515,8 @@ func run(args []string) (err error) {
 	// Always migrate any legacy credentials before configuration and deployment generation
 	MigrateLegacyCredentials(targetDir)
 
-	// In interactive mode, ensure directories exist and prompt for providers and SSH
+	// In interactive mode, prompt for providers, ensure directories exist, and prompt for SSH
 	if !*nonInteractiveFlag {
-		credDirs := []string{
-			filepath.Join(targetDir, "etcd-tree", "credentials"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "opencode"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "simplest"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
-		}
-		for _, cd := range credDirs {
-			_ = os.MkdirAll(cd, 0700)
-			_ = os.Chmod(cd, 0700)
-		}
-
-		otherDirs := []string{
-			filepath.Join(targetDir, "etcd-tree", "aw"),
-			filepath.Join(targetDir, "etcd-tree", "simplest"),
-		}
-		for _, d := range otherDirs {
-			_ = os.MkdirAll(d, 0755)
-		}
-
 		if !state.IsCompleted("providers") {
 			if len(cliProviders) > 0 {
 				data.Providers = cliProviders
@@ -547,7 +526,38 @@ func run(args []string) (err error) {
 			state.Providers = data.Providers
 			state.MarkCompleted("providers")
 			_ = state.Save(targetDir)
+		} else if len(data.Providers) == 0 && len(state.Providers) > 0 {
+			data.Providers = state.Providers
 		}
+
+		credDirs := []string{
+			filepath.Join(targetDir, "etcd-tree", "credentials"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
+		}
+		if data.IsProviderEnabled("opencode") || dirExists(filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")) {
+			credDirs = append(credDirs, filepath.Join(targetDir, "etcd-tree", "credentials", "opencode"))
+		}
+		if data.IsProviderEnabled("simplest") || dirExists(filepath.Join(targetDir, "etcd-tree", "credentials", "simplest")) {
+			credDirs = append(credDirs, filepath.Join(targetDir, "etcd-tree", "credentials", "simplest"))
+		}
+		for _, cd := range credDirs {
+			_ = os.MkdirAll(cd, 0700)
+			_ = os.Chmod(cd, 0700)
+		}
+
+		otherDirs := []string{
+			filepath.Join(targetDir, "etcd-tree", "aw"),
+		}
+		if data.IsProviderEnabled("simplest") || dirExists(filepath.Join(targetDir, "etcd-tree", "simplest")) {
+			otherDirs = append(otherDirs, filepath.Join(targetDir, "etcd-tree", "simplest"))
+		}
+		for _, d := range otherDirs {
+			_ = os.MkdirAll(d, 0755)
+		}
+
 		if !state.IsCompleted("ssh") {
 			PromptSSHCredentials(reader, os.Stdout, targetDir, true)
 			state.MarkCompleted("ssh")
@@ -592,10 +602,18 @@ func run(args []string) (err error) {
 	removeState(targetDir)
 
 	if *nonInteractiveFlag {
-		PromptCLICredentials(reader, os.Stdout, targetDir, false)
-		PromptClaudeCredentials(reader, os.Stdout, targetDir, false)
-		PromptOpencodeConfig(reader, os.Stdout, targetDir, false)
-		PromptSimplestConfig(reader, os.Stdout, targetDir, false)
+		if data.IsProviderEnabled("agy") {
+			PromptCLICredentials(reader, os.Stdout, targetDir, false)
+		}
+		if data.IsProviderEnabled("claude") {
+			PromptClaudeCredentials(reader, os.Stdout, targetDir, false)
+		}
+		if data.IsProviderEnabled("opencode") {
+			PromptOpencodeConfig(reader, os.Stdout, targetDir, false)
+		}
+		if data.IsProviderEnabled("simplest") {
+			PromptSimplestConfig(reader, os.Stdout, targetDir, false)
+		}
 		PromptSSHCredentials(reader, os.Stdout, targetDir, false)
 		PromptGCPSACredentials(reader, os.Stdout, targetDir, false)
 	}
@@ -610,6 +628,16 @@ func isNonEmptyFile(path string) bool {
 		return false
 	}
 	return !fi.IsDir() && fi.Size() > 0
+}
+
+func isDirEmpty(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	_, err = f.Readdirnames(1)
+	return err == io.EOF
 }
 
 // CheckCLICredentials checks if oauth_creds.json or antigravity-oauth-token exists in targetDir/etcd-tree/credentials/agy and is a non-empty file.
@@ -895,13 +923,24 @@ func promptProviderWithActivation(
 	cliName string,
 	promptCredFn func(io.Reader, io.Writer, string, bool) bool,
 ) bool {
-	if promptCredFn(r, w, targetDir, interactive) {
-		return true
+	var credDir string
+	if interactive {
+		switch cliName {
+		case "agy", "claude", "opencode", "simplest":
+			credDir = filepath.Join(targetDir, "etcd-tree", "credentials", cliName)
+			_ = os.MkdirAll(credDir, 0700)
+			_ = os.Chmod(credDir, 0700)
+		}
 	}
-	if !interactive {
-		return false
+
+	ok := promptCredFn(r, w, targetDir, interactive)
+	if !ok && interactive {
+		ok = PromptCLIActivation(r, w, cliName)
 	}
-	return PromptCLIActivation(r, w, cliName)
+	if !ok && credDir != "" && isDirEmpty(credDir) {
+		_ = os.Remove(credDir)
+	}
+	return ok
 }
 
 // PromptProviderSetup prompts for CLI credential setup and provider activation for each supported provider.

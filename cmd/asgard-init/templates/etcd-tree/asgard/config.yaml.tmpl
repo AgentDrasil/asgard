@@ -33,6 +33,12 @@ auth:
   client_secret: "{{ .AuthClientSecret }}"
   token_source: "{{ .AuthTokenSource }}"
   token_audience: "{{ .AuthTokenAudience }}"
+  # Optional role-based access control inside OIDC claims:
+  # role_claim: "roles"
+  # required_role: "asgard-user"
+  # Optional auth code options (e.g. for Google offline refresh tokens):
+  # auth_code_options:
+  #   access_type: "offline"
 
 # ------------------------------------------------------------------------------
 # OPTIONAL CORE SETTINGS (Uncomment and customize as needed)
@@ -84,9 +90,3 @@ providers:
 #   vapid_key: ""
 #   service_account_file: ""
 
-# Role-based access control inside OIDC claims
-# auth:
-#   role_claim: "roles"
-#   required_role: "asgard-user"
-#   auth_code_options:
-#     access_type: "offline"
