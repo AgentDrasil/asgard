@@ -489,9 +489,14 @@ const documentCSP = "default-src 'self'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data:; " +
 	"media-src 'self' blob:; " +
-	// 'self' covers the same-origin API, SSE and WSS endpoints; the explicit
-	// origin is the Gemini Live WebSocket used by voice input.
-	"connect-src 'self' wss://generativelanguage.googleapis.com; " +
+	// 'self' covers the same-origin API, SSE and WSS endpoints. The explicit
+	// origins are the Gemini Live WebSocket used by voice input, the Iconify
+	// API that @iconify/vue fetches icon data from at runtime, and the
+	// Firebase installation/registration endpoints used by FCM Web Push.
+	"connect-src 'self' wss://generativelanguage.googleapis.com " +
+	"https://api.iconify.design " +
+	"https://firebaseinstallations.googleapis.com " +
+	"https://fcmregistrations.googleapis.com; " +
 	// The audio worklet and the in-app downloads use blob: URLs.
 	"worker-src 'self' blob:; " +
 	"frame-src 'self'; " +

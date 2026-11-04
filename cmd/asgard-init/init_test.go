@@ -346,11 +346,13 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, sopsStr, `opencode\.aw\.yaml`)
 	assert.Contains(t, sopsStr, `key\.yaml`)
 	credRuleIdx := strings.Index(sopsStr, "credentials/.*")
-	genericRuleIdx := strings.Index(sopsStr, ".*\\.(yaml|yml|json)$")
+	genericRuleIdx := strings.Index(sopsStr, `(asgard|aw|simplest)/[^/]+\.(yaml|yml|json)$`)
 	require.True(t, credRuleIdx != -1 && genericRuleIdx != -1)
 	assert.True(t, credRuleIdx < genericRuleIdx, "credentials whole-file encryption rule must precede generic yaml/json rule to avoid shadowing")
 	assert.Contains(t, sopsStr, "refresh_token")
 	assert.Contains(t, sopsStr, "id_token")
+	// Agent definitions contain no secrets and must not be matched by any rule.
+	assert.NotContains(t, sopsStr, `.*\.(yaml|yml|json)$`)
 
 	// Verify commented providers when data.Providers is empty
 	configContent, err = os.ReadFile(filepath.Join(tempDir, "etcd-tree", "asgard", "config.yaml"))

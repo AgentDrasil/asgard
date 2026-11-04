@@ -375,6 +375,14 @@ func TestDocumentCSP(t *testing.T) {
 		// Inline scripts stay forbidden; they are the whole point of the policy.
 		assert.Contains(t, csp, "script-src 'self'")
 		assert.NotContains(t, csp, "script-src 'self' 'unsafe-inline'")
+		// Runtime icon data and FCM Web Push must stay reachable.
+		for _, origin := range []string{
+			"https://api.iconify.design",
+			"https://firebaseinstallations.googleapis.com",
+			"https://fcmregistrations.googleapis.com",
+		} {
+			assert.Contains(t, csp, origin)
+		}
 		assert.Contains(t, csp, "frame-ancestors 'none'")
 		assert.Contains(t, csp, "object-src 'none'")
 		assert.Contains(t, csp, "base-uri 'self'")
