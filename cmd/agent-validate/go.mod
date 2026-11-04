@@ -7,7 +7,7 @@ require (
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
-	github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e
+	github.com/elmhuangyu/configs v0.0.0-20261104153437-dcca3a415c69
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/goccy/go-yaml v1.19.2
 	github.com/stretchr/testify v1.12.1

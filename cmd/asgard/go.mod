@@ -74,7 +74,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e // indirect
+	github.com/elmhuangyu/configs v0.0.0-20261104153437-dcca3a415c69 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.40.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/fatih/color v1.19.0 // indirect
