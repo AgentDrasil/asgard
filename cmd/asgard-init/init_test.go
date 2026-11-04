@@ -229,8 +229,8 @@ func TestGenerateDeployment(t *testing.T) {
 		"etcd-tree/simplest/models.yaml",
 		"etcd-tree/simplest/providers.yaml",
 		"etcd-tree/credentials/auth.json",
-		"etcd-tree/agents/agent-father/config.yaml",
-		"etcd-tree/agents/agent-father/AGENTS.md",
+		"etcd-tree/agents/agent_father/config.yaml",
+		"etcd-tree/agents/agent_father/AGENTS.md",
 		"etcd-tree/agents/default-agent/config.yaml",
 		"etcd-tree/agents/default-agent/AGENTS.md",
 	}
@@ -1694,4 +1694,74 @@ func TestDeployEtcdChoice(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, string(composeBytes), "container_name: asgard-etcd")
 	})
+}
+
+func TestAgentFatherUsesRequiredID(t *testing.T) {
+	t.Setenv("ASGARD_INIT_SKIP_CFGCTL_CHECK", "1")
+
+	outDir := t.TempDir()
+	require.NoError(t, run([]string{"--dir", outDir, "--non-interactive"}))
+	cfg, err := os.ReadFile(filepath.Join(outDir, "etcd-tree", "agents", "agent_father", "config.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cfg), "\nid: agent_father\n", "the backend requires the root agent id agent_father")
+	assert.NoDirExists(t, filepath.Join(outDir, "etcd-tree", "agents", "agent-father"))
+}
+
+func TestMigrateLegacyAgentFather(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	old := filepath.Join(dir, "etcd-tree", "agents", "agent-father")
+	require.NoError(t, os.MkdirAll(old, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(old, "config.yaml"), []byte("type: agent\nid: agent-father\nname: Agent Father\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(old, "AGENTS.md"), []byte("hi"), 0644))
+
+	MigrateLegacyAgentFather(dir)
+
+	assert.NoDirExists(t, old)
+	cfg, err := os.ReadFile(filepath.Join(dir, "etcd-tree", "agents", "agent_father", "config.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "type: agent\nid: agent_father\nname: Agent Father\n", string(cfg))
+	assert.FileExists(t, filepath.Join(dir, "etcd-tree", "agents", "agent_father", "AGENTS.md"))
+
+	// An existing agent_father definition is never overwritten.
+	dir2 := t.TempDir()
+	for _, n := range []string{"agent-father", "agent_father"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir2, "etcd-tree", "agents", n), 0755))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "etcd-tree", "agents", "agent_father", "config.yaml"), []byte("id: agent_father\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "etcd-tree", "agents", "agent-father", "config.yaml"), []byte("id: agent-father\n"), 0644))
+	MigrateLegacyAgentFather(dir2)
+	assert.DirExists(t, filepath.Join(dir2, "etcd-tree", "agents", "agent-father"))
+
+	// An empty agent_father dir (fresh GenerateDeployment) does not block it.
+	dir3 := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir3, "etcd-tree", "agents", "agent_father"), 0755))
+	legacy3 := filepath.Join(dir3, "etcd-tree", "agents", "agent-father")
+	require.NoError(t, os.MkdirAll(legacy3, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy3, "config.yaml"), []byte("id: agent-father\n"), 0644))
+	MigrateLegacyAgentFather(dir3)
+	assert.NoDirExists(t, legacy3)
+	got, err := os.ReadFile(filepath.Join(dir3, "etcd-tree", "agents", "agent_father", "config.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "id: agent_father\n", string(got))
+
+	// Quoted ids, trailing comments and CRLF are handled; an unrecognised
+	// definition is left untouched (no half-migration).
+	dir4 := t.TempDir()
+	legacy4 := filepath.Join(dir4, "etcd-tree", "agents", "agent-father")
+	require.NoError(t, os.MkdirAll(legacy4, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy4, "config.yaml"), []byte("type: agent\r\nid: \"agent-father\" # root\r\nname: x\r\n"), 0644))
+	MigrateLegacyAgentFather(dir4)
+	got, err = os.ReadFile(filepath.Join(dir4, "etcd-tree", "agents", "agent_father", "config.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "type: agent\r\nid: agent_father # root\r\nname: x\r\n", string(got))
+
+	dir5 := t.TempDir()
+	legacy5 := filepath.Join(dir5, "etcd-tree", "agents", "agent-father")
+	require.NoError(t, os.MkdirAll(legacy5, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy5, "config.yaml"), []byte("id: something-else\n"), 0644))
+	MigrateLegacyAgentFather(dir5)
+	assert.DirExists(t, legacy5)
+	assert.NoDirExists(t, filepath.Join(dir5, "etcd-tree", "agents", "agent_father"))
 }

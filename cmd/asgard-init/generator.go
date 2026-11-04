@@ -121,7 +121,7 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "runners", data.InitialRunner, "certs"),
 		filepath.Join(targetDir, "etcd-tree", "asgard"),
 		filepath.Join(targetDir, "etcd-tree", "aw"),
-		filepath.Join(targetDir, "etcd-tree", "agents", "agent-father"),
+		filepath.Join(targetDir, "etcd-tree", "agents", "agent_father"),
 		filepath.Join(targetDir, "etcd-tree", "agents", "default-agent"),
 	}
 	simplestDir := filepath.Join(targetDir, "etcd-tree", "simplest")
@@ -282,8 +282,8 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		{"templates/etcd-tree/simplest/models.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "models.yaml"), 0644},
 		{"templates/etcd-tree/simplest/providers.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "providers.yaml"), 0644},
 		{"templates/etcd-tree/credentials/auth.json.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "auth.json"), 0600},
-		{"templates/etcd-tree/agents/agent-father/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "agent-father", "config.yaml"), 0644},
-		{"templates/etcd-tree/agents/agent-father/AGENTS.md.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "agent-father", "AGENTS.md"), 0644},
+		{"templates/etcd-tree/agents/agent_father/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "agent_father", "config.yaml"), 0644},
+		{"templates/etcd-tree/agents/agent_father/AGENTS.md.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "agent_father", "AGENTS.md"), 0644},
 		{"templates/etcd-tree/agents/default-agent/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "default-agent", "config.yaml"), 0644},
 		{"templates/etcd-tree/agents/default-agent/AGENTS.md.tmpl", filepath.Join(targetDir, "etcd-tree", "agents", "default-agent", "AGENTS.md"), 0644},
 	}
@@ -630,6 +630,7 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 // MigrateLegacyCredentials migrates legacy root credential files into dedicated provider subfolders.
 func MigrateLegacyCredentials(targetDir string) {
 	MigrateLegacyGCPSAKey(targetDir)
+	MigrateLegacyAgentFather(targetDir)
 	legacyMigrations := []struct {
 		oldPath string
 		newPath string
@@ -659,4 +660,41 @@ func MigrateLegacyCredentials(targetDir string) {
 			_ = os.Remove(m.oldPath)
 		}
 	}
+}
+
+// legacyAgentFatherID matches the id line of a legacy agent-father definition,
+// tolerating quotes and leaving any trailing comment / CR untouched.
+var legacyAgentFatherID = regexp.MustCompile(`(?m)^id:[ \t]*["']?agent-father["']?`)
+
+// MigrateLegacyAgentFather renames the mis-named etcd-tree/agents/agent-father
+// (id "agent-father") produced by older asgard-init versions to
+// agents/agent_father with id "agent_father", the id the backend requires as
+// its initial root agent. An existing agent_father definition is never
+// overwritten; an empty agent_father directory (created by a fresh
+// GenerateDeployment) is replaced.
+func MigrateLegacyAgentFather(targetDir string) {
+	agentsDir := filepath.Join(targetDir, "etcd-tree", "agents")
+	oldDir := filepath.Join(agentsDir, "agent-father")
+	newDir := filepath.Join(agentsDir, "agent_father")
+	if !dirExists(oldDir) || fileExists(filepath.Join(newDir, "config.yaml")) {
+		return
+	}
+
+	// Rewrite the id first so a failure never leaves a renamed directory with
+	// the legacy id behind.
+	cfgPath := filepath.Join(oldDir, "config.yaml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil || !legacyAgentFatherID.Match(data) {
+		return
+	}
+	fixed := legacyAgentFatherID.ReplaceAll(data, []byte("id: agent_father"))
+	if err := os.WriteFile(cfgPath, fixed, 0644); err != nil {
+		return
+	}
+	if dirExists(newDir) {
+		if err := os.Remove(newDir); err != nil { // only succeeds when empty
+			return
+		}
+	}
+	_ = os.Rename(oldDir, newDir)
 }

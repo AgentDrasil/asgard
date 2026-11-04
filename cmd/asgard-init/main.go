@@ -1136,7 +1136,7 @@ func printInitSuccess(dir string, data *ConfigData) {
 	fmt.Printf("  • %stls/%s                     - Root CA and mTLS keypairs generated and distributed\n", colorYellow, colorReset)
 	fmt.Printf("  • %sbackend/certs/%s           - Backend server cert, key & client-ca bundle\n", colorYellow, colorReset)
 	fmt.Printf("  • %srunners/%s/certs/%s   - Runner client cert, key & ca bundle (hardcoded /certs/tls.*)\n", colorYellow, data.InitialRunner, colorReset)
-	fmt.Printf("  • %setcd-tree/agents/%s        - 2 Default agents: %sagent-father%s & %sdefault-agent%s\n", colorYellow, colorReset, colorBold, colorReset, colorBold, colorReset)
+	fmt.Printf("  • %setcd-tree/agents/%s        - 2 Default agents: %sagent_father%s & %sdefault-agent%s\n", colorYellow, colorReset, colorBold, colorReset, colorBold, colorReset)
 	fmt.Printf("  • %setcd-tree/asgard/config.yaml%s - Minimal required config (optional fields commented)\n", colorYellow, colorReset)
 	if data.IncludeEtcdService {
 		fmt.Printf("  • %scompose.yaml%s             - Multi-container orchestration (etcd, backend, runner)\n", colorYellow, colorReset)
