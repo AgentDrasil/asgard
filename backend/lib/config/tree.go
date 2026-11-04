@@ -11,7 +11,6 @@ import (
 
 // SimplestRawScope maps the simplest/ sub-namespace raw configuration bytes.
 type SimplestRawScope struct {
-	Key       []byte `key:"key.yaml"`
 	Models    []byte `key:"models.yaml"`
 	Providers []byte `key:"providers.yaml"`
 }
@@ -22,6 +21,8 @@ type CredentialsScope struct {
 	OAuthCreds            []byte   `key:"agy/oauth_creds.json"`
 	AntigravityOAuthToken []byte   `key:"agy/antigravity-oauth-token"`
 	Claude                []byte   `key:"claude/.credentials.json"`
+	Opencode              []byte   `key:"opencode/opencode.aw.yaml"`
+	Simplest              []byte   `key:"simplest/key.yaml"`
 	GeminiAPIKey          string   `key:"gemini-api-key"`
 	XAIAPIKey             string   `key:"xai-api-key"`
 	GCPSAKey              []byte   `key:"gcp/gcp-sa.json"`
@@ -163,5 +164,4 @@ type AsgardTreeConfig struct {
 	AW          awconfig.Config  `key:"aw/config.yaml"`
 	Simplest    SimplestRawScope `key:"simplest/"`
 	Credentials CredentialsScope `key:"credentials/"`
-	OpencodeAW  []byte           `key:"aw/opencode.aw.yaml"`
 }

@@ -701,6 +701,54 @@ func TestSyncOpencodeAW(t *testing.T) {
 	require.NoError(t, SyncOpencodeAW(tempHome, []byte{}))
 }
 
+func TestSyncSimplestKey(t *testing.T) {
+	t.Parallel()
+
+	tempHome := t.TempDir()
+	simplestDir := filepath.Join(tempHome, ".config", "simplest")
+	keyPath := filepath.Join(simplestDir, "key.yaml")
+
+	// 1. Initial write
+	initialContent := []byte("openai: \"sk-test-1\"\n")
+	require.NoError(t, SyncSimplestKey(tempHome, initialContent))
+
+	data, err := os.ReadFile(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, initialContent, data)
+
+	fi, err := os.Stat(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+
+	dirFi, err := os.Stat(simplestDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirFi.Mode().Perm())
+
+	// 2. Update content
+	updatedContent := []byte("openai: \"sk-test-2\"\n")
+	require.NoError(t, SyncSimplestKey(tempHome, updatedContent))
+
+	data, err = os.ReadFile(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, updatedContent, data)
+
+	// 3. Permission tightening when unchanged
+	require.NoError(t, os.Chmod(keyPath, 0644))
+	require.NoError(t, SyncSimplestKey(tempHome, updatedContent))
+
+	fi, err = os.Stat(keyPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+
+	// 4. Revocation / removal on empty content
+	require.NoError(t, SyncSimplestKey(tempHome, nil))
+	_, err = os.Stat(keyPath)
+	assert.True(t, os.IsNotExist(err), "simplest key.yaml must be removed when content is empty")
+
+	// 5. Calling with nil when file already does not exist shouldn't fail
+	require.NoError(t, SyncSimplestKey(tempHome, []byte{}))
+}
+
 func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	t.Parallel()
 

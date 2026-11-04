@@ -118,6 +118,8 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "opencode"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "simplest"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 	}
 	for _, cd := range credDirs {
@@ -242,8 +244,8 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		{"templates/etcd-tree/asgard/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "config.yaml"), 0600},
 		{"templates/etcd-tree/asgard/proxy.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "asgard", "proxy.yaml"), 0644},
 		{"templates/etcd-tree/aw/config.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "config.yaml"), 0644},
-		{"templates/etcd-tree/aw/opencode.aw.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml"), 0600},
-		{"templates/etcd-tree/simplest/key.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml"), 0600},
+		{"templates/etcd-tree/credentials/opencode/opencode.aw.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"), 0600},
+		{"templates/etcd-tree/credentials/simplest/key.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml"), 0600},
 		{"templates/etcd-tree/simplest/models.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "models.yaml"), 0644},
 		{"templates/etcd-tree/simplest/providers.yaml.tmpl", filepath.Join(targetDir, "etcd-tree", "simplest", "providers.yaml"), 0644},
 		{"templates/etcd-tree/credentials/auth.json.tmpl", filepath.Join(targetDir, "etcd-tree", "credentials", "auth.json"), 0600},
@@ -254,7 +256,7 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	}
 
 	for _, item := range templateMap {
-		if (item.tmpl == "templates/etcd-tree/aw/opencode.aw.yaml.tmpl" || item.tmpl == "templates/etcd-tree/simplest/key.yaml.tmpl") && isNonEmptyFile(item.dest) {
+		if (item.tmpl == "templates/etcd-tree/credentials/opencode/opencode.aw.yaml.tmpl" || item.tmpl == "templates/etcd-tree/credentials/simplest/key.yaml.tmpl") && isNonEmptyFile(item.dest) {
 			continue
 		}
 		if err := renderTemplate(item.tmpl, item.dest, data, item.perm); err != nil {
@@ -564,6 +566,14 @@ func MigrateLegacyCredentials(targetDir string) {
 		{
 			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json"),
 			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"),
+		},
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"),
+		},
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml"),
 		},
 	}
 	for _, m := range legacyMigrations {

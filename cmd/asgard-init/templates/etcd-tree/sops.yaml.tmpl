@@ -1,6 +1,6 @@
 # SOPS configuration for Asgard dynamic configurations & credentials
 creation_rules:
-  - path_regex: (credentials/.*(antigravity-oauth-token|oauth_creds\.json|auth\.json|gemini-api-key|xai-api-key|\.credentials\.json)|credentials/ssh/.*|aw/opencode\.aw\.yaml|simplest/key\.yaml)$
+  - path_regex: (credentials/.*(antigravity-oauth-token|oauth_creds\.json|auth\.json|gemini-api-key|xai-api-key|\.credentials\.json|opencode\.aw\.yaml|key\.yaml)|credentials/ssh/.*)$
 {{- if .GCPKMS }}
     gcp_kms: "{{ .GCPKMS }}"
 {{- else if .AgeRecipient }}

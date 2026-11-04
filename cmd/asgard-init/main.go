@@ -475,15 +475,18 @@ func run(args []string) (err error) {
 		fmt.Printf("\n%sWarning:%s auth.client_secret is set to placeholder %q. Remember to update it with your real OIDC provider credentials.\n", colorYellow+colorBold, colorReset, data.AuthClientSecret)
 	}
 
+	// Always migrate any legacy credentials before configuration and deployment generation
+	MigrateLegacyCredentials(targetDir)
+
 	// In interactive mode, ensure directories exist and prompt for providers and SSH
 	if !*nonInteractiveFlag {
-		MigrateLegacyCredentials(targetDir)
-
 		credDirs := []string{
 			filepath.Join(targetDir, "etcd-tree", "credentials"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "opencode"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "simplest"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 		}
 		for _, cd := range credDirs {
@@ -605,9 +608,9 @@ func CheckGCPSACredentials(targetDir string) (string, bool) {
 	return saPath, true
 }
 
-// CheckOpencodeConfig checks if opencode.aw.yaml exists in targetDir/etcd-tree/aw and contains non-comment content.
+// CheckOpencodeConfig checks if opencode.aw.yaml exists in targetDir/etcd-tree/credentials/opencode and contains non-comment content.
 func CheckOpencodeConfig(targetDir string) (string, bool) {
-	path := filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml")
+	path := filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil || len(bytes.TrimSpace(data)) == 0 {
 		return "", false
@@ -622,9 +625,9 @@ func CheckOpencodeConfig(targetDir string) (string, bool) {
 	return "", false
 }
 
-// CheckSimplestConfig checks if key.yaml exists in targetDir/etcd-tree/simplest and contains non-comment content.
+// CheckSimplestConfig checks if key.yaml exists in targetDir/etcd-tree/credentials/simplest and contains non-comment content.
 func CheckSimplestConfig(targetDir string) (string, bool) {
-	keyPath := filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml")
+	keyPath := filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml")
 	data, err := os.ReadFile(keyPath)
 	if err != nil || len(bytes.TrimSpace(data)) == 0 {
 		return "", false
@@ -750,9 +753,9 @@ func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interact
 	}
 }
 
-// PromptOpencodeConfig prompts the user to configure their OpenCode configuration in etcd-tree/aw/opencode.aw.yaml.
+// PromptOpencodeConfig prompts the user to configure their OpenCode configuration in etcd-tree/credentials/opencode/opencode.aw.yaml.
 func PromptOpencodeConfig(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	cfgPath := filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml")
+	cfgPath := filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml")
 	if !interactive {
 		if foundPath, ok := CheckOpencodeConfig(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ OpenCode configuration verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -787,7 +790,7 @@ func PromptOpencodeConfig(r io.Reader, w io.Writer, targetDir string, interactiv
 			}
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid, uncommented configuration found at %s.\n", colorRed+colorBold, colorReset, cfgPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped OpenCode configuration setup.%s You can configure it in etcd-tree/aw/opencode.aw.yaml later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped OpenCode configuration setup.%s You can configure it in etcd-tree/credentials/opencode/opencode.aw.yaml later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
@@ -795,9 +798,9 @@ func PromptOpencodeConfig(r io.Reader, w io.Writer, targetDir string, interactiv
 	}
 }
 
-// PromptSimplestConfig prompts the user to configure API keys in etcd-tree/simplest/key.yaml.
+// PromptSimplestConfig prompts the user to configure API keys in etcd-tree/credentials/simplest/key.yaml.
 func PromptSimplestConfig(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	cfgPath := filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml")
+	cfgPath := filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml")
 	if !interactive {
 		if foundPath, ok := CheckSimplestConfig(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ Simplest configuration verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -832,7 +835,7 @@ func PromptSimplestConfig(r io.Reader, w io.Writer, targetDir string, interactiv
 			}
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid, uncommented API keys found at %s.\n", colorRed+colorBold, colorReset, cfgPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped Simplest configuration setup.%s You can configure it in etcd-tree/simplest/key.yaml later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped Simplest configuration setup.%s You can configure it in etcd-tree/credentials/simplest/key.yaml later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)

@@ -125,8 +125,11 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 		if syncErr := SyncCLICredentials(s.opts.HomeDir, &tree.Credentials); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync CLI credentials to home directory")
 		}
-		if syncErr := SyncOpencodeAW(s.opts.HomeDir, tree.OpencodeAW); syncErr != nil {
+		if syncErr := SyncOpencodeAW(s.opts.HomeDir, tree.Credentials.Opencode); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync opencode.aw.yaml to home directory")
+		}
+		if syncErr := SyncSimplestKey(s.opts.HomeDir, tree.Credentials.Simplest); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync simplest key.yaml to home directory")
 		}
 
 		hasKeys := tree.Credentials.SSH.HasKeys()
@@ -453,6 +456,47 @@ func SyncOpencodeAW(home string, content []byte) error {
 	} else {
 		if err := os.Remove(awPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", awPath, err)
+		}
+	}
+
+	return nil
+}
+
+// SyncSimplestKey writes simplest key.yaml received from etcd to ~/.config/simplest/key.yaml.
+func SyncSimplestKey(home string, content []byte) error {
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolving home directory: %w", err)
+			}
+		}
+	}
+
+	simplestDir := filepath.Join(home, ".config", "simplest")
+	keyPath := filepath.Join(simplestDir, "key.yaml")
+
+	if len(content) > 0 {
+		if err := os.MkdirAll(simplestDir, 0700); err != nil {
+			return fmt.Errorf("create simplest directory %s: %w", simplestDir, err)
+		}
+		if err := os.Chmod(simplestDir, 0700); err != nil {
+			return fmt.Errorf("chmod simplest directory %s: %w", simplestDir, err)
+		}
+
+		existing, err := os.ReadFile(keyPath)
+		if err != nil || !bytes.Equal(existing, content) {
+			if err := atomicWriteFile(keyPath, content, 0600); err != nil {
+				return fmt.Errorf("write %s: %w", keyPath, err)
+			}
+		} else {
+			_ = os.Chmod(keyPath, 0600)
+		}
+	} else {
+		if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", keyPath, err)
 		}
 	}
 

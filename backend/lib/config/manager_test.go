@@ -46,10 +46,10 @@ agents:
   - agy:
       - gemini.*
 `),
-		"aw/opencode.aw.yaml": []byte(`env:
+		"credentials/opencode/opencode.aw.yaml": []byte(`env:
   OPENCODE_ZAI_API_KEY: "test-zai-key"
 `),
-		"simplest/key.yaml": []byte(`
+		"credentials/simplest/key.yaml": []byte(`
 providers:
   google:
     apiKey: test-google-key
@@ -100,14 +100,14 @@ providers:
 
 	// Validate AW
 	assert.True(t, cfg.AW.IsModelAllowed("agy", "gemini-1.5-pro"))
-	assert.Equal(t, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"test-zai-key\"\n"), cfg.OpencodeAW)
 
 	// Validate simplest raw scope
-	assert.NotEmpty(t, cfg.Simplest.Key)
 	assert.NotEmpty(t, cfg.Simplest.Models)
 	assert.NotEmpty(t, cfg.Simplest.Providers)
 
 	// Validate credentials scope
+	assert.Equal(t, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"test-zai-key\"\n"), cfg.Credentials.Opencode)
+	assert.NotEmpty(t, cfg.Credentials.Simplest)
 	assert.Equal(t, "test-gemini-secret", cfg.Credentials.GeminiAPIKey)
 	assert.Equal(t, "test-xai-secret", cfg.Credentials.XAIAPIKey)
 	assert.Equal(t, []byte(`{"project_id":"test-sa-proj"}`), cfg.Credentials.GCPSAKey)

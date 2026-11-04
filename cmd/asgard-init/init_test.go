@@ -225,8 +225,8 @@ func TestGenerateDeployment(t *testing.T) {
 		"etcd-tree/asgard/config.yaml",
 		"etcd-tree/asgard/proxy.yaml",
 		"etcd-tree/aw/config.yaml",
-		"etcd-tree/aw/opencode.aw.yaml",
-		"etcd-tree/simplest/key.yaml",
+		"etcd-tree/credentials/opencode/opencode.aw.yaml",
+		"etcd-tree/credentials/simplest/key.yaml",
 		"etcd-tree/simplest/models.yaml",
 		"etcd-tree/simplest/providers.yaml",
 		"etcd-tree/credentials/auth.json",
@@ -244,7 +244,7 @@ func TestGenerateDeployment(t *testing.T) {
 	}
 
 	// Verify permissions on sensitive files and credential directories
-	for _, credSubDir := range []string{"credentials", "credentials/agy", "credentials/claude", "credentials/gcp", "credentials/ssh"} {
+	for _, credSubDir := range []string{"credentials", "credentials/agy", "credentials/claude", "credentials/gcp", "credentials/opencode", "credentials/simplest", "credentials/ssh"} {
 		dirInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", credSubDir))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm(), "dir %s should have 0700 perms", credSubDir)
@@ -254,11 +254,11 @@ func TestGenerateDeployment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), authJSONInfo.Mode().Perm())
 
-	opencodeAWInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "aw", "opencode.aw.yaml"))
+	opencodeAWInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), opencodeAWInfo.Mode().Perm())
 
-	simplestKeyInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "simplest", "key.yaml"))
+	simplestKeyInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", "simplest", "key.yaml"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), simplestKeyInfo.Mode().Perm())
 
@@ -343,8 +343,8 @@ func TestGenerateDeployment(t *testing.T) {
 	sopsStr := string(sopsContent)
 	assert.Contains(t, sopsStr, "oauth_creds\\.json")
 	assert.Contains(t, sopsStr, `\.credentials\.json`)
-	assert.Contains(t, sopsStr, `aw/opencode\.aw\.yaml`)
-	assert.Contains(t, sopsStr, `simplest/key\.yaml`)
+	assert.Contains(t, sopsStr, `opencode\.aw\.yaml`)
+	assert.Contains(t, sopsStr, `key\.yaml`)
 	credRuleIdx := strings.Index(sopsStr, "credentials/.*")
 	genericRuleIdx := strings.Index(sopsStr, ".*\\.(yaml|yml|json)$")
 	require.True(t, credRuleIdx != -1 && genericRuleIdx != -1)
@@ -1051,8 +1051,8 @@ func TestCheckOpencodeConfig(t *testing.T) {
 	t.Run("empty file returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		require.NoError(t, os.MkdirAll(awDir, 0755))
+		awDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+		require.NoError(t, os.MkdirAll(awDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("   \n\n"), 0600))
 		path, ok := CheckOpencodeConfig(tempDir)
 		assert.False(t, ok)
@@ -1062,8 +1062,8 @@ func TestCheckOpencodeConfig(t *testing.T) {
 	t.Run("commented-only file returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		require.NoError(t, os.MkdirAll(awDir, 0755))
+		awDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+		require.NoError(t, os.MkdirAll(awDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("# comment\n# env:\n#   KEY: val\n"), 0600))
 		path, ok := CheckOpencodeConfig(tempDir)
 		assert.False(t, ok)
@@ -1073,8 +1073,8 @@ func TestCheckOpencodeConfig(t *testing.T) {
 	t.Run("file with uncommented keys returns true and tightens permissions to 0600", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		require.NoError(t, os.MkdirAll(awDir, 0755))
+		awDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+		require.NoError(t, os.MkdirAll(awDir, 0700))
 		targetPath := filepath.Join(awDir, "opencode.aw.yaml")
 		require.NoError(t, os.WriteFile(targetPath, []byte("env:\n  OPENCODE_ZAI_API_KEY: \"sk-123\"\n"), 0644))
 		path, ok := CheckOpencodeConfig(tempDir)
@@ -1100,8 +1100,8 @@ func TestCheckSimplestConfig(t *testing.T) {
 	t.Run("commented-only file returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("# openai: sk-...\n"), 0600))
 		path, ok := CheckSimplestConfig(tempDir)
 		assert.False(t, ok)
@@ -1111,8 +1111,8 @@ func TestCheckSimplestConfig(t *testing.T) {
 	t.Run("file with uncommented keys returns true and tightens permissions to 0600", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 		targetPath := filepath.Join(simplestDir, "key.yaml")
 		require.NoError(t, os.WriteFile(targetPath, []byte("openai: \"sk-12345\"\n"), 0644))
 		path, ok := CheckSimplestConfig(tempDir)
@@ -1297,8 +1297,8 @@ func TestPromptOpencodeConfig(t *testing.T) {
 	t.Run("non-interactive detects existing", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		require.NoError(t, os.MkdirAll(awDir, 0755))
+		awDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+		require.NoError(t, os.MkdirAll(awDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  API_KEY: \"sk-1\"\n"), 0600))
 
 		var out bytes.Buffer
@@ -1317,8 +1317,8 @@ func TestPromptOpencodeConfig(t *testing.T) {
 	t.Run("interactive prompt verify success on y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		require.NoError(t, os.MkdirAll(awDir, 0755))
+		awDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+		require.NoError(t, os.MkdirAll(awDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  API_KEY: \"sk-1\"\n"), 0600))
 
 		var out bytes.Buffer
@@ -1333,8 +1333,8 @@ func TestPromptSimplestConfig(t *testing.T) {
 	t.Run("non-interactive detects existing", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("openai: \"sk-test\"\n"), 0600))
 
 		var out bytes.Buffer
@@ -1353,8 +1353,8 @@ func TestPromptSimplestConfig(t *testing.T) {
 	t.Run("interactive prompt verify success on y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("openai: \"sk-test\"\n"), 0600))
 
 		var out bytes.Buffer
@@ -1374,17 +1374,17 @@ func TestPromptProviderSetup(t *testing.T) {
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
 		agyDir := filepath.Join(credDir, "agy")
 		claudeDir := filepath.Join(credDir, "claude")
-		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+		opencodeDir := filepath.Join(credDir, "opencode")
+		simplestDir := filepath.Join(credDir, "simplest")
 
-		require.NoError(t, os.MkdirAll(agyDir, 0755))
-		require.NoError(t, os.MkdirAll(claudeDir, 0755))
-		require.NoError(t, os.MkdirAll(awDir, 0755))
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		require.NoError(t, os.MkdirAll(agyDir, 0700))
+		require.NoError(t, os.MkdirAll(claudeDir, 0700))
+		require.NoError(t, os.MkdirAll(opencodeDir, 0700))
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 
 		require.NoError(t, os.WriteFile(filepath.Join(agyDir, "oauth_creds.json"), []byte(`{"tok":"1"}`), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"tok":"2"}`), 0600))
-		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  K: V\n"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(opencodeDir, "opencode.aw.yaml"), []byte("env:\n  K: V\n"), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
 
 		in := strings.NewReader("y\ny\ny\ny\n")
@@ -1427,8 +1427,8 @@ func TestPromptProviderSetup(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 
-		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-		require.NoError(t, os.MkdirAll(simplestDir, 0755))
+		simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
 
 		// agy: skip & decline
@@ -1479,12 +1479,12 @@ func TestGenerateDeployment_PreservesExistingConfigs(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 
-	awDir := filepath.Join(tempDir, "etcd-tree", "aw")
-	simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
-	require.NoError(t, os.MkdirAll(awDir, 0755))
-	require.NoError(t, os.MkdirAll(simplestDir, 0755))
+	opencodeDir := filepath.Join(tempDir, "etcd-tree", "credentials", "opencode")
+	simplestDir := filepath.Join(tempDir, "etcd-tree", "credentials", "simplest")
+	require.NoError(t, os.MkdirAll(opencodeDir, 0700))
+	require.NoError(t, os.MkdirAll(simplestDir, 0700))
 
-	opencodeAWPath := filepath.Join(awDir, "opencode.aw.yaml")
+	opencodeAWPath := filepath.Join(opencodeDir, "opencode.aw.yaml")
 	simplestKeyPath := filepath.Join(simplestDir, "key.yaml")
 
 	require.NoError(t, os.WriteFile(opencodeAWPath, []byte("# custom opencode config\nCUSTOM: 1\n"), 0600))
@@ -1513,16 +1513,25 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
 	require.NoError(t, os.MkdirAll(credDir, 0700))
 
+	legacyAwDir := filepath.Join(tempDir, "etcd-tree", "aw")
+	legacySimplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
+	require.NoError(t, os.MkdirAll(legacyAwDir, 0755))
+	require.NoError(t, os.MkdirAll(legacySimplestDir, 0755))
+
 	// Write legacy files
 	legacyOAuth := filepath.Join(credDir, "oauth_creds.json")
 	legacyToken := filepath.Join(credDir, "antigravity-oauth-token")
 	legacyClaude := filepath.Join(credDir, ".credentials.json")
 	legacyGCP := filepath.Join(credDir, "gcp-sa.json")
+	legacyOpencode := filepath.Join(legacyAwDir, "opencode.aw.yaml")
+	legacySimplest := filepath.Join(legacySimplestDir, "key.yaml")
 
 	require.NoError(t, os.WriteFile(legacyOAuth, []byte(`{"oauth":"data"}`), 0600))
 	require.NoError(t, os.WriteFile(legacyToken, []byte("tok-data"), 0600))
 	require.NoError(t, os.WriteFile(legacyClaude, []byte(`{"claude":"data"}`), 0600))
 	require.NoError(t, os.WriteFile(legacyGCP, []byte(`{"gcp":"data"}`), 0600))
+	require.NoError(t, os.WriteFile(legacyOpencode, []byte("env:\n  API_KEY: \"legacy-opencode\"\n"), 0600))
+	require.NoError(t, os.WriteFile(legacySimplest, []byte("openai: \"legacy-simplest\"\n"), 0600))
 
 	MigrateLegacyCredentials(tempDir)
 
@@ -1531,17 +1540,23 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	assert.NoFileExists(t, legacyToken)
 	assert.NoFileExists(t, legacyClaude)
 	assert.NoFileExists(t, legacyGCP)
+	assert.NoFileExists(t, legacyOpencode)
+	assert.NoFileExists(t, legacySimplest)
 
 	// New files should exist with correct content and 0600 permissions
 	newOAuth := filepath.Join(credDir, "agy", "oauth_creds.json")
 	newToken := filepath.Join(credDir, "agy", "antigravity-oauth-token")
 	newClaude := filepath.Join(credDir, "claude", ".credentials.json")
 	newGCP := filepath.Join(credDir, "gcp", "gcp-sa.json")
+	newOpencode := filepath.Join(credDir, "opencode", "opencode.aw.yaml")
+	newSimplest := filepath.Join(credDir, "simplest", "key.yaml")
 
 	require.FileExists(t, newOAuth)
 	require.FileExists(t, newToken)
 	require.FileExists(t, newClaude)
 	require.FileExists(t, newGCP)
+	require.FileExists(t, newOpencode)
+	require.FileExists(t, newSimplest)
 
 	data, err := os.ReadFile(newOAuth)
 	require.NoError(t, err)
@@ -1559,8 +1574,16 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `{"gcp":"data"}`, string(data))
 
+	data, err = os.ReadFile(newOpencode)
+	require.NoError(t, err)
+	assert.Equal(t, "env:\n  API_KEY: \"legacy-opencode\"\n", string(data))
+
+	data, err = os.ReadFile(newSimplest)
+	require.NoError(t, err)
+	assert.Equal(t, "openai: \"legacy-simplest\"\n", string(data))
+
 	// Verify directory permissions
-	for _, sub := range []string{"agy", "claude", "gcp"} {
+	for _, sub := range []string{"agy", "claude", "gcp", "opencode", "simplest"} {
 		info, err := os.Stat(filepath.Join(credDir, sub))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0700), info.Mode().Perm())

@@ -599,7 +599,7 @@ rules:
     real_secret: Bearer real
 `),
 		"aw/config.yaml":                          []byte("agents: []\n"),
-		"simplest/key.yaml":                       []byte("providers: {}\n"),
+		"credentials/simplest/key.yaml":           []byte("providers: {}\n"),
 		"simplest/models.yaml":                    []byte("models: []\n"),
 		"simplest/providers.yaml":                 []byte("providers: {}\n"),
 		"credentials/auth.json":                   []byte("{}"),
@@ -653,7 +653,7 @@ rules:
     real_secret: Bearer initial-secret
 `),
 		"aw/config.yaml":                          []byte("agents: []\n"),
-		"simplest/key.yaml":                       []byte("providers: {}\n"),
+		"credentials/simplest/key.yaml":           []byte("providers: {}\n"),
 		"simplest/models.yaml":                    []byte("models: []\n"),
 		"simplest/providers.yaml":                 []byte("providers: {}\n"),
 		"credentials/auth.json":                   []byte("{}"),
