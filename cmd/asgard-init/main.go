@@ -485,8 +485,7 @@ func run(args []string) (err error) {
 		}
 
 		if data.GCPKMS != "" && !state.IsCompleted("gcp_sa_key") {
-			MigrateLegacyGCPSAKey(targetDir)
-			if *gcpSAKeyFlag != "" && !isMigratedLegacyGCPRef(targetDir, *gcpSAKeyFlag) {
+			if *gcpSAKeyFlag != "" {
 				if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
 					return err
 				}
@@ -507,9 +506,6 @@ func run(args []string) (err error) {
 	if data.AuthClientSecret == "change-me-secret" {
 		fmt.Printf("\n%sWarning:%s auth.client_secret is set to placeholder %q. Remember to update it with your real OIDC provider credentials.\n", colorYellow+colorBold, colorReset, data.AuthClientSecret)
 	}
-
-	// Always migrate any legacy credentials before configuration and deployment generation
-	MigrateLegacyCredentials(targetDir)
 
 	// In interactive mode, prompt for providers, ensure directories exist, and prompt for SSH
 	if !*nonInteractiveFlag {
@@ -583,7 +579,7 @@ func run(args []string) (err error) {
 		return fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 
-	if *nonInteractiveFlag && *gcpSAKeyFlag != "" && !isMigratedLegacyGCPRef(targetDir, *gcpSAKeyFlag) {
+	if *nonInteractiveFlag && *gcpSAKeyFlag != "" {
 		if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
 			return err
 		}

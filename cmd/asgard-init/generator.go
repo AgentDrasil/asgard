@@ -159,9 +159,6 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		}
 	}
 
-	// Migrate legacy root credentials if they exist and target doesn't exist yet
-	MigrateLegacyCredentials(targetDir)
-
 	// 2. Generate TLS certificates
 	caCert, caKey, caCertPEM, caKeyPEM, err := GenerateCA()
 	if err != nil {
@@ -251,10 +248,8 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	// 3b. Place the GCP Service Account key at <targetDir>/gcp-sa.json if provided.
 	// It is deliberately kept out of etcd-tree: the key is required to decrypt
 	// the etcd content (GCP KMS), so it must be mounted from a local file.
-	MigrateLegacyGCPSAKey(targetDir)
 	localSAKey := filepath.Join(targetDir, GCPSAKeyFile)
-	// A resumed state may still point at the legacy etcd-tree path that was just migrated.
-	if data.GCPSAKey != "" && !isMigratedLegacyGCPRef(targetDir, data.GCPSAKey) {
+	if data.GCPSAKey != "" {
 		if err := copyGCPSAKey(targetDir, data.GCPSAKey); err != nil {
 			return fmt.Errorf("copy GCP service account key: %w", err)
 		}
@@ -565,29 +560,6 @@ const GCPSAKeyFile = "gcp-sa.json"
 // It is not under /asgard/data, which the backend manages itself.
 const GCPSAKeyContainerPath = "/secrets/gcp-sa.json"
 
-// isMigratedLegacyGCPRef reports whether ref points into the legacy etcd-tree
-// credentials location whose key has already been moved to <targetDir>/gcp-sa.json.
-func isMigratedLegacyGCPRef(targetDir, ref string) bool {
-	return strings.Contains(filepath.ToSlash(ref), "etcd-tree/credentials/") &&
-		fileExists(filepath.Join(targetDir, GCPSAKeyFile))
-}
-
-// MigrateLegacyGCPSAKey moves a SA key previously staged under etcd-tree to
-// <targetDir>/gcp-sa.json so it is no longer pushed to etcd.
-func MigrateLegacyGCPSAKey(targetDir string) {
-	dst := filepath.Join(targetDir, GCPSAKeyFile)
-	for _, old := range []string{
-		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json"),
-	} {
-		if fileExists(old) && !fileExists(dst) {
-			if err := copyFile(old, dst, 0600); err == nil {
-				_ = os.Remove(old)
-			}
-		}
-	}
-}
-
 // copyGCPSAKey copies the GCP Service Account key to <targetDir>/gcp-sa.json (0600),
 // which compose mounts read-only into the backend and runners.
 func copyGCPSAKey(targetDir string, saKeyPath string) error {
@@ -625,76 +597,4 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 		}
 	}
 	return nil
-}
-
-// MigrateLegacyCredentials migrates legacy root credential files into dedicated provider subfolders.
-func MigrateLegacyCredentials(targetDir string) {
-	MigrateLegacyGCPSAKey(targetDir)
-	MigrateLegacyAgentFather(targetDir)
-	legacyMigrations := []struct {
-		oldPath string
-		newPath string
-	}{
-		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "antigravity-oauth-token"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token"),
-		},
-		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", ".credentials.json"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json"),
-		},
-		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "aw", "opencode.aw.yaml"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "opencode", "opencode.aw.yaml"),
-		},
-		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "simplest", "key.yaml"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "simplest", "key.yaml"),
-		},
-	}
-	for _, m := range legacyMigrations {
-		if fileExists(m.oldPath) && !fileExists(m.newPath) {
-			_ = os.MkdirAll(filepath.Dir(m.newPath), 0700)
-			_ = os.Chmod(filepath.Dir(m.newPath), 0700)
-			_ = copyFile(m.oldPath, m.newPath, 0600)
-			_ = os.Remove(m.oldPath)
-		}
-	}
-}
-
-// legacyAgentFatherID matches the id line of a legacy agent-father definition,
-// tolerating quotes and leaving any trailing comment / CR untouched.
-var legacyAgentFatherID = regexp.MustCompile(`(?m)^id:[ \t]*["']?agent-father["']?`)
-
-// MigrateLegacyAgentFather renames the mis-named etcd-tree/agents/agent-father
-// (id "agent-father") produced by older asgard-init versions to
-// agents/agent_father with id "agent_father", the id the backend requires as
-// its initial root agent. An existing agent_father definition is never
-// overwritten; an empty agent_father directory (created by a fresh
-// GenerateDeployment) is replaced.
-func MigrateLegacyAgentFather(targetDir string) {
-	agentsDir := filepath.Join(targetDir, "etcd-tree", "agents")
-	oldDir := filepath.Join(agentsDir, "agent-father")
-	newDir := filepath.Join(agentsDir, "agent_father")
-	if !dirExists(oldDir) || fileExists(filepath.Join(newDir, "config.yaml")) {
-		return
-	}
-
-	// Rewrite the id first so a failure never leaves a renamed directory with
-	// the legacy id behind.
-	cfgPath := filepath.Join(oldDir, "config.yaml")
-	data, err := os.ReadFile(cfgPath)
-	if err != nil || !legacyAgentFatherID.Match(data) {
-		return
-	}
-	fixed := legacyAgentFatherID.ReplaceAll(data, []byte("id: agent_father"))
-	if err := os.WriteFile(cfgPath, fixed, 0644); err != nil {
-		return
-	}
-	if dirExists(newDir) {
-		if err := os.Remove(newDir); err != nil { // only succeeds when empty
-			return
-		}
-	}
-	_ = os.Rename(oldDir, newDir)
 }

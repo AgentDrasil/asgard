@@ -378,33 +378,6 @@ func TestGCPSAKey_LocalMountNotInEtcdTree(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(string(compose), "- GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json"))
 }
 
-func TestMigrateLegacyGCPSAKey_MovesOutOfEtcdTree(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	legacy := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0700))
-	require.NoError(t, os.WriteFile(legacy, []byte(`{"project_id":"p"}`), 0600))
-
-	MigrateLegacyGCPSAKey(tempDir)
-
-	assert.NoFileExists(t, legacy)
-	data, err := os.ReadFile(filepath.Join(tempDir, "gcp-sa.json"))
-	require.NoError(t, err)
-	assert.Equal(t, `{"project_id":"p"}`, string(data))
-
-	// The older flat legacy location is migrated too, and an existing local key wins.
-	other := t.TempDir()
-	flat := filepath.Join(other, "etcd-tree", "credentials", "gcp-sa.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(flat), 0700))
-	require.NoError(t, os.WriteFile(flat, []byte(`{"project_id":"flat"}`), 0600))
-	MigrateLegacyGCPSAKey(other)
-	assert.NoFileExists(t, flat)
-	data, err = os.ReadFile(filepath.Join(other, "gcp-sa.json"))
-	require.NoError(t, err)
-	assert.Equal(t, `{"project_id":"flat"}`, string(data))
-}
-
 func TestJustfileExportsGCPCredsWhenKMSConfiguredWithoutKey(t *testing.T) {
 	t.Parallel()
 
@@ -418,33 +391,4 @@ func TestJustfileExportsGCPCredsWhenKMSConfiguredWithoutKey(t *testing.T) {
 	compose, err := os.ReadFile(filepath.Join(outDir, "compose.yaml"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(compose), "/secrets/gcp-sa.json")
-}
-
-func TestGenerateDeployment_LegacyKeyPathReference(t *testing.T) {
-	outDir := t.TempDir()
-	legacyDir := filepath.Join(outDir, "etcd-tree", "credentials", "gcp")
-	require.NoError(t, os.MkdirAll(legacyDir, 0700))
-	legacy := createFakeGCPKeyJSON(t, legacyDir, "gcp-sa.json")
-
-	// A resumed state / old flag may still reference the legacy etcd-tree path.
-	require.NoError(t, run([]string{"--dir", outDir, "--non-interactive", "--gcp-sa-key", legacy}))
-
-	assert.NoFileExists(t, legacy)
-	require.FileExists(t, filepath.Join(outDir, "gcp-sa.json"))
-	compose, err := os.ReadFile(filepath.Join(outDir, "compose.yaml"))
-	require.NoError(t, err)
-	assert.Contains(t, string(compose), "- ./gcp-sa.json:/secrets/gcp-sa.json:ro")
-}
-
-func TestCheckGCPSACredentials_DetectsMigratedLegacyKey(t *testing.T) {
-	t.Parallel()
-
-	outDir := t.TempDir()
-	legacyDir := filepath.Join(outDir, "etcd-tree", "credentials", "gcp")
-	require.NoError(t, os.MkdirAll(legacyDir, 0700))
-	createFakeGCPKeyJSON(t, legacyDir, "gcp-sa.json")
-
-	MigrateLegacyGCPSAKey(outDir)
-	_, ok := CheckGCPSACredentials(outDir)
-	assert.True(t, ok)
 }
