@@ -290,7 +290,7 @@ func New(opts ...Option) (*App, error) {
 	configLoaded := true
 
 	// 2. Validate CLI agent setups (unless skipped or config failed to load)
-	if !options.SkipAgentValidation && configLoaded {
+	if shouldValidateCLISetups(options.SkipAgentValidation, configLoaded, conf) {
 		for _, provider := range conf.GetProviders() {
 			switch provider {
 			case "agy":
@@ -684,6 +684,15 @@ func Run(ctx context.Context, opts ...Option) error {
 		return startErr
 	}
 	return stopErr
+}
+
+// shouldValidateCLISetups reports whether the backend should check the vendor
+// CLI credentials in its own home directory at startup. With a runner section
+// configured, agents, model listing and quota queries all run on the runners,
+// which sync their own credentials from etcd; the backend's home never holds
+// them, so validating it would only raise false cli_auth errors.
+func shouldValidateCLISetups(skip, configLoaded bool, conf *config.Config) bool {
+	return !skip && configLoaded && conf.GetRunner() == nil
 }
 
 func syncGCPSAKey(creds *config.CredentialsScope) {

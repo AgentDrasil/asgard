@@ -771,3 +771,15 @@ func TestSyncGCPSAKey(t *testing.T) {
 	assert.NoFileExists(t, saPath)
 	assert.Empty(t, os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 }
+
+func TestShouldValidateCLISetups(t *testing.T) {
+	t.Parallel()
+
+	local := &config.Config{}
+	withRunner := &config.Config{Runner: &config.RunnerConfig{}}
+
+	assert.True(t, shouldValidateCLISetups(false, true, local), "no runner section: backend hosts the CLIs")
+	assert.False(t, shouldValidateCLISetups(false, true, withRunner), "runners own the CLI credentials")
+	assert.False(t, shouldValidateCLISetups(true, true, local), "explicit skip")
+	assert.False(t, shouldValidateCLISetups(false, false, local), "config failed to load")
+}
