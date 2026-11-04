@@ -149,3 +149,11 @@ func TestQuotaClientWithoutRegistry(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, string(body))
 	assert.Contains(t, string(body), "simplest")
 }
+
+func TestQuotaWithoutRunnerSupportIsUnavailable(t *testing.T) {
+	// The backend host has no CLI credentials; it must not fall back to
+	// querying the vendor CLIs locally.
+	code, body := getQuota(t, &Server{}, "")
+	assert.Equal(t, http.StatusServiceUnavailable, code, string(body))
+	assert.Contains(t, string(body), "no runner is configured")
+}

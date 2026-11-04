@@ -541,17 +541,11 @@ const quotaTimeout = 60 * time.Second
 //   - no parameter otherwise: QuotaAllResponse, every online runner keyed by
 //     node id plus per-node errors. With no runner online it is 503.
 //
-// Without runners configured (development) the backend host is queried
-// directly, as before.
+// The backend never queries the vendor CLIs itself: without runner support the
+// endpoint answers 503.
 func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	if s.runnerClient == nil {
-		res, err := agentwrapper.GetQuota(r.Context())
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to fetch quota info")
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, res)
+		writeJSONError(w, http.StatusServiceUnavailable, "no runner is configured")
 		return
 	}
 

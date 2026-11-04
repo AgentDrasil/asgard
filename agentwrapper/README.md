@@ -21,10 +21,10 @@ Here is the breakdown of responsibilities across Asgard:
 
 2. **Outside `agentwrapper` (Where else logic resides)**:
     - **`lib/bwrap/`**: Renders the `AW_AGENTS.md` contract (agent identity metadata + prompt body) and bind-mounts it at the canonical `/session/AW_AGENTS.md` path; consumes `types.SandboxSpec` via `agentwrapper.GetSandboxSpec(cliName)` for skills mounts, directory binds, authentication directories, and extra args.
-    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateClaudeSetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup.
+    - **`cmd/asgard/main.go`**: Invokes validation functions (e.g., `agentwrapper.ValidateAgySetup()`, `agentwrapper.ValidateClaudeSetup()`, `agentwrapper.ValidateOpencodeSetup()`) at server startup when no runner section is configured (with runners, the runners own the CLI credentials and the backend skips this validation).
     - **`backend/agentwrapper/cmd/aw/`**: Asgard's CLI tool (`aw`). Each sub-command (e.g., `backend/agentwrapper/cmd/aw/commands/agy.go`, `claude.go`, `opencode.go`) exposes a CLI command that invokes the agent's `Prompt` and `Usage` methods. Inside the sandbox, `aw` loads the `AW_AGENTS.md` contract (`agentwrapper/common`) and translates it into CLI-native agent definitions (opencode `agents/<id>.md`, simplest custom prompt, agy `GEMINI.md`, claude `--append-system-prompt-file`).
     - **`lib/agents/run/`**: Handles runtime agent execution within Bubblewrap sandboxes and performs quota checks using `agentwrapper.CheckQuota(cli, model)`.
-    - **`lib/api/`**: Serves HTTP endpoints (e.g., `/api/quota`) by delegating quota queries to `agentwrapper.GetQuota(ctx)`.
+    - **`lib/api/`**: Serves `/api/quota` by asking the runners (`runnerfs.QueryQuota`); the runner's `QueryQuota` service calls `agentwrapper.GetQuota(ctx)` in its own sandbox. The backend never queries the vendor CLIs itself (503 when no runner is configured).
 
 ---
 
