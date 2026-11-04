@@ -56,8 +56,8 @@ services:
       - ./runner-asgard:/asgard
       # Per-session scratch and persistent data, logs:
       - ./session-data:/session-data
-      # Workspaces mounted under /data:
-      - ~/src:/data/src
+      # Workspaces mounted under /workspace:
+      - ~/src:/workspace
       # SSH credentials are delivered via etcd credentials/ssh/ (no host mount required).
       # - ./ssh:/home/user/.ssh:ro
     restart: always

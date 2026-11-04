@@ -42,6 +42,8 @@ type ConfigData struct {
 	GCPSAKey                     string
 	AgeRecipient                 string
 	GoogleApplicationCredentials string
+	DeployEtcd                   *bool
+	IncludeEtcdService           bool
 	Force                        bool
 }
 
@@ -73,6 +75,12 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		return fmt.Errorf("invalid initial runner: %w", err)
 	}
 	data.InitialRunnerService = runnerServiceName(data.InitialRunner)
+
+	if data.DeployEtcd != nil {
+		data.IncludeEtcdService = *data.DeployEtcd
+	} else {
+		data.IncludeEtcdService = (data.EtcdEndpoints == "" || data.EtcdEndpoints == "http://etcd:2379")
+	}
 
 	if data.EtcdEndpoints == "" {
 		data.EtcdEndpoints = "http://etcd:2379"

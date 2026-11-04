@@ -1,4 +1,5 @@
 services:
+{{- if .IncludeEtcdService }}
   etcd:
     image: quay.io/coreos/etcd:v3.5.21
     container_name: asgard-etcd
@@ -11,6 +12,7 @@ services:
       - ./etcd-data:/etcd-data
     restart: always
 
+{{- end }}
   backend:
     image: ghcr.io/agentdrasil/asgard-backend:main
     container_name: asgard-backend

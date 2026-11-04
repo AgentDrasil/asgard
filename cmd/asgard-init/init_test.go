@@ -197,7 +197,7 @@ func TestGenerateDeployment(t *testing.T) {
 		AuthClientSecret: "my-secret-123",
 		AuthTokenSource:  "access_token",
 		InitialRunner:    "runner-prod-1",
-		WorkspaceMounts:  []string{"/home/user/src:/data/src"},
+		WorkspaceMounts:  []string{"/home/user/src:/workspace"},
 		GCPKMS:           "projects/test-p/locations/us/keyRings/r/cryptoKeys/k",
 	}
 
@@ -1588,4 +1588,88 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
 	}
+}
+
+func TestDeployEtcdChoice(t *testing.T) {
+	t.Setenv("ASGARD_INIT_SKIP_CFGCTL_CHECK", "1")
+
+	ptr := func(b bool) *bool { return &b }
+
+	t.Run("GenerateDeployment with DeployEtcd false excludes etcd container", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		data := &ConfigData{
+			Host:          "https://asgard.example.com",
+			BackendPort:   7000,
+			EtcdEndpoints: "http://localhost:2379",
+			DeployEtcd:    ptr(false),
+		}
+		err := GenerateDeployment(tempDir, data)
+		require.NoError(t, err)
+
+		composeBytes, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
+		require.NoError(t, err)
+		composeStr := string(composeBytes)
+		assert.NotContains(t, composeStr, "container_name: asgard-etcd")
+		assert.False(t, data.IncludeEtcdService)
+	})
+
+	t.Run("GenerateDeployment with DeployEtcd true includes etcd container", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		data := &ConfigData{
+			Host:        "https://asgard.example.com",
+			BackendPort: 7000,
+			DeployEtcd:  ptr(true),
+		}
+		err := GenerateDeployment(tempDir, data)
+		require.NoError(t, err)
+
+		composeBytes, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
+		require.NoError(t, err)
+		composeStr := string(composeBytes)
+		assert.Contains(t, composeStr, "container_name: asgard-etcd")
+		assert.True(t, data.IncludeEtcdService)
+	})
+
+	t.Run("Non-interactive CLI with --deploy-etcd=false without endpoints fails fast", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--non-interactive", "--dir", tempDir, "--deploy-etcd=false"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "external etcd requires explicit --etcd-endpoints when --deploy-etcd=false")
+	})
+
+	t.Run("Non-interactive CLI with --deploy-etcd=false and explicit endpoints succeeds", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--non-interactive", "--dir", tempDir, "--deploy-etcd=false", "--etcd-endpoints", "http://external-etcd:2379"})
+		require.NoError(t, err)
+
+		composeBytes, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
+		require.NoError(t, err)
+		assert.NotContains(t, string(composeBytes), "container_name: asgard-etcd")
+	})
+
+	t.Run("Non-interactive CLI with --deploy-etcd=true", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--non-interactive", "--dir", tempDir, "--deploy-etcd=true"})
+		require.NoError(t, err)
+
+		composeBytes, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(composeBytes), "container_name: asgard-etcd")
+	})
+
+	t.Run("Non-interactive CLI defaults deploy-etcd to false when external etcd-endpoints provided", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		err := run([]string{"--non-interactive", "--dir", tempDir, "--etcd-endpoints", "http://external-etcd:2379"})
+		require.NoError(t, err)
+
+		composeBytes, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
+		require.NoError(t, err)
+		assert.NotContains(t, string(composeBytes), "container_name: asgard-etcd")
+	})
 }

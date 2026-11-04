@@ -19,6 +19,8 @@ func TestState_SaveAndLoad(t *testing.T) {
 	state.TargetDir = tempDir
 	state.Host = "https://asgard.example.com"
 	state.BackendPort = 8080
+	deployEtcd := true
+	state.DeployEtcd = &deployEtcd
 	state.EtcdEndpoints = "http://10.0.0.1:2379"
 	state.EtcdPrefix = "/custom/prefix"
 	state.AuthIssuer = "https://idp.example.com"
@@ -45,6 +47,16 @@ func TestState_SaveAndLoad(t *testing.T) {
 	assert.Equal(t, state.TargetDir, loaded.TargetDir)
 	assert.Equal(t, state.Host, loaded.Host)
 	assert.Equal(t, state.BackendPort, loaded.BackendPort)
+	assert.Equal(t, state.DeployEtcd, loaded.DeployEtcd)
+
+	// Verify persistence of DeployEtcd = false
+	deployEtcdFalse := false
+	state.DeployEtcd = &deployEtcdFalse
+	require.NoError(t, state.Save(tempDir))
+	_, loadedWithFalse, err := loadState(tempDir)
+	require.NoError(t, err)
+	require.NotNil(t, loadedWithFalse.DeployEtcd)
+	assert.False(t, *loadedWithFalse.DeployEtcd)
 	assert.Equal(t, state.EtcdEndpoints, loaded.EtcdEndpoints)
 	assert.Equal(t, state.EtcdPrefix, loaded.EtcdPrefix)
 	assert.Equal(t, state.AuthIssuer, loaded.AuthIssuer)
@@ -90,7 +102,7 @@ func TestState_InterruptedRun_PreservesStateAndResumes(t *testing.T) {
 	callCount := 0
 	promptUser = func(r io.Reader, question, def string, opts ...PromptOption) (string, error) {
 		callCount++
-		if callCount > 4 {
+		if callCount > 5 {
 			return "", ErrPromptCancelled
 		}
 		return origPromptUser(r, question, def, opts...)
@@ -100,7 +112,8 @@ func TestState_InterruptedRun_PreservesStateAndResumes(t *testing.T) {
 		deployDir,                    // 1. target directory
 		"https://myasgard.test:7000", // 2. host
 		"7777",                       // 3. port
-		"http://etcd-cluster:2379",   // 4. etcd endpoints
+		"Y",                          // 4. deploy etcd in compose
+		"http://etcd-cluster:2379",   // 5. etcd endpoints
 	}
 	defaultStdinReader = bufioNewReader(strings.NewReader(strings.Join(part1Inputs, "\n") + "\n"))
 
@@ -117,10 +130,13 @@ func TestState_InterruptedRun_PreservesStateAndResumes(t *testing.T) {
 	assert.True(t, savedState.IsCompleted("target_dir"))
 	assert.True(t, savedState.IsCompleted("host"))
 	assert.True(t, savedState.IsCompleted("port"))
+	assert.True(t, savedState.IsCompleted("deploy_etcd"))
 	assert.True(t, savedState.IsCompleted("etcd_endpoints"))
 	assert.False(t, savedState.IsCompleted("etcd_prefix"))
 	assert.Equal(t, "https://myasgard.test:7000", savedState.Host)
 	assert.Equal(t, 7777, savedState.BackendPort)
+	require.NotNil(t, savedState.DeployEtcd)
+	assert.True(t, *savedState.DeployEtcd)
 	assert.Equal(t, "http://etcd-cluster:2379", savedState.EtcdEndpoints)
 
 	// Part 2: Resume with --resume flag
@@ -196,6 +212,7 @@ func TestState_InteractiveResumePrompt_DeclineStartsFresh(t *testing.T) {
 		deployDir,               // targetDir
 		"https://fresh-host.io", // host
 		"7001",                  // port
+		"",                      // deploy etcd in docker compose
 		"",                      // etcd endpoints
 		"",                      // etcd prefix
 		"", "", "",              // OIDC

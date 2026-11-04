@@ -15,6 +15,7 @@ type InitState struct {
 	TargetDir        string          `json:"target_dir,omitempty"`
 	Host             string          `json:"host,omitempty"`
 	BackendPort      int             `json:"backend_port,omitempty"`
+	DeployEtcd       *bool           `json:"deploy_etcd,omitempty"`
 	EtcdEndpoints    string          `json:"etcd_endpoints,omitempty"`
 	EtcdPrefix       string          `json:"etcd_prefix,omitempty"`
 	AuthIssuer       string          `json:"auth_issuer,omitempty"`

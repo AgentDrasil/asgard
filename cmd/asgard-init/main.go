@@ -87,13 +87,14 @@ func run(args []string) (err error) {
 		nonInteractiveFlag   = fs.Bool("non-interactive", false, "Disable interactive prompts and use defaults/flags")
 		hostFlag             = fs.String("host", "http://localhost:7000", "Public base URL of Asgard backend")
 		portFlag             = fs.Int("port", 7000, "Backend HTTP port")
+		deployEtcdFlag       = fs.Bool("deploy-etcd", true, "Deploy etcd container in docker-compose.yaml (set to false if using external etcd)")
 		etcdEndpointsFlag    = fs.String("etcd-endpoints", "http://etcd:2379", "Etcd cluster endpoints")
 		etcdPrefixFlag       = fs.String("etcd-prefix", "/asgard/configs", "Etcd prefix for configurations")
 		authIssuerFlag       = fs.String("auth-issuer", "https://auth.example.com/oauth2", "OIDC Provider Issuer URL")
 		authClientIDFlag     = fs.String("auth-client-id", "asgard", "OIDC Client ID")
 		authClientSecretFlag = fs.String("auth-client-secret", "change-me-secret", "OIDC Client Secret")
 		runnerFlag           = fs.String("runner", "runner-1", "Initial Runner Node ID")
-		mountFlag            = fs.String("mount", "", "Workspace mount in format <host_path>:<container_path> (e.g. /home/user/src:/data/src)")
+		mountFlag            = fs.String("mount", "", "Workspace mount in format <host_path>:<container_path> (e.g. /home/user/src:/workspace)")
 		gcpKmsFlag           = fs.String("gcp-kms", "", "Google Cloud KMS key resource ID for SOPS")
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
 		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
@@ -182,6 +183,14 @@ func run(args []string) (err error) {
 		Force:            *forceFlag,
 	}
 
+	if explicitFlags["deploy-etcd"] {
+		val := *deployEtcdFlag
+		data.DeployEtcd = &val
+	} else if explicitFlags["etcd-endpoints"] && *etcdEndpointsFlag != "http://etcd:2379" {
+		val := false
+		data.DeployEtcd = &val
+	}
+
 	if *mountFlag != "" {
 		data.WorkspaceMounts = append(data.WorkspaceMounts, *mountFlag)
 	}
@@ -224,6 +233,9 @@ func run(args []string) (err error) {
 	}
 	if !explicitFlags["port"] && state.BackendPort != 0 {
 		data.BackendPort = state.BackendPort
+	}
+	if !explicitFlags["deploy-etcd"] && state.DeployEtcd != nil {
+		data.DeployEtcd = state.DeployEtcd
 	}
 	if !explicitFlags["etcd-endpoints"] && state.EtcdEndpoints != "" {
 		data.EtcdEndpoints = state.EtcdEndpoints
@@ -274,6 +286,7 @@ func run(args []string) (err error) {
 		state.TargetDir = targetDir
 		state.Host = data.Host
 		state.BackendPort = data.BackendPort
+		state.DeployEtcd = data.DeployEtcd
 		state.EtcdEndpoints = data.EtcdEndpoints
 		state.EtcdPrefix = data.EtcdPrefix
 		state.AuthIssuer = data.AuthIssuer
@@ -335,8 +348,31 @@ func run(args []string) (err error) {
 			_ = state.Save(targetDir)
 		}
 
+		if !state.IsCompleted("deploy_etcd") {
+			defaultChoice := "Y"
+			if (data.DeployEtcd != nil && !*data.DeployEtcd) || (data.EtcdEndpoints != "" && data.EtcdEndpoints != "http://etcd:2379") {
+				defaultChoice = "n"
+			}
+			ans, err := promptUser(reader, "Deploy etcd service in docker compose? [Y/n]", defaultChoice)
+			if err != nil {
+				return err
+			}
+			deployEtcd := strings.ToLower(strings.TrimSpace(ans)) != "n" && strings.ToLower(strings.TrimSpace(ans)) != "no"
+			data.DeployEtcd = &deployEtcd
+			state.DeployEtcd = &deployEtcd
+			state.MarkCompleted("deploy_etcd")
+			_ = state.Save(targetDir)
+		}
+
 		if !state.IsCompleted("etcd_endpoints") {
-			data.EtcdEndpoints, err = promptUser(reader, "Etcd endpoints", data.EtcdEndpoints)
+			promptMsg := "Etcd endpoints"
+			if data.DeployEtcd != nil && !*data.DeployEtcd {
+				promptMsg = "External etcd endpoints"
+				if data.EtcdEndpoints == "http://etcd:2379" {
+					data.EtcdEndpoints = "http://localhost:2379"
+				}
+			}
+			data.EtcdEndpoints, err = promptUser(reader, promptMsg, data.EtcdEndpoints)
 			if err != nil {
 				return err
 			}
@@ -408,7 +444,7 @@ func run(args []string) (err error) {
 			if len(data.WorkspaceMounts) > 0 {
 				defaultMount = strings.Join(data.WorkspaceMounts, ",")
 			}
-			workspaceMount, err := promptUser(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/data/src)", defaultMount)
+			workspaceMount, err := promptUser(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/workspace)", defaultMount)
 			if err != nil {
 				return err
 			}
@@ -518,6 +554,14 @@ func run(args []string) (err error) {
 			_ = state.Save(targetDir)
 		}
 	} else {
+		if data.DeployEtcd == nil {
+			val := *deployEtcdFlag
+			data.DeployEtcd = &val
+		}
+		if data.DeployEtcd != nil && !*data.DeployEtcd && data.EtcdEndpoints == "http://etcd:2379" {
+			return fmt.Errorf("external etcd requires explicit --etcd-endpoints when --deploy-etcd=false")
+		}
+
 		if len(cliProviders) > 0 {
 			data.Providers = cliProviders
 		} else if len(data.Providers) == 0 {
@@ -1065,7 +1109,11 @@ func printInitSuccess(dir string, data *ConfigData) {
 	fmt.Printf("  • %srunners/%s/certs/%s   - Runner client cert, key & ca bundle (hardcoded /certs/tls.*)\n", colorYellow, data.InitialRunner, colorReset)
 	fmt.Printf("  • %setcd-tree/agents/%s        - 2 Default agents: %sagent-father%s & %sdefault-agent%s\n", colorYellow, colorReset, colorBold, colorReset, colorBold, colorReset)
 	fmt.Printf("  • %setcd-tree/asgard/config.yaml%s - Minimal required config (optional fields commented)\n", colorYellow, colorReset)
-	fmt.Printf("  • %scompose.yaml%s             - Multi-container orchestration (etcd, backend, runner)\n", colorYellow, colorReset)
+	if data.IncludeEtcdService {
+		fmt.Printf("  • %scompose.yaml%s             - Multi-container orchestration (etcd, backend, runner)\n", colorYellow, colorReset)
+	} else {
+		fmt.Printf("  • %scompose.yaml%s             - Multi-container orchestration (backend, runner; external etcd)\n", colorYellow, colorReset)
+	}
 	fmt.Printf("  • %sJustfile%s                 - Docker Compose & cfgctl push automation commands\n\n", colorYellow, colorReset)
 
 	fmt.Printf("%s[Next Steps]%s\n", colorGreen+colorBold, colorReset)

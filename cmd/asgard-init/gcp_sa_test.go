@@ -109,19 +109,21 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 		// 1. targetDir -> deployDir
 		// 2. host -> default
 		// 3. port -> default
-		// 4. etcd endpoints -> default
-		// 5. etcd prefix -> default
-		// 6. oidc issuer -> default
-		// 7. oidc client id -> default
-		// 8. oidc client secret -> default
-		// 9. runner -> default
-		// 10. workspace mount -> empty
-		// 11. GCP KMS -> projects/p/locations/l/keyRings/r/cryptoKeys/k
-		// 12. GCP SA key -> y (verify placed key)
-		// 13. providers (agy: skip/decline, claude: s/n, opencode: s/n, simplest: s/n -> fallback agy)
-		// 14. ssh -> s
+		// 4. deploy etcd in compose -> default (Y)
+		// 5. etcd endpoints -> default
+		// 6. etcd prefix -> default
+		// 7. oidc issuer -> default
+		// 8. oidc client id -> default
+		// 9. oidc client secret -> default
+		// 10. runner -> default
+		// 11. workspace mount -> empty
+		// 12. GCP KMS -> projects/p/locations/l/keyRings/r/cryptoKeys/k
+		// 13. GCP SA key -> y (verify placed key)
+		// 14. providers (agy: skip/decline, claude: s/n, opencode: s/n, simplest: s/n -> fallback agy)
+		// 15. ssh -> s
 		inputs := []string{
 			deployDir,
+			"",
 			"",
 			"",
 			"",
@@ -170,6 +172,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 			"",
 			"",
 			"",
+			"",
 			"projects/p/locations/l/keyRings/r/cryptoKeys/k",
 			"y", // press 'y' to verify key that was passed via CLI flag and copied
 			"s", "n", "s", "n", "s", "n", "s", "n",
@@ -195,6 +198,7 @@ func TestGCPSAKey_InteractivePrompt(t *testing.T) {
 
 		inputs := []string{
 			deployDir,
+			"",
 			"",
 			"",
 			"",
