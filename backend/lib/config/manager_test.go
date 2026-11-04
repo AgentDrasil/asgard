@@ -54,28 +54,27 @@ providers:
   google:
     apiKey: test-google-key
 `),
-		"simplest/models.yaml":                 []byte("models: []\n"),
-		"simplest/providers.yaml":              []byte("providers: {}\n"),
-		"credentials/auth.json":                []byte(`{"type":"test"}`),
-		"credentials/oauth_creds.json":         []byte(`{"client_id":"test-id","client_secret":"test-secret"}`),
-		"credentials/antigravity-oauth-token":  []byte("test-oauth-token"),
-		"credentials/claude/.credentials.json": []byte(`{"claude_token":"test-claude"}`),
-		"credentials/.credentials.json":        []byte(`{"claude_root_token":"test-claude-root"}`),
-		"credentials/gemini-api-key":           []byte("test-gemini-secret"),
-		"credentials/xai-api-key":              []byte("test-xai-secret"),
-		"credentials/gcp-sa.json":              []byte(`{"project_id":"test-sa-proj"}`),
-		"credentials/ssh/key":                  []byte("ssh-rsa AAAAB3NzaC1yc2E..."),
-		"credentials/ssh/key.pub":              []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"),
-		"credentials/ssh/id_ed25519":           []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"),
-		"credentials/ssh/id_ed25519.pub":       []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"),
-		"credentials/ssh/id_rsa":               []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nrsa-key\n-----END OPENSSH PRIVATE KEY-----"),
-		"credentials/ssh/id_rsa.pub":           []byte("ssh-rsa AAAAB3NzaC1yc2E... id_rsa-pub"),
-		"credentials/ssh/id_ecdsa":             []byte("-----BEGIN OPENSSH PRIVATE KEY-----\necdsa-key\n-----END OPENSSH PRIVATE KEY-----"),
-		"credentials/ssh/id_ecdsa.pub":         []byte("ecdsa-sha2-nistp256 AAAAE2VjZHNh... id_ecdsa-pub"),
-		"credentials/ssh/id_dsa":               []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ndsa-key\n-----END OPENSSH PRIVATE KEY-----"),
-		"credentials/ssh/id_dsa.pub":           []byte("ssh-dss AAAAB3NzaC1kc3M... id_dsa-pub"),
-		"credentials/ssh/config":               []byte("Host *\n  ServerAliveInterval 60\n"),
-		"credentials/ssh/known_hosts":          []byte("github.com ssh-rsa AAAAB3NzaC1yc2E..."),
+		"simplest/models.yaml":                    []byte("models: []\n"),
+		"simplest/providers.yaml":                 []byte("providers: {}\n"),
+		"credentials/auth.json":                   []byte(`{"type":"test"}`),
+		"credentials/agy/oauth_creds.json":        []byte(`{"client_id":"test-id","client_secret":"test-secret"}`),
+		"credentials/agy/antigravity-oauth-token": []byte("test-oauth-token"),
+		"credentials/claude/.credentials.json":    []byte(`{"claude_token":"test-claude"}`),
+		"credentials/gemini-api-key":              []byte("test-gemini-secret"),
+		"credentials/xai-api-key":                 []byte("test-xai-secret"),
+		"credentials/gcp/gcp-sa.json":             []byte(`{"project_id":"test-sa-proj"}`),
+		"credentials/ssh/key":                     []byte("ssh-rsa AAAAB3NzaC1yc2E..."),
+		"credentials/ssh/key.pub":                 []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"),
+		"credentials/ssh/id_ed25519":              []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_ed25519.pub":          []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"),
+		"credentials/ssh/id_rsa":                  []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nrsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_rsa.pub":              []byte("ssh-rsa AAAAB3NzaC1yc2E... id_rsa-pub"),
+		"credentials/ssh/id_ecdsa":                []byte("-----BEGIN OPENSSH PRIVATE KEY-----\necdsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_ecdsa.pub":            []byte("ecdsa-sha2-nistp256 AAAAE2VjZHNh... id_ecdsa-pub"),
+		"credentials/ssh/id_dsa":                  []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ndsa-key\n-----END OPENSSH PRIVATE KEY-----"),
+		"credentials/ssh/id_dsa.pub":              []byte("ssh-dss AAAAB3NzaC1kc3M... id_dsa-pub"),
+		"credentials/ssh/config":                  []byte("Host *\n  ServerAliveInterval 60\n"),
+		"credentials/ssh/known_hosts":             []byte("github.com ssh-rsa AAAAB3NzaC1yc2E..."),
 	}
 
 	src := configlib.NewMemSource(kvs)
@@ -116,8 +115,6 @@ providers:
 	assert.Equal(t, []byte(`{"client_id":"test-id","client_secret":"test-secret"}`), cfg.Credentials.OAuthCreds)
 	assert.Equal(t, []byte("test-oauth-token"), cfg.Credentials.AntigravityOAuthToken)
 	assert.Equal(t, []byte(`{"claude_token":"test-claude"}`), cfg.Credentials.Claude)
-	assert.Equal(t, []byte(`{"claude_root_token":"test-claude-root"}`), cfg.Credentials.ClaudeRoot)
-	assert.Equal(t, []byte(`{"claude_token":"test-claude"}`), cfg.Credentials.GetClaudeCredentials())
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E..."), cfg.Credentials.SSH.Key)
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"), cfg.Credentials.SSH.KeyPub)
 	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdEd25519)
@@ -207,63 +204,4 @@ func TestSSHScope_HelperMethods(t *testing.T) {
 	scopeA := &SSHScope{Key: []byte("foo"), KeyPub: []byte("bar")}
 	scopeB := &SSHScope{Key: []byte("fo"), KeyPub: []byte("obar")}
 	assert.NotEqual(t, scopeA.Fingerprint(), scopeB.Fingerprint())
-}
-
-func TestCredentialsScope_GetClaudeCredentials(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		scope    *CredentialsScope
-		expected []byte
-	}{
-		{
-			name:     "nil receiver returns nil",
-			scope:    nil,
-			expected: nil,
-		},
-		{
-			name:     "empty struct returns nil",
-			scope:    &CredentialsScope{},
-			expected: nil,
-		},
-		{
-			name: "claude present returns claude",
-			scope: &CredentialsScope{
-				Claude: []byte("claude-creds"),
-			},
-			expected: []byte("claude-creds"),
-		},
-		{
-			name: "claudeRoot present returns claudeRoot",
-			scope: &CredentialsScope{
-				ClaudeRoot: []byte("root-creds"),
-			},
-			expected: []byte("root-creds"),
-		},
-		{
-			name: "both claude and claudeRoot present favors claude",
-			scope: &CredentialsScope{
-				Claude:     []byte("claude-creds"),
-				ClaudeRoot: []byte("root-creds"),
-			},
-			expected: []byte("claude-creds"),
-		},
-		{
-			name: "empty claude with non-empty claudeRoot falls back to claudeRoot",
-			scope: &CredentialsScope{
-				Claude:     []byte(""),
-				ClaudeRoot: []byte("root-creds"),
-			},
-			expected: []byte("root-creds"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.scope.GetClaudeCredentials()
-			assert.Equal(t, tt.expected, got)
-		})
-	}
 }

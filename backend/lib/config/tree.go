@@ -19,29 +19,13 @@ type SimplestRawScope struct {
 // CredentialsScope maps standard credentials stored under credentials/.
 type CredentialsScope struct {
 	Auth                  []byte   `key:"auth.json"`
-	OAuthCreds            []byte   `key:"oauth_creds.json"`
-	AntigravityOAuthToken []byte   `key:"antigravity-oauth-token"`
+	OAuthCreds            []byte   `key:"agy/oauth_creds.json"`
+	AntigravityOAuthToken []byte   `key:"agy/antigravity-oauth-token"`
 	Claude                []byte   `key:"claude/.credentials.json"`
-	ClaudeRoot            []byte   `key:".credentials.json"`
 	GeminiAPIKey          string   `key:"gemini-api-key"`
 	XAIAPIKey             string   `key:"xai-api-key"`
-	GCPSAKey              []byte   `key:"gcp-sa.json"`
+	GCPSAKey              []byte   `key:"gcp/gcp-sa.json"`
 	SSH                   SSHScope `key:"ssh/"`
-}
-
-// GetClaudeCredentials returns Claude credentials from claude/.credentials.json if non-empty,
-// else fallback to .credentials.json if non-empty, else nil.
-func (c *CredentialsScope) GetClaudeCredentials() []byte {
-	if c == nil {
-		return nil
-	}
-	if len(c.Claude) > 0 {
-		return c.Claude
-	}
-	if len(c.ClaudeRoot) > 0 {
-		return c.ClaudeRoot
-	}
-	return nil
 }
 
 // SSHScope maps SSH credentials stored under credentials/ssh/.

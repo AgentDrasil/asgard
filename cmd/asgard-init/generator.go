@@ -102,7 +102,6 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		filepath.Join(targetDir, "etcd-tree", "asgard"),
 		filepath.Join(targetDir, "etcd-tree", "aw"),
 		filepath.Join(targetDir, "etcd-tree", "simplest"),
-		filepath.Join(targetDir, "etcd-tree", "credentials"),
 		filepath.Join(targetDir, "etcd-tree", "agents", "agent-father"),
 		filepath.Join(targetDir, "etcd-tree", "agents", "default-agent"),
 	}
@@ -113,14 +112,25 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		}
 	}
 
-	// Create SSH credentials directory with strict permissions (0700)
-	sshCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh")
-	if err := os.MkdirAll(sshCredDir, 0700); err != nil {
-		return fmt.Errorf("failed to create directory %q: %w", sshCredDir, err)
+	// Create credentials directories with strict permissions (0700)
+	credDirs := []string{
+		filepath.Join(targetDir, "etcd-tree", "credentials"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
+		filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 	}
-	if err := os.Chmod(sshCredDir, 0700); err != nil {
-		return fmt.Errorf("failed to chmod directory %q: %w", sshCredDir, err)
+	for _, cd := range credDirs {
+		if err := os.MkdirAll(cd, 0700); err != nil {
+			return fmt.Errorf("failed to create directory %q: %w", cd, err)
+		}
+		if err := os.Chmod(cd, 0700); err != nil {
+			return fmt.Errorf("failed to chmod directory %q: %w", cd, err)
+		}
 	}
+
+	// Migrate legacy root credentials if they exist and target doesn't exist yet
+	MigrateLegacyCredentials(targetDir)
 
 	// 2. Generate TLS certificates
 	caCert, caKey, caCertPEM, caKeyPEM, err := GenerateCA()
@@ -208,16 +218,15 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		return err
 	}
 
-	// 3b. Copy GCP Service Account key if provided or present
-	// 3b. Copy GCP Service Account key to etcd-tree/credentials/gcp-sa.json if provided
-	etcdTreeSAKey := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	// 3b. Copy GCP Service Account key to etcd-tree/credentials/gcp/gcp-sa.json if provided
+	etcdTreeSAKey := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 	if data.GCPSAKey != "" {
 		if err := copyGCPSAKey(targetDir, data.GCPSAKey); err != nil {
 			return fmt.Errorf("copy GCP service account key: %w", err)
 		}
-		data.GCPSAKey = "./etcd-tree/credentials/gcp-sa.json"
+		data.GCPSAKey = "./etcd-tree/credentials/gcp/gcp-sa.json"
 	} else if fileExists(etcdTreeSAKey) {
-		data.GCPSAKey = "./etcd-tree/credentials/gcp-sa.json"
+		data.GCPSAKey = "./etcd-tree/credentials/gcp/gcp-sa.json"
 	}
 
 	// 4. Render template files
@@ -491,11 +500,11 @@ func appendRunnerService(composeFile, runnerName string, workspaceMounts []strin
 	return os.WriteFile(composeFile, []byte(newContent), 0644)
 }
 
-// copyGCPSAKey copies the GCP Service Account key to etcd-tree/credentials/gcp-sa.json (0600)
+// copyGCPSAKey copies the GCP Service Account key to etcd-tree/credentials/gcp/gcp-sa.json (0600)
 // for distribution to backend and runners via etcd.
 func copyGCPSAKey(targetDir string, saKeyPath string) error {
 	saKeyPath = strings.TrimSpace(saKeyPath)
-	etcdTreeDst := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	etcdTreeDst := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 
 	if saKeyPath != "" {
 		absDst, _ := filepath.Abs(etcdTreeDst)
@@ -523,9 +532,46 @@ func copyGCPSAKey(targetDir string, saKeyPath string) error {
 		if err := validateJSONFile(absResolved); err != nil {
 			return err
 		}
+		if err := os.MkdirAll(filepath.Dir(etcdTreeDst), 0700); err != nil {
+			return fmt.Errorf("create gcp credentials directory: %w", err)
+		}
+		_ = os.Chmod(filepath.Dir(etcdTreeDst), 0700)
 		if err := copyFile(absResolved, etcdTreeDst, 0600); err != nil {
 			return fmt.Errorf("copy SA key to etcd-tree: %w", err)
 		}
 	}
 	return nil
+}
+
+// MigrateLegacyCredentials migrates legacy root credential files into dedicated provider subfolders.
+func MigrateLegacyCredentials(targetDir string) {
+	legacyMigrations := []struct {
+		oldPath string
+		newPath string
+	}{
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json"),
+		},
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "antigravity-oauth-token"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token"),
+		},
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", ".credentials.json"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json"),
+		},
+		{
+			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json"),
+			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json"),
+		},
+	}
+	for _, m := range legacyMigrations {
+		if fileExists(m.oldPath) && !fileExists(m.newPath) {
+			_ = os.MkdirAll(filepath.Dir(m.newPath), 0700)
+			_ = os.Chmod(filepath.Dir(m.newPath), 0700)
+			_ = copyFile(m.oldPath, m.newPath, 0600)
+			_ = os.Remove(m.oldPath)
+		}
+	}
 }

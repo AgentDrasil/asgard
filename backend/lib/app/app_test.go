@@ -23,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 type mockClient struct {
@@ -597,18 +598,18 @@ rules:
     dummy_secret: Bearer dummy
     real_secret: Bearer real
 `),
-		"aw/config.yaml":                      []byte("agents: []\n"),
-		"simplest/key.yaml":                   []byte("providers: {}\n"),
-		"simplest/models.yaml":                []byte("models: []\n"),
-		"simplest/providers.yaml":             []byte("providers: {}\n"),
-		"credentials/auth.json":               []byte("{}"),
-		"credentials/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
-		"credentials/antigravity-oauth-token": []byte("tok"),
-		"credentials/gemini-api-key":          []byte("key"),
-		"credentials/xai-api-key":             []byte("xkey"),
-		"credentials/ssh/key":                 []byte("ssh-key"),
-		"credentials/ssh/key.pub":             []byte("ssh-pub"),
-		"credentials/ssh/config":              []byte("ssh-config"),
+		"aw/config.yaml":                          []byte("agents: []\n"),
+		"simplest/key.yaml":                       []byte("providers: {}\n"),
+		"simplest/models.yaml":                    []byte("models: []\n"),
+		"simplest/providers.yaml":                 []byte("providers: {}\n"),
+		"credentials/auth.json":                   []byte("{}"),
+		"credentials/agy/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
+		"credentials/agy/antigravity-oauth-token": []byte("tok"),
+		"credentials/gemini-api-key":              []byte("key"),
+		"credentials/xai-api-key":                 []byte("xkey"),
+		"credentials/ssh/key":                     []byte("ssh-key"),
+		"credentials/ssh/key.pub":                 []byte("ssh-pub"),
+		"credentials/ssh/config":                  []byte("ssh-config"),
 	}
 
 	src := configlib.NewMemSource(kvs)
@@ -651,18 +652,18 @@ rules:
     dummy_secret: Bearer dummy
     real_secret: Bearer initial-secret
 `),
-		"aw/config.yaml":                      []byte("agents: []\n"),
-		"simplest/key.yaml":                   []byte("providers: {}\n"),
-		"simplest/models.yaml":                []byte("models: []\n"),
-		"simplest/providers.yaml":             []byte("providers: {}\n"),
-		"credentials/auth.json":               []byte("{}"),
-		"credentials/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
-		"credentials/antigravity-oauth-token": []byte("tok"),
-		"credentials/gemini-api-key":          []byte("key"),
-		"credentials/xai-api-key":             []byte("xkey"),
-		"credentials/ssh/key":                 []byte("ssh-key"),
-		"credentials/ssh/key.pub":             []byte("ssh-pub"),
-		"credentials/ssh/config":              []byte("ssh-config"),
+		"aw/config.yaml":                          []byte("agents: []\n"),
+		"simplest/key.yaml":                       []byte("providers: {}\n"),
+		"simplest/models.yaml":                    []byte("models: []\n"),
+		"simplest/providers.yaml":                 []byte("providers: {}\n"),
+		"credentials/auth.json":                   []byte("{}"),
+		"credentials/agy/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
+		"credentials/agy/antigravity-oauth-token": []byte("tok"),
+		"credentials/gemini-api-key":              []byte("key"),
+		"credentials/xai-api-key":                 []byte("xkey"),
+		"credentials/ssh/key":                     []byte("ssh-key"),
+		"credentials/ssh/key.pub":                 []byte("ssh-pub"),
+		"credentials/ssh/config":                  []byte("ssh-config"),
 	}
 
 	src := configlib.NewMemSource(kvs)
@@ -735,4 +736,40 @@ func TestRequireAuthConfigured(t *testing.T) {
 	require.ErrorContains(t, requireAuthConfigured(nil), "authentication is required")
 	require.ErrorContains(t, requireAuthConfigured(&config.Config{}), "authentication is required")
 	require.NoError(t, requireAuthConfigured(&config.Config{Auth: &auth.Config{Issuer: "https://idp.example.com"}}))
+}
+
+func TestSyncGCPSAKey(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(paths.EnvRoot, tempDir)
+	origEnv := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	t.Cleanup(func() {
+		if origEnv != "" {
+			_ = os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", origEnv)
+		} else {
+			_ = os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+		}
+	})
+
+	saPath := filepath.Join(tempDir, "data", "gcp-sa.json")
+
+	// 1. Nil scope does nothing
+	syncGCPSAKey(nil)
+	assert.NoFileExists(t, saPath)
+
+	// 2. Non-empty GCPSAKey writes key and sets env
+	keyContent := []byte(`{"type":"service_account","project_id":"my-proj"}`)
+	syncGCPSAKey(&config.CredentialsScope{GCPSAKey: keyContent})
+	require.FileExists(t, saPath)
+	info, err := os.Stat(saPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	data, err := os.ReadFile(saPath)
+	require.NoError(t, err)
+	assert.Equal(t, keyContent, data)
+	assert.Equal(t, saPath, os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+
+	// 3. Empty GCPSAKey revokes key and unsets env
+	syncGCPSAKey(&config.CredentialsScope{GCPSAKey: nil})
+	assert.NoFileExists(t, saPath)
+	assert.Empty(t, os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 }

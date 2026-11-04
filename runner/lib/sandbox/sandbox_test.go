@@ -296,23 +296,6 @@ func TestSyncCLICredentials_Direct(t *testing.T) {
 			checkClaude: true,
 		},
 		{
-			name: "claude root credentials fallback written with 0600 mode and dir 0700",
-			creds: &config.CredentialsScope{
-				ClaudeRoot: []byte(`{"claude_root":"root-1"}`),
-			},
-			wantClaude:  `{"claude_root":"root-1"}`,
-			checkClaude: true,
-		},
-		{
-			name: "claude credentials take precedence over claude root",
-			creds: &config.CredentialsScope{
-				Claude:     []byte(`{"claude_token":"claude-pri"}`),
-				ClaudeRoot: []byte(`{"claude_root":"root-pri"}`),
-			},
-			wantClaude:  `{"claude_token":"claude-pri"}`,
-			checkClaude: true,
-		},
-		{
 			name: "both credentials written together",
 			creds: &config.CredentialsScope{
 				OAuthCreds:            []byte(`{"access_token":"token-2"}`),

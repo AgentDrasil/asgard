@@ -360,7 +360,7 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		}
 	}
 
-	claudeData := creds.GetClaudeCredentials()
+	claudeData := creds.Claude
 	claudeDir := filepath.Join(home, ".claude")
 	claudePath := filepath.Join(claudeDir, ".credentials.json")
 	if len(claudeData) > 0 {

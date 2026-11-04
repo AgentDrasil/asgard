@@ -243,7 +243,13 @@ func TestGenerateDeployment(t *testing.T) {
 		assert.False(t, info.IsDir(), "path should be file: %s", rel)
 	}
 
-	// Verify permissions on sensitive files
+	// Verify permissions on sensitive files and credential directories
+	for _, credSubDir := range []string{"credentials", "credentials/agy", "credentials/claude", "credentials/gcp", "credentials/ssh"} {
+		dirInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", credSubDir))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm(), "dir %s should have 0700 perms", credSubDir)
+	}
+
 	authJSONInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", "auth.json"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), authJSONInfo.Mode().Perm())
@@ -305,15 +311,20 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, justStr, "cfgctl push ./etcd-tree")
 	assert.Contains(t, justStr, "publish: encrypt push")
 
-	// Verify etcd-tree/credentials/ssh directory was created with 0700 permissions
+	// Verify etcd-tree/credentials dedicated directories were created
+	for _, sub := range []string{"agy", "claude", "gcp", "ssh"} {
+		dirInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", sub))
+		require.NoError(t, err, "directory must exist: %s", sub)
+		assert.True(t, dirInfo.IsDir())
+	}
 	sshDirInfo, err := os.Stat(filepath.Join(tempDir, "etcd-tree", "credentials", "ssh"))
 	require.NoError(t, err)
-	assert.True(t, sshDirInfo.IsDir())
 	assert.Equal(t, os.FileMode(0700), sshDirInfo.Mode().Perm())
 
 	// Verify Justfile contains binary sops encryption loop for extensionless credentials
 	assert.Contains(t, justStr, "sops --input-type binary --output-type json -e \"$$f\" > \"$$f.sops.json\"")
 	assert.NotContains(t, justStr, ".credentials.json")
+	assert.Contains(t, justStr, "./etcd-tree/credentials/agy/antigravity-oauth-token")
 
 	// Verify .gitignore ignores plaintext staged credentials (in-place encrypted JSON files are not ignored)
 	gitignoreContent, err := os.ReadFile(filepath.Join(tempDir, ".gitignore"))
@@ -321,7 +332,9 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/ssh/*")
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/*.sops.json")
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/.gitkeep")
-	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/antigravity-oauth-token")
+	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/agy/antigravity-oauth-token")
+	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/gcp/*")
+	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/gcp/.gitkeep")
 	assert.NotContains(t, string(gitignoreContent), ".credentials.json")
 
 	// Verify .sops.yaml contains oauth_creds.json in path_regex and credentials rule precedes generic rule
@@ -488,7 +501,7 @@ func TestCheckCLICredentials(t *testing.T) {
 	t.Run("zero-byte oauth_creds.json returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		oauthFile := filepath.Join(credDir, "oauth_creds.json")
 		require.NoError(t, os.WriteFile(oauthFile, []byte(""), 0600))
@@ -498,7 +511,41 @@ func TestCheckCLICredentials(t *testing.T) {
 		assert.Empty(t, path)
 	})
 
-	t.Run("valid oauth_creds.json returns true", func(t *testing.T) {
+	t.Run("valid oauth_creds.json returns true and tightens permissions", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		oauthFile := filepath.Join(credDir, "oauth_creds.json")
+		require.NoError(t, os.WriteFile(oauthFile, []byte(`{"token":"abc"}`), 0644))
+
+		path, ok := CheckCLICredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, oauthFile, path)
+
+		fi, err := os.Stat(oauthFile)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+	})
+
+	t.Run("valid antigravity-oauth-token returns true and tightens permissions", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		tokenFile := filepath.Join(credDir, "antigravity-oauth-token")
+		require.NoError(t, os.WriteFile(tokenFile, []byte("tok123"), 0644))
+
+		path, ok := CheckCLICredentials(tempDir)
+		assert.True(t, ok)
+		assert.Equal(t, tokenFile, path)
+
+		fi, err := os.Stat(tokenFile)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+	})
+
+	t.Run("root credentials file ignored (no root fallback)", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
@@ -507,21 +554,8 @@ func TestCheckCLICredentials(t *testing.T) {
 		require.NoError(t, os.WriteFile(oauthFile, []byte(`{"token":"abc"}`), 0600))
 
 		path, ok := CheckCLICredentials(tempDir)
-		assert.True(t, ok)
-		assert.Equal(t, oauthFile, path)
-	})
-
-	t.Run("valid antigravity-oauth-token fallback returns true", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
-		require.NoError(t, os.MkdirAll(credDir, 0755))
-		tokenFile := filepath.Join(credDir, "antigravity-oauth-token")
-		require.NoError(t, os.WriteFile(tokenFile, []byte("tok123"), 0600))
-
-		path, ok := CheckCLICredentials(tempDir)
-		assert.True(t, ok)
-		assert.Equal(t, tokenFile, path)
+		assert.False(t, ok)
+		assert.Empty(t, path)
 	})
 }
 
@@ -549,33 +583,24 @@ func TestCheckClaudeCredentials(t *testing.T) {
 		assert.Empty(t, path)
 	})
 
-	t.Run("valid claude .credentials.json returns true", func(t *testing.T) {
+	t.Run("valid claude .credentials.json returns true and tightens permissions", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		claudeDir := filepath.Join(tempDir, "etcd-tree", "credentials", "claude")
 		require.NoError(t, os.MkdirAll(claudeDir, 0755))
 		claudeFile := filepath.Join(claudeDir, ".credentials.json")
-		require.NoError(t, os.WriteFile(claudeFile, []byte(`{"claude_token":"secret"}`), 0600))
+		require.NoError(t, os.WriteFile(claudeFile, []byte(`{"claude_token":"secret"}`), 0644))
 
 		path, ok := CheckClaudeCredentials(tempDir)
 		assert.True(t, ok)
 		assert.Equal(t, claudeFile, path)
+
+		fi, err := os.Stat(claudeFile)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
 	})
 
-	t.Run("zero-byte root .credentials.json returns false", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
-		require.NoError(t, os.MkdirAll(credDir, 0755))
-		rootFile := filepath.Join(credDir, ".credentials.json")
-		require.NoError(t, os.WriteFile(rootFile, []byte(""), 0600))
-
-		path, ok := CheckClaudeCredentials(tempDir)
-		assert.False(t, ok)
-		assert.Empty(t, path)
-	})
-
-	t.Run("valid root .credentials.json fallback returns true", func(t *testing.T) {
+	t.Run("root .credentials.json ignored (no root fallback)", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
@@ -584,24 +609,8 @@ func TestCheckClaudeCredentials(t *testing.T) {
 		require.NoError(t, os.WriteFile(rootFile, []byte(`{"claude_root_token":"root_secret"}`), 0600))
 
 		path, ok := CheckClaudeCredentials(tempDir)
-		assert.True(t, ok)
-		assert.Equal(t, rootFile, path)
-	})
-
-	t.Run("claude .credentials.json takes precedence over root .credentials.json", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		claudeDir := filepath.Join(tempDir, "etcd-tree", "credentials", "claude")
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
-		require.NoError(t, os.MkdirAll(claudeDir, 0755))
-		claudeFile := filepath.Join(claudeDir, ".credentials.json")
-		rootFile := filepath.Join(credDir, ".credentials.json")
-		require.NoError(t, os.WriteFile(claudeFile, []byte(`{"claude_token":"pri"}`), 0600))
-		require.NoError(t, os.WriteFile(rootFile, []byte(`{"claude_root_token":"sec"}`), 0600))
-
-		path, ok := CheckClaudeCredentials(tempDir)
-		assert.True(t, ok)
-		assert.Equal(t, claudeFile, path)
+		assert.False(t, ok)
+		assert.Empty(t, path)
 	})
 }
 
@@ -619,7 +628,7 @@ func TestCheckGCPSACredentials(t *testing.T) {
 	t.Run("zero-byte gcp-sa.json returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte(""), 0600))
@@ -632,7 +641,7 @@ func TestCheckGCPSACredentials(t *testing.T) {
 	t.Run("invalid json returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte("{invalid-json"), 0600))
@@ -645,7 +654,7 @@ func TestCheckGCPSACredentials(t *testing.T) {
 	t.Run("missing project_id returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account"}`), 0600))
@@ -658,7 +667,7 @@ func TestCheckGCPSACredentials(t *testing.T) {
 	t.Run("valid gcp-sa.json returns true and tightens permissions to 0600", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0644))
@@ -670,6 +679,19 @@ func TestCheckGCPSACredentials(t *testing.T) {
 		fi, err := os.Stat(saFile)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+	})
+
+	t.Run("root gcp-sa.json ignored (no root fallback)", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		require.NoError(t, os.MkdirAll(credDir, 0755))
+		saFile := filepath.Join(credDir, "gcp-sa.json")
+		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0644))
+
+		path, ok := CheckGCPSACredentials(tempDir)
+		assert.False(t, ok)
+		assert.Empty(t, path)
 	})
 }
 
@@ -690,7 +712,7 @@ func TestPromptCLICredentials(t *testing.T) {
 	t.Run("non-interactive detects existing credential", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"xyz"}`), 0600))
 
@@ -705,7 +727,7 @@ func TestPromptCLICredentials(t *testing.T) {
 	t.Run("interactive prompt verify success on y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"valid"}`), 0600))
 
@@ -732,7 +754,7 @@ func TestPromptCLICredentials(t *testing.T) {
 	t.Run("interactive retry: missing then placed then y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 
 		r, w := io.Pipe()
@@ -752,6 +774,7 @@ func TestPromptCLICredentials(t *testing.T) {
 		verified := PromptCLICredentials(r, &out, tempDir, true)
 		assert.True(t, verified)
 		assert.Contains(t, out.String(), "No valid, non-empty credential file found")
+		assert.NotContains(t, out.String(), "(or antigravity-oauth-token)")
 		assert.Contains(t, out.String(), "CLI credential verified successfully")
 	})
 }
@@ -1169,6 +1192,17 @@ func TestPromptClaudeCredentials(t *testing.T) {
 		var out bytes.Buffer
 		assert.True(t, PromptClaudeCredentials(strings.NewReader("y\n"), &out, tempDir, true))
 		assert.Contains(t, out.String(), "Claude credential verified successfully:")
+		assert.NotContains(t, out.String(), "(or etcd-tree/credentials/.credentials.json)")
+	})
+
+	t.Run("interactive prompt verify failure on y then skip", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		var out bytes.Buffer
+		assert.False(t, PromptClaudeCredentials(strings.NewReader("y\ns\n"), &out, tempDir, true))
+		assert.Contains(t, out.String(), "No valid, non-empty Claude credential file found at")
+		assert.NotContains(t, out.String(), "(or etcd-tree/credentials/.credentials.json)")
 	})
 }
 
@@ -1189,7 +1223,7 @@ func TestPromptGCPSACredentials(t *testing.T) {
 	t.Run("non-interactive detects existing key", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0600))
@@ -1205,7 +1239,7 @@ func TestPromptGCPSACredentials(t *testing.T) {
 	t.Run("interactive prompt verify success on y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 		saFile := filepath.Join(credDir, "gcp-sa.json")
 		require.NoError(t, os.WriteFile(saFile, []byte(`{"type":"service_account","project_id":"test-proj"}`), 0600))
@@ -1233,7 +1267,7 @@ func TestPromptGCPSACredentials(t *testing.T) {
 	t.Run("interactive retry: missing then placed then y", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "gcp")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
 
 		r, w := io.Pipe()
@@ -1338,15 +1372,17 @@ func TestPromptProviderSetup(t *testing.T) {
 
 		// Prepare all credential files
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+		agyDir := filepath.Join(credDir, "agy")
 		claudeDir := filepath.Join(credDir, "claude")
 		awDir := filepath.Join(tempDir, "etcd-tree", "aw")
 		simplestDir := filepath.Join(tempDir, "etcd-tree", "simplest")
 
+		require.NoError(t, os.MkdirAll(agyDir, 0755))
 		require.NoError(t, os.MkdirAll(claudeDir, 0755))
 		require.NoError(t, os.MkdirAll(awDir, 0755))
 		require.NoError(t, os.MkdirAll(simplestDir, 0755))
 
-		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"tok":"1"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(agyDir, "oauth_creds.json"), []byte(`{"tok":"1"}`), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"tok":"2"}`), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(awDir, "opencode.aw.yaml"), []byte("env:\n  K: V\n"), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
@@ -1468,4 +1504,65 @@ func TestGenerateDeployment_PreservesExistingConfigs(t *testing.T) {
 	keyData, err := os.ReadFile(simplestKeyPath)
 	require.NoError(t, err)
 	assert.Equal(t, "# custom simplest key\ngemini: AIza-custom\n", string(keyData))
+}
+
+func TestMigrateLegacyCredentials(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
+	require.NoError(t, os.MkdirAll(credDir, 0700))
+
+	// Write legacy files
+	legacyOAuth := filepath.Join(credDir, "oauth_creds.json")
+	legacyToken := filepath.Join(credDir, "antigravity-oauth-token")
+	legacyClaude := filepath.Join(credDir, ".credentials.json")
+	legacyGCP := filepath.Join(credDir, "gcp-sa.json")
+
+	require.NoError(t, os.WriteFile(legacyOAuth, []byte(`{"oauth":"data"}`), 0600))
+	require.NoError(t, os.WriteFile(legacyToken, []byte("tok-data"), 0600))
+	require.NoError(t, os.WriteFile(legacyClaude, []byte(`{"claude":"data"}`), 0600))
+	require.NoError(t, os.WriteFile(legacyGCP, []byte(`{"gcp":"data"}`), 0600))
+
+	MigrateLegacyCredentials(tempDir)
+
+	// Old files should be removed
+	assert.NoFileExists(t, legacyOAuth)
+	assert.NoFileExists(t, legacyToken)
+	assert.NoFileExists(t, legacyClaude)
+	assert.NoFileExists(t, legacyGCP)
+
+	// New files should exist with correct content and 0600 permissions
+	newOAuth := filepath.Join(credDir, "agy", "oauth_creds.json")
+	newToken := filepath.Join(credDir, "agy", "antigravity-oauth-token")
+	newClaude := filepath.Join(credDir, "claude", ".credentials.json")
+	newGCP := filepath.Join(credDir, "gcp", "gcp-sa.json")
+
+	require.FileExists(t, newOAuth)
+	require.FileExists(t, newToken)
+	require.FileExists(t, newClaude)
+	require.FileExists(t, newGCP)
+
+	data, err := os.ReadFile(newOAuth)
+	require.NoError(t, err)
+	assert.Equal(t, `{"oauth":"data"}`, string(data))
+
+	data, err = os.ReadFile(newToken)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-data", string(data))
+
+	data, err = os.ReadFile(newClaude)
+	require.NoError(t, err)
+	assert.Equal(t, `{"claude":"data"}`, string(data))
+
+	data, err = os.ReadFile(newGCP)
+	require.NoError(t, err)
+	assert.Equal(t, `{"gcp":"data"}`, string(data))
+
+	// Verify directory permissions
+	for _, sub := range []string{"agy", "claude", "gcp"} {
+		info, err := os.Stat(filepath.Join(credDir, sub))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+	}
 }

@@ -448,17 +448,18 @@ func run(args []string) (err error) {
 		}
 
 		if data.GCPKMS != "" && !state.IsCompleted("gcp_sa_key") {
-			credDir := filepath.Join(targetDir, "etcd-tree", "credentials")
-			if err := os.MkdirAll(credDir, 0755); err != nil {
+			credDir := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp")
+			if err := os.MkdirAll(credDir, 0700); err != nil {
 				return fmt.Errorf("create credentials directory %s: %w", credDir, err)
 			}
+			_ = os.Chmod(credDir, 0700)
 			if *gcpSAKeyFlag != "" {
 				if err := copyGCPSAKey(targetDir, *gcpSAKeyFlag); err != nil {
 					return err
 				}
 			}
 			if PromptGCPSACredentials(reader, os.Stdout, targetDir, true) {
-				data.GCPSAKey = filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+				data.GCPSAKey = filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 				state.GCPSAKey = data.GCPSAKey
 			} else {
 				data.GCPSAKey = ""
@@ -476,13 +477,25 @@ func run(args []string) (err error) {
 
 	// In interactive mode, ensure directories exist and prompt for providers and SSH
 	if !*nonInteractiveFlag {
-		dirs := []string{
+		MigrateLegacyCredentials(targetDir)
+
+		credDirs := []string{
+			filepath.Join(targetDir, "etcd-tree", "credentials"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
+			filepath.Join(targetDir, "etcd-tree", "credentials", "gcp"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
+		}
+		for _, cd := range credDirs {
+			_ = os.MkdirAll(cd, 0700)
+			_ = os.Chmod(cd, 0700)
+		}
+
+		otherDirs := []string{
 			filepath.Join(targetDir, "etcd-tree", "aw"),
 			filepath.Join(targetDir, "etcd-tree", "simplest"),
 		}
-		for _, d := range dirs {
+		for _, d := range otherDirs {
 			_ = os.MkdirAll(d, 0755)
 		}
 
@@ -552,37 +565,36 @@ func isNonEmptyFile(path string) bool {
 	return !fi.IsDir() && fi.Size() > 0
 }
 
-// CheckCLICredentials checks if oauth_creds.json or antigravity-oauth-token exists in targetDir/etcd-tree/credentials and is a non-empty file.
+// CheckCLICredentials checks if oauth_creds.json or antigravity-oauth-token exists in targetDir/etcd-tree/credentials/agy and is a non-empty file.
 func CheckCLICredentials(targetDir string) (string, bool) {
-	oauthPath := filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json")
+	oauthPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json")
 	if isNonEmptyFile(oauthPath) {
+		_ = os.Chmod(oauthPath, 0600)
 		return oauthPath, true
 	}
-	tokenPath := filepath.Join(targetDir, "etcd-tree", "credentials", "antigravity-oauth-token")
+	tokenPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token")
 	if isNonEmptyFile(tokenPath) {
+		_ = os.Chmod(tokenPath, 0600)
 		return tokenPath, true
 	}
 	return "", false
 }
 
-// CheckClaudeCredentials checks if claude/.credentials.json or .credentials.json exists in targetDir/etcd-tree/credentials and is a non-empty file.
+// CheckClaudeCredentials checks if claude/.credentials.json exists in targetDir/etcd-tree/credentials and is a non-empty file.
 func CheckClaudeCredentials(targetDir string) (string, bool) {
 	claudePath := filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json")
 	if isNonEmptyFile(claudePath) {
+		_ = os.Chmod(claudePath, 0600)
 		return claudePath, true
-	}
-	rootPath := filepath.Join(targetDir, "etcd-tree", "credentials", ".credentials.json")
-	if isNonEmptyFile(rootPath) {
-		return rootPath, true
 	}
 	return "", false
 }
 
-// CheckGCPSACredentials checks whether filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+// CheckGCPSACredentials checks whether filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 // exists, is non-empty, and passes validateJSONFile (valid JSON with project_id).
 // If valid, tightens permissions to 0600 and returns (path, true).
 func CheckGCPSACredentials(targetDir string) (string, bool) {
-	saPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	saPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 	if !isNonEmptyFile(saPath) {
 		return "", false
 	}
@@ -667,7 +679,7 @@ func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interac
 		reader = bufio.NewReader(os.Stdin)
 	}
 	_, _ = fmt.Fprintf(w, "\n%s--- Claude CLI Credential Setup ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your Claude credential file into %s%s%s (or etcd-tree/credentials/.credentials.json).\n", colorYellow, credPath, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your Claude credential file into %s%s%s.\n", colorYellow, credPath, colorReset)
 
 	for {
 		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
@@ -682,7 +694,7 @@ func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interac
 				_, _ = fmt.Fprintf(w, "%s✔ Claude credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
 				return true
 			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty Claude credential file found at %s (or etcd-tree/credentials/.credentials.json).\n", colorRed+colorBold, colorReset, credPath)
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty Claude credential file found at %s.\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
 			_, _ = fmt.Fprintf(w, "%sSkipped Claude credential setup.%s You can place it into etcd-tree/credentials/claude/ later before running just publish.\n", colorYellow, colorReset)
 			return false
@@ -692,9 +704,9 @@ func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interac
 	}
 }
 
-// PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into etcd-tree/credentials/gcp-sa.json.
+// PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into etcd-tree/credentials/gcp/gcp-sa.json.
 func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp-sa.json")
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "gcp", "gcp-sa.json")
 	if !interactive {
 		if foundPath, ok := CheckGCPSACredentials(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ GCP Service Account key verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -730,7 +742,7 @@ func PromptGCPSACredentials(r io.Reader, w io.Writer, targetDir string, interact
 			}
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid GCP Service Account JSON key file found at %s (must be valid JSON with project_id).\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped GCP Service Account key setup.%s You can place it into etcd-tree/credentials/gcp-sa.json later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped GCP Service Account key setup.%s You can place it into etcd-tree/credentials/gcp/gcp-sa.json later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
@@ -881,10 +893,10 @@ func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive
 	return providers
 }
 
-// PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials.
+// PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials/agy.
 // When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
 func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json")
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json")
 	if !interactive {
 		if foundPath, ok := CheckCLICredentials(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ CLI credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -917,9 +929,9 @@ func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactiv
 				_, _ = fmt.Fprintf(w, "%s✔ CLI credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
 				return true
 			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty credential file found at %s (or antigravity-oauth-token).\n", colorRed+colorBold, colorReset, credPath)
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty credential file found at %s.\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it into etcd-tree/credentials/ later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it into etcd-tree/credentials/agy/ later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
