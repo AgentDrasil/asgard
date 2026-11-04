@@ -260,24 +260,14 @@ func TestSyncCLICredentials_Direct(t *testing.T) {
 	tests := []struct {
 		name        string
 		creds       *config.CredentialsScope
-		wantOAuth   string
 		wantToken   string
 		wantClaude  string
-		checkOAuth  bool
 		checkToken  bool
 		checkClaude bool
 	}{
 		{
 			name:  "nil creds does nothing",
 			creds: nil,
-		},
-		{
-			name: "oauth creds written with 0600 mode and dir 0700",
-			creds: &config.CredentialsScope{
-				OAuthCreds: []byte(`{"access_token":"token-1"}`),
-			},
-			wantOAuth:  `{"access_token":"token-1"}`,
-			checkOAuth: true,
 		},
 		{
 			name: "antigravity token written with 0600 mode and dir 0700",
@@ -298,25 +288,11 @@ func TestSyncCLICredentials_Direct(t *testing.T) {
 		{
 			name: "both credentials written together",
 			creds: &config.CredentialsScope{
-				OAuthCreds:            []byte(`{"access_token":"token-2"}`),
 				AntigravityOAuthToken: []byte("token-agy-2"),
+				Claude:                []byte(`{"claude_token":"claude-2"}`),
 			},
-			wantOAuth:  `{"access_token":"token-2"}`,
-			wantToken:  "token-agy-2",
-			checkOAuth: true,
-			checkToken: true,
-		},
-		{
-			name: "all credentials written together",
-			creds: &config.CredentialsScope{
-				OAuthCreds:            []byte(`{"access_token":"token-3"}`),
-				AntigravityOAuthToken: []byte("token-agy-3"),
-				Claude:                []byte(`{"claude_token":"claude-3"}`),
-			},
-			wantOAuth:   `{"access_token":"token-3"}`,
-			wantToken:   "token-agy-3",
-			wantClaude:  `{"claude_token":"claude-3"}`,
-			checkOAuth:  true,
+			wantToken:   "token-agy-2",
+			wantClaude:  `{"claude_token":"claude-2"}`,
 			checkToken:  true,
 			checkClaude: true,
 		},
@@ -329,21 +305,6 @@ func TestSyncCLICredentials_Direct(t *testing.T) {
 			tempHome := t.TempDir()
 			err := SyncCLICredentials(tempHome, tt.creds)
 			require.NoError(t, err)
-
-			if tt.checkOAuth {
-				oauthPath := filepath.Join(tempHome, ".gemini", "oauth_creds.json")
-				data, err := os.ReadFile(oauthPath)
-				require.NoError(t, err)
-				assert.Equal(t, tt.wantOAuth, string(data))
-
-				info, err := os.Stat(oauthPath)
-				require.NoError(t, err)
-				assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
-
-				dirInfo, err := os.Stat(filepath.Join(tempHome, ".gemini"))
-				require.NoError(t, err)
-				assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
-			}
 
 			if tt.checkToken {
 				tokenPath := filepath.Join(tempHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
@@ -358,6 +319,10 @@ func TestSyncCLICredentials_Direct(t *testing.T) {
 				dirInfo, err := os.Stat(filepath.Join(tempHome, ".gemini", "antigravity-cli"))
 				require.NoError(t, err)
 				assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+
+				geminiInfo, err := os.Stat(filepath.Join(tempHome, ".gemini"))
+				require.NoError(t, err)
+				assert.Equal(t, os.FileMode(0700), geminiInfo.Mode().Perm())
 			}
 
 			if tt.checkClaude {
@@ -384,7 +349,6 @@ func TestSyncCLICredentials_OnTreeChange(t *testing.T) {
 	tempHome := t.TempDir()
 
 	tree := validTree(proxy.Config{})
-	tree.Credentials.OAuthCreds = []byte(`{"access_token":"initial-token"}`)
 	tree.Credentials.AntigravityOAuthToken = []byte(`tok-initial`)
 	tree.Credentials.Claude = []byte(`{"claude_token":"claude-initial"}`)
 
@@ -397,16 +361,6 @@ func TestSyncCLICredentials_OnTreeChange(t *testing.T) {
 	t.Cleanup(sb.Close)
 
 	require.NoError(t, sb.Ready())
-
-	// Verify ~/.gemini/oauth_creds.json written on initial setup
-	oauthPath := filepath.Join(tempHome, ".gemini", "oauth_creds.json")
-	oauthBytes, err := os.ReadFile(oauthPath)
-	require.NoError(t, err)
-	assert.Equal(t, `{"access_token":"initial-token"}`, string(oauthBytes))
-
-	oauthStat, err := os.Stat(oauthPath)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
 
 	geminiDirStat, err := os.Stat(filepath.Join(tempHome, ".gemini"))
 	require.NoError(t, err)
@@ -438,20 +392,10 @@ func TestSyncCLICredentials_OnTreeChange(t *testing.T) {
 
 	// Now fire tree change with updated credentials
 	updatedTree := validTree(proxy.Config{})
-	updatedTree.Credentials.OAuthCreds = []byte(`{"access_token":"updated-token"}`)
 	updatedTree.Credentials.AntigravityOAuthToken = []byte(`tok-updated`)
 	updatedTree.Credentials.Claude = []byte(`{"claude_token":"claude-updated"}`)
 
 	src.fire(updatedTree)
-
-	// Verify updated ~/.gemini/oauth_creds.json
-	oauthBytes, err = os.ReadFile(oauthPath)
-	require.NoError(t, err)
-	assert.Equal(t, `{"access_token":"updated-token"}`, string(oauthBytes))
-
-	oauthStat, err = os.Stat(oauthPath)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
 
 	// Verify updated antigravity-oauth-token
 	agyBytes, err = os.ReadFile(agyPath)
@@ -473,16 +417,12 @@ func TestSyncCLICredentials_OnTreeChange(t *testing.T) {
 
 	// Now fire tree change with cleared/revoked credentials
 	clearedTree := validTree(proxy.Config{})
-	clearedTree.Credentials.OAuthCreds = nil
 	clearedTree.Credentials.AntigravityOAuthToken = nil
 	clearedTree.Credentials.Claude = nil
 
 	src.fire(clearedTree)
 
 	// Verify credential files are removed upon revocation
-	_, err = os.Stat(oauthPath)
-	assert.True(t, os.IsNotExist(err), "oauth_creds.json must be removed when credential is empty/cleared")
-
 	_, err = os.Stat(agyPath)
 	assert.True(t, os.IsNotExist(err), "antigravity-oauth-token must be removed when credential is empty/cleared")
 
@@ -506,16 +446,13 @@ func TestSyncCLICredentials_RevocationAndPermissionTightening(t *testing.T) {
 	require.NoError(t, os.Chmod(claudeDir, 0755))
 
 	// Write pre-existing credentials
-	oauthPath := filepath.Join(geminiDir, "oauth_creds.json")
 	agyPath := filepath.Join(agyDir, "antigravity-oauth-token")
 	claudePath := filepath.Join(claudeDir, ".credentials.json")
-	require.NoError(t, os.WriteFile(oauthPath, []byte("old-oauth"), 0644))
 	require.NoError(t, os.WriteFile(agyPath, []byte("old-agy"), 0644))
 	require.NoError(t, os.WriteFile(claudePath, []byte("old-claude"), 0644))
 
 	// Sync with updated credentials
 	creds := &config.CredentialsScope{
-		OAuthCreds:            []byte("new-oauth"),
 		AntigravityOAuthToken: []byte("new-agy"),
 		Claude:                []byte("new-claude"),
 	}
@@ -534,9 +471,9 @@ func TestSyncCLICredentials_RevocationAndPermissionTightening(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0700), claudeDirStat.Mode().Perm())
 
-	oauthStat, err := os.Stat(oauthPath)
+	agyStat, err := os.Stat(agyPath)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), oauthStat.Mode().Perm())
+	assert.Equal(t, os.FileMode(0600), agyStat.Mode().Perm())
 
 	claudeStat, err := os.Stat(claudePath)
 	require.NoError(t, err)
@@ -548,9 +485,6 @@ func TestSyncCLICredentials_RevocationAndPermissionTightening(t *testing.T) {
 	// Revoke: sync with empty credentials
 	emptyCreds := &config.CredentialsScope{}
 	require.NoError(t, SyncCLICredentials(tempHome, emptyCreds))
-
-	_, err = os.Stat(oauthPath)
-	assert.True(t, os.IsNotExist(err))
 
 	_, err = os.Stat(agyPath)
 	assert.True(t, os.IsNotExist(err))

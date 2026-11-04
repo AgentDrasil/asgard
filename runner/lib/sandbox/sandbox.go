@@ -314,35 +314,15 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 	}
 
 	geminiDir := filepath.Join(home, ".gemini")
-	oauthPath := filepath.Join(geminiDir, "oauth_creds.json")
-	if len(creds.OAuthCreds) > 0 {
-		if err := os.MkdirAll(geminiDir, 0700); err != nil {
-			return fmt.Errorf("create gemini directory %s: %w", geminiDir, err)
-		}
-		if err := os.Chmod(geminiDir, 0700); err != nil {
-			return fmt.Errorf("chmod gemini directory %s: %w", geminiDir, err)
-		}
-
-		existing, err := os.ReadFile(oauthPath)
-		if err != nil || !bytes.Equal(existing, creds.OAuthCreds) {
-			if err := atomicWriteFile(oauthPath, creds.OAuthCreds, 0600); err != nil {
-				return fmt.Errorf("write %s: %w", oauthPath, err)
-			}
-		} else {
-			_ = os.Chmod(oauthPath, 0600)
-		}
-	} else {
-		// Credential revoked / cleared: remove file if it exists
-		if err := os.Remove(oauthPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", oauthPath, err)
-		}
-	}
 
 	agyDir := filepath.Join(geminiDir, "antigravity-cli")
 	agyPath := filepath.Join(agyDir, "antigravity-oauth-token")
 	if len(creds.AntigravityOAuthToken) > 0 {
 		if err := os.MkdirAll(agyDir, 0700); err != nil {
 			return fmt.Errorf("create antigravity-cli directory %s: %w", agyDir, err)
+		}
+		if err := os.Chmod(geminiDir, 0700); err != nil {
+			return fmt.Errorf("chmod gemini directory %s: %w", geminiDir, err)
 		}
 		if err := os.Chmod(agyDir, 0700); err != nil {
 			return fmt.Errorf("chmod antigravity-cli directory %s: %w", agyDir, err)

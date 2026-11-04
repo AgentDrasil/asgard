@@ -635,13 +635,8 @@ func isDirEmpty(path string) bool {
 	return err == io.EOF
 }
 
-// CheckCLICredentials checks if oauth_creds.json or antigravity-oauth-token exists in targetDir/etcd-tree/credentials/agy and is a non-empty file.
+// CheckCLICredentials checks if antigravity-oauth-token exists in targetDir/etcd-tree/credentials/agy and is a non-empty file.
 func CheckCLICredentials(targetDir string) (string, bool) {
-	oauthPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json")
-	if isNonEmptyFile(oauthPath) {
-		_ = os.Chmod(oauthPath, 0600)
-		return oauthPath, true
-	}
 	tokenPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token")
 	if isNonEmptyFile(tokenPath) {
 		_ = os.Chmod(tokenPath, 0600)
@@ -977,7 +972,7 @@ func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive
 // PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials/agy.
 // When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
 func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json")
+	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token")
 	if !interactive {
 		if foundPath, ok := CheckCLICredentials(targetDir); ok {
 			_, _ = fmt.Fprintf(w, "\n%s✔ CLI credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
@@ -994,8 +989,8 @@ func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactiv
 	} else {
 		reader = bufio.NewReader(os.Stdin)
 	}
-	_, _ = fmt.Fprintf(w, "\n%s--- CLI Credential Setup (e.g. Gemini / Antigravity OAuth) ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your CLI credential file into %s%s%s.\n", colorYellow, credPath, colorReset)
+	_, _ = fmt.Fprintf(w, "\n%s--- CLI Credential Setup (Antigravity OAuth token) ---%s\n", colorCyan+colorBold, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your Antigravity OAuth token file into %s%s%s.\n", colorYellow, credPath, colorReset)
 
 	for {
 		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
@@ -1012,7 +1007,7 @@ func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactiv
 			}
 			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty credential file found at %s.\n", colorRed+colorBold, colorReset, credPath)
 		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it into etcd-tree/credentials/agy/ later before running just publish.\n", colorYellow, colorReset)
+			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it at etcd-tree/credentials/agy/antigravity-oauth-token later before running just publish.\n", colorYellow, colorReset)
 			return false
 		default:
 			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)

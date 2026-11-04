@@ -57,7 +57,6 @@ providers:
 		"simplest/models.yaml":                    []byte("models: []\n"),
 		"simplest/providers.yaml":                 []byte("providers: {}\n"),
 		"credentials/auth.json":                   []byte(`{"type":"test"}`),
-		"credentials/agy/oauth_creds.json":        []byte(`{"client_id":"test-id","client_secret":"test-secret"}`),
 		"credentials/agy/antigravity-oauth-token": []byte("test-oauth-token"),
 		"credentials/claude/.credentials.json":    []byte(`{"claude_token":"test-claude"}`),
 		"credentials/gemini-api-key":              []byte("test-gemini-secret"),
@@ -112,7 +111,6 @@ providers:
 	assert.Equal(t, "test-xai-secret", cfg.Credentials.XAIAPIKey)
 	assert.Equal(t, []byte(`{"project_id":"test-sa-proj"}`), cfg.Credentials.GCPSAKey)
 	assert.Equal(t, []byte(`{"type":"test"}`), cfg.Credentials.Auth)
-	assert.Equal(t, []byte(`{"client_id":"test-id","client_secret":"test-secret"}`), cfg.Credentials.OAuthCreds)
 	assert.Equal(t, []byte("test-oauth-token"), cfg.Credentials.AntigravityOAuthToken)
 	assert.Equal(t, []byte(`{"claude_token":"test-claude"}`), cfg.Credentials.Claude)
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E..."), cfg.Credentials.SSH.Key)

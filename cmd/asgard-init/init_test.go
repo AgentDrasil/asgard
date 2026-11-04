@@ -337,11 +337,12 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, string(gitignoreContent), "gcp-sa.json")
 	assert.NotContains(t, string(gitignoreContent), ".credentials.json")
 
-	// Verify .sops.yaml contains oauth_creds.json in path_regex and credentials rule precedes generic rule
+	// Verify .sops.yaml contains antigravity-oauth-token in path_regex and credentials rule precedes generic rule
 	sopsContent, err := os.ReadFile(filepath.Join(tempDir, "etcd-tree", ".sops.yaml"))
 	require.NoError(t, err)
 	sopsStr := string(sopsContent)
-	assert.Contains(t, sopsStr, "oauth_creds\\.json")
+	assert.Contains(t, sopsStr, "antigravity-oauth-token")
+	assert.NotContains(t, sopsStr, "oauth_creds")
 	assert.Contains(t, sopsStr, `\.credentials\.json`)
 	assert.Contains(t, sopsStr, `opencode\.aw\.yaml`)
 	assert.Contains(t, sopsStr, `key\.yaml`)
@@ -527,34 +528,17 @@ func TestCheckCLICredentials(t *testing.T) {
 		assert.Empty(t, path)
 	})
 
-	t.Run("zero-byte oauth_creds.json returns false", func(t *testing.T) {
+	t.Run("zero-byte antigravity-oauth-token returns false", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
-		oauthFile := filepath.Join(credDir, "oauth_creds.json")
+		oauthFile := filepath.Join(credDir, "antigravity-oauth-token")
 		require.NoError(t, os.WriteFile(oauthFile, []byte(""), 0600))
 
 		path, ok := CheckCLICredentials(tempDir)
 		assert.False(t, ok)
 		assert.Empty(t, path)
-	})
-
-	t.Run("valid oauth_creds.json returns true and tightens permissions", func(t *testing.T) {
-		t.Parallel()
-		tempDir := t.TempDir()
-		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
-		require.NoError(t, os.MkdirAll(credDir, 0755))
-		oauthFile := filepath.Join(credDir, "oauth_creds.json")
-		require.NoError(t, os.WriteFile(oauthFile, []byte(`{"token":"abc"}`), 0644))
-
-		path, ok := CheckCLICredentials(tempDir)
-		assert.True(t, ok)
-		assert.Equal(t, oauthFile, path)
-
-		fi, err := os.Stat(oauthFile)
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
 	})
 
 	t.Run("valid antigravity-oauth-token returns true and tightens permissions", func(t *testing.T) {
@@ -579,7 +563,7 @@ func TestCheckCLICredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
-		oauthFile := filepath.Join(credDir, "oauth_creds.json")
+		oauthFile := filepath.Join(credDir, "antigravity-oauth-token")
 		require.NoError(t, os.WriteFile(oauthFile, []byte(`{"token":"abc"}`), 0600))
 
 		path, ok := CheckCLICredentials(tempDir)
@@ -743,7 +727,7 @@ func TestPromptCLICredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"xyz"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(credDir, "antigravity-oauth-token"), []byte(`{"token":"xyz"}`), 0600))
 
 		var out bytes.Buffer
 		in := strings.NewReader("")
@@ -758,7 +742,7 @@ func TestPromptCLICredentials(t *testing.T) {
 		tempDir := t.TempDir()
 		credDir := filepath.Join(tempDir, "etcd-tree", "credentials", "agy")
 		require.NoError(t, os.MkdirAll(credDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"token":"valid"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(credDir, "antigravity-oauth-token"), []byte(`{"token":"valid"}`), 0600))
 
 		var out bytes.Buffer
 		in := strings.NewReader("y\n")
@@ -794,7 +778,7 @@ func TestPromptCLICredentials(t *testing.T) {
 			_, _ = w.Write([]byte("y\n"))
 			time.Sleep(50 * time.Millisecond)
 			// Place credential file
-			_ = os.WriteFile(filepath.Join(credDir, "oauth_creds.json"), []byte(`{"oauth":1}`), 0600)
+			_ = os.WriteFile(filepath.Join(credDir, "antigravity-oauth-token"), []byte(`{"oauth":1}`), 0600)
 			// Write second 'y' -> should now succeed
 			_, _ = w.Write([]byte("y\n"))
 		}()
@@ -1411,7 +1395,7 @@ func TestPromptProviderSetup(t *testing.T) {
 		require.NoError(t, os.MkdirAll(opencodeDir, 0700))
 		require.NoError(t, os.MkdirAll(simplestDir, 0700))
 
-		require.NoError(t, os.WriteFile(filepath.Join(agyDir, "oauth_creds.json"), []byte(`{"tok":"1"}`), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(agyDir, "antigravity-oauth-token"), []byte(`{"tok":"1"}`), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"tok":"2"}`), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(opencodeDir, "opencode.aw.yaml"), []byte("env:\n  K: V\n"), 0600))
 		require.NoError(t, os.WriteFile(filepath.Join(simplestDir, "key.yaml"), []byte("gemini: AIza...\n"), 0600))
@@ -1566,14 +1550,12 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	require.NoError(t, os.MkdirAll(legacySimplestDir, 0755))
 
 	// Write legacy files
-	legacyOAuth := filepath.Join(credDir, "oauth_creds.json")
 	legacyToken := filepath.Join(credDir, "antigravity-oauth-token")
 	legacyClaude := filepath.Join(credDir, ".credentials.json")
 	legacyGCP := filepath.Join(credDir, "gcp-sa.json")
 	legacyOpencode := filepath.Join(legacyAwDir, "opencode.aw.yaml")
 	legacySimplest := filepath.Join(legacySimplestDir, "key.yaml")
 
-	require.NoError(t, os.WriteFile(legacyOAuth, []byte(`{"oauth":"data"}`), 0600))
 	require.NoError(t, os.WriteFile(legacyToken, []byte("tok-data"), 0600))
 	require.NoError(t, os.WriteFile(legacyClaude, []byte(`{"claude":"data"}`), 0600))
 	require.NoError(t, os.WriteFile(legacyGCP, []byte(`{"gcp":"data"}`), 0600))
@@ -1583,7 +1565,6 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	MigrateLegacyCredentials(tempDir)
 
 	// Old files should be removed
-	assert.NoFileExists(t, legacyOAuth)
 	assert.NoFileExists(t, legacyToken)
 	assert.NoFileExists(t, legacyClaude)
 	assert.NoFileExists(t, legacyGCP)
@@ -1591,25 +1572,19 @@ func TestMigrateLegacyCredentials(t *testing.T) {
 	assert.NoFileExists(t, legacySimplest)
 
 	// New files should exist with correct content and 0600 permissions
-	newOAuth := filepath.Join(credDir, "agy", "oauth_creds.json")
 	newToken := filepath.Join(credDir, "agy", "antigravity-oauth-token")
 	newClaude := filepath.Join(credDir, "claude", ".credentials.json")
 	newGCP := filepath.Join(tempDir, "gcp-sa.json")
 	newOpencode := filepath.Join(credDir, "opencode", "opencode.aw.yaml")
 	newSimplest := filepath.Join(credDir, "simplest", "key.yaml")
 
-	require.FileExists(t, newOAuth)
 	require.FileExists(t, newToken)
 	require.FileExists(t, newClaude)
 	require.FileExists(t, newGCP)
 	require.FileExists(t, newOpencode)
 	require.FileExists(t, newSimplest)
 
-	data, err := os.ReadFile(newOAuth)
-	require.NoError(t, err)
-	assert.Equal(t, `{"oauth":"data"}`, string(data))
-
-	data, err = os.ReadFile(newToken)
+	data, err := os.ReadFile(newToken)
 	require.NoError(t, err)
 	assert.Equal(t, "tok-data", string(data))
 

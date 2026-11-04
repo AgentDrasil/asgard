@@ -635,10 +635,6 @@ func MigrateLegacyCredentials(targetDir string) {
 		newPath string
 	}{
 		{
-			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "oauth_creds.json"),
-			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "oauth_creds.json"),
-		},
-		{
 			oldPath: filepath.Join(targetDir, "etcd-tree", "credentials", "antigravity-oauth-token"),
 			newPath: filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token"),
 		},

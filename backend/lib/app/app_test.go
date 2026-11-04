@@ -603,7 +603,6 @@ rules:
 		"simplest/models.yaml":                    []byte("models: []\n"),
 		"simplest/providers.yaml":                 []byte("providers: {}\n"),
 		"credentials/auth.json":                   []byte("{}"),
-		"credentials/agy/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
 		"credentials/agy/antigravity-oauth-token": []byte("tok"),
 		"credentials/gemini-api-key":              []byte("key"),
 		"credentials/xai-api-key":                 []byte("xkey"),
@@ -624,7 +623,7 @@ rules:
 	require.NotNil(t, appInstance)
 	assert.Equal(t, 7000, appInstance.Config().Port)
 	assert.True(t, appInstance.Config().IsProxyEnabled())
-	assert.Equal(t, []byte(`{"access_token":"test-oauth"}`), mgr.Get().Credentials.OAuthCreds)
+	assert.Equal(t, []byte("tok"), mgr.Get().Credentials.AntigravityOAuthToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -657,7 +656,6 @@ rules:
 		"simplest/models.yaml":                    []byte("models: []\n"),
 		"simplest/providers.yaml":                 []byte("providers: {}\n"),
 		"credentials/auth.json":                   []byte("{}"),
-		"credentials/agy/oauth_creds.json":        []byte(`{"access_token":"test-oauth"}`),
 		"credentials/agy/antigravity-oauth-token": []byte("tok"),
 		"credentials/gemini-api-key":              []byte("key"),
 		"credentials/xai-api-key":                 []byte("xkey"),
