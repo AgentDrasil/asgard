@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,7 +256,7 @@ func TestCleanupRejectsNegativeCutoff(t *testing.T) {
 func TestQueryQuotaMapping(t *testing.T) {
 	in := map[string][]llms.ModelUsage{
 		"opencode": {{
-			Model: "zai/glm-5.3", Remaining: 0.4, RefreshDate: 1234,
+			Model: "zai/glm-5.3", Remaining: 0.4, RefreshDate: 1234, Account: "acc",
 			Limits: []llms.QuotaLimit{{Name: "5h", Remaining: 0.4, RefreshDate: 99}, {Name: "weekly", Remaining: 0.9}},
 		}},
 		"simplest": {{
@@ -305,4 +306,80 @@ func TestQueryQuotaError(t *testing.T) {
 	cl, _ := startService(t, Options{Quota: func(context.Context) (map[string][]llms.ModelUsage, error) { return nil, errors.New("boom") }})
 	_, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
 	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestQueryQuotaPerAccountFanOut(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	for _, d := range []string{"claude/work", "claude/home", "claude/broken", "agy/solo"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o700))
+	}
+	legacy := map[string][]llms.ModelUsage{
+		"claude":   {{Model: "legacy", Remaining: 1}},
+		"agy":      {{Model: "legacy", Remaining: 1}},
+		"opencode": {{Model: "oc", Remaining: 0.3}},
+	}
+	var mu sync.Mutex
+	var asked []string
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) { return legacy, nil },
+		AccountQuota: func(_ context.Context, cli, alias string) ([]llms.ModelUsage, error) {
+			mu.Lock()
+			asked = append(asked, cli+"/"+alias)
+			mu.Unlock()
+			if alias == "broken" {
+				return nil, errors.New("boom")
+			}
+			return []llms.ModelUsage{{Model: "m-" + alias, Remaining: 0.5}}, nil
+		},
+	})
+
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	type row struct{ cli, model, account string }
+	var got []row
+	for _, u := range resp.GetUsages() {
+		got = append(got, row{u.GetCli(), u.GetModel(), u.GetAccount()})
+	}
+	// Sorted by cli; one set per account in alias order; the failing account
+	// is skipped; the CLI without accounts keeps the legacy shape.
+	assert.Equal(t, []row{
+		{"agy", "m-solo", "solo"},
+		{"claude", "m-home", "home"},
+		{"claude", "m-work", "work"},
+		{"opencode", "oc", ""},
+	}, got)
+	assert.ElementsMatch(t, []string{"agy/solo", "claude/broken", "claude/home", "claude/work"}, asked)
+}
+
+func TestQueryQuotaAllAccountsFailKeepsLegacy(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "claude", "work"), 0o700))
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) {
+			return map[string][]llms.ModelUsage{"claude": {{Model: "legacy", Remaining: 1}}}, nil
+		},
+		AccountQuota: func(context.Context, string, string) ([]llms.ModelUsage, error) { return nil, errors.New("boom") },
+	})
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetUsages(), 1)
+	assert.Equal(t, "legacy", resp.GetUsages()[0].GetModel())
+	assert.Equal(t, "", resp.GetUsages()[0].GetAccount())
+}
+
+func TestQueryQuotaAnsweredEmptyDropsLegacy(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "claude", "work"), 0o700))
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) {
+			return map[string][]llms.ModelUsage{"claude": {{Model: "legacy", Remaining: 1}}}, nil
+		},
+		AccountQuota: func(context.Context, string, string) ([]llms.ModelUsage, error) { return nil, nil },
+	})
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetUsages())
 }

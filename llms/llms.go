@@ -49,6 +49,10 @@ type ModelUsage struct {
 	// Balance is the prepaid account balance for pay-as-you-go providers
 	// (e.g. DeepSeek). It is nil for subscription/rate-limit based quotas.
 	Balance *AccountBalance `json:"balance,omitempty"`
+
+	// Account is the runner-local account alias this quota belongs to. It is
+	// empty for CLIs without accounts.
+	Account string `json:"account,omitempty"`
 }
 
 // UsageOptions controls how model usage / quota queries behave.

@@ -553,6 +553,14 @@ func applySubdirMaskRule(args []string, baseDir string, rule *agentspec.SubdirMa
 // buildSandboxArgs constructs the bubblewrap arguments up to and including the
 // "--" separator, i.e. everything except the command run inside the sandbox.
 func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, session string, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
+	return buildSandboxArgsPinned(nil, cfg, agentPath, target, allCLIs, session, runDir, sockDir, chatID, langRules, configPath, proxyOpts...)
+}
+
+// buildSandboxArgsPinned is buildSandboxArgs with an optional set of pinned
+// accounts (cli -> alias) for the query sandbox (allCLIs). When pins is
+// non-empty, the sandbox binds exactly those accounts and never consults the
+// account chooser nor relays sessions.
+func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, session string, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -767,14 +775,22 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 	// Overlay the selected agy account's token over the host ~/.gemini token.
 	// agy refreshes the token in place, so a file bind persists refreshes.
 	if allCLIs || target.CLI == "agy" {
-		if args, err = appendAgyAccountToken(args, home, target.Model); err != nil {
+		sel, err := accountForSandbox("agy", target.Model, allCLIs, pins)
+		if err != nil {
+			return nil, err
+		}
+		if args, err = appendAgyAccountToken(args, home, sel); err != nil {
 			return nil, err
 		}
 	}
 	// Overlay the selected claude account dir over the host ~/.claude. It must
 	// follow the host bind above; later binds under ~/.claude (skills) come after.
 	if allCLIs || target.CLI == "claude" {
-		if args, err = appendClaudeAccountDir(args, home, target.Model, session); err != nil {
+		sel, err := accountForSandbox("claude", target.Model, allCLIs, pins)
+		if err != nil {
+			return nil, err
+		}
+		if args, err = appendClaudeAccountDir(args, home, sel, session); err != nil {
 			return nil, err
 		}
 	}
@@ -930,6 +946,14 @@ const (
 // mounts the credentials of every registered CLI, since one `aw` call queries
 // them all. The returned cleanup removes the query's throwaway directories.
 func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
+	return CommandForQueryWithAccounts(ctx, nil, args...)
+}
+
+// CommandForQueryWithAccounts is CommandForQuery with accounts pinned
+// (cli -> alias): the sandbox binds exactly those accounts and skips account
+// selection. With no pins it behaves like CommandForQuery. The query sandbox
+// never relays sessions.
+func CommandForQueryWithAccounts(ctx context.Context, accts map[string]string, args ...string) (*exec.Cmd, func(), error) {
 	chatID := fmt.Sprintf("aw-query-%d-%d", os.Getpid(), time.Now().UnixNano())
 	cleanup := func() {
 		_ = os.RemoveAll(runnerpaths.SessionDir(chatID))
@@ -940,7 +964,7 @@ func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), er
 		cleanup()
 		return nil, nil, err
 	}
-	bwrapArgs, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", chatID, "", "")
+	bwrapArgs, err := buildSandboxArgsPinned(accts, nil, "", agentspec.CLITarget{}, true, "", runDir, "", chatID, "", "")
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -953,7 +977,13 @@ func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), er
 // RunQuery runs `aw <args...>` in a query sandbox and returns its stdout. It
 // satisfies agentwrapper.QueryRunner.
 func RunQuery(ctx context.Context, args ...string) ([]byte, error) {
-	cmd, cleanup, err := CommandForQuery(ctx, args...)
+	return RunQueryWithAccounts(ctx, nil, args...)
+}
+
+// RunQueryWithAccounts is RunQuery with accounts pinned (cli -> alias); see
+// CommandForQueryWithAccounts.
+func RunQueryWithAccounts(ctx context.Context, accts map[string]string, args ...string) ([]byte, error) {
+	cmd, cleanup, err := CommandForQueryWithAccounts(ctx, accts, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1463,29 +1493,52 @@ func CommandForGit(ctx context.Context, spec GitSandboxSpec) (*exec.Cmd, error) 
 	return exec.CommandContext(ctx, "bwrap", args...), nil
 }
 
-// selectAccount picks the account alias for a CLI; a variable so tests can stub it.
+// selectAccount picks the account alias for a CLI (env override or first
+// alias); a variable so tests can stub it.
 var selectAccount = accounts.Select
 
-// chooseAccount is the single place where the account for (cli, model) is
-// chosen. Currently a placeholder (env override or first alias).
-func chooseAccount(cli, model string) (string, bool, error) {
-	return selectAccount(cli)
+// accountSel is the account chosen for one CLI in a sandbox. strict means the
+// account was requested explicitly (env override or pinned), so a missing
+// credentials file is an error instead of a fall back to host credentials.
+type accountSel struct {
+	alias  string
+	ok     bool
+	strict bool
+}
+
+// accountForSandbox resolves the account for cli in a sandbox:
+//   - pinned query sandbox (allCLIs with pins): exactly the pinned alias, or
+//     none for a CLI that is not pinned; no selection logic runs;
+//   - unpinned query sandbox: the simple selection (env override or first
+//     alias), so a metadata query never triggers quota lookups itself;
+//   - agent sandbox: chooseAccount (quota-aware per cli and model).
+func accountForSandbox(cli, model string, allCLIs bool, pins map[string]string) (accountSel, error) {
+	if allCLIs && len(pins) > 0 {
+		alias, ok := pins[cli]
+		return accountSel{alias: alias, ok: ok, strict: true}, nil
+	}
+	choose := chooseAccount
+	if allCLIs {
+		choose = func(cli, _ string) (string, bool, error) { return selectAccount(cli) }
+	}
+	alias, ok, err := choose(cli, model)
+	if err != nil {
+		return accountSel{}, fmt.Errorf("selecting %s account: %w", cli, err)
+	}
+	return accountSel{alias: alias, ok: ok, strict: os.Getenv(accountEnvName(cli)) != ""}, nil
 }
 
 // agyOAuthTokenRelPath is the agy token path relative to the home directory.
 const agyOAuthTokenRelPath = ".gemini/antigravity-cli/antigravity-oauth-token"
 
-// appendAgyAccountToken binds the selected agy account's token file over the
+// appendAgyAccountToken binds the given agy account's token file over the
 // sandbox's agy token path. It changes nothing when no account is selected or
-// the token file is missing. A selection error (e.g. bad override) is returned.
-func appendAgyAccountToken(args []string, home, model string) ([]string, error) {
-	alias, ok, err := chooseAccount("agy", model)
-	if err != nil {
-		return nil, fmt.Errorf("selecting agy account: %w", err)
-	}
-	if !ok {
+// a selected account's missing token file is an error.
+func appendAgyAccountToken(args []string, home string, sel accountSel) ([]string, error) {
+	if !sel.ok {
 		return args, nil
 	}
+	alias := sel.alias
 	tokenPath, err := accounts.TokenPath(alias)
 	if err != nil {
 		return nil, fmt.Errorf("agy account %q: %w", alias, err)
@@ -1495,30 +1548,24 @@ func appendAgyAccountToken(args []string, home, model string) ([]string, error) 
 		statErr = errors.New("is a directory")
 	}
 	if statErr != nil {
-		// An explicitly requested account must never silently run as the
-		// host's own credentials.
-		if os.Getenv("ASGARD_AGY_ACCOUNT") != "" || !os.IsNotExist(statErr) {
-			return nil, fmt.Errorf("agy account %q token %s: %w", alias, tokenPath, statErr)
-		}
-		log.Warn().Str("cli", "agy").Str("account", alias).Msg("account token file missing, using default credentials")
-		return args, nil
+		// A selected account must never silently run as the host's own
+		// credentials.
+		return nil, fmt.Errorf("agy account %q token %s: %w", alias, tokenPath, statErr)
 	}
 	log.Debug().Str("cli", "agy").Str("account", alias).Msg("binding account token")
 	return append(args, "--bind", tokenPath, filepath.Join(home, agyOAuthTokenRelPath)), nil
 }
 
-// appendClaudeAccountDir binds the selected claude account dir read-write over
+// appendClaudeAccountDir binds the given claude account dir read-write over
 // the sandbox's ~/.claude. When session is set and another account holds it,
-// the session files are first relayed into the chosen account. It changes
-// nothing when no account is selected or the account has no credentials.
-func appendClaudeAccountDir(args []string, home, model, session string) ([]string, error) {
-	alias, ok, err := chooseAccount("claude", model)
-	if err != nil {
-		return nil, fmt.Errorf("selecting claude account: %w", err)
-	}
-	if !ok {
+// the session files are first relayed into the account (agent path only: the
+// query sandbox passes no session). It changes nothing when no account is
+// selected; a selected account without credentials is an error.
+func appendClaudeAccountDir(args []string, home string, sel accountSel, session string) ([]string, error) {
+	if !sel.ok {
 		return args, nil
 	}
+	alias := sel.alias
 	dir, err := accounts.Dir("claude", alias)
 	if err != nil {
 		return nil, fmt.Errorf("claude account %q: %w", alias, err)
@@ -1529,11 +1576,7 @@ func appendClaudeAccountDir(args []string, home, model, session string) ([]strin
 		statErr = errors.New("is a directory")
 	}
 	if statErr != nil {
-		if os.Getenv("ASGARD_CLAUDE_ACCOUNT") != "" || !os.IsNotExist(statErr) {
-			return nil, fmt.Errorf("claude account %q credentials %s: %w", alias, credPath, statErr)
-		}
-		log.Warn().Str("cli", "claude").Str("account", alias).Msg("account credentials missing, using default credentials")
-		return args, nil
+		return nil, fmt.Errorf("claude account %q credentials %s: %w", alias, credPath, statErr)
 	}
 	if session != "" {
 		if err := relayClaudeSession(alias, session); err != nil {

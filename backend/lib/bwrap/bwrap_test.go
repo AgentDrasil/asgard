@@ -1643,11 +1643,10 @@ func TestBuildSandboxArgs_AgyAccountToken(t *testing.T) {
 		t.Fatal("unexpected token bind without accounts")
 	}
 
-	// Account without token file: no bind.
+	// Selected account without token file: error, never host credentials.
 	mkAcc("alpha", false)
-	args, _ = build(target, false)
-	if slices.Contains(args, dest) {
-		t.Fatal("unexpected token bind with missing token file")
+	if _, err := build(target, false); err == nil {
+		t.Fatal("expected error for selected account without token file")
 	}
 
 	// Token present: bound after the .gemini bind.
@@ -1747,11 +1746,10 @@ func TestBuildSandboxArgs_ClaudeAccountDir(t *testing.T) {
 		}
 	}
 
-	// Account without credentials: warn, no bind.
+	// Selected account without credentials: error, never host credentials.
 	alpha := mkAcc("alpha", false)
-	args, err = build(target, false, "")
-	require.NoError(t, err)
-	assert.Equal(t, -1, indexOfSeq(args, "--bind", alpha, hostClaude))
+	_, err = build(target, false, "")
+	require.Error(t, err)
 
 	// With credentials: bound after the host ~/.claude bind, before the skills mount.
 	require.NoError(t, os.WriteFile(filepath.Join(alpha, ".credentials.json"), []byte("{}"), 0o600))

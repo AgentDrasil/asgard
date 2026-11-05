@@ -6044,14 +6044,17 @@ func (x *AccountBalance) GetBalanceInfos() []*BalanceInfo {
 
 // ModelUsage mirrors llms.ModelUsage for one target.
 type ModelUsage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Cli           string                 `protobuf:"bytes,1,opt,name=cli,proto3" json:"cli,omitempty"`
-	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
-	Remaining     float64                `protobuf:"fixed64,3,opt,name=remaining,proto3" json:"remaining,omitempty"`
-	RefreshDate   int64                  `protobuf:"varint,4,opt,name=refresh_date,json=refreshDate,proto3" json:"refresh_date,omitempty"`
-	Limits        []*QuotaLimit          `protobuf:"bytes,5,rep,name=limits,proto3" json:"limits,omitempty"`
-	Balance       *AccountBalance        `protobuf:"bytes,6,opt,name=balance,proto3" json:"balance,omitempty"`
-	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Cli         string                 `protobuf:"bytes,1,opt,name=cli,proto3" json:"cli,omitempty"`
+	Model       string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	Remaining   float64                `protobuf:"fixed64,3,opt,name=remaining,proto3" json:"remaining,omitempty"`
+	RefreshDate int64                  `protobuf:"varint,4,opt,name=refresh_date,json=refreshDate,proto3" json:"refresh_date,omitempty"`
+	Limits      []*QuotaLimit          `protobuf:"bytes,5,rep,name=limits,proto3" json:"limits,omitempty"`
+	Balance     *AccountBalance        `protobuf:"bytes,6,opt,name=balance,proto3" json:"balance,omitempty"`
+	Enabled     bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// account is the runner-local account alias this quota belongs to; empty
+	// for a CLI without accounts.
+	Account       string `protobuf:"bytes,8,opt,name=account,proto3" json:"account,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6133,6 +6136,13 @@ func (x *ModelUsage) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *ModelUsage) GetAccount() string {
+	if x != nil {
+		return x.Account
+	}
+	return ""
 }
 
 type QueryQuotaResponse struct {
@@ -6646,7 +6656,7 @@ const file_runner_proto_rawDesc = "" +
 	"\x11topped_up_balance\x18\x04 \x01(\tR\x0ftoppedUpBalance\"w\n" +
 	"\x0eAccountBalance\x12!\n" +
 	"\fis_available\x18\x01 \x01(\bR\visAvailable\x12B\n" +
-	"\rbalance_infos\x18\x02 \x03(\v2\x1d.asgard.runner.v1.BalanceInfoR\fbalanceInfos\"\x81\x02\n" +
+	"\rbalance_infos\x18\x02 \x03(\v2\x1d.asgard.runner.v1.BalanceInfoR\fbalanceInfos\"\x9b\x02\n" +
 	"\n" +
 	"ModelUsage\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
@@ -6655,7 +6665,8 @@ const file_runner_proto_rawDesc = "" +
 	"\frefresh_date\x18\x04 \x01(\x03R\vrefreshDate\x124\n" +
 	"\x06limits\x18\x05 \x03(\v2\x1c.asgard.runner.v1.QuotaLimitR\x06limits\x12:\n" +
 	"\abalance\x18\x06 \x01(\v2 .asgard.runner.v1.AccountBalanceR\abalance\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\"J\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\x12\x18\n" +
+	"\aaccount\x18\b \x01(\tR\aaccount\"J\n" +
 	"\x12QueryQuotaResponse\x124\n" +
 	"\x06usages\x18\x01 \x03(\v2\x1c.asgard.runner.v1.ModelUsageR\x06usages*?\n" +
 	"\vAgentSource\x12\x17\n" +

@@ -3,13 +3,18 @@ package service
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
+	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -71,6 +76,9 @@ func (s *Service) QueryQuota(ctx context.Context, req *runnerpb.QueryQuotaReques
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	if res != nil {
+		s.applyAccountQuotas(ctx, res)
+	}
 	usages := runnerfs.QuotaToProto(res)
 	if targets := req.GetTargets(); len(targets) > 0 {
 		var kept []*runnerpb.ModelUsage
@@ -85,4 +93,63 @@ func (s *Service) QueryQuota(ctx context.Context, req *runnerpb.QueryQuotaReques
 		usages = kept
 	}
 	return &runnerpb.QueryQuotaResponse{Usages: usages}, nil
+}
+
+// accountQuotaCLIs are the CLIs whose quota is reported per runner account.
+var accountQuotaCLIs = []string{"agy", "claude"}
+
+// accountQuotaTimeout bounds the whole per-account quota fan-out.
+const accountQuotaTimeout = 40 * time.Second
+
+// applyAccountQuotas replaces res[cli] of each account-aware CLI that has
+// accounts with one usage set per account (Account = alias, alias order). The
+// accounts are queried concurrently; a failing account is logged and skipped.
+// When no account answers, the legacy entries of the CLI are kept.
+func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.ModelUsage) {
+	fetch := s.accountQuota
+	if fetch == nil {
+		fetch = bwrap.QueryAccountQuota
+	}
+	ctx, cancel := context.WithTimeout(ctx, accountQuotaTimeout)
+	defer cancel()
+	for _, cli := range accountQuotaCLIs {
+		aliases, err := accounts.List(cli)
+		if err != nil {
+			log.Warn().Err(err).Str("cli", cli).Msg("listing accounts for quota failed")
+			continue
+		}
+		if len(aliases) == 0 {
+			continue
+		}
+		perAccount := make([][]llms.ModelUsage, len(aliases))
+		answeredAcc := make([]bool, len(aliases))
+		var wg sync.WaitGroup
+		for i, alias := range aliases {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				usages, err := fetch(ctx, cli, alias)
+				if err != nil {
+					log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota query failed, skipping")
+					return
+				}
+				for j := range usages {
+					usages[j].Account = alias
+				}
+				perAccount[i] = usages
+				answeredAcc[i] = true
+			}()
+		}
+		wg.Wait()
+		var merged []llms.ModelUsage
+		answered := false
+		for i, u := range perAccount {
+			answered = answered || answeredAcc[i]
+			merged = append(merged, u...)
+		}
+		if !answered {
+			continue
+		}
+		res[cli] = merged
+	}
 }

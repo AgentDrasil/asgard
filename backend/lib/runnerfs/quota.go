@@ -22,7 +22,7 @@ func QuotaToProto(res map[string][]llms.ModelUsage) []*runnerpb.ModelUsage {
 	for _, cli := range clis {
 		for _, u := range res[cli] {
 			m := &runnerpb.ModelUsage{
-				Cli: cli, Model: u.Model, Remaining: u.Remaining, RefreshDate: u.RefreshDate, Enabled: true,
+				Cli: cli, Model: u.Model, Remaining: u.Remaining, RefreshDate: u.RefreshDate, Enabled: true, Account: u.Account,
 			}
 			for _, l := range u.Limits {
 				m.Limits = append(m.Limits, &runnerpb.QuotaLimit{Name: l.Name, Remaining: l.Remaining, RefreshDate: l.RefreshDate})
@@ -51,7 +51,7 @@ func QuotaFromProto(usages []*runnerpb.ModelUsage) map[string][]llms.ModelUsage 
 		if !m.GetEnabled() {
 			continue
 		}
-		u := llms.ModelUsage{Model: m.GetModel(), Remaining: m.GetRemaining(), RefreshDate: m.GetRefreshDate()}
+		u := llms.ModelUsage{Model: m.GetModel(), Remaining: m.GetRemaining(), RefreshDate: m.GetRefreshDate(), Account: m.GetAccount()}
 		for _, l := range m.GetLimits() {
 			u.Limits = append(u.Limits, llms.QuotaLimit{Name: l.GetName(), Remaining: l.GetRemaining(), RefreshDate: l.GetRefreshDate()})
 		}

@@ -55,6 +55,10 @@ type Options struct {
 	// Quota queries the runner's quota (default agentwrapper.GetQuota; tests
 	// substitute it).
 	Quota func(context.Context) (map[string][]llms.ModelUsage, error)
+	// AccountQuota queries the quota of one account of a CLI (default
+	// bwrap.QueryAccountQuota: a query sandbox pinned to the account; tests
+	// substitute it).
+	AccountQuota func(ctx context.Context, cli, alias string) ([]llms.ModelUsage, error)
 }
 
 // Service implements runnerpb.RunnerServiceServer. RPCs that are not
@@ -75,6 +79,9 @@ type Service struct {
 	// quota queries the runner's quota (agentwrapper.GetQuota; tests
 	// substitute it).
 	quota func(context.Context) (map[string][]llms.ModelUsage, error)
+	// accountQuota queries one account's quota (bwrap.QueryAccountQuota; tests
+	// substitute it).
+	accountQuota func(ctx context.Context, cli, alias string) ([]llms.ModelUsage, error)
 	// runSandboxed runs a sandboxed command (cmdexec.RunSandboxed; tests
 	// substitute it).
 	runSandboxed func(context.Context, cmdexec.SandboxSpec, io.Writer, io.Writer) (int, error)
@@ -89,7 +96,7 @@ func New(opts Options) *Service {
 	return &Service{
 		idem: newIdemCache(opts.IdemTTL, opts.IdemMax), agents: opts.Agents, shell: opts.Shell, gitExec: opts.GitExec,
 		cmds: newCmdRegistry(opts.IdemTTL, 0), ready: opts.Ready, sandboxConf: opts.SandboxConf,
-		allowUnsandboxed: opts.AllowUnsandboxed, detachGrace: grace, quota: opts.Quota, runSandboxed: cmdexec.RunSandboxed,
+		allowUnsandboxed: opts.AllowUnsandboxed, detachGrace: grace, quota: opts.Quota, accountQuota: opts.AccountQuota, runSandboxed: cmdexec.RunSandboxed,
 	}
 }
 

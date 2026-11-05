@@ -32,6 +32,7 @@ interface ModelUsage {
   refresh_date?: number;
   limits?: QuotaLimit[];
   balance?: AccountBalance;
+  account?: string;
 }
 
 const props = defineProps<{
@@ -220,11 +221,13 @@ defineExpose({
                 <div class="space-y-4">
                   <div
                     v-for="m in models"
-                    :key="m.model"
+                    :key="`${m.account ?? ''}/${m.model}`"
                     class="bg-base-300/40 border border-base-100/30 rounded-xl p-4 space-y-3"
                   >
                     <div class="flex justify-between items-start">
-                      <h4 class="font-medium text-sm text-base-content">{{ m.model }}</h4>
+                      <h4 class="font-medium text-sm text-base-content">
+                        {{ m.account ? `${m.model} · ${m.account}` : m.model }}
+                      </h4>
                       <span
                         class="text-xs font-semibold px-2 py-0.5 rounded-md"
                         :class="[

@@ -62,6 +62,18 @@ describe("QuotaModal", () => {
     expect(root.querySelector('[data-testid="quota-runner-section"]')).toBeNull();
   });
 
+  it("shows the account alias next to the model name when present", async () => {
+    await mount({
+      claude: [
+        { model: "m1", remaining: 0.5, account: "work" },
+        { model: "m1", remaining: 0.9, account: "home" },
+        { model: "m2", remaining: 1 },
+      ],
+    });
+    const titles = Array.from(root.querySelectorAll("h4")).map((h) => h.textContent?.trim());
+    expect(titles).toEqual(["m1 · work", "m1 · home", "m2"]);
+  });
+
   it("calls /api/quota without runner in legacy mode", async () => {
     const fetchSpy = await mount({ claude: [model] });
     expect(fetchSpy).toHaveBeenCalledWith("/api/quota");

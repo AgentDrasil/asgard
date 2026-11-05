@@ -106,6 +106,14 @@ Runner accounts live on local disk rather than in etcd for several reasons:
 
 Claude sandboxes bind the selected account directory (read-write) as `~/.claude`, so each account keeps its own credentials, config and projects. When a run resumes a session (`--session`) that lives in a different account than the one chosen, the runner relays only that session's file family (`projects/*/<sid>.jsonl` and `<sid>/`, `file-history/<sid>`, `session-env/<sid>`, `todos/<sid>-*.json`) into the chosen account before the sandbox starts. Credentials, `.claude.json` and `sessions/` are never copied: claude refresh tokens rotate, so exactly one account directory must own each credential. Concurrent sandboxes on the same account share its directory.
 
+**Account selection** is per `(cli, model)`: an agent run uses the first account (sorted alias order) that still has quota for its model, so account A can serve `gemini-3` until its quota is exhausted while a concurrent run needing `gemini-4` (which A has no quota for) uses account B. Rules:
+- `ASGARD_<CLI>_ACCOUNT` (e.g. `ASGARD_AGY_ACCOUNT`) always wins when set.
+- With zero or one account no quota lookup happens.
+- Otherwise each account's quota is read (cached per `(cli, alias)` for 60s, one shared fetch for concurrent runs). A model with no quota entry on an account counts as available; an entry is exhausted when its remaining fraction or any of its limits is `0`. If every account is exhausted, the account whose quota refreshes first is used.
+- If an account's quota cannot be fetched it is treated as available (a warning is logged), so selection falls back to the first alias.
+
+`/api/quota` reports quota per account for `agy` and `claude`: each runner queries every account separately (in a sandbox pinned to that account) and the usage entries carry an `"account": "<alias>"` field (omitted for CLIs without accounts). An account whose query fails is skipped.
+
 ## Sandbox Architecture
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).

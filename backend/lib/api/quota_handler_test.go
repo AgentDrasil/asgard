@@ -124,6 +124,28 @@ func TestQuotaProtoRoundTripKeepsLimits(t *testing.T) {
 	assert.JSONEq(t, `{"opencode":[{"model":"m1","remaining":0.5,"refresh_date":7,"limits":[{"name":"5h","remaining":0.5,"refresh_date":7}]}]}`, string(body))
 }
 
+func TestQuotaForwardsAccount(t *testing.T) {
+	usages := []*runnerpb.ModelUsage{
+		{Cli: "claude", Model: "m1", Remaining: 0.5, Enabled: true, Account: "work"},
+		{Cli: "claude", Model: "m1", Remaining: 0.9, Enabled: true, Account: "home"},
+		{Cli: "opencode", Model: "m2", Remaining: 1, Enabled: true},
+	}
+	s := quotaServer([]runnerhub.NodeInfo{{NodeID: "a", Online: true}}, map[string]quotaClient{"a": {usages: usages}})
+	_, body := getQuota(t, s, "?runner=a")
+	assert.JSONEq(t, `{"claude":[{"model":"m1","remaining":0.5,"account":"work"},{"model":"m1","remaining":0.9,"account":"home"}],"opencode":[{"model":"m2","remaining":1}]}`, string(body))
+
+	// Aggregate shape keeps the account per runner.
+	s = quotaServer([]runnerhub.NodeInfo{{NodeID: "a", Online: true}, {NodeID: "b", Online: true}},
+		map[string]quotaClient{"a": {usages: usages}, "b": {usages: usageB}})
+	_, body = getQuota(t, s, "")
+	var all struct {
+		Runners map[string]map[string][]map[string]any `json:"runners"`
+	}
+	require.NoError(t, json.Unmarshal(body, &all))
+	assert.Equal(t, "work", all.Runners["a"]["claude"][0]["account"])
+	assert.NotContains(t, all.Runners["b"]["simplest"][0], "account")
+}
+
 // Creating a runner-bound chat leaves the backend's own data dirs alone.
 func TestCreateRunnerBoundSessionCreatesNoLocalDirs(t *testing.T) {
 	f := setupBindingFixture(t)

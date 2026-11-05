@@ -851,6 +851,9 @@ message ModelUsage {
   repeated QuotaLimit limits = 5;
   AccountBalance balance = 6;
   bool enabled = 7;
+  // account is the runner-local account alias this quota belongs to; empty
+  // for a CLI without accounts.
+  string account = 8;
 }
 message QueryQuotaResponse {
   repeated ModelUsage usages = 1;
