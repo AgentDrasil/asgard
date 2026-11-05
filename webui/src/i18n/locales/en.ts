@@ -78,6 +78,14 @@ export const en = {
     unassigned: "Not assigned to any user",
     noUsers: "No users have signed in yet.",
     saveFailed: "Failed to update runner assignment",
+    assignedUsers: "Assigned Users",
+    addUser: "Add User",
+    searchUsersPlaceholder: "Search users by name, email, or ID...",
+    noMatchingUsers: "No matching users found",
+    allUsersAssigned: "All users are assigned to this runner",
+    removeUser: "Remove user",
+    userAssignedSuccess: "User assigned successfully",
+    userRemovedSuccess: "User removed successfully",
   },
   runners: {
     title: "Runners",
@@ -394,6 +402,8 @@ export const en = {
     proxySecrets: "Personal API Keys",
     proxyKeysCardTitle: "Personal API Keys",
     proxyKeysCardDesc: "Manage and configure personal API keys injected into agent sandboxes.",
+    runnersCardTitle: "Runners",
+    runnersCardDesc: "View available runner nodes, health status, and manage user assignments.",
     proxySecretsDesc:
       "Manage your personal API keys and secrets (e.g. GEMINI_API_KEY, OPENAI_API_KEY) injected into agent sandboxes.",
     proxySecretsAddKey: "Add Key",

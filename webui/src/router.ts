@@ -8,6 +8,7 @@ import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 import UserProxyKeysView from "./views/UserProxyKeysView.vue";
+import RunnersView from "./views/RunnersView.vue";
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -68,6 +69,11 @@ export const routes: RouteRecordRaw[] = [
     path: "/settings/keys",
     name: "settings-keys",
     component: UserProxyKeysView,
+  },
+  {
+    path: "/settings/runners",
+    name: "settings-runners",
+    component: RunnersView,
   },
 ];
 

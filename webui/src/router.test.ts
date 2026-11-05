@@ -8,6 +8,7 @@ import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 import UserProxyKeysView from "./views/UserProxyKeysView.vue";
+import RunnersView from "./views/RunnersView.vue";
 
 describe("router configuration", () => {
   it("redirects root path '/' to '/dashboard'", () => {
@@ -16,7 +17,7 @@ describe("router configuration", () => {
     expect(rootRoute?.redirect).toBe("/dashboard");
   });
 
-  it("registers routes for /dashboard, /settings, /settings/keybindings, /settings/config, and /settings/logs with actual components", () => {
+  it("registers routes for /dashboard, /settings, /settings/keybindings, /settings/config, /settings/logs, /settings/keys, and /settings/runners with actual components", () => {
     const dashboardRoute = routes.find((r) => r.path === "/dashboard");
     const settingsRoute = routes.find((r) => r.path === "/settings");
     const keybindingsRoute = routes.find((r) => r.path === "/settings/keybindings");
@@ -24,6 +25,7 @@ describe("router configuration", () => {
     const logsRoute = routes.find((r) => r.path === "/settings/logs");
     const compressionRoute = routes.find((r) => r.path === "/settings/compression");
     const keysRoute = routes.find((r) => r.path === "/settings/keys");
+    const runnersRoute = routes.find((r) => r.path === "/settings/runners");
 
     expect(dashboardRoute).toBeDefined();
     expect(dashboardRoute?.name).toBe("dashboard");
@@ -52,5 +54,9 @@ describe("router configuration", () => {
     expect(keysRoute).toBeDefined();
     expect(keysRoute?.name).toBe("settings-keys");
     expect(keysRoute?.component).toBe(UserProxyKeysView);
+
+    expect(runnersRoute).toBeDefined();
+    expect(runnersRoute?.name).toBe("settings-runners");
+    expect(runnersRoute?.component).toBe(RunnersView);
   });
 });

@@ -80,6 +80,14 @@ export const zhCN: MessageSchema = {
     unassigned: "尚未分配给任何用户",
     noUsers: "还没有用户登录过。",
     saveFailed: "更新 runner 分配失败",
+    assignedUsers: "已分配用户",
+    addUser: "添加用户",
+    searchUsersPlaceholder: "按姓名、邮箱或 ID 搜索用户...",
+    noMatchingUsers: "未找到匹配的用户",
+    allUsersAssigned: "所有用户均已分配给该 Runner",
+    removeUser: "移除用户",
+    userAssignedSuccess: "用户分配成功",
+    userRemovedSuccess: "用户已移除",
   },
   runners: {
     title: "Runner 节点",
@@ -388,6 +396,8 @@ export const zhCN: MessageSchema = {
     proxySecrets: "个人 API 密钥",
     proxyKeysCardTitle: "个人 API 密钥",
     proxyKeysCardDesc: "管理和配置注入到 Agent 沙箱的个人 API 密钥（如 GEMINI_API_KEY 等）。",
+    runnersCardTitle: "Runner 节点",
+    runnersCardDesc: "查看可用 Runner 节点、健康状态并管理用户授权。",
     proxySecretsDesc:
       "管理注入到 Agent 沙箱中的个人 API 密钥与代理密钥（如 GEMINI_API_KEY、OPENAI_API_KEY）。",
     proxySecretsAddKey: "添加密钥",

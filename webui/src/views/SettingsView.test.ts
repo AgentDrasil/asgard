@@ -86,6 +86,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("System & Server Actions");
     expect(root.textContent).toContain("Reload Agents");
     expect(root.textContent).toContain("Personal API Keys");
+    expect(root.textContent).toContain("Runners");
     expect(root.textContent).toContain("Restart Server");
     expect(root.textContent).toContain("Usage & Quota");
     expect(root.textContent).toContain("Configuration & Diagnostics");
@@ -112,6 +113,7 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("系统与服务操作");
     expect(root.textContent).toContain("重载 Agent");
     expect(root.textContent).toContain("个人 API 密钥");
+    expect(root.textContent).toContain("Runner 节点");
     expect(root.textContent).toContain("重启服务器");
     expect(root.textContent).toContain("用量与配额");
     expect(root.textContent).toContain("配置与诊断");
@@ -193,6 +195,24 @@ describe("SettingsView.vue", () => {
     app.unmount();
   });
 
+  it("navigates to /settings/runners when Runners card is clicked", async () => {
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const runnersCard = root.querySelector<HTMLElement>('[data-testid="nav-runners"]');
+    expect(runnersCard).not.toBeNull();
+    runnersCard!.click();
+
+    expect(mockPush).toHaveBeenCalledWith("/settings/runners");
+    app.unmount();
+  });
+
   it("restricts server logs and diagnostics to admin users", async () => {
     vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
     vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
@@ -234,17 +254,15 @@ describe("SettingsView.vue", () => {
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
-    const getLogsSpy = vi
-      .spyOn(api, "getSystemLogs")
-      .mockResolvedValue([
-        {
-          id: 1,
-          timestamp: new Date().toISOString(),
-          level: "warn",
-          source: "backend",
-          message: "w",
-        },
-      ]);
+    const getLogsSpy = vi.spyOn(api, "getSystemLogs").mockResolvedValue([
+      {
+        id: 1,
+        timestamp: new Date().toISOString(),
+        level: "warn",
+        source: "backend",
+        message: "w",
+      },
+    ]);
 
     const app = createApp({
       render() {

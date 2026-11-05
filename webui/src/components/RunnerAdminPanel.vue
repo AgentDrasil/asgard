@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { Icon } from "@iconify/vue";
 import { getManageRunners, setRunnerUsers } from "../lib/api";
 import { useRunners } from "../composables/useRunners";
 import { useToast } from "../composables/useToast";
@@ -14,21 +15,61 @@ const runners = ref<ManageRunner[]>([]);
 const users = ref<ManageUser[]>([]);
 const loading = ref(false);
 const saving = ref("");
+const searchQueries = ref<Record<string, string>>({});
+const isSearchOpen = ref<Record<string, boolean>>({});
 
-const userLabel = (u: ManageUser) => u.email || u.name || u.subject;
+const usersMap = computed(() => new Map(users.value.map((u) => [u.subject, u])));
+
+function getUserInitials(u?: ManageUser): string {
+  if (!u) return "?";
+  const source = u.name || u.email || u.subject || "";
+  const parts = source.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join("");
+}
+
+function userDisplayName(u?: ManageUser): string {
+  if (!u) return "";
+  return u.name || u.email || u.subject;
+}
+
+function availableUsers(r: ManageRunner): ManageUser[] {
+  return users.value.filter((u) => !r.users.includes(u.subject));
+}
+
+function filteredUsers(r: ManageRunner): ManageUser[] {
+  const q = (searchQueries.value[r.node_id] || "").trim().toLowerCase();
+  const available = availableUsers(r);
+  if (!q) return available.slice(0, 10);
+  return available.filter((u) => {
+    const name = (u.name || "").toLowerCase();
+    const email = (u.email || "").toLowerCase();
+    const sub = u.subject.toLowerCase();
+    return name.includes(q) || email.includes(q) || sub.includes(q);
+  });
+}
 
 async function load() {
   loading.value = true;
-  const res = await getManageRunners();
-  if (res) {
-    runners.value = res.runners;
-    users.value = res.users;
+  try {
+    const res = await getManageRunners();
+    if (res) {
+      runners.value = res.runners;
+      users.value = res.users;
+    }
+  } catch (err) {
+    toast.error(String(err));
+  } finally {
+    loading.value = false;
   }
-  loading.value = false;
 }
 
-async function toggle(r: ManageRunner, subject: string, checked: boolean) {
-  const next = checked ? [...r.users, subject] : r.users.filter((s) => s !== subject);
+async function addUser(r: ManageRunner, subject: string) {
+  if (r.users.includes(subject)) return;
+  const next = [...r.users, subject];
   saving.value = r.node_id;
   const err = await setRunnerUsers(r.node_id, next);
   saving.value = "";
@@ -36,47 +77,269 @@ async function toggle(r: ManageRunner, subject: string, checked: boolean) {
     toast.error(`${t("runnerAdmin.saveFailed")}: ${err}`);
   } else {
     r.users = next;
+    searchQueries.value[r.node_id] = "";
+    isSearchOpen.value[r.node_id] = false;
+    toast.success(t("runnerAdmin.userAssignedSuccess"));
     void refreshRunners();
   }
 }
 
-onMounted(() => void load());
+async function removeUser(r: ManageRunner, subject: string) {
+  const next = r.users.filter((s) => s !== subject);
+  saving.value = r.node_id;
+  const err = await setRunnerUsers(r.node_id, next);
+  saving.value = "";
+  if (err) {
+    toast.error(`${t("runnerAdmin.saveFailed")}: ${err}`);
+  } else {
+    r.users = next;
+    toast.success(t("runnerAdmin.userRemovedSuccess"));
+    void refreshRunners();
+  }
+}
+
+function handleDocumentClick(e: MouseEvent) {
+  const target = e.target as Node | null;
+  if (!(target instanceof Element) || !target.closest("[data-runner-search]")) {
+    isSearchOpen.value = {};
+  }
+}
+
+onMounted(() => {
+  void load();
+  document.addEventListener("click", handleDocumentClick);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleDocumentClick);
+});
 </script>
 
 <template>
   <section class="space-y-3" data-testid="runner-admin-panel">
-    <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-      {{ t("runnerAdmin.title") }}
-    </h2>
-    <div class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 space-y-3">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
+        {{ t("runnerAdmin.title") }}
+      </h2>
+      <button
+        class="btn btn-ghost btn-xs gap-1.5"
+        :disabled="loading"
+        data-testid="runner-admin-refresh"
+        @click="load"
+      >
+        <Icon icon="mynaui:refresh" :class="['h-4 w-4', { 'animate-spin': loading }]" />
+        <span>{{ t("runners.refresh") }}</span>
+      </button>
+    </div>
+
+    <div class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 space-y-4">
       <p class="text-xs text-base-content/70">{{ t("runnerAdmin.desc") }}</p>
-      <p v-if="!loading && runners.length === 0" class="text-sm text-base-content/60">
+
+      <div v-if="loading" class="flex justify-center py-6">
+        <span class="loading loading-spinner loading-sm text-primary"></span>
+      </div>
+
+      <p v-else-if="runners.length === 0" class="text-sm text-base-content/60">
         {{ t("runners.noRunners") }}
       </p>
-      <p v-else-if="!loading && users.length === 0" class="text-sm text-base-content/60">
+
+      <p v-else-if="users.length === 0" class="text-sm text-base-content/60">
         {{ t("runnerAdmin.noUsers") }}
       </p>
-      <div
-        v-for="r in runners"
-        :key="r.node_id"
-        class="py-2 space-y-1"
-        data-testid="runner-admin-row"
-      >
-        <div class="font-mono font-medium">{{ r.node_id }}</div>
-        <p v-if="r.users.length === 0" class="text-xs text-warning">
-          {{ t("runnerAdmin.unassigned") }}
-        </p>
-        <div class="flex flex-wrap gap-x-4 gap-y-1">
-          <label v-for="u in users" :key="u.subject" class="flex items-center gap-1.5 text-sm">
-            <input
-              type="checkbox"
-              class="checkbox checkbox-xs"
-              :checked="r.users.includes(u.subject)"
-              :disabled="saving === r.node_id"
-              @change="toggle(r, u.subject, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ userLabel(u) }}</span>
-          </label>
+
+      <div v-else class="space-y-4 divide-y divide-base-300">
+        <div
+          v-for="r in runners"
+          :key="r.node_id"
+          class="pt-3 first:pt-0 space-y-3"
+          data-testid="runner-admin-row"
+        >
+          <!-- Runner Header -->
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span
+                :class="[
+                  'inline-block h-2.5 w-2.5 rounded-full shrink-0',
+                  r.online ? 'bg-success' : 'bg-error',
+                ]"
+              />
+              <span class="font-mono font-medium text-sm text-base-content">{{ r.node_id }}</span>
+              <span :class="['badge badge-xs', r.online ? 'badge-success' : 'badge-error']">
+                {{ r.online ? t("runners.online") : t("runners.offline") }}
+              </span>
+            </div>
+            <span class="text-xs text-base-content/60">
+              {{ t("runnerAdmin.assignedUsers") }}: {{ r.users.length }}
+            </span>
+          </div>
+
+          <!-- Unassigned Warning -->
+          <p v-if="r.users.length === 0" class="text-xs text-warning flex items-center gap-1.5">
+            <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0" />
+            <span>{{ t("runnerAdmin.unassigned") }}</span>
+          </p>
+
+          <!-- Assigned Users Chips -->
+          <div
+            v-if="r.users.length > 0"
+            class="flex flex-wrap gap-2"
+            data-testid="assigned-users-list"
+          >
+            <div
+              v-for="sub in r.users"
+              :key="sub"
+              class="inline-flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-2.5 py-1 text-xs shadow-xs"
+              data-testid="assigned-user-chip"
+            >
+              <img
+                v-if="usersMap.get(sub)?.avatarUrl"
+                :src="usersMap.get(sub)!.avatarUrl"
+                alt=""
+                class="w-5 h-5 rounded-full object-cover shrink-0"
+              />
+              <span
+                v-else
+                class="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center shrink-0"
+              >
+                {{ getUserInitials(usersMap.get(sub)) }}
+              </span>
+
+              <div class="flex items-center gap-1 min-w-0">
+                <span class="font-medium text-base-content truncate max-w-[120px]">
+                  {{ userDisplayName(usersMap.get(sub)) || sub }}
+                </span>
+                <span
+                  v-if="usersMap.get(sub)?.email && usersMap.get(sub)?.name"
+                  class="text-[11px] text-base-content/50 truncate max-w-[120px]"
+                >
+                  ({{ usersMap.get(sub)!.email }})
+                </span>
+              </div>
+
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs btn-circle text-base-content/50 hover:text-error shrink-0"
+                :disabled="saving === r.node_id"
+                :title="t('runnerAdmin.removeUser')"
+                :aria-label="t('runnerAdmin.removeUser')"
+                data-testid="remove-user-btn"
+                @click="removeUser(r, sub)"
+              >
+                <Icon icon="mynaui:x" class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Add User Search Box -->
+          <div class="relative w-full max-w-md pt-1" data-runner-search>
+            <div class="flex items-center gap-2">
+              <div
+                class="flex items-center gap-2 input input-sm input-bordered bg-base-100 rounded-lg flex-1 shadow-xs"
+              >
+                <Icon icon="mynaui:search" class="w-4 h-4 text-base-content/40 shrink-0" />
+                <input
+                  v-model="searchQueries[r.node_id]"
+                  type="text"
+                  class="w-full bg-transparent focus:outline-hidden text-xs"
+                  :placeholder="t('runnerAdmin.searchUsersPlaceholder')"
+                  data-testid="search-users-input"
+                  @focus="isSearchOpen[r.node_id] = true"
+                  @keydown.esc="isSearchOpen[r.node_id] = false"
+                />
+                <button
+                  v-if="searchQueries[r.node_id]"
+                  type="button"
+                  class="btn btn-ghost btn-xs btn-circle text-base-content/50"
+                  @click="searchQueries[r.node_id] = ''"
+                >
+                  <Icon icon="mynaui:x" class="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <button
+                v-if="!isSearchOpen[r.node_id]"
+                type="button"
+                class="btn btn-outline btn-sm gap-1 text-xs shrink-0"
+                @click="isSearchOpen[r.node_id] = true"
+              >
+                <Icon icon="mynaui:plus" class="w-3.5 h-3.5" />
+                <span>{{ t("runnerAdmin.addUser") }}</span>
+              </button>
+
+              <button
+                v-else
+                type="button"
+                class="btn btn-ghost btn-sm text-xs shrink-0"
+                @click="isSearchOpen[r.node_id] = false"
+              >
+                {{ t("common.cancel") }}
+              </button>
+            </div>
+
+            <!-- Search Dropdown Results -->
+            <div
+              v-if="isSearchOpen[r.node_id]"
+              class="absolute left-0 right-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-1 shadow-xl"
+              data-testid="user-search-dropdown"
+            >
+              <div
+                v-if="availableUsers(r).length === 0"
+                class="py-3 px-3 text-center text-xs text-base-content/50"
+              >
+                {{ t("runnerAdmin.allUsersAssigned") }}
+              </div>
+              <div
+                v-else-if="filteredUsers(r).length === 0"
+                class="py-3 px-3 text-center text-xs text-base-content/50"
+              >
+                {{ t("runnerAdmin.noMatchingUsers") }}
+              </div>
+              <ul v-else class="menu menu-xs p-0">
+                <li v-for="u in filteredUsers(r)" :key="u.subject">
+                  <button
+                    type="button"
+                    class="flex items-center justify-between gap-3 py-2 px-2.5 rounded-lg hover:bg-base-200"
+                    :disabled="saving === r.node_id"
+                    data-testid="user-option"
+                    @click="addUser(r, u.subject)"
+                  >
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <img
+                        v-if="u.avatarUrl"
+                        :src="u.avatarUrl"
+                        alt=""
+                        class="w-6 h-6 rounded-full object-cover shrink-0"
+                      />
+                      <span
+                        v-else
+                        class="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center shrink-0"
+                      >
+                        {{ getUserInitials(u) }}
+                      </span>
+                      <div class="flex flex-col text-left min-w-0">
+                        <span class="font-medium text-xs text-base-content truncate">
+                          {{ userDisplayName(u) }}
+                        </span>
+                        <span v-if="u.email" class="text-[11px] text-base-content/60 truncate">
+                          {{ u.email }}
+                        </span>
+                        <span
+                          v-else-if="u.name"
+                          class="text-[10px] text-base-content/40 font-mono truncate"
+                        >
+                          {{ u.subject }}
+                        </span>
+                      </div>
+                    </div>
+                    <span class="btn btn-primary btn-xs shrink-0">
+                      <Icon icon="mynaui:plus" class="w-3.5 h-3.5" />
+                      <span>{{ t("runnerAdmin.addUser") }}</span>
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     </div>
