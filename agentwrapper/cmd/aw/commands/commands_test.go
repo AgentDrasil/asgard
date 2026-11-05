@@ -89,6 +89,18 @@ func TestCommandHierarchy(t *testing.T) {
 		agySubCmds[c.Name()] = true
 	}
 	assert.True(t, agySubCmds["models"], "agyCmd should have models subcommand")
+	assert.True(t, agySubCmds["login"], "agyCmd should have login subcommand")
+	assert.True(t, agySubCmds["list"], "agyCmd should have list subcommand")
+	assert.True(t, agySubCmds["remove"], "agyCmd should have remove subcommand")
+
+	claudeSubCmds := make(map[string]bool)
+	for _, c := range claudeCmd.Commands() {
+		claudeSubCmds[c.Name()] = true
+	}
+	assert.True(t, claudeSubCmds["models"], "claudeCmd should have models subcommand")
+	assert.True(t, claudeSubCmds["login"], "claudeCmd should have login subcommand")
+	assert.True(t, claudeSubCmds["list"], "claudeCmd should have list subcommand")
+	assert.True(t, claudeSubCmds["remove"], "claudeCmd should have remove subcommand")
 
 	opencodeSubCmds := make(map[string]bool)
 	for _, c := range opencodeCmd.Commands() {

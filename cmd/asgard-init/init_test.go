@@ -267,6 +267,12 @@ func TestGenerateDeployment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), cfgInfo.Mode().Perm())
 
+	// Verify runner accounts directory permissions (0700)
+	runnerAccountsInfo, err := os.Stat(filepath.Join(tempDir, "runners", "runner-prod-1", "accounts"))
+	require.NoError(t, err)
+	assert.True(t, runnerAccountsInfo.IsDir())
+	assert.Equal(t, os.FileMode(0700), runnerAccountsInfo.Mode().Perm())
+
 	// Verify runner tls cert CN is runner-prod-1
 	runnerCertBytes, err := os.ReadFile(filepath.Join(tempDir, "runners", "runner-prod-1", "certs", "tls.crt"))
 	require.NoError(t, err)
@@ -302,6 +308,7 @@ func TestGenerateDeployment(t *testing.T) {
 	composeContent, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(composeContent), "\"7000:7000\"")
+	assert.Contains(t, string(composeContent), "./runners/runner-prod-1/accounts:/accounts")
 
 	// Verify Justfile commands
 	justContent, err := os.ReadFile(filepath.Join(tempDir, "Justfile"))
@@ -334,6 +341,7 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/*.sops.json")
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/.gitkeep")
 	assert.Contains(t, string(gitignoreContent), "etcd-tree/credentials/agy/antigravity-oauth-token")
+	assert.Contains(t, string(gitignoreContent), "runners/*/accounts/")
 	assert.Contains(t, string(gitignoreContent), "gcp-sa.json")
 	assert.NotContains(t, string(gitignoreContent), ".credentials.json")
 
@@ -416,7 +424,14 @@ func TestAddRunner(t *testing.T) {
 	assert.Contains(t, string(composeContent), "runner-2:")
 	assert.Contains(t, string(composeContent), "container_name: asgard-runner-2")
 	assert.Contains(t, string(composeContent), "./runners/runner-2/certs:/certs:ro")
+	assert.Contains(t, string(composeContent), "./runners/runner-2/accounts:/accounts")
 	assert.Contains(t, string(composeContent), "/data/extra:/data/extra")
+
+	// Verify runner-2 accounts directory permissions (0700)
+	runner2AccountsInfo, err := os.Stat(filepath.Join(tempDir, "runners", "runner-2", "accounts"))
+	require.NoError(t, err)
+	assert.True(t, runner2AccountsInfo.IsDir())
+	assert.Equal(t, os.FileMode(0700), runner2AccountsInfo.Mode().Perm())
 
 	// Adding runner with existing name reuses keypair and is idempotent
 	err = AddRunner(tempDir, "runner-2", nil)

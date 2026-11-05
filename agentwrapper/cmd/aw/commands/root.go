@@ -34,7 +34,8 @@ var rootCmd = &cobra.Command{
 
 		// Unfiltered models and single-CLI usage ignore the allow-list, so
 		// a broken config must not stop the host's catalog/quota lookups.
-		if (cmd == modelsCmd && modelsUnfiltered) || (cmd == usageCmd && usageCLI != "") {
+		// Account management subcommands also do not require config.
+		if (cmd == modelsCmd && modelsUnfiltered) || (cmd == usageCmd && usageCLI != "") || isAccountCmd(cmd) {
 			return nil
 		}
 

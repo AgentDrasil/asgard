@@ -159,6 +159,15 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		}
 	}
 
+	// Create runner accounts directory with strict permissions (0700)
+	initialAccountsDir := filepath.Join(targetDir, "runners", data.InitialRunner, "accounts")
+	if err := os.MkdirAll(initialAccountsDir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory %q: %w", initialAccountsDir, err)
+	}
+	if err := os.Chmod(initialAccountsDir, 0700); err != nil {
+		return fmt.Errorf("failed to chmod directory %q: %w", initialAccountsDir, err)
+	}
+
 	// 2. Generate TLS certificates
 	caCert, caKey, caCertPEM, caKeyPEM, err := GenerateCA()
 	if err != nil {
@@ -359,6 +368,13 @@ func AddRunner(targetDir string, runnerName string, workspaceMounts []string) er
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(runnerDir, "session-data"), 0755); err != nil {
+		return err
+	}
+	runnerAccountsDir := filepath.Join(runnerDir, "accounts")
+	if err := os.MkdirAll(runnerAccountsDir, 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(runnerAccountsDir, 0700); err != nil {
 		return err
 	}
 

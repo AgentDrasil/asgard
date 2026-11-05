@@ -54,14 +54,55 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
 └── logs/                   # runner and sandbox tool logs
 
 /certs/                     # Runner TLS: tls.crt, tls.key, ca.crt (fixed, read-only)
+/accounts/                  # Runner: local CLI accounts (agy, claude)
+├── agy/<alias>/            # 0700, contains antigravity-oauth-token (0600)
+└── claude/<alias>/         # 0700, Claude config directory (CLAUDE_CONFIG_DIR)
+
 /data/                      # Workspaces, mounted by docker compose (run_dirs / mount_dirs)
 ```
 
-The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `/session-data/sessions` and `/session-data/tmp` (the chat directories) live on the **runner** that owns the chat.
+The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `/session-data/sessions`, `/session-data/tmp` (the chat directories), and `/accounts` live on the **runner** that owns the chat.
 
 The SQLite database path is fixed (`dsn` is only used for `db: pg`). `aw`'s own
 `~/.config/aw/config.yaml` and the web UI static asset path (`webui_path`) are
 not part of this layout.
+
+## Runner Accounts
+
+CLI provider accounts (for `agy` and `claude`) are managed on runner instances and stored on the runner's local disk under `/accounts` (customizable via `ASGARD_ACCOUNTS_DIR`, mounted from `./runners/<runner>/accounts`).
+
+### Layout
+
+- **`agy`**: `/accounts/agy/<alias>/antigravity-oauth-token` (file `0600`, directory `0700`).
+- **`claude`**: `/accounts/claude/<alias>/` (directory `0700` containing `.credentials.json` and session state, used as `CLAUDE_CONFIG_DIR`).
+- **Alias validation**: Aliases must match `^[a-z0-9][a-z0-9_-]{0,31}$`. Path traversal is strictly rejected.
+
+### Commands
+
+Run commands inside the runner container:
+
+```bash
+# agy: login, list, remove
+docker exec -it asgard-<runner> aw agy login <alias> [--force]
+docker exec -it asgard-<runner> aw agy list
+docker exec -it asgard-<runner> aw agy remove <alias>
+
+# claude: login, list, remove
+docker exec -it asgard-<runner> aw claude login <alias> [--force]
+docker exec -it asgard-<runner> aw claude list
+docker exec -it asgard-<runner> aw claude remove <alias>
+```
+
+- `login <alias>`: Launches an interactive login session with stdio attached. On success, securely saves credentials under the alias with strict file/directory permissions. Overwriting an existing alias requires `--force`.
+- `list`: Prints configured account aliases one per line.
+- `remove <alias>`: Deletes the alias account directory.
+
+### Why Local Disk Instead of etcd?
+
+Runner accounts live on local disk rather than in etcd for several reasons:
+- **Security & Scope**: OAuth refresh tokens and CLI configuration directories belong strictly to the runner that executes the chats. Distributing them via etcd would unnecessarily expose credential material across all nodes.
+- **Stateful CLI Configs**: Claude requires a complete configuration directory (`CLAUDE_CONFIG_DIR`) with local state and caches, which is ill-suited for storage in etcd key-value pairs.
+- **Isolation & Concurrency**: Storing credentials locally avoids etcd write contention, key-value size limits, and synchronization races while ensuring strict filesystem permissions (`0700`/`0600`) backed by a dedicated runner-local volume mount (`./runners/<runner>/accounts:/accounts`).
 
 ## Sandbox Architecture
 
