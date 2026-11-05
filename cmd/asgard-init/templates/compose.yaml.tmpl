@@ -50,6 +50,7 @@ services:
 {{- end }}
     security_opt:
       - seccomp=unconfined
+      - systempaths=unconfined
     command:
       - -backend
       - backend:{{ .RegistryPort }}
