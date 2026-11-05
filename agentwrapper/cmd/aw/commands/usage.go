@@ -16,7 +16,7 @@ var usageCmd = &cobra.Command{
 	Use:   "usage",
 	Short: "Print quota usage for all supported agents",
 	Long: `usage queries all registered agents concurrently and outputs their per-model quota as JSON.
-With --cli, only that agent is queried and only top-level quota is returned.`,
+With --cli, only that agent is queried.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var (
 			res map[string][]types.ModelUsage
@@ -43,5 +43,5 @@ With --cli, only that agent is queried and only top-level quota is returned.`,
 }
 
 func init() {
-	usageCmd.Flags().StringVar(&usageCLI, "cli", "", "Only query this agent (top-level quota only)")
+	usageCmd.Flags().StringVar(&usageCLI, "cli", "", "Only query this agent")
 }

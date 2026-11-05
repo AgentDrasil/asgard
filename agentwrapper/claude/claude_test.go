@@ -100,6 +100,11 @@ func TestParseUsageText(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 10, 28, 4, 30, 0, 0, time.UTC).Unix(), usage.general[0].refresh)
 	assert.Equal(t, time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC).Unix(), usage.general[1].refresh)
 
+	claudeUsage, ok := buildModelUsage("claude", usage, true)
+	require.True(t, ok)
+	assert.InDelta(t, 0.6, claudeUsage.Remaining, 1e-9) // most constrained tier across all (Sonnet tier binds)
+	assert.Len(t, claudeUsage.Limits, 3)
+
 	opus, ok := buildModelUsage("opus", usage, true)
 	require.True(t, ok)
 	assert.InDelta(t, 0.82, opus.Remaining, 1e-9) // most constrained tier
@@ -505,7 +510,8 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Current se
 
 	usage, err := Usage(context.Background(), types.UsageOptions{Dir: dir})
 	require.NoError(t, err)
-	require.Len(t, usage, 4)
+	require.Len(t, usage, 1)
+	assert.Equal(t, "claude", usage[0].Model)
 	assert.InDelta(t, 0.9, usage[0].Remaining, 1e-9)
 
 	raw, err := os.ReadFile(probe)

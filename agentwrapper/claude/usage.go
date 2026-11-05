@@ -48,16 +48,12 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 		return nil, err
 	}
 
-	models, _ := Models(ctx, opts)
-	result := make([]types.ModelUsage, 0, len(models))
-	for _, m := range models {
-		// A model with no applicable tier is left out, so a quota check on
-		// it fails closed instead of inheriting another model's numbers.
-		if u, ok := buildModelUsage(m, usage, opts.Detailed); ok {
-			result = append(result, u)
-		}
+	// Claude subscription accounts share a single account-wide quota pool.
+	// Return a single entry representing the account quota.
+	if u, ok := buildModelUsage("claude", usage, opts.Detailed); ok {
+		return []types.ModelUsage{u}, nil
 	}
-	return result, nil
+	return nil, nil
 }
 
 type usageTier struct {
@@ -83,7 +79,7 @@ type parsedUsage struct {
 func buildModelUsage(model string, usage *parsedUsage, detailed bool) (types.ModelUsage, bool) {
 	tiers := append([]usageTier(nil), usage.general...)
 	for _, mt := range usage.perModel {
-		if strings.Contains(mt.label, strings.ToLower(model)) {
+		if model == "claude" || strings.Contains(mt.label, strings.ToLower(model)) {
 			tiers = append(tiers, mt.tier)
 		}
 	}

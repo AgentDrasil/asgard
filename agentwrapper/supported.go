@@ -213,14 +213,14 @@ func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsag
 	return res
 }
 
-// GetCLIQuota returns the top-level quota of a single CLI keyed by its name,
+// GetCLIQuota returns the quota of a single CLI keyed by its name,
 // without the sandbox query runner. It backs `aw usage --cli`.
 func GetCLIQuota(ctx context.Context, cli string) (map[string][]types.ModelUsage, error) {
 	client, ok := registeredClients()[cli]
 	if !ok {
 		return nil, fmt.Errorf("unknown cli %q", cli)
 	}
-	usages, err := client.Usage(ctx, types.UsageOptions{})
+	usages, err := client.Usage(ctx, types.UsageOptions{Detailed: true})
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,9 @@ import (
 // name, accounting for opencode/agy/simplest variant suffixes (e.g. "provider/model/low"
 // or "gemini-3.7-flash-low" matches the known model "provider/model" or "gemini-3.7-flash").
 func MatchesModel(cli, model, known string) bool {
+	if cli == "claude" && (known == "claude" || known == "all") {
+		return model == "claude" || IsKnownModel(cli, model)
+	}
 	for _, name := range ModelCandidates(cli, model) {
 		if name == known {
 			return true

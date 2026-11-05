@@ -152,6 +152,17 @@ const formatRefreshDate = (timestamp?: number) => {
   return date.toLocaleString();
 };
 
+const formatLimitName = (name: string) => {
+  const lower = name.toLowerCase();
+  if (lower === "5h") return t("quota.limit5h");
+  if (lower === "weekly" || lower === "7d") return t("quota.limitWeekly");
+  if (lower.startsWith("weekly:")) {
+    const sub = name.slice(7).trim();
+    return `${t("quota.limitWeekly")} (${sub})`;
+  }
+  return name;
+};
+
 defineExpose({
   fetchQuotas,
 });
@@ -380,7 +391,7 @@ defineExpose({
                         >
                           <div class="flex justify-between items-center">
                             <span class="text-xs font-semibold text-base-content/80 capitalize">{{
-                              lim.name
+                              formatLimitName(lim.name)
                             }}</span>
                             <span
                               class="text-[11px] font-medium"

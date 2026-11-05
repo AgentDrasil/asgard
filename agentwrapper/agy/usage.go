@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,9 +30,13 @@ type CLIEvent struct {
 				Label string `json:"label,omitempty"`
 			} `json:"models"`
 			Groups []struct {
-				Name    string `json:"name"`
-				Buckets []struct {
+				Name        string `json:"name"`
+				Description string `json:"description,omitempty"`
+				Buckets     []struct {
 					ID                string  `json:"id"`
+					Name              string  `json:"name,omitempty"`
+					Description       string  `json:"description,omitempty"`
+					Window            string  `json:"window,omitempty"`
 					RemainingFraction float64 `json:"remaining_fraction"`
 					ResetTime         string  `json:"reset_time"`
 				} `json:"buckets"`
@@ -78,21 +83,91 @@ func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	return models, nil
 }
 
-func getModelQuota(modelName string, quota map[string]QuotaEntry) (remaining float64, refreshDate int64) {
-	remaining = 1.0
-	refreshDate = 0
+func getModelQuota(modelName string, quota map[string]QuotaEntry) (remaining float64, refreshDate int64, limits []types.QuotaLimit) {
+	lower := strings.ToLower(strings.TrimSpace(modelName))
+	isArgon := strings.Contains(lower, "argon")
+	isGemini := strings.HasPrefix(lower, "gemini")
 
-	isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "gemini")
 	var q5h, qWeekly QuotaEntry
 	var has5h, hasWeekly bool
 
-	if isGemini {
-		q5h, has5h = quota["gemini-5h"]
-		qWeekly, hasWeekly = quota["gemini-weekly"]
+	if isArgon {
+		if e, ok := quota["gemini-argon-wtu-weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		} else if e, ok := quota["gemini 4 argon:weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		} else {
+			keys := make([]string, 0, len(quota))
+			for k := range quota {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if strings.Contains(k, "argon") && strings.Contains(k, "weekly") {
+					qWeekly, hasWeekly = quota[k], true
+					break
+				}
+			}
+		}
+		if e, ok := quota["gemini-argon-wtu-5h"]; ok {
+			q5h, has5h = e, true
+		} else if e, ok := quota["gemini 4 argon:5h"]; ok {
+			q5h, has5h = e, true
+		} else {
+			keys := make([]string, 0, len(quota))
+			for k := range quota {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if strings.Contains(k, "argon") && (strings.Contains(k, "5h") || strings.Contains(k, "session")) {
+					q5h, has5h = quota[k], true
+					break
+				}
+			}
+		}
+	} else if isGemini {
+		if e, ok := quota["gemini-5h"]; ok {
+			q5h, has5h = e, true
+		} else if e, ok := quota["gemini models:5h"]; ok {
+			q5h, has5h = e, true
+		}
+		if e, ok := quota["gemini-weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		} else if e, ok := quota["gemini models:weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		}
 	} else {
-		q5h, has5h = quota["3p-5h"]
-		qWeekly, hasWeekly = quota["3p-weekly"]
+		// 3P models (Claude, GPT-OSS)
+		if e, ok := quota["3p-5h"]; ok {
+			q5h, has5h = e, true
+		} else if e, ok := quota["claude and gpt models:5h"]; ok {
+			q5h, has5h = e, true
+		}
+		if e, ok := quota["3p-weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		} else if e, ok := quota["claude and gpt models:weekly"]; ok {
+			qWeekly, hasWeekly = e, true
+		}
 	}
+
+	if has5h {
+		limits = append(limits, types.QuotaLimit{
+			Name:        "5h",
+			Remaining:   q5h.RemainingFraction,
+			RefreshDate: parseResetTime(q5h.ResetTime),
+		})
+	}
+	if hasWeekly {
+		limits = append(limits, types.QuotaLimit{
+			Name:        "weekly",
+			Remaining:   qWeekly.RemainingFraction,
+			RefreshDate: parseResetTime(qWeekly.ResetTime),
+		})
+	}
+
+	remaining = 1.0
+	refreshDate = 0
 
 	if has5h && hasWeekly {
 		if q5h.RemainingFraction < qWeekly.RemainingFraction {
@@ -111,8 +186,6 @@ func getModelQuota(modelName string, quota map[string]QuotaEntry) (remaining flo
 				} else {
 					refreshDate = tWeekly
 				}
-			} else {
-				refreshDate = 0
 			}
 		}
 	} else if has5h {
@@ -127,7 +200,7 @@ func getModelQuota(modelName string, quota map[string]QuotaEntry) (remaining flo
 		}
 	}
 
-	return remaining, refreshDate
+	return remaining, refreshDate, limits
 }
 
 func parseResetTime(s string) int64 {
@@ -171,54 +244,47 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	if err := json.Unmarshal(output, &ev); err == nil && ev.Command != nil && ev.Command.Name == "usage" {
 		for _, g := range ev.Command.Data.Groups {
 			for _, b := range g.Buckets {
-				quota[b.ID] = QuotaEntry{
+				entry := QuotaEntry{
 					RemainingFraction: b.RemainingFraction,
 					ResetTime:         b.ResetTime,
+				}
+				if b.ID != "" {
+					quota[b.ID] = entry
+				}
+				if g.Name != "" && b.Window != "" {
+					quota[strings.ToLower(strings.TrimSpace(g.Name))+":"+strings.ToLower(strings.TrimSpace(b.Window))] = entry
 				}
 			}
 		}
 	}
 
-	result := make([]types.ModelUsage, 0, len(models))
+	// Deduplicate models by base model name: thinking variants (-low, -medium, -high)
+	// share the exact same underlying quota pool.
+	seen := make(map[string]bool)
+	var baseModels []string
 	for _, mName := range models {
-		rem, ref := getModelQuota(mName, quota)
-
-		var limits []types.QuotaLimit
-		if opts.Detailed {
-			isGemini := strings.HasPrefix(strings.ToLower(strings.TrimSpace(mName)), "gemini")
-			var q5h, qWeekly QuotaEntry
-			var has5h, hasWeekly bool
-
-			if isGemini {
-				q5h, has5h = quota["gemini-5h"]
-				qWeekly, hasWeekly = quota["gemini-weekly"]
-			} else {
-				q5h, has5h = quota["3p-5h"]
-				qWeekly, hasWeekly = quota["3p-weekly"]
-			}
-
-			if has5h {
-				limits = append(limits, types.QuotaLimit{
-					Name:        "5h",
-					Remaining:   q5h.RemainingFraction,
-					RefreshDate: parseResetTime(q5h.ResetTime),
-				})
-			}
-			if hasWeekly {
-				limits = append(limits, types.QuotaLimit{
-					Name:        "weekly",
-					Remaining:   qWeekly.RemainingFraction,
-					RefreshDate: parseResetTime(qWeekly.ResetTime),
-				})
-			}
+		base, _ := SplitModelVariant(mName)
+		if base == "" {
+			base = mName
 		}
+		if !seen[base] {
+			seen[base] = true
+			baseModels = append(baseModels, base)
+		}
+	}
 
-		result = append(result, types.ModelUsage{
-			Model:       mName,
+	result := make([]types.ModelUsage, 0, len(baseModels))
+	for _, base := range baseModels {
+		rem, ref, limits := getModelQuota(base, quota)
+		usageEntry := types.ModelUsage{
+			Model:       base,
 			Remaining:   rem,
 			RefreshDate: ref,
-			Limits:      limits,
-		})
+		}
+		if opts.Detailed {
+			usageEntry.Limits = limits
+		}
+		result = append(result, usageEntry)
 	}
 
 	return result, nil

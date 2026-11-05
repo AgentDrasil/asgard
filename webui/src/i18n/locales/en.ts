@@ -119,6 +119,8 @@ export const en = {
     resetsAt: "Resets {date} {relative}",
     resetPrefix: "Reset: {date}",
     limitsBreakdown: "Quota Limits Breakdown",
+    limit5h: "5 Hours",
+    limitWeekly: "7 Days (Weekly)",
     balance: "Account Balance",
     balanceAvailable: "Balance available",
     balanceUnavailable: "No usable balance",

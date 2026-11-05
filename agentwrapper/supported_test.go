@@ -87,6 +87,41 @@ func TestCheckQuota_ModelVariant(t *testing.T) {
 	if q3 != 0.0 {
 		t.Errorf("expected quota 0.0 for unmatched model, got %f", q3)
 	}
+
+	// agy variant matches base model
+	fakeAgy := NewFakeClient()
+	fakeAgy.UsageFunc = func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+		return []types.ModelUsage{
+			{Model: "gemini-3.8-flash", Remaining: 0.45},
+			{Model: "gemini-4-argon", Remaining: 0.99},
+		}, nil
+	}
+	SetClients(map[string]types.CLIClient{
+		"agy": fakeAgy,
+	})
+	if q := CheckQuota("agy", "gemini-3.8-flash-low"); q != 0.45 {
+		t.Errorf("expected quota 0.45 for gemini-3.8-flash-low, got %f", q)
+	}
+	if q := CheckQuota("agy", "gemini-4-argon-high"); q != 0.99 {
+		t.Errorf("expected quota 0.99 for gemini-4-argon-high, got %f", q)
+	}
+
+	// claude single quota matches any claude model
+	fakeClaude := NewFakeClient()
+	fakeClaude.UsageFunc = func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+		return []types.ModelUsage{
+			{Model: "claude", Remaining: 0.9},
+		}, nil
+	}
+	SetClients(map[string]types.CLIClient{
+		"claude": fakeClaude,
+	})
+	if q := CheckQuota("claude", "sonnet"); q != 0.9 {
+		t.Errorf("expected quota 0.9 for claude sonnet, got %f", q)
+	}
+	if q := CheckQuota("claude", "opus"); q != 0.9 {
+		t.Errorf("expected quota 0.9 for claude opus, got %f", q)
+	}
 }
 
 func TestSupportedCLIs_SimplestRegistration(t *testing.T) {

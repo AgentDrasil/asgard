@@ -77,6 +77,11 @@ func (c *Config) IsModelAllowed(agentName, modelName string) bool {
 	if !found {
 		return true
 	}
+	// If querying the agent itself (e.g. modelName == agentName or "all"),
+	// allow it if the agent has any patterns configured.
+	if (modelName == agentName || modelName == "all") && len(patterns) > 0 {
+		return true
+	}
 	for _, pattern := range patterns {
 		p := pattern
 		if !strings.HasPrefix(p, "(?i)") {

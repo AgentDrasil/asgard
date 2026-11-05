@@ -120,6 +120,8 @@ export const zhCN: MessageSchema = {
     resetsAt: "重置时间 {date} {relative}",
     resetPrefix: "重置: {date}",
     limitsBreakdown: "配额明细",
+    limit5h: "5 小时配额",
+    limitWeekly: "7 天周配额",
     balance: "账户余额",
     balanceAvailable: "余额可用",
     balanceUnavailable: "无可用余额",

@@ -183,17 +183,25 @@ const DefaultContextWindow = 1048576
 var exactModelContextTable = map[string]int{
 	// agy (Claude: 256000, Gemini: 1048576)
 	"claude-opus-4-6-thinking": 256000,
+	"claude-opus-5-5":          256000,
 	"claude-sonnet-4-6":        256000,
+	"claude-sonnet-5-5":        256000,
+	"gemini-3.1-pro":           1048576,
 	"gemini-3.1-pro-high":      1048576,
 	"gemini-3.1-pro-low":       1048576,
+	"gemini-3.7-flash":         1048576,
 	"gemini-3.7-flash-high":    1048576,
 	"gemini-3.7-flash-low":     1048576,
 	"gemini-3.7-flash-medium":  1048576,
+	"gemini-3.8-flash":         1048576,
 	"gemini-3.8-flash-high":    1048576,
 	"gemini-3.8-flash-low":     1048576,
 	"gemini-3.8-flash-medium":  1048576,
+	"gemini-4-argon":           1048576,
+	"gpt-oss-120b":             1048576,
 
 	// claude (aliases)
+	"claude": 1048576,
 	"fable":  1048576,
 	"opus":   1048576,
 	"sonnet": 1048576,

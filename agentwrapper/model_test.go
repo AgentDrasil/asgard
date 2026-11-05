@@ -26,6 +26,15 @@ func TestMatchesModel(t *testing.T) {
 		{cli: "simplest", model: "gemini/gemini-3.7-flash/high", known: "gemini/gemini-3.7-flash", want: true},
 		{cli: "simplest", model: "gemini-3.7-flash/high", known: "gemini-3.7-flash", want: true},
 		{cli: "simplest", model: "gemini-3.7-flash", known: "gemini-3.7-flash", want: true},
+		{cli: "claude", model: "sonnet", known: "claude", want: true},
+		{cli: "claude", model: "opus", known: "claude", want: true},
+		{cli: "claude", model: "haiku", known: "claude", want: true},
+		{cli: "claude", model: "claude", known: "claude", want: true},
+		{cli: "claude", model: "claude-sonnet-4-6", known: "claude", want: true},
+		{cli: "claude", model: "gpt-4", known: "claude", want: false},
+		{cli: "claude", model: "unknown-xyz", known: "claude", want: false},
+		{cli: "agy", model: "gemini-3.8-flash-low", known: "gemini-3.8-flash", want: true},
+		{cli: "agy", model: "gemini-4-argon-medium", known: "gemini-4-argon", want: true},
 	}
 
 	for _, tt := range tests {
