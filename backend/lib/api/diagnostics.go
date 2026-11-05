@@ -25,6 +25,8 @@ type LogEntry struct {
 	ID        int64     `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
 	Level     string    `json:"level"` // "warn" | "error"
+	Component string    `json:"component,omitempty"`
+	NodeID    string    `json:"node_id,omitempty"`
 	Source    string    `json:"source"`
 	Message   string    `json:"message"`
 	Details   string    `json:"details,omitempty"`
@@ -76,11 +78,28 @@ func (d *SystemDiagnostics) recordLogEntry(level, source, message, details strin
 	defer d.logMu.Unlock()
 
 	d.nextLogID++
+	comp := "backend"
+	nodeID := ""
+	cleanSource := source
+	if strings.HasPrefix(source, "runner:") {
+		comp = "runner"
+		nodeID = strings.TrimPrefix(source, "runner:")
+		cleanSource = "runner"
+	} else if strings.HasPrefix(source, "runner/") {
+		comp = "runner"
+		nodeID = strings.TrimPrefix(source, "runner/")
+		cleanSource = "runner"
+	} else if source == "runner" || strings.HasPrefix(source, "runner_") {
+		comp = "runner"
+	}
+
 	entry := LogEntry{
 		ID:        d.nextLogID,
 		Timestamp: time.Now(),
 		Level:     level,
-		Source:    source,
+		Component: comp,
+		NodeID:    nodeID,
+		Source:    cleanSource,
 		Message:   message,
 		Details:   details,
 	}

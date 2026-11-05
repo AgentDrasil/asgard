@@ -23,6 +23,8 @@ interface UnifiedLogItem {
   timestamp: number;
   timeString: string;
   level: "error" | "warn" | "info";
+  component: "backend" | "runner" | "ui";
+  nodeId?: string;
   source: string;
   title?: string;
   message: string;
@@ -33,6 +35,7 @@ const backendLogs = ref<SystemLogEntry[]>([]);
 const isLoading = ref(false);
 const searchQuery = ref("");
 const selectedLevel = ref<"all" | "error" | "warn">("all");
+const selectedComponent = ref<"all" | "backend" | "runner" | "ui">("all");
 const copiedId = ref<string | null>(null);
 let copyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -94,11 +97,15 @@ const unifiedLogs = computed<UnifiedLogItem[]>(() => {
     const ts = new Date(log.timestamp).getTime() || Date.now();
     const lvl: "error" | "warn" | "info" =
       log.level === "error" ? "error" : log.level === "warn" ? "warn" : "info";
+    const comp: "backend" | "runner" | "ui" =
+      log.component === "runner" ? "runner" : log.component === "ui" ? "ui" : "backend";
     list.push({
       id: `backend-${log.id}`,
       timestamp: ts,
       timeString: formatTime(ts),
       level: lvl,
+      component: comp,
+      nodeId: log.node_id,
       source: log.source || "backend",
       message: log.message,
       details: log.details,
@@ -115,6 +122,7 @@ const unifiedLogs = computed<UnifiedLogItem[]>(() => {
       timestamp: ts,
       timeString: formatTime(ts),
       level: lvl,
+      component: "ui",
       source: "toast",
       title: toast.title,
       message: toast.message,
@@ -126,10 +134,14 @@ const unifiedLogs = computed<UnifiedLogItem[]>(() => {
   return list;
 });
 
-// Filter by level and search query
+// Filter by level, component and search query
 const filteredLogs = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   return unifiedLogs.value.filter((item) => {
+    // Component filter
+    if (selectedComponent.value !== "all" && item.component !== selectedComponent.value) {
+      return false;
+    }
     // Level filter
     if (selectedLevel.value !== "all" && item.level !== selectedLevel.value) {
       return false;
@@ -138,21 +150,49 @@ const filteredLogs = computed(() => {
     if (q) {
       const inMsg = item.message.toLowerCase().includes(q);
       const inSrc = item.source.toLowerCase().includes(q);
+      const inComp = item.component.toLowerCase().includes(q);
+      const inNode = item.nodeId ? item.nodeId.toLowerCase().includes(q) : false;
       const inTitle = item.title ? item.title.toLowerCase().includes(q) : false;
       const inDetails = item.details ? item.details.toLowerCase().includes(q) : false;
-      return inMsg || inSrc || inTitle || inDetails;
+      return inMsg || inSrc || inComp || inNode || inTitle || inDetails;
     }
     return true;
   });
 });
 
-const totalCount = computed(() => unifiedLogs.value.length);
-const errorCount = computed(() => unifiedLogs.value.filter((l) => l.level === "error").length);
-const warnCount = computed(() => unifiedLogs.value.filter((l) => l.level === "warn").length);
+const counts = computed(() => {
+  let total = 0;
+  let errors = 0;
+  let warnings = 0;
+  let backend = 0;
+  let runner = 0;
+  let ui = 0;
+  for (const item of unifiedLogs.value) {
+    total++;
+    if (item.level === "error") errors++;
+    else if (item.level === "warn") warnings++;
+
+    if (item.component === "backend") backend++;
+    else if (item.component === "runner") runner++;
+    else if (item.component === "ui") ui++;
+  }
+  return { total, errors, warnings, backend, runner, ui };
+});
+
+const totalCount = computed(() => counts.value.total);
+const errorCount = computed(() => counts.value.errors);
+const warnCount = computed(() => counts.value.warnings);
+const backendCount = computed(() => counts.value.backend);
+const runnerCount = computed(() => counts.value.runner);
+const uiCount = computed(() => counts.value.ui);
 
 const handleCopyLog = async (item: UnifiedLogItem) => {
+  const compLabel =
+    item.component === "runner" && item.nodeId
+      ? `RUNNER:${item.nodeId}`
+      : item.component.toUpperCase();
   const content = [
-    `[${item.timeString}] [${item.level.toUpperCase()}] [${item.source}]`,
+    `[${item.timeString}] [${item.level.toUpperCase()}] [${compLabel}] [${item.source}]`,
     item.title ? `Title: ${item.title}` : null,
     `Message: ${item.message}`,
     item.details ? `Details:\n${item.details}` : null,
@@ -278,34 +318,82 @@ const navigateBackToSettings = () => {
       </div>
 
       <!-- Filters & Search Toolbar -->
-      <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-        <!-- Level Tabs -->
-        <div class="join border border-base-300 rounded-lg p-0.5 bg-base-200">
-          <button
-            class="join-item btn btn-xs md:btn-sm border-0 font-medium"
-            :class="selectedLevel === 'all' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
-            @click="selectedLevel = 'all'"
-          >
-            {{ t("logs.levels.all", { count: totalCount }) }}
-          </button>
-          <button
-            class="join-item btn btn-xs md:btn-sm border-0 font-medium text-error"
-            :class="selectedLevel === 'error' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
-            @click="selectedLevel = 'error'"
-          >
-            {{ t("logs.levels.error", { count: errorCount }) }}
-          </button>
-          <button
-            class="join-item btn btn-xs md:btn-sm border-0 font-medium text-warning"
-            :class="selectedLevel === 'warn' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
-            @click="selectedLevel = 'warn'"
-          >
-            {{ t("logs.levels.warn", { count: warnCount }) }}
-          </button>
+      <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Component Tabs -->
+          <div class="join border border-base-300 rounded-lg p-0.5 bg-base-200">
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium"
+              :class="
+                selectedComponent === 'all' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'
+              "
+              @click="selectedComponent = 'all'"
+            >
+              {{ t("logs.components.all") }}
+            </button>
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium"
+              :class="
+                selectedComponent === 'backend'
+                  ? 'btn-active bg-base-100 shadow-xs text-info'
+                  : 'btn-ghost'
+              "
+              @click="selectedComponent = 'backend'"
+            >
+              {{ t("logs.components.backend", { count: backendCount }) }}
+            </button>
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium"
+              :class="
+                selectedComponent === 'runner'
+                  ? 'btn-active bg-base-100 shadow-xs text-secondary'
+                  : 'btn-ghost'
+              "
+              @click="selectedComponent = 'runner'"
+            >
+              {{ t("logs.components.runner", { count: runnerCount }) }}
+            </button>
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium"
+              :class="
+                selectedComponent === 'ui'
+                  ? 'btn-active bg-base-100 shadow-xs text-accent'
+                  : 'btn-ghost'
+              "
+              @click="selectedComponent = 'ui'"
+            >
+              {{ t("logs.components.ui", { count: uiCount }) }}
+            </button>
+          </div>
+
+          <!-- Level Tabs -->
+          <div class="join border border-base-300 rounded-lg p-0.5 bg-base-200">
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium"
+              :class="selectedLevel === 'all' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
+              @click="selectedLevel = 'all'"
+            >
+              {{ t("logs.levels.all", { count: totalCount }) }}
+            </button>
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium text-error"
+              :class="selectedLevel === 'error' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
+              @click="selectedLevel = 'error'"
+            >
+              {{ t("logs.levels.error", { count: errorCount }) }}
+            </button>
+            <button
+              class="join-item btn btn-xs md:btn-sm border-0 font-medium text-warning"
+              :class="selectedLevel === 'warn' ? 'btn-active bg-base-100 shadow-xs' : 'btn-ghost'"
+              @click="selectedLevel = 'warn'"
+            >
+              {{ t("logs.levels.warn", { count: warnCount }) }}
+            </button>
+          </div>
         </div>
 
         <!-- Search Bar -->
-        <div class="relative flex-1 sm:max-w-xs">
+        <div class="relative flex-1 md:max-w-xs">
           <Icon
             icon="material-symbols:search"
             class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-base-content/50"
@@ -353,7 +441,30 @@ const navigateBackToSettings = () => {
                 {{ t("logs.badges.info") }}
               </span>
 
-              <!-- Source Badge -->
+              <!-- Component Badge -->
+              <span
+                v-if="item.component === 'backend'"
+                class="badge badge-sm badge-info badge-outline font-semibold gap-1 text-xs"
+              >
+                <Icon icon="material-symbols:dns-outline" class="w-3.5 h-3.5" />
+                Backend
+              </span>
+              <span
+                v-else-if="item.component === 'runner'"
+                class="badge badge-sm badge-secondary badge-outline font-semibold gap-1 text-xs"
+              >
+                <Icon icon="material-symbols:terminal" class="w-3.5 h-3.5" />
+                {{ item.nodeId ? `Runner: ${item.nodeId}` : "Runner" }}
+              </span>
+              <span
+                v-else
+                class="badge badge-sm badge-accent badge-outline font-semibold gap-1 text-xs"
+              >
+                <Icon icon="material-symbols:desktop-windows-outline" class="w-3.5 h-3.5" />
+                UI
+              </span>
+
+              <!-- Source / Module Badge -->
               <span class="badge badge-sm badge-neutral font-mono text-xs opacity-80">
                 {{ item.source }}
               </span>
@@ -424,11 +535,23 @@ const navigateBackToSettings = () => {
         v-else
         class="flex flex-col items-center justify-center py-16 text-center text-base-content/50 border border-dashed border-base-300 rounded-xl"
       >
-        <Icon icon="material-symbols:check-circle-outline" class="w-12 h-12 text-success/60 mb-3" />
+        <Icon
+          :icon="
+            searchQuery || selectedLevel !== 'all' || selectedComponent !== 'all'
+              ? 'material-symbols:filter-list-off'
+              : 'material-symbols:check-circle-outline'
+          "
+          class="w-12 h-12 mb-3"
+          :class="
+            searchQuery || selectedLevel !== 'all' || selectedComponent !== 'all'
+              ? 'text-base-content/40'
+              : 'text-success/60'
+          "
+        />
         <div class="text-base font-medium text-base-content/80">{{ t("logs.empty.title") }}</div>
         <div class="text-sm text-base-content/50 mt-1 max-w-sm">
           {{
-            searchQuery || selectedLevel !== "all"
+            searchQuery || selectedLevel !== "all" || selectedComponent !== "all"
               ? t("logs.empty.filtered")
               : t("logs.empty.healthy")
           }}

@@ -178,6 +178,8 @@ export const zhCN: MessageSchema = {
   app: {
     systemDegraded: "系统降级运行",
     systemWarning: "系统告警",
+    backendSystemDegraded: "后端系统降级运行",
+    backendSystemWarning: "后端系统告警",
     systemRunningDegraded: "系统当前正处于降级模式运行",
     reloadSuccessTitle: "重载成功",
     reloadSuccessMessage: "Agent 配置已成功重载",
@@ -608,6 +610,12 @@ export const zhCN: MessageSchema = {
       all: "全部 ({count})",
       error: "错误 ({count})",
       warn: "警告 ({count})",
+    },
+    components: {
+      all: "全部组件",
+      backend: "后端服务 ({count})",
+      runner: "运行节点 ({count})",
+      ui: "前端通知 ({count})",
     },
     searchPlaceholder: "搜索系统日志与诊断信息...",
     badges: {

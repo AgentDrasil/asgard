@@ -42,9 +42,19 @@ describe("LogView.vue", () => {
         id: 1,
         timestamp: new Date().toISOString(),
         level: "error",
-        source: "backend",
+        component: "backend",
+        source: "agent_load",
         message: "Failed to connect",
         details: "Connection refused on 127.0.0.1:8080",
+      },
+      {
+        id: 2,
+        timestamp: new Date().toISOString(),
+        level: "warn",
+        component: "runner",
+        node_id: "runner-chao",
+        source: "runner",
+        message: "Runner high load",
       },
     ]);
   });
@@ -75,7 +85,13 @@ describe("LogView.vue", () => {
     expect(root.textContent).toContain("Total Entries");
     expect(root.textContent).toContain("Errors");
     expect(root.textContent).toContain("Warnings");
+    expect(root.textContent).toContain("Backend (1)");
+    expect(root.textContent).toContain("Runners (1)");
+    expect(root.textContent).toContain("UI / Toast (0)");
     expect(root.textContent).toContain("Refresh");
+
+    // Component badges
+    expect(root.textContent).toContain("Runner: runner-chao");
 
     app.unmount();
   });

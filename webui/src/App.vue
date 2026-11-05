@@ -334,18 +334,18 @@ const checkSystemStatus = async () => {
     if (status.status === "degraded") {
       if (status.errors && status.errors.length > 0) {
         for (const err of status.errors) {
-          toast.error(err, { title: t("app.systemDegraded"), translate: true });
+          toast.error(err, { title: t("app.backendSystemDegraded"), translate: true });
         }
       } else {
         toast.warning(t("app.systemRunningDegraded"), {
-          title: t("app.systemDegraded"),
+          title: t("app.backendSystemDegraded"),
         });
       }
     }
 
     if (status.warnings && status.warnings.length > 0) {
       for (const warn of status.warnings) {
-        toast.warning(warn, { title: t("app.systemWarning"), translate: true });
+        toast.warning(warn, { title: t("app.backendSystemWarning"), translate: true });
       }
     }
   } catch (e) {

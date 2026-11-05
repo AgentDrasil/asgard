@@ -300,6 +300,8 @@ export interface SystemLogEntry {
   id: number;
   timestamp: string;
   level: "warn" | "error" | "info";
+  component?: "backend" | "runner" | "ui";
+  node_id?: string;
   source: string;
   message: string;
   details?: string;

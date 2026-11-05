@@ -56,13 +56,10 @@ func TestServer_ReloadsAgentsFromSourceOnChange(t *testing.T) {
 	})
 	require.Eventually(t, func() bool { return len(agentIDs()) == 2 }, 5*time.Second, 20*time.Millisecond)
 
-	// Dropping agent_father makes the reload fail; the previous list is kept
-	// and the failure is reported.
+	// Dropping an agent updates the list cleanly without requiring agent_father.
 	src.Set(configlib.FlattenKVs{"agents/helper/config.yaml": agentSourceYAML("helper")})
-	require.Eventually(t, func() bool {
-		return len(srv.diagnostics.Snapshot().Errors) > 0
-	}, 5*time.Second, 20*time.Millisecond)
-	assert.Len(t, agentIDs(), 2)
+	require.Eventually(t, func() bool { return len(agentIDs()) == 1 }, 5*time.Second, 20*time.Millisecond)
+	assert.Equal(t, []string{"helper"}, agentIDs())
 }
 
 // acceptRecorder is a Lister that records the lists passed to Accept.

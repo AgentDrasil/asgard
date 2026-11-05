@@ -177,6 +177,8 @@ export const en = {
   app: {
     systemDegraded: "System Degraded",
     systemWarning: "System Warning",
+    backendSystemDegraded: "Backend System Degraded",
+    backendSystemWarning: "Backend System Warning",
     systemRunningDegraded: "System is currently running in degraded mode",
     reloadSuccessTitle: "Reload Success",
     reloadSuccessMessage: "Agent configuration reloaded successfully",
@@ -622,6 +624,12 @@ export const en = {
       all: "All ({count})",
       error: "Errors ({count})",
       warn: "Warnings ({count})",
+    },
+    components: {
+      all: "All Components",
+      backend: "Backend ({count})",
+      runner: "Runners ({count})",
+      ui: "UI / Toast ({count})",
     },
     searchPlaceholder: "Search logs & diagnostics...",
     badges: {

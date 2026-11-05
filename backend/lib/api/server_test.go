@@ -118,7 +118,9 @@ cli:
 
 func TestServer_ReloadFailure_MuxInitialized_StatusAccessible(t *testing.T) {
 	tempDir := t.TempDir()
-	// Empty agents dir - reload will fail because agent_father is missing
+	// Corrupt agent config - reload will fail because config.yaml is invalid
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "agents", "broken"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "agents", "broken", "config.yaml"), []byte("invalid: yaml: : ["), 0644))
 	cfg := &config.Config{
 		AgentDir: tempDir,
 	}

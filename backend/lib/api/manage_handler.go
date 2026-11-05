@@ -17,7 +17,6 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
@@ -26,10 +25,7 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	"github.com/AgentDrasil/asgard/pkg/version"
-	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
-
-const agentFatherID = "agent_father"
 
 var osRename = os.Rename
 
@@ -119,18 +115,6 @@ func (s *Server) reload() error {
 		return err
 	}
 
-	hasAgentFather := false
-	for _, a := range agents {
-		if a.Config.ID == agentFatherID {
-			hasAgentFather = true
-			break
-		}
-	}
-
-	if !hasAgentFather {
-		return errors.New("agent_father is required as the initial root agent, but was not found in the loaded agent definitions")
-	}
-
 	s.mu.Lock()
 	s.agents = agents
 	if s.workflowEngine != nil {
@@ -143,11 +127,6 @@ func (s *Server) reload() error {
 	// protecting the previous one.
 	if acc, ok := s.agentSource.(interface{ Accept([]*agentspec.Agent) }); ok {
 		acc.Accept(agents)
-	}
-
-	if s.diagnostics != nil {
-		s.validateModelContextWindows(agents)
-		s.validateWorkflows(agents)
 	}
 
 	if s.cronManager != nil {
@@ -171,74 +150,6 @@ func (s *Server) ReloadAgents() error {
 		log.Error().Err(err).Msg("Failed to reload agents")
 	}
 	return err
-}
-
-// validateWorkflows validates workflow definitions and checks model pairing coverage,
-// recording any errors or warnings in diagnostics.
-func (s *Server) validateWorkflows(agents []*agentspec.Agent) {
-	s.diagnostics.ResetSource("workflow_validation")
-	wfAgents := agentspec.AgentsToWorkflowAgentInfos(agents)
-
-	for _, a := range agents {
-		if a == nil || a.Config.Type != "workflow" || a.WorkflowPath == "" {
-			continue
-		}
-		defn, err := workflowspec.LoadDefinition(a.WorkflowPath)
-		if err != nil {
-			log.Error().Err(err).Str("agent", a.Config.ID).Msg("Failed to load workflow definition during validation")
-			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q definition error: %v", a.Config.ID, err))
-			continue
-		}
-
-		if err := defn.ValidateScheduleRunner(a.NodeID); err != nil {
-			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q: %v", a.Config.ID, err))
-		}
-		if err := defn.ValidateWithAgents(wfAgents); err != nil {
-			log.Error().Err(err).Str("agent", a.Config.ID).Msg("Workflow validation failed")
-			s.diagnostics.AddError("workflow_validation", fmt.Sprintf("Workflow %q: %v", a.Config.ID, err))
-		}
-		for _, warning := range defn.ModelPairingWarnings() {
-			s.diagnostics.AddWarning("workflow_validation", fmt.Sprintf("Workflow %q: %s", a.Config.ID, warning))
-		}
-	}
-}
-
-// validateModelContextWindows checks configured models against the context window registry,
-// recording warnings in diagnostics for any uncataloged models without failing reload.
-func (s *Server) validateModelContextWindows(agents []*agentspec.Agent) {
-	s.diagnostics.ResetSource("model_validation")
-	seenModels := make(map[string]bool)
-	for _, a := range agents {
-		if a == nil {
-			continue
-		}
-		for _, target := range a.Config.CLI {
-			if target.Model == "" || !s.conf.IsProviderEnabled(target.CLI) {
-				continue
-			}
-			// Deduplicate warnings by CLI and model pair to avoid spamming duplicate warnings across agents.
-			modelKey := target.CLI + ":" + target.Model
-			if seenModels[modelKey] {
-				continue
-			}
-			seenModels[modelKey] = true
-
-			// CLI-aware lookup: handles variant suffixes (e.g. agy
-			// "gemini-3.7-flash-low", simplest "deepseek/deepseek-v4-pro/high")
-			// and simplest user-config models.
-			if !agentwrapper.IsKnownModel(target.CLI, target.Model) {
-				log.Error().
-					Str("agent", a.Config.ID).
-					Str("cli", target.CLI).
-					Str("model", target.Model).
-					Msg("Configured model is not in known context window registry, falling back to 1M default context window")
-				s.diagnostics.AddWarning(
-					"model_validation",
-					fmt.Sprintf("Agent %q uses uncataloged model %q; falling back to 1M default context window", a.Config.ID, target.Model),
-				)
-			}
-		}
-	}
 }
 
 // handleSystemStatus handles GET /api/system/status.
