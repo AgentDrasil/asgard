@@ -367,6 +367,7 @@ export const en = {
   settings: {
     title: "Settings",
     backToChat: "Back to Chat",
+    backToSettings: "Back to Settings",
     preferences: "Preferences",
     authentication: "Authentication",
     authSignedIn: "Signed in via OIDC",
@@ -391,6 +392,8 @@ export const en = {
       "View current token usage, credit balance, and resource consumption details.",
     checkQuota: "Check Quota",
     proxySecrets: "Personal API Keys",
+    proxyKeysCardTitle: "Personal API Keys",
+    proxyKeysCardDesc: "Manage and configure personal API keys injected into agent sandboxes.",
     proxySecretsDesc:
       "Manage your personal API keys and secrets (e.g. GEMINI_API_KEY, OPENAI_API_KEY) injected into agent sandboxes.",
     proxySecretsAddKey: "Add Key",

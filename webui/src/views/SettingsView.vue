@@ -7,7 +7,6 @@ import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
 import LanguageSelector from "../components/sidebar/LanguageSelector.vue";
 import RunnersPanel from "../components/RunnersPanel.vue";
 import RunnerAdminPanel from "../components/RunnerAdminPanel.vue";
-import UserProxyKeysPanel from "../components/UserProxyKeysPanel.vue";
 import { useUserProfile } from "../composables/useUserProfile";
 import QuotaModal from "../components/sidebar/QuotaModal.vue";
 import { reloadAgents, getSystemLogs, isAuthEnabled, logout } from "../lib/api";
@@ -122,6 +121,10 @@ const navigateToCompressionStats = () => {
   router.push("/settings/compression");
 };
 
+const navigateToKeys = () => {
+  router.push("/settings/keys");
+};
+
 const navigateBack = () => {
   if (window.history.state?.back) {
     router.back();
@@ -224,8 +227,6 @@ const navigateBack = () => {
       <RunnersPanel />
 
       <RunnerAdminPanel v-if="profile?.isAdmin" />
-
-      <UserProxyKeysPanel />
 
       <!-- Section: System & Server Actions -->
       <section class="space-y-3">
@@ -331,6 +332,32 @@ const navigateBack = () => {
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
                 {{ t("settings.editConfigDesc") }}
+              </p>
+            </div>
+            <Icon
+              icon="material-symbols:chevron-right"
+              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
+            />
+          </div>
+
+          <!-- Personal API Keys Card -->
+          <div
+            role="button"
+            tabindex="0"
+            @click="navigateToKeys"
+            @keydown.enter.space.prevent="navigateToKeys"
+            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+            data-testid="nav-proxy-keys"
+          >
+            <div class="space-y-1">
+              <div
+                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
+              >
+                <Icon icon="mynaui:key" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.proxyKeysCardTitle") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 leading-relaxed">
+                {{ t("settings.proxyKeysCardDesc") }}
               </p>
             </div>
             <Icon

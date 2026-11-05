@@ -11,7 +11,8 @@ import type { SystemLogEntry } from "../types";
 
 const router = useRouter();
 const { t } = useI18n();
-const { toastHistory, clearToastHistory } = useToast();
+const toast = useToast();
+const { toastHistory, clearToastHistory } = toast;
 
 const authEnabled = isAuthEnabled();
 const { profile, load: loadProfile } = useUserProfile();

@@ -364,6 +364,7 @@ export const zhCN: MessageSchema = {
   settings: {
     title: "设置",
     backToChat: "返回对话",
+    backToSettings: "返回设置",
     preferences: "偏好设置",
     authentication: "身份认证",
     authSignedIn: "已通过 OIDC 登录",
@@ -385,6 +386,8 @@ export const zhCN: MessageSchema = {
     usageAndQuotaDesc: "查看当前 Token 用量、余额与资源消耗明细。",
     checkQuota: "查看配额",
     proxySecrets: "个人 API 密钥",
+    proxyKeysCardTitle: "个人 API 密钥",
+    proxyKeysCardDesc: "管理和配置注入到 Agent 沙箱的个人 API 密钥（如 GEMINI_API_KEY 等）。",
     proxySecretsDesc:
       "管理注入到 Agent 沙箱中的个人 API 密钥与代理密钥（如 GEMINI_API_KEY、OPENAI_API_KEY）。",
     proxySecretsAddKey: "添加密钥",

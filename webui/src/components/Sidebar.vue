@@ -208,11 +208,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Runner selector (hidden in legacy mode, when no runners are reported) -->
-    <div
-      v-if="isOpen && runnerMode"
-      class="px-3 pb-2 w-full"
-      data-testid="runner-select"
-    >
+    <div v-if="isOpen && runnerMode" class="px-3 pb-2 w-full" data-testid="runner-select">
       <div ref="runnerSelectEl" class="relative w-full">
         <button
           type="button"
@@ -238,16 +234,8 @@ onUnmounted(() => {
               runners.length === 0 ? t("runners.noRunner") : selectedRunnerId
             }}</span>
           </span>
-          <Icon
-            v-if="runners.length > 0"
-            icon="mynaui:chevron-down"
-            class="h-4 w-4 shrink-0"
-          />
-          <Icon
-            v-else
-            icon="mynaui:danger"
-            class="h-4 w-4 shrink-0 text-warning"
-          />
+          <Icon v-if="runners.length > 0" icon="mynaui:chevron-down" class="h-4 w-4 shrink-0" />
+          <Icon v-else icon="mynaui:danger" class="h-4 w-4 shrink-0 text-warning" />
         </button>
         <ul
           v-if="runnerMenuOpen && runners.length > 0"

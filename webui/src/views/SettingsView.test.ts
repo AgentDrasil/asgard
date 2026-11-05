@@ -39,7 +39,6 @@ describe("SettingsView.vue", () => {
 
     vi.spyOn(api, "getRunners").mockResolvedValue(null);
     vi.spyOn(api, "getManageRunners").mockResolvedValue(null);
-    vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([]);
     vi.spyOn(api, "getSystemLogs").mockResolvedValue([
       {
         id: 1,
@@ -176,9 +175,28 @@ describe("SettingsView.vue", () => {
     app.unmount();
   });
 
+  it("navigates to /settings/keys when Personal API Keys card is clicked", async () => {
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const keysCard = root.querySelector<HTMLElement>('[data-testid="nav-proxy-keys"]');
+    expect(keysCard).not.toBeNull();
+    keysCard!.click();
+
+    expect(mockPush).toHaveBeenCalledWith("/settings/keys");
+    app.unmount();
+  });
+
   it("restricts server logs and diagnostics to admin users", async () => {
     vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
-    vi.spyOn(api, "apiFetch").mockImplementation(async (path: string) => {
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
       if (path === "/api/auth/me") {
         return {
           ok: true,
@@ -206,7 +224,8 @@ describe("SettingsView.vue", () => {
 
   it("allows admin users to view server logs and diagnostics", async () => {
     vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
-    vi.spyOn(api, "apiFetch").mockImplementation(async (path: string) => {
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
       if (path === "/api/auth/me") {
         return {
           ok: true,
@@ -215,9 +234,17 @@ describe("SettingsView.vue", () => {
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
-    const getLogsSpy = vi.spyOn(api, "getSystemLogs").mockResolvedValue([
-      { id: 1, timestamp: new Date().toISOString(), level: "warn", source: "backend", message: "w" },
-    ]);
+    const getLogsSpy = vi
+      .spyOn(api, "getSystemLogs")
+      .mockResolvedValue([
+        {
+          id: 1,
+          timestamp: new Date().toISOString(),
+          level: "warn",
+          source: "backend",
+          message: "w",
+        },
+      ]);
 
     const app = createApp({
       render() {

@@ -102,7 +102,8 @@ describe("LogView.vue", () => {
 
   it("shows access denied and skips fetching logs for non-admin", async () => {
     vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
-    vi.spyOn(api, "apiFetch").mockImplementation(async (path: string) => {
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
       if (path === "/api/auth/me") {
         return {
           ok: true,
