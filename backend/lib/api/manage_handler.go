@@ -569,7 +569,17 @@ func (s *Server) runnerQuota(ctx context.Context, node string) (map[string][]llm
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	return runnerfs.QueryQuotaWithStatus(ctx, client)
+	res, err := runnerfs.QueryQuotaWithStatus(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	// The runner reports every CLI it knows; only configured providers count.
+	for cli := range res {
+		if !s.conf.IsProviderEnabled(cli) {
+			delete(res, cli)
+		}
+	}
+	return res, nil
 }
 
 // ConfigResponse represents the public configuration sent to web clients.

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import Sidebar from "./components/Sidebar.vue";
+import TerminalPanel from "./components/TerminalPanel.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
 import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import SessionSearchModal from "./components/SessionSearchModal.vue";
@@ -695,6 +696,14 @@ const commandList = computed<CommandItem[]>(() => [
           @retry="handleRetryLastUserMessage"
         />
       </router-view>
+      <!-- Hosted here (not in ChatView) so the sidebar terminal works on every page. -->
+      <TerminalPanel
+        :sessionId="activeSessionId || ''"
+        :terminalType="terminalType"
+        :isOpen="isTerminalOpen"
+        @hide="isTerminalOpen = false"
+        @close="isTerminalOpen = false"
+      />
     </main>
 
     <!-- File Search Modal (triggered from Command Palette or action buttons) -->

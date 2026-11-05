@@ -6,7 +6,6 @@ import ChatInput from "../components/ChatInput.vue";
 import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
-import TerminalPanel from "../components/TerminalPanel.vue";
 import type {
   ChatMessage,
   AgentInfo,
@@ -273,13 +272,6 @@ function navigateToVcs(gitRoot?: string) {
           v-model="chatInputText"
         />
       </template>
-      <TerminalPanel
-        :sessionId="sessionId"
-        :terminalType="terminalType"
-        :isOpen="isTerminalOpen"
-        @hide="isTerminalOpen = false"
-        @close="isTerminalOpen = false"
-      />
     </div>
   </div>
 </template>

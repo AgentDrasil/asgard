@@ -17,7 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog/log"
+
+	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
 
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
@@ -130,6 +133,12 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 		}
 		if syncErr := SyncSimplestKey(s.opts.HomeDir, tree.Credentials.Simplest); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync simplest key.yaml to home directory")
+		}
+		if syncErr := SyncSimplestCatalog(s.opts.HomeDir, tree.Simplest.Models, tree.Simplest.Providers); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync simplest models/providers to home directory")
+		}
+		if syncErr := SyncAWConfig(s.opts.HomeDir, &tree.AW); syncErr != nil {
+			log.Warn().Err(syncErr).Msg("failed to sync aw config.yaml to home directory")
 		}
 
 		hasKeys := tree.Credentials.SSH.HasKeys()
@@ -424,6 +433,71 @@ func SyncSimplestKey(home string, content []byte) error {
 		}
 	}
 
+	return nil
+}
+
+// SyncSimplestCatalog writes simplest's models.yaml and providers.yaml received
+// from etcd to ~/.config/simplest. Empty content removes the file.
+func SyncSimplestCatalog(home string, models, providers []byte) error {
+	dir, err := configSubdir(home, "simplest")
+	if err != nil {
+		return err
+	}
+	if err := syncConfigFile(dir, "models.yaml", models); err != nil {
+		return err
+	}
+	return syncConfigFile(dir, "providers.yaml", providers)
+}
+
+// SyncAWConfig writes the aw model allow-list to ~/.config/aw/config.yaml,
+// where `aw models|usage` reads it. An empty allow-list removes the file.
+func SyncAWConfig(home string, cfg *awconfig.Config) error {
+	dir, err := configSubdir(home, "aw")
+	if err != nil {
+		return err
+	}
+	var content []byte
+	if cfg != nil && len(cfg.Agents) > 0 {
+		if content, err = yaml.Marshal(cfg); err != nil {
+			return fmt.Errorf("encode aw config: %w", err)
+		}
+	}
+	return syncConfigFile(dir, "config.yaml", content)
+}
+
+func configSubdir(home, name string) (string, error) {
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			var err error
+			if home, err = os.UserHomeDir(); err != nil {
+				return "", fmt.Errorf("resolving home directory: %w", err)
+			}
+		}
+	}
+	return filepath.Join(home, ".config", name), nil
+}
+
+// syncConfigFile makes dir/name hold content (mode 0600), or removes it when
+// content is empty.
+func syncConfigFile(dir, name string, content []byte) error {
+	path := filepath.Join(dir, name)
+	if len(content) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+	if existing, err := os.ReadFile(path); err != nil || !bytes.Equal(existing, content) {
+		if err := atomicWriteFile(path, content, 0600); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	} else {
+		_ = os.Chmod(path, 0600)
+	}
 	return nil
 }
 

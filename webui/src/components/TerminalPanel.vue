@@ -62,7 +62,9 @@ watch(
 // Render only the panel matching the real viewport so a single terminal/WS
 // connection is created (ttyd runs with --once = single client).
 const isDesktop = ref(
-  typeof window !== "undefined" ? window.matchMedia("(min-width: 640px)").matches : true,
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(min-width: 640px)").matches
+    : true,
 );
 let mql: MediaQueryList | null = null;
 const onMqlChange = (e: MediaQueryListEvent) => {
@@ -78,9 +80,11 @@ onMounted(() => {
     }
   }
 
-  mql = window.matchMedia("(min-width: 640px)");
-  isDesktop.value = mql.matches;
-  mql.addEventListener("change", onMqlChange);
+  if (typeof window.matchMedia === "function") {
+    mql = window.matchMedia("(min-width: 640px)");
+    isDesktop.value = mql.matches;
+    mql.addEventListener("change", onMqlChange);
+  }
 });
 
 const toggleMaximize = () => {
@@ -177,14 +181,19 @@ onUnmounted(() => {
       <div
         class="px-3 py-1.5 bg-base-200 border-b border-base-300 flex items-center justify-between shrink-0"
       >
-        <div class="flex items-center gap-1.5 text-xs font-semibold text-base-content/80 min-w-0">
+        <div
+          class="flex items-center gap-1.5 text-xs font-semibold text-base-content/80 min-w-0"
+        >
           <!-- Mobile Back Button -->
           <button
             @click="emit('hide')"
             class="sm:hidden btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0 mr-0.5"
             :title="t('terminal.backToChat')"
           >
-            <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
+            <Icon
+              icon="material-symbols:arrow-back-ios-rounded"
+              class="h-4 w-4 ml-1"
+            />
           </button>
           <Icon icon="mynaui:terminal" class="h-4 w-4 text-primary shrink-0" />
           <span class="truncate">{{
@@ -198,7 +207,9 @@ onUnmounted(() => {
           <button
             @click="emit('hide')"
             class="btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            :title="t('terminal.hideTerminal', { shortcut: toggleTerminalShortcut })"
+            :title="
+              t('terminal.hideTerminal', { shortcut: toggleTerminalShortcut })
+            "
           >
             <Icon icon="ep:minus" class="h-3.5 w-3.5" />
           </button>
@@ -206,10 +217,18 @@ onUnmounted(() => {
           <button
             @click="toggleMaximize"
             class="hidden sm:flex btn btn-ghost btn-xs btn-square text-base-content/70 hover:text-base-content"
-            :title="isMaximized ? t('terminal.restoreTerminal') : t('terminal.maximizeTerminal')"
+            :title="
+              isMaximized
+                ? t('terminal.restoreTerminal')
+                : t('terminal.maximizeTerminal')
+            "
           >
             <Icon
-              :icon="isMaximized ? 'octicon:screen-normal-24' : 'octicon:screen-full-24'"
+              :icon="
+                isMaximized
+                  ? 'octicon:screen-normal-24'
+                  : 'octicon:screen-full-24'
+              "
               class="h-3.5 w-3.5"
             />
           </button>
@@ -226,7 +245,10 @@ onUnmounted(() => {
 
       <!-- Terminal -->
       <div class="flex-1 w-full h-full bg-black overflow-hidden relative">
-        <div v-if="isResizing" class="absolute inset-0 bg-transparent z-20"></div>
+        <div
+          v-if="isResizing"
+          class="absolute inset-0 bg-transparent z-20"
+        ></div>
         <TerminalView
           :key="terminalKey"
           :session-id="sessionId"
@@ -246,14 +268,19 @@ onUnmounted(() => {
     <header
       class="px-3 py-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between shrink-0"
     >
-      <div class="flex items-center gap-2 text-sm font-bold text-base-content min-w-0">
+      <div
+        class="flex items-center gap-2 text-sm font-bold text-base-content min-w-0"
+      >
         <!-- Mobile Back Button (Hide/Minimize) -->
         <button
           @click="emit('hide')"
           class="btn btn-sm btn-ghost btn-square text-base-content/80 hover:text-base-content shrink-0"
           :title="t('terminal.backToChatMinimize')"
         >
-          <Icon icon="material-symbols:arrow-back-ios-rounded" class="h-4 w-4 ml-1" />
+          <Icon
+            icon="material-symbols:arrow-back-ios-rounded"
+            class="h-4 w-4 ml-1"
+          />
         </button>
         <Icon icon="mynaui:terminal" class="h-5 w-5 text-primary shrink-0" />
         <span class="truncate">{{ t("terminal.terminal") }}</span>
