@@ -465,3 +465,30 @@ func TestAgentStore_SameRevisionDifferentContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "new", string(got))
 }
+
+func TestAgentStore_NoCLIValidationByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// No clients registered and no catalog: the backend must not probe or
+	// reject arbitrary cli/model pairs.
+	agentwrapper.SetClients(map[string]types.CLIClient{})
+	t.Cleanup(func() { agentwrapper.SetClients(nil) })
+	yaml := []byte("id: a\nname: a\ndescription: d\nmain_agent: false\ncli:\n  - cli: whatever\n    model: any-model\n")
+	store := NewAgentStore(PrefixedSource{Source: configlib.NewMemSource(configlib.FlattenKVs{"agents/a/config.yaml": yaml})})
+	require.NoError(t, store.Start(context.Background()))
+	t.Cleanup(store.Close)
+	agents, err := store.LoadAll()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a"}, agentIDs(agents))
+}
+
+func TestAgentStore_RunnerCatalogStillValidates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	yaml := []byte("id: a\nname: a\ndescription: d\nmain_agent: false\ncli:\n  - cli: opencode\n    model: nope\n")
+	store := NewAgentStore(PrefixedSource{Source: configlib.NewMemSource(configlib.FlattenKVs{"agents/a/config.yaml": yaml})})
+	store.SetSupportedCLIs(map[string][]string{"opencode": {"deepseek-chat"}})
+	require.NoError(t, store.Start(context.Background()))
+	t.Cleanup(store.Close)
+	_, err := store.LoadAll()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not supported")
+}

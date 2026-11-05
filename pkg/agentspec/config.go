@@ -396,6 +396,14 @@ func (cfg *AgentConfig) Validate() error {
 	return cfg.ValidateWithCLIs(supportedCLIs)
 }
 
+// AnyCLIKey, present as a key in a supported CLI map, disables the CLI and
+// model catalog checks (the model must still be non-empty). The backend has no
+// vendor CLIs; runners validate against their own catalogs.
+const AnyCLIKey = "*"
+
+// NoCLIValidation returns a supported CLI map that accepts any cli and model.
+func NoCLIValidation() map[string][]string { return map[string][]string{AnyCLIKey: nil} }
+
 // ValidateWithCLIs checks the AgentConfig fields for correctness against a provided map of supported CLIs and models.
 func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) error {
 	if cfg.MainAgent == nil {
@@ -430,7 +438,11 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 			return fmt.Errorf("cli target name cannot be empty")
 		}
 
+		_, anyCLI := supportedCLIs[AnyCLIKey]
 		models, supported := supportedCLIs[target.CLI]
+		if anyCLI {
+			models, supported = nil, true
+		}
 		if !supported {
 			return fmt.Errorf("unsupported cli agent: %q", target.CLI)
 		}

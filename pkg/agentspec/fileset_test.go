@@ -220,3 +220,11 @@ func TestParseFiles_UnknownTeamInRunnerIsScoped(t *testing.T) {
 	require.Len(t, set.RunnerErrors(), 1)
 	assert.ErrorContains(t, set.RunnerErrors()[0], "runner n1")
 }
+
+func TestValidateWithCLIs_NoCLIValidation(t *testing.T) {
+	cfg := AgentConfig{ID: "a", Name: "a", Description: "d", RunDirs: []string{"/w"}, CLI: []CLITarget{{CLI: "x", Model: "m"}}}
+	assert.Error(t, cfg.ValidateWithCLIs(map[string][]string{}))
+	assert.NoError(t, cfg.ValidateWithCLIs(NoCLIValidation()))
+	cfg.CLI[0].Model = ""
+	assert.Error(t, cfg.ValidateWithCLIs(NoCLIValidation()))
+}

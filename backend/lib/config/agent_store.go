@@ -15,7 +15,6 @@ import (
 	"github.com/elmhuangyu/configs/pkg/configlib"
 	"github.com/getsops/sops/v3/decrypt"
 
-	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
@@ -39,8 +38,9 @@ type PrefixedSource struct {
 // effective list for a given runner.
 type AgentStore struct {
 	sources []PrefixedSource
-	// clis is the supported CLI/model map, computed once (it execs vendor
-	// CLIs) and never while holding mu.
+	// clis is the supported CLI/model map. Unset (the backend), agents are
+	// parsed without CLI/model validation: the backend has no vendor CLIs and
+	// never probes them; runners inject their own catalog.
 	clis map[string][]string
 
 	mu       sync.Mutex
@@ -94,8 +94,8 @@ func (s *AgentStore) Accept(agents []*agentspec.Agent) {
 	s.handed = nil
 }
 
-// SetSupportedCLIs overrides the supported CLI/model map instead of probing the
-// installed CLIs at Start. Call before Start.
+// SetSupportedCLIs sets the CLI/model catalog agents are validated against
+// (runners). Without it no CLI/model validation happens. Call before Start.
 func (s *AgentStore) SetSupportedCLIs(clis map[string][]string) { s.clis = clis }
 
 // OnChange registers fn, called after every applied update (including ones
@@ -111,7 +111,7 @@ func (s *AgentStore) OnChange(fn func()) {
 // they surface through LoadAll so the server can start degraded.
 func (s *AgentStore) Start(ctx context.Context) error {
 	if s.clis == nil {
-		s.clis = agentwrapper.GetSupportedCLIsAndModels()
+		s.clis = agentspec.NoCLIValidation()
 	}
 	watchCtx, cancel := context.WithCancel(ctx)
 
