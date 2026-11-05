@@ -2,10 +2,12 @@ package bwrap
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1599,4 +1601,112 @@ func TestAppendSSHSandboxArgs_KnownHosts(t *testing.T) {
 	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--tmpfs", sshDir), 0)
 	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--ro-bind", configPath, configPath), 0)
 	assert.GreaterOrEqual(t, indexOfSeq(argsWithKnownHosts, "--ro-bind", knownHostsPath, knownHostsPath), 0)
+}
+
+func TestBuildSandboxArgs_AgyAccountToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	accRoot := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", accRoot)
+	t.Setenv("ASGARD_AGY_ACCOUNT", "")
+	runDir := filepath.Join(home, "run")
+	for _, d := range []string{runDir, filepath.Join(home, ".gemini")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := agentspec.CLITarget{CLI: "agy"}
+	dest := filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	build := func(tg agentspec.CLITarget, all bool) ([]string, error) {
+		return buildSandboxArgs(nil, "", tg, all, runDir, "", "c1", "", "")
+	}
+	mkAcc := func(alias string, token bool) string {
+		d := filepath.Join(accRoot, "agy", alias)
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(d, "antigravity-oauth-token")
+		if token {
+			if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return p
+	}
+
+	// No accounts: no extra bind.
+	args, err := build(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, dest) {
+		t.Fatal("unexpected token bind without accounts")
+	}
+
+	// Account without token file: no bind.
+	mkAcc("alpha", false)
+	args, _ = build(target, false)
+	if slices.Contains(args, dest) {
+		t.Fatal("unexpected token bind with missing token file")
+	}
+
+	// Token present: bound after the .gemini bind.
+	tok := mkAcc("alpha", true)
+	args, err = build(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokIdx := indexOfSeq(args, "--bind", tok, dest)
+	gemIdx := indexOfSeq(args, "--bind", filepath.Join(home, ".gemini"), filepath.Join(home, ".gemini"))
+	if tokIdx < 0 || gemIdx < 0 || tokIdx < gemIdx {
+		t.Fatalf("token bind %d should follow .gemini bind %d", tokIdx, gemIdx)
+	}
+
+	// Query sandbox includes it too.
+	args, _ = build(agentspec.CLITarget{}, true)
+	if indexOfSeq(args, "--bind", tok, dest) < 0 {
+		t.Fatal("query sandbox should bind token")
+	}
+
+	// Non-agy target: no bind.
+	args, _ = build(agentspec.CLITarget{CLI: "claude"}, false)
+	if slices.Contains(args, dest) {
+		t.Fatal("claude target must not bind agy token")
+	}
+
+	// Env override picks another account.
+	tok2 := mkAcc("beta", true)
+	t.Setenv("ASGARD_AGY_ACCOUNT", "beta")
+	args, _ = build(target, false)
+	if indexOfSeq(args, "--bind", tok2, dest) < 0 {
+		t.Fatal("env override should bind beta token")
+	}
+
+	// Explicit override whose token file is missing must fail, not fall back.
+	mkAcc("gamma", false)
+	t.Setenv("ASGARD_AGY_ACCOUNT", "gamma")
+	if _, err := build(target, false); err == nil {
+		t.Fatal("expected error for override without token file")
+	}
+
+	// Bad override is an error.
+	t.Setenv("ASGARD_AGY_ACCOUNT", "nope")
+	if _, err := build(target, false); err == nil {
+		t.Fatal("expected error for bad override")
+	}
+}
+
+func TestChooseAccount_StubbedError(t *testing.T) {
+	old := selectAccount
+	t.Cleanup(func() { selectAccount = old })
+	selectAccount = func(string) (string, bool, error) { return "", false, fmt.Errorf("boom") }
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runDir := filepath.Join(home, "run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "agy"}, false, runDir, "", "c", "", ""); err == nil {
+		t.Fatal("selector error must be returned")
+	}
 }

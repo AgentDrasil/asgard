@@ -3,6 +3,7 @@ package bwrap
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
@@ -758,6 +760,13 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 			envs[k] = v
 		}
 	}
+	// Overlay the selected agy account's token over the host ~/.gemini token.
+	// agy refreshes the token in place, so a file bind persists refreshes.
+	if allCLIs || target.CLI == "agy" {
+		if args, err = appendAgyAccountToken(args, home, target.Model); err != nil {
+			return nil, err
+		}
+	}
 	// Readonly mounts last among the directory binds, so they win over any
 	// read-write bind of an ancestor (run_dirs, mount_dirs.readwrite, CLI dirs).
 	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
@@ -1441,4 +1450,48 @@ func CommandForGit(ctx context.Context, spec GitSandboxSpec) (*exec.Cmd, error) 
 		return nil, err
 	}
 	return exec.CommandContext(ctx, "bwrap", args...), nil
+}
+
+// selectAccount picks the account alias for a CLI; a variable so tests can stub it.
+var selectAccount = accounts.Select
+
+// chooseAccount is the single place where the account for (cli, model) is
+// chosen. Currently a placeholder (env override or first alias).
+func chooseAccount(cli, model string) (string, bool, error) {
+	return selectAccount(cli)
+}
+
+// agyOAuthTokenRelPath is the agy token path relative to the home directory.
+const agyOAuthTokenRelPath = ".gemini/antigravity-cli/antigravity-oauth-token"
+
+// appendAgyAccountToken binds the selected agy account's token file over the
+// sandbox's agy token path. It changes nothing when no account is selected or
+// the token file is missing. A selection error (e.g. bad override) is returned.
+func appendAgyAccountToken(args []string, home, model string) ([]string, error) {
+	alias, ok, err := chooseAccount("agy", model)
+	if err != nil {
+		return nil, fmt.Errorf("selecting agy account: %w", err)
+	}
+	if !ok {
+		return args, nil
+	}
+	tokenPath, err := accounts.TokenPath(alias)
+	if err != nil {
+		return nil, fmt.Errorf("agy account %q: %w", alias, err)
+	}
+	fi, statErr := os.Stat(tokenPath)
+	if statErr == nil && fi.IsDir() {
+		statErr = errors.New("is a directory")
+	}
+	if statErr != nil {
+		// An explicitly requested account must never silently run as the
+		// host's own credentials.
+		if os.Getenv("ASGARD_AGY_ACCOUNT") != "" || !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("agy account %q token %s: %w", alias, tokenPath, statErr)
+		}
+		log.Warn().Str("cli", "agy").Str("account", alias).Msg("account token file missing, using default credentials")
+		return args, nil
+	}
+	log.Debug().Str("cli", "agy").Str("account", alias).Msg("binding account token")
+	return append(args, "--bind", tokenPath, filepath.Join(home, agyOAuthTokenRelPath)), nil
 }

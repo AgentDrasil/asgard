@@ -131,3 +131,31 @@ func Remove(cli, alias string) error {
 
 	return os.RemoveAll(dir)
 }
+
+// Select chooses the account alias for a CLI. It returns the alias named by
+// ASGARD_<CLI>_ACCOUNT if set (which must be a valid, existing account),
+// otherwise the first alias of List(cli). ok is false when no account exists.
+func Select(cli string) (alias string, ok bool, err error) {
+	if err := ValidateCLI(cli); err != nil {
+		return "", false, err
+	}
+	envName := "ASGARD_" + strings.ToUpper(cli) + "_ACCOUNT"
+	if v := os.Getenv(envName); v != "" {
+		dir, err := Dir(cli, v)
+		if err != nil {
+			return "", false, fmt.Errorf("%s: %w", envName, err)
+		}
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return "", false, fmt.Errorf("%s: account %q does not exist", envName, v)
+		}
+		return v, true, nil
+	}
+	aliases, err := List(cli)
+	if err != nil {
+		return "", false, err
+	}
+	if len(aliases) == 0 {
+		return "", false, nil
+	}
+	return aliases[0], true, nil
+}

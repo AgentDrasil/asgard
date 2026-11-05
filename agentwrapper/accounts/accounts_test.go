@@ -247,3 +247,38 @@ func TestRemove(t *testing.T) {
 		assert.True(t, os.IsNotExist(statErr))
 	})
 }
+
+func TestSelect(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(EnvAccountsDir, root)
+	t.Setenv("ASGARD_AGY_ACCOUNT", "")
+
+	_, ok, err := Select("agy")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	for _, a := range []string{"work", "alpha"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "agy", a), DirMode))
+	}
+	alias, ok, err := Select("agy")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "alpha", alias)
+
+	t.Setenv("ASGARD_AGY_ACCOUNT", "work")
+	alias, ok, err = Select("agy")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "work", alias)
+
+	t.Setenv("ASGARD_AGY_ACCOUNT", "missing")
+	_, _, err = Select("agy")
+	assert.Error(t, err)
+
+	t.Setenv("ASGARD_AGY_ACCOUNT", "../x")
+	_, _, err = Select("agy")
+	assert.Error(t, err)
+
+	_, _, err = Select("bogus")
+	assert.Error(t, err)
+}
