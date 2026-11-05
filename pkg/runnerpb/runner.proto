@@ -854,6 +854,12 @@ message ModelUsage {
   // account is the runner-local account alias this quota belongs to; empty
   // for a CLI without accounts.
   string account = 8;
+  // status marks a status-only entry (model is empty and carries no quota):
+  // "no_credentials" (the CLI/account has no usable login) or "error" (the
+  // query failed). Empty for a regular quota entry.
+  string status = 9;
+  // message is the error text or login hint of a status-only entry.
+  string message = 10;
 }
 message QueryQuotaResponse {
   repeated ModelUsage usages = 1;

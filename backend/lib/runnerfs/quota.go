@@ -23,6 +23,7 @@ func QuotaToProto(res map[string][]llms.ModelUsage) []*runnerpb.ModelUsage {
 		for _, u := range res[cli] {
 			m := &runnerpb.ModelUsage{
 				Cli: cli, Model: u.Model, Remaining: u.Remaining, RefreshDate: u.RefreshDate, Enabled: true, Account: u.Account,
+				Status: u.Status, Message: u.Message,
 			}
 			for _, l := range u.Limits {
 				m.Limits = append(m.Limits, &runnerpb.QuotaLimit{Name: l.Name, Remaining: l.Remaining, RefreshDate: l.RefreshDate})
@@ -45,13 +46,29 @@ func QuotaToProto(res map[string][]llms.ModelUsage) []*runnerpb.ModelUsage {
 
 // QuotaFromProto is the inverse of QuotaToProto. Disabled entries are
 // dropped, mirroring the filtered map the previous local query returned.
+// Status-only entries (no credentials / query error) are dropped too, so
+// callers that pick models never see a model-less entry as 0% quota; use
+// QuotaFromProtoWithStatus to keep them.
 func QuotaFromProto(usages []*runnerpb.ModelUsage) map[string][]llms.ModelUsage {
+	return quotaFromProto(usages, false)
+}
+
+// QuotaFromProtoWithStatus is QuotaFromProto that keeps the status-only
+// entries, for display (GET /api/quota).
+func QuotaFromProtoWithStatus(usages []*runnerpb.ModelUsage) map[string][]llms.ModelUsage {
+	return quotaFromProto(usages, true)
+}
+
+func quotaFromProto(usages []*runnerpb.ModelUsage, withStatus bool) map[string][]llms.ModelUsage {
 	res := make(map[string][]llms.ModelUsage)
 	for _, m := range usages {
 		if !m.GetEnabled() {
 			continue
 		}
-		u := llms.ModelUsage{Model: m.GetModel(), Remaining: m.GetRemaining(), RefreshDate: m.GetRefreshDate(), Account: m.GetAccount()}
+		if m.GetStatus() != "" && !withStatus {
+			continue
+		}
+		u := llms.ModelUsage{Model: m.GetModel(), Remaining: m.GetRemaining(), RefreshDate: m.GetRefreshDate(), Account: m.GetAccount(), Status: m.GetStatus(), Message: m.GetMessage()}
 		for _, l := range m.GetLimits() {
 			u.Limits = append(u.Limits, llms.QuotaLimit{Name: l.GetName(), Remaining: l.GetRemaining(), RefreshDate: l.GetRefreshDate()})
 		}
@@ -71,11 +88,21 @@ func QuotaFromProto(usages []*runnerpb.ModelUsage) map[string][]llms.ModelUsage 
 }
 
 // QueryQuota asks a runner for its quota (all targets) in the shape
-// agentwrapper.GetQuota returns.
+// agentwrapper.GetQuota returns, without status-only entries.
 func QueryQuota(ctx context.Context, client runnerpb.RunnerServiceClient) (map[string][]llms.ModelUsage, error) {
 	resp, err := client.QueryQuota(ctx, &runnerpb.QueryQuotaRequest{})
 	if err != nil {
 		return nil, ToError(err)
 	}
 	return QuotaFromProto(resp.GetUsages()), nil
+}
+
+// QueryQuotaWithStatus is QueryQuota that keeps the status-only entries
+// (no_credentials / error), for display.
+func QueryQuotaWithStatus(ctx context.Context, client runnerpb.RunnerServiceClient) (map[string][]llms.ModelUsage, error) {
+	resp, err := client.QueryQuota(ctx, &runnerpb.QueryQuotaRequest{})
+	if err != nil {
+		return nil, ToError(err)
+	}
+	return QuotaFromProtoWithStatus(resp.GetUsages()), nil
 }

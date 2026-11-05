@@ -342,9 +342,10 @@ func TestQueryQuotaPerAccountFanOut(t *testing.T) {
 		got = append(got, row{u.GetCli(), u.GetModel(), u.GetAccount()})
 	}
 	// Sorted by cli; one set per account in alias order; the failing account
-	// is skipped; the CLI without accounts keeps the legacy shape.
+	// is a status-only entry; the CLI without accounts keeps the legacy shape.
 	assert.Equal(t, []row{
 		{"agy", "m-solo", "solo"},
+		{"claude", "", "broken"},
 		{"claude", "m-home", "home"},
 		{"claude", "m-work", "work"},
 		{"opencode", "oc", ""},
@@ -364,9 +365,47 @@ func TestQueryQuotaAllAccountsFailKeepsLegacy(t *testing.T) {
 	})
 	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
 	require.NoError(t, err)
-	require.Len(t, resp.GetUsages(), 1)
+	require.Len(t, resp.GetUsages(), 2)
 	assert.Equal(t, "legacy", resp.GetUsages()[0].GetModel())
 	assert.Equal(t, "", resp.GetUsages()[0].GetAccount())
+	st := resp.GetUsages()[1]
+	assert.Equal(t, "error", st.GetStatus())
+	assert.Equal(t, "boom", st.GetMessage())
+	assert.Equal(t, "work", st.GetAccount())
+}
+
+func TestQueryQuotaAccountNoCredentials(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "agy", "solo"), 0o700))
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) {
+			return map[string][]llms.ModelUsage{"agy": {llms.StatusUsage(errors.New("agy /usage: Authentication required"))}}, nil
+		},
+		AccountQuota: func(context.Context, string, string) ([]llms.ModelUsage, error) {
+			return nil, errors.New("agy /usage: Authentication required")
+		},
+	})
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetUsages(), 1)
+	assert.Equal(t, "no_credentials", resp.GetUsages()[0].GetStatus())
+	assert.Equal(t, "solo", resp.GetUsages()[0].GetAccount())
+}
+
+func TestQueryQuotaNoAccountsKeepsLegacyStatus(t *testing.T) {
+	t.Setenv("ASGARD_ACCOUNTS_DIR", t.TempDir())
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) {
+			return map[string][]llms.ModelUsage{"claude": {llms.StatusUsage(errors.New("Not logged in"))}}, nil
+		},
+	})
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetUsages(), 1)
+	assert.Equal(t, "claude", resp.GetUsages()[0].GetCli())
+	assert.Equal(t, "no_credentials", resp.GetUsages()[0].GetStatus())
+	assert.Equal(t, "Not logged in", resp.GetUsages()[0].GetMessage())
 }
 
 func TestQueryQuotaAnsweredEmptyDropsLegacy(t *testing.T) {

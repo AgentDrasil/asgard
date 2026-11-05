@@ -179,3 +179,20 @@ func TestQuotaWithoutRunnerSupportIsUnavailable(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, code, string(body))
 	assert.Contains(t, string(body), "no runner is configured")
 }
+
+func TestQuotaKeepsStatusOnlyEntries(t *testing.T) {
+	s := quotaServer([]runnerhub.NodeInfo{{NodeID: "a", Online: true}}, map[string]quotaClient{"a": {usages: []*runnerpb.ModelUsage{
+		{Cli: "agy", Enabled: true, Status: "no_credentials", Message: "Authentication required"},
+		{Cli: "claude", Enabled: true, Account: "work", Status: "error", Message: "boom"},
+		{Cli: "opencode", Model: "m1", Remaining: 0.5, Enabled: true},
+	}}})
+	code, body := getQuota(t, s, "")
+	assert.Equal(t, http.StatusOK, code)
+	var got map[string][]map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Len(t, got["agy"], 1)
+	assert.Equal(t, "no_credentials", got["agy"][0]["status"])
+	assert.Equal(t, "Authentication required", got["agy"][0]["message"])
+	assert.Equal(t, "work", got["claude"][0]["account"])
+	assert.NotContains(t, got["opencode"][0], "status")
+}

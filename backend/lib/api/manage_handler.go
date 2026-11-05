@@ -462,6 +462,10 @@ const quotaTimeout = 60 * time.Second
 //   - no parameter otherwise: QuotaAllResponse, every online runner keyed by
 //     node id plus per-node errors. With no runner online it is 503.
 //
+// A CLI's list may contain status-only entries (empty model, "status" is
+// "no_credentials" or "error", "message" holds the text) next to or instead of
+// model entries; the UI shows them as notices.
+//
 // The backend never queries the vendor CLIs itself: without runner support the
 // endpoint answers 503.
 func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +569,7 @@ func (s *Server) runnerQuota(ctx context.Context, node string) (map[string][]llm
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	return runnerfs.QueryQuota(ctx, client)
+	return runnerfs.QueryQuotaWithStatus(ctx, client)
 }
 
 // ConfigResponse represents the public configuration sent to web clients.

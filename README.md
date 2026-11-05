@@ -116,7 +116,7 @@ Claude sandboxes bind the selected account directory (read-write) as `~/.claude`
 - Otherwise each account's quota is read (cached per `(cli, alias)` for 60s, one shared fetch for concurrent runs). A model with no quota entry on an account counts as available; an entry is exhausted when its remaining fraction or any of its limits is `0`. If every account is exhausted, the account whose quota refreshes first is used.
 - If an account's quota cannot be fetched it is treated as available (a warning is logged), so selection falls back to the first alias.
 
-`/api/quota` reports quota per account for `agy` and `claude`: each runner queries every account separately (in a sandbox pinned to that account) and the usage entries carry an `"account": "<alias>"` field (omitted for CLIs without accounts). An account whose query fails is skipped.
+`/api/quota` reports quota per account for `agy` and `claude`: each runner queries every account separately (in a sandbox pinned to that account) and the usage entries carry an `"account": "<alias>"` field (omitted for CLIs without accounts). An account whose query fails (or has no credentials) yields a status-only entry instead: no `model`, `"status"` of `no_credentials` or `error`, and the error text in `"message"`; a CLI with no accounts and no login reports the same. The UI shows these as notices.
 
 ## Sandbox Architecture
 

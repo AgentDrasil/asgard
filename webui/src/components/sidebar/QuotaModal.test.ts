@@ -94,4 +94,45 @@ describe("QuotaModal", () => {
       "n3: boom",
     );
   });
+  it("explains no credentials with the runner id and a login hint (aggregate)", async () => {
+    await mount({
+      runners: {
+        n1: { agy: [{ status: "no_credentials", message: "Authentication required" }] },
+        n2: { claude: [model] },
+      },
+    });
+    const el = root.querySelector('[data-testid="quota-status-no_credentials"]')!;
+    expect(el.textContent).toContain("No agy credentials on runner n1.");
+    expect(el.textContent).toContain("aw agy login NAME");
+    expect(el.textContent).toContain("Authentication required");
+    expect(root.querySelectorAll("h4").length).toBe(1);
+  });
+
+  it("uses the selected runner for no credentials in the flat shape", async () => {
+    vi.spyOn(api, "getRunners").mockResolvedValue({
+      backend_version: "",
+      runners: [{ node_id: "n9", online: true }],
+    });
+    await useRunners().refreshRunners();
+    await mount({ claude: [{ status: "no_credentials", message: "Not logged in" }] });
+    expect(root.textContent).toContain("No claude credentials on runner n9.");
+  });
+
+  it("shows per-CLI query errors with their text next to working models", async () => {
+    await mount({
+      agy: [{ status: "error", message: "bwrap: Permission denied", account: "work" }],
+      claude: [model],
+    });
+    const el = root.querySelector('[data-testid="quota-status-error"]')!;
+    expect(el.textContent).toContain("Failed to query agy (work) quota.");
+    expect(el.textContent).toContain("bwrap: Permission denied");
+    expect(root.textContent).toContain("m1");
+  });
+
+  it("renders the Chinese no-credentials text", async () => {
+    setLocale("zh-CN", false);
+    await mount({ agy: [{ status: "no_credentials" }] });
+    expect(root.textContent).toContain("agy 凭据");
+    setLocale("en", false);
+  });
 });

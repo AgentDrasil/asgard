@@ -4,12 +4,14 @@ package agy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms"
 )
 
 type QuotaEntry struct {
@@ -38,12 +40,24 @@ type CLIEvent struct {
 	} `json:"command,omitempty"`
 }
 
+// stderrSuffix returns ": <stderr>" for a failed command, so the CLI's own
+// message (e.g. "Authentication required") reaches the error text.
+func stderrSuffix(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if s := strings.TrimSpace(string(ee.Stderr)); s != "" {
+			return ": " + s
+		}
+	}
+	return ""
+}
+
 func Models(ctx context.Context, opts types.UsageOptions) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "agy", "--output-format", "json", "models")
 	cmd.Dir = opts.Dir
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running agy models: %w", err)
+		return nil, fmt.Errorf("running agy models: %w%s", err, stderrSuffix(err))
 	}
 
 	var ev CLIEvent
@@ -143,7 +157,12 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running agy for usage: %w", err)
+		return nil, fmt.Errorf("running agy for usage: %w%s", err, stderrSuffix(err))
+	}
+	// An unauthenticated agy answers "Authentication required" instead of
+	// quota buckets; reporting that as full quota would be wrong.
+	if llms.IsNoCredentialsText(string(output)) {
+		return nil, fmt.Errorf("agy /usage: %s", strings.TrimSpace(string(output)))
 	}
 
 	quota := make(map[string]QuotaEntry)

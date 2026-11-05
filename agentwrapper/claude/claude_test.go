@@ -16,6 +16,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms"
 )
 
 const sampleStream = `{"type":"system","subtype":"init","session_id":"s-1"}
@@ -528,4 +529,10 @@ func TestCommandEnvHasSingleConfigDir(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude")}, got)
+}
+
+func TestParseUsageTextNotLoggedInIsNoCredentials(t *testing.T) {
+	_, err := parseUsageText("Not logged in · Please run /login", time.Now())
+	require.Error(t, err)
+	assert.True(t, llms.IsNoCredentialsText(err.Error()))
 }

@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -31,6 +32,10 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && strings.TrimSpace(string(ee.Stderr)) != "" {
+			return nil, fmt.Errorf("running claude /usage: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
 		return nil, fmt.Errorf("running claude /usage: %w", err)
 	}
 

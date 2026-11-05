@@ -2,12 +2,15 @@ package agy
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms"
 )
 
 func TestModels(t *testing.T) {
@@ -30,4 +33,20 @@ func TestModels(t *testing.T) {
 		}
 	}
 	require.True(t, hasGemini, "Expected models to include gemini models, got: %v", models)
+}
+
+func TestUsageNoCredentials(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+case "$*" in
+  *models*) echo '{"command":{"name":"models","data":{"models":[{"id":"gemini-x"}]}}}' ;;
+  *) echo 'Authentication required' ;;
+esac
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agy"), []byte(script), 0o755))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := Usage(context.Background(), types.UsageOptions{})
+	require.Error(t, err)
+	require.True(t, llms.IsNoCredentialsText(err.Error()), err.Error())
 }

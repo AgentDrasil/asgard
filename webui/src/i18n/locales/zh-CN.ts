@@ -133,6 +133,10 @@ export const zhCN: MessageSchema = {
     close: "关闭",
     failedToFetch: "加载配额信息失败",
     statusError: "服务器返回状态码 {status}",
+    noCredentials: "此 runner 上没有 {cli} 凭据。",
+    noCredentialsOnRunner: "runner {runner} 上没有 {cli} 凭据。",
+    loginHint: "请在 runner 上登录：aw {cli} login NAME",
+    cliError: "查询 {cli} 配额失败。",
   },
   commands: {
     openDashboard: "打开看板",

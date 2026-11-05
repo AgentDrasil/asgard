@@ -33,6 +33,9 @@ interface ModelUsage {
   limits?: QuotaLimit[];
   balance?: AccountBalance;
   account?: string;
+  // Status-only entry (no model/quota): "no_credentials" or "error".
+  status?: string;
+  message?: string;
 }
 
 const props = defineProps<{
@@ -66,6 +69,20 @@ const sections = computed<QuotaSection[]>(() => {
   return out;
 });
 const hasQuotaData = computed(() => sections.value.some((s) => Object.keys(s.clis).length > 0));
+// The runner a section belongs to: the aggregate id, else the selected runner.
+const sectionRunner = (id: string) => id || selectedRunnerId.value || "";
+
+const modelsOf = (models: ModelUsage[]) => models.filter((m) => !m.status);
+const statusesOf = (models: ModelUsage[]) => models.filter((m) => !!m.status);
+const statusText = (cli: string, runner: string, s: ModelUsage) => {
+  const who = s.account ? `${cli} (${s.account})` : cli;
+  if (s.status === "no_credentials") {
+    return runner
+      ? t("quota.noCredentialsOnRunner", { cli: who, runner })
+      : t("quota.noCredentials", { cli: who });
+  }
+  return t("quota.cliError", { cli: who });
+};
 
 const applyQuotaResponse = (data: any) => {
   const isAggregate =
@@ -220,7 +237,27 @@ defineExpose({
 
                 <div class="space-y-4">
                   <div
-                    v-for="m in models"
+                    v-for="(s, i) in statusesOf(models)"
+                    :key="`status-${s.account ?? ''}-${i}`"
+                    class="alert text-xs flex items-start gap-2"
+                    :class="s.status === 'no_credentials' ? 'alert-warning' : 'alert-error'"
+                    :data-testid="`quota-status-${s.status}`"
+                  >
+                    <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0 mt-0.5" />
+                    <div class="space-y-1 min-w-0">
+                      <div class="font-semibold">
+                        {{ statusText(String(cliName), sectionRunner(section.id), s) }}
+                      </div>
+                      <div v-if="s.status === 'no_credentials'">
+                        {{ t("quota.loginHint", { cli: String(cliName) }) }}
+                      </div>
+                      <div v-if="s.message" class="font-mono break-words opacity-80">
+                        {{ s.message }}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-for="m in modelsOf(models)"
                     :key="`${m.account ?? ''}/${m.model}`"
                     class="bg-base-300/40 border border-base-100/30 rounded-xl p-4 space-y-3"
                   >

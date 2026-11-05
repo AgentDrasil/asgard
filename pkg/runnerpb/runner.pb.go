@@ -6054,7 +6054,13 @@ type ModelUsage struct {
 	Enabled     bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// account is the runner-local account alias this quota belongs to; empty
 	// for a CLI without accounts.
-	Account       string `protobuf:"bytes,8,opt,name=account,proto3" json:"account,omitempty"`
+	Account string `protobuf:"bytes,8,opt,name=account,proto3" json:"account,omitempty"`
+	// status marks a status-only entry (model is empty and carries no quota):
+	// "no_credentials" (the CLI/account has no usable login) or "error" (the
+	// query failed). Empty for a regular quota entry.
+	Status string `protobuf:"bytes,9,opt,name=status,proto3" json:"status,omitempty"`
+	// message is the error text or login hint of a status-only entry.
+	Message       string `protobuf:"bytes,10,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6141,6 +6147,20 @@ func (x *ModelUsage) GetEnabled() bool {
 func (x *ModelUsage) GetAccount() string {
 	if x != nil {
 		return x.Account
+	}
+	return ""
+}
+
+func (x *ModelUsage) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ModelUsage) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -6656,7 +6676,7 @@ const file_runner_proto_rawDesc = "" +
 	"\x11topped_up_balance\x18\x04 \x01(\tR\x0ftoppedUpBalance\"w\n" +
 	"\x0eAccountBalance\x12!\n" +
 	"\fis_available\x18\x01 \x01(\bR\visAvailable\x12B\n" +
-	"\rbalance_infos\x18\x02 \x03(\v2\x1d.asgard.runner.v1.BalanceInfoR\fbalanceInfos\"\x9b\x02\n" +
+	"\rbalance_infos\x18\x02 \x03(\v2\x1d.asgard.runner.v1.BalanceInfoR\fbalanceInfos\"\xcd\x02\n" +
 	"\n" +
 	"ModelUsage\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
@@ -6666,7 +6686,10 @@ const file_runner_proto_rawDesc = "" +
 	"\x06limits\x18\x05 \x03(\v2\x1c.asgard.runner.v1.QuotaLimitR\x06limits\x12:\n" +
 	"\abalance\x18\x06 \x01(\v2 .asgard.runner.v1.AccountBalanceR\abalance\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12\x18\n" +
-	"\aaccount\x18\b \x01(\tR\aaccount\"J\n" +
+	"\aaccount\x18\b \x01(\tR\aaccount\x12\x16\n" +
+	"\x06status\x18\t \x01(\tR\x06status\x12\x18\n" +
+	"\amessage\x18\n" +
+	" \x01(\tR\amessage\"J\n" +
 	"\x12QueryQuotaResponse\x124\n" +
 	"\x06usages\x18\x01 \x03(\v2\x1c.asgard.runner.v1.ModelUsageR\x06usages*?\n" +
 	"\vAgentSource\x12\x17\n" +

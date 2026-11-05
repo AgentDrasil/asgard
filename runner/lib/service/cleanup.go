@@ -103,8 +103,10 @@ const accountQuotaTimeout = 40 * time.Second
 
 // applyAccountQuotas replaces res[cli] of each account-aware CLI that has
 // accounts with one usage set per account (Account = alias, alias order). The
-// accounts are queried concurrently; a failing account is logged and skipped.
-// When no account answers, the legacy entries of the CLI are kept.
+// accounts are queried concurrently; a failing account
+// contributes a status-only entry (no_credentials / error) with its message.
+// When no account answers, the legacy models of the CLI are kept next to those
+// status entries.
 func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.ModelUsage) {
 	fetch := s.accountQuota
 	if fetch == nil {
@@ -119,10 +121,13 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 			continue
 		}
 		if len(aliases) == 0 {
+			// No accounts: the legacy per-HOME login answered, or its
+			// status-only entry (no credentials / error) stays.
 			continue
 		}
 		perAccount := make([][]llms.ModelUsage, len(aliases))
 		answeredAcc := make([]bool, len(aliases))
+		failed := make([]*llms.ModelUsage, len(aliases))
 		var wg sync.WaitGroup
 		for i, alias := range aliases {
 			wg.Add(1)
@@ -130,7 +135,10 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 				defer wg.Done()
 				usages, err := fetch(ctx, cli, alias)
 				if err != nil {
-					log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota query failed, skipping")
+					log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota query failed")
+					st := llms.StatusUsage(err)
+					st.Account = alias
+					failed[i] = &st
 					return
 				}
 				for j := range usages {
@@ -146,8 +154,20 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 		for i, u := range perAccount {
 			answered = answered || answeredAcc[i]
 			merged = append(merged, u...)
+			if failed[i] != nil {
+				merged = append(merged, *failed[i])
+			}
 		}
 		if !answered {
+			// Keep the legacy models (if any) and report why each account
+			// failed.
+			var legacy []llms.ModelUsage
+			for _, u := range res[cli] {
+				if !u.IsStatusOnly() {
+					legacy = append(legacy, u)
+				}
+			}
+			res[cli] = append(legacy, merged...)
 			continue
 		}
 		res[cli] = merged

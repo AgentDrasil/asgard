@@ -16,6 +16,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms"
 )
 
 var defaultClients = map[string]types.CLIClient{
@@ -177,7 +178,8 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 				usages = u
 			} else {
 				log.Error().Err(err).Str("cli", name).Msg("Failed to check quota for CLI")
-				usages = []types.ModelUsage{}
+				// A status-only entry carries the failure to the UI.
+				usages = []types.ModelUsage{llms.StatusUsage(err)}
 			}
 			mu.Lock()
 			res[name] = usages
@@ -190,7 +192,8 @@ func GetQuota(ctx context.Context) (map[string][]types.ModelUsage, error) {
 	return filterQuota(res), nil
 }
 
-// filterQuota drops models the aw config does not allow.
+// filterQuota drops models the aw config does not allow. Status-only entries
+// are kept: they report a failed query, not a model.
 func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsage {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -200,7 +203,7 @@ func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsag
 	for agentName, usages := range res {
 		filtered := make([]types.ModelUsage, 0, len(usages))
 		for _, u := range usages {
-			if cfg.IsModelAllowed(agentName, u.Model) {
+			if u.IsStatusOnly() || cfg.IsModelAllowed(agentName, u.Model) {
 				filtered = append(filtered, u)
 			}
 		}

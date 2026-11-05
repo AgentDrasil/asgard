@@ -132,6 +132,10 @@ export const en = {
     close: "Close",
     failedToFetch: "Failed to load quota information",
     statusError: "Server returned status {status}",
+    noCredentials: "No {cli} credentials on this runner.",
+    noCredentialsOnRunner: "No {cli} credentials on runner {runner}.",
+    loginHint: "Log in on the runner with: aw {cli} login NAME",
+    cliError: "Failed to query {cli} quota.",
   },
   commands: {
     openDashboard: "Open Dashboard",

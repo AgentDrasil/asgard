@@ -1,6 +1,8 @@
 // Package llms provides shared types, interfaces, and utilities for LLM providers and quota inspection.
 package llms
 
+import "strings"
+
 // QuotaLimit represents a single specific quota limit (e.g. TOKENS_LIMIT, 5h, weekly).
 type QuotaLimit struct {
 	Name        string  `json:"name"`
@@ -53,6 +55,60 @@ type ModelUsage struct {
 	// Account is the runner-local account alias this quota belongs to. It is
 	// empty for CLIs without accounts.
 	Account string `json:"account,omitempty"`
+
+	// Status marks a status-only entry: Model is empty and the entry carries
+	// no quota. Empty for a regular quota entry. See the QuotaStatus*
+	// constants. Consumers that look for models must skip these entries.
+	Status string `json:"status,omitempty"`
+
+	// Message is the error text of a status-only entry.
+	Message string `json:"message,omitempty"`
+}
+
+// Quota entry statuses (ModelUsage.Status).
+const (
+	// QuotaStatusNoCredentials: the CLI (or account) has no usable login.
+	QuotaStatusNoCredentials = "no_credentials"
+	// QuotaStatusError: the quota query failed; Message holds the error.
+	QuotaStatusError = "error"
+)
+
+// IsStatusOnly reports whether the entry is a status-only entry rather than a
+// model's quota.
+func (u ModelUsage) IsStatusOnly() bool { return u.Status != "" }
+
+// NoCredentialsMarkers are lowercase fragments of CLI output that mean the CLI
+// is not logged in.
+var NoCredentialsMarkers = []string{
+	"authentication required",
+	"not logged in",
+	"please run /login",
+	"invalid api key",
+	"no credentials",
+	"credentials not found",
+}
+
+// IsNoCredentialsText reports whether CLI output or an error text says the
+// CLI has no usable credentials.
+func IsNoCredentialsText(text string) bool {
+	text = strings.ToLower(text)
+	for _, m := range NoCredentialsMarkers {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// StatusUsage builds the status-only entry for a failed quota query:
+// QuotaStatusNoCredentials when the error text indicates missing credentials,
+// QuotaStatusError otherwise.
+func StatusUsage(err error) ModelUsage {
+	st := QuotaStatusError
+	if IsNoCredentialsText(err.Error()) {
+		st = QuotaStatusNoCredentials
+	}
+	return ModelUsage{Status: st, Message: err.Error()}
 }
 
 // UsageOptions controls how model usage / quota queries behave.
