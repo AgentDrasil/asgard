@@ -104,6 +104,8 @@ Runner accounts live on local disk rather than in etcd for several reasons:
 - **Stateful CLI Configs**: Claude requires a complete configuration directory (`CLAUDE_CONFIG_DIR`) with local state and caches, which is ill-suited for storage in etcd key-value pairs.
 - **Isolation & Concurrency**: Storing credentials locally avoids etcd write contention, key-value size limits, and synchronization races while ensuring strict filesystem permissions (`0700`/`0600`) backed by a dedicated runner-local volume mount (`./runners/<runner>/accounts:/accounts`).
 
+Claude sandboxes bind the selected account directory (read-write) as `~/.claude`, so each account keeps its own credentials, config and projects. When a run resumes a session (`--session`) that lives in a different account than the one chosen, the runner relays only that session's file family (`projects/*/<sid>.jsonl` and `<sid>/`, `file-history/<sid>`, `session-env/<sid>`, `todos/<sid>-*.json`) into the chosen account before the sandbox starts. Credentials, `.claude.json` and `sessions/` are never copied: claude refresh tokens rotate, so exactly one account directory must own each credential. Concurrent sandboxes on the same account share its directory.
+
 ## Sandbox Architecture
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).

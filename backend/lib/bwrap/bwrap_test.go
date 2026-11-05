@@ -757,7 +757,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 		return false
 	}
 
-	all, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-all", "", "")
+	all, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", "q-all", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +775,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
-	withCfg, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-cfg", "", "")
+	withCfg, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", "q-cfg", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -794,7 +794,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 	if err := os.Symlink(realCfg, awConfig); err != nil {
 		t.Fatal(err)
 	}
-	linked, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-link", "", "")
+	linked, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", "q-link", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +808,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 	if err := os.WriteFile(opencodeCfg, []byte("env:\n  OPENAI_API_KEY: sk-test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-oc", "", "")
+	withOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", "q-oc", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,7 +824,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 	if err := os.Remove(opencodeCfg); err != nil {
 		t.Fatal(err)
 	}
-	linkedWithOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", "q-link-oc", "", "")
+	linkedWithOpencode, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", "q-link-oc", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +832,7 @@ func TestBuildSandboxArgs_CredentialScope(t *testing.T) {
 		t.Error("query sandbox should mount opencode.aw.yaml from symlink resolved directory and set OPENCODE_AW_CONFIG")
 	}
 
-	one, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "claude"}, false, runDir, "", "q-one", "", "")
+	one, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "claude"}, false, "", runDir, "", "q-one", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1084,19 +1084,19 @@ func TestBuildSandboxArgs_ReadonlyMountsComeAfterEveryReadWriteBind(t *testing.T
 	ro := filepath.Join(rw, "ro")
 	require.NoError(t, os.MkdirAll(ro, 0o755))
 	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{ro}, ReadWrite: []string{rw}}}
-	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", runDir, "", "c1", "", "")
 	require.NoError(t, err)
 	check(t, args, ro, rw)
 
 	// Under an ancestor that is a run dir, and under the (extra) bound run dir.
 	cfg = &agentspec.AgentConfig{RunDirs: []string{rw}, MountDirs: agentspec.MountConfig{ReadOnly: []string{ro}}}
-	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c2", "", "")
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", runDir, "", "c2", "", "")
 	require.NoError(t, err)
 	check(t, args, ro, rw, runDir)
 	sub := filepath.Join(runDir, "docs")
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{sub}}}
-	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c3", "", "")
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", runDir, "", "c3", "", "")
 	require.NoError(t, err)
 	check(t, args, sub, runDir)
 
@@ -1104,7 +1104,7 @@ func TestBuildSandboxArgs_ReadonlyMountsComeAfterEveryReadWriteBind(t *testing.T
 	cacheRo := filepath.Join(home, ".cache", "refs")
 	require.NoError(t, os.MkdirAll(cacheRo, 0o755))
 	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{cacheRo}}}
-	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, runDir, "", "c4", "", "")
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, "", runDir, "", "c4", "", "")
 	require.NoError(t, err)
 	check(t, args, cacheRo, filepath.Join(home, ".cache"))
 }
@@ -1181,7 +1181,7 @@ func TestBuildSandboxArgs_ReadWriteBindsAliasingReadonlyRootsAreDemoted(t *testi
 		RunDirs:   []string{runAlias},
 		MountDirs: agentspec.MountConfig{ReadOnly: []string{realRO}, ReadWrite: []string{rwAlias}},
 	}
-	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, extra, "", "c1", "", "")
+	args, err := buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", extra, "", "c1", "", "")
 	require.NoError(t, err)
 	demoted(args, rwAlias)
 	demoted(args, runAlias)
@@ -1191,7 +1191,7 @@ func TestBuildSandboxArgs_ReadWriteBindsAliasingReadonlyRootsAreDemoted(t *testi
 	cache := filepath.Join(home, ".cache")
 	require.NoError(t, os.Symlink(realRO, cache))
 	cfg = &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{realRO}}}
-	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, runDir, "", "c2", "", "")
+	args, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, true, "", runDir, "", "c2", "", "")
 	require.NoError(t, err)
 	demoted(args, cache)
 	// Unrelated dirs stay read-write.
@@ -1236,7 +1236,7 @@ func TestRelativeReadonlyMountsFailClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "relative/dir")
 
 	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: []string{"relative/dir"}}}
-	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", runDir, "", "c1", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "relative/dir")
 }
@@ -1269,7 +1269,7 @@ func TestReadonlyRootInMaskedDirIsRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "masks")
 
 	cfg := &agentspec.AgentConfig{MountDirs: agentspec.MountConfig{ReadOnly: ro}}
-	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, runDir, "", "c1", "", "")
+	_, err = buildSandboxArgs(cfg, "", agentspec.CLITarget{}, false, "", runDir, "", "c1", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "masks")
 }
@@ -1304,7 +1304,7 @@ func TestBuildSandboxArgs_SubdirMasking_MaskOthers(t *testing.T) {
 	}
 
 	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
-	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	args, err := buildSandboxArgs(cfg, "", target, false, "", projA, "sock", "chat-1", "", "")
 	require.NoError(t, err)
 
 	// 1. Literal keep_rw (.pnpm-store) was pre-created
@@ -1358,7 +1358,7 @@ func TestBuildSandboxArgs_SubdirMasking_DeepNestedSpine(t *testing.T) {
 	}
 
 	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
-	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	args, err := buildSandboxArgs(cfg, "", target, false, "", projA, "sock", "chat-1", "", "")
 	require.NoError(t, err)
 
 	srcBind := indexOfSeq(args, "--bind", srcDir, srcDir)
@@ -1403,7 +1403,7 @@ func TestBuildSandboxArgs_SubdirMasking_MaskMatched(t *testing.T) {
 	}
 
 	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
-	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	args, err := buildSandboxArgs(cfg, "", target, false, "", projA, "sock", "chat-1", "", "")
 	require.NoError(t, err)
 
 	srcBind := indexOfSeq(args, "--bind", srcDir, srcDir)
@@ -1460,7 +1460,7 @@ func TestBuildSandboxArgs_SubdirMasking_SymlinkSafety(t *testing.T) {
 	}
 
 	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
-	args, err := buildSandboxArgs(cfg, "", target, false, projA, "sock", "chat-1", "", "")
+	args, err := buildSandboxArgs(cfg, "", target, false, "", projA, "sock", "chat-1", "", "")
 	require.NoError(t, err)
 
 	// In-tree valid symlink target is masked at link path
@@ -1529,7 +1529,7 @@ func TestReadOnlyLockMode(t *testing.T) {
 	// 1. Agent sandbox verification
 	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
 	chat := "chat-ro"
-	args, err := buildSandboxArgs(cfg, "", target, false, runDir, "sock", chat, "", "")
+	args, err := buildSandboxArgs(cfg, "", target, false, "", runDir, "sock", chat, "", "")
 	require.NoError(t, err)
 
 	// RunDirs and runDir are mounted read-only
@@ -1618,7 +1618,7 @@ func TestBuildSandboxArgs_AgyAccountToken(t *testing.T) {
 	target := agentspec.CLITarget{CLI: "agy"}
 	dest := filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 	build := func(tg agentspec.CLITarget, all bool) ([]string, error) {
-		return buildSandboxArgs(nil, "", tg, all, runDir, "", "c1", "", "")
+		return buildSandboxArgs(nil, "", tg, all, "", runDir, "", "c1", "", "")
 	}
 	mkAcc := func(alias string, token bool) string {
 		d := filepath.Join(accRoot, "agy", alias)
@@ -1706,7 +1706,148 @@ func TestChooseAccount_StubbedError(t *testing.T) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "agy"}, false, runDir, "", "c", "", ""); err == nil {
+	if _, err := buildSandboxArgs(nil, "", agentspec.CLITarget{CLI: "agy"}, false, "", runDir, "", "c", "", ""); err == nil {
 		t.Fatal("selector error must be returned")
 	}
+}
+
+func TestBuildSandboxArgs_ClaudeAccountDir(t *testing.T) {
+	const sid = "11111111-2222-3333-4444-555555555555"
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	accRoot := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", accRoot)
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "")
+	runDir := filepath.Join(home, "run")
+	hostClaude := filepath.Join(home, ".claude")
+	for _, d := range []string{runDir, hostClaude} {
+		require.NoError(t, os.MkdirAll(d, 0o755))
+	}
+	agentPath := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(agentPath, "skills"), 0o755))
+	target := agentspec.CLITarget{CLI: "claude"}
+	build := func(tg agentspec.CLITarget, all bool, session string) ([]string, error) {
+		return buildSandboxArgs(nil, agentPath, tg, all, session, runDir, "", "c1", "", "")
+	}
+	mkAcc := func(alias string, creds bool) string {
+		d := filepath.Join(accRoot, "claude", alias)
+		require.NoError(t, os.MkdirAll(d, 0o700))
+		if creds {
+			require.NoError(t, os.WriteFile(filepath.Join(d, ".credentials.json"), []byte("{}"), 0o600))
+		}
+		return d
+	}
+
+	// No accounts: legacy host bind only.
+	args, err := build(target, false, "")
+	require.NoError(t, err)
+	for i, a := range args {
+		if a == "--bind" && i+2 < len(args) && strings.HasPrefix(args[i+1], accRoot) {
+			t.Fatalf("unexpected account bind %v", args[i:i+3])
+		}
+	}
+
+	// Account without credentials: warn, no bind.
+	alpha := mkAcc("alpha", false)
+	args, err = build(target, false, "")
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", alpha, hostClaude))
+
+	// With credentials: bound after the host ~/.claude bind, before the skills mount.
+	require.NoError(t, os.WriteFile(filepath.Join(alpha, ".credentials.json"), []byte("{}"), 0o600))
+	args, err = build(target, false, "")
+	require.NoError(t, err)
+	hostIdx := indexOfSeq(args, "--bind", hostClaude, hostClaude)
+	accIdx := indexOfSeq(args, "--bind", alpha, hostClaude)
+	skillsIdx := indexOfSeq(args, "--ro-bind", filepath.Join(agentPath, "skills"), filepath.Join(hostClaude, "skills"))
+	require.True(t, hostIdx >= 0 && accIdx > hostIdx, "account bind %d must follow host bind %d", accIdx, hostIdx)
+	require.True(t, skillsIdx > accIdx, "skills mount %d must follow account bind %d", skillsIdx, accIdx)
+
+	// Query sandbox includes it too.
+	args, err = build(agentspec.CLITarget{}, true, "")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", alpha, hostClaude), 0)
+
+	// Other targets: no bind.
+	args, err = build(agentspec.CLITarget{CLI: "agy"}, false, "")
+	require.NoError(t, err)
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", alpha, hostClaude))
+
+	// Override: picks the account; missing credentials is an error.
+	beta := mkAcc("beta", true)
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "beta")
+	args, err = build(target, false, "")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", beta, hostClaude), 0)
+	mkAcc("gamma", false)
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "gamma")
+	_, err = build(target, false, "")
+	assert.Error(t, err)
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "nope")
+	_, err = build(target, false, "")
+	assert.Error(t, err)
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "")
+
+	// Relay: alpha holds the session, beta is chosen.
+	jl := filepath.Join("projects", "-p", sid+".jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Join(alpha, "projects", "-p"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(alpha, jl), []byte("history"), 0o600))
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "beta")
+	_, err = build(target, false, sid)
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(beta, jl))
+	require.NoError(t, err)
+	assert.Equal(t, "history", string(got))
+	_, err = os.Stat(filepath.Join(beta, ".claude.json"))
+	assert.True(t, os.IsNotExist(err))
+
+	// No relay when the chosen account holds it (and no relay without a session).
+	require.NoError(t, os.WriteFile(filepath.Join(beta, jl), []byte("beta-newer-history"), 0o600))
+	_, err = build(target, false, sid)
+	require.NoError(t, err)
+	got, _ = os.ReadFile(filepath.Join(beta, jl))
+	assert.Equal(t, "beta-newer-history", string(got))
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "alpha")
+	require.NoError(t, os.Remove(filepath.Join(beta, jl)))
+	_, err = build(target, false, "")
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(beta, jl))
+	assert.True(t, os.IsNotExist(err), "no session means no relay")
+
+	// Unknown session: nothing to relay, fresh start is allowed.
+	_, err = build(target, false, "99999999-0000-0000-0000-000000000000")
+	require.NoError(t, err)
+
+	// Invalid session id skips the relay instead of failing the build.
+	_, err = build(target, false, "../../x")
+	assert.NoError(t, err)
+
+	// Flip-flop: alpha holds the session, relay to beta, beta grows, choose alpha.
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "alpha")
+	require.NoError(t, os.RemoveAll(filepath.Join(beta, "projects")))
+	require.NoError(t, os.WriteFile(filepath.Join(alpha, jl), []byte("v1"), 0o600))
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "beta")
+	_, err = build(target, false, sid)
+	require.NoError(t, err)
+	got, _ = os.ReadFile(filepath.Join(beta, jl))
+	assert.Equal(t, "v1", string(got))
+	require.NoError(t, os.WriteFile(filepath.Join(beta, jl), []byte("v1-and-more"), 0o600))
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "alpha")
+	_, err = build(target, false, sid)
+	require.NoError(t, err)
+	got, _ = os.ReadFile(filepath.Join(alpha, jl))
+	assert.Equal(t, "v1-and-more", string(got), "alpha refreshed from beta")
+	// Chosen holds the newest copy: no copy.
+	require.NoError(t, os.WriteFile(filepath.Join(alpha, jl), []byte("alpha-is-newest-now"), 0o600))
+	_, err = build(target, false, sid)
+	require.NoError(t, err)
+	got, _ = os.ReadFile(filepath.Join(beta, jl))
+	assert.Equal(t, "v1-and-more", string(got))
+
+	// Copy failure surfaces: destination projects dir is a file.
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "beta")
+	require.NoError(t, os.RemoveAll(filepath.Join(beta, "projects")))
+	require.NoError(t, os.WriteFile(filepath.Join(beta, "projects"), []byte("x"), 0o600))
+	_, err = build(target, false, sid)
+	assert.Error(t, err)
 }

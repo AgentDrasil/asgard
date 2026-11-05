@@ -327,7 +327,11 @@ func appendCrossSessionMaskArgs(args []string, home string) []string {
 // buildArgsForAgent constructs the bubblewrap arguments for the given config, target, prompt, optional session, and runDir.
 // It returns the list of arguments to pass to the bwrap executable.
 func buildArgsForAgent(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
-	args, err := buildSandboxArgs(cfg, agentPath, target, false, runDir, sockDir, chatID, langRules, configPath, proxyOpts...)
+	sess := ""
+	if session.IsSome() {
+		sess = session.Unwrap()
+	}
+	args, err := buildSandboxArgs(cfg, agentPath, target, false, sess, runDir, sockDir, chatID, langRules, configPath, proxyOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +552,7 @@ func applySubdirMaskRule(args []string, baseDir string, rule *agentspec.SubdirMa
 
 // buildSandboxArgs constructs the bubblewrap arguments up to and including the
 // "--" separator, i.e. everything except the command run inside the sandbox.
-func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
+func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, session string, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user home directory: %w", err)
@@ -767,6 +771,13 @@ func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agent
 			return nil, err
 		}
 	}
+	// Overlay the selected claude account dir over the host ~/.claude. It must
+	// follow the host bind above; later binds under ~/.claude (skills) come after.
+	if allCLIs || target.CLI == "claude" {
+		if args, err = appendClaudeAccountDir(args, home, target.Model, session); err != nil {
+			return nil, err
+		}
+	}
 	// Readonly mounts last among the directory binds, so they win over any
 	// read-write bind of an ancestor (run_dirs, mount_dirs.readwrite, CLI dirs).
 	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
@@ -929,7 +940,7 @@ func CommandForQuery(ctx context.Context, args ...string) (*exec.Cmd, func(), er
 		cleanup()
 		return nil, nil, err
 	}
-	bwrapArgs, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, runDir, "", chatID, "", "")
+	bwrapArgs, err := buildSandboxArgs(nil, "", agentspec.CLITarget{}, true, "", runDir, "", chatID, "", "")
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -1494,4 +1505,63 @@ func appendAgyAccountToken(args []string, home, model string) ([]string, error) 
 	}
 	log.Debug().Str("cli", "agy").Str("account", alias).Msg("binding account token")
 	return append(args, "--bind", tokenPath, filepath.Join(home, agyOAuthTokenRelPath)), nil
+}
+
+// appendClaudeAccountDir binds the selected claude account dir read-write over
+// the sandbox's ~/.claude. When session is set and another account holds it,
+// the session files are first relayed into the chosen account. It changes
+// nothing when no account is selected or the account has no credentials.
+func appendClaudeAccountDir(args []string, home, model, session string) ([]string, error) {
+	alias, ok, err := chooseAccount("claude", model)
+	if err != nil {
+		return nil, fmt.Errorf("selecting claude account: %w", err)
+	}
+	if !ok {
+		return args, nil
+	}
+	dir, err := accounts.Dir("claude", alias)
+	if err != nil {
+		return nil, fmt.Errorf("claude account %q: %w", alias, err)
+	}
+	credPath := filepath.Join(dir, accounts.ClaudeCredentialsFile)
+	fi, statErr := os.Stat(credPath)
+	if statErr == nil && fi.IsDir() {
+		statErr = errors.New("is a directory")
+	}
+	if statErr != nil {
+		if os.Getenv("ASGARD_CLAUDE_ACCOUNT") != "" || !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("claude account %q credentials %s: %w", alias, credPath, statErr)
+		}
+		log.Warn().Str("cli", "claude").Str("account", alias).Msg("account credentials missing, using default credentials")
+		return args, nil
+	}
+	if session != "" {
+		if err := relayClaudeSession(alias, session); err != nil {
+			return nil, err
+		}
+	}
+	log.Debug().Str("cli", "claude").Str("account", alias).Msg("binding account dir")
+	return append(args, "--bind", dir, filepath.Join(home, ".claude")), nil
+}
+
+// relayClaudeSession makes sure the chosen account holds the newest copy of
+// session, copying it from the account that does when it does not. An invalid
+// session id is not an error: the relay is skipped and claude handles the id.
+func relayClaudeSession(chosen, session string) error {
+	if err := accounts.ValidateSessionID(session); err != nil {
+		log.Debug().Err(err).Str("session", session).Msg("skipping claude session relay")
+		return nil
+	}
+	holder, found, err := accounts.FindClaudeSession(session)
+	if err != nil {
+		return fmt.Errorf("locating claude session %s: %w", session, err)
+	}
+	if !found || holder == chosen {
+		return nil
+	}
+	if err := accounts.CopyClaudeSession(holder, chosen, session); err != nil {
+		return fmt.Errorf("relaying claude session %s from account %q to %q: %w", session, holder, chosen, err)
+	}
+	log.Info().Str("session", session).Str("from", holder).Str("to", chosen).Msg("relayed claude session between accounts")
+	return nil
 }
