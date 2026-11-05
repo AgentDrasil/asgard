@@ -377,7 +377,7 @@ const navigateBack = () => {
               <div
                 class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
               >
-                <Icon icon="mynaui:server" class="w-5 h-5 text-primary" />
+                <Icon icon="material-symbols:directions-run" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.runnersCardTitle") }}</span>
               </div>
               <p class="text-xs text-base-content/70 leading-relaxed">
