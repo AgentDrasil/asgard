@@ -313,62 +313,6 @@ func SyncCLICredentials(home string, creds *config.CredentialsScope) error {
 		}
 	}
 
-	geminiDir := filepath.Join(home, ".gemini")
-
-	agyDir := filepath.Join(geminiDir, "antigravity-cli")
-	agyPath := filepath.Join(agyDir, "antigravity-oauth-token")
-	if len(creds.AntigravityOAuthToken) > 0 {
-		if err := os.MkdirAll(agyDir, 0700); err != nil {
-			return fmt.Errorf("create antigravity-cli directory %s: %w", agyDir, err)
-		}
-		if err := os.Chmod(geminiDir, 0700); err != nil {
-			return fmt.Errorf("chmod gemini directory %s: %w", geminiDir, err)
-		}
-		if err := os.Chmod(agyDir, 0700); err != nil {
-			return fmt.Errorf("chmod antigravity-cli directory %s: %w", agyDir, err)
-		}
-
-		existing, err := os.ReadFile(agyPath)
-		if err != nil || !bytes.Equal(existing, creds.AntigravityOAuthToken) {
-			if err := atomicWriteFile(agyPath, creds.AntigravityOAuthToken, 0600); err != nil {
-				return fmt.Errorf("write %s: %w", agyPath, err)
-			}
-		} else {
-			_ = os.Chmod(agyPath, 0600)
-		}
-	} else {
-		// Credential revoked / cleared: remove file if it exists
-		if err := os.Remove(agyPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", agyPath, err)
-		}
-	}
-
-	claudeData := creds.Claude
-	claudeDir := filepath.Join(home, ".claude")
-	claudePath := filepath.Join(claudeDir, ".credentials.json")
-	if len(claudeData) > 0 {
-		if err := os.MkdirAll(claudeDir, 0700); err != nil {
-			return fmt.Errorf("create claude directory %s: %w", claudeDir, err)
-		}
-		if err := os.Chmod(claudeDir, 0700); err != nil {
-			return fmt.Errorf("chmod claude directory %s: %w", claudeDir, err)
-		}
-
-		existing, err := os.ReadFile(claudePath)
-		if err != nil || !bytes.Equal(existing, claudeData) {
-			if err := atomicWriteFile(claudePath, claudeData, 0600); err != nil {
-				return fmt.Errorf("write %s: %w", claudePath, err)
-			}
-		} else {
-			_ = os.Chmod(claudePath, 0600)
-		}
-	} else {
-		// Credential revoked / cleared: remove file if it exists
-		if err := os.Remove(claudePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", claudePath, err)
-		}
-	}
-
 	configDir := filepath.Join(home, ".config")
 	gcpsaPath := filepath.Join(configDir, "gcp-sa.json")
 	if len(creds.GCPSAKey) > 0 {

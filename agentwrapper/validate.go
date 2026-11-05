@@ -5,15 +5,41 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
 	"github.com/AgentDrasil/asgard/simplest"
 )
 
 var homeDirFn = os.UserHomeDir
 
-// ValidateAgySetup verifies that agy is correctly set up on the user's system.
-// It checks that ~/.gemini/antigravity-cli/antigravity-oauth-token exists.
+// hasAccountFile reports whether at least one account of the given CLI under
+// accounts.Root() has a regular file named fileName.
+func hasAccountFile(cli, fileName string) bool {
+	aliases, err := accounts.List(cli)
+	if err != nil {
+		return false
+	}
+	for _, alias := range aliases {
+		dir, err := accounts.Dir(cli, alias)
+		if err != nil {
+			continue
+		}
+		if fi, err := os.Stat(filepath.Join(dir, fileName)); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateAgySetup verifies that agy is correctly set up on the runner.
+// It passes if at least one account under accounts.Root() has an
+// antigravity-oauth-token, or else (legacy) if
+// ~/.gemini/antigravity-cli/antigravity-oauth-token exists.
 func ValidateAgySetup() error {
+	if hasAccountFile("agy", accounts.TokenFileName) {
+		return nil
+	}
+
 	home, err := homeDirFn()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
@@ -23,7 +49,7 @@ func ValidateAgySetup() error {
 	if fi, err := os.Stat(tokenPath); err != nil {
 		if os.IsNotExist(err) {
 			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
-			return fmt.Errorf("agy setup validation failed: oauth token file does not exist at %s. Please run 'docker exec -it <container_name> agy' to log in (find the container name via 'docker ps').", tokenPath)
+			return fmt.Errorf("agy setup validation failed: no agy account found under %s and no legacy token at %s. Please run 'docker exec -it <container_name> aw agy login <alias>' on the runner to log in (find the container name via 'docker ps').", filepath.Join(accounts.Root(), "agy"), tokenPath)
 		}
 		return fmt.Errorf("failed to check oauth token: %w", err)
 	} else if fi.IsDir() {
@@ -33,9 +59,14 @@ func ValidateAgySetup() error {
 	return nil
 }
 
-// ValidateClaudeSetup verifies that claude is correctly set up on the user's system.
-// It checks that ~/.claude/.credentials.json exists.
+// ValidateClaudeSetup verifies that claude is correctly set up on the runner.
+// It passes if at least one account under accounts.Root() has a
+// .credentials.json, or else (legacy) if ~/.claude/.credentials.json exists.
 func ValidateClaudeSetup() error {
+	if hasAccountFile("claude", accounts.ClaudeCredentialsFile) {
+		return nil
+	}
+
 	home, err := homeDirFn()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
@@ -45,7 +76,7 @@ func ValidateClaudeSetup() error {
 	if fi, err := os.Stat(credPath); err != nil {
 		if os.IsNotExist(err) {
 			//nolint:staticcheck // Detailed error message with actionable user guidance and sentences
-			return fmt.Errorf("claude setup validation failed: credentials file does not exist at %s. Please run 'docker exec -it -e CLAUDE_CONFIG_DIR=%s <container_name> claude' to log in (find the container name via 'docker ps').", credPath, filepath.Join(home, ".claude"))
+			return fmt.Errorf("claude setup validation failed: no claude account found under %s and no legacy credentials file at %s. Please run 'docker exec -it <container_name> aw claude login <alias>' on the runner to log in (find the container name via 'docker ps').", filepath.Join(accounts.Root(), "claude"), credPath)
 		}
 		return fmt.Errorf("failed to check credentials: %w", err)
 	} else if fi.IsDir() {

@@ -12,6 +12,7 @@ import (
 
 func TestValidateAgySetup(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", filepath.Join(tempDir, "accounts"))
 	origHomeDirFn := homeDirFn
 	homeDirFn = func() (string, error) {
 		return tempDir, nil
@@ -45,8 +46,25 @@ func TestValidateAgySetup(t *testing.T) {
 	}
 }
 
+func TestValidateAgySetup_AccountToken(t *testing.T) {
+	tempDir := t.TempDir()
+	accts := filepath.Join(tempDir, "accounts")
+	t.Setenv("ASGARD_ACCOUNTS_DIR", accts)
+	origHomeDirFn := homeDirFn
+	homeDirFn = func() (string, error) { return tempDir, nil }
+	t.Cleanup(func() { homeDirFn = origHomeDirFn })
+
+	// Account dir without token does not pass.
+	require.NoError(t, os.MkdirAll(filepath.Join(accts, "agy", "work"), 0o700))
+	require.Error(t, ValidateAgySetup())
+
+	require.NoError(t, os.WriteFile(filepath.Join(accts, "agy", "work", "antigravity-oauth-token"), []byte("t"), 0o600))
+	require.NoError(t, ValidateAgySetup())
+}
+
 func TestValidateAgySetup_MissingToken_ErrorContainsDockerExecHint(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", filepath.Join(tempDir, "accounts"))
 	origHomeDirFn := homeDirFn
 	homeDirFn = func() (string, error) {
 		return tempDir, nil
@@ -57,7 +75,7 @@ func TestValidateAgySetup_MissingToken_ErrorContainsDockerExecHint(t *testing.T)
 
 	err := ValidateAgySetup()
 	require.Error(t, err)
-	expectedHint := "Please run 'docker exec -it <container_name> agy' to log in (find the container name via 'docker ps')."
+	expectedHint := "aw agy login <alias>"
 	assert.True(t, strings.Contains(err.Error(), expectedHint), "expected error to contain %q, got %q", expectedHint, err.Error())
 }
 

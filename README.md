@@ -97,6 +97,10 @@ docker exec -it asgard-<runner> aw claude remove <alias>
 - `list`: Prints configured account aliases one per line.
 - `remove <alias>`: Deletes the alias account directory.
 
+### Migration from etcd-distributed credentials
+
+Previously the etcd keys `credentials/agy/antigravity-oauth-token` and `credentials/claude/.credentials.json` were synced to every runner's `~/.gemini` / `~/.claude`. They are now ignored: runners no longer read or write them. Log in on each runner instead (`docker exec -it asgard-<runner> aw agy login <alias>` and `... aw claude login <alias>`). Stale keys can be removed from etcd with the existing `cfgctl push --prune` flow (delete the files from `etcd-tree/credentials/agy` and `etcd-tree/credentials/claude`, then `just publish`). Startup validation passes when at least one account holds credentials, falling back to a manually provisioned host `~/.gemini` / `~/.claude`.
+
 ### Why Local Disk Instead of etcd?
 
 Runner accounts live on local disk rather than in etcd for several reasons:
@@ -271,7 +275,7 @@ The runner reads TLS certificates from fixed paths inside `/certs`:
 - Client key: `/certs/tls.key`
 - CA certificate: `/certs/ca.crt`
 
-The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions, proxy and credential config), and the agent CLIs and credentials (`~/.claude`, `~/.gemini`, ...) of the user it runs as. Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
+The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions, proxy and credential config), and the agent CLIs of the user it runs as, with agy/claude logged in via `aw <cli> login <alias>` (see Runner Accounts). Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
 
 Constraints to know before deploying:
 - **Runner root directories must be real paths.** The directories agents and workflows may use (their `run_dirs` and mount dirs) and the runner's data roots are opened without following symlinks. A root that is, or lies under, a symlink is refused (fail closed); mount or configure the resolved path instead.

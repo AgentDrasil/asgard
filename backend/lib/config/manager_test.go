@@ -111,8 +111,7 @@ providers:
 	assert.Equal(t, "test-xai-secret", cfg.Credentials.XAIAPIKey)
 	assert.Equal(t, []byte(`{"project_id":"test-sa-proj"}`), cfg.Credentials.GCPSAKey)
 	assert.Equal(t, []byte(`{"type":"test"}`), cfg.Credentials.Auth)
-	assert.Equal(t, []byte("test-oauth-token"), cfg.Credentials.AntigravityOAuthToken)
-	assert.Equal(t, []byte(`{"claude_token":"test-claude"}`), cfg.Credentials.Claude)
+	// Legacy agy/claude keys in etcd are ignored (accounts are runner-local).
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E..."), cfg.Credentials.SSH.Key)
 	assert.Equal(t, []byte("ssh-rsa AAAAB3NzaC1yc2E... user@host"), cfg.Credentials.SSH.KeyPub)
 	assert.Equal(t, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ned25519-key\n-----END OPENSSH PRIVATE KEY-----"), cfg.Credentials.SSH.IdEd25519)

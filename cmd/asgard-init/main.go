@@ -524,8 +524,6 @@ func run(args []string) (err error) {
 
 		credDirs := []string{
 			filepath.Join(targetDir, "etcd-tree", "credentials"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
-			filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
 			filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 		}
 		if data.IsProviderEnabled("opencode") || dirExists(filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")) {
@@ -593,12 +591,6 @@ func run(args []string) (err error) {
 	removeState(targetDir)
 
 	if *nonInteractiveFlag {
-		if data.IsProviderEnabled("agy") {
-			PromptCLICredentials(reader, os.Stdout, targetDir, false)
-		}
-		if data.IsProviderEnabled("claude") {
-			PromptClaudeCredentials(reader, os.Stdout, targetDir, false)
-		}
 		if data.IsProviderEnabled("opencode") {
 			PromptOpencodeConfig(reader, os.Stdout, targetDir, false)
 		}
@@ -629,26 +621,6 @@ func isDirEmpty(path string) bool {
 	defer func() { _ = f.Close() }()
 	_, err = f.Readdirnames(1)
 	return err == io.EOF
-}
-
-// CheckCLICredentials checks if antigravity-oauth-token exists in targetDir/etcd-tree/credentials/agy and is a non-empty file.
-func CheckCLICredentials(targetDir string) (string, bool) {
-	tokenPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token")
-	if isNonEmptyFile(tokenPath) {
-		_ = os.Chmod(tokenPath, 0600)
-		return tokenPath, true
-	}
-	return "", false
-}
-
-// CheckClaudeCredentials checks if claude/.credentials.json exists in targetDir/etcd-tree/credentials and is a non-empty file.
-func CheckClaudeCredentials(targetDir string) (string, bool) {
-	claudePath := filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json")
-	if isNonEmptyFile(claudePath) {
-		_ = os.Chmod(claudePath, 0600)
-		return claudePath, true
-	}
-	return "", false
 }
 
 // CheckGCPSACredentials checks whether filepath.Join(targetDir, GCPSAKeyFile)
@@ -718,51 +690,6 @@ func PromptCLIActivation(r io.Reader, w io.Writer, cliName string) bool {
 	}
 	ans := strings.ToLower(strings.TrimSpace(line))
 	return ans == "y" || ans == "yes"
-}
-
-// PromptClaudeCredentials prompts the user to place their Claude credentials into etcd-tree/credentials/claude/.credentials.json.
-func PromptClaudeCredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "claude", ".credentials.json")
-	if !interactive {
-		if foundPath, ok := CheckClaudeCredentials(targetDir); ok {
-			_, _ = fmt.Fprintf(w, "\n%s✔ Claude credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
-			return true
-		}
-		return false
-	}
-
-	var reader *bufio.Reader
-	if br, ok := r.(*bufio.Reader); ok {
-		reader = br
-	} else if r != nil {
-		reader = bufio.NewReader(r)
-	} else {
-		reader = bufio.NewReader(os.Stdin)
-	}
-	_, _ = fmt.Fprintf(w, "\n%s--- Claude CLI Credential Setup ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your Claude credential file into %s%s%s.\n", colorYellow, credPath, colorReset)
-
-	for {
-		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return false
-		}
-		ans := strings.ToLower(strings.TrimSpace(line))
-		switch ans {
-		case "y", "yes":
-			if foundPath, ok := CheckClaudeCredentials(targetDir); ok {
-				_, _ = fmt.Fprintf(w, "%s✔ Claude credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
-				return true
-			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty Claude credential file found at %s.\n", colorRed+colorBold, colorReset, credPath)
-		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped Claude credential setup.%s You can place it into etcd-tree/credentials/claude/ later before running just publish.\n", colorYellow, colorReset)
-			return false
-		default:
-			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
-		}
-	}
 }
 
 // PromptGCPSACredentials prompts the user to place their GCP Service Account JSON key file into <dir>/gcp-sa.json (local file mounted into containers, never pushed to etcd).
@@ -912,7 +839,7 @@ func promptProviderWithActivation(
 	var credDir string
 	if interactive {
 		switch cliName {
-		case "agy", "claude", "opencode", "simplest":
+		case "opencode", "simplest":
 			credDir = filepath.Join(targetDir, "etcd-tree", "credentials", cliName)
 			_ = os.MkdirAll(credDir, 0700)
 			_ = os.Chmod(credDir, 0700)
@@ -929,6 +856,29 @@ func promptProviderWithActivation(
 	return ok
 }
 
+// PromptAccountProviderActivation asks whether to activate an account-based CLI
+// provider (agy, claude). Credentials are not collected by asgard-init: the
+// operator logs in on the runner after deployment.
+func PromptAccountProviderActivation(r io.Reader, w io.Writer, cliName string) bool {
+	_, _ = fmt.Fprintf(w, "\n%s--- %s provider ---%s\n", colorCyan+colorBold, cliName, colorReset)
+	_, _ = fmt.Fprintf(w, "Credentials are not stored in etcd; after %sdocker compose up%s run %saw %s login <alias>%s on the runner.\n", colorYellow, colorReset, colorYellow, cliName, colorReset)
+	var reader *bufio.Reader
+	if br, ok := r.(*bufio.Reader); ok {
+		reader = br
+	} else if r != nil {
+		reader = bufio.NewReader(r)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	_, _ = fmt.Fprintf(w, "%sActivate %s? [y/N]:%s ", colorBold, cliName, colorReset)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	return ans == "y" || ans == "yes"
+}
+
 // PromptProviderSetup prompts for CLI credential setup and provider activation for each supported provider.
 func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive bool) []string {
 	var reader *bufio.Reader
@@ -941,11 +891,12 @@ func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive
 	}
 
 	var providers []string
-	if promptProviderWithActivation(reader, w, targetDir, interactive, "agy", PromptCLICredentials) {
-		providers = append(providers, "agy")
-	}
-	if promptProviderWithActivation(reader, w, targetDir, interactive, "claude", PromptClaudeCredentials) {
-		providers = append(providers, "claude")
+	// agy and claude credentials live on the runner (aw <cli> login <alias>),
+	// so there is nothing to collect here; only ask whether to activate them.
+	for _, cli := range []string{"agy", "claude"} {
+		if interactive && PromptAccountProviderActivation(reader, w, cli) {
+			providers = append(providers, cli)
+		}
 	}
 	if promptProviderWithActivation(reader, w, targetDir, interactive, "opencode", PromptOpencodeConfig) {
 		providers = append(providers, "opencode")
@@ -963,52 +914,6 @@ func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive
 		}
 	}
 	return providers
-}
-
-// PromptCLICredentials prompts the user to place their CLI credential into etcd-tree/credentials/agy.
-// When interactive is false, it does not block on r and checks if the file exists or skips gracefully.
-func PromptCLICredentials(r io.Reader, w io.Writer, targetDir string, interactive bool) bool {
-	credPath := filepath.Join(targetDir, "etcd-tree", "credentials", "agy", "antigravity-oauth-token")
-	if !interactive {
-		if foundPath, ok := CheckCLICredentials(targetDir); ok {
-			_, _ = fmt.Fprintf(w, "\n%s✔ CLI credential verified:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
-			return true
-		}
-		return false
-	}
-
-	var reader *bufio.Reader
-	if br, ok := r.(*bufio.Reader); ok {
-		reader = br
-	} else if r != nil {
-		reader = bufio.NewReader(r)
-	} else {
-		reader = bufio.NewReader(os.Stdin)
-	}
-	_, _ = fmt.Fprintf(w, "\n%s--- CLI Credential Setup (Antigravity OAuth token) ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your Antigravity OAuth token file into %s%s%s.\n", colorYellow, credPath, colorReset)
-
-	for {
-		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return false
-		}
-		ans := strings.ToLower(strings.TrimSpace(line))
-		switch ans {
-		case "y", "yes":
-			if foundPath, ok := CheckCLICredentials(targetDir); ok {
-				_, _ = fmt.Fprintf(w, "%s✔ CLI credential verified successfully:%s %s\n", colorGreen+colorBold, colorReset, foundPath)
-				return true
-			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty credential file found at %s.\n", colorRed+colorBold, colorReset, credPath)
-		case "s", "skip":
-			_, _ = fmt.Fprintf(w, "%sSkipped CLI credential setup.%s You can place it at etcd-tree/credentials/agy/antigravity-oauth-token later before running just publish.\n", colorYellow, colorReset)
-			return false
-		default:
-			_, _ = fmt.Fprintf(w, "Invalid input %q. Enter 'y' to verify or 's' to skip.\n", ans)
-		}
-	}
 }
 
 // CheckSSHCredentials checks whether valid SSH private keys exist in targetDir/etcd-tree/credentials/ssh/.
@@ -1152,12 +1057,16 @@ func printInitSuccess(dir string, data *ConfigData) {
 	fmt.Printf("  3. %sStart services:%s\n", colorBold, colorReset)
 	fmt.Printf("     %sjust start%s     (runs docker compose up -d)\n\n", colorCyan+colorBold, colorReset)
 
-	fmt.Printf("  4. %sCheck logs and status:%s\n", colorBold, colorReset)
+	fmt.Printf("  4. %sLog in to agy / claude on each runner%s (accounts live only on the runner, not in etcd):\n", colorBold, colorReset)
+	fmt.Printf("     %sdocker exec -it asgard-%s aw agy login <alias>%s\n", colorCyan, data.InitialRunner, colorReset)
+	fmt.Printf("     %sdocker exec -it asgard-%s aw claude login <alias>%s\n\n", colorCyan, data.InitialRunner, colorReset)
+
+	fmt.Printf("  5. %sCheck logs and status:%s\n", colorBold, colorReset)
 	fmt.Printf("     %sjust status%s\n", colorCyan, colorReset)
 	fmt.Printf("     %sjust logs-backend%s\n", colorCyan, colorReset)
 	fmt.Printf("     %sjust logs-runner%s\n\n", colorCyan, colorReset)
 
-	fmt.Printf("  5. %sAdd more runners anytime:%s\n", colorBold, colorReset)
+	fmt.Printf("  6. %sAdd more runners anytime:%s\n", colorBold, colorReset)
 	fmt.Printf("     %sasgard-init --add-new-runner runner-2%s\n\n", colorCyan, colorReset)
 }
 
@@ -1178,4 +1087,8 @@ func printAddRunnerSuccess(dir, runnerName string) {
 
 	fmt.Printf("  2. Start the new runner container:\n")
 	fmt.Printf("     %sdocker compose up -d %s%s\n\n", colorCyan+colorBold, svcName, colorReset)
+
+	fmt.Printf("  3. Log in to agy / claude on the new runner:\n")
+	fmt.Printf("     %sdocker exec -it asgard-%s aw agy login <alias>%s\n", colorCyan, runnerName, colorReset)
+	fmt.Printf("     %sdocker exec -it asgard-%s aw claude login <alias>%s\n\n", colorCyan, runnerName, colorReset)
 }

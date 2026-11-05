@@ -138,8 +138,6 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 	// Create credentials directories with strict permissions (0700)
 	credDirs := []string{
 		filepath.Join(targetDir, "etcd-tree", "credentials"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "agy"),
-		filepath.Join(targetDir, "etcd-tree", "credentials", "claude"),
 		filepath.Join(targetDir, "etcd-tree", "credentials", "ssh"),
 	}
 	opencodeCredDir := filepath.Join(targetDir, "etcd-tree", "credentials", "opencode")

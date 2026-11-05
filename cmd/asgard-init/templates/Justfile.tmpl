@@ -39,9 +39,6 @@ encrypt:
             sops --input-type binary --output-type json -e "$$f" > "$$f.sops.json"; \
         fi \
     done
-    @if [ -f ./etcd-tree/credentials/agy/antigravity-oauth-token ] && [ ! -f ./etcd-tree/credentials/agy/antigravity-oauth-token.sops.json ]; then \
-        sops --input-type binary --output-type json -e ./etcd-tree/credentials/agy/antigravity-oauth-token > ./etcd-tree/credentials/agy/antigravity-oauth-token.sops.json; \
-    fi
 
 # Push etcd-tree configuration into etcd cluster
 push:

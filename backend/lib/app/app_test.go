@@ -623,7 +623,7 @@ rules:
 	require.NotNil(t, appInstance)
 	assert.Equal(t, 7000, appInstance.Config().Port)
 	assert.True(t, appInstance.Config().IsProxyEnabled())
-	assert.Equal(t, []byte("tok"), mgr.Get().Credentials.AntigravityOAuthToken)
+	assert.Equal(t, []byte("{}"), mgr.Get().Credentials.Auth)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

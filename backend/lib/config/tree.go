@@ -17,15 +17,13 @@ type SimplestRawScope struct {
 
 // CredentialsScope maps standard credentials stored under credentials/.
 type CredentialsScope struct {
-	Auth                  []byte   `key:"auth.json"`
-	AntigravityOAuthToken []byte   `key:"agy/antigravity-oauth-token"`
-	Claude                []byte   `key:"claude/.credentials.json"`
-	Opencode              []byte   `key:"opencode/opencode.aw.yaml"`
-	Simplest              []byte   `key:"simplest/key.yaml"`
-	GeminiAPIKey          string   `key:"gemini-api-key"`
-	XAIAPIKey             string   `key:"xai-api-key"`
-	GCPSAKey              []byte   `key:"gcp/gcp-sa.json"`
-	SSH                   SSHScope `key:"ssh/"`
+	Auth         []byte   `key:"auth.json"`
+	Opencode     []byte   `key:"opencode/opencode.aw.yaml"`
+	Simplest     []byte   `key:"simplest/key.yaml"`
+	GeminiAPIKey string   `key:"gemini-api-key"`
+	XAIAPIKey    string   `key:"xai-api-key"`
+	GCPSAKey     []byte   `key:"gcp/gcp-sa.json"`
+	SSH          SSHScope `key:"ssh/"`
 }
 
 // SSHScope maps SSH credentials stored under credentials/ssh/.
