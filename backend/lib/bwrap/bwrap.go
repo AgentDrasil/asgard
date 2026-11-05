@@ -695,13 +695,14 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		args = append(args, "--bind", sockDir, "/fakebash")
 	}
 
-	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/bash")
-	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/bash")
-	args = append(args, "--ro-bind", "/bin/fakebash", "/bin/sh")
-	args = append(args, "--ro-bind", "/bin/fakebash", "/usr/bin/sh")
+	// bwrap cannot mount onto a symlink destination (e.g. /usr/bin/sh -> dash
+	// on Debian), so bind fakebash onto the resolved targets instead.
+	for _, dest := range resolveBindDests("/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh") {
+		args = append(args, "--ro-bind", "/bin/fakebash", dest)
+	}
 
 	// Mask fish so it is not usable inside the sandbox (only if present on host).
-	for _, p := range []string{"/usr/bin/fish", "/bin/fish"} {
+	for _, p := range resolveBindDests("/usr/bin/fish", "/bin/fish") {
 		if _, err := os.Stat(p); err == nil {
 			args = append(args, "--ro-bind", "/dev/null", p)
 		}
@@ -1607,4 +1608,22 @@ func relayClaudeSession(chosen, session string) error {
 	}
 	log.Info().Str("session", session).Str("from", holder).Str("to", chosen).Msg("relayed claude session between accounts")
 	return nil
+}
+
+// resolveBindDests resolves symlinks in each bind destination (bwrap cannot
+// mount onto a symlink) and returns the unique results in input order. A path
+// that cannot be resolved (e.g. it does not exist) is kept as is.
+func resolveBindDests(paths ...string) []string {
+	seen := make(map[string]bool, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
