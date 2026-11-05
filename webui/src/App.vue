@@ -10,9 +10,10 @@ import SessionSearchModal from "./components/SessionSearchModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
-import { getDirInfo, getSystemStatus, reloadAgents } from "./lib/api";
+import { getDirInfo, getSystemStatus, reloadAgents, isAuthEnabled } from "./lib/api";
 import { useToast } from "./composables/useToast";
 import { useRestartFlow } from "./composables/useRestartFlow";
+import { useUserProfile } from "./composables/useUserProfile";
 import type { ActiveView, Attachment, CommandItem } from "./types";
 import {
   resolveViewFromRoute,
@@ -318,9 +319,15 @@ watch(
 );
 
 const toast = useToast();
+const { profile, load: loadProfile } = useUserProfile();
+const isAdmin = computed(() => !isAuthEnabled() || Boolean(profile.value?.isAdmin));
 
 const checkSystemStatus = async () => {
   try {
+    if (isAuthEnabled()) {
+      await loadProfile();
+      if (!isAdmin.value) return;
+    }
     const status = await getSystemStatus();
     if (!status) return;
 

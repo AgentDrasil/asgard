@@ -523,7 +523,7 @@ func isProtectedPath(path string) bool {
 
 // isAdminPath reports whether a request path requires the "admin" role.
 func isAdminPath(path string) bool {
-	return strings.HasPrefix(path, "/api/manage/")
+	return strings.HasPrefix(path, "/api/manage/") || path == "/api/system/logs"
 }
 
 // ServeHTTP delegates HTTP requests to the current active ServeMux, adding CORS support.

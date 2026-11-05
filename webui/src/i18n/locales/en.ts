@@ -594,6 +594,8 @@ export const en = {
   },
   logs: {
     title: "System Logs & Diagnostics",
+    adminOnlyTitle: "Administrator Access Required",
+    adminOnlyDesc: "System logs and diagnostics are only visible to administrators.",
     backToSettings: "Back to Settings",
     refresh: "Refresh",
     refreshTooltip: "Refresh Logs",

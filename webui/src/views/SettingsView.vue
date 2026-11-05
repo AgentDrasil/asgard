@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
@@ -36,10 +36,17 @@ const backendWarnCount = ref(0);
 // OIDC, so a logout button never shows up in an unauthenticated deployment.
 const authEnabled = isAuthEnabled();
 const { profile, load: loadProfile } = useUserProfile();
+const isAdmin = computed(() => !authEnabled || Boolean(profile.value?.isAdmin));
+
 onMounted(() => void loadProfile());
 const handleLogout = () => logout();
 
 const fetchBackendLogCounts = async () => {
+  if (!isAdmin.value) {
+    backendErrorCount.value = 0;
+    backendWarnCount.value = 0;
+    return;
+  }
   try {
     const logs = await getSystemLogs();
     backendErrorCount.value = logs.filter((l) => l.level === "error").length;
@@ -49,8 +56,19 @@ const fetchBackendLogCounts = async () => {
   }
 };
 
+watch(isAdmin, (admin) => {
+  if (admin) {
+    void fetchBackendLogCounts();
+  } else {
+    backendErrorCount.value = 0;
+    backendWarnCount.value = 0;
+  }
+});
+
 onMounted(() => {
-  void fetchBackendLogCounts();
+  if (isAdmin.value) {
+    void fetchBackendLogCounts();
+  }
 });
 
 const toastErrorCount = computed(() => toastHistory.value.filter((t) => t.type === "error").length);
@@ -58,8 +76,12 @@ const toastWarnCount = computed(
   () => toastHistory.value.filter((t) => t.type === "warning").length,
 );
 
-const totalErrors = computed(() => backendErrorCount.value + toastErrorCount.value);
-const totalWarnings = computed(() => backendWarnCount.value + toastWarnCount.value);
+const totalErrors = computed(
+  () => (isAdmin.value ? backendErrorCount.value : 0) + toastErrorCount.value,
+);
+const totalWarnings = computed(
+  () => (isAdmin.value ? backendWarnCount.value : 0) + toastWarnCount.value,
+);
 
 const handleReloadAgents = async () => {
   if (isReloading.value) return;
@@ -213,6 +235,7 @@ const navigateBack = () => {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           <!-- Reload Agents Card -->
           <div
+            v-if="isAdmin"
             class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex flex-col justify-between gap-3"
           >
             <div class="space-y-1">
@@ -236,6 +259,7 @@ const navigateBack = () => {
 
           <!-- Restart Server Card -->
           <div
+            v-if="isAdmin"
             class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex flex-col justify-between gap-3"
           >
             <div class="space-y-1">
@@ -291,6 +315,7 @@ const navigateBack = () => {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <!-- Edit Config Card -->
           <div
+            v-if="isAdmin"
             role="button"
             tabindex="0"
             @click="navigateToConfig"
@@ -341,6 +366,7 @@ const navigateBack = () => {
 
           <!-- Logs & Diagnostics Card -->
           <div
+            v-if="isAdmin"
             role="button"
             tabindex="0"
             @click="navigateToLogs"

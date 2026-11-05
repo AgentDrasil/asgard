@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
@@ -252,6 +253,11 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			Warnings: []string{},
 		}
 	}
+	// Redact internal errors and warnings for non-admin users when auth is enabled.
+	if s.auth != nil && !auth.HasRole(r.Context(), auth.AdminRole) {
+		snap.Errors = []string{}
+		snap.Warnings = []string{}
+	}
 	snap.Version = version.Get()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -260,6 +266,10 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleSystemLogs handles GET /api/system/logs.
 func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
+	if s.auth != nil && !auth.HasRole(r.Context(), auth.AdminRole) {
+		writeJSONError(w, http.StatusForbidden, "admin role required")
+		return
+	}
 	level := r.URL.Query().Get("level")
 	var logs []LogEntry
 	if s.diagnostics != nil {

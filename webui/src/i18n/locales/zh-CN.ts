@@ -580,6 +580,8 @@ export const zhCN: MessageSchema = {
   },
   logs: {
     title: "系统日志与诊断",
+    adminOnlyTitle: "需要管理员权限",
+    adminOnlyDesc: "系统日志与诊断信息仅管理员可见。",
     backToSettings: "返回设置",
     refresh: "刷新",
     refreshTooltip: "刷新日志",

@@ -4,6 +4,7 @@ import { createApp, h, nextTick } from "vue";
 import SettingsView from "./SettingsView.vue";
 import * as api from "../lib/api";
 import { i18n, setLocale } from "../i18n";
+import { __resetUserProfileForTest } from "../composables/useUserProfile";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -31,11 +32,13 @@ describe("SettingsView.vue", () => {
     root = document.createElement("div");
     document.body.appendChild(root);
     vi.restoreAllMocks();
+    __resetUserProfileForTest();
     mockPush.mockReset();
     mockBack.mockReset();
     setLocale("en");
 
     vi.spyOn(api, "getRunners").mockResolvedValue(null);
+    vi.spyOn(api, "getManageRunners").mockResolvedValue(null);
     vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([]);
     vi.spyOn(api, "getSystemLogs").mockResolvedValue([
       {
@@ -170,6 +173,64 @@ describe("SettingsView.vue", () => {
     signOut!.click();
 
     expect(logoutSpy).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
+
+  it("restricts server logs and diagnostics to admin users", async () => {
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    vi.spyOn(api, "apiFetch").mockImplementation(async (path: string) => {
+      if (path === "/api/auth/me") {
+        return {
+          ok: true,
+          json: async () => ({ subject: "user-1", name: "User", isAdmin: false }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+    const getLogsSpy = vi.spyOn(api, "getSystemLogs");
+
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    expect(getLogsSpy).not.toHaveBeenCalled();
+    expect(root.textContent).not.toContain("Logs & Diagnostics");
+    expect(root.textContent).not.toContain("Edit Config");
+    app.unmount();
+  });
+
+  it("allows admin users to view server logs and diagnostics", async () => {
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    vi.spyOn(api, "apiFetch").mockImplementation(async (path: string) => {
+      if (path === "/api/auth/me") {
+        return {
+          ok: true,
+          json: async () => ({ subject: "admin-1", name: "Admin", isAdmin: true }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+    const getLogsSpy = vi.spyOn(api, "getSystemLogs").mockResolvedValue([
+      { id: 1, timestamp: new Date().toISOString(), level: "warn", source: "backend", message: "w" },
+    ]);
+
+    const app = createApp({
+      render() {
+        return h(SettingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    expect(getLogsSpy).toHaveBeenCalled();
+    expect(root.textContent).toContain("Logs & Diagnostics");
+    expect(root.textContent).toContain("Edit Config");
     app.unmount();
   });
 });

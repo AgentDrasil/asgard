@@ -274,6 +274,7 @@ func TestAdminRoutesRequireAdminRole(t *testing.T) {
 		"/api/manage/config",
 		"/api/manage/proxy",
 		"/api/manage/keybindings",
+		"/api/system/logs",
 	}
 
 	t.Run("token without admin role is forbidden on admin routes", func(t *testing.T) {
@@ -341,6 +342,33 @@ func TestAdminRoutesRequireAdminRole(t *testing.T) {
 			assert.NotEqual(t, http.StatusUnauthorized, rec.Code)
 			assert.NotEqual(t, http.StatusForbidden, rec.Code, "GET %s should be accessible with admin role in array", path)
 		}
+	})
+
+	t.Run("system status redacts warnings and errors for non-admin", func(t *testing.T) {
+		srv.diagnostics = NewSystemDiagnostics()
+		srv.diagnostics.AddWarning("source", "warn-1")
+		srv.diagnostics.AddError("source", "err-1")
+
+		claims := p.Claims()
+		claims["roles"] = "ai"
+		userToken := p.Sign(t, claims)
+
+		recUser := serve(srv, http.MethodGet, "/api/system/status", map[string]string{"Authorization": "Bearer " + userToken})
+		assert.Equal(t, http.StatusOK, recUser.Code)
+		var userSnap DiagnosticsSnapshot
+		require.NoError(t, json.Unmarshal(recUser.Body.Bytes(), &userSnap))
+		assert.Empty(t, userSnap.Warnings)
+		assert.Empty(t, userSnap.Errors)
+
+		claims["roles"] = "ai admin"
+		adminToken := p.Sign(t, claims)
+
+		recAdmin := serve(srv, http.MethodGet, "/api/system/status", map[string]string{"Authorization": "Bearer " + adminToken})
+		assert.Equal(t, http.StatusOK, recAdmin.Code)
+		var adminSnap DiagnosticsSnapshot
+		require.NoError(t, json.Unmarshal(recAdmin.Body.Bytes(), &adminSnap))
+		assert.Contains(t, adminSnap.Warnings, "warn-1")
+		assert.Contains(t, adminSnap.Errors, "err-1")
 	})
 }
 

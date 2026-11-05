@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
-import { getSystemLogs } from "../lib/api";
+import { getSystemLogs, isAuthEnabled } from "../lib/api";
+import { useUserProfile } from "../composables/useUserProfile";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import type { SystemLogEntry } from "../types";
 
 const router = useRouter();
 const { t } = useI18n();
 const { toastHistory, clearToastHistory } = useToast();
+
+const authEnabled = isAuthEnabled();
+const { profile, load: loadProfile } = useUserProfile();
+const isAdmin = computed(() => !authEnabled || Boolean(profile.value?.isAdmin));
 
 interface UnifiedLogItem {
   id: string;
@@ -31,17 +36,33 @@ const copiedId = ref<string | null>(null);
 let copyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 const fetchLogs = async () => {
+  if (!isAdmin.value) {
+    backendLogs.value = [];
+    return;
+  }
   isLoading.value = true;
   try {
     const logs = await getSystemLogs();
     backendLogs.value = logs;
+  } catch (err: any) {
+    backendLogs.value = [];
+    toast.error(err?.message || "Failed to fetch logs");
   } finally {
     isLoading.value = false;
   }
 };
 
+watch(isAdmin, (admin) => {
+  if (admin) {
+    void fetchLogs();
+  }
+});
+
 onMounted(() => {
-  void fetchLogs();
+  void loadProfile();
+  if (isAdmin.value) {
+    void fetchLogs();
+  }
 });
 
 onUnmounted(() => {
@@ -188,7 +209,7 @@ const navigateBackToSettings = () => {
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div v-if="isAdmin" class="flex items-center gap-2">
         <button
           @click="fetchLogs"
           class="btn btn-ghost btn-sm gap-1.5"
@@ -213,7 +234,26 @@ const navigateBackToSettings = () => {
       </div>
     </header>
 
-    <div class="p-4 md:p-6 max-w-6xl w-full mx-auto space-y-5 flex-1">
+    <!-- Access Denied for Non-Admin -->
+    <div
+      v-if="!isAdmin"
+      class="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 max-w-md mx-auto"
+      data-testid="logs-access-denied"
+    >
+      <div class="p-3.5 rounded-full bg-warning/10 text-warning">
+        <Icon icon="mynaui:lock" class="w-8 h-8" />
+      </div>
+      <div class="space-y-1">
+        <h2 class="text-base font-bold text-base-content">{{ t("logs.adminOnlyTitle") }}</h2>
+        <p class="text-xs text-base-content/70 leading-relaxed">{{ t("logs.adminOnlyDesc") }}</p>
+      </div>
+      <button @click="navigateBackToSettings" class="btn btn-outline btn-sm">
+        {{ t("logs.backToSettings") }}
+      </button>
+    </div>
+
+    <!-- Main Content for Admin -->
+    <div v-else class="p-4 md:p-6 max-w-6xl w-full mx-auto space-y-5 flex-1">
       <!-- Metrics Overview -->
       <div class="grid grid-cols-3 gap-3 md:gap-4">
         <div class="rounded-lg border border-base-300 bg-base-200/50 p-3 md:p-4">
