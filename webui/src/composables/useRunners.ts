@@ -10,6 +10,7 @@ export const RUNNER_POLL_INTERVAL_MS = 15000;
 const runners = ref<RunnerInfo[]>([]);
 const backendVersion = ref("");
 const loading = ref(false);
+const runnerModeReported = ref(false);
 const preferredRunnerId = ref(readStoredRunner());
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -41,8 +42,8 @@ const selectedRunnerId = computed(() => {
   return (list.find((r) => r.online) || list[0]).node_id;
 });
 
-// Runner mode is on when the backend reports at least one runner.
-const runnerMode = computed(() => runners.value.length > 0);
+// Runner mode is on when the backend reports runner mode or at least one runner.
+const runnerMode = computed(() => runnerModeReported.value || runners.value.length > 0);
 
 const selectedRunner = computed(
   () => runners.value.find((r) => r.node_id === selectedRunnerId.value) || null,
@@ -55,6 +56,9 @@ async function refreshRunners() {
     if (res) {
       runners.value = res.runners;
       backendVersion.value = res.backend_version;
+      if (res.runner_mode !== undefined) {
+        runnerModeReported.value = res.runner_mode;
+      }
     }
   } catch (err) {
     console.error("refreshRunners error:", err);
@@ -93,6 +97,7 @@ function stopPolling() {
 export function resetRunnersForTest() {
   runners.value = [];
   backendVersion.value = "";
+  runnerModeReported.value = false;
   preferredRunnerId.value = readStoredRunner();
   pollUsers = 0;
   if (pollTimer) clearInterval(pollTimer);

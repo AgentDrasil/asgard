@@ -31,8 +31,12 @@ describe("Sidebar runner dropdown", () => {
   let root: HTMLElement;
   let app: ReturnType<typeof createApp>;
 
-  const mount = async (runners: RunnerInfo[]) => {
-    vi.spyOn(api, "getRunners").mockResolvedValue({ backend_version: "v1", runners });
+  const mount = async (runners: RunnerInfo[], runnerMode?: boolean) => {
+    vi.spyOn(api, "getRunners").mockResolvedValue({
+      backend_version: "v1",
+      runners,
+      runner_mode: runnerMode ?? runners.length > 0,
+    });
     app = createApp({
       render: () => h(Sidebar, { sessions: [], activeSessionId: null, isOpen: true }),
     });
@@ -57,8 +61,23 @@ describe("Sidebar runner dropdown", () => {
   });
 
   it("is hidden in legacy mode (no runners)", async () => {
-    await mount([]);
+    await mount([], false);
     expect(root.querySelector('[data-testid="runner-select"]')).toBeNull();
+  });
+
+  it("shows warning state when runner mode is active but user has no assigned runner", async () => {
+    await mount([], true);
+    const select = root.querySelector('[data-testid="runner-select"]');
+    expect(select).not.toBeNull();
+    const btn = root.querySelector<HTMLButtonElement>('[data-testid="runner-select-button"]')!;
+    expect(btn.textContent).toContain("No runner");
+    expect(btn.disabled).toBe(true);
+    expect(root.querySelector('[data-testid="runner-selected-dot"]')!.className).toContain(
+      "bg-warning",
+    );
+    const warning = root.querySelector('[data-testid="no-runner-warning"]');
+    expect(warning).not.toBeNull();
+    expect(warning!.textContent).toContain("No runner assigned");
   });
 
   it("defaults to the first online runner and lists runners with status dots", async () => {

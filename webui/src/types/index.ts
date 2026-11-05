@@ -108,6 +108,7 @@ export interface RunnerInfo {
 export interface RunnersResponse {
   backend_version: string;
   runners: RunnerInfo[];
+  runner_mode?: boolean;
 }
 
 export interface ManageRunner {

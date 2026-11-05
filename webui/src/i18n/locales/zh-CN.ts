@@ -84,6 +84,9 @@ export const zhCN: MessageSchema = {
   runners: {
     title: "Runner 节点",
     selectRunner: "Runner",
+    noRunner: "无可用 Runner",
+    noRunnerAssigned: "未分配 Runner",
+    noRunnerWarning: "未分配任何 Runner，请联系管理员。",
     online: "在线",
     offline: "离线",
     boundRunner: "Runner：{id}",

@@ -82,6 +82,9 @@ export const en = {
   runners: {
     title: "Runners",
     selectRunner: "Runner",
+    noRunner: "No runner",
+    noRunnerAssigned: "No runner assigned",
+    noRunnerWarning: "No runner assigned. Please contact an administrator.",
     online: "Online",
     offline: "Offline",
     boundRunner: "Runner: {id}",

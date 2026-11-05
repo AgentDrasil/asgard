@@ -56,6 +56,7 @@ func TestHandleRunners(t *testing.T) {
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 			assert.Equal(t, version.Get(), got.BackendVersion)
 			assert.Equal(t, tt.want, got.Runners)
+			assert.Equal(t, tt.reg != nil, got.RunnerMode)
 		})
 	}
 }

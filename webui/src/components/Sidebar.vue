@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import type { ChatSession, AgentInfo } from "../types";
@@ -64,6 +64,13 @@ const onDocPointerDown = (e: MouseEvent) => {
 const onDocKeydown = (e: KeyboardEvent) => {
   if (e.key === "Escape") runnerMenuOpen.value = false;
 };
+
+watch(
+  () => runners.value.length,
+  (len) => {
+    if (len === 0) runnerMenuOpen.value = false;
+  },
+);
 
 const chooseRunner = (id: string) => {
   selectRunner(id);
@@ -203,56 +210,81 @@ onUnmounted(() => {
     <!-- Runner selector (hidden in legacy mode, when no runners are reported) -->
     <div
       v-if="isOpen && runnerMode"
-      ref="runnerSelectEl"
-      class="px-3 pb-2 w-full relative"
+      class="px-3 pb-2 w-full"
       data-testid="runner-select"
     >
-      <button
-        type="button"
-        class="btn btn-sm btn-ghost w-full justify-between bg-base-200/60 font-normal gap-2"
-        :title="t('runners.selectRunner')"
-        data-testid="runner-select-button"
-        @click="runnerMenuOpen = !runnerMenuOpen"
-      >
-        <span class="flex items-center gap-2 min-w-0">
-          <span
-            :class="[
-              'inline-block h-2 w-2 rounded-full shrink-0',
-              selectedRunner?.online ? 'bg-success' : 'bg-error',
-            ]"
-            data-testid="runner-selected-dot"
-          />
-          <span class="truncate">{{ selectedRunnerId }}</span>
-        </span>
-        <Icon icon="mynaui:chevron-down" class="h-4 w-4 shrink-0" />
-      </button>
-      <ul
-        v-if="runnerMenuOpen"
-        class="menu menu-sm absolute left-3 right-3 z-40 mt-1 rounded-box bg-base-200 border border-base-100 shadow-lg p-1"
-        data-testid="runner-menu"
-      >
-        <li v-for="r in runners" :key="r.node_id">
-          <button
-            type="button"
-            :disabled="!r.online"
-            :class="[
-              'flex items-center gap-2',
-              { 'menu-active': r.node_id === selectedRunnerId, 'opacity-50': !r.online },
-            ]"
-            :data-testid="`runner-option-${r.node_id}`"
-            @click="chooseRunner(r.node_id)"
-          >
+      <div ref="runnerSelectEl" class="relative w-full">
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost w-full justify-between bg-base-200/60 font-normal gap-2"
+          :title="runners.length === 0 ? t('runners.noRunnerAssigned') : t('runners.selectRunner')"
+          data-testid="runner-select-button"
+          :disabled="runners.length === 0"
+          @click="runnerMenuOpen = !runnerMenuOpen"
+        >
+          <span class="flex items-center gap-2 min-w-0">
             <span
               :class="[
                 'inline-block h-2 w-2 rounded-full shrink-0',
-                r.online ? 'bg-success' : 'bg-error',
+                runners.length === 0
+                  ? 'bg-warning'
+                  : selectedRunner?.online
+                    ? 'bg-success'
+                    : 'bg-error',
               ]"
-              :title="r.online ? t('runners.online') : t('runners.offline')"
+              data-testid="runner-selected-dot"
             />
-            <span class="truncate">{{ r.node_id }}</span>
-          </button>
-        </li>
-      </ul>
+            <span class="truncate">{{
+              runners.length === 0 ? t("runners.noRunner") : selectedRunnerId
+            }}</span>
+          </span>
+          <Icon
+            v-if="runners.length > 0"
+            icon="mynaui:chevron-down"
+            class="h-4 w-4 shrink-0"
+          />
+          <Icon
+            v-else
+            icon="mynaui:danger"
+            class="h-4 w-4 shrink-0 text-warning"
+          />
+        </button>
+        <ul
+          v-if="runnerMenuOpen && runners.length > 0"
+          class="menu menu-sm absolute left-0 right-0 w-full z-40 mt-1 rounded-box bg-base-200 border border-base-100 shadow-lg p-1 box-border"
+          data-testid="runner-menu"
+        >
+          <li v-for="r in runners" :key="r.node_id">
+            <button
+              type="button"
+              :disabled="!r.online"
+              :class="[
+                'flex items-center gap-2',
+                { 'menu-active': r.node_id === selectedRunnerId, 'opacity-50': !r.online },
+              ]"
+              :data-testid="`runner-option-${r.node_id}`"
+              @click="chooseRunner(r.node_id)"
+            >
+              <span
+                :class="[
+                  'inline-block h-2 w-2 rounded-full shrink-0',
+                  r.online ? 'bg-success' : 'bg-error',
+                ]"
+                :title="r.online ? t('runners.online') : t('runners.offline')"
+              />
+              <span class="truncate">{{ r.node_id }}</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+      <div
+        v-if="runners.length === 0"
+        class="mt-1.5 flex items-start gap-1.5 rounded-lg bg-warning/10 border border-warning/20 px-2.5 py-1.5 text-xs text-warning"
+        data-testid="no-runner-warning"
+      >
+        <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0 mt-0.5" />
+        <span class="leading-tight">{{ t("runners.noRunnerWarning") }}</span>
+      </div>
     </div>
 
     <!-- Action buttons (Dashboard when collapsed, New Chat, Search) -->

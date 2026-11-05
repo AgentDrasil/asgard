@@ -37,11 +37,16 @@ type RunnerInfoResponse struct {
 type RunnersResponse struct {
 	BackendVersion string               `json:"backend_version"`
 	Runners        []RunnerInfoResponse `json:"runners"`
+	RunnerMode     bool                 `json:"runner_mode"`
 }
 
 // handleRunners handles GET /api/runners.
 func (s *Server) handleRunners(w http.ResponseWriter, r *http.Request) {
-	resp := RunnersResponse{BackendVersion: version.Get(), Runners: []RunnerInfoResponse{}}
+	resp := RunnersResponse{
+		BackendVersion: version.Get(),
+		Runners:        []RunnerInfoResponse{},
+		RunnerMode:     s.runners != nil,
+	}
 	if s.runners != nil {
 		// Only the runners assigned to the requester are visible.
 		allowed, aerr := s.assignedRunners(r)
