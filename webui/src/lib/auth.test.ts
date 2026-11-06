@@ -4,6 +4,8 @@ import {
   apiFetch,
   appendAccessToken,
   getAttachmentUrl,
+  getGitDiff,
+  getGitLog,
   getRawFileContentUrl,
   getRawWorkspaceFileUrl,
   getStoredTokens,
@@ -241,8 +243,8 @@ describe("auth capability discovery", () => {
       expect(getStoredTokens()?.refresh_token).toBe("refresh-1");
     });
 
-    it("redirects to the denial page on 403 without retrying", async () => {
-      fetchMock.mockResolvedValue(jsonResponse(403));
+    it("redirects to the denial page on 403 insufficient role without retrying", async () => {
+      fetchMock.mockResolvedValue(jsonResponse(403, { error: "insufficient role" }));
 
       void apiFetch("/api/agents");
 
@@ -261,6 +263,22 @@ describe("auth capability discovery", () => {
 
       const res = await apiFetch("/api/subdirs?dir=/tmp");
       expect(res.status).toBe(403);
+      expect(navigations).toHaveLength(0);
+    });
+
+    it("propagates server error message on getGitDiff and getGitLog errors", async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(403, {
+          error: 'access denied: repository config "core.fsmonitor" is not allowed on the runner',
+        }),
+      );
+
+      await expect(getGitDiff("session-123")).rejects.toThrow(
+        'access denied: repository config "core.fsmonitor" is not allowed on the runner',
+      );
+      await expect(getGitLog("session-123")).rejects.toThrow(
+        'access denied: repository config "core.fsmonitor" is not allowed on the runner',
+      );
       expect(navigations).toHaveLength(0);
     });
 

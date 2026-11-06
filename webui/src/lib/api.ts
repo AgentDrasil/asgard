@@ -227,15 +227,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
 
   if (response.status === 403) {
-    let isRoleForbidden = true;
+    let isRoleForbidden = false;
     try {
       const resClone = typeof response.clone === "function" ? response.clone() : response;
       const data = await resClone.json();
-      if (data && typeof data === "object" && data.error && data.error !== "insufficient role") {
-        isRoleForbidden = false;
+      if (data && typeof data === "object" && data.error === "insufficient role") {
+        isRoleForbidden = true;
       }
     } catch {
-      // not JSON: treat as role forbidden
+      // not JSON: treat as non-role forbidden
     }
 
     if (isRoleForbidden) {
@@ -615,12 +615,15 @@ export async function getGitDiff(sessionId: string, commit?: string): Promise<Gi
 
   try {
     const res = await apiFetch(`/api/git/diff?${params.toString()}`);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `Failed to load git diff (${res.status})`);
+    }
     const data = await res.json();
     return data.files || [];
   } catch (err) {
     console.error("getGitDiff error:", err);
-    return [];
+    throw err;
   }
 }
 
@@ -630,11 +633,14 @@ export async function getGitLog(sessionId: string, limit = 10): Promise<GitLogRe
     const res = await apiFetch(
       `/api/git/log?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `Failed to load git log (${res.status})`);
+    }
     return await res.json();
   } catch (err) {
     console.error("getGitLog error:", err);
-    return null;
+    throw err;
   }
 }
 

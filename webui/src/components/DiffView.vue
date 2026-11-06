@@ -604,11 +604,18 @@ const commentedFileList = computed(() => {
           </div>
 
           <!-- Error -->
-          <div v-else-if="errorMsg" class="flex items-center justify-center h-full p-8">
-            <div class="alert alert-error max-w-md">
+          <div
+            v-else-if="errorMsg"
+            class="flex flex-col items-center justify-center h-full p-8 gap-4"
+          >
+            <div class="alert alert-error max-w-lg shadow-sm">
               <Icon icon="mynaui:danger" class="h-5 w-5 shrink-0" />
-              <span class="text-sm">{{ errorMsg }}</span>
+              <span class="text-sm break-words">{{ errorMsg }}</span>
             </div>
+            <button class="btn btn-sm btn-outline gap-2" @click="loadGitData">
+              <Icon icon="mynaui:refresh" class="w-4 h-4" />
+              <span>{{ t("vcs.refreshTitle") }}</span>
+            </button>
           </div>
 
           <!-- No changes in current selection -->
