@@ -965,7 +965,9 @@ var hexHash = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 // refs/remotes/<configured remote>/<branch> name. Nothing from the push's own
 // output (which a server can influence) is used.
 func (r *gitRepo) pushTracking(ctx context.Context) (ref, hash string, ok bool) {
-	out, _, err := r.run(ctx, gitReadTimeout, 4096, "rev-parse", "--symbolic-full-name", "--end-of-options", "@{push}")
+	// @{push} is a constant, so no --end-of-options: git echoes that marker
+	// back in rev-parse's output, which would corrupt the ref name.
+	out, _, err := r.run(ctx, gitReadTimeout, 4096, "rev-parse", "--symbolic-full-name", "@{push}")
 	if err == nil {
 		ref = strings.TrimSpace(string(out))
 	} else {

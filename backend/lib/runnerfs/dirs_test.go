@@ -940,6 +940,29 @@ func TestGitPushHidesTrackingComplaintWhenRefCannotBeDerived(t *testing.T) {
 	assert.Equal(t, gitCmd(t, ws, "rev-parse", "HEAD"), gitCmd(t, remote, "rev-parse", "main"))
 }
 
+func TestGitPushUpdatesTrackingRefThatAlreadyExists(t *testing.T) {
+	fs, ws, remote := pushRepo(t)
+	// First push creates origin/main; @{push} then resolves from git itself
+	// rather than from the configuration.
+	res, err := fs.GitPush(t.Context(), ws, "")
+	require.NoError(t, err)
+	require.True(t, res.Success, res.Error+res.Output)
+
+	writeFile(t, filepath.Join(ws, "b.txt"), "b\n")
+	gitCmd(t, ws, "add", "-A")
+	gitCmd(t, ws, "commit", "-m", "third")
+	// Stand-in for the read-only mount: git cannot update the tracking ref.
+	writeFile(t, filepath.Join(ws, ".git", "refs", "remotes", "origin", "main.lock"), "")
+
+	res, err = fs.GitPush(t.Context(), ws, "")
+	require.NoError(t, err)
+	assert.True(t, res.Success, res.Error+res.Output)
+	assert.NotContains(t, res.Output, "update_ref failed")
+	head := gitCmd(t, ws, "rev-parse", "HEAD")
+	assert.Equal(t, head, gitCmd(t, remote, "rev-parse", "main"))
+	assert.Equal(t, head, gitCmd(t, ws, "rev-parse", "refs/remotes/origin/main"), "the runner must record the pushed commit")
+}
+
 func TestGitPushOutputCannotChangeWhatIsRecorded(t *testing.T) {
 	fs, ws, remote := pushRepo(t)
 	// A transport that prints porcelain-looking and To-looking lines.
