@@ -70,25 +70,7 @@ const totalWarnings = computed(
   () => (isAdmin.value ? backendWarnCount.value : 0) + toastWarnCount.value,
 );
 
-const navigateToKeybindings = () => {
-  router.push("/settings/keybindings");
-};
-
-const navigateToLogs = () => {
-  router.push("/settings/logs");
-};
-
-const navigateToCompressionStats = () => {
-  router.push("/settings/compression");
-};
-
-const navigateToKeys = () => {
-  router.push("/settings/keys");
-};
-
-const navigateToRunners = () => {
-  router.push("/settings/runners");
-};
+const go = (path: string) => router.push(path);
 
 const navigateBack = () => {
   if (window.history.state?.back) {
@@ -121,199 +103,155 @@ const navigateBack = () => {
       </div>
     </header>
 
-    <!-- Main Content -->
-    <div class="p-4 md:p-6 max-w-4xl w-full mx-auto space-y-6 flex-1">
-      <!-- Section: Preferences -->
-      <section class="space-y-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
+    <div class="p-4 md:p-6 max-w-2xl w-full mx-auto space-y-8 flex-1">
+      <!-- Group: Preferences -->
+      <section class="space-y-2">
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wider text-base-content/60">
           {{ t("settings.preferences") }}
         </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-          <!-- Language Setting Card -->
-          <div
-            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
-          >
-            <div class="space-y-1">
-              <div class="font-medium text-base-content flex items-center gap-2">
+        <div class="rounded-xl border border-base-300 bg-base-200/50 divide-y divide-base-300">
+          <div class="flex items-center justify-between gap-4 p-4">
+            <div class="min-w-0">
+              <div class="font-medium flex items-center gap-2">
                 <Icon icon="material-symbols:translate" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.language") }}</span>
               </div>
-              <p class="text-xs text-base-content/70">
-                {{ t("settings.languageDesc") }}
-              </p>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.languageDesc") }}</p>
             </div>
-            <div class="w-36 shrink-0">
-              <LanguageSelector />
-            </div>
+            <div class="w-44 shrink-0"><LanguageSelector /></div>
           </div>
-
-          <!-- Theme Setting Card -->
-          <div
-            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
-          >
-            <div class="space-y-1">
-              <div class="font-medium text-base-content flex items-center gap-2">
+          <div class="flex items-center justify-between gap-4 p-4">
+            <div class="min-w-0">
+              <div class="font-medium flex items-center gap-2">
                 <Icon icon="mdi:paint-outline" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.theme") }}</span>
               </div>
-              <p class="text-xs text-base-content/70">
-                {{ t("settings.themeDesc") }}
-              </p>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.themeDesc") }}</p>
             </div>
-            <ThemeSelector />
+            <div class="w-56 shrink-0"><ThemeSelector /></div>
           </div>
-        </div>
-      </section>
-
-      <!-- Section: Authentication (only when the backend runs OIDC) -->
-      <section v-if="authEnabled" class="space-y-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          {{ t("settings.authentication") }}
-        </h2>
-        <div
-          class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4"
-        >
-          <div class="space-y-1">
-            <div class="font-medium text-base-content flex items-center gap-2">
-              <Icon icon="mynaui:shield-check" class="w-5 h-5 text-primary" />
-              <span>{{ t("settings.authSignedIn") }}</span>
-            </div>
-            <p class="text-xs text-base-content/70">
-              {{ t("settings.authSignedInDesc") }}
-            </p>
-          </div>
-          <button class="btn btn-outline btn-sm gap-1.5 shrink-0" @click="handleLogout">
-            <Icon icon="mynaui:logout" class="h-4 w-4" />
-            <span>{{ t("settings.signOut") }}</span>
-          </button>
-        </div>
-      </section>
-
-      <!-- Section: System & Server Actions -->
-      <section class="space-y-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          {{ t("settings.systemActions") }}
-        </h2>
-        <div class="max-w-md">
-          <!-- Quota Card -->
-          <div
-            class="rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex flex-col justify-between gap-3"
-          >
-            <div class="space-y-1">
-              <div class="font-medium text-base-content flex items-center gap-2">
-                <Icon icon="mynaui:chart-bar-one" class="w-5 h-5 text-primary" />
-                <span>{{ t("settings.usageAndQuota") }}</span>
-              </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
-                {{ t("settings.usageAndQuotaDesc") }}
-              </p>
-            </div>
-            <button
-              @click="isQuotaModalOpen = true"
-              class="btn btn-outline btn-sm w-full gap-2 mt-2"
-            >
-              <Icon icon="mynaui:chart-bar-one" class="w-4 h-4" />
-              <span>{{ t("settings.checkQuota") }}</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Section: Navigation & Tools -->
-      <section class="space-y-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-base-content/60">
-          {{ t("settings.configAndDiagnostics") }}
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-          <!-- Personal API Keys Card -->
           <div
             role="button"
             tabindex="0"
-            @click="navigateToKeys"
-            @keydown.enter.space.prevent="navigateToKeys"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
-            data-testid="nav-proxy-keys"
+            @click="go('/settings/keybindings')"
+            @keydown.enter.space.prevent="go('/settings/keybindings')"
+            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-b-xl"
           >
-            <div class="space-y-1">
+            <div class="min-w-0">
               <div
-                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
-              >
-                <Icon icon="mynaui:key" class="w-5 h-5 text-primary" />
-                <span>{{ t("settings.proxyKeysCardTitle") }}</span>
-              </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
-                {{ t("settings.proxyKeysCardDesc") }}
-              </p>
-            </div>
-            <Icon
-              icon="material-symbols:chevron-right"
-              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
-            />
-          </div>
-
-          <!-- Runners Card -->
-          <div
-            role="button"
-            tabindex="0"
-            @click="navigateToRunners"
-            @keydown.enter.space.prevent="navigateToRunners"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
-            data-testid="nav-runners"
-          >
-            <div class="space-y-1">
-              <div
-                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
-              >
-                <Icon icon="material-symbols:directions-run" class="w-5 h-5 text-primary" />
-                <span>{{ t("settings.runnersCardTitle") }}</span>
-              </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
-                {{ t("settings.runnersCardDesc") }}
-              </p>
-            </div>
-            <Icon
-              icon="material-symbols:chevron-right"
-              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
-            />
-          </div>
-
-          <!-- Keyboard Shortcuts Card -->
-          <div
-            role="button"
-            tabindex="0"
-            @click="navigateToKeybindings"
-            @keydown.enter.space.prevent="navigateToKeybindings"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
-          >
-            <div class="space-y-1">
-              <div
-                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
+                class="font-medium flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="material-symbols:keyboard-outline" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.keyboardShortcuts") }}</span>
               </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
+              <p class="text-xs text-base-content/70 mt-1">
                 {{ t("settings.keyboardShortcutsDesc") }}
               </p>
             </div>
             <Icon
               icon="material-symbols:chevron-right"
-              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
+              class="w-6 h-6 text-base-content/40 shrink-0"
             />
           </div>
+        </div>
+      </section>
 
-          <!-- Logs & Diagnostics Card -->
+      <!-- Group: Account & Access -->
+      <section class="space-y-2">
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wider text-base-content/60">
+          {{ t("settings.accountAndAccess") }}
+        </h2>
+        <div class="rounded-xl border border-base-300 bg-base-200/50 divide-y divide-base-300">
+          <!-- Only when the backend runs OIDC -->
+          <div v-if="authEnabled" class="flex items-center justify-between gap-4 p-4">
+            <div class="min-w-0">
+              <div class="font-medium flex items-center gap-2">
+                <Icon icon="mynaui:shield-check" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.authSignedIn") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.authSignedInDesc") }}</p>
+            </div>
+            <button class="btn btn-outline btn-sm gap-1.5 shrink-0" @click="handleLogout">
+              <Icon icon="mynaui:logout" class="h-4 w-4" />
+              <span>{{ t("settings.signOut") }}</span>
+            </button>
+          </div>
+          <div
+            role="button"
+            tabindex="0"
+            @click="go('/settings/keys')"
+            @keydown.enter.space.prevent="go('/settings/keys')"
+            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+            data-testid="nav-proxy-keys"
+          >
+            <div class="min-w-0">
+              <div
+                class="font-medium flex items-center gap-2 group-hover:text-primary transition-colors"
+              >
+                <Icon icon="mynaui:key" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.proxyKeysCardTitle") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.proxyKeysCardDesc") }}</p>
+            </div>
+            <Icon
+              icon="material-symbols:chevron-right"
+              class="w-6 h-6 text-base-content/40 shrink-0"
+            />
+          </div>
+          <div class="flex items-center justify-between gap-4 p-4">
+            <div class="min-w-0">
+              <div class="font-medium flex items-center gap-2">
+                <Icon icon="mynaui:chart-bar-one" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.usageAndQuota") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.usageAndQuotaDesc") }}</p>
+            </div>
+            <button class="btn btn-outline btn-sm shrink-0" @click="isQuotaModalOpen = true">
+              {{ t("settings.checkQuota") }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Group: System -->
+      <section class="space-y-2">
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wider text-base-content/60">
+          {{ t("settings.systemActions") }}
+        </h2>
+        <div class="rounded-xl border border-base-300 bg-base-200/50 divide-y divide-base-300">
+          <div
+            role="button"
+            tabindex="0"
+            @click="go('/settings/runners')"
+            @keydown.enter.space.prevent="go('/settings/runners')"
+            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-t-xl"
+            data-testid="nav-runners"
+          >
+            <div class="min-w-0">
+              <div
+                class="font-medium flex items-center gap-2 group-hover:text-primary transition-colors"
+              >
+                <Icon icon="material-symbols:directions-run" class="w-5 h-5 text-primary" />
+                <span>{{ t("settings.runnersCardTitle") }}</span>
+              </div>
+              <p class="text-xs text-base-content/70 mt-1">{{ t("settings.runnersCardDesc") }}</p>
+            </div>
+            <Icon
+              icon="material-symbols:chevron-right"
+              class="w-6 h-6 text-base-content/40 shrink-0"
+            />
+          </div>
           <div
             v-if="isAdmin"
             role="button"
             tabindex="0"
-            @click="navigateToLogs"
-            @keydown.enter.space.prevent="navigateToLogs"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+            @click="go('/settings/logs')"
+            @keydown.enter.space.prevent="go('/settings/logs')"
+            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
           >
-            <div class="space-y-1">
+            <div class="min-w-0">
               <div
-                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
+                class="font-medium flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="material-symbols:receipt-long-outline" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.logsAndDiagnostics") }}</span>
@@ -324,38 +262,36 @@ const navigateBack = () => {
                   {{ t("settings.warnsCount", { count: totalWarnings }) }}
                 </span>
               </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
+              <p class="text-xs text-base-content/70 mt-1">
                 {{ t("settings.logsAndDiagnosticsDesc") }}
               </p>
             </div>
             <Icon
               icon="material-symbols:chevron-right"
-              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
+              class="w-6 h-6 text-base-content/40 shrink-0"
             />
           </div>
-
-          <!-- Compression Statistics Card -->
           <div
             role="button"
             tabindex="0"
-            @click="navigateToCompressionStats"
-            @keydown.enter.space.prevent="navigateToCompressionStats"
-            class="group rounded-xl border border-base-300 bg-base-200/50 p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:border-primary/50 hover:bg-base-200 transition-all shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+            @click="go('/settings/compression')"
+            @keydown.enter.space.prevent="go('/settings/compression')"
+            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-b-xl"
           >
-            <div class="space-y-1">
+            <div class="min-w-0">
               <div
-                class="font-medium text-base-content flex items-center gap-2 group-hover:text-primary transition-colors"
+                class="font-medium flex items-center gap-2 group-hover:text-primary transition-colors"
               >
                 <Icon icon="mynaui:chart-bar-one" class="w-5 h-5 text-primary" />
                 <span>{{ t("settings.compressionStats") }}</span>
               </div>
-              <p class="text-xs text-base-content/70 leading-relaxed">
+              <p class="text-xs text-base-content/70 mt-1">
                 {{ t("settings.compressionStatsDesc") }}
               </p>
             </div>
             <Icon
               icon="material-symbols:chevron-right"
-              class="w-6 h-6 text-base-content/40 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0"
+              class="w-6 h-6 text-base-content/40 shrink-0"
             />
           </div>
         </div>

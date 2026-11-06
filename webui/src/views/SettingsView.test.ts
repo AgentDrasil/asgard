@@ -83,11 +83,11 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("Preferences");
     expect(root.textContent).toContain("Language");
     expect(root.textContent).toContain("Theme");
-    expect(root.textContent).toContain("System & Server Actions");
+    expect(root.textContent).toContain("System & Diagnostics");
     expect(root.textContent).toContain("Personal API Keys");
     expect(root.textContent).toContain("Runners");
     expect(root.textContent).toContain("Usage & Quota");
-    expect(root.textContent).toContain("Configuration & Diagnostics");
+    expect(root.textContent).toContain("Account & Access");
     expect(root.textContent).toContain("Compression Statistics");
 
     app.unmount();
@@ -108,11 +108,11 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("偏好设置");
     expect(root.textContent).toContain("语言");
     expect(root.textContent).toContain("主题");
-    expect(root.textContent).toContain("系统与服务操作");
+    expect(root.textContent).toContain("系统与诊断");
     expect(root.textContent).toContain("个人 API 密钥");
     expect(root.textContent).toContain("Runner 节点");
     expect(root.textContent).toContain("用量与配额");
-    expect(root.textContent).toContain("配置与诊断");
+    expect(root.textContent).toContain("账号与访问");
     expect(root.textContent).toContain("压缩统计");
 
     app.unmount();
@@ -129,7 +129,7 @@ describe("SettingsView.vue", () => {
     app.mount(root);
     await flush();
 
-    expect(root.textContent).toContain("Authentication");
+    expect(root.textContent).toContain("Account & Access");
     expect(root.textContent).toContain("Signed in via OIDC");
 
     app.unmount();
@@ -146,7 +146,6 @@ describe("SettingsView.vue", () => {
     app.mount(root);
     await flush();
 
-    expect(root.textContent).not.toContain("Authentication");
     expect(root.textContent).not.toContain("Signed in via OIDC");
 
     app.unmount();

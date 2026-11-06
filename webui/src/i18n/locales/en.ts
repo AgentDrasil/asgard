@@ -359,6 +359,7 @@ export const en = {
     backToChat: "Back to Chat",
     backToSettings: "Back to Settings",
     preferences: "Preferences",
+    accountAndAccess: "Account & Access",
     authentication: "Authentication",
     authSignedIn: "Signed in via OIDC",
     authSignedInDesc:
@@ -369,7 +370,7 @@ export const en = {
     appearance: "Appearance",
     theme: "Theme",
     themeDesc: "Customize the look and feel of the interface (DaisyUI & Catppuccin themes).",
-    systemActions: "System & Server Actions",
+    systemActions: "System & Diagnostics",
     usageAndQuota: "Usage & Quota",
     usageAndQuotaDesc:
       "View current token usage, credit balance, and resource consumption details.",
