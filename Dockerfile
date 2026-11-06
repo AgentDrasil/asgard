@@ -63,6 +63,7 @@ RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
     ln -s /usr/lib/go/bin/gofmt /usr/bin/gofmt
 ENV PATH="/usr/lib/go/bin:${PATH}"
 RUN GOBIN=/usr/bin /usr/bin/go install golang.org/x/tools/cmd/goimports@latest
+RUN GOBIN=/usr/bin /usr/bin/go install github.com/elmhuangyu/configs/cmd/cfgctl@latest
 
 RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/bin ${GOLANGCI_LINT_VERSION}
 
