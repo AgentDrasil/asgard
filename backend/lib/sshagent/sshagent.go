@@ -107,7 +107,7 @@ func AddKeysFromDir(sshDir string) error {
 		}
 		name := entry.Name()
 		// Skip public keys, known_hosts, config, etc.
-		if strings.HasSuffix(name, ".pub") || name == "known_hosts" || name == "config" || name == "authorized_keys" {
+		if strings.HasSuffix(name, ".pub") || name == "known_hosts" || name == "config" || name == "authorized_keys" || skipManagedName(name) {
 			continue
 		}
 
@@ -155,7 +155,7 @@ func ClearKeys() error {
 						continue
 					}
 					name := entry.Name()
-					if strings.HasSuffix(name, ".pub") || name == "config" || name == "known_hosts" || name == "authorized_keys" {
+					if strings.HasSuffix(name, ".pub") || name == "config" || name == "known_hosts" || name == "authorized_keys" || skipManagedName(name) {
 						continue
 					}
 					keyPath := filepath.Join(sshDir, name)
@@ -199,4 +199,9 @@ func RemoveKey(keyPath string) error {
 	}
 	log.Info().Str("key", keyPath).Msg("Removed SSH key from ssh-agent")
 	return nil
+}
+
+// skipManagedName reports Asgard bookkeeping and temp files that are never keys.
+func skipManagedName(name string) bool {
+	return strings.HasPrefix(name, ".asgard-") || strings.HasSuffix(name, ".tmp")
 }

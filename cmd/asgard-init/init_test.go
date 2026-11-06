@@ -708,7 +708,7 @@ func TestCheckSSHCredentials(t *testing.T) {
 		assert.Nil(t, keys)
 	})
 
-	t.Run("multiple keys found, non-private files ignored, unsupported files warned", func(t *testing.T) {
+	t.Run("multiple keys found, non-private files ignored, arbitrary names accepted", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
 		sshDir := filepath.Join(tempDir, "etcd-tree", "credentials", "ssh")
@@ -726,13 +726,13 @@ func TestCheckSSHCredentials(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte("hosts"), 0644))
 		require.NoError(t, os.WriteFile(filepath.Join(sshDir, ".gitkeep"), []byte(""), 0644))
 
-		// Unsupported file names (including authorized_keys and id_custom) should trigger warning and not be synced
+		// Arbitrary key filenames are accepted; files without a PEM header (authorized_keys) are not keys
 		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "authorized_keys"), []byte("ssh-ed25519 ..."), 0644))
 		require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_custom"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ncustom"), 0644))
 
 		keys, ok := CheckSSHCredentials(tempDir)
 		assert.True(t, ok)
-		assert.Equal(t, []string{"id_ed25519", "id_rsa", "key"}, keys)
+		assert.Equal(t, []string{"id_custom", "id_ed25519", "id_rsa", "key"}, keys)
 
 		// Check all private keys were chmodded to 0600
 		for _, name := range keys {

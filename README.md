@@ -546,6 +546,10 @@ Asgard uses standard `ssh-agent` Socket passthrough to allow agents to perform S
 2. The `SSH_AUTH_SOCK` Unix socket is mounted into the Asgard container.
 3. Asgard's `bwrap` sandbox automatically passes through `SSH_AUTH_SOCK` into the agent and command execution sandboxes while keeping `/home/user/.ssh` masked with an empty `tmpfs`.
 
+### Syncing SSH keys via etcd (`credentials/ssh/`)
+
+Any filename under `credentials/ssh/` is synced to the runner's `~/.ssh/` (e.g. `huangyu` and `huangyu.pub` referenced by `IdentityFile ~/.ssh/huangyu`), so multiple keys with arbitrary names are supported. A file is treated as a private key (mode `0600`, loaded into `ssh-agent`) when it is not `*.pub`, `config` or `known_hosts` and its content contains a PEM `-----BEGIN ` header. Asgard records the names it wrote in `~/.ssh/.asgard-managed`; files removed from etcd are deleted from `~/.ssh/` on the next sync, and files Asgard did not write are left alone (the one exception: on the first sync after upgrading from a version without the manifest, the old fixed names `key`, `id_*`, `config` and `known_hosts` absent from etcd are swept once). File names must be a single path segment without leading/trailing whitespace or newlines, must not be `.asgard-managed` or end in `.sops.json`; others are skipped.
+
 ### Running with Docker Compose:
 
 Ensure your host has `ssh-agent` running and key loaded:

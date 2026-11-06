@@ -14,6 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +44,8 @@ type Options struct {
 	SetupSSH func() error
 	// ClearSSH removes all identities from the ssh-agent (default sshagent.ClearKeys).
 	ClearSSH func() error
+	// RemoveSSHKey removes one key file's identity from the ssh-agent (default sshagent.RemoveKey).
+	RemoveSSHKey func(keyPath string) error
 	// SkipSSH disables ssh-agent setup (tests).
 	SkipSSH bool
 	// NewProxy creates the proxy manager (default proxy.NewManager).
@@ -84,6 +88,9 @@ type Sandbox struct {
 func Setup(src Source, opts Options) *Sandbox {
 	if opts.SetupSSH == nil {
 		opts.SetupSSH = sshagent.SetupSSHAgent
+	}
+	if opts.RemoveSSHKey == nil {
+		opts.RemoveSSHKey = sshagent.RemoveKey
 	}
 	if opts.ClearSSH == nil {
 		opts.ClearSSH = sshagent.ClearKeys
@@ -152,7 +159,15 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 			}
 		}
 
-		if syncErr := SyncSSHCredentials(s.opts.HomeDir, &tree.Credentials.SSH); syncErr != nil {
+		var onRemoveKey func(string)
+		if !s.opts.SkipSSH && s.opts.RemoveSSHKey != nil {
+			onRemoveKey = func(path string) {
+				if err := s.opts.RemoveSSHKey(path); err != nil {
+					log.Debug().Err(err).Str("key", path).Msg("failed to remove SSH key from ssh-agent")
+				}
+			}
+		}
+		if syncErr := syncSSHCredentials(s.opts.HomeDir, &tree.Credentials.SSH, onRemoveKey); syncErr != nil {
 			log.Warn().Err(syncErr).Msg("failed to sync SSH credentials to home directory")
 		} else {
 			if keyChanged {
@@ -501,23 +516,84 @@ func syncConfigFile(dir, name string, content []byte) error {
 	return nil
 }
 
-var managedSSHFiles = []string{
-	"key",
-	"key.pub",
-	"id_ed25519",
-	"id_ed25519.pub",
-	"id_rsa",
-	"id_rsa.pub",
-	"id_ecdsa",
-	"id_ecdsa.pub",
-	"id_dsa",
-	"id_dsa.pub",
-	"config",
-	"known_hosts",
+// legacySSHFiles are the fixed names managed by versions that predate the manifest.
+// They are only swept once, on the first sync after upgrade (no manifest yet).
+var legacySSHFiles = []string{
+	"key", "key.pub",
+	"id_ed25519", "id_ed25519.pub",
+	"id_rsa", "id_rsa.pub",
+	"id_ecdsa", "id_ecdsa.pub",
+	"id_dsa", "id_dsa.pub",
+	"config", "known_hosts",
+}
+
+// readSSHManifest returns the names Asgard previously wrote to sshDir and
+// whether a manifest exists.
+func readSSHManifest(sshDir string) ([]string, bool, error) {
+	data, err := os.ReadFile(filepath.Join(sshDir, config.SSHManifestName))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read ssh manifest: %w", err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, true, nil
+}
+
+// removeManagedSSH deletes files not in keep that Asgard previously wrote (manifest names;
+// legacy fixed names only when no manifest exists, i.e. the one-time upgrade sweep).
+// Only single-segment names are ever touched. onRemove, if set, is called with the path of
+// each removed private key before it is deleted.
+func removeManagedSSH(sshDir string, names []string, keep map[string][]byte, onRemove func(path string)) error {
+	for _, name := range names {
+		if _, ok := keep[name]; ok || name != filepath.Base(name) || name == "." || name == ".." || name == config.SSHManifestName {
+			continue
+		}
+		target := filepath.Join(sshDir, name)
+		if onRemove != nil && !strings.HasSuffix(name, ".pub") {
+			if data, err := os.ReadFile(target); err == nil && bytes.Contains(data, []byte("-----BEGIN ")) {
+				onRemove(target)
+			}
+		}
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", target, err)
+		}
+	}
+	return nil
+}
+
+// writeSSHManifest records the given names. An empty manifest is still written so
+// its existence marks that the one-time legacy sweep has already happened.
+func writeSSHManifest(sshDir string, names []string) error {
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return fmt.Errorf("create ssh directory %s: %w", sshDir, err)
+	}
+	sorted := slices.Compact(slices.Sorted(slices.Values(names)))
+	content := ""
+	if len(sorted) > 0 {
+		content = strings.Join(sorted, "\n") + "\n"
+	}
+	return atomicWriteFile(filepath.Join(sshDir, config.SSHManifestName), []byte(content), 0600)
 }
 
 // SyncSSHCredentials writes SSH credentials received from etcd to the runner user's ~/.ssh directory.
+// Any filename is supported; files previously written by Asgard (tracked in a manifest)
+// that are no longer present are removed. Files Asgard never wrote are left alone, except for
+// a one-time sweep of the legacy fixed names on the first non-empty sync after upgrade
+// (when no manifest exists yet).
 func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
+	return syncSSHCredentials(home, ssh, nil)
+}
+
+// syncSSHCredentials is SyncSSHCredentials with a hook called with the path of each private
+// key that is about to be deleted while other credentials remain (for ssh-agent revocation).
+func syncSSHCredentials(home string, ssh *config.SSHScope, onRemoveKey func(path string)) error {
 	if home == "" {
 		home = os.Getenv("HOME")
 		if home == "" {
@@ -530,16 +606,23 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 	}
 
 	sshDir := filepath.Join(home, ".ssh")
+	allFiles := ssh.AllFiles()
+	managed, hasManifest, err := readSSHManifest(sshDir)
+	if err != nil {
+		return err
+	}
+	candidates := managed
+	if !hasManifest {
+		// One-time upgrade sweep of the legacy fixed names.
+		candidates = legacySSHFiles
+	}
 
-	if ssh == nil || (!ssh.HasKeys() && len(ssh.Config) == 0 && len(ssh.KnownHosts) == 0) {
-		// Revocation: remove any known managed files in ~/.ssh/
-		for _, name := range managedSSHFiles {
-			target := filepath.Join(sshDir, name)
-			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove %s: %w", target, err)
-			}
+	if ssh == nil || (!ssh.HasKeys() && len(allFiles["config"]) == 0 && len(allFiles["known_hosts"]) == 0) {
+		// Revocation: remove all managed files (manifest names, or legacy names once).
+		if err := removeManagedSSH(sshDir, candidates, nil, onRemoveKey); err != nil {
+			return err
 		}
-		return nil
+		return writeSSHManifest(sshDir, nil)
 	}
 
 	if err := os.MkdirAll(sshDir, 0700); err != nil {
@@ -549,7 +632,15 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 		return fmt.Errorf("chmod ssh directory %s: %w", sshDir, err)
 	}
 
-	allFiles := ssh.AllFiles()
+	// Record old + new names before writing so a partial failure cannot orphan files.
+	newNames := make([]string, 0, len(allFiles))
+	for name := range allFiles {
+		newNames = append(newNames, name)
+	}
+	if err := writeSSHManifest(sshDir, append(slices.Clone(candidates), newNames...)); err != nil {
+		return err
+	}
+
 	privKeys := ssh.PrivateKeys()
 
 	for name, data := range allFiles {
@@ -561,6 +652,10 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 
 		existing, err := os.ReadFile(targetPath)
 		if err != nil || !bytes.Equal(existing, data) {
+			// Rotation: revoke the old identity from the agent before overwriting it.
+			if err == nil && onRemoveKey != nil && !strings.HasSuffix(name, ".pub") && bytes.Contains(existing, []byte("-----BEGIN ")) {
+				onRemoveKey(targetPath)
+			}
 			if err := atomicWriteFile(targetPath, data, perm); err != nil {
 				return fmt.Errorf("write %s: %w", targetPath, err)
 			}
@@ -569,17 +664,10 @@ func SyncSSHCredentials(home string, ssh *config.SSHScope) error {
 		}
 	}
 
-	// Any managed file that is NOT present in ssh.AllFiles() should be deleted if it exists.
-	for _, name := range managedSSHFiles {
-		if _, ok := allFiles[name]; !ok {
-			target := filepath.Join(sshDir, name)
-			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove %s: %w", target, err)
-			}
-		}
+	if err := removeManagedSSH(sshDir, candidates, allFiles, onRemoveKey); err != nil {
+		return err
 	}
-
-	return nil
+	return writeSSHManifest(sshDir, newNames)
 }
 
 func atomicWriteFile(target string, data []byte, perm os.FileMode) error {

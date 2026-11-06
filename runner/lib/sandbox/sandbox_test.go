@@ -432,9 +432,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	tempHome := t.TempDir()
 
 	tree := validTree(proxy.Config{})
-	tree.Credentials.SSH.Key = []byte("initial-ssh-key")
-	tree.Credentials.SSH.KeyPub = []byte("initial-ssh-pub")
-	tree.Credentials.SSH.Config = []byte("initial-ssh-config")
+	tree.Credentials.SSH = sshScopeOf(map[string]string{"key": "-----BEGIN X-----\ninitial-ssh-key", "key.pub": "initial-ssh-pub", "config": "initial-ssh-config"})
 
 	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
 	require.NoError(t, err)
@@ -477,7 +475,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	// Verify key (0600)
 	keyBytes, err := os.ReadFile(keyPath)
 	require.NoError(t, err)
-	assert.Equal(t, "initial-ssh-key", string(keyBytes))
+	assert.Equal(t, "-----BEGIN X-----\ninitial-ssh-key", string(keyBytes))
 	keyStat, err := os.Stat(keyPath)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), keyStat.Mode().Perm())
@@ -515,15 +513,13 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 
 	// Update credentials
 	updatedTree := validTree(proxy.Config{})
-	updatedTree.Credentials.SSH.Key = []byte("updated-ssh-key")
-	updatedTree.Credentials.SSH.KeyPub = []byte("updated-ssh-pub")
-	updatedTree.Credentials.SSH.Config = []byte("updated-ssh-config")
+	updatedTree.Credentials.SSH = sshScopeOf(map[string]string{"key": "-----BEGIN X-----\nupdated-ssh-key", "key.pub": "updated-ssh-pub", "config": "updated-ssh-config"})
 
 	src.fire(updatedTree)
 
 	keyBytes, err = os.ReadFile(keyPath)
 	require.NoError(t, err)
-	assert.Equal(t, "updated-ssh-key", string(keyBytes))
+	assert.Equal(t, "-----BEGIN X-----\nupdated-ssh-key", string(keyBytes))
 
 	pubBytes, err = os.ReadFile(pubPath)
 	require.NoError(t, err)
@@ -629,11 +625,8 @@ func TestSyncSSHCredentials_RevocationAndPermissionTightening(t *testing.T) {
 	require.NoError(t, os.WriteFile(cfgPath, []byte("old-cfg"), 0600))
 
 	// Sync with updated credentials
-	ssh := &config.SSHScope{
-		Key:    []byte("new-key"),
-		KeyPub: []byte("new-pub"),
-		Config: []byte("new-cfg"),
-	}
+	sshv := sshScopeOf(map[string]string{"key": "-----BEGIN X-----\nnew-key", "key.pub": "new-pub", "config": "new-cfg"})
+	ssh := &sshv
 	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
 
 	// Verify permissions tightened to 0700 on ~/.ssh, 0600 on key, 0644 on pub/config
@@ -701,18 +694,14 @@ func TestSyncSSHCredentials_MultiKey(t *testing.T) {
 	tempHome := t.TempDir()
 	sshDir := filepath.Join(tempHome, ".ssh")
 
-	ssh := &config.SSHScope{
-		IdEd25519:    []byte("ed25519-priv"),
-		IdEd25519Pub: []byte("ed25519-pub"),
-		IdRSA:        []byte("rsa-priv"),
-		IdRSAPub:     []byte("rsa-pub"),
-		IdECDSA:      []byte("ecdsa-priv"),
-		IdECDSAPub:   []byte("ecdsa-pub"),
-		IdDSA:        []byte("dsa-priv"),
-		IdDSAPub:     []byte("dsa-pub"),
-		Config:       []byte("Host *"),
-		KnownHosts:   []byte("github.com ssh-rsa ..."),
-	}
+	sshv := sshScopeOf(map[string]string{
+		"id_ed25519": "-----BEGIN X-----\ned", "id_ed25519.pub": "ed25519-pub",
+		"id_rsa": "-----BEGIN X-----\nrsa", "id_rsa.pub": "rsa-pub",
+		"id_ecdsa": "-----BEGIN X-----\nec", "id_ecdsa.pub": "ecdsa-pub",
+		"id_dsa": "-----BEGIN X-----\ndsa", "id_dsa.pub": "dsa-pub",
+		"config": "Host *", "known_hosts": "github.com ssh-rsa ...",
+	})
+	ssh := &sshv
 
 	require.NoError(t, SyncSSHCredentials(tempHome, ssh))
 
@@ -737,11 +726,8 @@ func TestSyncSSHCredentials_MultiKey(t *testing.T) {
 	}
 
 	// Remove some keys (e.g. keep only id_ed25519 and config)
-	subsetSSH := &config.SSHScope{
-		IdEd25519:    []byte("ed25519-priv"),
-		IdEd25519Pub: []byte("ed25519-pub"),
-		Config:       []byte("Host *"),
-	}
+	subsetv := sshScopeOf(map[string]string{"id_ed25519": "-----BEGIN X-----\ned", "id_ed25519.pub": "ed25519-pub", "config": "Host *"})
+	subsetSSH := &subsetv
 	require.NoError(t, SyncSSHCredentials(tempHome, subsetSSH))
 
 	// id_ed25519 and config should still exist
@@ -759,7 +745,7 @@ func TestSyncSSHCredentials_MultiKey(t *testing.T) {
 
 	// Complete revocation
 	require.NoError(t, SyncSSHCredentials(tempHome, &config.SSHScope{}))
-	for _, m := range managedSSHFiles {
+	for _, m := range []string{"id_ed25519", "id_ed25519.pub", "config", "id_rsa", "known_hosts"} {
 		p := filepath.Join(sshDir, m)
 		_, err = os.Stat(p)
 		assert.True(t, os.IsNotExist(err), "%s should have been removed on revocation", m)
@@ -772,8 +758,7 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 	tempHome := t.TempDir()
 
 	tree := validTree(proxy.Config{})
-	tree.Credentials.SSH.IdEd25519 = []byte("initial-ed25519-priv")
-	tree.Credentials.SSH.IdEd25519Pub = []byte("initial-ed25519-pub")
+	tree.Credentials.SSH = sshScopeOf(map[string]string{"id_ed25519": "-----BEGIN X-----\ninitial-ed25519-priv", "id_ed25519.pub": "initial-ed25519-pub"})
 
 	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
 	require.NoError(t, err)
@@ -810,10 +795,10 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 
 	// Add an RSA key alongside ed25519
 	updatedTree := validTree(proxy.Config{})
-	updatedTree.Credentials.SSH.IdEd25519 = []byte("initial-ed25519-priv")
-	updatedTree.Credentials.SSH.IdEd25519Pub = []byte("initial-ed25519-pub")
-	updatedTree.Credentials.SSH.IdRSA = []byte("added-rsa-priv")
-	updatedTree.Credentials.SSH.IdRSAPub = []byte("added-rsa-pub")
+	updatedTree.Credentials.SSH = sshScopeOf(map[string]string{
+		"id_ed25519": "-----BEGIN X-----\ninitial-ed25519-priv", "id_ed25519.pub": "initial-ed25519-pub",
+		"id_rsa": "-----BEGIN X-----\nadded-rsa-priv", "id_rsa.pub": "added-rsa-pub",
+	})
 
 	src.fire(updatedTree)
 
@@ -845,4 +830,184 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 	_, err = os.Stat(filepath.Join(sshDir, "id_rsa"))
 	assert.True(t, os.IsNotExist(err))
+}
+
+func sshScopeOf(files map[string]string) config.SSHScope {
+	s := config.SSHScope{Files: map[string]config.SSHFile{}}
+	for k, v := range files {
+		s.Files[k] = config.SSHFile{Data: []byte(v)}
+	}
+	return s
+}
+
+func TestSyncSSHCredentials_MultiKeyAndRevocation(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "user_own"), []byte("mine"), 0600))
+
+	pem := func(n string) string { return "-----BEGIN OPENSSH PRIVATE KEY-----\n" + n }
+	scope := sshScopeOf(map[string]string{
+		"huangyu": pem("a"), "huangyu.pub": "pub-a", "work": pem("b"), "config": "Host *",
+	})
+	require.NoError(t, SyncSSHCredentials(home, &scope))
+
+	mode := func(name string) os.FileMode {
+		fi, err := os.Stat(filepath.Join(sshDir, name))
+		require.NoError(t, err)
+		return fi.Mode().Perm()
+	}
+	assert.Equal(t, os.FileMode(0600), mode("huangyu"))
+	assert.Equal(t, os.FileMode(0600), mode("work"))
+	assert.Equal(t, os.FileMode(0644), mode("huangyu.pub"))
+	assert.Equal(t, os.FileMode(0644), mode("config"))
+
+	// Removing one key deletes only that file
+	scope2 := sshScopeOf(map[string]string{"huangyu": pem("a"), "huangyu.pub": "pub-a", "config": "Host *"})
+	require.NoError(t, SyncSSHCredentials(home, &scope2))
+	assert.NoFileExists(t, filepath.Join(sshDir, "work"))
+	assert.FileExists(t, filepath.Join(sshDir, "huangyu"))
+	assert.FileExists(t, filepath.Join(sshDir, "user_own"))
+
+	// Revocation clears managed files, leaves unrelated ones
+	require.NoError(t, SyncSSHCredentials(home, &config.SSHScope{}))
+	for _, n := range []string{"huangyu", "huangyu.pub", "config"} {
+		assert.NoFileExists(t, filepath.Join(sshDir, n))
+	}
+	assert.FileExists(t, filepath.Join(sshDir, "user_own"))
+}
+
+func TestSyncSSHCredentials_ReservedAndUnsafeNamesNotSynced(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	pem := "-----BEGIN X-----\nk"
+	scope := sshScopeOf(map[string]string{
+		"good": pem, config.SSHManifestName: "evil", "evil\nvictim": pem, "padded ": pem,
+	})
+	require.NoError(t, SyncSSHCredentials(home, &scope))
+	entries, err := os.ReadDir(sshDir)
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.ElementsMatch(t, []string{"good", config.SSHManifestName}, names)
+	manifest, err := os.ReadFile(filepath.Join(sshDir, config.SSHManifestName))
+	require.NoError(t, err)
+	assert.Equal(t, "good\n", string(manifest))
+}
+
+func TestSyncSSHCredentials_LegacyUpgradeSweepOnce(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	// Pre-manifest install left a legacy key on disk.
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("old"), 0600))
+
+	scope := sshScopeOf(map[string]string{"huangyu": "-----BEGIN X-----\nk"})
+	require.NoError(t, SyncSSHCredentials(home, &scope))
+	assert.NoFileExists(t, filepath.Join(sshDir, "id_rsa"), "legacy file swept on upgrade")
+
+	// Once a manifest exists, user-placed legacy-name files survive.
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("user"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte("user"), 0644))
+	require.NoError(t, SyncSSHCredentials(home, &scope))
+	assert.FileExists(t, filepath.Join(sshDir, "id_rsa"))
+	assert.FileExists(t, filepath.Join(sshDir, "known_hosts"))
+
+	// ...also across revocation.
+	require.NoError(t, SyncSSHCredentials(home, &config.SSHScope{}))
+	assert.NoFileExists(t, filepath.Join(sshDir, "huangyu"))
+	assert.FileExists(t, filepath.Join(sshDir, "id_rsa"))
+	assert.FileExists(t, filepath.Join(sshDir, "known_hosts"))
+}
+
+func TestSyncSSHCredentials_PerKeyRemovalRevokesFromAgent(t *testing.T) {
+	t.Parallel()
+	tempHome := t.TempDir()
+	pem := "-----BEGIN X-----\n"
+	tree := validTree(proxy.Config{})
+	tree.Credentials.SSH = sshScopeOf(map[string]string{"a": pem + "a", "a.pub": "pa", "b": pem + "b"})
+	conf, err := runnerconfig.SandboxConfigFromTree(tree)
+	require.NoError(t, err)
+	src := &fakeSource{conf: conf, tree: tree}
+
+	var mu sync.Mutex
+	var removed []string
+	sb := Setup(src, Options{
+		HomeDir:  tempHome,
+		SetupSSH: func() error { return nil },
+		ClearSSH: func() error { return nil },
+		RemoveSSHKey: func(p string) error {
+			mu.Lock()
+			removed = append(removed, filepath.Base(p))
+			mu.Unlock()
+			return nil
+		},
+	})
+	t.Cleanup(sb.Close)
+	require.NoError(t, sb.Ready())
+
+	next := validTree(proxy.Config{})
+	next.Credentials.SSH = sshScopeOf(map[string]string{"b": pem + "b"})
+	src.fire(next)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"a"}, removed)
+	assert.NoFileExists(t, filepath.Join(tempHome, ".ssh", "a"))
+	assert.NoFileExists(t, filepath.Join(tempHome, ".ssh", "a.pub"))
+	assert.FileExists(t, filepath.Join(tempHome, ".ssh", "b"))
+}
+
+func TestSyncSSHCredentials_RotationRevokesBeforeOverwrite(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	target := filepath.Join(home, ".ssh", "k")
+	old := sshScopeOf(map[string]string{"k": "-----BEGIN X-----\nold"})
+	require.NoError(t, SyncSSHCredentials(home, &old))
+
+	var seen []string
+	hook := func(p string) {
+		b, err := os.ReadFile(p)
+		require.NoError(t, err, "file must still exist when hook fires")
+		seen = append(seen, p+"="+string(b))
+	}
+	next := sshScopeOf(map[string]string{"k": "-----BEGIN X-----\nnew"})
+	require.NoError(t, syncSSHCredentials(home, &next, hook))
+	assert.Equal(t, []string{target + "=-----BEGIN X-----\nold"}, seen)
+	b, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "-----BEGIN X-----\nnew", string(b))
+}
+
+func TestSyncSSHCredentials_RevocationLegacySweepWithoutManifest(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("-----BEGIN X-----\nold"), 0600))
+
+	var removed []string
+	require.NoError(t, syncSSHCredentials(home, &config.SSHScope{}, func(p string) { removed = append(removed, filepath.Base(p)) }))
+	assert.NoFileExists(t, filepath.Join(sshDir, "id_rsa"))
+	assert.Equal(t, []string{"id_rsa"}, removed)
+
+	// Sweep is one-time: a later user-placed legacy-name file survives.
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("user"), 0600))
+	require.NoError(t, SyncSSHCredentials(home, &config.SSHScope{}))
+	assert.FileExists(t, filepath.Join(sshDir, "id_rsa"))
+}
+
+func TestSyncSSHCredentials_ManifestReadErrorAborts(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(filepath.Join(sshDir, config.SSHManifestName), 0700)) // unreadable as a file
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("user"), 0600))
+	require.Error(t, SyncSSHCredentials(home, &config.SSHScope{}))
+	assert.FileExists(t, filepath.Join(sshDir, "id_rsa"))
 }

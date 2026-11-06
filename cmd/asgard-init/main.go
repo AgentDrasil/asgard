@@ -944,24 +944,24 @@ func PromptProviderSetup(r io.Reader, w io.Writer, targetDir string, interactive
 	return providers
 }
 
+// safeSSHName mirrors config.SafeSSHName (backend/lib/config/tree.go), duplicated to keep
+// this tool free of the backend config dependency tree. Keep the two in sync.
+func safeSSHName(name string) bool {
+	if name == "" || name == "." || name == ".." || name == ".asgard-managed" {
+		return false
+	}
+	return !strings.ContainsAny(name, "/\\\x00\n\r") && strings.TrimSpace(name) == name && !strings.HasSuffix(name, ".sops.json")
+}
+
 // CheckSSHCredentials checks whether valid SSH private keys exist in targetDir/etcd-tree/credentials/ssh/.
-// A valid private key MUST be in supportedPrivateKeys, is a regular file, and its content should start with (or contain) "-----BEGIN ".
-// If an unsupported file is found (not ending in .pub, not .sops.json, not config, not known_hosts, not .gitkeep),
-// a warning is printed to the user that the filename is not in supported list {key, id_ed25519, id_rsa, id_ecdsa, id_dsa} and won't be synced to runner.
+// Any filename is supported: a valid private key is a regular, non-empty file (not *.pub, *.sops.json, config,
+// known_hosts or .gitkeep) whose content contains "-----BEGIN ".
 // It tightens every valid private key's permissions to 0600, and returns the sorted list of key names.
 func CheckSSHCredentials(targetDir string) ([]string, bool) {
 	sshDir := filepath.Join(targetDir, "etcd-tree", "credentials", "ssh")
 	entries, err := os.ReadDir(sshDir)
 	if err != nil {
 		return nil, false
-	}
-
-	supportedPrivateKeys := map[string]bool{
-		"key":        true,
-		"id_ed25519": true,
-		"id_rsa":     true,
-		"id_ecdsa":   true,
-		"id_dsa":     true,
 	}
 
 	var foundKeys []string
@@ -977,9 +977,8 @@ func CheckSSHCredentials(targetDir string) ([]string, bool) {
 		case "config", "known_hosts", ".gitkeep":
 			continue
 		}
-
-		if !supportedPrivateKeys[name] {
-			fmt.Printf("\n%sWarning:%s %s is not in supported list {key, id_ed25519, id_rsa, id_ecdsa, id_dsa} and won't be synced to runner.\n", colorYellow+colorBold, colorReset, name)
+		if !safeSSHName(name) {
+			fmt.Printf("\n%sWarning:%s %s has an unsupported file name (path separators, surrounding whitespace/newlines or reserved name) and won't be synced to runner.\n", colorYellow+colorBold, colorReset, name)
 			continue
 		}
 
@@ -1023,7 +1022,7 @@ func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, intera
 	}
 
 	_, _ = fmt.Fprintf(w, "\n%s--- SSH Credentials Setup ---%s\n", colorCyan+colorBold, colorReset)
-	_, _ = fmt.Fprintf(w, "Please place your SSH private key (and optional *.pub / config) into %s%s/%s (e.g. id_ed25519, id_rsa, key).\n", colorYellow, sshDir, colorReset)
+	_, _ = fmt.Fprintf(w, "Please place your SSH private key (and optional *.pub / config) into %s%s/%s (any filename, e.g. id_ed25519 or myserver).\n", colorYellow, sshDir, colorReset)
 
 	for {
 		_, _ = fmt.Fprintf(w, "%sPress 'y' when ready to verify (or 's' to skip for now):%s ", colorBold, colorReset)
@@ -1038,7 +1037,7 @@ func PromptSSHCredentials(r *bufio.Reader, w io.Writer, targetDir string, intera
 				_, _ = fmt.Fprintf(w, "%s✔ SSH credentials verified successfully:%s %s\n", colorGreen+colorBold, colorReset, strings.Join(keys, ", "))
 				return true
 			}
-			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty SSH private key found in %s (e.g. id_ed25519, id_rsa, key).\n", colorRed+colorBold, colorReset, sshDir)
+			_, _ = fmt.Fprintf(w, "%sError:%s No valid, non-empty SSH private key found in %s (a file containing \"-----BEGIN \").\n", colorRed+colorBold, colorReset, sshDir)
 		case "s", "skip":
 			_, _ = fmt.Fprintf(w, "%sSkipped SSH credentials setup.%s You can place it into %s/ later before running just publish.\n", colorYellow, colorReset, sshDir)
 			return false

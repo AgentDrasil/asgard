@@ -99,3 +99,30 @@ func TestClearKeys_ExternalAgentIteratesSSHDir(t *testing.T) {
 	assert.NotContains(t, logStr, "known_hosts")
 	assert.NotContains(t, logStr, "authorized_keys")
 }
+
+func TestAddKeysAndClearKeys_SkipManagedAndTmpFiles(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	binDir := t.TempDir()
+	logFile := filepath.Join(binDir, "calls.log")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\nexit 0\n", logFile)
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "ssh-add"), []byte(script), 0755))
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	sockPath := filepath.Join(tempHome, "agent.sock")
+	require.NoError(t, os.WriteFile(sockPath, []byte{}, 0600))
+	t.Setenv("SSH_AUTH_SOCK", sockPath)
+
+	sshDir := filepath.Join(tempHome, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	for _, n := range []string{"huangyu", ".asgard-managed", "huangyu.123.tmp"} {
+		require.NoError(t, os.WriteFile(filepath.Join(sshDir, n), []byte("x"), 0600))
+	}
+	require.NoError(t, AddKeysFromDir(sshDir))
+	require.NoError(t, ClearKeys())
+
+	logged, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(logged), filepath.Join(sshDir, "huangyu"))
+	assert.NotContains(t, string(logged), ".asgard-managed")
+	assert.NotContains(t, string(logged), ".tmp")
+}
