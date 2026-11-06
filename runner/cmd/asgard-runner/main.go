@@ -96,7 +96,7 @@ func run() error {
 	if err != nil {
 		log.Warn().Err(err).Msg("failed to initialize runner cron manager")
 	} else {
-		defer cronMgr.Shutdown()
+		defer func() { _ = cronMgr.Shutdown() }()
 	}
 	client = conn.New(conn.Options{
 		Executor:      executor,

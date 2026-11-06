@@ -390,17 +390,6 @@ func resolveFanoutReadPath(nctx *pluginsdk.NodeContext, name string) string {
 	return filepath.Join(os.TempDir(), name)
 }
 
-// resolveTmpFilePath joins name with the node's tmp dir, falling back to a
-// run-scoped temp path (or process temp dir) when the context carries none.
-func resolveTmpFilePath(nctx *pluginsdk.NodeContext, name string) string {
-	if nctx != nil && nctx.TmpDir != "" {
-		return filepath.Join(nctx.TmpDir, name)
-	}
-	if nctx != nil && nctx.RunID != "" {
-		return filepath.Join(os.TempDir(), nctx.RunID+"-"+name)
-	}
-	return filepath.Join(os.TempDir(), name)
-}
 
 // fanoutResult mirrors one JSONL entry produced by fan-out workflow nodes
 // (uppercase SUCCEEDED/FAILED statuses).

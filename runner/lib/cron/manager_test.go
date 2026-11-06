@@ -54,15 +54,15 @@ func (s *fakeAgentSource) setAgents(agents []*agentspec.Agent) {
 }
 
 type fakeCallbacks struct {
-	mu              sync.Mutex
-	initSessions    []*runnerpb.InitWorkflowSessionRequest
-	events          []*runnerpb.ReportWorkflowEventRequest
-	runStarts       []*runnerpb.WorkflowRunStartRequest
-	runSettles      []*runnerpb.WorkflowRunSettleRequest
-	initSessionErr  error
-	runStartErr     error
-	runSettleErr    error
-	reportEventErr  error
+	mu             sync.Mutex
+	initSessions   []*runnerpb.InitWorkflowSessionRequest
+	events         []*runnerpb.ReportWorkflowEventRequest
+	runStarts      []*runnerpb.WorkflowRunStartRequest
+	runSettles     []*runnerpb.WorkflowRunSettleRequest
+	initSessionErr error
+	runStartErr    error
+	runSettleErr   error
+	reportEventErr error
 }
 
 func (f *fakeCallbacks) AskUser(ctx context.Context, in *runnerpb.AskUserRequest, opts ...grpc.CallOption) (*runnerpb.AskUserResponse, error) {
@@ -454,9 +454,6 @@ func TestRemoteRunStore(t *testing.T) {
 	run, err := store.GetRun("r-123")
 	assert.NoError(t, err)
 	assert.Nil(t, run)
-	waiting, err := store.FindWaitingHuman("r-123")
-	assert.NoError(t, err)
-	assert.Nil(t, waiting)
 	allWaiting, err := store.FindWaitingHumans("s-456")
 	assert.NoError(t, err)
 	assert.Nil(t, allWaiting)
