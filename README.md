@@ -425,7 +425,6 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 
 ### 3. Management & Coordination API
 *   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).
-*   **Reload Configurations** (`POST /api/manage/reload`): Reloads the local agent definition YAML configurations dynamically without needing to restart the orchestrator server.
 *   **Team Discovery** (`GET /team`):
     *   Finds the agent linked to the session queried by chat ID.
     *   Identifies that agent's team configurations.

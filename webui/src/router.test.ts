@@ -4,7 +4,6 @@ import { routes } from "./router";
 import SettingsView from "./views/SettingsView.vue";
 import DashboardView from "./views/DashboardView.vue";
 import KeyBindingsView from "./views/KeyBindingsView.vue";
-import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 import UserProxyKeysView from "./views/UserProxyKeysView.vue";
@@ -17,11 +16,16 @@ describe("router configuration", () => {
     expect(rootRoute?.redirect).toBe("/dashboard");
   });
 
-  it("registers routes for /dashboard, /settings, /settings/keybindings, /settings/config, /settings/logs, /settings/keys, and /settings/runners with actual components", () => {
+  it("redirects '/settings/config' to '/settings'", () => {
+    const configRoute = routes.find((r) => r.path === "/settings/config");
+    expect(configRoute).toBeDefined();
+    expect(configRoute?.redirect).toBe("/settings");
+  });
+
+  it("registers routes for /dashboard, /settings, /settings/keybindings, /settings/logs, /settings/keys, and /settings/runners with actual components", () => {
     const dashboardRoute = routes.find((r) => r.path === "/dashboard");
     const settingsRoute = routes.find((r) => r.path === "/settings");
     const keybindingsRoute = routes.find((r) => r.path === "/settings/keybindings");
-    const configRoute = routes.find((r) => r.path === "/settings/config");
     const logsRoute = routes.find((r) => r.path === "/settings/logs");
     const compressionRoute = routes.find((r) => r.path === "/settings/compression");
     const keysRoute = routes.find((r) => r.path === "/settings/keys");
@@ -38,10 +42,6 @@ describe("router configuration", () => {
     expect(keybindingsRoute).toBeDefined();
     expect(keybindingsRoute?.name).toBe("settings-keybindings");
     expect(keybindingsRoute?.component).toBe(KeyBindingsView);
-
-    expect(configRoute).toBeDefined();
-    expect(configRoute?.name).toBe("settings-config");
-    expect(configRoute?.component).toBe(ConfigEditView);
 
     expect(logsRoute).toBeDefined();
     expect(logsRoute?.name).toBe("settings-logs");

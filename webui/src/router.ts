@@ -4,7 +4,6 @@ import ChatView from "./views/ChatView.vue";
 import DashboardView from "./views/DashboardView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import KeyBindingsView from "./views/KeyBindingsView.vue";
-import ConfigEditView from "./views/ConfigEditView.vue";
 import LogView from "./views/LogView.vue";
 import CompressionMetricsView from "./views/CompressionMetricsView.vue";
 import UserProxyKeysView from "./views/UserProxyKeysView.vue";
@@ -52,8 +51,7 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: "/settings/config",
-    name: "settings-config",
-    component: ConfigEditView,
+    redirect: "/settings",
   },
   {
     path: "/settings/logs",

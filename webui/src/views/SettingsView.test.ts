@@ -84,10 +84,8 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("Language");
     expect(root.textContent).toContain("Theme");
     expect(root.textContent).toContain("System & Server Actions");
-    expect(root.textContent).toContain("Reload Agents");
     expect(root.textContent).toContain("Personal API Keys");
     expect(root.textContent).toContain("Runners");
-    expect(root.textContent).toContain("Restart Server");
     expect(root.textContent).toContain("Usage & Quota");
     expect(root.textContent).toContain("Configuration & Diagnostics");
     expect(root.textContent).toContain("Compression Statistics");
@@ -111,10 +109,8 @@ describe("SettingsView.vue", () => {
     expect(root.textContent).toContain("语言");
     expect(root.textContent).toContain("主题");
     expect(root.textContent).toContain("系统与服务操作");
-    expect(root.textContent).toContain("重载 Agent");
     expect(root.textContent).toContain("个人 API 密钥");
     expect(root.textContent).toContain("Runner 节点");
-    expect(root.textContent).toContain("重启服务器");
     expect(root.textContent).toContain("用量与配额");
     expect(root.textContent).toContain("配置与诊断");
     expect(root.textContent).toContain("压缩统计");
@@ -275,7 +271,6 @@ describe("SettingsView.vue", () => {
 
     expect(getLogsSpy).toHaveBeenCalled();
     expect(root.textContent).toContain("Logs & Diagnostics");
-    expect(root.textContent).toContain("Edit Config");
     app.unmount();
   });
 });

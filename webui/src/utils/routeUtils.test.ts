@@ -239,12 +239,6 @@ describe("routeUtils", () => {
         commitId: null,
       });
 
-      expect(resolveViewFromRoute("/settings/config", {}, "settings-config")).toEqual({
-        activeView: "chat",
-        filePath: null,
-        commitId: null,
-      });
-
       expect(resolveViewFromRoute("/settings/logs", {}, "settings-logs")).toEqual({
         activeView: "chat",
         filePath: null,

@@ -40,7 +40,6 @@ var ErrServerShutdownBeforeStart = errors.New("server shut down before start com
 type Server struct {
 	conf               *config.Config
 	configPath         string
-	restartTrigger     func()
 	mu                 sync.RWMutex
 	agents             []*agentspec.Agent
 	agentSource        agentspec.Lister
@@ -121,13 +120,6 @@ func (s *Server) ConfigPath() string {
 		return ""
 	}
 	return s.configPath
-}
-
-// WithRestartTrigger overrides the default restart trigger function for the Server.
-func WithRestartTrigger(fn func()) ServerOption {
-	return func(s *Server) {
-		s.restartTrigger = fn
-	}
 }
 
 // WithFunctionRegistry replaces the Server's workflow function registry.
@@ -349,14 +341,6 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 	}
 	if s.conf != nil && s.conf.ConfigPath == "" {
 		s.conf.ConfigPath = s.configPath
-	}
-
-	if s.restartTrigger == nil {
-		s.restartTrigger = func() {
-			if s.cancel != nil {
-				s.cancel()
-			}
-		}
 	}
 
 	if s.diagnostics == nil {
@@ -606,9 +590,6 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	mux.HandleFunc("GET /api/system/logs", s.handleSystemLogs)
 	mux.HandleFunc("GET "+metrics.EndpointPath, s.handleGetCompressionMetrics)
-	mux.HandleFunc("POST /api/manage/reload", s.handleReload)
-	mux.HandleFunc("GET /api/manage/config", s.handleGetConfigRaw)
-	mux.HandleFunc("PUT /api/manage/config", s.handleSaveConfigRaw)
 	mux.HandleFunc("GET /api/manage/proxy", s.handleGetManageProxy)
 	mux.HandleFunc("PUT /api/manage/proxy", s.handleSaveManageProxy)
 	mux.HandleFunc("POST /api/manage/proxy/reload", s.handleReloadManageProxy)
@@ -617,7 +598,6 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/user/proxy-keys/{key_name}", s.handleDeleteUserProxyKey)
 	mux.HandleFunc("GET /api/keybindings", s.handleGetKeybindings)
 	mux.HandleFunc("PUT /api/manage/keybindings", s.handleSaveManageKeybindings)
-	mux.HandleFunc("POST /api/manage/restart", s.handleRestart)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/quota", s.handleQuota)

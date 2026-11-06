@@ -117,14 +117,12 @@ describe("useCommandPalette", () => {
     expect(selectedIndex.value).toBe(0);
   });
 
-  it("filters and executes core commands (Dashboard, Settings, Logs, Config, Reload, Restart, Search Files)", () => {
+  it("filters and executes core commands (Dashboard, Settings, Logs, Keybindings, Search Files)", () => {
     const actions = {
       openDashboard: vi.fn<() => void>(),
       openSettings: vi.fn<() => void>(),
       openLogs: vi.fn<() => void>(),
-      editConfig: vi.fn<() => void>(),
-      reloadAgents: vi.fn<() => void>(),
-      restartServer: vi.fn<() => void>(),
+      openKeybindings: vi.fn<() => void>(),
       searchFiles: vi.fn<() => void>(),
     };
 
@@ -132,9 +130,7 @@ describe("useCommandPalette", () => {
       { id: "open-dashboard", title: "Open Dashboard", action: actions.openDashboard },
       { id: "open-settings", title: "Open Settings", action: actions.openSettings },
       { id: "open-logs", title: "Open System Logs & Diagnostics", action: actions.openLogs },
-      { id: "edit-config", title: "Open Config Editor", action: actions.editConfig },
-      { id: "reload-agents", title: "Reload Agents", action: actions.reloadAgents },
-      { id: "restart-server", title: "Restart Server", action: actions.restartServer },
+      { id: "open-keybindings", title: "Open Keybindings", action: actions.openKeybindings },
       { id: "search-files", title: "Search Files in Workspace", action: actions.searchFiles },
     ];
 
@@ -161,26 +157,12 @@ describe("useCommandPalette", () => {
     selectCurrent()?.action();
     expect(actions.openLogs).toHaveBeenCalledTimes(1);
 
-    // Test Config command
-    query.value = "config";
+    // Test Keybindings command
+    query.value = "keybindings";
     expect(filteredCommands.value).toHaveLength(1);
-    expect(filteredCommands.value[0].id).toBe("edit-config");
+    expect(filteredCommands.value[0].id).toBe("open-keybindings");
     selectCurrent()?.action();
-    expect(actions.editConfig).toHaveBeenCalledTimes(1);
-
-    // Test Reload command
-    query.value = "reload";
-    expect(filteredCommands.value).toHaveLength(1);
-    expect(filteredCommands.value[0].id).toBe("reload-agents");
-    selectCurrent()?.action();
-    expect(actions.reloadAgents).toHaveBeenCalledTimes(1);
-
-    // Test Restart command
-    query.value = "restart";
-    expect(filteredCommands.value).toHaveLength(1);
-    expect(filteredCommands.value[0].id).toBe("restart-server");
-    selectCurrent()?.action();
-    expect(actions.restartServer).toHaveBeenCalledTimes(1);
+    expect(actions.openKeybindings).toHaveBeenCalledTimes(1);
 
     // Test Search Files command
     query.value = "search files";

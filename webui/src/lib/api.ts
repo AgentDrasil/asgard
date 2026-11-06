@@ -3,8 +3,6 @@ import type {
   Attachment,
   ChatSession,
   CompressionMetrics,
-  ConfigFileResponse,
-  ConfigSaveResponse,
   DirInfo,
   FileScope,
   FileSearchResult,
@@ -369,27 +367,6 @@ export async function getAgents(runner?: string): Promise<AgentInfo[]> {
   }
 }
 
-// Reload agents via /api/manage/reload
-export async function reloadAgents(): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await apiFetch("/api/manage/reload", { method: "POST" });
-    if (res.ok) {
-      return { success: true };
-    }
-    const body = await res.json().catch(() => null);
-    return {
-      success: false,
-      error: body?.error || `Reload failed with status ${res.status}`,
-    };
-  } catch (err: any) {
-    console.error("reloadAgents error:", err);
-    return {
-      success: false,
-      error: err?.message || "Failed to reload agents",
-    };
-  }
-}
-
 export interface UserProxyKeyMeta {
   key_name: string;
   updated_at: string;
@@ -423,36 +400,6 @@ export async function deleteUserProxyKey(key_name: string): Promise<void> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data?.error || `Failed to delete user proxy key: ${res.statusText}`);
-  }
-}
-
-// Fetch raw config file content
-export async function getConfigFile(): Promise<ConfigFileResponse | null> {
-  try {
-    const res = await apiFetch("/api/manage/config");
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.error("getConfigFile error:", err);
-  }
-  return null;
-}
-
-// Save raw config file content
-export async function saveConfigFile(content: string): Promise<ConfigSaveResponse> {
-  try {
-    const res = await apiFetch("/api/manage/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
-    const body = await res.json().catch(() => null);
-    if (res.ok) {
-      return { status: "success", message: body?.message || "config saved" };
-    }
-    return { error: body?.error || `Failed to save configuration (${res.status})` };
-  } catch (err: any) {
-    console.error("saveConfigFile error:", err);
-    return { error: err?.message || "Failed to save configuration" };
   }
 }
 
@@ -505,18 +452,6 @@ export async function saveKeybindings(
       success: false,
       error: err?.message || "Failed to save keybindings",
     };
-  }
-}
-
-// Trigger server restart (tolerates connection abort / reset)
-export async function restartServer(): Promise<boolean> {
-  try {
-    const res = await apiFetch("/api/manage/restart", { method: "POST" });
-    return res.ok;
-  } catch (err) {
-    // When the server terminates gracefully, the HTTP connection might be dropped/reset
-    console.warn("restartServer network connection dropped as expected during shutdown:", err);
-    return true;
   }
 }
 

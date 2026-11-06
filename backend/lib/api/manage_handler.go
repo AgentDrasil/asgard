@@ -23,48 +23,10 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
-	"github.com/AgentDrasil/asgard/pkg/paths"
 	"github.com/AgentDrasil/asgard/pkg/version"
 )
 
 var osRename = os.Rename
-
-const defaultConfigTemplate = `# Asgard Configuration Template
-debug: false
-port: 8080
-host: "127.0.0.1"
-db: "sqlite"
-# dsn is only used when db is "pg" (PostgreSQL connection string).
-# SQLite always lives at ~/asgard/data/data.db.
-gemini_api_key: "<your-gemini-api-key>"
-gemini_model_for_chat_title: "gemini-2.5-flash"
-chat_lang: "English (US)"
-doc_lang: "English (US)"
-comment_lang: "English (US)"
-providers:
-  - agy
-  - claude
-  - opencode
-  - simplest
-# Credential Injection Proxy (Optional). The standalone proxy config, CA cert
-# and key live under ~/asgard/config/ and are not path-configurable.
-# proxy:
-#   enable: true
-#   server:
-#     addr: "127.0.0.1:8082"
-#   debug:
-#     enable: false
-#     dump_headers: false
-#     dump_body: false
-#     max_body_bytes: 4096
-#   rules:
-#     - host: "api.openai.com"
-#       path_prefix: "/v1"
-#       header_key: "Authorization"
-#       real_secret: "Bearer sk-real-key"
-#       dummy_secret: "Bearer dummy-token"
-#       env: "OPENAI_API_KEY"
-`
 
 func checkManageOrigin(r *http.Request) error {
 	origin := r.Header.Get("Origin")
@@ -193,211 +155,10 @@ func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(SystemLogsResponse{Logs: logs})
 }
 
-// handleReload handles POST /api/manage/reload.
-func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	if err := s.reload(); err != nil {
-		log.Error().Err(err).Msg("Failed to reload agents")
-		if s.diagnostics != nil {
-			s.diagnostics.ResetSource("agent_load")
-			s.diagnostics.AddError("agent_load", err.Error())
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	if s.proxyManager != nil {
-		reloadedCfg, err := s.proxyManager.ReloadFromFile()
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to cascade reload proxy config")
-			if s.diagnostics != nil {
-				s.diagnostics.AddError("proxy", err.Error())
-			}
-		} else if reloadedCfg != nil && s.conf != nil {
-			if s.diagnostics != nil {
-				s.diagnostics.ResetSource("proxy")
-			}
-			s.conf.SetProxy(reloadedCfg)
-			log.Info().
-				Bool("enable", reloadedCfg.Enable).
-				Int("rules_count", len(reloadedCfg.Rules)).
-				Strs("env_vars", reloadedCfg.EnvNames()).
-				Msg("cascaded proxy config reload to server config")
-		}
-	} else {
-		log.Debug().Msg("proxy manager not initialized at startup, skipping proxy reload cascade")
-	}
-
-	if s.diagnostics != nil {
-		s.diagnostics.ResetSource("agent_load")
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "agents reloaded"})
-}
-
-// ConfigRawResponse represents the raw configuration file response.
-type ConfigRawResponse struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Exists  bool   `json:"exists"`
-}
-
-// SaveConfigRawRequest represents the request body for saving configuration.
-type SaveConfigRawRequest struct {
-	Content string `json:"content"`
-}
-
-// handleGetConfigRaw handles GET /api/manage/config.
-func (s *Server) handleGetConfigRaw(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	cfgPath := s.configPath
-	if cfgPath == "" {
-		cfgPath = paths.ConfigFile()
-	}
-
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(ConfigRawResponse{
-				Path:    cfgPath,
-				Content: defaultConfigTemplate,
-				Exists:  false,
-			})
-			return
-		}
-		log.Error().Err(err).Str("path", cfgPath).Msg("failed to read raw config")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(ConfigRawResponse{
-		Path:    cfgPath,
-		Content: string(data),
-		Exists:  true,
-	})
-}
-
 func writeStatusOK(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": msg})
-}
-
-// handleSaveConfigRaw handles PUT /api/manage/config.
-func (s *Server) handleSaveConfigRaw(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	// Limit request body size to 1MB
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	var req SaveConfigRawRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
-		return
-	}
-
-	// Validate configuration
-	if _, err := config.ParseAndValidate([]byte(req.Content)); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("invalid configuration: %v", err)})
-		return
-	}
-
-	cfgPath := s.configPath
-	if cfgPath == "" {
-		cfgPath = paths.ConfigFile()
-	}
-
-	dir := filepath.Dir(cfgPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Error().Err(err).Str("dir", dir).Msg("failed to create config directory")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	// 1. Try atomic rename via temp file
-	tmpFile, err := os.CreateTemp(dir, "config-*.tmp")
-	if err == nil {
-		tmpPath := tmpFile.Name()
-		_, writeErr := tmpFile.Write([]byte(req.Content))
-		syncErr := tmpFile.Sync()
-		closeErr := tmpFile.Close()
-
-		if writeErr == nil && syncErr == nil && closeErr == nil {
-			renameErr := osRename(tmpPath, cfgPath)
-			if renameErr == nil {
-				// Atomic write succeeded
-				writeStatusOK(w, "config saved")
-				return
-			}
-
-			// If rename fails due to Docker bind-mount (EBUSY or EXDEV), fallback to direct truncate write
-			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
-				_ = os.Remove(tmpPath)
-				if writeErr := writeConfigDirect(cfgPath, req.Content, 0644); writeErr != nil {
-					log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config via direct truncate fallback")
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
-					return
-				}
-				writeStatusOK(w, "config saved")
-				return
-			}
-
-			_ = os.Remove(tmpPath)
-			log.Error().Err(renameErr).Str("path", cfgPath).Msg("failed to atomic rename config file")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": renameErr.Error()})
-			return
-		}
-
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-	}
-
-	// If creating temp file failed, fallback to direct truncate
-	if writeErr := writeConfigDirect(cfgPath, req.Content, 0644); writeErr != nil {
-		log.Error().Err(writeErr).Str("path", cfgPath).Msg("failed to write config directly")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
-		return
-	}
-
-	writeStatusOK(w, "config saved")
 }
 
 func writeConfigDirect(path, content string, perm os.FileMode) error {
@@ -415,27 +176,6 @@ func writeConfigDirect(path, content string, perm os.FileMode) error {
 		return err
 	}
 	return f.Close()
-}
-
-// handleRestart handles POST /api/manage/restart.
-func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "server restart initiated"})
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
-	if s.restartTrigger != nil {
-		time.AfterFunc(300*time.Millisecond, s.restartTrigger)
-	}
 }
 
 // QuotaAllResponse is the body of GET /api/quota without ?runner= when more

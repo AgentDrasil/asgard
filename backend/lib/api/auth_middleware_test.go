@@ -60,7 +60,6 @@ var protectedPaths = []string{
 	"/api/runners",
 	"/api/auth/me",
 	"/api/auth/avatar",
-	"/api/manage/config",
 	"/api/compression-metrics",
 	"/api/ttyd/sidebar/ws",
 	"/api/sessions/abc/events",
@@ -271,7 +270,6 @@ func TestAdminRoutesRequireAdminRole(t *testing.T) {
 	})
 
 	adminPaths := []string{
-		"/api/manage/config",
 		"/api/manage/proxy",
 		"/api/manage/keybindings",
 		"/api/system/logs",
@@ -300,7 +298,7 @@ func TestAdminRoutesRequireAdminRole(t *testing.T) {
 		claims["roles"] = "ai"
 		token := p.Sign(t, claims)
 
-		rec := serve(srv, http.MethodPost, "/api/manage/reload", map[string]string{"Authorization": "Bearer " + token})
+		rec := serve(srv, http.MethodPost, "/api/manage/proxy/reload", map[string]string{"Authorization": "Bearer " + token})
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 		var resp map[string]string
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -312,7 +310,7 @@ func TestAdminRoutesRequireAdminRole(t *testing.T) {
 		claims["roles"] = "other" // lacks base role "ai"
 		token := p.Sign(t, claims)
 
-		rec := serve(srv, http.MethodGet, "/api/manage/config", map[string]string{"Authorization": "Bearer " + token})
+		rec := serve(srv, http.MethodGet, "/api/manage/proxy", map[string]string{"Authorization": "Bearer " + token})
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 		var resp map[string]string
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))

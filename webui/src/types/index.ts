@@ -284,18 +284,6 @@ export interface SystemStatusResponse {
   version: string;
 }
 
-export interface ConfigFileResponse {
-  path: string;
-  content: string;
-  exists: boolean;
-}
-
-export interface ConfigSaveResponse {
-  status?: string;
-  message?: string;
-  error?: string;
-}
-
 export interface SystemLogEntry {
   id: number;
   timestamp: string;

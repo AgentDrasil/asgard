@@ -10,10 +10,8 @@ describe("translateServerMessage", () => {
 
   describe("English environment", () => {
     it("translates exact match server messages", () => {
-      expect(translateServerMessage("server restart initiated")).toBe("Server restart initiated");
-      expect(translateServerMessage("agents reloaded")).toBe("Agents reloaded successfully");
-      expect(translateServerMessage("config saved")).toBe("Configuration saved successfully");
       expect(translateServerMessage("agent not found")).toBe("Agent not found");
+      expect(translateServerMessage("missing session_id")).toBe("Session ID is required");
       expect(translateServerMessage("cross-origin manage request rejected")).toBe(
         "Cross-origin manage request rejected",
       );
@@ -54,9 +52,6 @@ describe("translateServerMessage", () => {
     });
 
     it("translates exact match server messages to Chinese", () => {
-      expect(translateServerMessage("server restart initiated")).toBe("服务器重启已触发");
-      expect(translateServerMessage("agents reloaded")).toBe("Agent 配置已成功重载");
-      expect(translateServerMessage("config saved")).toBe("配置已成功保存");
       expect(translateServerMessage("agent not found")).toBe("未找到指定的 Agent");
       expect(translateServerMessage("cross-origin manage request rejected")).toBe(
         "跨域管理请求已被拒绝",

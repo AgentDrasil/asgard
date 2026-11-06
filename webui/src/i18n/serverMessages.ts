@@ -7,18 +7,6 @@ interface ServerMessagePattern {
 
 // Exact match dictionary mapping raw server error/status strings to translation key or custom translated strings
 const EXACT_MATCHES: Record<string, { en: string; "zh-CN": string }> = {
-  "server restart initiated": {
-    en: "Server restart initiated",
-    "zh-CN": "服务器重启已触发",
-  },
-  "agents reloaded": {
-    en: "Agents reloaded successfully",
-    "zh-CN": "Agent 配置已成功重载",
-  },
-  "config saved": {
-    en: "Configuration saved successfully",
-    "zh-CN": "配置已成功保存",
-  },
   "agent not found": {
     en: "Agent not found",
     "zh-CN": "未找到指定的 Agent",
@@ -58,14 +46,6 @@ const EXACT_MATCHES: Record<string, { en: string; "zh-CN": string }> = {
   "Failed to fetch quota info": {
     en: "Failed to fetch quota info",
     "zh-CN": "获取配额信息失败",
-  },
-  "Failed to reload agents": {
-    en: "Failed to reload agents",
-    "zh-CN": "重载 Agent 配置失败",
-  },
-  "Failed to save configuration": {
-    en: "Failed to save configuration",
-    "zh-CN": "保存配置失败",
   },
   "Database unavailable in degraded mode": {
     en: "Database unavailable in degraded mode",
