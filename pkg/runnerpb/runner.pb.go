@@ -4761,6 +4761,95 @@ func (x *SubdirsResponse) GetNextPageToken() string {
 	return ""
 }
 
+type GlobRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// pattern is an absolute glob pattern on the runner.
+	Pattern       string `protobuf:"bytes,1,opt,name=pattern,proto3" json:"pattern,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GlobRequest) Reset() {
+	*x = GlobRequest{}
+	mi := &file_runner_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GlobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GlobRequest) ProtoMessage() {}
+
+func (x *GlobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_runner_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GlobRequest.ProtoReflect.Descriptor instead.
+func (*GlobRequest) Descriptor() ([]byte, []int) {
+	return file_runner_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *GlobRequest) GetPattern() string {
+	if x != nil {
+		return x.Pattern
+	}
+	return ""
+}
+
+type GlobResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Paths         []string               `protobuf:"bytes,1,rep,name=paths,proto3" json:"paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GlobResponse) Reset() {
+	*x = GlobResponse{}
+	mi := &file_runner_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GlobResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GlobResponse) ProtoMessage() {}
+
+func (x *GlobResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_runner_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GlobResponse.ProtoReflect.Descriptor instead.
+func (*GlobResponse) Descriptor() ([]byte, []int) {
+	return file_runner_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *GlobResponse) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
 type TtydOpen struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// session_key is the ttyd session key ("sidebar", "agent-<id>", ...).
@@ -4777,7 +4866,7 @@ type TtydOpen struct {
 
 func (x *TtydOpen) Reset() {
 	*x = TtydOpen{}
-	mi := &file_runner_proto_msgTypes[61]
+	mi := &file_runner_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4789,7 +4878,7 @@ func (x *TtydOpen) String() string {
 func (*TtydOpen) ProtoMessage() {}
 
 func (x *TtydOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[61]
+	mi := &file_runner_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4802,7 +4891,7 @@ func (x *TtydOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydOpen.ProtoReflect.Descriptor instead.
 func (*TtydOpen) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{61}
+	return file_runner_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *TtydOpen) GetSessionKey() string {
@@ -4850,7 +4939,7 @@ type TtydResize struct {
 
 func (x *TtydResize) Reset() {
 	*x = TtydResize{}
-	mi := &file_runner_proto_msgTypes[62]
+	mi := &file_runner_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4862,7 +4951,7 @@ func (x *TtydResize) String() string {
 func (*TtydResize) ProtoMessage() {}
 
 func (x *TtydResize) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[62]
+	mi := &file_runner_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4875,7 +4964,7 @@ func (x *TtydResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydResize.ProtoReflect.Descriptor instead.
 func (*TtydResize) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{62}
+	return file_runner_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *TtydResize) GetCols() uint32 {
@@ -4901,7 +4990,7 @@ type TtydExit struct {
 
 func (x *TtydExit) Reset() {
 	*x = TtydExit{}
-	mi := &file_runner_proto_msgTypes[63]
+	mi := &file_runner_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4913,7 +5002,7 @@ func (x *TtydExit) String() string {
 func (*TtydExit) ProtoMessage() {}
 
 func (x *TtydExit) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[63]
+	mi := &file_runner_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4926,7 +5015,7 @@ func (x *TtydExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydExit.ProtoReflect.Descriptor instead.
 func (*TtydExit) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{63}
+	return file_runner_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *TtydExit) GetCode() int32 {
@@ -4952,7 +5041,7 @@ type TtydFrame struct {
 
 func (x *TtydFrame) Reset() {
 	*x = TtydFrame{}
-	mi := &file_runner_proto_msgTypes[64]
+	mi := &file_runner_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4964,7 +5053,7 @@ func (x *TtydFrame) String() string {
 func (*TtydFrame) ProtoMessage() {}
 
 func (x *TtydFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[64]
+	mi := &file_runner_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4977,7 +5066,7 @@ func (x *TtydFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydFrame.ProtoReflect.Descriptor instead.
 func (*TtydFrame) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{64}
+	return file_runner_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *TtydFrame) GetPayload() isTtydFrame_Payload {
@@ -5080,7 +5169,7 @@ type PathRef struct {
 
 func (x *PathRef) Reset() {
 	*x = PathRef{}
-	mi := &file_runner_proto_msgTypes[65]
+	mi := &file_runner_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5092,7 +5181,7 @@ func (x *PathRef) String() string {
 func (*PathRef) ProtoMessage() {}
 
 func (x *PathRef) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[65]
+	mi := &file_runner_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5105,7 +5194,7 @@ func (x *PathRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathRef.ProtoReflect.Descriptor instead.
 func (*PathRef) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{65}
+	return file_runner_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *PathRef) GetSessionId() string {
@@ -5145,7 +5234,7 @@ type StatRequest struct {
 
 func (x *StatRequest) Reset() {
 	*x = StatRequest{}
-	mi := &file_runner_proto_msgTypes[66]
+	mi := &file_runner_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5157,7 +5246,7 @@ func (x *StatRequest) String() string {
 func (*StatRequest) ProtoMessage() {}
 
 func (x *StatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[66]
+	mi := &file_runner_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5170,7 +5259,7 @@ func (x *StatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatRequest.ProtoReflect.Descriptor instead.
 func (*StatRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{66}
+	return file_runner_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *StatRequest) GetRef() *PathRef {
@@ -5192,7 +5281,7 @@ type StatResponse struct {
 
 func (x *StatResponse) Reset() {
 	*x = StatResponse{}
-	mi := &file_runner_proto_msgTypes[67]
+	mi := &file_runner_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5204,7 +5293,7 @@ func (x *StatResponse) String() string {
 func (*StatResponse) ProtoMessage() {}
 
 func (x *StatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[67]
+	mi := &file_runner_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5217,7 +5306,7 @@ func (x *StatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatResponse.ProtoReflect.Descriptor instead.
 func (*StatResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{67}
+	return file_runner_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *StatResponse) GetExists() bool {
@@ -5273,7 +5362,7 @@ type WriteFileHeader struct {
 
 func (x *WriteFileHeader) Reset() {
 	*x = WriteFileHeader{}
-	mi := &file_runner_proto_msgTypes[68]
+	mi := &file_runner_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5285,7 +5374,7 @@ func (x *WriteFileHeader) String() string {
 func (*WriteFileHeader) ProtoMessage() {}
 
 func (x *WriteFileHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[68]
+	mi := &file_runner_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5298,7 +5387,7 @@ func (x *WriteFileHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileHeader.ProtoReflect.Descriptor instead.
 func (*WriteFileHeader) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{68}
+	return file_runner_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *WriteFileHeader) GetRef() *PathRef {
@@ -5364,7 +5453,7 @@ type WriteFileChunk struct {
 
 func (x *WriteFileChunk) Reset() {
 	*x = WriteFileChunk{}
-	mi := &file_runner_proto_msgTypes[69]
+	mi := &file_runner_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5376,7 +5465,7 @@ func (x *WriteFileChunk) String() string {
 func (*WriteFileChunk) ProtoMessage() {}
 
 func (x *WriteFileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[69]
+	mi := &file_runner_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5389,7 +5478,7 @@ func (x *WriteFileChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileChunk.ProtoReflect.Descriptor instead.
 func (*WriteFileChunk) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{69}
+	return file_runner_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *WriteFileChunk) GetPayload() isWriteFileChunk_Payload {
@@ -5442,7 +5531,7 @@ type WriteFileResponse struct {
 
 func (x *WriteFileResponse) Reset() {
 	*x = WriteFileResponse{}
-	mi := &file_runner_proto_msgTypes[70]
+	mi := &file_runner_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5454,7 +5543,7 @@ func (x *WriteFileResponse) String() string {
 func (*WriteFileResponse) ProtoMessage() {}
 
 func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[70]
+	mi := &file_runner_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5467,7 +5556,7 @@ func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileResponse.ProtoReflect.Descriptor instead.
 func (*WriteFileResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{70}
+	return file_runner_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *WriteFileResponse) GetSize() int64 {
@@ -5496,7 +5585,7 @@ type AppendFileRequest struct {
 
 func (x *AppendFileRequest) Reset() {
 	*x = AppendFileRequest{}
-	mi := &file_runner_proto_msgTypes[71]
+	mi := &file_runner_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5508,7 +5597,7 @@ func (x *AppendFileRequest) String() string {
 func (*AppendFileRequest) ProtoMessage() {}
 
 func (x *AppendFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[71]
+	mi := &file_runner_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5521,7 +5610,7 @@ func (x *AppendFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendFileRequest.ProtoReflect.Descriptor instead.
 func (*AppendFileRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{71}
+	return file_runner_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *AppendFileRequest) GetRef() *PathRef {
@@ -5567,7 +5656,7 @@ type AppendFileResponse struct {
 
 func (x *AppendFileResponse) Reset() {
 	*x = AppendFileResponse{}
-	mi := &file_runner_proto_msgTypes[72]
+	mi := &file_runner_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5579,7 +5668,7 @@ func (x *AppendFileResponse) String() string {
 func (*AppendFileResponse) ProtoMessage() {}
 
 func (x *AppendFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[72]
+	mi := &file_runner_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5592,7 +5681,7 @@ func (x *AppendFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendFileResponse.ProtoReflect.Descriptor instead.
 func (*AppendFileResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{72}
+	return file_runner_proto_rawDescGZIP(), []int{74}
 }
 
 type RemoveRequest struct {
@@ -5609,7 +5698,7 @@ type RemoveRequest struct {
 
 func (x *RemoveRequest) Reset() {
 	*x = RemoveRequest{}
-	mi := &file_runner_proto_msgTypes[73]
+	mi := &file_runner_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5621,7 +5710,7 @@ func (x *RemoveRequest) String() string {
 func (*RemoveRequest) ProtoMessage() {}
 
 func (x *RemoveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[73]
+	mi := &file_runner_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5634,7 +5723,7 @@ func (x *RemoveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveRequest.ProtoReflect.Descriptor instead.
 func (*RemoveRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{73}
+	return file_runner_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *RemoveRequest) GetRef() *PathRef {
@@ -5666,7 +5755,7 @@ type RemoveResponse struct {
 
 func (x *RemoveResponse) Reset() {
 	*x = RemoveResponse{}
-	mi := &file_runner_proto_msgTypes[74]
+	mi := &file_runner_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5678,7 +5767,7 @@ func (x *RemoveResponse) String() string {
 func (*RemoveResponse) ProtoMessage() {}
 
 func (x *RemoveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[74]
+	mi := &file_runner_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5691,7 +5780,7 @@ func (x *RemoveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveResponse.ProtoReflect.Descriptor instead.
 func (*RemoveResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{74}
+	return file_runner_proto_rawDescGZIP(), []int{76}
 }
 
 // MkdirRequest creates ref.path (a directory) beneath its confined root, with
@@ -5709,7 +5798,7 @@ type MkdirRequest struct {
 
 func (x *MkdirRequest) Reset() {
 	*x = MkdirRequest{}
-	mi := &file_runner_proto_msgTypes[75]
+	mi := &file_runner_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5721,7 +5810,7 @@ func (x *MkdirRequest) String() string {
 func (*MkdirRequest) ProtoMessage() {}
 
 func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[75]
+	mi := &file_runner_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5734,7 +5823,7 @@ func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirRequest.ProtoReflect.Descriptor instead.
 func (*MkdirRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{75}
+	return file_runner_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *MkdirRequest) GetRef() *PathRef {
@@ -5759,7 +5848,7 @@ type MkdirResponse struct {
 
 func (x *MkdirResponse) Reset() {
 	*x = MkdirResponse{}
-	mi := &file_runner_proto_msgTypes[76]
+	mi := &file_runner_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5771,7 +5860,7 @@ func (x *MkdirResponse) String() string {
 func (*MkdirResponse) ProtoMessage() {}
 
 func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[76]
+	mi := &file_runner_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5784,7 +5873,7 @@ func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirResponse.ProtoReflect.Descriptor instead.
 func (*MkdirResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{76}
+	return file_runner_proto_rawDescGZIP(), []int{78}
 }
 
 type RunCommandRequest struct {
@@ -5826,7 +5915,7 @@ type RunCommandRequest struct {
 
 func (x *RunCommandRequest) Reset() {
 	*x = RunCommandRequest{}
-	mi := &file_runner_proto_msgTypes[77]
+	mi := &file_runner_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5838,7 +5927,7 @@ func (x *RunCommandRequest) String() string {
 func (*RunCommandRequest) ProtoMessage() {}
 
 func (x *RunCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[77]
+	mi := &file_runner_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5851,7 +5940,7 @@ func (x *RunCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandRequest.ProtoReflect.Descriptor instead.
 func (*RunCommandRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{77}
+	return file_runner_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *RunCommandRequest) GetChatId() string {
@@ -5963,7 +6052,7 @@ type RunCommandExit struct {
 
 func (x *RunCommandExit) Reset() {
 	*x = RunCommandExit{}
-	mi := &file_runner_proto_msgTypes[78]
+	mi := &file_runner_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5975,7 +6064,7 @@ func (x *RunCommandExit) String() string {
 func (*RunCommandExit) ProtoMessage() {}
 
 func (x *RunCommandExit) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[78]
+	mi := &file_runner_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5988,7 +6077,7 @@ func (x *RunCommandExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandExit.ProtoReflect.Descriptor instead.
 func (*RunCommandExit) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{78}
+	return file_runner_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *RunCommandExit) GetCode() int32 {
@@ -6017,7 +6106,7 @@ type StreamData struct {
 
 func (x *StreamData) Reset() {
 	*x = StreamData{}
-	mi := &file_runner_proto_msgTypes[79]
+	mi := &file_runner_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6029,7 +6118,7 @@ func (x *StreamData) String() string {
 func (*StreamData) ProtoMessage() {}
 
 func (x *StreamData) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[79]
+	mi := &file_runner_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6042,7 +6131,7 @@ func (x *StreamData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamData.ProtoReflect.Descriptor instead.
 func (*StreamData) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{79}
+	return file_runner_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *StreamData) GetOffset() uint64 {
@@ -6074,7 +6163,7 @@ type RunCommandFrame struct {
 
 func (x *RunCommandFrame) Reset() {
 	*x = RunCommandFrame{}
-	mi := &file_runner_proto_msgTypes[80]
+	mi := &file_runner_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6086,7 +6175,7 @@ func (x *RunCommandFrame) String() string {
 func (*RunCommandFrame) ProtoMessage() {}
 
 func (x *RunCommandFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[80]
+	mi := &file_runner_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6099,7 +6188,7 @@ func (x *RunCommandFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandFrame.ProtoReflect.Descriptor instead.
 func (*RunCommandFrame) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{80}
+	return file_runner_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *RunCommandFrame) GetPayload() isRunCommandFrame_Payload {
@@ -6180,7 +6269,7 @@ type RunFunctionRequest struct {
 
 func (x *RunFunctionRequest) Reset() {
 	*x = RunFunctionRequest{}
-	mi := &file_runner_proto_msgTypes[81]
+	mi := &file_runner_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6192,7 +6281,7 @@ func (x *RunFunctionRequest) String() string {
 func (*RunFunctionRequest) ProtoMessage() {}
 
 func (x *RunFunctionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[81]
+	mi := &file_runner_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6205,7 +6294,7 @@ func (x *RunFunctionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunFunctionRequest.ProtoReflect.Descriptor instead.
 func (*RunFunctionRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{81}
+	return file_runner_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *RunFunctionRequest) GetChatId() string {
@@ -6317,7 +6406,7 @@ type RunFunctionResponse struct {
 
 func (x *RunFunctionResponse) Reset() {
 	*x = RunFunctionResponse{}
-	mi := &file_runner_proto_msgTypes[82]
+	mi := &file_runner_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6329,7 +6418,7 @@ func (x *RunFunctionResponse) String() string {
 func (*RunFunctionResponse) ProtoMessage() {}
 
 func (x *RunFunctionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[82]
+	mi := &file_runner_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6342,7 +6431,7 @@ func (x *RunFunctionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunFunctionResponse.ProtoReflect.Descriptor instead.
 func (*RunFunctionResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{82}
+	return file_runner_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *RunFunctionResponse) GetExitCode() int32 {
@@ -6378,7 +6467,7 @@ type OrphanTmpSweep struct {
 
 func (x *OrphanTmpSweep) Reset() {
 	*x = OrphanTmpSweep{}
-	mi := &file_runner_proto_msgTypes[83]
+	mi := &file_runner_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6390,7 +6479,7 @@ func (x *OrphanTmpSweep) String() string {
 func (*OrphanTmpSweep) ProtoMessage() {}
 
 func (x *OrphanTmpSweep) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[83]
+	mi := &file_runner_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6403,7 +6492,7 @@ func (x *OrphanTmpSweep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OrphanTmpSweep.ProtoReflect.Descriptor instead.
 func (*OrphanTmpSweep) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{83}
+	return file_runner_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *OrphanTmpSweep) GetDir() *DirRef {
@@ -6441,7 +6530,7 @@ type CleanupRequest struct {
 
 func (x *CleanupRequest) Reset() {
 	*x = CleanupRequest{}
-	mi := &file_runner_proto_msgTypes[84]
+	mi := &file_runner_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6453,7 +6542,7 @@ func (x *CleanupRequest) String() string {
 func (*CleanupRequest) ProtoMessage() {}
 
 func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[84]
+	mi := &file_runner_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6466,7 +6555,7 @@ func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupRequest.ProtoReflect.Descriptor instead.
 func (*CleanupRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{84}
+	return file_runner_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *CleanupRequest) GetChatIds() []string {
@@ -6515,7 +6604,7 @@ type CleanupFailure struct {
 
 func (x *CleanupFailure) Reset() {
 	*x = CleanupFailure{}
-	mi := &file_runner_proto_msgTypes[85]
+	mi := &file_runner_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6527,7 +6616,7 @@ func (x *CleanupFailure) String() string {
 func (*CleanupFailure) ProtoMessage() {}
 
 func (x *CleanupFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[85]
+	mi := &file_runner_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6540,7 +6629,7 @@ func (x *CleanupFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupFailure.ProtoReflect.Descriptor instead.
 func (*CleanupFailure) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{85}
+	return file_runner_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *CleanupFailure) GetChatId() string {
@@ -6574,7 +6663,7 @@ type CleanupResponse struct {
 
 func (x *CleanupResponse) Reset() {
 	*x = CleanupResponse{}
-	mi := &file_runner_proto_msgTypes[86]
+	mi := &file_runner_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6586,7 +6675,7 @@ func (x *CleanupResponse) String() string {
 func (*CleanupResponse) ProtoMessage() {}
 
 func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[86]
+	mi := &file_runner_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6599,7 +6688,7 @@ func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupResponse.ProtoReflect.Descriptor instead.
 func (*CleanupResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{86}
+	return file_runner_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *CleanupResponse) GetRemoved() int32 {
@@ -6626,7 +6715,7 @@ type QueryQuotaRequest struct {
 
 func (x *QueryQuotaRequest) Reset() {
 	*x = QueryQuotaRequest{}
-	mi := &file_runner_proto_msgTypes[87]
+	mi := &file_runner_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6638,7 +6727,7 @@ func (x *QueryQuotaRequest) String() string {
 func (*QueryQuotaRequest) ProtoMessage() {}
 
 func (x *QueryQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[87]
+	mi := &file_runner_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6651,7 +6740,7 @@ func (x *QueryQuotaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryQuotaRequest.ProtoReflect.Descriptor instead.
 func (*QueryQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{87}
+	return file_runner_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *QueryQuotaRequest) GetTargets() []*Target {
@@ -6673,7 +6762,7 @@ type QuotaLimit struct {
 
 func (x *QuotaLimit) Reset() {
 	*x = QuotaLimit{}
-	mi := &file_runner_proto_msgTypes[88]
+	mi := &file_runner_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6685,7 +6774,7 @@ func (x *QuotaLimit) String() string {
 func (*QuotaLimit) ProtoMessage() {}
 
 func (x *QuotaLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[88]
+	mi := &file_runner_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6698,7 +6787,7 @@ func (x *QuotaLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuotaLimit.ProtoReflect.Descriptor instead.
 func (*QuotaLimit) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{88}
+	return file_runner_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *QuotaLimit) GetName() string {
@@ -6734,7 +6823,7 @@ type BalanceInfo struct {
 
 func (x *BalanceInfo) Reset() {
 	*x = BalanceInfo{}
-	mi := &file_runner_proto_msgTypes[89]
+	mi := &file_runner_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6746,7 +6835,7 @@ func (x *BalanceInfo) String() string {
 func (*BalanceInfo) ProtoMessage() {}
 
 func (x *BalanceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[89]
+	mi := &file_runner_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6759,7 +6848,7 @@ func (x *BalanceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BalanceInfo.ProtoReflect.Descriptor instead.
 func (*BalanceInfo) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{89}
+	return file_runner_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *BalanceInfo) GetCurrency() string {
@@ -6800,7 +6889,7 @@ type AccountBalance struct {
 
 func (x *AccountBalance) Reset() {
 	*x = AccountBalance{}
-	mi := &file_runner_proto_msgTypes[90]
+	mi := &file_runner_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6812,7 +6901,7 @@ func (x *AccountBalance) String() string {
 func (*AccountBalance) ProtoMessage() {}
 
 func (x *AccountBalance) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[90]
+	mi := &file_runner_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6825,7 +6914,7 @@ func (x *AccountBalance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountBalance.ProtoReflect.Descriptor instead.
 func (*AccountBalance) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{90}
+	return file_runner_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *AccountBalance) GetIsAvailable() bool {
@@ -6867,7 +6956,7 @@ type ModelUsage struct {
 
 func (x *ModelUsage) Reset() {
 	*x = ModelUsage{}
-	mi := &file_runner_proto_msgTypes[91]
+	mi := &file_runner_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6879,7 +6968,7 @@ func (x *ModelUsage) String() string {
 func (*ModelUsage) ProtoMessage() {}
 
 func (x *ModelUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[91]
+	mi := &file_runner_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6892,7 +6981,7 @@ func (x *ModelUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelUsage.ProtoReflect.Descriptor instead.
 func (*ModelUsage) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{91}
+	return file_runner_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ModelUsage) GetCli() string {
@@ -6974,7 +7063,7 @@ type QueryQuotaResponse struct {
 
 func (x *QueryQuotaResponse) Reset() {
 	*x = QueryQuotaResponse{}
-	mi := &file_runner_proto_msgTypes[92]
+	mi := &file_runner_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6986,7 +7075,7 @@ func (x *QueryQuotaResponse) String() string {
 func (*QueryQuotaResponse) ProtoMessage() {}
 
 func (x *QueryQuotaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_runner_proto_msgTypes[92]
+	mi := &file_runner_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6999,7 +7088,7 @@ func (x *QueryQuotaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryQuotaResponse.ProtoReflect.Descriptor instead.
 func (*QueryQuotaResponse) Descriptor() ([]byte, []int) {
-	return file_runner_proto_rawDescGZIP(), []int{92}
+	return file_runner_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *QueryQuotaResponse) GetUsages() []*ModelUsage {
@@ -7398,7 +7487,11 @@ const file_runner_proto_rawDesc = "" +
 	"\x0fSubdirsResponse\x12\x18\n" +
 	"\asubdirs\x18\x01 \x03(\tR\asubdirs\x12\x19\n" +
 	"\bgit_root\x18\x02 \x01(\tR\agitRoot\x12&\n" +
-	"\x0fnext_page_token\x18\x03 \x01(\tR\rnextPageToken\"\xa7\x01\n" +
+	"\x0fnext_page_token\x18\x03 \x01(\tR\rnextPageToken\"'\n" +
+	"\vGlobRequest\x12\x18\n" +
+	"\apattern\x18\x01 \x01(\tR\apattern\"$\n" +
+	"\fGlobResponse\x12\x14\n" +
+	"\x05paths\x18\x01 \x03(\tR\x05paths\"\xa7\x01\n" +
 	"\bTtydOpen\x12\x1f\n" +
 	"\vsession_key\x18\x01 \x01(\tR\n" +
 	"sessionKey\x129\n" +
@@ -7588,7 +7681,7 @@ const file_runner_proto_rawDesc = "" +
 	"\x13InitWorkflowSession\x12,.asgard.runner.v1.InitWorkflowSessionRequest\x1a-.asgard.runner.v1.InitWorkflowSessionResponse\x12r\n" +
 	"\x13ReportWorkflowEvent\x12,.asgard.runner.v1.ReportWorkflowEventRequest\x1a-.asgard.runner.v1.ReportWorkflowEventResponse\x12i\n" +
 	"\x10WorkflowRunStart\x12).asgard.runner.v1.WorkflowRunStartRequest\x1a*.asgard.runner.v1.WorkflowRunStartResponse\x12l\n" +
-	"\x11WorkflowRunSettle\x12*.asgard.runner.v1.WorkflowRunSettleRequest\x1a+.asgard.runner.v1.WorkflowRunSettleResponse2\xf0\f\n" +
+	"\x11WorkflowRunSettle\x12*.asgard.runner.v1.WorkflowRunSettleRequest\x1a+.asgard.runner.v1.WorkflowRunSettleResponse2\xb7\r\n" +
 	"\rRunnerService\x12E\n" +
 	"\x04Tree\x12\x1d.asgard.runner.v1.TreeRequest\x1a\x1e.asgard.runner.v1.TreeResponse\x12P\n" +
 	"\bReadFile\x12!.asgard.runner.v1.ReadFileRequest\x1a\x1f.asgard.runner.v1.ReadFileChunk0\x01\x12K\n" +
@@ -7599,7 +7692,8 @@ const file_runner_proto_rawDesc = "" +
 	"\x06GitLog\x12\x1f.asgard.runner.v1.GitLogRequest\x1a .asgard.runner.v1.GitLogResponse\x12O\n" +
 	"\aGitPush\x12#.asgard.runner.v1.GitSessionRequest\x1a\x1f.asgard.runner.v1.GitOpResponse\x12O\n" +
 	"\aGitPull\x12#.asgard.runner.v1.GitSessionRequest\x1a\x1f.asgard.runner.v1.GitOpResponse\x12N\n" +
-	"\aSubdirs\x12 .asgard.runner.v1.SubdirsRequest\x1a!.asgard.runner.v1.SubdirsResponse\x12D\n" +
+	"\aSubdirs\x12 .asgard.runner.v1.SubdirsRequest\x1a!.asgard.runner.v1.SubdirsResponse\x12E\n" +
+	"\x04Glob\x12\x1d.asgard.runner.v1.GlobRequest\x1a\x1e.asgard.runner.v1.GlobResponse\x12D\n" +
 	"\x04Ttyd\x12\x1b.asgard.runner.v1.TtydFrame\x1a\x1b.asgard.runner.v1.TtydFrame(\x010\x01\x12E\n" +
 	"\x04Stat\x12\x1d.asgard.runner.v1.StatRequest\x1a\x1e.asgard.runner.v1.StatResponse\x12T\n" +
 	"\tWriteFile\x12 .asgard.runner.v1.WriteFileChunk\x1a#.asgard.runner.v1.WriteFileResponse(\x01\x12W\n" +
@@ -7627,7 +7721,7 @@ func file_runner_proto_rawDescGZIP() []byte {
 }
 
 var file_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 96)
+var file_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 98)
 var file_runner_proto_goTypes = []any{
 	(AgentSource)(0),                    // 0: asgard.runner.v1.AgentSource
 	(FileScope)(0),                      // 1: asgard.runner.v1.FileScope
@@ -7692,41 +7786,43 @@ var file_runner_proto_goTypes = []any{
 	(*GitOpResponse)(nil),               // 60: asgard.runner.v1.GitOpResponse
 	(*SubdirsRequest)(nil),              // 61: asgard.runner.v1.SubdirsRequest
 	(*SubdirsResponse)(nil),             // 62: asgard.runner.v1.SubdirsResponse
-	(*TtydOpen)(nil),                    // 63: asgard.runner.v1.TtydOpen
-	(*TtydResize)(nil),                  // 64: asgard.runner.v1.TtydResize
-	(*TtydExit)(nil),                    // 65: asgard.runner.v1.TtydExit
-	(*TtydFrame)(nil),                   // 66: asgard.runner.v1.TtydFrame
-	(*PathRef)(nil),                     // 67: asgard.runner.v1.PathRef
-	(*StatRequest)(nil),                 // 68: asgard.runner.v1.StatRequest
-	(*StatResponse)(nil),                // 69: asgard.runner.v1.StatResponse
-	(*WriteFileHeader)(nil),             // 70: asgard.runner.v1.WriteFileHeader
-	(*WriteFileChunk)(nil),              // 71: asgard.runner.v1.WriteFileChunk
-	(*WriteFileResponse)(nil),           // 72: asgard.runner.v1.WriteFileResponse
-	(*AppendFileRequest)(nil),           // 73: asgard.runner.v1.AppendFileRequest
-	(*AppendFileResponse)(nil),          // 74: asgard.runner.v1.AppendFileResponse
-	(*RemoveRequest)(nil),               // 75: asgard.runner.v1.RemoveRequest
-	(*RemoveResponse)(nil),              // 76: asgard.runner.v1.RemoveResponse
-	(*MkdirRequest)(nil),                // 77: asgard.runner.v1.MkdirRequest
-	(*MkdirResponse)(nil),               // 78: asgard.runner.v1.MkdirResponse
-	(*RunCommandRequest)(nil),           // 79: asgard.runner.v1.RunCommandRequest
-	(*RunCommandExit)(nil),              // 80: asgard.runner.v1.RunCommandExit
-	(*StreamData)(nil),                  // 81: asgard.runner.v1.StreamData
-	(*RunCommandFrame)(nil),             // 82: asgard.runner.v1.RunCommandFrame
-	(*RunFunctionRequest)(nil),          // 83: asgard.runner.v1.RunFunctionRequest
-	(*RunFunctionResponse)(nil),         // 84: asgard.runner.v1.RunFunctionResponse
-	(*OrphanTmpSweep)(nil),              // 85: asgard.runner.v1.OrphanTmpSweep
-	(*CleanupRequest)(nil),              // 86: asgard.runner.v1.CleanupRequest
-	(*CleanupFailure)(nil),              // 87: asgard.runner.v1.CleanupFailure
-	(*CleanupResponse)(nil),             // 88: asgard.runner.v1.CleanupResponse
-	(*QueryQuotaRequest)(nil),           // 89: asgard.runner.v1.QueryQuotaRequest
-	(*QuotaLimit)(nil),                  // 90: asgard.runner.v1.QuotaLimit
-	(*BalanceInfo)(nil),                 // 91: asgard.runner.v1.BalanceInfo
-	(*AccountBalance)(nil),              // 92: asgard.runner.v1.AccountBalance
-	(*ModelUsage)(nil),                  // 93: asgard.runner.v1.ModelUsage
-	(*QueryQuotaResponse)(nil),          // 94: asgard.runner.v1.QueryQuotaResponse
-	nil,                                 // 95: asgard.runner.v1.Register.SupportedClisEntry
-	nil,                                 // 96: asgard.runner.v1.StartRun.SessionsEntry
-	nil,                                 // 97: asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
+	(*GlobRequest)(nil),                 // 63: asgard.runner.v1.GlobRequest
+	(*GlobResponse)(nil),                // 64: asgard.runner.v1.GlobResponse
+	(*TtydOpen)(nil),                    // 65: asgard.runner.v1.TtydOpen
+	(*TtydResize)(nil),                  // 66: asgard.runner.v1.TtydResize
+	(*TtydExit)(nil),                    // 67: asgard.runner.v1.TtydExit
+	(*TtydFrame)(nil),                   // 68: asgard.runner.v1.TtydFrame
+	(*PathRef)(nil),                     // 69: asgard.runner.v1.PathRef
+	(*StatRequest)(nil),                 // 70: asgard.runner.v1.StatRequest
+	(*StatResponse)(nil),                // 71: asgard.runner.v1.StatResponse
+	(*WriteFileHeader)(nil),             // 72: asgard.runner.v1.WriteFileHeader
+	(*WriteFileChunk)(nil),              // 73: asgard.runner.v1.WriteFileChunk
+	(*WriteFileResponse)(nil),           // 74: asgard.runner.v1.WriteFileResponse
+	(*AppendFileRequest)(nil),           // 75: asgard.runner.v1.AppendFileRequest
+	(*AppendFileResponse)(nil),          // 76: asgard.runner.v1.AppendFileResponse
+	(*RemoveRequest)(nil),               // 77: asgard.runner.v1.RemoveRequest
+	(*RemoveResponse)(nil),              // 78: asgard.runner.v1.RemoveResponse
+	(*MkdirRequest)(nil),                // 79: asgard.runner.v1.MkdirRequest
+	(*MkdirResponse)(nil),               // 80: asgard.runner.v1.MkdirResponse
+	(*RunCommandRequest)(nil),           // 81: asgard.runner.v1.RunCommandRequest
+	(*RunCommandExit)(nil),              // 82: asgard.runner.v1.RunCommandExit
+	(*StreamData)(nil),                  // 83: asgard.runner.v1.StreamData
+	(*RunCommandFrame)(nil),             // 84: asgard.runner.v1.RunCommandFrame
+	(*RunFunctionRequest)(nil),          // 85: asgard.runner.v1.RunFunctionRequest
+	(*RunFunctionResponse)(nil),         // 86: asgard.runner.v1.RunFunctionResponse
+	(*OrphanTmpSweep)(nil),              // 87: asgard.runner.v1.OrphanTmpSweep
+	(*CleanupRequest)(nil),              // 88: asgard.runner.v1.CleanupRequest
+	(*CleanupFailure)(nil),              // 89: asgard.runner.v1.CleanupFailure
+	(*CleanupResponse)(nil),             // 90: asgard.runner.v1.CleanupResponse
+	(*QueryQuotaRequest)(nil),           // 91: asgard.runner.v1.QueryQuotaRequest
+	(*QuotaLimit)(nil),                  // 92: asgard.runner.v1.QuotaLimit
+	(*BalanceInfo)(nil),                 // 93: asgard.runner.v1.BalanceInfo
+	(*AccountBalance)(nil),              // 94: asgard.runner.v1.AccountBalance
+	(*ModelUsage)(nil),                  // 95: asgard.runner.v1.ModelUsage
+	(*QueryQuotaResponse)(nil),          // 96: asgard.runner.v1.QueryQuotaResponse
+	nil,                                 // 97: asgard.runner.v1.Register.SupportedClisEntry
+	nil,                                 // 98: asgard.runner.v1.StartRun.SessionsEntry
+	nil,                                 // 99: asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
 }
 var file_runner_proto_depIdxs = []int32{
 	3,   // 0: asgard.runner.v1.NoQuota.targets:type_name -> asgard.runner.v1.TargetQuota
@@ -7740,7 +7836,7 @@ var file_runner_proto_depIdxs = []int32{
 	18,  // 8: asgard.runner.v1.BackendMessage.start_run:type_name -> asgard.runner.v1.StartRun
 	19,  // 9: asgard.runner.v1.BackendMessage.cancel_run:type_name -> asgard.runner.v1.CancelRun
 	9,   // 10: asgard.runner.v1.BackendMessage.ack:type_name -> asgard.runner.v1.Ack
-	95,  // 11: asgard.runner.v1.Register.supported_clis:type_name -> asgard.runner.v1.Register.SupportedClisEntry
+	97,  // 11: asgard.runner.v1.Register.supported_clis:type_name -> asgard.runner.v1.Register.SupportedClisEntry
 	7,   // 12: asgard.runner.v1.Register.active_runs:type_name -> asgard.runner.v1.RunRef
 	7,   // 13: asgard.runner.v1.Register.completed_unacked_runs:type_name -> asgard.runner.v1.RunRef
 	3,   // 14: asgard.runner.v1.Heartbeat.quotas:type_name -> asgard.runner.v1.TargetQuota
@@ -7750,7 +7846,7 @@ var file_runner_proto_depIdxs = []int32{
 	44,  // 18: asgard.runner.v1.RunResult.run_dir_ref:type_name -> asgard.runner.v1.DirRef
 	0,   // 19: asgard.runner.v1.StartRun.agent_source:type_name -> asgard.runner.v1.AgentSource
 	2,   // 20: asgard.runner.v1.StartRun.candidates:type_name -> asgard.runner.v1.Target
-	96,  // 21: asgard.runner.v1.StartRun.sessions:type_name -> asgard.runner.v1.StartRun.SessionsEntry
+	98,  // 21: asgard.runner.v1.StartRun.sessions:type_name -> asgard.runner.v1.StartRun.SessionsEntry
 	44,  // 22: asgard.runner.v1.StartRun.run_dir:type_name -> asgard.runner.v1.DirRef
 	17,  // 23: asgard.runner.v1.StartRun.status_scope:type_name -> asgard.runner.v1.StatusScope
 	20,  // 24: asgard.runner.v1.AskUserRequest.meta:type_name -> asgard.runner.v1.CallMeta
@@ -7760,7 +7856,7 @@ var file_runner_proto_depIdxs = []int32{
 	20,  // 28: asgard.runner.v1.RecordMetricsRequest.meta:type_name -> asgard.runner.v1.CallMeta
 	27,  // 29: asgard.runner.v1.RecordMetricsRequest.events:type_name -> asgard.runner.v1.MetricsEvent
 	20,  // 30: asgard.runner.v1.GetUserProxyKeysRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	97,  // 31: asgard.runner.v1.GetUserProxyKeysResponse.keys:type_name -> asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
+	99,  // 31: asgard.runner.v1.GetUserProxyKeysResponse.keys:type_name -> asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
 	1,   // 32: asgard.runner.v1.TreeRequest.scope:type_name -> asgard.runner.v1.FileScope
 	44,  // 33: asgard.runner.v1.TreeRequest.run_dir:type_name -> asgard.runner.v1.DirRef
 	40,  // 34: asgard.runner.v1.TreeResponse.entries:type_name -> asgard.runner.v1.FileTreeEntry
@@ -7777,32 +7873,32 @@ var file_runner_proto_depIdxs = []int32{
 	57,  // 45: asgard.runner.v1.GitLogResponse.commits:type_name -> asgard.runner.v1.GitCommit
 	44,  // 46: asgard.runner.v1.GitSessionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
 	44,  // 47: asgard.runner.v1.TtydOpen.working_dir:type_name -> asgard.runner.v1.DirRef
-	63,  // 48: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
-	64,  // 49: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
-	65,  // 50: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
+	65,  // 48: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
+	66,  // 49: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
+	67,  // 50: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
 	44,  // 51: asgard.runner.v1.PathRef.run_dir:type_name -> asgard.runner.v1.DirRef
 	1,   // 52: asgard.runner.v1.PathRef.scope:type_name -> asgard.runner.v1.FileScope
-	67,  // 53: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
-	67,  // 54: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
-	70,  // 55: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
-	67,  // 56: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
-	67,  // 57: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
-	67,  // 58: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
+	69,  // 53: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
+	69,  // 54: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
+	72,  // 55: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
+	69,  // 56: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
+	69,  // 57: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
+	69,  // 58: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
 	44,  // 59: asgard.runner.v1.RunCommandRequest.run_dir:type_name -> asgard.runner.v1.DirRef
 	44,  // 60: asgard.runner.v1.RunCommandRequest.tmp:type_name -> asgard.runner.v1.DirRef
 	14,  // 61: asgard.runner.v1.RunCommandExit.artifacts:type_name -> asgard.runner.v1.Artifact
-	81,  // 62: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
-	81,  // 63: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
-	80,  // 64: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
+	83,  // 62: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
+	83,  // 63: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
+	82,  // 64: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
 	44,  // 65: asgard.runner.v1.RunFunctionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
 	44,  // 66: asgard.runner.v1.OrphanTmpSweep.dir:type_name -> asgard.runner.v1.DirRef
-	85,  // 67: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
-	87,  // 68: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
+	87,  // 67: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
+	89,  // 68: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
 	2,   // 69: asgard.runner.v1.QueryQuotaRequest.targets:type_name -> asgard.runner.v1.Target
-	91,  // 70: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
-	90,  // 71: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
-	92,  // 72: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
-	93,  // 73: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
+	93,  // 70: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
+	92,  // 71: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
+	94,  // 72: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
+	95,  // 73: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
 	11,  // 74: asgard.runner.v1.Register.SupportedClisEntry.value:type_name -> asgard.runner.v1.ModelList
 	5,   // 75: asgard.runner.v1.NodeControlService.Connect:input_type -> asgard.runner.v1.RunnerMessage
 	21,  // 76: asgard.runner.v1.AgentCallbackService.AskUser:input_type -> asgard.runner.v1.AskUserRequest
@@ -7824,48 +7920,50 @@ var file_runner_proto_depIdxs = []int32{
 	59,  // 92: asgard.runner.v1.RunnerService.GitPush:input_type -> asgard.runner.v1.GitSessionRequest
 	59,  // 93: asgard.runner.v1.RunnerService.GitPull:input_type -> asgard.runner.v1.GitSessionRequest
 	61,  // 94: asgard.runner.v1.RunnerService.Subdirs:input_type -> asgard.runner.v1.SubdirsRequest
-	66,  // 95: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
-	68,  // 96: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
-	71,  // 97: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
-	73,  // 98: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
-	75,  // 99: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
-	77,  // 100: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
-	79,  // 101: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
-	83,  // 102: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
-	86,  // 103: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
-	89,  // 104: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
-	6,   // 105: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
-	22,  // 106: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
-	24,  // 107: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
-	26,  // 108: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
-	29,  // 109: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
-	31,  // 110: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
-	33,  // 111: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
-	35,  // 112: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
-	37,  // 113: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
-	39,  // 114: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
-	42,  // 115: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
-	46,  // 116: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
-	49,  // 117: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
-	52,  // 118: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
-	46,  // 119: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
-	55,  // 120: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
-	58,  // 121: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
-	60,  // 122: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
-	60,  // 123: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
-	62,  // 124: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
-	66,  // 125: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
-	69,  // 126: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
-	72,  // 127: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
-	74,  // 128: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
-	76,  // 129: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
-	78,  // 130: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
-	82,  // 131: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
-	84,  // 132: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
-	88,  // 133: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
-	94,  // 134: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
-	105, // [105:135] is the sub-list for method output_type
-	75,  // [75:105] is the sub-list for method input_type
+	63,  // 95: asgard.runner.v1.RunnerService.Glob:input_type -> asgard.runner.v1.GlobRequest
+	68,  // 96: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
+	70,  // 97: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
+	73,  // 98: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
+	75,  // 99: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
+	77,  // 100: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
+	79,  // 101: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
+	81,  // 102: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
+	85,  // 103: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
+	88,  // 104: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
+	91,  // 105: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
+	6,   // 106: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
+	22,  // 107: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
+	24,  // 108: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
+	26,  // 109: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
+	29,  // 110: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
+	31,  // 111: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
+	33,  // 112: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
+	35,  // 113: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
+	37,  // 114: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
+	39,  // 115: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
+	42,  // 116: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
+	46,  // 117: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
+	49,  // 118: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
+	52,  // 119: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
+	46,  // 120: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
+	55,  // 121: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
+	58,  // 122: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
+	60,  // 123: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
+	60,  // 124: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
+	62,  // 125: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
+	64,  // 126: asgard.runner.v1.RunnerService.Glob:output_type -> asgard.runner.v1.GlobResponse
+	68,  // 127: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
+	71,  // 128: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
+	74,  // 129: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
+	76,  // 130: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
+	78,  // 131: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
+	80,  // 132: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
+	84,  // 133: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
+	86,  // 134: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
+	90,  // 135: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
+	96,  // 136: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
+	106, // [106:137] is the sub-list for method output_type
+	75,  // [75:106] is the sub-list for method input_type
 	75,  // [75:75] is the sub-list for extension type_name
 	75,  // [75:75] is the sub-list for extension extendee
 	0,   // [0:75] is the sub-list for field type_name
@@ -7898,19 +7996,19 @@ func file_runner_proto_init() {
 		(*PutAttachmentChunk_Header)(nil),
 		(*PutAttachmentChunk_Data)(nil),
 	}
-	file_runner_proto_msgTypes[64].OneofWrappers = []any{
+	file_runner_proto_msgTypes[66].OneofWrappers = []any{
 		(*TtydFrame_Open)(nil),
 		(*TtydFrame_Input)(nil),
 		(*TtydFrame_Resize)(nil),
 		(*TtydFrame_Output)(nil),
 		(*TtydFrame_Exit)(nil),
 	}
-	file_runner_proto_msgTypes[69].OneofWrappers = []any{
+	file_runner_proto_msgTypes[71].OneofWrappers = []any{
 		(*WriteFileChunk_Header)(nil),
 		(*WriteFileChunk_Data)(nil),
 	}
-	file_runner_proto_msgTypes[77].OneofWrappers = []any{}
-	file_runner_proto_msgTypes[80].OneofWrappers = []any{
+	file_runner_proto_msgTypes[79].OneofWrappers = []any{}
+	file_runner_proto_msgTypes[82].OneofWrappers = []any{
 		(*RunCommandFrame_Stdout)(nil),
 		(*RunCommandFrame_Stderr)(nil),
 		(*RunCommandFrame_Exit)(nil),
@@ -7921,7 +8019,7 @@ func file_runner_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_runner_proto_rawDesc), len(file_runner_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   96,
+			NumMessages:   98,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

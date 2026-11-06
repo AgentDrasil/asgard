@@ -64,6 +64,15 @@ func (s *Service) Subdirs(ctx context.Context, req *runnerpb.SubdirsRequest) (*r
 	return &runnerpb.SubdirsResponse{Subdirs: res.Subdirs, GitRoot: res.GitRoot, NextPageToken: res.NextPageToken}, nil
 }
 
+// Glob implements RunnerService.
+func (s *Service) Glob(ctx context.Context, req *runnerpb.GlobRequest) (*runnerpb.GlobResponse, error) {
+	paths, err := s.noChatFS().Glob(ctx, req.GetPattern())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+	return &runnerpb.GlobResponse{Paths: paths}, nil
+}
+
 // GitDiff implements RunnerService: one frame per changed file.
 func (s *Service) GitDiff(req *runnerpb.GitDiffRequest, stream runnerpb.RunnerService_GitDiffServer) error {
 	rd, err := runDirString(req.GetSessionId(), req.GetRunDir())

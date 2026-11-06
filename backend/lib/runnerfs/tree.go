@@ -397,13 +397,10 @@ func (l Local) Search(ctx context.Context, req SearchRequest) ([]SearchHit, erro
 // subdirRoots are the directories Subdirs may list: the allowed run dirs
 // (readonly mounts included). Without an allowlist (development) it is nil.
 func (l Local) subdirRoots() []string {
-	var roots []string
-	for _, d := range l.AllowedRunDirs(false) {
-		if filepath.IsAbs(d) {
-			roots = append(roots, filepath.Clean(d))
-		}
+	if l.AllowedRunDirs == nil {
+		return nil
 	}
-	return roots
+	return expandAllowedRoots(l.AllowedRunDirs(false))
 }
 
 // openDirAbs opens the absolute directory p: beneath the roots when

@@ -68,6 +68,59 @@ func (l Local) SessionDir() string { return l.base("session") }
 // TmpDir returns the host temporary directory for the chat.
 func (l Local) TmpDir() string { return l.base("tmp") }
 
+func expandAllowedRoots(dirs []string) []string {
+	var roots []string
+	seen := make(map[string]bool)
+	for _, d := range dirs {
+		if !filepath.IsAbs(d) {
+			continue
+		}
+		if strings.ContainsAny(d, "*?[") {
+			matches, err := filepath.Glob(d)
+			if err != nil {
+				continue
+			}
+			for _, m := range matches {
+				fi, err := os.Lstat(m)
+				if err == nil && fi.IsDir() {
+					clean := filepath.Clean(m)
+					if !seen[clean] {
+						seen[clean] = true
+						roots = append(roots, clean)
+					}
+				}
+			}
+			continue
+		}
+		clean := filepath.Clean(d)
+		if !seen[clean] {
+			seen[clean] = true
+			roots = append(roots, clean)
+		}
+	}
+	return roots
+}
+
+func matchGlobOrSubdir(pattern, path string) bool {
+	pattern = filepath.Clean(pattern)
+	path = filepath.Clean(path)
+
+	patSegs := strings.Split(pattern, string(filepath.Separator))
+	pathSegs := strings.Split(path, string(filepath.Separator))
+
+	if len(pathSegs) < len(patSegs) {
+		return false
+	}
+
+	for i, pSeg := range patSegs {
+		matched, err := filepath.Match(pSeg, pathSegs[i])
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
+}
+
 // roots lists the absolute directories paths may lie beneath: the chat's own
 // tmp/session dirs and the allowed run dirs. The "/tmp"-style tokens of
 // IsAllowedDir are not expanded to the shared host roots, which would reach
@@ -80,12 +133,57 @@ func (l Local) roots(write bool, extra string) []string {
 		}
 		return roots
 	}
-	for _, d := range l.AllowedRunDirs(write) {
-		if filepath.IsAbs(d) {
-			roots = append(roots, filepath.Clean(d))
+	roots = append(roots, expandAllowedRoots(l.AllowedRunDirs(write))...)
+	return roots
+}
+
+// Glob implements DirOps.
+func (l Local) Glob(ctx context.Context, pattern string) ([]string, error) {
+	if !filepath.IsAbs(pattern) {
+		return nil, Errf(CodeBadRequest, "pattern %q is not an absolute path", pattern)
+	}
+	if l.AllowedRunDirs != nil {
+		allowedDirs := l.AllowedRunDirs(false)
+		patternAllowed := false
+		for _, d := range allowedDirs {
+			if !filepath.IsAbs(d) {
+				continue
+			}
+			if matchGlobOrSubdir(d, pattern) {
+				patternAllowed = true
+				break
+			}
+		}
+		if !patternAllowed {
+			return nil, Errf(CodeDenied, "access denied: pattern is not permitted")
 		}
 	}
-	return roots
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, Errf(CodeInternal, "failed to glob pattern %q: %v", pattern, err)
+	}
+	var dirs []string
+	for _, m := range matches {
+		fi, err := os.Lstat(m)
+		if err != nil || !fi.IsDir() {
+			continue
+		}
+		clean := filepath.Clean(m)
+		if l.AllowedRunDirs != nil {
+			allowed := false
+			for _, d := range l.AllowedRunDirs(false) {
+				if matchGlobOrSubdir(d, clean) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+		}
+		dirs = append(dirs, clean)
+	}
+	return dirs, nil
 }
 
 // lexicalRel returns target relative to root when it lies inside.

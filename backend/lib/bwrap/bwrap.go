@@ -550,6 +550,23 @@ func applySubdirMaskRule(args []string, baseDir string, rule *agentspec.SubdirMa
 	return args, nil
 }
 
+func expandGlobDirs(entry string) ([]string, bool) {
+	if !strings.ContainsAny(entry, "*?[") {
+		return nil, false
+	}
+	matches, err := filepath.Glob(entry)
+	if err != nil {
+		return nil, true
+	}
+	var dirs []string
+	for _, m := range matches {
+		if fi, err := os.Lstat(m); err == nil && fi.IsDir() {
+			dirs = append(dirs, filepath.Clean(m))
+		}
+	}
+	return dirs, true
+}
+
 // buildSandboxArgs constructs the bubblewrap arguments up to and including the
 // "--" separator, i.e. everything except the command run inside the sandbox.
 func buildSandboxArgs(cfg *agentspec.AgentConfig, agentPath string, target agentspec.CLITarget, allCLIs bool, session string, runDir string, sockDir string, chatID string, langRules string, configPath string, proxyOpts ...ProxySandboxConfig) ([]string, error) {
@@ -576,7 +593,13 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 	// or beneath a readonly mount root (e.g. through a symlink alias).
 	var readonlyDirs []string
 	if cfg != nil {
-		readonlyDirs = cfg.MountDirs.ReadOnly
+		for _, dir := range cfg.MountDirs.ReadOnly {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				readonlyDirs = append(readonlyDirs, expanded...)
+			} else {
+				readonlyDirs = append(readonlyDirs, dir)
+			}
+		}
 	}
 
 	if err := validateReadonlyRoots(readonlyDirs, []string{filepath.Join(home, ".ssh"), paths.ConfigDir()}); err != nil {
@@ -595,6 +618,17 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		var roDirs []string
 		seenRO := make(map[string]bool)
 		for _, dir := range cfg.RunDirs {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				for _, m := range expanded {
+					clean := filepath.Clean(m)
+					if !seenRO[clean] {
+						seenRO[clean] = true
+						args = append(args, "--ro-bind", m, m)
+						roDirs = append(roDirs, m)
+					}
+				}
+				continue
+			}
 			if _, err := os.Stat(dir); err != nil {
 				return nil, fmt.Errorf("run directory %q does not exist: %w", dir, err)
 			}
@@ -621,6 +655,21 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 			seenRW := make(map[string]bool)
 
 			for _, dir := range cfg.RunDirs {
+				if expanded, isGlob := expandGlobDirs(dir); isGlob {
+					for _, m := range expanded {
+						clean := filepath.Clean(m)
+						if seenRW[clean] {
+							continue
+						}
+						seenRW[clean] = true
+						rwEntries = append(rwEntries, rwMountEntry{
+							dir:      m,
+							isRunDir: true,
+							rule:     cfg.MountDirs.MaskRuleFor(m),
+						})
+					}
+					continue
+				}
 				clean := filepath.Clean(dir)
 				if seenRW[clean] {
 					continue
@@ -634,6 +683,25 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 			}
 
 			for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
+				if expanded, isGlob := expandGlobDirs(entry.Path); isGlob {
+					for _, m := range expanded {
+						clean := filepath.Clean(m)
+						if seenRW[clean] {
+							continue
+						}
+						seenRW[clean] = true
+						rule := entry.MaskRules
+						if rule == nil {
+							rule = cfg.MountDirs.MaskRuleFor(m)
+						}
+						rwEntries = append(rwEntries, rwMountEntry{
+							dir:      m,
+							isRunDir: false,
+							rule:     rule,
+						})
+					}
+					continue
+				}
 				clean := filepath.Clean(entry.Path)
 				if seenRW[clean] {
 					continue
@@ -1189,10 +1257,22 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 
 	var mergedReadonlyDirs []string
 	if len(readonlyDirs) > 0 {
-		mergedReadonlyDirs = append(mergedReadonlyDirs, readonlyDirs...)
+		for _, dir := range readonlyDirs {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				mergedReadonlyDirs = append(mergedReadonlyDirs, expanded...)
+			} else {
+				mergedReadonlyDirs = append(mergedReadonlyDirs, dir)
+			}
+		}
 	}
 	if cfg != nil && len(cfg.MountDirs.ReadOnly) > 0 {
-		mergedReadonlyDirs = append(mergedReadonlyDirs, cfg.MountDirs.ReadOnly...)
+		for _, dir := range cfg.MountDirs.ReadOnly {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				mergedReadonlyDirs = append(mergedReadonlyDirs, expanded...)
+			} else {
+				mergedReadonlyDirs = append(mergedReadonlyDirs, dir)
+			}
+		}
 	}
 
 	masked := []string{filepath.Join(home, ".ssh"), paths.ConfigDir(), filepath.Join(home, ".config", "gcp-sa.json")}
@@ -1221,6 +1301,20 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 
 		seenRO := make(map[string]bool)
 		for _, dir := range cfg.RunDirs {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				for _, m := range expanded {
+					clean := filepath.Clean(m)
+					if seenRO[clean] {
+						continue
+					}
+					seenRO[clean] = true
+					if beneathAny([]string{home, sessionTmp, sessionDir}, m) {
+						continue
+					}
+					args = append(args, "--ro-bind", m, m)
+				}
+				continue
+			}
 			clean := filepath.Clean(dir)
 			if seenRO[clean] {
 				continue
@@ -1250,6 +1344,21 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 		seenRW := make(map[string]bool)
 
 		for _, dir := range cfg.RunDirs {
+			if expanded, isGlob := expandGlobDirs(dir); isGlob {
+				for _, m := range expanded {
+					clean := filepath.Clean(m)
+					if seenRW[clean] {
+						continue
+					}
+					seenRW[clean] = true
+					rwEntries = append(rwEntries, rwMountEntry{
+						dir:      m,
+						isRunDir: true,
+						rule:     cfg.MountDirs.MaskRuleFor(m),
+					})
+				}
+				continue
+			}
 			clean := filepath.Clean(dir)
 			if seenRW[clean] {
 				continue
@@ -1263,6 +1372,25 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 		}
 
 		for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
+			if expanded, isGlob := expandGlobDirs(entry.Path); isGlob {
+				for _, m := range expanded {
+					clean := filepath.Clean(m)
+					if seenRW[clean] {
+						continue
+					}
+					seenRW[clean] = true
+					rule := entry.MaskRules
+					if rule == nil {
+						rule = cfg.MountDirs.MaskRuleFor(m)
+					}
+					rwEntries = append(rwEntries, rwMountEntry{
+						dir:      m,
+						isRunDir: false,
+						rule:     rule,
+					})
+				}
+				continue
+			}
 			clean := filepath.Clean(entry.Path)
 			if seenRW[clean] {
 				continue

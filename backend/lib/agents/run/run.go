@@ -19,10 +19,36 @@ import (
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 
+func matchGlobOrSubdir(pattern, path string) bool {
+	pattern = filepath.Clean(pattern)
+	path = filepath.Clean(path)
+
+	patSegs := strings.Split(pattern, string(filepath.Separator))
+	pathSegs := strings.Split(path, string(filepath.Separator))
+
+	if len(pathSegs) < len(patSegs) {
+		return false
+	}
+
+	for i, pSeg := range patSegs {
+		matched, err := filepath.Match(pSeg, pathSegs[i])
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
+}
+
 func IsAllowedDir(path string, allowedDirs []string) bool {
 	path = filepath.Clean(path)
 	for _, dir := range allowedDirs {
 		dir = filepath.Clean(dir)
+		if strings.ContainsAny(dir, "*?[") {
+			if matchGlobOrSubdir(dir, path) {
+				return true
+			}
+			continue
+		}
 		if path == dir {
 			return true
 		}
@@ -57,7 +83,20 @@ func resolveRunDir(agent *agentspec.Agent, runDirOpt optional.Option[string]) (s
 		return rd, nil
 	}
 	if len(agent.Config.RunDirs) > 0 && agent.Config.RunDirs[0] != "" {
-		return agent.Config.RunDirs[0], nil
+		for _, candidate := range agent.Config.RunDirs {
+			if strings.ContainsAny(candidate, "*?[") {
+				if matches, err := filepath.Glob(candidate); err == nil {
+					for _, m := range matches {
+						if fi, err := os.Lstat(m); err == nil && fi.IsDir() {
+							return m, nil
+						}
+					}
+				}
+				continue
+			}
+			return candidate, nil
+		}
+		return "", fmt.Errorf("no matching run directory found for configured run_dirs %v", agent.Config.RunDirs)
 	}
 	tmpDir := runnerpaths.TmpDir()
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {

@@ -393,6 +393,15 @@ func (r Remote) Subdirs(ctx context.Context, req SubdirsRequest) (SubdirsResult,
 	}
 }
 
+// Glob implements DirOps.
+func (r Remote) Glob(ctx context.Context, pattern string) ([]string, error) {
+	resp, err := r.Client.Glob(ctx, &runnerpb.GlobRequest{Pattern: pattern})
+	if err != nil {
+		return nil, ToError(err)
+	}
+	return resp.GetPaths(), nil
+}
+
 // GitDiff implements DirOps.
 func (r Remote) GitDiff(ctx context.Context, req GitDiffRequest, yield func(GitDiffFile) bool) error {
 	ctx, cancel := context.WithCancel(ctx)

@@ -470,6 +470,7 @@ service RunnerService {
   rpc GitPush(GitSessionRequest) returns (GitOpResponse);
   rpc GitPull(GitSessionRequest) returns (GitOpResponse);
   rpc Subdirs(SubdirsRequest) returns (SubdirsResponse);
+  rpc Glob(GlobRequest) returns (GlobResponse);
   // Ttyd: first client frame is Open; afterwards input/resize. Server frames
   // are output or exit.
   rpc Ttyd(stream TtydFrame) returns (stream TtydFrame);
@@ -692,6 +693,15 @@ message SubdirsResponse {
   repeated string subdirs = 1;
   string git_root = 2;
   string next_page_token = 3;
+}
+
+message GlobRequest {
+  // pattern is an absolute glob pattern on the runner.
+  string pattern = 1;
+}
+
+message GlobResponse {
+  repeated string paths = 1;
 }
 
 message TtydOpen {

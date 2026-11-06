@@ -289,6 +289,8 @@ type DirOps interface {
 	Search(ctx context.Context, req SearchRequest) ([]SearchHit, error)
 	// Subdirs needs no chat: dir is an absolute directory on the runner.
 	Subdirs(ctx context.Context, req SubdirsRequest) (SubdirsResult, error)
+	// Glob needs no chat: pattern is an absolute glob pattern on the runner.
+	Glob(ctx context.Context, pattern string) ([]string, error)
 	// GitDiff calls yield once per changed file; a false return stops early.
 	GitDiff(ctx context.Context, req GitDiffRequest, yield func(GitDiffFile) bool) error
 	GitLog(ctx context.Context, runDir string, limit int) (GitLogResult, error)

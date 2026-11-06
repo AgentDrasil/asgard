@@ -205,6 +205,67 @@ func TestSubdirsDevModeUnconfined(t *testing.T) {
 	assert.Equal(t, []string{"x"}, res.Subdirs)
 }
 
+func TestRunnerFS_RootsExpansionWithGlob(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	r1Agents := filepath.Join(base, "runners", "r1", "agents")
+	r2Agents := filepath.Join(base, "runners", "r2", "agents")
+	r3File := filepath.Join(base, "runners", "r3", "agents")
+	require.NoError(t, os.MkdirAll(filepath.Join(r1Agents, "agent-a"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(r2Agents, "agent-b"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(r3File), 0755))
+	require.NoError(t, os.WriteFile(r3File, []byte("not a dir"), 0644))
+
+	pattern := filepath.Join(base, "runners", "*", "agents")
+	fs := NewConfined("chat-glob", func(write bool) []string {
+		return []string{pattern}
+	}, nil)
+
+	// Check roots
+	roots := fs.roots(false, "")
+	assert.Contains(t, roots, r1Agents)
+	assert.Contains(t, roots, r2Agents)
+	assert.NotContains(t, roots, r3File)
+	assert.NotContains(t, roots, filepath.Join(base, "runners", "r1"))
+
+	// Check subdirRoots
+	subRoots := fs.subdirRoots()
+	assert.Contains(t, subRoots, r1Agents)
+	assert.Contains(t, subRoots, r2Agents)
+	assert.NotContains(t, subRoots, r3File)
+
+	// Subdirs on allowed expanded root succeeds
+	res, err := fs.Subdirs(t.Context(), SubdirsRequest{Dir: r1Agents})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"agent-a"}, res.Subdirs)
+
+	// Subdirs on parent of roots is denied
+	_, err = fs.Subdirs(t.Context(), SubdirsRequest{Dir: filepath.Join(base, "runners", "r1")})
+	assert.Equal(t, CodeDenied, CodeOf(err))
+
+	// Glob method returns expanded directories
+	matched, err := fs.Glob(t.Context(), pattern)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{r1Agents, r2Agents}, matched)
+
+	// Local.Glob denies unauthorized patterns when confined
+	_, err = fs.Glob(t.Context(), "/etc/*")
+	assert.Equal(t, CodeDenied, CodeOf(err))
+	_, err = fs.Glob(t.Context(), filepath.Join(base, "runners", "*"))
+	assert.Equal(t, CodeDenied, CodeOf(err))
+
+	// Symlink pointing outside must be skipped in Glob and roots
+	outsideDir := t.TempDir()
+	r4Symlink := filepath.Join(base, "runners", "r4", "agents")
+	require.NoError(t, os.MkdirAll(filepath.Dir(r4Symlink), 0755))
+	require.NoError(t, os.Symlink(outsideDir, r4Symlink))
+
+	matchedAfterSymlink, err := fs.Glob(t.Context(), pattern)
+	require.NoError(t, err)
+	assert.NotContains(t, matchedAfterSymlink, r4Symlink)
+	assert.NotContains(t, fs.roots(false, ""), r4Symlink)
+}
+
 // --- git ---
 
 func gitCmd(t *testing.T, dir string, args ...string) string {

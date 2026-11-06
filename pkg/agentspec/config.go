@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 )
@@ -241,14 +242,26 @@ func (m MountConfig) MaskRuleFor(dir string) *SubdirMaskRule {
 			return rule
 		}
 		for k, rule := range m.MaskRules {
-			if k != "" && filepath.Clean(k) == cleanDir && rule != nil {
-				return rule
+			if k != "" && rule != nil {
+				cleanK := filepath.Clean(k)
+				if cleanK == cleanDir {
+					return rule
+				}
+				if strings.ContainsAny(cleanK, "*?[") && matchGlobOrSubdir(cleanK, cleanDir) {
+					return rule
+				}
 			}
 		}
 	}
 	for _, entry := range m.ReadWriteEntries {
-		if entry.Path != "" && filepath.Clean(entry.Path) == cleanDir && entry.MaskRules != nil {
-			return entry.MaskRules
+		if entry.Path != "" && entry.MaskRules != nil {
+			cleanEntry := filepath.Clean(entry.Path)
+			if cleanEntry == cleanDir {
+				return entry.MaskRules
+			}
+			if strings.ContainsAny(cleanEntry, "*?[") && matchGlobOrSubdir(cleanEntry, cleanDir) {
+				return entry.MaskRules
+			}
 		}
 	}
 	return nil
@@ -483,20 +496,20 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	}
 
 	for _, dir := range cfg.RunDirs {
-		if !filepath.IsAbs(dir) {
-			return fmt.Errorf("run directory must be an absolute path: %q", dir)
+		if err := validateConfigPath(dir, "run directory"); err != nil {
+			return err
 		}
 	}
 
 	for _, dir := range cfg.MountDirs.ReadOnly {
-		if !filepath.IsAbs(dir) {
-			return fmt.Errorf("mount readonly directory must be an absolute path: %q", dir)
+		if err := validateConfigPath(dir, "mount readonly directory"); err != nil {
+			return err
 		}
 	}
 
 	for _, dir := range cfg.MountDirs.ReadWrite {
-		if !filepath.IsAbs(dir) {
-			return fmt.Errorf("mount readwrite directory must be an absolute path: %q", dir)
+		if err := validateConfigPath(dir, "mount readwrite directory"); err != nil {
+			return err
 		}
 	}
 
@@ -505,11 +518,8 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 		if rule != nil && rule.Base != "" {
 			targetBase = rule.Base
 		}
-		if targetBase == "" {
-			return fmt.Errorf("mask rule base directory cannot be empty")
-		}
-		if !filepath.IsAbs(targetBase) {
-			return fmt.Errorf("mask rule base directory must be an absolute path: %q", targetBase)
+		if err := validateConfigPath(targetBase, "mask rule base directory"); err != nil {
+			return err
 		}
 		if rule != nil {
 			if err := validateSubdirMaskRule(targetBase, rule); err != nil {
@@ -519,11 +529,8 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	}
 
 	for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
-		if entry.Path == "" {
-			return fmt.Errorf("mount readwrite directory path cannot be empty")
-		}
-		if !filepath.IsAbs(entry.Path) {
-			return fmt.Errorf("mount readwrite directory must be an absolute path: %q", entry.Path)
+		if err := validateConfigPath(entry.Path, "mount readwrite directory path"); err != nil {
+			return err
 		}
 		if entry.MaskRules != nil {
 			if err := validateSubdirMaskRule(entry.Path, entry.MaskRules); err != nil {
@@ -555,6 +562,49 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	return nil
 }
 
+func validateConfigPath(path string, desc string) error {
+	if path == "" {
+		return fmt.Errorf("%s cannot be empty", desc)
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%s must be an absolute path: %q", desc, path)
+	}
+	if strings.Contains(path, "**") {
+		return fmt.Errorf("%s contains unsupported recursive wildcard \"**\": %q", desc, path)
+	}
+	for _, seg := range strings.Split(path, string(filepath.Separator)) {
+		if seg == ".." {
+			return fmt.Errorf("%s cannot contain \"..\" components: %q", desc, path)
+		}
+		if strings.ContainsAny(seg, "*?[") {
+			if _, err := filepath.Match(seg, ""); err != nil {
+				return fmt.Errorf("%s contains invalid glob pattern %q: %w", desc, seg, err)
+			}
+		}
+	}
+	return nil
+}
+
+func matchGlobOrSubdir(pattern, path string) bool {
+	pattern = filepath.Clean(pattern)
+	path = filepath.Clean(path)
+
+	patSegs := strings.Split(pattern, string(filepath.Separator))
+	pathSegs := strings.Split(path, string(filepath.Separator))
+
+	if len(pathSegs) < len(patSegs) {
+		return false
+	}
+
+	for i, pSeg := range patSegs {
+		matched, err := filepath.Match(pSeg, pathSegs[i])
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
+}
+
 func validateSubdirMaskRule(base string, rule *SubdirMaskRule) error {
 	if rule == nil {
 		return nil
@@ -563,11 +613,8 @@ func validateSubdirMaskRule(base string, rule *SubdirMaskRule) error {
 	if effectiveBase == "" {
 		effectiveBase = base
 	}
-	if effectiveBase == "" {
-		return fmt.Errorf("mask rule base directory cannot be empty")
-	}
-	if !filepath.IsAbs(effectiveBase) {
-		return fmt.Errorf("mask rule base directory must be an absolute path: %q", effectiveBase)
+	if err := validateConfigPath(effectiveBase, "mask rule base directory"); err != nil {
+		return err
 	}
 	if base != "" && rule.Base != "" && filepath.Clean(base) != filepath.Clean(rule.Base) {
 		return fmt.Errorf("mask rule base directory %q does not match mount path %q", rule.Base, base)

@@ -778,6 +778,109 @@ func TestAgentConfig_ValidateWithCLIs(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid glob patterns in run_dirs and mount_dirs",
+			config: AgentConfig{
+				ID:          "agent-glob",
+				Name:        "Glob Agent",
+				Description: "Agent with glob run_dirs",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{
+					"/workspace/asgard/etcd-tree/agents",
+					"/workspace/asgard/etcd-tree/runners/*/agents",
+					"/workspace/asgard/runners/?/dir",
+					"/workspace/asgard/runners/[a-z]/dir",
+				},
+				MountDirs: MountConfig{
+					ReadOnly:  []string{"/workspace/ro/*"},
+					ReadWrite: []string{"/workspace/rw/*"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "relative path in run_dirs rejected",
+			config: AgentConfig{
+				ID:          "agent-rel-run-dir",
+				Name:        "Relative RunDir Agent",
+				Description: "Agent with relative run_dir",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"workspace/runners/*/agents"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty path in run_dirs rejected",
+			config: AgentConfig{
+				ID:          "agent-empty-run-dir",
+				Name:        "Empty RunDir Agent",
+				Description: "Agent with empty run_dir",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{""},
+			},
+			wantErr: true,
+		},
+		{
+			name: "dotdot in run_dirs rejected",
+			config: AgentConfig{
+				ID:          "agent-dotdot-run-dir",
+				Name:        "DotDot RunDir Agent",
+				Description: "Agent with .. in run_dir",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/workspace/asgard/../runners/*/agents"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "dotdot in mount_dirs rejected",
+			config: AgentConfig{
+				ID:          "agent-dotdot-mount-dir",
+				Name:        "DotDot MountDir Agent",
+				Description: "Agent with .. in mount_dir",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/tmp/run"},
+				MountDirs: MountConfig{
+					ReadWrite: []string{"/workspace/*/.."},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "malformed glob pattern in run_dirs rejected",
+			config: AgentConfig{
+				ID:          "agent-bad-glob",
+				Name:        "Bad Glob Agent",
+				Description: "Agent with malformed glob",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/workspace/[unclosed-bracket"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "recursive globstar rejected",
+			config: AgentConfig{
+				ID:          "agent-globstar",
+				Name:        "Globstar Agent",
+				Description: "Agent with **",
+				CLI: []CLITarget{
+					{CLI: "agy", Model: "gemini-2.5-flash"},
+				},
+				RunDirs: []string{"/workspace/**/agents"},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1445,4 +1548,28 @@ func TestMountConfig_Clone(t *testing.T) {
 	assert.Equal(t, ".pnpm-store", orig.ReadWriteEntries[0].MaskRules.KeepRW[0])
 	assert.Equal(t, ".pnpm-store", orig.MaskRules["/rw1"].KeepRW[0])
 	assert.Equal(t, ".env", orig.MaskRules["/rw1"].MaskRO[0])
+}
+
+func TestMountConfig_MaskRuleFor_Glob(t *testing.T) {
+	rule := &SubdirMaskRule{
+		Base:   "/workspace/runners/*/agents",
+		Mode:   MaskOthers,
+		KeepRW: []string{"keep-dir"},
+	}
+	cfg := MountConfig{
+		MaskRules: map[string]*SubdirMaskRule{
+			"/workspace/runners/*/agents": rule,
+		},
+	}
+
+	assert.Nil(t, cfg.MaskRuleFor("/workspace/runners/r1"))
+	assert.Nil(t, cfg.MaskRuleFor("/workspace/other"))
+
+	matched := cfg.MaskRuleFor("/workspace/runners/r1/agents")
+	require.NotNil(t, matched)
+	assert.Equal(t, []string{"keep-dir"}, matched.KeepRW)
+
+	matchedSub := cfg.MaskRuleFor("/workspace/runners/r2/agents/sub")
+	require.NotNil(t, matchedSub)
+	assert.Equal(t, []string{"keep-dir"}, matchedSub.KeepRW)
 }

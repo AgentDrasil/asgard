@@ -504,3 +504,85 @@ func TestRun_ProxyOptions(t *testing.T) {
 		assert.NotContains(t, string(out), "http://127.0.0.1:8082")
 	})
 }
+
+func TestIsAllowedDir(t *testing.T) {
+	allowedDirs := []string{
+		"/workspace/asgard/etcd-tree/agents",
+		"/workspace/asgard/etcd-tree/runners/*/agents",
+		"/workspace/special-[0-9]/data",
+		"/workspace/cluster-?/nodes",
+	}
+
+	// Exact matches
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/agents", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/agents", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-chao/agents", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/special-3/data", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/cluster-a/nodes", allowedDirs))
+
+	// Subdirectory matches
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/agents/agent_father", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/agents/agent-a", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/agents/agent-a/skills", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/special-3/data/sub/dir", allowedDirs))
+	assert.True(t, IsAllowedDir("/workspace/cluster-a/nodes/node-1", allowedDirs))
+
+	// Parent directory or sibling directories of runners must be REJECTED
+	assert.False(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners", allowedDirs))
+	assert.False(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1", allowedDirs))
+	assert.False(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/certs", allowedDirs))
+	assert.False(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/config.yaml", allowedDirs))
+	assert.False(t, IsAllowedDir("/workspace/asgard/etcd-tree/runners/runner-1/sensitive", allowedDirs))
+	assert.False(t, IsAllowedDir("/workspace/special-a/data", allowedDirs))   // 'a' does not match [0-9]
+	assert.False(t, IsAllowedDir("/workspace/cluster-ab/nodes", allowedDirs)) // 'ab' does not match single char '?'
+	assert.False(t, IsAllowedDir("/random/path", allowedDirs))
+
+	// Tmp and session directories
+	tmpDirs := []string{"/tmp", "/session"}
+	assert.True(t, IsAllowedDir("/tmp", tmpDirs))
+	assert.True(t, IsAllowedDir("/tmp/sub", tmpDirs))
+	assert.True(t, IsAllowedDir("/session", tmpDirs))
+	assert.True(t, IsAllowedDir("/session/sub", tmpDirs))
+	assert.True(t, IsAllowedDir(filepath.Join(runnerpaths.TmpDir(), "some-chat"), tmpDirs))
+	assert.True(t, IsAllowedDir(filepath.Join(runnerpaths.SessionsDir(), "some-chat"), tmpDirs))
+}
+
+func TestResolveRunDir_Glob(t *testing.T) {
+	tempDir := t.TempDir()
+	r1Agents := filepath.Join(tempDir, "runners", "r1", "agents")
+	require.NoError(t, os.MkdirAll(r1Agents, 0755))
+
+	// Match found
+	agentWithMatch := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			RunDirs: []string{filepath.Join(tempDir, "runners", "*", "agents")},
+		},
+	}
+	rd, err := resolveRunDir(agentWithMatch, optional.None[string]())
+	require.NoError(t, err)
+	assert.Equal(t, r1Agents, rd)
+
+	// No match found for glob pattern must return an error, never raw pattern string
+	agentNoMatch := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			RunDirs: []string{filepath.Join(tempDir, "nonexistent", "*", "agents")},
+		},
+	}
+	_, err = resolveRunDir(agentNoMatch, optional.None[string]())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no matching run directory found")
+
+	// Symlink match must be skipped by Lstat
+	symlinkTarget := t.TempDir()
+	symlinkPath := filepath.Join(tempDir, "runners", "r2", "agents")
+	require.NoError(t, os.MkdirAll(filepath.Dir(symlinkPath), 0755))
+	require.NoError(t, os.Symlink(symlinkTarget, symlinkPath))
+
+	agentSymlinkOnly := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			RunDirs: []string{filepath.Join(tempDir, "runners", "r2", "*")},
+		},
+	}
+	_, err = resolveRunDir(agentSymlinkOnly, optional.None[string]())
+	require.Error(t, err)
+}

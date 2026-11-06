@@ -1849,3 +1849,79 @@ func TestBuildSandboxArgs_ClaudeAccountDir(t *testing.T) {
 	_, err = build(target, false, sid)
 	assert.Error(t, err)
 }
+
+func TestBuildSandboxArgs_GlobMountDirs(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	r1Agents := filepath.Join(base, "runners", "r1", "agents")
+	r2Agents := filepath.Join(base, "runners", "r2", "agents")
+	r3File := filepath.Join(base, "runners", "r3", "agents")
+	require.NoError(t, os.MkdirAll(r1Agents, 0755))
+	require.NoError(t, os.MkdirAll(r2Agents, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(r3File), 0755))
+	require.NoError(t, os.WriteFile(r3File, []byte("regular file, not a directory"), 0644))
+
+	outsideDir := t.TempDir()
+	r4Symlink := filepath.Join(base, "runners", "r4", "agents")
+	require.NoError(t, os.MkdirAll(filepath.Dir(r4Symlink), 0755))
+	require.NoError(t, os.Symlink(outsideDir, r4Symlink))
+
+	m1Dir := filepath.Join(base, "mounts", "m1")
+	m2Dir := filepath.Join(base, "mounts", "m2")
+	require.NoError(t, os.MkdirAll(m1Dir, 0755))
+	require.NoError(t, os.MkdirAll(m2Dir, 0755))
+
+	runDir := r1Agents
+	cfg := &agentspec.AgentConfig{
+		ID:      "test-glob-agent",
+		RunDirs: []string{filepath.Join(base, "runners", "*", "agents")},
+		MountDirs: agentspec.MountConfig{
+			ReadWrite: []string{filepath.Join(base, "mounts", "*")},
+		},
+	}
+
+	target := agentspec.CLITarget{CLI: "claude", Model: "sonnet"}
+	chat := "chat-glob-rw"
+
+	// 1. RW mode in buildSandboxArgs
+	args, err := buildSandboxArgs(cfg, "", target, false, "", runDir, "sock", chat, "", "")
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", r1Agents, r1Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", r2Agents, r2Agents), 0)
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", r3File, r3File), "non-directory match should be skipped")
+	assert.Equal(t, -1, indexOfSeq(args, "--bind", r4Symlink, r4Symlink), "symlink match should be skipped")
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", m1Dir, m1Dir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", m2Dir, m2Dir), 0)
+
+	// 2. CommandForAgentCommandExec in RW mode
+	cmd, err := CommandForAgentCommandExec(cfg, runDir, "", "sock", chat, "", false)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", r1Agents, r1Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", r2Agents, r2Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", m1Dir, m1Dir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", m2Dir, m2Dir), 0)
+
+	// 3. ReadOnly mode in buildSandboxArgs
+	cfgRO := &agentspec.AgentConfig{
+		ID:       "test-glob-agent-ro",
+		LockMode: agentspec.LockModeReadOnly,
+		RunDirs:  []string{filepath.Join(base, "runners", "*", "agents")},
+		MountDirs: agentspec.MountConfig{
+			ReadOnly: []string{filepath.Join(base, "mounts", "*")},
+		},
+	}
+	chatRO := "chat-glob-ro"
+	argsRO, err := buildSandboxArgs(cfgRO, "", target, false, "", runDir, "sock", chatRO, "", "")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(argsRO, "--ro-bind", r1Agents, r1Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(argsRO, "--ro-bind", r2Agents, r2Agents), 0)
+	assert.Equal(t, -1, indexOfSeq(argsRO, "--ro-bind", r3File, r3File))
+
+	// 4. CommandForAgentCommandExec in ReadOnly mode
+	cmdRO, err := CommandForAgentCommandExec(cfgRO, runDir, "", "sock", chatRO, "", false)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, indexOfSeq(cmdRO.Args, "--ro-bind", r1Agents, r1Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(cmdRO.Args, "--ro-bind", r2Agents, r2Agents), 0)
+}

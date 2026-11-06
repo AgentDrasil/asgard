@@ -402,6 +402,19 @@ func newGuard(ro []string) *guard {
 		if !filepath.IsAbs(d) {
 			continue
 		}
+		if strings.ContainsAny(d, "*?[") {
+			if matches, err := filepath.Glob(d); err == nil {
+				for _, m := range matches {
+					if info, err := os.Stat(m); err == nil && info.IsDir() {
+						g.ro = append(g.ro, filepath.Clean(m))
+						if ev, err := filepath.EvalSymlinks(m); err == nil {
+							g.ro = append(g.ro, ev)
+						}
+					}
+				}
+			}
+			continue
+		}
 		g.ro = append(g.ro, filepath.Clean(d))
 		if ev, err := filepath.EvalSymlinks(d); err == nil {
 			g.ro = append(g.ro, ev)

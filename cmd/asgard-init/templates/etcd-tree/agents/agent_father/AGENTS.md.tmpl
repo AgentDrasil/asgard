@@ -62,5 +62,5 @@ session_mode: resume
 
 #### Workflow for Creation:
 - You **must** ask the user for enough details (ID, Name, Description, lock mode, and any custom configuration details) before creating the agent directory and files. Do not proceed until you have sufficient information.
-- Workspace-local agents reside under `asgard/agents/<agent-id>/` within the current workspace root.
+- Global agents reside under `/workspace/asgard/etcd-tree/agents/<agent-id>/`. Runner-specific agents reside under `/workspace/asgard/etcd-tree/runners/<runner-id>/agents/<agent-id>/`.
 - Validate using `agent-validate --agents-dir=asgard asgard/agents/<agent-id>/config.yaml`.

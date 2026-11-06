@@ -549,6 +549,7 @@ const (
 	RunnerService_GitPush_FullMethodName       = "/asgard.runner.v1.RunnerService/GitPush"
 	RunnerService_GitPull_FullMethodName       = "/asgard.runner.v1.RunnerService/GitPull"
 	RunnerService_Subdirs_FullMethodName       = "/asgard.runner.v1.RunnerService/Subdirs"
+	RunnerService_Glob_FullMethodName          = "/asgard.runner.v1.RunnerService/Glob"
 	RunnerService_Ttyd_FullMethodName          = "/asgard.runner.v1.RunnerService/Ttyd"
 	RunnerService_Stat_FullMethodName          = "/asgard.runner.v1.RunnerService/Stat"
 	RunnerService_WriteFile_FullMethodName     = "/asgard.runner.v1.RunnerService/WriteFile"
@@ -578,6 +579,7 @@ type RunnerServiceClient interface {
 	GitPush(ctx context.Context, in *GitSessionRequest, opts ...grpc.CallOption) (*GitOpResponse, error)
 	GitPull(ctx context.Context, in *GitSessionRequest, opts ...grpc.CallOption) (*GitOpResponse, error)
 	Subdirs(ctx context.Context, in *SubdirsRequest, opts ...grpc.CallOption) (*SubdirsResponse, error)
+	Glob(ctx context.Context, in *GlobRequest, opts ...grpc.CallOption) (*GlobResponse, error)
 	// Ttyd: first client frame is Open; afterwards input/resize. Server frames
 	// are output or exit.
 	Ttyd(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TtydFrame, TtydFrame], error)
@@ -737,6 +739,16 @@ func (c *runnerServiceClient) Subdirs(ctx context.Context, in *SubdirsRequest, o
 	return out, nil
 }
 
+func (c *runnerServiceClient) Glob(ctx context.Context, in *GlobRequest, opts ...grpc.CallOption) (*GlobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GlobResponse)
+	err := c.cc.Invoke(ctx, RunnerService_Glob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *runnerServiceClient) Ttyd(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TtydFrame, TtydFrame], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &RunnerService_ServiceDesc.Streams[4], RunnerService_Ttyd_FullMethodName, cOpts...)
@@ -869,6 +881,7 @@ type RunnerServiceServer interface {
 	GitPush(context.Context, *GitSessionRequest) (*GitOpResponse, error)
 	GitPull(context.Context, *GitSessionRequest) (*GitOpResponse, error)
 	Subdirs(context.Context, *SubdirsRequest) (*SubdirsResponse, error)
+	Glob(context.Context, *GlobRequest) (*GlobResponse, error)
 	// Ttyd: first client frame is Open; afterwards input/resize. Server frames
 	// are output or exit.
 	Ttyd(grpc.BidiStreamingServer[TtydFrame, TtydFrame]) error
@@ -927,6 +940,9 @@ func (UnimplementedRunnerServiceServer) GitPull(context.Context, *GitSessionRequ
 }
 func (UnimplementedRunnerServiceServer) Subdirs(context.Context, *SubdirsRequest) (*SubdirsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Subdirs not implemented")
+}
+func (UnimplementedRunnerServiceServer) Glob(context.Context, *GlobRequest) (*GlobResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Glob not implemented")
 }
 func (UnimplementedRunnerServiceServer) Ttyd(grpc.BidiStreamingServer[TtydFrame, TtydFrame]) error {
 	return status.Error(codes.Unimplemented, "method Ttyd not implemented")
@@ -1127,6 +1143,24 @@ func _RunnerService_Subdirs_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunnerService_Glob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GlobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunnerServiceServer).Glob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunnerService_Glob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunnerServiceServer).Glob(ctx, req.(*GlobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RunnerService_Ttyd_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(RunnerServiceServer).Ttyd(&grpc.GenericServerStream[TtydFrame, TtydFrame]{ServerStream: stream})
 }
@@ -1308,6 +1342,10 @@ var RunnerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Subdirs",
 			Handler:    _RunnerService_Subdirs_Handler,
+		},
+		{
+			MethodName: "Glob",
+			Handler:    _RunnerService_Glob_Handler,
 		},
 		{
 			MethodName: "Stat",

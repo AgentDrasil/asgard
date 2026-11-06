@@ -15,6 +15,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
@@ -66,6 +67,74 @@ func TestHandleAgents(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), "\"type\":\"workflow\"")
 	assert.Contains(t, w.Body.String(), "\"type\":\"agent\"")
+}
+
+func TestHandleAgents_GlobRunDirsExpansion(t *testing.T) {
+	tempDir := t.TempDir()
+	r1Agents := filepath.Join(tempDir, "runners", "r1", "agents")
+	r2Agents := filepath.Join(tempDir, "runners", "r2", "agents")
+	r3File := filepath.Join(tempDir, "runners", "r3", "agents")
+	staticAgents := filepath.Join(tempDir, "static-agents")
+	require.NoError(t, os.MkdirAll(r1Agents, 0755))
+	require.NoError(t, os.MkdirAll(r2Agents, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(r3File), 0755))
+	require.NoError(t, os.WriteFile(r3File, []byte("file"), 0644))
+	require.NoError(t, os.MkdirAll(staticAgents, 0755))
+
+	pattern := filepath.Join(tempDir, "runners", "*", "agents")
+	srv := &Server{
+		agents: []*agentspec.Agent{
+			{
+				Config: agentspec.AgentConfig{
+					ID:      "agent_father",
+					Name:    "Agent Father",
+					RunDirs: []string{staticAgents, pattern},
+				},
+			},
+		},
+	}
+
+	// 1. With local runner FS available (runnerClient nil defaults to local)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	w := httptest.NewRecorder()
+	srv.handleAgents(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var res []AgentInfo
+	err := json.Unmarshal(w.Body.Bytes(), &res)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+
+	expected := []string{staticAgents, r1Agents, r2Agents}
+	assert.ElementsMatch(t, expected, res[0].RunDirs)
+	assert.NotContains(t, res[0].RunDirs, r3File)
+
+	// 2. Fallback when runner offline or fs returns error
+	srvOffline := &Server{
+		agents: []*agentspec.Agent{
+			{
+				Config: agentspec.AgentConfig{
+					ID:      "agent_father",
+					Name:    "Agent Father",
+					RunDirs: []string{staticAgents, pattern},
+				},
+			},
+		},
+		fsResolver: func(chatID string) (runnerfs.FS, error) {
+			return nil, runnerfs.Errf(runnerfs.CodeUnavailable, "runner offline")
+		},
+	}
+
+	reqOffline := httptest.NewRequest(http.MethodGet, "/api/agents?runner=offline-runner", nil)
+	wOffline := httptest.NewRecorder()
+	srvOffline.handleAgents(wOffline, reqOffline)
+
+	assert.Equal(t, http.StatusOK, wOffline.Code)
+	var resOffline []AgentInfo
+	err = json.Unmarshal(wOffline.Body.Bytes(), &resOffline)
+	require.NoError(t, err)
+	require.Len(t, resOffline, 1)
+	assert.Equal(t, []string{staticAgents, pattern}, resOffline[0].RunDirs)
 }
 
 func TestExecuteValidation(t *testing.T) {
