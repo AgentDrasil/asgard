@@ -1,6 +1,8 @@
 package agentwrapper
 
 import (
+	"strings"
+
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/agentwrapper/claude"
 	"github.com/AgentDrasil/asgard/agentwrapper/opencode"
@@ -9,12 +11,20 @@ import (
 	simplestcfg "github.com/AgentDrasil/asgard/simplest"
 )
 
+func isZaiCodingPlan(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return m == "zai-coding-plan" || strings.HasPrefix(m, "zai-coding-plan/")
+}
+
 // MatchesModel reports whether the requested model matches a known model
 // name, accounting for opencode/agy/simplest variant suffixes (e.g. "provider/model/low"
 // or "gemini-3.7-flash-low" matches the known model "provider/model" or "gemini-3.7-flash").
 func MatchesModel(cli, model, known string) bool {
 	if cli == "claude" && (known == "claude" || known == "all") {
 		return model == "claude" || IsKnownModel(cli, model)
+	}
+	if known == "zai-coding-plan" && isZaiCodingPlan(model) {
+		return true
 	}
 	for _, name := range ModelCandidates(cli, model) {
 		if name == known {

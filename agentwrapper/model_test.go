@@ -35,6 +35,11 @@ func TestMatchesModel(t *testing.T) {
 		{cli: "claude", model: "unknown-xyz", known: "claude", want: false},
 		{cli: "agy", model: "gemini-3.8-flash-low", known: "gemini-3.8-flash", want: true},
 		{cli: "agy", model: "gemini-4-argon-medium", known: "gemini-4-argon", want: true},
+		{cli: "simplest", model: "zai-coding-plan/glm-5.3", known: "zai-coding-plan", want: true},
+		{cli: "simplest", model: "zai-coding-plan/glm-5.3/low", known: "zai-coding-plan", want: true},
+		{cli: "simplest", model: "zai-coding-plan/glm-5.3-flash", known: "zai-coding-plan", want: true},
+		{cli: "opencode", model: "zai-coding-plan/glm-5.3/high", known: "zai-coding-plan", want: true},
+		{cli: "simplest", model: "google/gemini-3.8-flash", known: "zai-coding-plan", want: false},
 	}
 
 	for _, tt := range tests {

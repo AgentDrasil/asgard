@@ -79,6 +79,12 @@ func TestUsage_ZaiCodingPlan(t *testing.T) {
 				Provider:      "zai-coding-plan",
 				ContextWindow: 1048576,
 			},
+			{
+				ID:            "glm-5.3-flash",
+				Name:          "GLM 5.3 Flash",
+				Provider:      "zai-coding-plan",
+				ContextWindow: 1048576,
+			},
 		},
 	})
 
@@ -87,12 +93,12 @@ func TestUsage_ZaiCodingPlan(t *testing.T) {
 
 	models, err := Models(ctx, opts)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"zai-coding-plan/glm-5.3"}, models)
+	assert.Equal(t, []string{"zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3-flash"}, models)
 
 	usages, err := Usage(ctx, opts)
 	require.NoError(t, err)
 	require.Len(t, usages, 1)
-	assert.Equal(t, "zai-coding-plan/glm-5.3", usages[0].Model)
+	assert.Equal(t, "zai-coding-plan", usages[0].Model)
 	assert.InDelta(t, 0.75, usages[0].Remaining, 0.0001)
 }
 

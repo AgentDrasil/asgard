@@ -60,24 +60,27 @@ func GetModelUsages(ctx context.Context, cfg *config.Config, opts types.UsageOpt
 	available := cfg.GetAvailableModels()
 	result := make([]types.ModelUsage, 0, len(available))
 
+	var hasZaiCodingPlan bool
+	var hasDeepSeek bool
 	for _, m := range available {
+		if isZaiCodingPlan(m.Provider, m.ID) {
+			hasZaiCodingPlan = true
+			continue
+		}
+		if isDeepSeek(m.Provider, m.ID) {
+			hasDeepSeek = true
+		}
 		result = append(result, types.ModelUsage{
 			Model:     config.FullModelName(m.Provider, m.ID),
 			Remaining: 1.0,
 		})
 	}
 
-	var hasZaiCodingPlan bool
-	var hasDeepSeek bool
-	for _, m := range available {
-		if isZaiCodingPlan(m.Provider, m.ID) {
-			hasZaiCodingPlan = true
-		} else if isDeepSeek(m.Provider, m.ID) {
-			hasDeepSeek = true
-		}
-	}
-
 	if hasZaiCodingPlan {
+		zaiUsage := types.ModelUsage{
+			Model:     "zai-coding-plan",
+			Remaining: 1.0,
+		}
 		token, baseURL := loadZaiCodingPlanProvider(cfg)
 		if token != "" {
 			// Explicit endpoint argument wins; otherwise a provider base URL
@@ -90,17 +93,14 @@ func GetModelUsages(ctx context.Context, cfg *config.Config, opts types.UsageOpt
 			}
 			rem, ref, limits, err := zai.FetchQuota(ctx, token, opts.Detailed, endpointArgs...)
 			if err == nil {
-				for i, m := range available {
-					if isZaiCodingPlan(m.Provider, m.ID) {
-						result[i].Remaining = rem
-						result[i].RefreshDate = ref
-						if opts.Detailed {
-							result[i].Limits = limits
-						}
-					}
+				zaiUsage.Remaining = rem
+				zaiUsage.RefreshDate = ref
+				if opts.Detailed {
+					zaiUsage.Limits = limits
 				}
 			}
 		}
+		result = append(result, zaiUsage)
 	}
 
 	// DeepSeek is a prepaid (pay-as-you-go) provider: its "quota" is the
@@ -112,7 +112,7 @@ func GetModelUsages(ctx context.Context, cfg *config.Config, opts types.UsageOpt
 			balance, err := fetchDeepSeekBalance(ctx, apiKey, baseURL)
 			if err == nil && balance != nil {
 				remaining := 0.0
-				if balance.IsAvailable {
+				if balance.IsAvailable && !isBalanceZero(balance) {
 					remaining = 1.0
 					// Low-balance guard: surface a 20% "remaining" warning so
 					// the UI reminds the user to top up the account.
@@ -120,8 +120,8 @@ func GetModelUsages(ctx context.Context, cfg *config.Config, opts types.UsageOpt
 						remaining = lowBalanceRemaining
 					}
 				}
-				for i, m := range available {
-					if isDeepSeek(m.Provider, m.ID) {
+				for i := range result {
+					if isDeepSeek("", result[i].Model) {
 						result[i].Balance = balance
 						result[i].Remaining = remaining
 					}

@@ -192,6 +192,25 @@ func TestIsBalanceLow(t *testing.T) {
 	}
 }
 
+func TestIsBalanceZero(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isBalanceZero(nil))
+	assert.True(t, isBalanceZero(&llms.AccountBalance{BalanceInfos: nil}))
+	assert.True(t, isBalanceZero(&llms.AccountBalance{
+		BalanceInfos: []llms.BalanceInfo{
+			{Currency: "USD", TotalBalance: "0.00"},
+			{Currency: "CNY", TotalBalance: "0.00"},
+		},
+	}))
+	assert.False(t, isBalanceZero(&llms.AccountBalance{
+		BalanceInfos: []llms.BalanceInfo{
+			{Currency: "USD", TotalBalance: "0.00"},
+			{Currency: "CNY", TotalBalance: "76.62"},
+		},
+	}))
+}
+
 func TestGetModelUsages_WithDeepSeekBalance(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "GET", r.Method)
@@ -309,6 +328,37 @@ func TestGetModelUsages_WithDeepSeekBalanceUnavailable(t *testing.T) {
 	assert.Equal(t, 0.0, usages[0].Remaining, "empty balance must surface as exhausted quota")
 }
 
+func TestGetModelUsages_WithDeepSeekZeroBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"is_available": true,
+			"balance_infos": [
+				{"currency": "USD", "total_balance": "0.00"},
+				{"currency": "CNY", "total_balance": "0.00"}
+			]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"deepseek": {API: types.APIOpenAICompat, APIKey: "ds-key", BaseURL: server.URL},
+		},
+		Models: []config.ModelConfig{
+			{ID: "deepseek-chat", Provider: "deepseek"},
+		},
+	}
+
+	ctx := context.Background()
+	usages, err := GetModelUsages(ctx, cfg, types.UsageOptions{})
+	require.NoError(t, err)
+	require.Len(t, usages, 1)
+
+	require.NotNil(t, usages[0].Balance)
+	assert.Equal(t, 0.0, usages[0].Remaining, "zero balance must report 0 remaining quota")
+}
+
 func TestGetModelUsages_DeepSeekFetchErrorKeepsDefaults(t *testing.T) {
 	// Server returns a non-200 so the balance fetch fails; usage must stay at
 	// the fully-available default instead of failing or zeroing quota.
@@ -399,6 +449,10 @@ func TestGetModelUsages_WithZaiCodingPlanAndGenericAPI(t *testing.T) {
 				ID:       "glm-5.3",
 				Provider: "zai-coding-plan", // Coding Plan: should check quota
 			},
+			{
+				ID:       "glm-5.3-flash",
+				Provider: "zai-coding-plan", // Coding Plan: shares the same unified quota
+			},
 		},
 	}
 
@@ -417,8 +471,8 @@ func TestGetModelUsages_WithZaiCodingPlanAndGenericAPI(t *testing.T) {
 	assert.Equal(t, 1.0, usages[1].Remaining)
 	assert.Equal(t, int64(0), usages[1].RefreshDate)
 
-	// Zai Coding Plan model usage (quota fetched)
-	assert.Equal(t, "zai-coding-plan/glm-5.3", usages[2].Model)
+	// Zai Coding Plan model usage (quota fetched, collapsed into unified entry)
+	assert.Equal(t, "zai-coding-plan", usages[2].Model)
 	assert.InDelta(t, 0.90, usages[2].Remaining, 0.0001)
 	assert.Equal(t, int64(1760000000), usages[2].RefreshDate)
 	require.Len(t, usages[2].Limits, 1)

@@ -163,6 +163,18 @@ const formatLimitName = (name: string) => {
   return name;
 };
 
+const nonZeroBalances = (balance?: AccountBalance) => {
+  if (!balance?.balance_infos) return [];
+  return balance.balance_infos.filter((b) => {
+    const total = parseFloat(b.total_balance);
+    return !isNaN(total) && total > 0;
+  });
+};
+
+const isBalanceZero = (balance?: AccountBalance) => {
+  return nonZeroBalances(balance).length === 0;
+};
+
 defineExpose({
   fetchQuotas,
 });
@@ -279,6 +291,8 @@ defineExpose({
                       <span
                         class="text-xs font-semibold px-2 py-0.5 rounded-md"
                         :class="[
+                          m.remaining === 0 ||
+                          (m.balance && (!m.balance.is_available || isBalanceZero(m.balance))) ||
                           m.remaining <= 0.2
                             ? 'bg-error/10 text-error'
                             : m.remaining <= 0.5
@@ -288,8 +302,8 @@ defineExpose({
                       >
                         <template v-if="m.balance">
                           {{
-                            !m.balance.is_available
-                              ? t("quota.balanceUnavailable")
+                            !m.balance.is_available || isBalanceZero(m.balance)
+                              ? t("quota.noBalance")
                               : m.remaining <= 0.2
                                 ? t("quota.balanceLow", { pct: Math.round(m.remaining * 100) })
                                 : t("quota.balanceAvailable")
@@ -308,38 +322,47 @@ defineExpose({
                       >
                         {{ t("quota.balance") }}
                       </h5>
-                      <div
-                        v-for="b in m.balance.balance_infos || []"
-                        :key="b.currency"
-                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 space-y-1.5"
-                      >
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="text-xs font-bold text-base-content/80">{{
-                            b.currency
-                          }}</span>
-                          <span class="text-sm font-semibold text-base-content">{{
-                            b.total_balance
-                          }}</span>
-                        </div>
+                      <div v-if="nonZeroBalances(m.balance).length > 0" class="space-y-2">
                         <div
-                          class="flex items-center justify-between gap-2 text-[11px] text-base-content/50"
+                          v-for="b in nonZeroBalances(m.balance)"
+                          :key="b.currency"
+                          class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 space-y-1.5"
                         >
-                          <span>
-                            {{ t("quota.balanceGranted") }}:
-                            <b class="font-semibold text-base-content/80">{{
-                              b.granted_balance
-                            }}</b>
-                          </span>
-                          <span>
-                            {{ t("quota.balanceToppedUp") }}:
-                            <b class="font-semibold text-base-content/80">{{
-                              b.topped_up_balance
-                            }}</b>
-                          </span>
+                          <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-bold text-base-content/80">{{
+                              b.currency
+                            }}</span>
+                            <span class="text-sm font-semibold text-base-content">{{
+                              b.total_balance
+                            }}</span>
+                          </div>
+                          <div
+                            class="flex items-center justify-between gap-2 text-[11px] text-base-content/50"
+                          >
+                            <span>
+                              {{ t("quota.balanceGranted") }}:
+                              <b class="font-semibold text-base-content/80">{{
+                                b.granted_balance
+                              }}</b>
+                            </span>
+                            <span>
+                              {{ t("quota.balanceToppedUp") }}:
+                              <b class="font-semibold text-base-content/80">{{
+                                b.topped_up_balance
+                              }}</b>
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <div
-                        v-if="!m.balance.is_available"
+                        v-else
+                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 text-xs text-base-content/60 font-medium"
+                        data-testid="quota-no-balance"
+                      >
+                        {{ t("quota.noBalance") }}
+                      </div>
+                      <div
+                        v-if="!m.balance.is_available || isBalanceZero(m.balance)"
                         class="alert alert-error text-xs py-1.5 px-2.5 flex items-center gap-1.5"
                       >
                         <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0" />

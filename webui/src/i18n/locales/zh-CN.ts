@@ -125,6 +125,7 @@ export const zhCN: MessageSchema = {
     balance: "账户余额",
     balanceAvailable: "余额可用",
     balanceUnavailable: "无可用余额",
+    noBalance: "无余额",
     balanceUnavailableHint: "请充值后恢复 API 调用。",
     balanceLow: "余额不足 ({pct}%)",
     balanceLowHint: "所有币种余额均低于最低值（人民币少于 20 且美元少于 5），请及时充值。",

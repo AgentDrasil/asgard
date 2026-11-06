@@ -102,22 +102,23 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 	}
 
 	result := make([]types.ModelUsage, 0, len(models))
+	var hasZaiCodingPlan bool
 	for _, m := range models {
+		if isZaiCodingPlan(m) {
+			hasZaiCodingPlan = true
+			continue
+		}
 		result = append(result, types.ModelUsage{
 			Model:     m,
 			Remaining: 1.0,
 		})
 	}
 
-	var hasZaiCodingPlan bool
-	for _, m := range result {
-		if isZaiCodingPlan(m.Model) {
-			hasZaiCodingPlan = true
-			break
-		}
-	}
-
 	if hasZaiCodingPlan {
+		zaiUsage := types.ModelUsage{
+			Model:     "zai-coding-plan",
+			Remaining: 1.0,
+		}
 		token := loadAuthToken()
 		if token != "" {
 			log.Debug().Msg("fetching zai quota from API")
@@ -126,19 +127,16 @@ func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, er
 				log.Debug().Err(err).Msg("failed to fetch zai quota")
 			} else {
 				log.Debug().Float64("remaining", remainingVal).Int64("refresh_date", refreshDate).Msg("successfully fetched zai quota limit")
-				for i := range result {
-					if isZaiCodingPlan(result[i].Model) {
-						result[i].Remaining = remainingVal
-						result[i].RefreshDate = refreshDate
-						if opts.Detailed {
-							result[i].Limits = limits
-						}
-					}
+				zaiUsage.Remaining = remainingVal
+				zaiUsage.RefreshDate = refreshDate
+				if opts.Detailed {
+					zaiUsage.Limits = limits
 				}
 			}
 		} else {
 			log.Debug().Msg("zai token not found, skipping quota fetch")
 		}
+		result = append(result, zaiUsage)
 	}
 
 	return result, nil

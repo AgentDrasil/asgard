@@ -122,6 +122,23 @@ func TestCheckQuota_ModelVariant(t *testing.T) {
 	if q := CheckQuota("claude", "opus"); q != 0.9 {
 		t.Errorf("expected quota 0.9 for claude opus, got %f", q)
 	}
+
+	// zai-coding-plan single quota matches any zai-coding-plan model
+	fakeSimplest := NewFakeClient()
+	fakeSimplest.UsageFunc = func(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
+		return []types.ModelUsage{
+			{Model: "zai-coding-plan", Remaining: 0.85},
+		}, nil
+	}
+	SetClients(map[string]types.CLIClient{
+		"simplest": fakeSimplest,
+	})
+	if q := CheckQuota("simplest", "zai-coding-plan/glm-5.3"); q != 0.85 {
+		t.Errorf("expected quota 0.85 for simplest zai-coding-plan/glm-5.3, got %f", q)
+	}
+	if q := CheckQuota("simplest", "zai-coding-plan/glm-5.3-flash"); q != 0.85 {
+		t.Errorf("expected quota 0.85 for simplest zai-coding-plan/glm-5.3-flash, got %f", q)
+	}
 }
 
 func TestSupportedCLIs_SimplestRegistration(t *testing.T) {

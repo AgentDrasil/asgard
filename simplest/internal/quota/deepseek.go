@@ -56,6 +56,24 @@ func isBalanceLow(balance *llms.AccountBalance) bool {
 	return checked > 0
 }
 
+// isBalanceZero reports whether every currency in the balance has a total
+// balance of zero or less (e.g. USD == 0 and CNY == 0).
+func isBalanceZero(balance *llms.AccountBalance) bool {
+	if balance == nil {
+		return true
+	}
+	if len(balance.BalanceInfos) == 0 {
+		return true
+	}
+	for _, info := range balance.BalanceInfos {
+		total, err := strconv.ParseFloat(strings.TrimSpace(info.TotalBalance), 64)
+		if err == nil && total > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // deepSeekBalanceEndpoint is the DeepSeek API path that reports the account
 // balance for the configured API key.
 const deepSeekBalanceEndpoint = "/user/balance"

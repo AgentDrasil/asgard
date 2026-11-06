@@ -135,4 +135,67 @@ describe("QuotaModal", () => {
     expect(root.textContent).toContain("agy 凭据");
     setLocale("en", false);
   });
+
+  it("filters out zero balances for DeepSeek and only renders positive currencies", async () => {
+    await mount({
+      simplest: [
+        {
+          model: "deepseek/dsv4-flash",
+          remaining: 1,
+          balance: {
+            is_available: true,
+            balance_infos: [
+              {
+                currency: "USD",
+                total_balance: "0.00",
+                granted_balance: "0.00",
+                topped_up_balance: "0.00",
+              },
+              {
+                currency: "CNY",
+                total_balance: "76.62",
+                granted_balance: "0.00",
+                topped_up_balance: "76.62",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(root.textContent).toContain("CNY");
+    expect(root.textContent).toContain("76.62");
+    expect(root.textContent).not.toContain("USD");
+  });
+
+  it("renders no balance when all currencies are zero", async () => {
+    await mount({
+      simplest: [
+        {
+          model: "deepseek/dsv4-flash",
+          remaining: 0,
+          balance: {
+            is_available: true,
+            balance_infos: [
+              {
+                currency: "USD",
+                total_balance: "0.00",
+                granted_balance: "0.00",
+                topped_up_balance: "0.00",
+              },
+              {
+                currency: "CNY",
+                total_balance: "0.00",
+                granted_balance: "0.00",
+                topped_up_balance: "0.00",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(root.textContent).toContain("No balance");
+    expect(root.querySelector('[data-testid="quota-no-balance"]')).not.toBeNull();
+    expect(root.textContent).not.toContain("USD");
+    expect(root.textContent).not.toContain("CNY");
+  });
 });

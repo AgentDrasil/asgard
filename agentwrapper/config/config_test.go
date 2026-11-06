@@ -68,6 +68,28 @@ func TestConfig_IsModelAllowed(t *testing.T) {
 			model:     "GPT-4o",
 			wantAllow: false,
 		},
+		{
+			name: "umbrella provider entry allowed when sub-model pattern matches",
+			cfg: &Config{
+				Agents: []map[string][]string{
+					{"simplest": {"zai-coding-plan/.*"}},
+				},
+			},
+			agent:     "simplest",
+			model:     "zai-coding-plan",
+			wantAllow: true,
+		},
+		{
+			name: "umbrella provider entry allowed with case-insensitive pattern",
+			cfg: &Config{
+				Agents: []map[string][]string{
+					{"simplest": {"(?i)ZAI-CODING-PLAN/.*"}},
+				},
+			},
+			agent:     "simplest",
+			model:     "zai-coding-plan",
+			wantAllow: true,
+		},
 	}
 
 	for _, tt := range tests {

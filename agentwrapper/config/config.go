@@ -91,6 +91,12 @@ func (c *Config) IsModelAllowed(agentName, modelName string) bool {
 		if err == nil && matched {
 			return true
 		}
+		// If modelName is an umbrella provider/model entry (e.g. "zai-coding-plan"),
+		// allow it if any configured pattern targets models under it (e.g. "zai-coding-plan/.*").
+		clean := strings.ToLower(strings.TrimPrefix(p, "(?i)"))
+		if strings.HasPrefix(clean, strings.ToLower(modelName)+"/") {
+			return true
+		}
 	}
 	return false
 }

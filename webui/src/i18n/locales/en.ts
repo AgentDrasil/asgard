@@ -124,6 +124,7 @@ export const en = {
     balance: "Account Balance",
     balanceAvailable: "Balance available",
     balanceUnavailable: "No usable balance",
+    noBalance: "No balance",
     balanceUnavailableHint: "Top up the account to resume API calls.",
     balanceLow: "Balance low ({pct}%)",
     balanceLowHint: "All currency balances are low (CNY < 20 and USD < 5). Please top up soon.",
