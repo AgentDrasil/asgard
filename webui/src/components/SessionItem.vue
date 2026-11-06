@@ -146,10 +146,6 @@ const handleArchive = () => {
       ]"
       :style="{ transform: `translateX(${swipeOffset}px)` }"
     >
-      <span class="truncate min-w-0 select-none flex-1">{{
-        session.title || t("sidebar.untitledChat")
-      }}</span>
-
       <!-- Directory Lock Indicator / Badge -->
       <span
         v-if="session.dirLock?.isWaitingForLock"
@@ -176,6 +172,9 @@ const handleArchive = () => {
           t("dirlock.uncommittedBadge")
         }}</span>
       </span>
+      <span class="truncate min-w-0 select-none flex-1">{{
+        session.title || t("sidebar.untitledChat")
+      }}</span>
 
       <div class="flex items-center gap-1 shrink-0">
         <!-- Desktop Mouse Hover Archive Button -->
