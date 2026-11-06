@@ -417,7 +417,7 @@ func TestScanLockAntiReentry(t *testing.T) {
 
 	t.Run("held ingest lock blocks scan", func(t *testing.T) {
 		lock := NewFileLock(filepath.Join(vault, ".state", "ingest.lock"))
-		require.True(t, lock.Acquire())
+		require.NoError(t, lock.Acquire())
 		t.Cleanup(lock.Release)
 
 		_, err := ScanIngestPending(context.Background(), nctx)
@@ -428,7 +428,7 @@ func TestScanLockAntiReentry(t *testing.T) {
 
 	t.Run("held absorb lock blocks scan", func(t *testing.T) {
 		lock := NewFileLock(filepath.Join(vault, ".state", "absorb.lock"))
-		require.True(t, lock.Acquire())
+		require.NoError(t, lock.Acquire())
 		t.Cleanup(lock.Release)
 
 		_, err := ScanAbsorbPending(context.Background(), nctx)
@@ -439,7 +439,7 @@ func TestScanLockAntiReentry(t *testing.T) {
 
 	t.Run("concurrent call while lock is held fails", func(t *testing.T) {
 		lock := NewFileLock(filepath.Join(vault, ".state", "ingest.lock"))
-		require.True(t, lock.Acquire())
+		require.NoError(t, lock.Acquire())
 		t.Cleanup(lock.Release)
 
 		errCh := make(chan error, 1)
@@ -459,7 +459,7 @@ func TestScanLockAntiReentry(t *testing.T) {
 
 	t.Run("released lock allows scan", func(t *testing.T) {
 		lock := NewFileLock(filepath.Join(vault, ".state", "ingest.lock"))
-		require.True(t, lock.Acquire())
+		require.NoError(t, lock.Acquire())
 		lock.Release()
 
 		_, err := ScanIngestPending(context.Background(), nctx)
@@ -518,4 +518,50 @@ func TestVaultResolutionError(t *testing.T) {
 			assert.Empty(t, out)
 		})
 	}
+}
+
+func TestFanoutSessionDirAndTmpDirHandling(t *testing.T) {
+	vault := newTestVault(t)
+	t.Setenv(envVaultDir, vault)
+
+	writeVaultFile(t, vault, "Data/Doc.pdf", "pdf-content")
+	writeVaultFile(t, vault, "01_Raw/Note.md", "# Title\nbody")
+
+	sessionDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	nctx := &pluginsdk.NodeContext{
+		SessionID:  "sess-fanout",
+		RunID:      "run-fanout",
+		SessionDir: sessionDir,
+		TmpDir:     tmpDir,
+	}
+
+	// 1. ScanIngestPending writes to both SessionDir and TmpDir
+	summary, err := ScanIngestPending(context.Background(), nctx)
+	require.NoError(t, err)
+	assert.Contains(t, summary, sessionDir)
+	assert.FileExists(t, filepath.Join(sessionDir, ingestItemsName))
+	assert.FileExists(t, filepath.Join(tmpDir, ingestItemsName))
+
+	// 2. RecordIngestSuccess reads results from SessionDir
+	resultsData := `{"item_index":0,"item":"Data/Doc.pdf","status":"SUCCEEDED","output":"done"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, ingestResultsName), []byte(resultsData), 0o644))
+	recSummary, err := RecordIngestSuccess(context.Background(), nctx)
+	require.NoError(t, err)
+	assert.Contains(t, recSummary, "succeeded=1")
+
+	// 3. ScanAbsorbPending writes to both SessionDir and TmpDir
+	absorbSummary, err := ScanAbsorbPending(context.Background(), nctx)
+	require.NoError(t, err)
+	assert.Contains(t, absorbSummary, sessionDir)
+	assert.FileExists(t, filepath.Join(sessionDir, absorbItemsName))
+	assert.FileExists(t, filepath.Join(tmpDir, absorbItemsName))
+
+	// 4. RecordAbsorbSuccess reads results from SessionDir
+	absorbResultsData := `{"item_index":0,"item":"[\"01_Raw/Note.md\"]","status":"SUCCEEDED","output":"done"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, absorbResultsName), []byte(absorbResultsData), 0o644))
+	absRecSummary, err := RecordAbsorbSuccess(context.Background(), nctx)
+	require.NoError(t, err)
+	assert.Contains(t, absRecSummary, "files_succeeded=1")
 }

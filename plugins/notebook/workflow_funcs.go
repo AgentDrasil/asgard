@@ -73,8 +73,8 @@ func ScanIngestPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 
 	lockRel := filepath.Join(vaultDir, filepath.FromSlash(ingestLockRel))
 	lock := NewFileLock(lockRel)
-	if !lock.Acquire() {
-		return "", fmt.Errorf("notebook: ingest scan aborted: lock %s is held by a live process", lockRel)
+	if err := lock.Acquire(); err != nil {
+		return "", fmt.Errorf("notebook: ingest scan aborted: %w", err)
 	}
 	defer lock.Release()
 
@@ -94,12 +94,15 @@ func ScanIngestPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 		return "", err
 	}
 
-	itemsPath := resolveTmpFilePath(nctx, ingestItemsName)
-	if err := writeLinesAtomic(itemsPath, pending); err != nil {
-		return "", fmt.Errorf("notebook: writing %s: %w", itemsPath, err)
+	primaryPath, secondaryPath := resolveFanoutWritePaths(nctx, ingestItemsName)
+	if err := writeLinesAtomic(primaryPath, pending); err != nil {
+		return "", fmt.Errorf("notebook: writing %s: %w", primaryPath, err)
+	}
+	if secondaryPath != "" {
+		_ = writeLinesAtomic(secondaryPath, pending)
 	}
 	return fmt.Sprintf("ingest scan: candidates=%d pending=%d excluded_failed=%d items_file=%s",
-		len(candidates), len(pending), excludedFailed, itemsPath), nil
+		len(candidates), len(pending), excludedFailed, primaryPath), nil
 }
 
 // RecordIngestSuccess implements `notebook.record_ingest_success`: it reads
@@ -120,7 +123,7 @@ func RecordIngestSuccess(ctx context.Context, nctx *pluginsdk.NodeContext) (stri
 		return "", err
 	}
 
-	results, err := loadFanoutResults(resolveTmpFilePath(nctx, ingestResultsName))
+	results, err := loadFanoutResults(resolveFanoutReadPath(nctx, ingestResultsName))
 	if err != nil {
 		return "", err
 	}
@@ -187,8 +190,8 @@ func ScanAbsorbPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 
 	lockRel := filepath.Join(vaultDir, filepath.FromSlash(absorbLockRel))
 	lock := NewFileLock(lockRel)
-	if !lock.Acquire() {
-		return "", fmt.Errorf("notebook: absorb scan aborted: lock %s is held by a live process", lockRel)
+	if err := lock.Acquire(); err != nil {
+		return "", fmt.Errorf("notebook: absorb scan aborted: %w", err)
 	}
 	defer lock.Release()
 
@@ -216,20 +219,24 @@ func ScanAbsorbPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 		}
 	}
 
-	itemsPath := resolveTmpFilePath(nctx, absorbItemsName)
-	if err := WriteFanoutItemsFile(groups, itemsPath); err != nil {
-		return "", fmt.Errorf("notebook: writing %s: %w", itemsPath, err)
+	primaryPath, secondaryPath := resolveFanoutWritePaths(nctx, absorbItemsName)
+	if err := WriteFanoutItemsFile(groups, primaryPath); err != nil {
+		return "", fmt.Errorf("notebook: writing %s: %w", primaryPath, err)
+	}
+	if secondaryPath != "" {
+		_ = WriteFanoutItemsFile(groups, secondaryPath)
 	}
 	return fmt.Sprintf("absorb scan: candidates=%d pending=%d excluded_failed=%d groups=%d journal_groups=%d items_file=%s",
-		len(candidates), len(pending), excludedFailed, len(groups), journalGroups, itemsPath), nil
+		len(candidates), len(pending), excludedFailed, len(groups), journalGroups, primaryPath), nil
 }
 
 // RecordAbsorbSuccess implements `notebook.record_absorb_success`: it reads
-// the fan-out results from `${tmp_dir}/absorb_results.jsonl` (a missing file
-// is tolerated as an empty result set). For SUCCEEDED groups it records
-// SHA-1 checkpoints of every contained Raw file into
-// `.state/absorb_state.yaml`; for FAILED groups it increments each file's
-// fail_count. It returns the number of successfully settled files.
+// the fan-out results from `${session_dir}/absorb_results.jsonl` or
+// `${tmp_dir}/absorb_results.jsonl` (a missing file is tolerated as an empty
+// result set). For SUCCEEDED groups it records SHA-1 checkpoints of every
+// contained Raw file into `.state/absorb_state.yaml`; for FAILED groups it
+// increments each file's fail_count. It returns the number of successfully
+// settled files.
 //
 // Note on concurrency: state settlement relies on the workflow engine's
 // single-instance execution constraint per workflow to avoid concurrent
@@ -243,7 +250,7 @@ func RecordAbsorbSuccess(ctx context.Context, nctx *pluginsdk.NodeContext) (stri
 		return "", err
 	}
 
-	results, err := loadFanoutResults(resolveTmpFilePath(nctx, absorbResultsName))
+	results, err := loadFanoutResults(resolveFanoutReadPath(nctx, absorbResultsName))
 	if err != nil {
 		return "", err
 	}
@@ -327,6 +334,60 @@ func resolveVaultDir(nctx *pluginsdk.NodeContext) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("notebook: vault dir unresolved: set %s or configure an absolute workflow run_dir", envVaultDir)
+}
+
+// resolveFanoutWritePaths determines where fan-out input files should be
+// written. If SessionDir is set, it writes to SessionDir (and copies to TmpDir
+// if TmpDir is also set and distinct), ensuring workflows configured with either
+// ${session_dir} or ${tmp_dir} find their items.
+func resolveFanoutWritePaths(nctx *pluginsdk.NodeContext, name string) (primary, secondary string) {
+	if nctx == nil {
+		return filepath.Join(os.TempDir(), name), ""
+	}
+	if nctx.SessionDir != "" {
+		primary = filepath.Join(nctx.SessionDir, name)
+		if nctx.TmpDir != "" && nctx.TmpDir != nctx.SessionDir {
+			secondary = filepath.Join(nctx.TmpDir, name)
+		}
+		return primary, secondary
+	}
+	if nctx.TmpDir != "" {
+		return filepath.Join(nctx.TmpDir, name), ""
+	}
+	if nctx.RunID != "" {
+		return filepath.Join(os.TempDir(), nctx.RunID+"-"+name), ""
+	}
+	return filepath.Join(os.TempDir(), name), ""
+}
+
+// resolveFanoutReadPath checks for fan-out results in SessionDir first, then
+// TmpDir, falling back to whichever is configured if the file does not exist yet.
+func resolveFanoutReadPath(nctx *pluginsdk.NodeContext, name string) string {
+	if nctx == nil {
+		return filepath.Join(os.TempDir(), name)
+	}
+	if nctx.SessionDir != "" {
+		p := filepath.Join(nctx.SessionDir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if nctx.TmpDir != "" {
+		p := filepath.Join(nctx.TmpDir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if nctx.SessionDir != "" {
+		return filepath.Join(nctx.SessionDir, name)
+	}
+	if nctx.TmpDir != "" {
+		return filepath.Join(nctx.TmpDir, name)
+	}
+	if nctx.RunID != "" {
+		return filepath.Join(os.TempDir(), nctx.RunID+"-"+name)
+	}
+	return filepath.Join(os.TempDir(), name)
 }
 
 // resolveTmpFilePath joins name with the node's tmp dir, falling back to a

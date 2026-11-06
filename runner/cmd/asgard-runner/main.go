@@ -15,8 +15,10 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/logger"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/pkg/version"
+	_ "github.com/AgentDrasil/asgard/plugins/notebook"
 	"github.com/AgentDrasil/asgard/runner/lib/config"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
+	"github.com/AgentDrasil/asgard/runner/lib/cron"
 	"github.com/AgentDrasil/asgard/runner/lib/exec"
 	"github.com/AgentDrasil/asgard/runner/lib/sandbox"
 	"github.com/AgentDrasil/asgard/runner/lib/service"
@@ -83,6 +85,19 @@ func run() error {
 		Ready: sb.Ready, SandboxConf: sb.Conf, AllowUnsandboxed: boot.AllowUnsandboxedCommands,
 	})
 	defer svc.Close() // no command outlives the runner
+
+	cronMgr, err := cron.New(cron.Options{
+		NodeID:           nodeID,
+		Remote:           remote,
+		Callbacks:        func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() },
+		Conf:             sb.Conf,
+		AllowUnsandboxed: boot.AllowUnsandboxedCommands,
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to initialize runner cron manager")
+	} else {
+		defer cronMgr.Shutdown()
+	}
 	client = conn.New(conn.Options{
 		Executor:      executor,
 		Service:       svc,

@@ -343,12 +343,12 @@ func TestWorkflowCronManager_RunnerIDRules(t *testing.T) {
 		m.Reload([]*agentspec.Agent{write(t, "runner_id: r1\n")})
 		assert.Equal(t, []string{"/wf"}, jobs(m))
 	})
-	t.Run("runner agent runs on its own runner without runner_id", func(t *testing.T) {
+	t.Run("runner agent is runner-bound and not scheduled by backend", func(t *testing.T) {
 		m := newTestCronManager(t, nil, nil)
 		a := write(t, "")
 		a.NodeID = "r2"
 		m.Reload([]*agentspec.Agent{a})
-		assert.Equal(t, []string{"r2/wf"}, jobs(m))
+		assert.Empty(t, jobs(m))
 	})
 	t.Run("runner agent naming another runner is rejected", func(t *testing.T) {
 		m := newTestCronManager(t, nil, nil)

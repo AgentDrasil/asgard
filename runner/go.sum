@@ -150,8 +150,6 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
-github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e h1:lfcvhMAaeaArZNw6PAbjXGxBompX8H8SGwAyUHh3Pes=
-github.com/elmhuangyu/configs v0.0.0-20261012235116-42931e514f2e/go.mod h1:QJ5Oo6dGU6bXtdS6GjXxvay9/iBQJPRsX4VK2gisyKw=
 github.com/elmhuangyu/configs v0.0.0-20261104153437-dcca3a415c69 h1:T64lepvNPWUtCuQQcd31nvHezeQgaS0/8Jc/FInoLDo=
 github.com/elmhuangyu/configs v0.0.0-20261104153437-dcca3a415c69/go.mod h1:QJ5Oo6dGU6bXtdS6GjXxvay9/iBQJPRsX4VK2gisyKw=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=

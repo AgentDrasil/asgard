@@ -13,7 +13,10 @@ require (
 	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0
+	github.com/AgentDrasil/asgard/plugins/notebook v0.0.0-00010101000000-000000000000
 	github.com/creack/pty v1.1.24
+	github.com/go-co-op/gocron/v2 v2.23.0
+	github.com/goccy/go-yaml v1.19.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/yamux v0.1.2
 	github.com/moznion/go-optional v0.13.0
@@ -89,7 +92,6 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/getsops/gopgagent v0.0.0-20241224165529-7044f28e491e // indirect
 	github.com/getsops/sops/v3 v3.13.3 // indirect
-	github.com/go-co-op/gocron/v2 v2.23.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/go-git/go-git/v5 v5.19.3 // indirect
@@ -97,7 +99,6 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect

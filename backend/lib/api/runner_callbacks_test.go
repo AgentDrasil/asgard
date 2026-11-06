@@ -31,6 +31,7 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/metrics"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
+	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
 type testNodeKey struct{}
@@ -710,5 +711,101 @@ func TestCallbackService_GetUserProxyKeys(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	})
+}
+
+func TestCallbackWorkflowExecutionMethods(t *testing.T) {
+	t.Parallel()
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	repo := dbmodels.NewSessionRepository(testDB)
+	wfRepo := dbmodels.NewWorkflowRunRepository(testDB)
+	events := NewSessionEventHubWithCapacity(10)
+	t.Cleanup(events.Close)
+
+	server := &Server{
+		repo:            repo,
+		workflowRunRepo: wfRepo,
+		eventHub:        events,
+		ctx:             context.Background(),
+	}
+	svc := newCallbackService(server, nil)
+	svc.nodeID = func(ctx context.Context) (string, bool) {
+		id, ok := ctx.Value(testNodeKey{}).(string)
+		return id, ok
+	}
+	ctx := withTestNode(context.Background(), "runner-1")
+
+	t.Run("InitWorkflowSession", func(t *testing.T) {
+		resp, err := svc.InitWorkflowSession(ctx, &runnerpb.InitWorkflowSessionRequest{
+			SessionId:    "wf-cron-r1-test",
+			RunnerId:     "runner-1",
+			AgentId:      "notebook-wf",
+			WorkflowName: "Notebook Pipeline",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetOk())
+
+		sess, err := repo.GetSession("wf-cron-r1-test")
+		require.NoError(t, err)
+		require.NotNil(t, sess)
+		assert.Equal(t, "runner-1", sess.RunnerNodeID)
+		assert.Equal(t, "notebook-wf", sess.CurrentAgent)
+		assert.Equal(t, "Scheduled: Notebook Pipeline", sess.Title)
+	})
+
+	t.Run("ReportWorkflowEvent", func(t *testing.T) {
+		resp, err := svc.ReportWorkflowEvent(ctx, &runnerpb.ReportWorkflowEventRequest{
+			SessionId: "wf-cron-r1-test",
+			RunnerId:  "runner-1",
+			Workflow:  "notebook-wf",
+			EventType: string(workflow.EventNodeFinished),
+			NodeId:    "scan_ingest",
+			NodeType:  string(workflowspec.NodeTypeFunction),
+			Status:    string(workflowspec.StatusSucceeded),
+			Output:    "candidates=5 pending=2",
+			AgentName: "Notebook Pipeline",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetOk())
+	})
+
+	t.Run("WorkflowRunStart and Settle", func(t *testing.T) {
+		startResp, err := svc.WorkflowRunStart(ctx, &runnerpb.WorkflowRunStartRequest{
+			RunId:     "run-wf-1",
+			SessionId: "wf-cron-r1-test",
+			Status:    "RUNNING",
+			DagSpec:   "name: test",
+			RunDir:    "/workspace",
+		})
+		require.NoError(t, err)
+		assert.True(t, startResp.GetOk())
+
+		row, err := wfRepo.GetRunRow("run-wf-1")
+		require.NoError(t, err)
+		require.NotNil(t, row)
+		assert.Equal(t, dbmodels.WorkflowStatusRunning, row.Status)
+
+		settleResp, err := svc.WorkflowRunSettle(ctx, &runnerpb.WorkflowRunSettleRequest{
+			RunId:          "run-wf-1",
+			Status:         "COMPLETED",
+			NodeStatesJson: []byte(`{"scan_ingest":{"status":"SUCCEEDED"}}`),
+		})
+		require.NoError(t, err)
+		assert.True(t, settleResp.GetOk())
+
+		row, err = wfRepo.GetRunRow("run-wf-1")
+		require.NoError(t, err)
+		require.NotNil(t, row)
+		assert.Equal(t, dbmodels.WorkflowStatusCompleted, row.Status)
+		assert.Contains(t, row.NodeStates, "scan_ingest")
+	})
+
+	t.Run("unauthenticated rejected", func(t *testing.T) {
+		_, err := svc.InitWorkflowSession(context.Background(), &runnerpb.InitWorkflowSessionRequest{
+			SessionId: "wf-cron-anon",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
 	})
 }

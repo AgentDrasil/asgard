@@ -84,6 +84,22 @@ func (f *fakeCallbacks) GetUserProxyKeys(_ context.Context, req *runnerpb.GetUse
 	return &runnerpb.GetUserProxyKeysResponse{Keys: f.proxyKeys}, nil
 }
 
+func (f *fakeCallbacks) InitWorkflowSession(_ context.Context, _ *runnerpb.InitWorkflowSessionRequest, _ ...grpc.CallOption) (*runnerpb.InitWorkflowSessionResponse, error) {
+	return &runnerpb.InitWorkflowSessionResponse{}, nil
+}
+
+func (f *fakeCallbacks) ReportWorkflowEvent(_ context.Context, _ *runnerpb.ReportWorkflowEventRequest, _ ...grpc.CallOption) (*runnerpb.ReportWorkflowEventResponse, error) {
+	return &runnerpb.ReportWorkflowEventResponse{}, nil
+}
+
+func (f *fakeCallbacks) WorkflowRunStart(_ context.Context, _ *runnerpb.WorkflowRunStartRequest, _ ...grpc.CallOption) (*runnerpb.WorkflowRunStartResponse, error) {
+	return &runnerpb.WorkflowRunStartResponse{}, nil
+}
+
+func (f *fakeCallbacks) WorkflowRunSettle(_ context.Context, _ *runnerpb.WorkflowRunSettleRequest, _ ...grpc.CallOption) (*runnerpb.WorkflowRunSettleResponse, error) {
+	return &runnerpb.WorkflowRunSettleResponse{}, nil
+}
+
 func (f *fakeCallbacks) askCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -815,27 +815,10 @@ func (s *Server) handleReloadManageProxy(w http.ResponseWriter, r *http.Request)
 	writeStatusOK(w, "proxy config reloaded")
 }
 
-// cronAgents extends the global agents with the agents owned by the allowed
-// runners, so their scheduled workflows run too.
+// cronAgents returns the agents eligible for backend cron scheduling (global
+// agents; runner-bound agents are scheduled and triggered on their own runners).
 func (s *Server) cronAgents(global []*agentspec.Agent) []*agentspec.Agent {
-	src, ok := s.agentSource.(agentsForRunner)
-	if !ok || s.conf == nil {
-		return global
-	}
-	all := append([]*agentspec.Agent(nil), global...)
-	for _, node := range s.conf.AllowedRunnerNodes() {
-		list, err := src.AgentsFor(node)
-		if err != nil {
-			log.Warn().Err(err).Str("runner", node).Msg("runner agents unavailable for cron scheduling")
-			continue
-		}
-		for _, a := range list {
-			if a.NodeID != "" {
-				all = append(all, a)
-			}
-		}
-	}
-	return all
+	return global
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, v any) {

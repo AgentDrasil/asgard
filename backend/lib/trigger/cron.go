@@ -106,6 +106,11 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 		if a == nil || a.Config.Type != "workflow" || a.WorkflowPath == "" {
 			continue
 		}
+		// Filter out runner-bound workflow agents: their schedules are initiated
+		// and executed locally on the runner, not by the backend.
+		if a.NodeID != "" {
+			continue
+		}
 		defn, err := workflowspec.LoadDefinition(a.WorkflowPath)
 		if err != nil {
 			log.Warn().Err(err).Str("agent", a.Config.ID).Msg("failed to load workflow definition for cron scheduling")

@@ -318,6 +318,11 @@ service AgentCallbackService {
   rpc FindPeer(FindPeerRequest) returns (FindPeerResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
+  // Runner-initiated workflow execution callbacks
+  rpc InitWorkflowSession(InitWorkflowSessionRequest) returns (InitWorkflowSessionResponse);
+  rpc ReportWorkflowEvent(ReportWorkflowEventRequest) returns (ReportWorkflowEventResponse);
+  rpc WorkflowRunStart(WorkflowRunStartRequest) returns (WorkflowRunStartResponse);
+  rpc WorkflowRunSettle(WorkflowRunSettleRequest) returns (WorkflowRunSettleResponse);
 }
 
 message CallMeta {
@@ -387,6 +392,64 @@ message GetUserProxyKeysRequest {
 
 message GetUserProxyKeysResponse {
   map<string, string> keys = 1;
+}
+
+message InitWorkflowSessionRequest {
+  string session_id = 1;
+  string runner_id = 2;
+  string agent_id = 3;
+  string workflow_name = 4;
+}
+message InitWorkflowSessionResponse {
+  bool ok = 1;
+}
+
+message ReportWorkflowEventRequest {
+  string session_id = 1;
+  string runner_id = 2;
+  string workflow = 3;
+  string event_type = 4;
+  string node_id = 5;
+  string node_type = 6;
+  string agent_id = 7;
+  string status = 8;
+  string skip_reason = 9;
+  string message = 10;
+  string entry_type = 11;
+  bytes metadata_json = 12;
+  string message_id = 13;
+  repeated string artifacts = 14;
+  string output = 15;
+  string agent_name = 16;
+  string cli = 17;
+  string model = 18;
+  int64 timestamp_unix_nano = 19;
+}
+message ReportWorkflowEventResponse {
+  bool ok = 1;
+}
+
+message WorkflowRunStartRequest {
+  string run_id = 1;
+  string session_id = 2;
+  string status = 3;
+  string dag_spec = 4;
+  string run_dir = 5;
+  string input = 6;
+  string parent_run_id = 7;
+  bool allow_cross_session = 8;
+}
+message WorkflowRunStartResponse {
+  bool ok = 1;
+}
+
+message WorkflowRunSettleRequest {
+  string run_id = 1;
+  string status = 2;
+  bytes node_states_json = 3;
+}
+message WorkflowRunSettleResponse {
+  bool ok = 1;
 }
 
 // ---------------------------------------------------------------------------

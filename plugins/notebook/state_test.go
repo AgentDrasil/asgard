@@ -292,7 +292,7 @@ func TestFileLockLifecycle(t *testing.T) {
 	lockFile := filepath.Join(t.TempDir(), ".state", "absorb.lock")
 
 	lock := NewFileLock(lockFile)
-	assert.True(t, lock.Acquire())
+	assert.NoError(t, lock.Acquire())
 	assert.True(t, lock.Acquired())
 
 	data, err := os.ReadFile(lockFile)
@@ -303,7 +303,8 @@ func TestFileLockLifecycle(t *testing.T) {
 		t.Parallel()
 
 		rival := NewFileLock(lockFile)
-		assert.False(t, rival.Acquire())
+		err := rival.Acquire()
+		assert.ErrorIs(t, err, ErrLockHeld)
 		assert.False(t, rival.Acquired())
 	})
 
@@ -312,12 +313,12 @@ func TestFileLockLifecycle(t *testing.T) {
 
 		other := filepath.Join(t.TempDir(), "other.lock")
 		first := NewFileLock(other)
-		require.True(t, first.Acquire())
+		require.NoError(t, first.Acquire())
 		first.Release()
 		assert.False(t, first.Acquired())
 
 		second := NewFileLock(other)
-		assert.True(t, second.Acquire())
+		assert.NoError(t, second.Acquire())
 		assert.FileExists(t, other)
 	})
 
@@ -329,11 +330,24 @@ func TestFileLockLifecycle(t *testing.T) {
 		assert.NoFileExists(t, fresh.lockFile)
 	})
 
+	t.Run("mkdir error returns explicit error not ErrLockHeld", func(t *testing.T) {
+		t.Parallel()
+
+		// Place a regular file where the lock directory would need to be created.
+		dirTarget := filepath.Join(t.TempDir(), "file-blocking-dir")
+		require.NoError(t, os.WriteFile(dirTarget, []byte("blocker"), 0o644))
+		blockedLock := NewFileLock(filepath.Join(dirTarget, "sub", "test.lock"))
+		err := blockedLock.Acquire()
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrLockHeld)
+		assert.ErrorContains(t, err, "creating lock dir")
+	})
+
 	lock.Release()
 	assert.NoFileExists(t, lockFile)
 
 	reacquired := NewFileLock(lockFile)
-	assert.True(t, reacquired.Acquire())
+	assert.NoError(t, reacquired.Acquire())
 }
 
 func TestFileLockTakesOverStaleLock(t *testing.T) {
@@ -365,7 +379,7 @@ func TestFileLockTakesOverStaleLock(t *testing.T) {
 			require.NoError(t, os.WriteFile(lockFile, []byte(tt.content), 0o644))
 
 			lock := NewFileLock(lockFile)
-			assert.True(t, lock.Acquire(), "stale lock should be taken over")
+			assert.NoError(t, lock.Acquire(), "stale lock should be taken over")
 
 			data, err := os.ReadFile(lockFile)
 			require.NoError(t, err)

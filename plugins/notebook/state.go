@@ -255,6 +255,9 @@ func RecordFailure(path string, state StateMap) {
 	}
 }
 
+// ErrLockHeld reports that a live process already holds the file lock.
+var ErrLockHeld = errors.New("lock is held by a live process")
+
 // FileLock is a process-aware PID file lock preventing concurrent double
 // runs. Locks held by dead processes are detected and taken over; malformed
 // lock files are treated as stale.
@@ -268,12 +271,13 @@ func NewFileLock(lockFile string) *FileLock {
 	return &FileLock{lockFile: lockFile}
 }
 
-// Acquire attempts to take the lock, returning false when a live process
-// currently holds it. It uses O_CREATE|O_EXCL to ensure atomic, race-free acquisition.
-func (l *FileLock) Acquire() bool {
+// Acquire attempts to take the lock, returning nil on success, ErrLockHeld when
+// a live process currently holds it, or an error if directory creation or file
+// operations fail. It uses O_CREATE|O_EXCL to ensure atomic, race-free acquisition.
+func (l *FileLock) Acquire() error {
 	dir := filepath.Dir(l.lockFile)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return false
+		return fmt.Errorf("creating lock dir: %w", err)
 	}
 	pidContent := []byte(strconv.Itoa(os.Getpid()) + "\n")
 	for attempts := 0; attempts < 2; attempts++ {
@@ -283,13 +287,13 @@ func (l *FileLock) Acquire() bool {
 			_ = f.Close()
 			if writeErr != nil {
 				_ = os.Remove(l.lockFile)
-				return false
+				return fmt.Errorf("writing lock file: %w", writeErr)
 			}
 			l.acquired = true
-			return true
+			return nil
 		}
 		if !os.IsExist(err) {
-			return false
+			return fmt.Errorf("opening lock file: %w", err)
 		}
 		// Lock file exists: check if holding PID is still alive.
 		data, readErr := os.ReadFile(l.lockFile)
@@ -299,12 +303,12 @@ func (l *FileLock) Acquire() bool {
 		}
 		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 		if parseErr == nil && isPIDRunning(pid) {
-			return false
+			return fmt.Errorf("%w (PID %d)", ErrLockHeld, pid)
 		}
 		// Stale or malformed lock: remove and retry
 		_ = os.Remove(l.lockFile)
 	}
-	return false
+	return ErrLockHeld
 }
 
 // Release removes the lock file if this instance holds the lock. Removal is

@@ -541,6 +541,38 @@ func (p callbackProxy) GetUserProxyKeys(ctx context.Context, req *runnerpb.GetUs
 	return cb.GetUserProxyKeys(ctx, req)
 }
 
+func (p callbackProxy) InitWorkflowSession(ctx context.Context, req *runnerpb.InitWorkflowSessionRequest) (*runnerpb.InitWorkflowSessionResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.InitWorkflowSession(ctx, req)
+}
+
+func (p callbackProxy) ReportWorkflowEvent(ctx context.Context, req *runnerpb.ReportWorkflowEventRequest) (*runnerpb.ReportWorkflowEventResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.ReportWorkflowEvent(ctx, req)
+}
+
+func (p callbackProxy) WorkflowRunStart(ctx context.Context, req *runnerpb.WorkflowRunStartRequest) (*runnerpb.WorkflowRunStartResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.WorkflowRunStart(ctx, req)
+}
+
+func (p callbackProxy) WorkflowRunSettle(ctx context.Context, req *runnerpb.WorkflowRunSettleRequest) (*runnerpb.WorkflowRunSettleResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.WorkflowRunSettle(ctx, req)
+}
+
 func (h *Hub) currentCallbacks() runnerpb.AgentCallbackServiceServer {
 	h.mu.Lock()
 	defer h.mu.Unlock()
