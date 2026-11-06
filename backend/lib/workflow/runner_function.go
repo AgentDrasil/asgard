@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 
@@ -25,6 +27,13 @@ func (r *functionRunner) Supports(t workflowspec.NodeType) bool {
 }
 
 func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+	if fr, ok := ctx.Value(fsCtxKey{}).(runnerfs.FunctionRunner); ok {
+		return r.runOnRunner(ctx, nctx, fr)
+	}
+	return r.runLocal(ctx, nctx)
+}
+
+func (r *functionRunner) runLocal(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
 	node := nctx.Node
 
 	ctx, cancel := withNodeTimeout(ctx, node)
@@ -60,6 +69,68 @@ func (r *functionRunner) Run(ctx context.Context, nctx *NodeContext) (*workflows
 		Status:   workflowspec.StatusSucceeded,
 		ExitCode: 0,
 		Output:   output,
+	}, nil
+}
+
+func (r *functionRunner) runOnRunner(ctx context.Context, nctx *NodeContext, fr runnerfs.FunctionRunner) (*workflowspec.NodeResult, error) {
+	node := nctx.Node
+
+	callCtx, cancel := ctx, context.CancelFunc(func() {})
+	if d := node.TimeoutDuration(); d > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, d+remoteTimeoutMargin)
+	}
+	defer cancel()
+
+	spec := runnerfs.FunctionSpec{
+		FunctionName:               node.Function,
+		NodeID:                     node.ID,
+		RunID:                      nctx.RunID,
+		WorkflowRunDirs:            nctx.WorkflowRunDirs,
+		WorkflowMountDirsReadOnly:  nctx.WorkflowMountDirs.ReadOnly,
+		WorkflowMountDirsReadWrite: nctx.WorkflowMountDirs.ReadWrite,
+		Timeout:                    node.TimeoutDuration(),
+		Iteration:                  nctx.Iteration,
+		RunDir:                     nctx.RunDir,
+		AllowCrossSession:          nctx.AllowCrossSession,
+		UserSubject:                nctx.UserSubject,
+		Input:                      nctx.Input,
+	}
+
+	res, err := fr.RunFunction(callCtx, spec)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return &workflowspec.NodeResult{
+				Status:   workflowspec.StatusFailed,
+				ExitCode: 1,
+				Error:    fmt.Errorf("node %s: function %q interrupted: %w", node.ID, node.Function, err),
+			}, nil
+		}
+		return &workflowspec.NodeResult{
+			Status:   workflowspec.StatusFailed,
+			ExitCode: 1,
+			Error:    fmt.Errorf("node %s: function %q failed on runner: %w", node.ID, node.Function, err),
+		}, nil
+	}
+
+	if res.ExitCode != 0 {
+		var err error
+		if res.Error != "" {
+			err = errors.New(res.Error)
+		} else {
+			err = fmt.Errorf("node %s: function %q failed with exit code %d", node.ID, node.Function, res.ExitCode)
+		}
+		return &workflowspec.NodeResult{
+			Status:   workflowspec.StatusFailed,
+			ExitCode: res.ExitCode,
+			Output:   res.Output,
+			Error:    err,
+		}, nil
+	}
+
+	return &workflowspec.NodeResult{
+		Status:   workflowspec.StatusSucceeded,
+		ExitCode: 0,
+		Output:   res.Output,
 	}, nil
 }
 

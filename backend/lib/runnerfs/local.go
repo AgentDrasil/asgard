@@ -62,6 +62,12 @@ func (l Local) checkChat() error {
 
 func (l Local) base(ns string) string { return agents.GetSessionScopedBaseDir(ns, l.ChatID) }
 
+// SessionDir returns the host session directory for the chat.
+func (l Local) SessionDir() string { return l.base("session") }
+
+// TmpDir returns the host temporary directory for the chat.
+func (l Local) TmpDir() string { return l.base("tmp") }
+
 // roots lists the absolute directories paths may lie beneath: the chat's own
 // tmp/session dirs and the allowed run dirs. The "/tmp"-style tokens of
 // IsAllowedDir are not expanded to the shared host roots, which would reach

@@ -485,6 +485,8 @@ service RunnerService {
   // RunCommand executes a workflow command node on the runner (optionally in
   // the bwrap + fakebashd sandbox, which is configured by the runner).
   rpc RunCommand(RunCommandRequest) returns (stream RunCommandFrame);
+  // RunFunction executes a workflow function node on the runner.
+  rpc RunFunction(RunFunctionRequest) returns (RunFunctionResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc QueryQuota(QueryQuotaRequest) returns (QueryQuotaResponse);
 }
@@ -851,6 +853,29 @@ message RunCommandFrame {
     StreamData stderr = 2;
     RunCommandExit exit = 3;
   }
+}
+
+message RunFunctionRequest {
+  string chat_id = 1;
+  string function_name = 2;
+  string node_id = 3;
+  string run_id = 4;
+  repeated string workflow_run_dirs = 5;
+  repeated string workflow_mount_dirs_readonly = 6;
+  repeated string workflow_mount_dirs_readwrite = 7;
+  int32 timeout_seconds = 8;
+  string request_id = 9;
+  int32 iteration = 10;
+  DirRef run_dir = 11;
+  bool allow_cross_session = 12;
+  string user_subject = 13;
+  string input = 14;
+}
+
+message RunFunctionResponse {
+  int32 exit_code = 1;
+  string output = 2;
+  string error = 3;
 }
 
 // OrphanTmpSweep mirrors dbmodels.CleanOrphanTmpFiles: recursively remove
