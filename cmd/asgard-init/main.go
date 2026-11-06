@@ -98,11 +98,12 @@ func run(args []string) (err error) {
 		gcpKmsFlag           = fs.String("gcp-kms", "", "Google Cloud KMS key resource ID for SOPS")
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
 		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
-		addNewRunnerFlag     = fs.String("add-new-runner", "", "Add a new runner to an existing deployment")
+		addNewRunnerFlag     = fs.Bool("add-new-runner", false, "Add a new runner to an existing deployment (interactive; optionally pass the runner name: --add-new-runner <name>)")
 		gcpSAKeyFlag         = fs.String("gcp-sa-key", "", "GCP Service Account JSON key file path for GCP KMS")
 		resumeFlag           = fs.Bool("resume", false, "Resume deployment setup from saved state")
 	)
 
+	args, addRunnerName := extractAddRunnerName(args)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -126,11 +127,38 @@ func run(args []string) (err error) {
 	}
 
 	// Mode: --add-new-runner
-	if *addNewRunnerFlag != "" {
-		runnerName := *addNewRunnerFlag
+	if *addNewRunnerFlag {
+		runnerName := addRunnerName
 		var mounts []string
 		if *mountFlag != "" {
 			mounts = append(mounts, *mountFlag)
+		}
+		if runnerName == "" || (*mountFlag == "" && !*nonInteractiveFlag) {
+			if *nonInteractiveFlag {
+				return fmt.Errorf("--add-new-runner requires a runner name in non-interactive mode")
+			}
+			if defaultStdinReader == nil {
+				defaultStdinReader = bufio.NewReader(os.Stdin)
+			}
+			reader := defaultStdinReader
+			if runnerName == "" {
+				runnerName, err = promptUser(reader, "New runner name", "")
+				if err != nil {
+					return err
+				}
+				runnerName = strings.TrimSpace(runnerName)
+			}
+			if *mountFlag == "" {
+				m, err := promptUser(reader, "Host workspace directory to mount into runner (optional, e.g. /home/user/src:/workspace)", "")
+				if err != nil {
+					return err
+				}
+				for _, part := range strings.Split(m, ",") {
+					if t := strings.TrimSpace(part); t != "" {
+						mounts = append(mounts, t)
+					}
+				}
+			}
 		}
 		if err := AddRunner(targetDir, runnerName, mounts); err != nil {
 			return err
@@ -1091,4 +1119,29 @@ func printAddRunnerSuccess(dir, runnerName string) {
 	fmt.Printf("  3. Log in to agy / claude on the new runner:\n")
 	fmt.Printf("     %sdocker exec -it asgard-%s aw agy login <alias>%s\n", colorCyan, runnerName, colorReset)
 	fmt.Printf("     %sdocker exec -it asgard-%s aw claude login <alias>%s\n\n", colorCyan, runnerName, colorReset)
+}
+
+// extractAddRunnerName supports both `--add-new-runner` (interactive) and the
+// legacy `--add-new-runner <name>` / `--add-new-runner=<name>` forms. It
+// returns the args rewritten with a plain boolean flag plus the runner name.
+func extractAddRunnerName(args []string) ([]string, string) {
+	var out []string
+	name := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--add-new-runner" || a == "-add-new-runner":
+			out = append(out, "--add-new-runner")
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				name = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--add-new-runner=") || strings.HasPrefix(a, "-add-new-runner="):
+			out = append(out, "--add-new-runner")
+			name = a[strings.Index(a, "=")+1:]
+		default:
+			out = append(out, a)
+		}
+	}
+	return out, name
 }
