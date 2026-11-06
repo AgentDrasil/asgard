@@ -111,6 +111,7 @@ func (f *bindingFixture) prompts() []string {
 func setupBindingFixture(t *testing.T) *bindingFixture {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ASGARD_SESSION_DATA", t.TempDir())
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
 	repo := dbmodels.NewSessionRepository(testDB)

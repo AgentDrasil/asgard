@@ -21,6 +21,7 @@ const testChat = "chat1"
 func confinedFS(t *testing.T) (fs Local, ws, outside string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ASGARD_SESSION_DATA", t.TempDir())
 	ws = filepath.Join(t.TempDir(), "ws")
 	outside = t.TempDir()
 	require.NoError(t, os.MkdirAll(ws, 0o755))

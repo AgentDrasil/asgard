@@ -158,6 +158,8 @@ func TestBuildArgs(t *testing.T) {
 
 	t.Setenv("HOME", tmpDir)
 	home := tmpDir
+	t.Setenv("ASGARD_ROOT", filepath.Join(tmpDir, "asgard"))
+	t.Setenv("ASGARD_SESSION_DATA", filepath.Join(tmpDir, "asgard", "session-data"))
 
 	// Create directories that buildArgsForAgent expects to exist under HOME
 	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh", "asgard/config"} {
@@ -457,6 +459,8 @@ func TestCommandForCommandExec(t *testing.T) {
 func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("ASGARD_ROOT", filepath.Join(tmpDir, "asgard"))
+	t.Setenv("ASGARD_SESSION_DATA", filepath.Join(tmpDir, "asgard", "session-data"))
 
 	// Mode A: Fallback layout (session-data is under HOME)
 	// 1. allowCrossSession = false (default): masked with tmpfs beneath HOME bind

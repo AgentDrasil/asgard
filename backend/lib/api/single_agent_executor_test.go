@@ -281,6 +281,7 @@ func TestSingleAgentExecutor_Attachments(t *testing.T) {
 func TestSingleAgentExecutor_Execute_TmpDirPreCreation(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
+	t.Setenv("ASGARD_SESSION_DATA", t.TempDir())
 
 	testDB := db.NewDBForTest(t)
 	err := dbmodels.AutoMigrate(testDB)

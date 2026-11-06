@@ -159,6 +159,7 @@ func TestSessionAttachmentsUpload_Sanitization(t *testing.T) {
 func TestSessionAttachmentsUpload_AtomicDeduplication(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
+	t.Setenv("ASGARD_SESSION_DATA", t.TempDir())
 
 	server, repo := setupAttachmentTestServer(t)
 
