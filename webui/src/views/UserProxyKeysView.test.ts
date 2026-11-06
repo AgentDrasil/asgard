@@ -32,6 +32,7 @@ describe("UserProxyKeysView.vue", () => {
     mockPush.mockReset();
     mockBack.mockReset();
     setLocale("en");
+    vi.spyOn(api, "getBackendConfig").mockResolvedValue({ proxy_envs: [] });
     vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([
       { key_name: "OPENAI_API_KEY", updated_at: new Date().toISOString() },
     ]);

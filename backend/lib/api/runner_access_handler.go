@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -51,6 +52,9 @@ func (s *Server) trackUser(r *http.Request) {
 		delete(s.users.seen, u.Subject)
 		s.users.mu.Unlock()
 	}
+	if u.Picture != "" && s.auth != nil {
+		_ = s.auth.EnsureAvatar(r.Context(), u.Subject, u.Picture)
+	}
 }
 
 // requestSubject returns the authenticated subject of r, or "".
@@ -97,9 +101,10 @@ type ManageRunnerResponse struct {
 
 // ManageUserResponse is one known user in GET /api/manage/runners.
 type ManageUserResponse struct {
-	Subject string `json:"subject"`
-	Name    string `json:"name,omitempty"`
-	Email   string `json:"email,omitempty"`
+	Subject   string `json:"subject"`
+	Name      string `json:"name,omitempty"`
+	Email     string `json:"email,omitempty"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
 // ManageRunnersResponse is the body of GET /api/manage/runners.
@@ -141,7 +146,11 @@ func (s *Server) handleManageRunners(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, u := range users {
-		resp.Users = append(resp.Users, ManageUserResponse{Subject: u.Subject, Name: u.Name, Email: u.Email})
+		item := ManageUserResponse{Subject: u.Subject, Name: u.Name, Email: u.Email}
+		if s.auth != nil && s.auth.HasAvatar(u.Subject) {
+			item.AvatarURL = "/api/manage/users/" + url.PathEscape(u.Subject) + "/avatar"
+		}
+		resp.Users = append(resp.Users, item)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

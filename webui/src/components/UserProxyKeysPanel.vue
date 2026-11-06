@@ -9,6 +9,7 @@ import {
   type UserProxyKeyMeta,
 } from "../lib/api";
 import { useToast } from "../composables/useToast";
+import { useProxyEnvs } from "../composables/useProxyEnvs";
 import { formatRelativeTime } from "../i18n/timeUtils";
 
 const KEY_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -33,6 +34,7 @@ const PROTECTED_KEYS = new Set([
 
 const { t } = useI18n();
 const toast = useToast();
+const { proxyEnvs, load: loadProxyEnvs } = useProxyEnvs();
 
 const keys = ref<UserProxyKeyMeta[]>([]);
 const loading = ref(false);
@@ -72,6 +74,7 @@ const fetchKeys = async () => {
 
 onMounted(() => {
   void fetchKeys();
+  void loadProxyEnvs();
 });
 
 const openAddModal = () => {
@@ -80,6 +83,7 @@ const openAddModal = () => {
   formKeyValue.value = "";
   showSecret.value = false;
   isModalOpen.value = true;
+  void loadProxyEnvs();
 };
 
 const openEditModal = (keyName: string) => {
@@ -188,7 +192,9 @@ const handleDelete = async () => {
           data-testid="proxy-key-row"
         >
           <div class="flex items-center gap-2.5 min-w-0">
-            <Icon icon="mynaui:key" class="w-4 h-4 text-primary shrink-0" />
+            <span class="badge badge-xs badge-neutral font-mono uppercase tracking-wider shrink-0"
+              >ENV</span
+            >
             <div class="min-w-0">
               <span class="font-mono text-sm font-medium text-base-content truncate block">
                 {{ k.key_name }}
@@ -248,26 +254,54 @@ const handleDelete = async () => {
         </div>
 
         <form @submit.prevent="handleSave" class="space-y-4">
-          <div class="space-y-1">
+          <div class="space-y-1.5">
             <label class="text-xs font-medium text-base-content/80">
               {{ t("settings.proxySecretsKeyName") }}
             </label>
-            <input
-              v-model="formKeyName"
-              type="text"
-              :readonly="isEditing"
-              :placeholder="t('settings.proxySecretsKeyNamePlaceholder')"
-              class="input input-sm input-bordered w-full font-mono text-sm"
-              :class="{ 'opacity-70 bg-base-200': isEditing, 'input-error': !!keyNameError }"
-              required
-              data-testid="proxy-key-name-input"
-            />
+            <div class="relative">
+              <input
+                v-model="formKeyName"
+                type="text"
+                list="proxy-envs-datalist"
+                :readonly="isEditing"
+                :placeholder="t('settings.proxySecretsKeyNamePlaceholder')"
+                class="input input-sm input-bordered w-full font-mono text-sm"
+                :class="{ 'opacity-70 bg-base-200': isEditing, 'input-error': !!keyNameError }"
+                required
+                data-testid="proxy-key-name-input"
+              />
+              <datalist id="proxy-envs-datalist">
+                <option v-for="env in proxyEnvs" :key="env" :value="env" />
+              </datalist>
+            </div>
+            <!-- Quick selection chips for configured proxy envs -->
+            <div v-if="!isEditing && proxyEnvs.length > 0" class="space-y-1 pt-0.5">
+              <span class="text-[11px] text-base-content/60 block">
+                {{ t("settings.proxySecretsAvailableEnvs") }}
+              </span>
+              <div class="flex flex-wrap gap-1.5" data-testid="proxy-envs-chips">
+                <button
+                  v-for="env in proxyEnvs"
+                  :key="env"
+                  type="button"
+                  class="badge badge-sm font-mono cursor-pointer transition-colors"
+                  :class="formKeyName === env ? 'badge-primary' : 'badge-ghost hover:badge-outline'"
+                  :aria-pressed="formKeyName === env"
+                  @click="formKeyName = env"
+                >
+                  {{ env }}
+                </button>
+              </div>
+            </div>
             <p
               v-if="keyNameError"
               class="text-xs text-error mt-1"
               data-testid="proxy-key-name-error"
             >
               {{ keyNameError }}
+            </p>
+            <p v-else-if="!isEditing" class="text-[11px] text-base-content/50">
+              {{ t("settings.proxySecretsEnvNotice") }}
             </p>
           </div>
 

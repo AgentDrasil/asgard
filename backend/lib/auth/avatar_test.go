@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -220,4 +221,73 @@ func TestHandleMe_NilServiceAndNoUser(t *testing.T) {
 	rec = httptest.NewRecorder()
 	s.HandleMe(rec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestHandleUserAvatar(t *testing.T) {
+	p := authtest.NewProvider(t)
+	s := newTestService(t, p, nil)
+	s.avatars = testAvatarStore(t)
+	pic, _ := newPictureServer(t, "image/png", "USER_PNG")
+
+	// Pre-cache an avatar for sub-target
+	require.True(t, s.avatars.Ensure(context.Background(), "sub-target", pic.URL))
+	assert.True(t, s.HasAvatar("sub-target"))
+	assert.False(t, s.HasAvatar("sub-ghost"))
+
+	requester := &User{Subject: "sub-viewer", Roles: []string{AdminRole}}
+	ctx := WithUser(context.Background(), requester)
+
+	// Valid request for sub-target by admin
+	req := httptest.NewRequest(http.MethodGet, "/api/manage/users/sub-target/avatar", nil).WithContext(ctx)
+	req.SetPathValue("subject", "sub-target")
+	rec := httptest.NewRecorder()
+	s.HandleUserAvatar(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "USER_PNG", rec.Body.String())
+
+	// Unknown user returns 404
+	req = httptest.NewRequest(http.MethodGet, "/api/manage/users/sub-ghost/avatar", nil).WithContext(ctx)
+	req.SetPathValue("subject", "sub-ghost")
+	rec = httptest.NewRecorder()
+	s.HandleUserAvatar(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	// Non-admin request returns 403
+	nonAdminCtx := WithUser(context.Background(), &User{Subject: "sub-viewer"})
+	req = httptest.NewRequest(http.MethodGet, "/api/manage/users/sub-target/avatar", nil).WithContext(nonAdminCtx)
+	req.SetPathValue("subject", "sub-target")
+	rec = httptest.NewRecorder()
+	s.HandleUserAvatar(rec, req)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+
+	// Unauthenticated request returns 403 (middleware returns 401)
+	req = httptest.NewRequest(http.MethodGet, "/api/manage/users/sub-target/avatar", nil)
+	req.SetPathValue("subject", "sub-target")
+	rec = httptest.NewRecorder()
+	s.HandleUserAvatar(rec, req)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestHandleMeKeepsCachedAvatarWhenPictureURLEmpty(t *testing.T) {
+	p := authtest.NewProvider(t)
+	s := newTestService(t, p, nil)
+	s.avatars = testAvatarStore(t)
+	pic, _ := newPictureServer(t, "image/png", "PNGDATA")
+
+	// Pre-cache avatar
+	require.True(t, s.avatars.Ensure(context.Background(), "sub-keep", pic.URL))
+	assert.True(t, s.HasAvatar("sub-keep"))
+
+	// Subsequent HandleMe for user with empty Picture preserves avatarUrl
+	user := &User{Subject: "sub-keep", Name: "Keep", Picture: ""}
+	ctx := WithUser(context.Background(), user)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	s.HandleMe(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp profileResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, AvatarPath, resp.AvatarURL)
+	assert.True(t, s.HasAvatar("sub-keep"))
 }

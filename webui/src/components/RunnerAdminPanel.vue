@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
-import { getManageRunners, setRunnerUsers } from "../lib/api";
+import { getManageRunners, setRunnerUsers, appendAccessToken } from "../lib/api";
 import { useRunners } from "../composables/useRunners";
 import { useToast } from "../composables/useToast";
 import type { ManageRunner, ManageUser } from "../types";
@@ -17,6 +17,7 @@ const loading = ref(false);
 const saving = ref("");
 const searchQueries = ref<Record<string, string>>({});
 const isSearchOpen = ref<Record<string, boolean>>({});
+const failedAvatars = ref<Record<string, boolean>>({});
 
 const usersMap = computed(() => new Map(users.value.map((u) => [u.subject, u])));
 
@@ -192,10 +193,11 @@ onUnmounted(() => {
               data-testid="assigned-user-chip"
             >
               <img
-                v-if="usersMap.get(sub)?.avatarUrl"
-                :src="usersMap.get(sub)!.avatarUrl"
+                v-if="usersMap.get(sub)?.avatarUrl && !failedAvatars[sub]"
+                :src="appendAccessToken(usersMap.get(sub)!.avatarUrl!)"
                 alt=""
                 class="w-5 h-5 rounded-full object-cover shrink-0"
+                @error="failedAvatars[sub] = true"
               />
               <span
                 v-else
@@ -305,10 +307,11 @@ onUnmounted(() => {
                   >
                     <div class="flex items-center gap-2.5 min-w-0">
                       <img
-                        v-if="u.avatarUrl"
-                        :src="u.avatarUrl"
+                        v-if="u.avatarUrl && !failedAvatars[u.subject]"
+                        :src="appendAccessToken(u.avatarUrl)"
                         alt=""
                         class="w-6 h-6 rounded-full object-cover shrink-0"
+                        @error="failedAvatars[u.subject] = true"
                       />
                       <span
                         v-else

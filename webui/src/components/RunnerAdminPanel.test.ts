@@ -174,4 +174,59 @@ describe("RunnerAdminPanel", () => {
     await flush();
     expect(root.querySelector('[data-testid="user-search-dropdown"]')).toBeNull();
   });
+
+  it("renders user avatar image using appendAccessToken when avatarUrl is present", async () => {
+    vi.spyOn(api, "getManageRunners").mockResolvedValue({
+      runners: [{ node_id: "node-1", online: true, users: ["user-alice"] }],
+      users: [
+        {
+          subject: "user-alice",
+          name: "Alice Smith",
+          email: "alice@example.com",
+          avatarUrl: "/api/manage/users/user-alice/avatar",
+        },
+      ],
+    });
+
+    app = createApp({ render: () => h(RunnerAdminPanel) });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const chip = root.querySelector('[data-testid="assigned-user-chip"]');
+    expect(chip).not.toBeNull();
+    const img = chip?.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toContain("/api/manage/users/user-alice/avatar");
+  });
+
+  it("falls back to initials when avatar image fails to load", async () => {
+    vi.spyOn(api, "getManageRunners").mockResolvedValue({
+      runners: [{ node_id: "node-1", online: true, users: ["user-alice"] }],
+      users: [
+        {
+          subject: "user-alice",
+          name: "Alice Smith",
+          email: "alice@example.com",
+          avatarUrl: "/api/manage/users/user-alice/avatar",
+        },
+      ],
+    });
+
+    app = createApp({ render: () => h(RunnerAdminPanel) });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    const chip = root.querySelector('[data-testid="assigned-user-chip"]');
+    expect(chip).not.toBeNull();
+    const img = chip?.querySelector("img");
+    expect(img).not.toBeNull();
+
+    img?.dispatchEvent(new Event("error"));
+    await flush();
+
+    expect(chip?.querySelector("img")).toBeNull();
+    expect(chip?.textContent).toContain("AS");
+  });
 });

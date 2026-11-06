@@ -19,7 +19,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -203,6 +205,19 @@ func (a *avatarStore) Ensure(ctx context.Context, subject, pictureURL string) bo
 	return err == nil
 }
 
+// HasAvatar reports whether a cached avatar file and metadata exist for subject.
+func (a *avatarStore) HasAvatar(subject string) bool {
+	if a == nil || subject == "" {
+		return false
+	}
+	img, metaPath := a.paths(subject)
+	if _, ok := readAvatarMeta(metaPath); !ok {
+		return false
+	}
+	_, err := os.Stat(img)
+	return err == nil
+}
+
 func (a *avatarStore) fetch(ctx context.Context, pictureURL, img, metaPath string) error {
 	u, err := url.Parse(pictureURL)
 	if err != nil {
@@ -282,6 +297,46 @@ func extractProfile(claims map[string]any) (name, email, picture string) {
 	return name, email, picture
 }
 
+// HasAvatar reports whether a cached avatar exists for the subject.
+func (s *Service) HasAvatar(subject string) bool {
+	if s == nil || s.avatars == nil {
+		return false
+	}
+	return s.avatars.HasAvatar(subject)
+}
+
+// EnsureAvatar downloads and caches the avatar for subject if pictureURL is set.
+func (s *Service) EnsureAvatar(ctx context.Context, subject, pictureURL string) bool {
+	if s == nil || s.avatars == nil || pictureURL == "" {
+		return false
+	}
+	return s.avatars.Ensure(ctx, subject, pictureURL)
+}
+
+// SetAvatarsDirForTest overrides the avatar cache directory in tests.
+func (s *Service) SetAvatarsDirForTest(dir string) {
+	if s != nil {
+		s.avatars = newAvatarStore(dir)
+	}
+}
+
+// WriteCachedAvatarForTest populates an avatar in the test avatar store directory.
+func (s *Service) WriteCachedAvatarForTest(subject, source string, data []byte, contentType string) error {
+	if s == nil || s.avatars == nil {
+		return errors.New("avatar store is not configured")
+	}
+	img, metaPath := s.avatars.paths(subject)
+	if err := os.WriteFile(img, data, 0o600); err != nil {
+		return err
+	}
+	m := avatarMeta{Source: source, ContentType: contentType}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, raw, 0o600)
+}
+
 // HandleMe returns the authenticated user's profile and caches their avatar.
 // It responds 404 when auth is disabled or the request carries no user.
 func (s *Service) HandleMe(w http.ResponseWriter, r *http.Request) {
@@ -294,8 +349,43 @@ func (s *Service) HandleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "no user profile")
 		return
 	}
+
+	// If Picture is empty, try to fetch userinfo from the provider.
+	p, pErr := s.ensureProvider(r.Context())
+	if pErr == nil && p != nil && p.oidcProvider != nil && u.Picture == "" {
+		rawToken := bearerToken(r)
+		if rawToken == "" {
+			rawToken = queryToken(r)
+		}
+		if rawToken != "" {
+			// Pin the HTTP client to s.httpClient so upstream timeouts are bounded.
+			ctx := oidc.ClientContext(r.Context(), s.httpClient)
+			uInfo, err := p.oidcProvider.UserInfo(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: rawToken}))
+			if err == nil {
+				var uClaims map[string]any
+				if err := uInfo.Claims(&uClaims); err == nil {
+					name, email, pic := extractProfile(uClaims)
+					if pic != "" {
+						u.Picture = pic
+					}
+					if u.Name == "" && name != "" {
+						u.Name = name
+					}
+					if u.Email == "" && email != "" {
+						u.Email = email
+					}
+				}
+			}
+		}
+	}
+
 	resp := profileResponse{Subject: u.Subject, Name: u.Name, Email: u.Email, IsAdmin: containsRole(u.Roles, AdminRole)}
-	if s.avatars.Ensure(r.Context(), u.Subject, u.Picture) {
+	if u.Picture != "" {
+		if s.avatars.Ensure(r.Context(), u.Subject, u.Picture) {
+			resp.AvatarURL = AvatarPath
+		}
+	} else if s.avatars.HasAvatar(u.Subject) {
+		// Preserve the previously cached avatar when access tokens do not carry picture claims.
 		resp.AvatarURL = AvatarPath
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -318,6 +408,39 @@ func (s *Service) HandleAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	img, metaPath := s.avatars.paths(u.Subject)
+	m, metaOK := readAvatarMeta(metaPath)
+	f, err := os.Open(img)
+	if !metaOK || err != nil {
+		writeJSONError(w, http.StatusNotFound, "no avatar")
+		return
+	}
+	defer func() { _ = f.Close() }()
+	w.Header().Set("Content-Type", m.ContentType)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	_, _ = io.Copy(w, f)
+}
+
+// HandleUserAvatar serves the cached avatar for any given subject (admin only).
+func (s *Service) HandleUserAvatar(w http.ResponseWriter, r *http.Request) {
+	if s == nil {
+		writeJSONError(w, http.StatusNotFound, "authentication disabled")
+		return
+	}
+	if !HasRole(r.Context(), AdminRole) {
+		writeJSONError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	if s.avatars == nil {
+		writeJSONError(w, http.StatusNotFound, "no avatar")
+		return
+	}
+	subject := r.PathValue("subject")
+	if subject == "" {
+		writeJSONError(w, http.StatusNotFound, "no avatar")
+		return
+	}
+	img, metaPath := s.avatars.paths(subject)
 	m, metaOK := readAvatarMeta(metaPath)
 	f, err := os.Open(img)
 	if !metaOK || err != nil {

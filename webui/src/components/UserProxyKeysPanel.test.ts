@@ -4,6 +4,7 @@ import { createApp, h, nextTick } from "vue";
 import { createI18n } from "vue-i18n";
 import UserProxyKeysPanel from "./UserProxyKeysPanel.vue";
 import * as api from "../lib/api";
+import { __resetProxyEnvsCacheForTest } from "../composables/useProxyEnvs";
 import en from "../i18n/locales/en";
 import zhCN from "../i18n/locales/zh-CN";
 
@@ -25,6 +26,10 @@ describe("UserProxyKeysPanel.vue", () => {
     root = document.createElement("div");
     document.body.appendChild(root);
     vi.restoreAllMocks();
+    __resetProxyEnvsCacheForTest();
+    vi.spyOn(api, "getBackendConfig").mockResolvedValue({
+      proxy_envs: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+    });
   });
 
   it("renders empty state when no keys exist", async () => {
@@ -217,6 +222,55 @@ describe("UserProxyKeysPanel.vue", () => {
     await flush();
 
     expect(deleteSpy).toHaveBeenCalledWith("TO_DELETE_KEY");
+
+    app.unmount();
+  });
+
+  it("displays ENV badge and supports selecting from configured proxy env chips", async () => {
+    vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([
+      { key_name: "GEMINI_API_KEY", updated_at: new Date().toISOString() },
+    ]);
+
+    const app = createApp({
+      render() {
+        return h(UserProxyKeysPanel);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    // Check ENV badge
+    const badge = root.querySelector('[data-testid="proxy-key-row"] .badge');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe("ENV");
+
+    // Open add modal
+    const addBtn = root.querySelector('[data-testid="add-proxy-key-btn"]') as HTMLButtonElement;
+    addBtn.click();
+    await flush();
+
+    const modal = document.body.querySelector('[data-testid="proxy-key-modal"]');
+    expect(modal).not.toBeNull();
+
+    // Verify proxy env chips
+    const chipsContainer = modal?.querySelector('[data-testid="proxy-envs-chips"]');
+    expect(chipsContainer).not.toBeNull();
+    const chips = chipsContainer?.querySelectorAll("button");
+    expect(chips?.length).toBe(2);
+    expect(chips?.[0].textContent).toContain("GEMINI_API_KEY");
+    expect(chips?.[1].textContent).toContain("OPENAI_API_KEY");
+
+    const nameInput = modal?.querySelector(
+      '[data-testid="proxy-key-name-input"]',
+    ) as HTMLInputElement;
+
+    // Clicking chip fills input
+    chips?.[1].click();
+    await flush();
+    expect(nameInput.value).toBe("OPENAI_API_KEY");
+    expect(chips?.[1].getAttribute("aria-pressed")).toBe("true");
+    expect(chips?.[0].getAttribute("aria-pressed")).toBe("false");
 
     app.unmount();
   });

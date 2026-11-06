@@ -624,6 +624,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/runners", s.handleRunners)
 	mux.HandleFunc("GET /api/manage/runners", s.handleManageRunners)
 	mux.HandleFunc("PUT /api/manage/runners/{node}/users", s.handleSetRunnerUsers)
+	mux.HandleFunc("GET /api/manage/users/{subject}/avatar", s.auth.HandleUserAvatar)
 	mux.HandleFunc("GET /api/subdirs", s.handleSubdirs)
 	mux.HandleFunc("GET /api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("GET /api/git/log", s.handleGitLog)

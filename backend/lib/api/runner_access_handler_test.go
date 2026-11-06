@@ -30,6 +30,7 @@ func newAccessServer(t *testing.T) (*Server, *authtest.Provider) {
 
 	testDB := db.NewDBForTest(t)
 	require.NoError(t, dbmodels.AutoMigrate(testDB))
+	svc.SetAvatarsDirForTest(t.TempDir())
 	srv := &Server{
 		conf:    &config.Config{Host: p.URL()},
 		auth:    svc,
@@ -101,6 +102,29 @@ func TestRunnerAccess_AdminAssignsRunnerToUser(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"user-1", "admin-1"}, subjects)
 
+	// Test avatar URL population when an avatar is cached
+	if srv.AuthService() != nil {
+		require.NoError(t, srv.AuthService().WriteCachedAvatarForTest("user-1", "https://example.com/pic.png", []byte("PNG"), "image/png"))
+
+		rec = doJSON(srv, http.MethodGet, "/api/manage/runners", admin, nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &manage))
+		for _, u := range manage.Users {
+			if u.Subject == "user-1" {
+				assert.Equal(t, "/api/manage/users/user-1/avatar", u.AvatarURL)
+			}
+		}
+
+		// Verify avatar endpoint works with admin token
+		rec = doJSON(srv, http.MethodGet, "/api/manage/users/user-1/avatar", admin, nil)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+
+		// Verify avatar endpoint fails closed with non-admin token
+		rec = doJSON(srv, http.MethodGet, "/api/manage/users/user-1/avatar", user, nil)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	}
+
 	rec = doJSON(srv, http.MethodPut, "/api/manage/runners/runner-a/users", admin, SetRunnerUsersRequest{Users: []string{"user-1"}})
 	require.Equal(t, http.StatusNoContent, rec.Code)
 
@@ -128,6 +152,7 @@ func TestRunnerAccess_ManageEndpointsFailClosed(t *testing.T) {
 		want    int
 	}{
 		{"non-admin list", http.MethodGet, "/api/manage/runners", user, nil, http.StatusForbidden},
+		{"non-admin avatar", http.MethodGet, "/api/manage/users/user-1/avatar", user, nil, http.StatusForbidden},
 		{"non-admin set", http.MethodPut, "/api/manage/runners/runner-a/users", user, SetRunnerUsersRequest{Users: []string{"user-1"}}, http.StatusForbidden},
 		{"no token", http.MethodGet, "/api/manage/runners", nil, nil, http.StatusUnauthorized},
 		{"unknown runner", http.MethodPut, "/api/manage/runners/nope/users", admin, SetRunnerUsersRequest{}, http.StatusNotFound},

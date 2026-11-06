@@ -104,9 +104,10 @@ type Service struct {
 
 // provider bundles what OIDC discovery and the oauth2 config yield.
 type provider struct {
-	oauth    *oauth2.Config
-	verifier *oidc.IDTokenVerifier
-	jwksURL  string
+	oauth        *oauth2.Config
+	verifier     *oidc.IDTokenVerifier
+	oidcProvider *oidc.Provider
+	jwksURL      string
 }
 
 // errProbeCached marks a probe result that was served from cache rather than
@@ -226,8 +227,9 @@ func (s *Service) ensureProvider(ctx context.Context) (*provider, error) {
 			RedirectURL:  s.baseURL + "/auth/callback",
 			Scopes:       strings.Fields(scopes),
 		},
-		verifier: p.VerifierContext(verifierCtx, &oidc.Config{ClientID: expectedAudience}),
-		jwksURL:  discovery.JWKSURL,
+		verifier:     p.VerifierContext(verifierCtx, &oidc.Config{ClientID: expectedAudience}),
+		oidcProvider: p,
+		jwksURL:      discovery.JWKSURL,
 	}
 	s.providerErr = nil
 	return s.provider, nil
@@ -552,6 +554,30 @@ func (s *Service) handleCallback(w http.ResponseWriter, r *http.Request) {
 				Msg("auth: freshly issued token failed verification; check token_source/token_audience")
 			http.Error(w, "issued token failed verification", http.StatusBadGateway)
 			return
+		}
+	}
+
+	// Cache user avatar if present in ID token or UserInfo
+	if rawIDToken, ok := token.Extra("id_token").(string); ok && rawIDToken != "" {
+		if idToken, err := p.verifier.Verify(r.Context(), rawIDToken); err == nil {
+			var idClaims map[string]any
+			if err := idToken.Claims(&idClaims); err == nil {
+				_, _, pic := extractProfile(idClaims)
+				if pic != "" {
+					s.avatars.Ensure(r.Context(), idToken.Subject, pic)
+				}
+			}
+		}
+	}
+	if p.oidcProvider != nil {
+		if uInfo, err := p.oidcProvider.UserInfo(r.Context(), oauth2.StaticTokenSource(token)); err == nil {
+			var uClaims map[string]any
+			if err := uInfo.Claims(&uClaims); err == nil {
+				_, _, pic := extractProfile(uClaims)
+				if pic != "" {
+					s.avatars.Ensure(r.Context(), uInfo.Subject, pic)
+				}
+			}
 		}
 	}
 
