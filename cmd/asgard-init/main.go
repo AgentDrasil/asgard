@@ -1077,7 +1077,7 @@ func printAddRunnerSuccess(dir, runnerName string) {
 
 	fmt.Printf("%s[Updated Components]%s\n", colorCyan+colorBold, colorReset)
 	fmt.Printf("  • Generated client certificate: %stls/%s.crt%s\n", colorYellow, runnerName, colorReset)
-	fmt.Printf("  • Created runner directory:     %srunners/%s/{certs,asgard,session-data,accounts}%s\n", colorYellow, runnerName, colorReset)
+	fmt.Printf("  • Created runner directory:     %srunners/%s/{certs,asgard,session-data,home,accounts}%s\n", colorYellow, runnerName, colorReset)
 	fmt.Printf("  • Updated allowed_nodes:        %setcd-tree/asgard/config.yaml%s\n", colorYellow, colorReset)
 	fmt.Printf("  • Appended service:             %scompose.yaml%s (%s)\n\n", colorYellow, colorReset, svcName)
 

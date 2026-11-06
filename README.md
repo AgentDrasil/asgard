@@ -57,11 +57,12 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
 /accounts/                  # Runner: local CLI accounts (agy, claude)
 ├── agy/<alias>/            # 0700, contains antigravity-oauth-token (0600)
 └── claude/<alias>/         # 0700, Claude config directory (CLAUDE_CONFIG_DIR)
+/home/user/                 # Runner: persistent home directory (0700, agy brain/session files, tool caches, ~/.gemini, ~/.claude)
 
 /data/                      # Workspaces, mounted by docker compose (run_dirs / mount_dirs)
 ```
 
-The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `/session-data/sessions`, `/session-data/tmp` (the chat directories), and `/accounts` live on the **runner** that owns the chat.
+The layout above exists on every machine that runs an Asgard process. On the **backend** only `config/`, `logs/`, the database, `avatars/` and the materialized agent cache (`data/agents-cache`, built from etcd) are used; `/session-data/sessions`, `/session-data/tmp` (the chat directories), `/home/user`, and `/accounts` live on the **runner** that owns the chat.
 
 The SQLite database path is fixed (`dsn` is only used for `db: pg`). `aw`'s own
 `~/.config/aw/config.yaml` and the web UI static asset path (`webui_path`) are
@@ -280,6 +281,7 @@ The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (
 Constraints to know before deploying:
 - **Runner root directories must be real paths.** The directories agents and workflows may use (their `run_dirs` and mount dirs) and the runner's data roots are opened without following symlinks. A root that is, or lies under, a symlink is refused (fail closed); mount or configure the resolved path instead.
 - **Keep the runner's TLS key out of the sandbox.** The command sandbox bind-mounts the runner user's `$HOME` read-write and only masks specific paths (`~/asgard/config`, `~/asgard/data`, `~/.ssh`, agent credential directories). The runner does **not** verify where its key lives, so a key under `$HOME` (or under any run dir/mount dir) is readable by agents and lets them impersonate the runner. Put the certificate files outside `$HOME` (for example `/certs`, as in the Docker example) with permissions limited to the runner user.
+- **Host runner volume ownership.** The runner container runs as a non-root `user` (UID 1000, GID 1000). Host-mounted directories such as `./runners/<runner>/home`, `./runners/<runner>/accounts`, and `./runners/<runner>/session-data` must be writable by UID 1000.
 - **bubblewrap needs unprivileged user namespaces.** Inside Docker run the runner with a seccomp profile that permits `clone`/`unshare`/`mount`/`pivot_root` (for example `--security-opt seccomp=unconfined`) and, where AppArmor restricts user namespaces, `--security-opt apparmor=unconfined`. The sandbox mounts a fresh `/proc` in a new pid namespace, which Docker refuses while it masks parts of `/proc`; also pass `--security-opt systempaths=unconfined` (the runner runs as a non-root user with no capabilities).
 
 ### Docker images and versions
@@ -290,6 +292,7 @@ Two images are built from the `Dockerfile` (CI pushes both): `ghcr.io/agentdrasi
 docker run --security-opt seccomp=unconfined \
   -e ETCD_ENDPOINTS=http://etcd:2379 \
   -v ./certs:/certs:ro -v ./runner-asgard:/asgard -v ./session-data:/session-data \
+  -v ./runner-home:/home/user \
   ghcr.io/agentdrasil/asgard-runner:main \
   -backend backend:9311
 ```

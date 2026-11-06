@@ -273,6 +273,12 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.True(t, runnerAccountsInfo.IsDir())
 	assert.Equal(t, os.FileMode(0700), runnerAccountsInfo.Mode().Perm())
 
+	// Verify runner home directory permissions (0700)
+	runnerHomeInfo, err := os.Stat(filepath.Join(tempDir, "runners", "runner-prod-1", "home"))
+	require.NoError(t, err)
+	assert.True(t, runnerHomeInfo.IsDir())
+	assert.Equal(t, os.FileMode(0700), runnerHomeInfo.Mode().Perm())
+
 	// Verify runner tls cert CN is runner-prod-1
 	runnerCertBytes, err := os.ReadFile(filepath.Join(tempDir, "runners", "runner-prod-1", "certs", "tls.crt"))
 	require.NoError(t, err)
@@ -308,6 +314,7 @@ func TestGenerateDeployment(t *testing.T) {
 	composeContent, err := os.ReadFile(filepath.Join(tempDir, "compose.yaml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(composeContent), "\"7000:7000\"")
+	assert.Contains(t, string(composeContent), "./runners/runner-prod-1/home:/home/user")
 	assert.Contains(t, string(composeContent), "./runners/runner-prod-1/accounts:/accounts")
 
 	// Verify Justfile commands
@@ -343,6 +350,7 @@ func TestGenerateDeployment(t *testing.T) {
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/*.sops.json")
 	assert.Contains(t, string(gitignoreContent), "!etcd-tree/credentials/ssh/.gitkeep")
 	assert.NotContains(t, string(gitignoreContent), "antigravity-oauth-token")
+	assert.Contains(t, string(gitignoreContent), "runners/*/home/")
 	assert.Contains(t, string(gitignoreContent), "runners/*/accounts/")
 	assert.Contains(t, string(gitignoreContent), "gcp-sa.json")
 	assert.NotContains(t, string(gitignoreContent), ".credentials.json")
@@ -426,8 +434,15 @@ func TestAddRunner(t *testing.T) {
 	assert.Contains(t, string(composeContent), "runner-2:")
 	assert.Contains(t, string(composeContent), "container_name: asgard-runner-2")
 	assert.Contains(t, string(composeContent), "./runners/runner-2/certs:/certs:ro")
+	assert.Contains(t, string(composeContent), "./runners/runner-2/home:/home/user")
 	assert.Contains(t, string(composeContent), "./runners/runner-2/accounts:/accounts")
 	assert.Contains(t, string(composeContent), "/data/extra:/data/extra")
+
+	// Verify runner-2 home directory permissions (0700)
+	runner2HomeInfo, err := os.Stat(filepath.Join(tempDir, "runners", "runner-2", "home"))
+	require.NoError(t, err)
+	assert.True(t, runner2HomeInfo.IsDir())
+	assert.Equal(t, os.FileMode(0700), runner2HomeInfo.Mode().Perm())
 
 	// Verify runner-2 accounts directory permissions (0700)
 	runner2AccountsInfo, err := os.Stat(filepath.Join(tempDir, "runners", "runner-2", "accounts"))

@@ -157,13 +157,20 @@ func GenerateDeployment(targetDir string, data *ConfigData) error {
 		}
 	}
 
-	// Create runner accounts directory with strict permissions (0700)
+	// Create runner accounts and home directories with strict permissions (0700)
 	initialAccountsDir := filepath.Join(targetDir, "runners", data.InitialRunner, "accounts")
 	if err := os.MkdirAll(initialAccountsDir, 0700); err != nil {
 		return fmt.Errorf("failed to create directory %q: %w", initialAccountsDir, err)
 	}
 	if err := os.Chmod(initialAccountsDir, 0700); err != nil {
 		return fmt.Errorf("failed to chmod directory %q: %w", initialAccountsDir, err)
+	}
+	initialHomeDir := filepath.Join(targetDir, "runners", data.InitialRunner, "home")
+	if err := os.MkdirAll(initialHomeDir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory %q: %w", initialHomeDir, err)
+	}
+	if err := os.Chmod(initialHomeDir, 0700); err != nil {
+		return fmt.Errorf("failed to chmod directory %q: %w", initialHomeDir, err)
 	}
 
 	// 2. Generate TLS certificates
@@ -366,6 +373,13 @@ func AddRunner(targetDir string, runnerName string, workspaceMounts []string) er
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(runnerDir, "session-data"), 0755); err != nil {
+		return err
+	}
+	runnerHomeDir := filepath.Join(runnerDir, "home")
+	if err := os.MkdirAll(runnerHomeDir, 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(runnerHomeDir, 0700); err != nil {
 		return err
 	}
 	runnerAccountsDir := filepath.Join(runnerDir, "accounts")

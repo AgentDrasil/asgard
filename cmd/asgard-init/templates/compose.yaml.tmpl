@@ -61,6 +61,7 @@ services:
 {{- end }}
       - ./runners/{{ .InitialRunner }}/asgard:/asgard
       - ./runners/{{ .InitialRunner }}/session-data:/session-data
+      - ./runners/{{ .InitialRunner }}/home:/home/user
       - ./runners/{{ .InitialRunner }}/accounts:/accounts
 {{- range .WorkspaceMounts }}
       - {{ . }}

@@ -56,6 +56,8 @@ services:
       - ./runner-asgard:/asgard
       # Per-session scratch and persistent data, logs:
       - ./session-data:/session-data
+      # User home directory (agy sessions/brain files, tool caches, ~/.gemini, ~/.claude):
+      - ./runner-home:/home/user
       # Workspaces mounted under /workspace:
       - ~/src:/workspace
       # SSH credentials are delivered via etcd credentials/ssh/ (no host mount required).

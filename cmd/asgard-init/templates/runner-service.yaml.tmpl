@@ -22,6 +22,7 @@
 {{- end }}
       - ./runners/{{ .RunnerName }}/asgard:/asgard
       - ./runners/{{ .RunnerName }}/session-data:/session-data
+      - ./runners/{{ .RunnerName }}/home:/home/user
       - ./runners/{{ .RunnerName }}/accounts:/accounts
 {{- range .WorkspaceMounts }}
       - {{ . }}
