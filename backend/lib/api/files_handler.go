@@ -91,7 +91,11 @@ func needsWorkspace(reqPath, scope, sessionID string) bool {
 // workspaceFS resolves what a files request needs: the chat's FS and its
 // (normalized) run dir, after the backend-side run dir check. It answers the
 // error itself and returns ok=false when the request is over.
-func (s *Server) workspaceFS(w http.ResponseWriter, sessionID string, checkRunDir bool) (runnerfs.FS, string, bool) {
+func (s *Server) workspaceFS(w http.ResponseWriter, r *http.Request, sessionID string, checkRunDir bool) (runnerfs.FS, string, bool) {
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return nil, "", false
+	}
 	runDir, code, err := s.resolveSessionWorkspace(sessionID)
 	if err != nil {
 		writeJSONError(w, code, err.Error())
@@ -125,7 +129,7 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	subPath := r.URL.Query().Get("path")
 	scope := r.URL.Query().Get("scope")
 
-	fs, runDir, ok := s.workspaceFS(w, sessionID, needsWorkspace(subPath, scope, sessionID))
+	fs, runDir, ok := s.workspaceFS(w, r, sessionID, needsWorkspace(subPath, scope, sessionID))
 	if !ok {
 		return
 	}
@@ -159,7 +163,7 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, sessionID, needsWorkspace(filePath, scope, sessionID))
+	fs, runDir, ok := s.workspaceFS(w, r, sessionID, needsWorkspace(filePath, scope, sessionID))
 	if !ok {
 		return
 	}
@@ -221,7 +225,7 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, sessionID, true)
+	fs, runDir, ok := s.workspaceFS(w, r, sessionID, true)
 	if !ok {
 		return
 	}

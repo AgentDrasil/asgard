@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 )
@@ -49,17 +47,14 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	var storedRunDir string
 	var sessionModifiedFiles []string
 
-	if s.repo != nil {
-		sess, err := s.repo.GetSessionMeta(sessionID)
-		if err != nil {
-			log.Error().Err(err).Str("session_id", sessionID).Msg("Failed to retrieve session for file read")
-			writeJSONError(w, http.StatusInternalServerError, "failed to query session")
-			return
-		}
-		if sess != nil {
-			storedRunDir = sess.RunDir
-			sessionModifiedFiles = sess.Artifacts
-		}
+	sess, aerr := s.authorizeSession(r, sessionID)
+	if aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+	if sess != nil {
+		storedRunDir = sess.RunDir
+		sessionModifiedFiles = sess.Artifacts
 	}
 
 	fs, ferr := s.chatFS(sessionID)

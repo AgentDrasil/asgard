@@ -34,6 +34,7 @@ func newAccessServer(t *testing.T) (*Server, *authtest.Provider) {
 	srv := &Server{
 		conf:    &config.Config{Host: p.URL()},
 		auth:    svc,
+		repo:    dbmodels.NewSessionRepository(testDB),
 		access:  dbmodels.NewRunnerAccessRepository(testDB),
 		runners: fakeRunnerRegistry{nodes: []runnerhub.NodeInfo{{NodeID: "runner-a", Online: true}, {NodeID: "runner-b"}}},
 	}
@@ -218,4 +219,143 @@ func TestRunnerAccess_RevokedUserCannotUseBoundChat(t *testing.T) {
 
 	rr := f.post(t, "global-agent", map[string]any{"prompt": "two", "chatId": "chat-rev"})
 	assert.Equal(t, http.StatusForbidden, rr.Code, rr.Body.String())
+}
+
+func TestRunnerAccess_SessionVisibilityAndAccessControl(t *testing.T) {
+	t.Parallel()
+	srv, p := newAccessServer(t)
+	admin := bearer(t, p, "admin-1", "admin")
+	user := bearer(t, p, "user-1")
+
+	// Trigger user registration
+	_ = doJSON(srv, http.MethodGet, "/api/runners", user, nil)
+	_ = doJSON(srv, http.MethodGet, "/api/runners", admin, nil)
+
+	// Create sessions on runner-a and runner-b
+	now := time.Now()
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "sess-a",
+		Title:        "Alpha Session",
+		RunnerNodeID: "runner-a",
+		UpdatedAt:    now.Add(1 * time.Minute),
+	}))
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "sess-b",
+		Title:        "Beta Session",
+		RunnerNodeID: "runner-b",
+		UpdatedAt:    now.Add(2 * time.Minute),
+	}))
+
+	// 1. Unassigned user sees no sessions on GET /api/sessions and search
+	rec := doJSON(srv, http.MethodGet, "/api/sessions", user, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var sessions []ChatSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &sessions))
+	assert.Empty(t, sessions)
+
+	recSearch := doJSON(srv, http.MethodGet, "/api/sessions?query=Alpha", user, nil)
+	require.Equal(t, http.StatusOK, recSearch.Code)
+	var searchRes []ChatSession
+	require.NoError(t, json.Unmarshal(recSearch.Body.Bytes(), &searchRes))
+	assert.Empty(t, searchRes)
+
+	// Unassigned user gets 403 on session endpoints
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/sessions/sess-a", user, nil).Code)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/sessions/sess-b", user, nil).Code)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodPost, "/api/sessions/sess-a/archive", user, nil).Code)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodDelete, "/api/sessions?chat_id=sess-a", user, nil).Code)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/sessions/sess-a/queue", user, nil).Code)
+
+	// 2. Admin assigns runner-a to user-1
+	rec = doJSON(srv, http.MethodPut, "/api/manage/runners/runner-a/users", admin, SetRunnerUsersRequest{Users: []string{"user-1"}})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Now user-1 sees only sess-a
+	rec = doJSON(srv, http.MethodGet, "/api/sessions", user, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &sessions))
+	require.Len(t, sessions, 1)
+	assert.Equal(t, "sess-a", sessions[0].ChatID)
+
+	// Search by query returns sess-a if matching, empty if searching for runner-b session
+	recSearch = doJSON(srv, http.MethodGet, "/api/sessions?query=Alpha", user, nil)
+	require.Equal(t, http.StatusOK, recSearch.Code)
+	require.NoError(t, json.Unmarshal(recSearch.Body.Bytes(), &searchRes))
+	require.Len(t, searchRes, 1)
+	assert.Equal(t, "sess-a", searchRes[0].ChatID)
+
+	recSearchBeta := doJSON(srv, http.MethodGet, "/api/sessions?query=Beta", user, nil)
+	require.Equal(t, http.StatusOK, recSearchBeta.Code)
+	var searchBetaRes []ChatSession
+	require.NoError(t, json.Unmarshal(recSearchBeta.Body.Bytes(), &searchBetaRes))
+	assert.Empty(t, searchBetaRes)
+
+	// user-1 can access sess-a, but still cannot access sess-b (runner-b)
+	assert.Equal(t, http.StatusOK, doJSON(srv, http.MethodGet, "/api/sessions/sess-a", user, nil).Code)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/sessions/sess-b", user, nil).Code)
+
+	// 3. Admin revokes runner-a assignment
+	rec = doJSON(srv, http.MethodPut, "/api/manage/runners/runner-a/users", admin, SetRunnerUsersRequest{Users: []string{}})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	// User-1 again sees no sessions
+	rec = doJSON(srv, http.MethodGet, "/api/sessions", user, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &sessions))
+	assert.Empty(t, sessions)
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/sessions/sess-a", user, nil).Code)
+}
+
+func TestRunnerAccess_TTYDAndSubdirsAccessControl(t *testing.T) {
+	t.Parallel()
+	srv, p := newAccessServer(t)
+	admin := bearer(t, p, "admin-1", "admin")
+	user := bearer(t, p, "user-1")
+
+	// Trigger registration
+	_ = doJSON(srv, http.MethodGet, "/api/runners", user, nil)
+	_ = doJSON(srv, http.MethodGet, "/api/runners", admin, nil)
+
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "sess-a",
+		Title:        "Alpha Session",
+		RunnerNodeID: "runner-a",
+		UpdatedAt:    time.Now(),
+	}))
+
+	reqFor := func(sub string, urlPath string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, urlPath, nil)
+		if sub != "" {
+			r = r.WithContext(auth.WithUser(r.Context(), &auth.User{Subject: sub}))
+		}
+		return r
+	}
+
+	// 1. Unassigned user cannot target agent session or plain runner via TTYD
+	reqAgent := reqFor("user-1", "/api/ttyd/agent-sess-a/ws")
+	_, code, _ := srv.resolveTTYDTarget(reqAgent, "agent-sess-a")
+	assert.Equal(t, http.StatusForbidden, code)
+
+	reqPlain := reqFor("user-1", "/api/ttyd/plain/ws?runner=runner-a")
+	_, code, _ = srv.resolveTTYDTarget(reqPlain, "plain")
+	assert.Equal(t, http.StatusForbidden, code)
+
+	// Subdirs also forbidden for unassigned user
+	assert.Equal(t, http.StatusForbidden, doJSON(srv, http.MethodGet, "/api/subdirs?dir=/tmp&runner=runner-a", user, nil).Code)
+
+	// 2. Assign runner-a to user-1
+	rec := doJSON(srv, http.MethodPut, "/api/manage/runners/runner-a/users", admin, SetRunnerUsersRequest{Users: []string{"user-1"}})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	// User can now target agent-sess-a and plain runner-a via TTYD
+	_, code, _ = srv.resolveTTYDTarget(reqAgent, "agent-sess-a")
+	assert.Equal(t, 0, code)
+
+	_, code, _ = srv.resolveTTYDTarget(reqPlain, "plain")
+	assert.Equal(t, 0, code)
+
+	// But user still cannot target runner-b
+	reqPlainB := reqFor("user-1", "/api/ttyd/plain/ws?runner=runner-b")
+	_, code, _ = srv.resolveTTYDTarget(reqPlainB, "plain")
+	assert.Equal(t, http.StatusForbidden, code)
 }

@@ -80,7 +80,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, sessionID, true)
+	fs, runDir, ok := s.workspaceFS(w, r, sessionID, true)
 	if !ok {
 		return
 	}
@@ -114,7 +114,7 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, sessionID, true)
+	fs, runDir, ok := s.workspaceFS(w, r, sessionID, true)
 	if !ok {
 		return
 	}
@@ -184,7 +184,7 @@ func (s *Server) handleGitAction(w http.ResponseWriter, r *http.Request, op func
 		return
 	}
 
-	fs, runDir, ok := s.gitActionFS(w, req.SessionID)
+	fs, runDir, ok := s.gitActionFS(w, r, req.SessionID)
 	if !ok {
 		return
 	}
@@ -206,7 +206,11 @@ func (s *Server) handleGitAction(w http.ResponseWriter, r *http.Request, op func
 }
 
 // gitActionFS is workspaceFS with GitActionResponse-shaped errors.
-func (s *Server) gitActionFS(w http.ResponseWriter, sessionID string) (runnerfs.FS, string, bool) {
+func (s *Server) gitActionFS(w http.ResponseWriter, r *http.Request, sessionID string) (runnerfs.FS, string, bool) {
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeGitActionError(w, aerr.status, aerr.msg)
+		return nil, "", false
+	}
 	runDir, code, err := s.resolveSessionWorkspace(sessionID)
 	if err != nil {
 		writeGitActionError(w, code, err.Error())

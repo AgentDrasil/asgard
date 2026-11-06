@@ -110,7 +110,9 @@ func TestSandboxAskUserThroughRunnerAndBackend(t *testing.T) {
 	body, err := json.Marshal(api.AskUserReplyRequest{ChatID: "chat-int", MessageID: askMsgID, ReplyText: "go ahead"})
 	require.NoError(t, err)
 	rr := httptest.NewRecorder()
-	st.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/ask-user/reply", bytes.NewReader(body)))
+	req := httptest.NewRequest(http.MethodPost, "/api/ask-user/reply", bytes.NewReader(body))
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{Subject: "test-user"}))
+	st.server.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusOK, rr.Code)
 
 	res, err := run.Wait(ctx)

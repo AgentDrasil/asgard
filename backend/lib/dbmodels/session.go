@@ -301,7 +301,38 @@ func (r *SessionRepository) GetSessions(includeArchived bool, limit ...int) ([]S
 		Order("updated_at desc").
 		Limit(queryLimit).
 		Find(&sessions).Error
-	return sessions, err
+	if err != nil {
+		return nil, err
+	}
+	if sessions == nil {
+		sessions = []Session{}
+	}
+	return sessions, nil
+}
+
+// GetSessionsByRunners retrieves sessions bound to any runner in runners, filtering by
+// archived status and applying an optional limit. If runners is empty, an empty slice is returned.
+func (r *SessionRepository) GetSessionsByRunners(runners []string, includeArchived bool, limit ...int) ([]Session, error) {
+	if len(runners) == 0 {
+		return []Session{}, nil
+	}
+	queryLimit := DefaultSessionLimit
+	if len(limit) > 0 {
+		queryLimit = NormalizeSessionLimit(limit[0])
+	}
+
+	var sessions []Session
+	err := r.db.Where("COALESCE(is_archived, false) = ? AND runner_node_id IN (?)", includeArchived, runners).
+		Order("updated_at desc").
+		Limit(queryLimit).
+		Find(&sessions).Error
+	if err != nil {
+		return nil, err
+	}
+	if sessions == nil {
+		sessions = []Session{}
+	}
+	return sessions, nil
 }
 
 // ArchiveSession archives a session by chat ID.
@@ -328,6 +359,39 @@ func (r *SessionRepository) SearchSessions(query string, limit int) ([]Session, 
 
 	var sessions []Session
 	err := r.db.Where("COALESCE(is_archived, false) = false AND LOWER(title) LIKE LOWER(?) ESCAPE '\\'", "%"+escaped+"%").
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&sessions).Error
+	if err != nil {
+		return nil, err
+	}
+	if sessions == nil {
+		sessions = make([]Session, 0)
+	}
+	return sessions, nil
+}
+
+// SearchSessionsByRunners searches sessions matching query and bound to any runner in runners.
+// If runners is empty, an empty slice is returned.
+func (r *SessionRepository) SearchSessionsByRunners(runners []string, query string, limit int) ([]Session, error) {
+	if len(runners) == 0 {
+		return []Session{}, nil
+	}
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return make([]Session, 0), nil
+	}
+
+	if limit <= 0 {
+		limit = 20
+	} else if limit > 50 {
+		limit = 50
+	}
+
+	escaped := sqlLikeReplacer.Replace(trimmed)
+
+	var sessions []Session
+	err := r.db.Where("COALESCE(is_archived, false) = false AND runner_node_id IN (?) AND LOWER(title) LIKE LOWER(?) ESCAPE '\\'", runners, "%"+escaped+"%").
 		Order("updated_at desc").
 		Limit(limit).
 		Find(&sessions).Error

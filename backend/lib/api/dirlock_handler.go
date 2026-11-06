@@ -121,22 +121,9 @@ func (s *Server) handleUnlockSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.repo != nil {
-		sess, err := s.repo.GetSessionMeta(id)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query session: "+err.Error())
-			return
-		}
-		if sess == nil {
-			writeJSONError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		if sess.RunnerNodeID != "" {
-			if aerr := s.authorizeRunner(r, sess.RunnerNodeID); aerr != nil {
-				writeJSONError(w, aerr.status, aerr.msg)
-				return
-			}
-		}
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
 	}
 
 	if s.dirLocks == nil {

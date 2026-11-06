@@ -393,6 +393,10 @@ func (s *Server) handleWorkflowRedrive(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "workflow run not found")
 		return
 	}
+	if _, aerr := s.authorizeSession(r, row.SessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
 	if row.Status != workflow.PersistStatusFailed {
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("workflow run status is %s; only FAILED runs can be re-driven", row.Status))
 		return
@@ -471,6 +475,10 @@ func (s *Server) handleSessionWorkflowRuns(w http.ResponseWriter, r *http.Reques
 	sessionID := r.PathValue("id")
 	if !IsValidChatID(sessionID) {
 		writeJSONError(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
 		return
 	}
 	if s.workflowRunRepo == nil {

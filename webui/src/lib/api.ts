@@ -348,6 +348,7 @@ export async function getRunners(): Promise<RunnersResponse | null> {
     return {
       backend_version: data?.backend_version || "",
       runners: Array.isArray(data?.runners) ? data.runners : [],
+      runner_mode: data?.runner_mode,
     };
   } catch (err) {
     console.error("getRunners error:", err);

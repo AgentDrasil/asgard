@@ -242,6 +242,10 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 // handleStopSession handles POST /api/sessions/{id}/stop.
 func (s *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
 	code, message := s.stopSessionExecution(sessionID)
 	if code != http.StatusOK {
 		writeJSONError(w, code, message)
@@ -275,6 +279,10 @@ func (s *Server) handleStopWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if row == nil {
 		writeJSONError(w, http.StatusNotFound, "workflow run not found")
+		return
+	}
+	if _, aerr := s.authorizeSession(r, row.SessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
 		return
 	}
 	// The execution guard is per-session, not per-run: a run that just settled

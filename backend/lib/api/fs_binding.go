@@ -110,6 +110,15 @@ func (s *Server) requestRunner(r *http.Request) (string, error) {
 
 // runnerOnlyFS is the FS of requests that name a runner but no chat.
 func (s *Server) runnerOnlyFS(r *http.Request) (runnerfs.FS, error) {
+	if s.bindingEnforced() {
+		node, err := s.requestRunner(r)
+		if err != nil {
+			return nil, err
+		}
+		if bErr := s.authorizeRunner(r, node); bErr != nil {
+			return nil, runnerfs.Errf(runnerfs.CodeDenied, "%s", bErr.msg)
+		}
+	}
 	if s.fsResolver != nil {
 		return s.fsResolver("")
 	}

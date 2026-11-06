@@ -37,6 +37,17 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.bindingEnforced() {
+		if sess.RunnerNodeID == "" {
+			http.Error(w, `{"error":"chat not bound to runner"}`, http.StatusBadRequest)
+			return
+		}
+		if aerr := s.authorizeRunner(r, sess.RunnerNodeID); aerr != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, aerr.msg), aerr.status)
+			return
+		}
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)

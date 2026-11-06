@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -44,16 +43,9 @@ func (s *Server) resolveTTYDTarget(r *http.Request, sessionKey string) (ttydTarg
 	t := ttydTarget{}
 	chatID, isAgent := strings.CutPrefix(sessionKey, "agent-")
 	if isAgent && s.repo != nil {
-		if !IsValidChatID(chatID) {
-			return t, http.StatusBadRequest, "invalid session_id format"
-		}
-		sess, err := s.repo.GetSessionMeta(chatID)
-		if err != nil {
-			log.Error().Err(err).Str("agent_session_id", chatID).Msg("failed to query agent session for ttyd working directory")
-			return t, http.StatusInternalServerError, "failed to query session"
-		}
-		if sess == nil {
-			return t, http.StatusNotFound, "session not found"
+		sess, bErr := s.authorizeSession(r, chatID)
+		if bErr != nil {
+			return t, bErr.status, bErr.msg
 		}
 		t.chatID, t.runner = chatID, sess.RunnerNodeID
 		if sess.RunDir != "" {
@@ -63,9 +55,6 @@ func (s *Server) resolveTTYDTarget(r *http.Request, sessionKey string) (ttydTarg
 			}
 			t.workingDir = agents.DirRefFor(chatID, runDir)
 		}
-		if t.runner == "" && s.bindingEnforced() {
-			return t, http.StatusBadRequest, "chat is not bound to a runner"
-		}
 	}
 	if t.runner == "" {
 		node, err := s.requestRunner(r)
@@ -74,6 +63,11 @@ func (s *Server) resolveTTYDTarget(r *http.Request, sessionKey string) (ttydTarg
 			return t, status, msg
 		}
 		t.runner = node
+	}
+	if s.bindingEnforced() {
+		if bErr := s.authorizeRunner(r, t.runner); bErr != nil {
+			return t, bErr.status, bErr.msg
+		}
 	}
 	return t, 0, ""
 }

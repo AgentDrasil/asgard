@@ -75,6 +75,11 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, req.ChatID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	reply, err := s.askUser(r.Context(), req)
 	if err != nil {
 		log.Warn().Str("chat_id", req.ChatID).Str("message_id", req.MessageID).Msg("ask-user HTTP context cancelled before user replied")
@@ -147,6 +152,11 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, req.ChatID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	req.ReplyText = convertEnvCommands(req.ReplyText)
 
 	if s.repo != nil {
@@ -166,6 +176,10 @@ func (s *Server) handleAskUserReply(w http.ResponseWriter, r *http.Request) {
 
 	askWaitersMu.Lock()
 	waiter, exists := askWaiters[req.MessageID]
+	if exists && waiter.chatID != req.ChatID {
+		exists = false
+		waiter = nil
+	}
 	if !exists && req.MessageID == "" {
 		// If no messageID is provided, fall back only if there is exactly 1 waiter for this chat.
 		var matchedWaiter *askUserWaiter

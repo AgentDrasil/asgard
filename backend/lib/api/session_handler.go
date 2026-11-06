@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"uuid"
 
 	"github.com/moznion/go-optional"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
@@ -128,6 +130,11 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	sess, err := s.repo.GetSession(id)
 	if err != nil {
 		// The transcript lives on the chat's runner: an offline runner is a
@@ -202,10 +209,36 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 
 	var dbSessions []dbmodels.Session
 	var err error
-	if q != "" {
-		dbSessions, err = s.repo.SearchSessions(q, limit)
+	if s.bindingEnforced() {
+		allowedMap, aerr := s.assignedRunners(r)
+		if aerr != nil {
+			log.Error().Err(aerr).Msg("failed to load runner assignments")
+			writeJSONError(w, http.StatusInternalServerError, "failed to load runner assignments")
+			return
+		}
+		if len(allowedMap) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]ChatSession{})
+			return
+		}
+		allowedRunners := make([]string, 0, len(allowedMap))
+		for nodeID := range allowedMap {
+			allowedRunners = append(allowedRunners, nodeID)
+		}
+		sort.Strings(allowedRunners)
+
+		if q != "" {
+			dbSessions, err = s.repo.SearchSessionsByRunners(allowedRunners, q, limit)
+		} else {
+			dbSessions, err = s.repo.GetSessionsByRunners(allowedRunners, archived, limit)
+		}
 	} else {
-		dbSessions, err = s.repo.GetSessions(archived, limit)
+		if q != "" {
+			dbSessions, err = s.repo.SearchSessions(q, limit)
+		} else {
+			dbSessions, err = s.repo.GetSessions(archived, limit)
+		}
 	}
 
 	if err != nil {
@@ -269,6 +302,11 @@ func (s *Server) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	if err := s.repo.ArchiveSession(id); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -297,6 +335,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid chat_id format"})
+		return
+	}
+
+	if _, aerr := s.authorizeSession(r, chatID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
 		return
 	}
 

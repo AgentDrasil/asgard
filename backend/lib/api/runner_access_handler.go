@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 )
 
 // userSeenTTL throttles how often a user's login record is refreshed.
@@ -90,6 +91,34 @@ func (s *Server) authorizeRunner(r *http.Request, runnerID string) *bindingError
 		return &bindingError{http.StatusForbidden, "runner " + runnerID + " is not assigned to you"}
 	}
 	return nil
+}
+
+// authorizeSession checks that the requester may access chatID. When runner
+// binding is enforced, the session must exist, be bound to a runner, and that
+// runner must be assigned to the requester.
+func (s *Server) authorizeSession(r *http.Request, chatID string) (*dbmodels.Session, *bindingError) {
+	if !IsValidChatID(chatID) {
+		return nil, &bindingError{http.StatusBadRequest, "invalid session_id format"}
+	}
+	if s.repo != nil {
+		sess, err := s.repo.GetSessionMeta(chatID)
+		if err != nil {
+			return nil, &bindingError{http.StatusInternalServerError, "failed to query session: " + err.Error()}
+		}
+		if sess == nil {
+			return nil, &bindingError{http.StatusNotFound, "session not found"}
+		}
+		if s.bindingEnforced() {
+			if sess.RunnerNodeID == "" {
+				return nil, &bindingError{http.StatusBadRequest, "chat " + chatID + " is not bound to a runner"}
+			}
+			if aerr := s.authorizeRunner(r, sess.RunnerNodeID); aerr != nil {
+				return nil, aerr
+			}
+		}
+		return sess, nil
+	}
+	return nil, nil
 }
 
 // ManageRunnerResponse is one runner in GET /api/manage/runners.

@@ -54,16 +54,9 @@ func (s *Server) handleSessionAttachmentsUpload(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if s.repo != nil {
-		sess, err := s.repo.GetSessionMeta(sessionID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query session: "+err.Error())
-			return
-		}
-		if sess == nil {
-			writeJSONError(w, http.StatusNotFound, "session not found")
-			return
-		}
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
 	}
 
 	// Enforce 50MB total body size
@@ -166,6 +159,11 @@ func (s *Server) handleSessionAttachmentDownload(w http.ResponseWriter, r *http.
 	filename := r.PathValue("filename")
 	if !runnerfs.ValidAttachmentName(filename) {
 		writeJSONError(w, http.StatusBadRequest, "invalid filename")
+		return
+	}
+
+	if _, aerr := s.authorizeSession(r, sessionID); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
 		return
 	}
 

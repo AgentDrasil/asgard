@@ -609,6 +609,81 @@ func TestSessionRepository_GetSessionsLimit(t *testing.T) {
 	assert.Len(t, maxSessions, 25)
 }
 
+func TestSessionRepository_GetAndSearchSessionsByRunners(t *testing.T) {
+	t.Parallel()
+
+	testDB := db.NewDBForTest(t)
+	require.NoError(t, testDB.AutoMigrate(&Session{}))
+	repo := NewSessionRepository(testDB)
+	tempDir := t.TempDir()
+	repo.SetSessionDirFunc(func(chatID string) string {
+		return filepath.Join(tempDir, chatID)
+	})
+
+	now := time.Now()
+	// Insert sessions for different runners
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:       "sess-r1-active",
+		Title:        "Feature Alpha R1",
+		RunnerNodeID: "runner-1",
+		IsArchived:   false,
+		UpdatedAt:    now.Add(1 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:       "sess-r1-archived",
+		Title:        "Feature Beta R1",
+		RunnerNodeID: "runner-1",
+		IsArchived:   true,
+		UpdatedAt:    now.Add(2 * time.Minute),
+	}))
+	require.NoError(t, repo.SaveSession(&Session{
+		ChatID:       "sess-r2-active",
+		Title:        "Feature Gamma R2",
+		RunnerNodeID: "runner-2",
+		IsArchived:   false,
+		UpdatedAt:    now.Add(3 * time.Minute),
+	}))
+
+	// Empty runner list returns empty
+	emptyRes, err := repo.GetSessionsByRunners(nil, false)
+	require.NoError(t, err)
+	assert.Empty(t, emptyRes)
+
+	emptySearch, err := repo.SearchSessionsByRunners(nil, "Alpha", 10)
+	require.NoError(t, err)
+	assert.Empty(t, emptySearch)
+
+	// Filter by runner-1 active
+	r1Active, err := repo.GetSessionsByRunners([]string{"runner-1"}, false)
+	require.NoError(t, err)
+	require.Len(t, r1Active, 1)
+	assert.Equal(t, "sess-r1-active", r1Active[0].ChatID)
+
+	// Filter by runner-1 archived
+	r1Archived, err := repo.GetSessionsByRunners([]string{"runner-1"}, true)
+	require.NoError(t, err)
+	require.Len(t, r1Archived, 1)
+	assert.Equal(t, "sess-r1-archived", r1Archived[0].ChatID)
+
+	// Filter by multiple runners
+	multi, err := repo.GetSessionsByRunners([]string{"runner-1", "runner-2"}, false)
+	require.NoError(t, err)
+	require.Len(t, multi, 2)
+	assert.Equal(t, "sess-r2-active", multi[0].ChatID)
+	assert.Equal(t, "sess-r1-active", multi[1].ChatID)
+
+	// Search by query scoped to runner-1
+	searchR1, err := repo.SearchSessionsByRunners([]string{"runner-1"}, "Feature", 10)
+	require.NoError(t, err)
+	require.Len(t, searchR1, 1)
+	assert.Equal(t, "sess-r1-active", searchR1[0].ChatID)
+
+	// Search matching runner-2 query
+	searchR2, err := repo.SearchSessionsByRunners([]string{"runner-1"}, "Gamma", 10)
+	require.NoError(t, err)
+	assert.Empty(t, searchR2)
+}
+
 func TestNormalizeSessionLimit(t *testing.T) {
 	t.Parallel()
 

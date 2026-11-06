@@ -817,6 +817,28 @@ describe("API Library", () => {
       vi.unstubAllGlobals();
     });
 
+    it("getRunners returns runner_mode and runners on success", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            backend_version: "v1.2.3",
+            runners: [],
+            runner_mode: true,
+          }),
+        })),
+      );
+      const res = await getRunners();
+      expect(res).toEqual({
+        backend_version: "v1.2.3",
+        runners: [],
+        runner_mode: true,
+      });
+      vi.unstubAllGlobals();
+    });
+
     it("getRunners returns null on failure", async () => {
       vi.stubGlobal(
         "fetch",

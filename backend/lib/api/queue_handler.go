@@ -33,6 +33,11 @@ func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	msgs, err := s.repo.GetQueuedMessages(id)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -64,6 +69,12 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, aerr := s.authorizeSession(r, id)
+	if aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	var req EnqueueMessageRequest
 	if r.Body != nil && r.Body != http.NoBody {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -81,36 +92,17 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.repo.GetSessionMeta(id)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to get session: " + err.Error()})
-		return
-	}
 	if session == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session not found"})
+		writeJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
 	// Resolve target agent from session.CurrentAgent (must be single agent, non-workflow)
 	// Agents are those visible to the chat's runner (global plus its own). A
 	// chat without a runner cannot run anything once binding is enforced.
-	if s.bindingEnforced() && session.RunnerNodeID == "" {
-		writeJSONError(w, http.StatusBadRequest, "chat is not bound to a runner")
-		return
-	}
-	if session.RunnerNodeID != "" {
-		if aerr := s.authorizeRunner(r, session.RunnerNodeID); aerr != nil {
-			writeJSONError(w, aerr.status, aerr.msg)
-			return
-		}
-	}
-	visible, aerr := s.agentsFor(session.RunnerNodeID)
-	if aerr != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+aerr.Error())
+	visible, agentErr := s.agentsFor(session.RunnerNodeID)
+	if agentErr != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to list agents of runner: "+agentErr.Error())
 		return
 	}
 	var targetAgent *agentspec.Agent
@@ -191,6 +183,11 @@ func (s *Server) handleUpdateQueuedMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	messageID := r.PathValue("messageId")
 	if messageID == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -259,6 +256,11 @@ func (s *Server) handleDeleteQueuedMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
 	messageID := r.PathValue("messageId")
 	if messageID == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -306,6 +308,11 @@ func (s *Server) handleClearQueue(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid session id format"})
+		return
+	}
+
+	if _, aerr := s.authorizeSession(r, id); aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
 		return
 	}
 
