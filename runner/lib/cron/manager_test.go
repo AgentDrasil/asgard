@@ -184,7 +184,7 @@ func TestRunnerCronManager_Reload_TableDriven(t *testing.T) {
 			schedule:      "0 3 * * *",
 			agentType:     "workflow",
 			expectJobKey:  "/wf-global-targeted",
-			expectPresent: true,
+			expectPresent: false,
 		},
 		{
 			name:          "local runner-owned workflow without schedule",

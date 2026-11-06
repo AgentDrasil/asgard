@@ -808,4 +808,30 @@ func TestCallbackWorkflowExecutionMethods(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, codes.Unauthenticated, status.Code(err))
 	})
+
+	t.Run("runner mismatch and validation rejected", func(t *testing.T) {
+		// Existing session is bound to runner-1; another runner cannot access it
+		ctxOther := withTestNode(context.Background(), "runner-other")
+		_, err := svc.ReportWorkflowEvent(ctxOther, &runnerpb.ReportWorkflowEventRequest{
+			SessionId: "wf-cron-r1-test",
+			EventType: string(workflow.EventNodeFinished),
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		_, err = svc.WorkflowRunStart(ctx, &runnerpb.WorkflowRunStartRequest{
+			RunId:     "",
+			SessionId: "wf-cron-r1-test",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+		_, err = svc.WorkflowRunSettle(ctx, &runnerpb.WorkflowRunSettleRequest{
+			RunId:          "run-wf-1",
+			Status:         "COMPLETED",
+			NodeStatesJson: []byte(`not-json`),
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -461,6 +462,23 @@ func (c *callbackService) GetUserProxyKeys(ctx context.Context, req *runnerpb.Ge
 	return &runnerpb.GetUserProxyKeysResponse{Keys: keys}, nil
 }
 
+func (c *callbackService) validateSessionOwnership(sessionID, nodeID string) (*dbmodels.Session, error) {
+	if sessionID == "" || !IsValidChatID(sessionID) {
+		return nil, status.Error(codes.InvalidArgument, "invalid session_id")
+	}
+	if c.s == nil || c.s.repo == nil {
+		return nil, nil
+	}
+	sess, err := c.s.repo.GetSessionMeta(sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get session: %v", err)
+	}
+	if sess != nil && sess.RunnerNodeID != "" && sess.RunnerNodeID != nodeID {
+		return nil, status.Error(codes.PermissionDenied, "session runner mismatch")
+	}
+	return sess, nil
+}
+
 // InitWorkflowSession implements runnerpb.AgentCallbackServiceServer.
 func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb.InitWorkflowSessionRequest) (*runnerpb.InitWorkflowSessionResponse, error) {
 	nodeID, ok := c.nodeID(ctx)
@@ -474,16 +492,26 @@ func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb
 		return &runnerpb.InitWorkflowSessionResponse{Ok: true}, nil
 	}
 	sessionID := req.GetSessionId()
-	if sessionID == "" || !IsValidChatID(sessionID) {
-		return nil, status.Error(codes.InvalidArgument, "invalid session_id")
+	existing, err := c.validateSessionOwnership(sessionID, nodeID)
+	if err != nil {
+		return nil, err
 	}
 	title := fmt.Sprintf("Scheduled: %s", req.GetWorkflowName())
 	if req.GetWorkflowName() == "" {
 		title = fmt.Sprintf("Scheduled: %s", req.GetAgentId())
 	}
+	currentAgent := req.GetAgentId()
+	if existing != nil {
+		if existing.Title != "" {
+			title = existing.Title
+		}
+		if existing.CurrentAgent != "" {
+			currentAgent = existing.CurrentAgent
+		}
+	}
 	session := &dbmodels.Session{
 		ChatID:       sessionID,
-		CurrentAgent: req.GetAgentId(),
+		CurrentAgent: currentAgent,
 		Title:        title,
 		RunnerNodeID: nodeID,
 	}
@@ -507,8 +535,8 @@ func (c *callbackService) ReportWorkflowEvent(ctx context.Context, req *runnerpb
 		return &runnerpb.ReportWorkflowEventResponse{Ok: true}, nil
 	}
 	sessionID := req.GetSessionId()
-	if sessionID == "" {
-		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	if _, err := c.validateSessionOwnership(sessionID, nodeID); err != nil {
+		return nil, err
 	}
 
 	var metadata map[string]any
@@ -550,16 +578,31 @@ func (c *callbackService) ReportWorkflowEvent(ctx context.Context, req *runnerpb
 
 // WorkflowRunStart implements runnerpb.AgentCallbackServiceServer.
 func (c *callbackService) WorkflowRunStart(ctx context.Context, req *runnerpb.WorkflowRunStartRequest) (*runnerpb.WorkflowRunStartResponse, error) {
-	_, ok := c.nodeID(ctx)
+	nodeID, ok := c.nodeID(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "unknown runner")
+	}
+	runID := req.GetRunId()
+	if runID == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+	sessionID := req.GetSessionId()
+	if _, err := c.validateSessionOwnership(sessionID, nodeID); err != nil {
+		return nil, err
 	}
 	if c.s == nil || c.s.workflowRunRepo == nil {
 		return &runnerpb.WorkflowRunStartResponse{Ok: true}, nil
 	}
-	err := c.s.workflowRunRepo.SaveRun(&dbmodels.WorkflowRun{
-		RunID:             req.GetRunId(),
-		SessionID:         req.GetSessionId(),
+	// Check if already settled to avoid resurrection from late retries
+	existing, err := c.s.workflowRunRepo.GetRunRow(runID)
+	if err == nil && existing != nil && (existing.Status == dbmodels.WorkflowStatusCompleted ||
+		existing.Status == dbmodels.WorkflowStatusFailed ||
+		existing.Status == dbmodels.WorkflowStatusCancelled) {
+		return &runnerpb.WorkflowRunStartResponse{Ok: true}, nil
+	}
+	err = c.s.workflowRunRepo.SaveRun(&dbmodels.WorkflowRun{
+		RunID:             runID,
+		SessionID:         sessionID,
 		Status:            req.GetStatus(),
 		DAGSpec:           req.GetDagSpec(),
 		NodeStates:        "{}",
@@ -569,7 +612,7 @@ func (c *callbackService) WorkflowRunStart(ctx context.Context, req *runnerpb.Wo
 		AllowCrossSession: req.GetAllowCrossSession(),
 	})
 	if err != nil {
-		log.Warn().Err(err).Str("run_id", req.GetRunId()).Msg("failed to save workflow run from runner")
+		log.Warn().Err(err).Str("run_id", runID).Msg("failed to save workflow run from runner")
 		return nil, status.Errorf(codes.Internal, "save workflow run: %v", err)
 	}
 	return &runnerpb.WorkflowRunStartResponse{Ok: true}, nil
@@ -577,35 +620,49 @@ func (c *callbackService) WorkflowRunStart(ctx context.Context, req *runnerpb.Wo
 
 // WorkflowRunSettle implements runnerpb.AgentCallbackServiceServer.
 func (c *callbackService) WorkflowRunSettle(ctx context.Context, req *runnerpb.WorkflowRunSettleRequest) (*runnerpb.WorkflowRunSettleResponse, error) {
-	_, ok := c.nodeID(ctx)
+	nodeID, ok := c.nodeID(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "unknown runner")
+	}
+	runID := req.GetRunId()
+	if runID == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+	rawStates := req.GetNodeStatesJson()
+	if len(rawStates) > 0 && !json.Valid(rawStates) {
+		return nil, status.Error(codes.InvalidArgument, "invalid node_states_json")
 	}
 	if c.s == nil || c.s.workflowRunRepo == nil {
 		return &runnerpb.WorkflowRunSettleResponse{Ok: true}, nil
 	}
-	run, err := c.s.workflowRunRepo.GetRunRow(req.GetRunId())
+	run, err := c.s.workflowRunRepo.GetRunRow(runID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "get workflow run: %v", err)
 	}
 	if run == nil {
 		return &runnerpb.WorkflowRunSettleResponse{Ok: true}, nil
 	}
-	switch req.GetStatus() {
+	if _, err := c.validateSessionOwnership(run.SessionID, nodeID); err != nil {
+		return nil, err
+	}
+	// Always release execution guard on run settlement to prevent any leak
+	c.s.releaseExecution(run.SessionID)
+
+	switch strings.ToUpper(req.GetStatus()) {
 	case workflow.PersistStatusCompleted:
 		run.Status = dbmodels.WorkflowStatusCompleted
 	case workflow.PersistStatusFailed:
 		run.Status = dbmodels.WorkflowStatusFailed
-	case workflow.PersistStatusCancelled:
+	case workflow.PersistStatusCancelled, "CANCELED":
 		run.Status = dbmodels.WorkflowStatusCancelled
 	default:
-		run.Status = req.GetStatus()
+		return nil, status.Errorf(codes.InvalidArgument, "unknown run status %q", req.GetStatus())
 	}
-	if raw := req.GetNodeStatesJson(); len(raw) > 0 {
-		run.NodeStates = string(raw)
+	if len(rawStates) > 0 {
+		run.NodeStates = string(rawStates)
 	}
 	if err := c.s.workflowRunRepo.SaveRun(run); err != nil {
-		log.Warn().Err(err).Str("run_id", req.GetRunId()).Msg("failed to settle workflow run from runner")
+		log.Warn().Err(err).Str("run_id", runID).Msg("failed to settle workflow run from runner")
 		return nil, status.Errorf(codes.Internal, "settle workflow run: %v", err)
 	}
 	return &runnerpb.WorkflowRunSettleResponse{Ok: true}, nil

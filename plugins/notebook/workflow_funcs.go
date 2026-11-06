@@ -66,6 +66,7 @@ func ScanIngestPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
+	cleanStaleResultsFile(nctx, ingestResultsName)
 	vaultDir, err := resolveVaultDir(nctx)
 	if err != nil {
 		return "", err
@@ -183,6 +184,7 @@ func ScanAbsorbPending(ctx context.Context, nctx *pluginsdk.NodeContext) (string
 	if err := checkCanceled(ctx); err != nil {
 		return "", err
 	}
+	cleanStaleResultsFile(nctx, absorbResultsName)
 	vaultDir, err := resolveVaultDir(nctx)
 	if err != nil {
 		return "", err
@@ -390,6 +392,19 @@ func resolveFanoutReadPath(nctx *pluginsdk.NodeContext, name string) string {
 	return filepath.Join(os.TempDir(), name)
 }
 
+// cleanStaleResultsFile removes leftover results files from previous runs in
+// SessionDir and TmpDir so a new scan begins with a clean slate.
+func cleanStaleResultsFile(nctx *pluginsdk.NodeContext, name string) {
+	if nctx == nil {
+		return
+	}
+	if nctx.SessionDir != "" {
+		_ = os.Remove(filepath.Join(nctx.SessionDir, name))
+	}
+	if nctx.TmpDir != "" {
+		_ = os.Remove(filepath.Join(nctx.TmpDir, name))
+	}
+}
 
 // fanoutResult mirrors one JSONL entry produced by fan-out workflow nodes
 // (uppercase SUCCEEDED/FAILED statuses).

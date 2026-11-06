@@ -106,8 +106,8 @@ func (m *WorkflowCronManager) Reload(agentsList []*agentspec.Agent) {
 		if a == nil || a.Config.Type != "workflow" || a.WorkflowPath == "" {
 			continue
 		}
-		// Filter out runner-bound workflow agents: their schedules are initiated
-		// and executed locally on the runner, not by the backend.
+		// Filter out runner-owned workflow agents: their schedules are initiated
+		// and executed locally on their owning runner, not by the backend.
 		if a.NodeID != "" {
 			continue
 		}

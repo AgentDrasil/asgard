@@ -35,6 +35,11 @@ type Options struct {
 	AllowUnsandboxed bool
 }
 
+type runnerJob struct {
+	job      gocron.Job
+	schedule string
+}
+
 // RunnerCronManager schedules and executes runner-bound workflows locally.
 type RunnerCronManager struct {
 	nodeID           string
@@ -45,7 +50,7 @@ type RunnerCronManager struct {
 
 	scheduler gocron.Scheduler
 	mu        sync.Mutex
-	jobs      map[string]gocron.Job // jobKey -> gocron.Job
+	jobs      map[string]runnerJob // jobKey -> runnerJob
 }
 
 // New creates and starts a RunnerCronManager.
@@ -62,7 +67,7 @@ func New(opts Options) (*RunnerCronManager, error) {
 		conf:             opts.Conf,
 		allowUnsandboxed: opts.AllowUnsandboxed,
 		scheduler:        scheduler,
-		jobs:             make(map[string]gocron.Job),
+		jobs:             make(map[string]runnerJob),
 	}
 
 	scheduler.Start()
@@ -105,12 +110,13 @@ func (m *RunnerCronManager) Reload() {
 		if defn.Schedule == "" {
 			continue
 		}
+		if err := defn.ValidateScheduleRunner(a.NodeID); err != nil {
+			log.Error().Err(err).Str("agent", a.Config.ID).Msg("workflow cron job not scheduled on runner")
+			continue
+		}
 
-		// Only schedule workflows bound to this runner:
-		// 1) Agent owned by this runner (a.NodeID == m.nodeID)
-		// 2) Global agent explicitly targeting this runner (a.NodeID == "" && defn.RunnerID == m.nodeID)
-		isRunnerBound := (a.NodeID == m.nodeID) || (a.NodeID == "" && defn.RunnerID == m.nodeID)
-		if !isRunnerBound {
+		// Only schedule workflows owned by this runner. Global agents are scheduled by backend.
+		if a.NodeID != m.nodeID {
 			continue
 		}
 
@@ -120,9 +126,9 @@ func (m *RunnerCronManager) Reload() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for id, job := range m.jobs {
+	for id, rj := range m.jobs {
 		if _, ok := desired[id]; !ok {
-			if err := m.scheduler.RemoveJob(job.ID()); err != nil {
+			if err := m.scheduler.RemoveJob(rj.job.ID()); err != nil {
 				log.Warn().Err(err).Str("job", id).Msg("failed to remove stale runner cron job")
 			}
 			delete(m.jobs, id)
@@ -130,8 +136,11 @@ func (m *RunnerCronManager) Reload() {
 	}
 
 	for id, item := range desired {
-		if job, ok := m.jobs[id]; ok {
-			if err := m.scheduler.RemoveJob(job.ID()); err != nil {
+		if existing, ok := m.jobs[id]; ok {
+			if existing.schedule == item.schedule {
+				continue // Unchanged schedule, skip re-register churn
+			}
+			if err := m.scheduler.RemoveJob(existing.job.ID()); err != nil {
 				log.Warn().Err(err).Str("job", id).Msg("failed to remove outdated runner cron job")
 			}
 			delete(m.jobs, id)
@@ -146,7 +155,7 @@ func (m *RunnerCronManager) Reload() {
 			log.Error().Err(err).Str("agent", id).Str("schedule", item.schedule).Msg("failed to register runner cron job")
 			continue
 		}
-		m.jobs[id] = job
+		m.jobs[id] = runnerJob{job: job, schedule: item.schedule}
 		log.Info().Str("agent", id).Str("schedule", item.schedule).Msg("Scheduled runner workflow cron job")
 	}
 }

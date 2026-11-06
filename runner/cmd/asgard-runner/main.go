@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -74,11 +75,17 @@ func run() error {
 	// The executor forwards the sandbox calls over the backend connection the
 	// client below maintains.
 	var client *conn.Client
+	callbacks := func() (runnerpb.AgentCallbackServiceClient, error) {
+		if client == nil {
+			return nil, errors.New("client not initialized")
+		}
+		return client.Callbacks()
+	}
 	executor := exec.New(exec.Options{
 		Agents:    remote,
 		Conf:      sb.Conf,
 		Ready:     sb.Ready,
-		Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() },
+		Callbacks: callbacks,
 	})
 	svc := service.New(service.Options{
 		Agents: remote.Agents, GitExec: sb.GitExec,
@@ -89,7 +96,7 @@ func run() error {
 	cronMgr, err := cron.New(cron.Options{
 		NodeID:           nodeID,
 		Remote:           remote,
-		Callbacks:        func() (runnerpb.AgentCallbackServiceClient, error) { return client.Callbacks() },
+		Callbacks:        callbacks,
 		Conf:             sb.Conf,
 		AllowUnsandboxed: boot.AllowUnsandboxedCommands,
 	})
