@@ -373,6 +373,7 @@ nodes:
 
 	// Collect SSE events and assert metadata
 	var fanoutProgressEvents []SessionEvent
+	var foundItem1, foundItem2 bool
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
@@ -381,11 +382,17 @@ nodes:
 				// Check for bubbled fanout progress messages
 				if strings.Contains(ev.Message.ID, "fanout_task") && strings.Contains(ev.Message.ID, "child_cmd") {
 					fanoutProgressEvents = append(fanoutProgressEvents, ev)
+					if strings.Contains(ev.Message.ID, "fanout_task-1-child_cmd") {
+						foundItem1 = true
+					}
+					if strings.Contains(ev.Message.ID, "fanout_task-2-child_cmd") {
+						foundItem2 = true
+					}
 				}
 			}
 		case <-time.After(50 * time.Millisecond):
 		}
-		if len(fanoutProgressEvents) >= 2 {
+		if foundItem1 && foundItem2 {
 			break
 		}
 	}
@@ -394,15 +401,6 @@ nodes:
 
 	// Verify we received bubbled fanout progress events with item indices in the Message IDs
 	require.NotEmpty(t, fanoutProgressEvents, "expected at least one fanout progress event delivered via SSE")
-	var foundItem1, foundItem2 bool
-	for _, ev := range fanoutProgressEvents {
-		if strings.Contains(ev.Message.ID, "fanout_task-1-child_cmd") {
-			foundItem1 = true
-		}
-		if strings.Contains(ev.Message.ID, "fanout_task-2-child_cmd") {
-			foundItem2 = true
-		}
-	}
 	assert.True(t, foundItem1, "expected item 1 fanout progress event")
 	assert.True(t, foundItem2, "expected item 2 fanout progress event")
 }
