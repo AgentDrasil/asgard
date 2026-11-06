@@ -924,6 +924,22 @@ func TestGitPushOutputAndTrackingRefWrittenByTheRunner(t *testing.T) {
 	assert.Equal(t, head, gitCmd(t, ws, "rev-parse", "refs/remotes/origin/main"))
 }
 
+func TestGitPushHidesTrackingComplaintWhenRefCannotBeDerived(t *testing.T) {
+	fs, ws, remote := pushRepo(t)
+	// Two fetch refspecs: the runner cannot say which tracking ref a push
+	// updates, but git still complains about the read-only repository.
+	gitCmd(t, ws, "config", "--local", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*")
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, ".git", "refs", "remotes", "origin"), 0o755))
+	writeFile(t, filepath.Join(ws, ".git", "refs", "remotes", "origin", "main.lock"), "")
+
+	res, err := fs.GitPush(t.Context(), ws, "")
+	require.NoError(t, err)
+	assert.True(t, res.Success, res.Error+res.Output)
+	assert.NotContains(t, res.Output, "cannot lock ref 'refs/remotes/")
+	assert.NotContains(t, res.Output, "update_ref failed")
+	assert.Equal(t, gitCmd(t, ws, "rev-parse", "HEAD"), gitCmd(t, remote, "rev-parse", "main"))
+}
+
 func TestGitPushOutputCannotChangeWhatIsRecorded(t *testing.T) {
 	fs, ws, remote := pushRepo(t)
 	// A transport that prints porcelain-looking and To-looking lines.

@@ -834,11 +834,13 @@ func (l Local) gitNetwork(ctx context.Context, runDir, sub string) (GitOpResult,
 	cmd.Stdout, cmd.Stderr = cw, cw
 	runErr := cmd.Run()
 	out, _ := capString(cw.buf.Bytes(), MaxGitError*2)
-	if sub == "push" && trackOK {
-		// The repository is read-only for git, so it could not update the
-		// remote-tracking ref itself: record it here after a successful push.
+	if sub == "push" {
+		// The repository is read-only for git, so it can never update a
+		// remote-tracking ref itself and always complains about it, whether or
+		// not we could work the ref out beforehand.
 		out = stripTrackingErrors(out)
-		if runErr == nil {
+		// Record the ref here after a successful push when it is known.
+		if trackOK && runErr == nil {
 			r.writeTracking(trackRef, trackHash)
 		}
 	}
