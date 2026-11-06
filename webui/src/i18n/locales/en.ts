@@ -93,6 +93,9 @@ export const en = {
     noRunner: "No runner",
     noRunnerAssigned: "No runner assigned",
     noRunnerWarning: "No runner assigned. Please contact an administrator.",
+    noRunnerAccessTitle: "You don't have any runner access",
+    noRunnerAccessDesc:
+      "You don't have any runner access. Ask an administrator to assign a runner to your account.",
     online: "Online",
     offline: "Offline",
     boundRunner: "Runner: {id}",

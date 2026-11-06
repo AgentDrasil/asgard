@@ -95,6 +95,9 @@ export const zhCN: MessageSchema = {
     noRunner: "无可用 Runner",
     noRunnerAssigned: "未分配 Runner",
     noRunnerWarning: "未分配任何 Runner，请联系管理员。",
+    noRunnerAccessTitle: "你没有任何runner access",
+    noRunnerAccessDesc:
+      "你的账号未分配任何 Runner 访问权限。请联系管理员为你分配 Runner 后再使用。",
     online: "在线",
     offline: "离线",
     boundRunner: "Runner：{id}",

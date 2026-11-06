@@ -254,6 +254,16 @@ describe("auth capability discovery", () => {
       expect(refreshes).toHaveLength(0);
     });
 
+    it("does not redirect to denial page on non-role 403 errors", async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(403, { error: "runner runner-chao is not assigned to you" }),
+      );
+
+      const res = await apiFetch("/api/subdirs?dir=/tmp");
+      expect(res.status).toBe(403);
+      expect(navigations).toHaveLength(0);
+    });
+
     it("collapses concurrent refreshes into a single request", async () => {
       const fresh: StoredTokens = {
         ...TOKENS,

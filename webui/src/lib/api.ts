@@ -227,10 +227,25 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
 
   if (response.status === 403) {
-    redirectToDenied();
-    // Return an unresolved promise so callers neither retry nor start an
-    // endless fetch loop while the browser navigates away.
-    return new Promise<Response>(() => {});
+    let isRoleForbidden = true;
+    try {
+      const resClone = typeof response.clone === "function" ? response.clone() : response;
+      const data = await resClone.json();
+      if (data && typeof data === "object" && data.error && data.error !== "insufficient role") {
+        isRoleForbidden = false;
+      }
+    } catch {
+      // not JSON: treat as role forbidden
+    }
+
+    if (isRoleForbidden) {
+      redirectToDenied();
+      // Return an unresolved promise so callers neither retry nor start an
+      // endless fetch loop while the browser navigates away.
+      return new Promise<Response>(() => {});
+    }
+
+    return response;
   }
 
   if (response.status === 401) {

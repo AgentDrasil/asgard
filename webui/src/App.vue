@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
+import { Icon } from "@iconify/vue";
 import Sidebar from "./components/Sidebar.vue";
 import TerminalPanel from "./components/TerminalPanel.vue";
 import FileSearchModal from "./components/file/FileSearchModal.vue";
@@ -10,7 +11,7 @@ import SessionSearchModal from "./components/SessionSearchModal.vue";
 import QuotaModal from "./components/sidebar/QuotaModal.vue";
 import ToastContainer from "./components/common/ToastContainer.vue";
 import { initPushNotifications } from "./lib/push";
-import { getDirInfo, getSystemStatus, isAuthEnabled } from "./lib/api";
+import { getDirInfo, getSystemStatus, isAuthEnabled, logout } from "./lib/api";
 import { useToast } from "./composables/useToast";
 import { useUserProfile } from "./composables/useUserProfile";
 import type { ActiveView, Attachment, CommandItem } from "./types";
@@ -187,7 +188,17 @@ const openSessionSearch = () => {
 };
 
 // 1. Agents Composable
-const { selectedRunnerId, runnerForSession, refreshRunners } = useRunners();
+const {
+  runners,
+  runnerMode,
+  loading: runnersLoading,
+  selectedRunnerId,
+  runnerForSession,
+  refreshRunners,
+} = useRunners();
+const hasNoRunnerAccess = computed(() => runnerMode.value && runners.value.length === 0);
+const authEnabled = isAuthEnabled();
+const handleLogout = () => logout();
 const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
 // 2. Session Store (Single Source of Truth)
@@ -218,7 +229,7 @@ const {
 // 3. Sessions Navigation & Operations
 const {
   handleSelectSession,
-  handleNewChat,
+  handleNewChat: rawHandleNewChat,
   handleDeleteSession,
   handleArchiveSession,
   handleUnlockSession,
@@ -234,6 +245,16 @@ const {
   archiveSessionById,
   unlockSessionById,
 );
+
+const handleNewChat = (closeSidebar?: () => void, agentId?: string, runDir?: string) => {
+  if (hasNoRunnerAccess.value) {
+    if (isAdmin.value) {
+      router.push("/settings/runners");
+    }
+    return;
+  }
+  rawHandleNewChat(closeSidebar, agentId, runDir);
+};
 
 // Keep the VCS git root in sync with the effective workspace directory so the
 // VCS entry point is available on direct loads (e.g. refresh while in file view).
@@ -344,17 +365,44 @@ const checkSystemStatus = async () => {
   }
 };
 
+watch(
+  [hasNoRunnerAccess, isAdmin, () => route.path],
+  ([noAccess, admin, path]) => {
+    if (noAccess && admin && !path.startsWith("/settings")) {
+      void router.replace("/settings/runners");
+    }
+  },
+  { immediate: true },
+);
+
+watch(hasNoRunnerAccess, (noAccess, prevNoAccess) => {
+  if (!noAccess && prevNoAccess) {
+    void checkSystemStatus();
+    void loadAgents(runnerForSession(activeSession.value) || undefined);
+    void loadSessions();
+  }
+});
+
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
   initPushNotifications().catch((err) => console.error("Push notification init error:", err));
-  void checkSystemStatus();
   void loadCustomKeybindings();
+  if (isAuthEnabled()) {
+    await loadProfile();
+  }
   // Runners first: the agents list is scoped to the selected runner.
   await refreshRunners();
-  await Promise.all([
-    loadAgents(runnerForSession(activeSession.value) || undefined),
-    loadSessions(),
-  ]);
+  if (hasNoRunnerAccess.value) {
+    if (isAdmin.value && !route.path.startsWith("/settings")) {
+      await router.replace("/settings/runners");
+    }
+  } else {
+    void checkSystemStatus();
+    await Promise.all([
+      loadAgents(runnerForSession(activeSession.value) || undefined),
+      loadSessions(),
+    ]);
+  }
 });
 
 // Re-scope the agents list when the effective runner changes (dropdown for a
@@ -585,7 +633,44 @@ const commandList = computed<CommandItem[]>(() => [
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col h-full bg-base-100 overflow-hidden min-w-0">
-      <router-view v-slot="{ Component }">
+      <!-- No Runner Access view for non-admin users -->
+      <div
+        v-if="hasNoRunnerAccess && !isAdmin"
+        class="flex-1 flex flex-col items-center justify-center p-6 text-center select-none"
+        data-testid="no-runner-access"
+      >
+        <div
+          class="w-16 h-16 rounded-full bg-warning/10 text-warning flex items-center justify-center mb-4 shadow-sm"
+        >
+          <Icon icon="mynaui:server" class="w-8 h-8" />
+        </div>
+        <h2 class="text-xl font-bold text-base-content mb-2">
+          {{ t("runners.noRunnerAccessTitle") }}
+        </h2>
+        <p class="text-sm text-base-content/60 max-w-md mb-6 leading-relaxed">
+          {{ t("runners.noRunnerAccessDesc") }}
+        </p>
+        <div class="flex items-center gap-3">
+          <button
+            class="btn btn-sm btn-outline gap-2"
+            :disabled="runnersLoading"
+            @click="refreshRunners"
+          >
+            <Icon icon="mynaui:refresh" :class="['w-4 h-4', { 'animate-spin': runnersLoading }]" />
+            <span>{{ t("runners.refresh") }}</span>
+          </button>
+          <button
+            v-if="authEnabled"
+            class="btn btn-sm btn-ghost gap-2 text-error"
+            @click="handleLogout"
+          >
+            <Icon icon="mynaui:logout" class="w-4 h-4" />
+            <span>{{ t("sidebar.logout") }}</span>
+          </button>
+        </div>
+      </div>
+
+      <router-view v-else v-slot="{ Component }">
         <component
           :is="Component"
           :agents="agents"

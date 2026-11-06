@@ -4,6 +4,9 @@ import { createApp, defineComponent, h, nextTick, watchEffect } from "vue";
 import { createRouter, createMemoryHistory } from "vue-router";
 import App from "./App.vue";
 import { i18n, setLocale } from "./i18n";
+import * as api from "./lib/api";
+import { resetRunnersForTest } from "./composables/useRunners";
+import { __resetUserProfileForTest } from "./composables/useUserProfile";
 import type { AgentInfo, ChatSession } from "./types";
 
 vi.mock("@iconify/vue", () => ({
@@ -185,6 +188,102 @@ describe("App new chat from an active session", () => {
     expect(router.currentRoute.value.path).toBe("/newchat");
     expect(captured.agent).toBe("agent-a");
     expect(captured.dir).toBe("/ws/a2");
+
+    app.unmount();
+  });
+
+  it("shows no runner access view for non-admin user with no runners", async () => {
+    resetRunnersForTest();
+    __resetUserProfileForTest();
+
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    vi.mocked(api.getRunners).mockResolvedValue({
+      backend_version: "1.0.0",
+      runners: [],
+      runner_mode: true,
+    });
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/auth/me") {
+        return new Response(JSON.stringify({ subject: "u1", name: "User 1", isAdmin: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/newchat", component: NewChatStub },
+        { path: "/dashboard", component: BlankStub },
+        { path: "/settings/runners", component: BlankStub },
+      ],
+    });
+
+    await router.push("/dashboard");
+
+    const app = createApp(App);
+    app.use(i18n);
+    app.use(router);
+    app.mount(root);
+    await router.isReady();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 10));
+    await nextTick();
+
+    const noRunnerAccessEl = root.querySelector('[data-testid="no-runner-access"]');
+    expect(noRunnerAccessEl).not.toBeNull();
+    expect(noRunnerAccessEl?.textContent).toContain("You don't have any runner access");
+
+    app.unmount();
+  });
+
+  it("redirects admin user with no runners to admin settings page", async () => {
+    resetRunnersForTest();
+    __resetUserProfileForTest();
+
+    vi.spyOn(api, "isAuthEnabled").mockReturnValue(true);
+    vi.mocked(api.getRunners).mockResolvedValue({
+      backend_version: "1.0.0",
+      runners: [],
+      runner_mode: true,
+    });
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/auth/me") {
+        return new Response(JSON.stringify({ subject: "admin-1", name: "Admin", isAdmin: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/newchat", component: NewChatStub },
+        { path: "/dashboard", component: BlankStub },
+        { path: "/settings/runners", component: BlankStub },
+      ],
+    });
+
+    await router.push("/dashboard");
+
+    const app = createApp(App);
+    app.use(i18n);
+    app.use(router);
+    app.mount(root);
+    await router.isReady();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 10));
+    await nextTick();
+
+    const noRunnerAccessEl = root.querySelector('[data-testid="no-runner-access"]');
+    expect(noRunnerAccessEl).toBeNull();
+    expect(router.currentRoute.value.path).toBe("/settings/runners");
 
     app.unmount();
   });
