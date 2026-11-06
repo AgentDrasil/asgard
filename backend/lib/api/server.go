@@ -467,8 +467,11 @@ const authStatusPath = "/api/auth/status"
 // which render inline styles in their output. The security-critical directive,
 // script-src, stays restricted to same-origin files: index.html loads the theme
 // bootstrap as an external script precisely so no inline script is needed.
+// script-src additionally allows 'wasm-unsafe-eval' (WebAssembly compilation
+// only, not JS eval) because Shiki's default Oniguruma regex engine is a WASM
+// module; without it syntax highlighting silently falls back to plain text.
 const documentCSP = "default-src 'self'; " +
-	"script-src 'self'; " +
+	"script-src 'self' 'wasm-unsafe-eval'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data:; " +
