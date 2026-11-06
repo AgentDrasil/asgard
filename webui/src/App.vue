@@ -405,6 +405,24 @@ onMounted(async () => {
   }
 });
 
+// Only list sessions bound to the selected runner (unbound legacy ones stay visible).
+const visibleSessions = computed(() =>
+  runnerMode.value && selectedRunnerId.value
+    ? sessions.value.filter((s) => !s.runnerId || s.runnerId === selectedRunnerId.value)
+    : sessions.value,
+);
+
+// Switching runner in the sidebar also switches the active session to that
+// runner's most recent session, or to a new chat when it has none.
+watch(selectedRunnerId, (runner, prev) => {
+  if (!runner || runner === prev || !prev) return;
+  const current = activeSession.value;
+  if (current?.runnerId === runner) return;
+  const target = sessions.value.find((s) => s.runnerId === runner);
+  if (target) handleSelectSession(target.chatID);
+  else handleNewChat();
+});
+
 // Re-scope the agents list when the effective runner changes (dropdown for a
 // new chat, bound runner for an existing chat).
 watch(
@@ -618,7 +636,7 @@ const commandList = computed<CommandItem[]>(() => [
     <!-- Sidebar -->
     <Sidebar
       :isOpen="isSidebarOpen"
-      :sessions="sessions"
+      :sessions="visibleSessions"
       :agents="agents"
       :activeSessionId="activeSessionId"
       @select-session="(id) => handleSelectSession(id, closeSidebarOnMobile)"
