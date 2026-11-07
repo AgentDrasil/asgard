@@ -605,3 +605,37 @@ func TestAutoSelectable(t *testing.T) {
 		})
 	}
 }
+
+func TestExplicitUsable(t *testing.T) {
+	yes, no := true, false
+	tests := []struct {
+		name  string
+		check agentwrapper.QuotaCheck
+		want  bool
+	}{
+		{"no verdict with quota", agentwrapper.QuotaCheck{Remaining: 0.05}, true},
+		{"no verdict without quota", agentwrapper.QuotaCheck{}, false},
+		{"policy accepts", agentwrapper.QuotaCheck{Remaining: 0.04, Usable: &yes}, true},
+		{"policy rejects despite remaining quota", agentwrapper.QuotaCheck{Remaining: 0.50, Usable: &no}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, explicitUsable(tt.check))
+		})
+	}
+}
+
+func TestPolicyReason(t *testing.T) {
+	yes, no := true, false
+	assert.Empty(t, policyReason(agentwrapper.QuotaCheck{Remaining: 0.01}))
+	assert.Empty(t, policyReason(agentwrapper.QuotaCheck{Usable: &yes}))
+	assert.Equal(t, "weekly: 4% remaining", policyReason(agentwrapper.QuotaCheck{Usable: &no, Reason: "weekly: 4% remaining"}))
+	assert.NotEmpty(t, policyReason(agentwrapper.QuotaCheck{Usable: &no}))
+}
+
+func TestNoQuotaErrorMentionsPolicyReason(t *testing.T) {
+	err := &NoQuotaError{AgentID: "a", MinThreshold: MinAutoQuotaThreshold, Targets: []QuotaTargetStatus{
+		{CLI: "claude", Model: "opus", Remaining: 0.08, Enabled: true, Reason: "weekly: 8% remaining"},
+	}}
+	assert.Contains(t, err.Error(), "claude opus: 8% quota remaining (weekly: 8% remaining)")
+}

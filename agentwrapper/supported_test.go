@@ -10,6 +10,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/llms"
 	simplestpkg "github.com/AgentDrasil/asgard/simplest"
 )
 
@@ -323,5 +324,58 @@ func TestApplyQuotaPolicyUsesProfileEnv(t *testing.T) {
 	applyQuotaPolicy(cfg, res)
 	if u := res["claude"][0].Usable; u == nil || *u {
 		t.Fatalf("default should reject 8%%, got %v", u)
+	}
+}
+
+func TestCheckTargetPicksBestAccount(t *testing.T) {
+	yes, no := true, false
+	SetQueryRunner(func(context.Context, ...string) ([]byte, error) {
+		t.Fatal("the plain query must not run when the provider answers")
+		return nil, nil
+	})
+	t.Cleanup(func() { SetQueryRunner(nil); SetAccountUsageProvider(nil) })
+
+	provide := func(usages ...types.ModelUsage) {
+		SetAccountUsageProvider(func(string) ([]types.ModelUsage, bool) { return usages, true })
+	}
+
+	// The first account is below its policy, the second is fine.
+	provide(
+		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.08, Usable: &no, Reason: "low"},
+		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.30, Usable: &yes},
+	)
+	if got := CheckTarget("claude", "m1"); got.Usable == nil || !*got.Usable || got.Remaining != 0.30 {
+		t.Fatalf("CheckTarget = %+v, want the usable account", got)
+	}
+
+	// A policy-accepted account beats one with more raw quota.
+	provide(
+		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.90, Usable: &no},
+		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.04, Usable: &yes},
+	)
+	if got := CheckTarget("claude", "m1"); got.Usable == nil || !*got.Usable {
+		t.Fatalf("CheckTarget = %+v, want the account the policy accepts", got)
+	}
+
+	// Without verdicts the account with the most quota is reported.
+	provide(
+		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.05},
+		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.60},
+		types.ModelUsage{Status: llms.QuotaStatusError},
+	)
+	if got := CheckTarget("claude", "m1"); got.Remaining != 0.60 {
+		t.Fatalf("CheckTarget = %+v, want 0.60", got)
+	}
+}
+
+func TestCheckTargetFallsBackWhenProviderHasNoAnswer(t *testing.T) {
+	SetQueryRunner(func(context.Context, ...string) ([]byte, error) {
+		return []byte(`{"claude":[{"model":"m1","remaining":0.5}]}`), nil
+	})
+	SetAccountUsageProvider(func(string) ([]types.ModelUsage, bool) { return nil, false })
+	t.Cleanup(func() { SetQueryRunner(nil); SetAccountUsageProvider(nil) })
+
+	if got := CheckTarget("claude", "m1"); got.Remaining != 0.5 {
+		t.Fatalf("CheckTarget = %+v", got)
 	}
 }

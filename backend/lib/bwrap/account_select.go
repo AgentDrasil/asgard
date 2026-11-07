@@ -79,6 +79,32 @@ func QueryAccountQuota(ctx context.Context, cli, alias string) ([]llms.ModelUsag
 	return usages, nil
 }
 
+// AllAccountUsages returns the cached quota of every account of cli, tagged
+// with the account, for agentwrapper.CheckTarget. ok is false when account
+// selection is not in play (an account override, or fewer than two accounts)
+// or no account answered.
+func AllAccountUsages(cli string) ([]llms.ModelUsage, bool) {
+	if os.Getenv(accountEnvName(cli)) != "" {
+		return nil, false
+	}
+	aliases, err := listAccounts(cli)
+	if err != nil || len(aliases) < 2 {
+		return nil, false
+	}
+	var all []llms.ModelUsage
+	answered := false
+	for _, alias := range aliases {
+		usages, err := cachedAccountQuota(cli, alias)
+		if err != nil {
+			log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota unavailable, skipping it")
+			continue
+		}
+		answered = true
+		all = append(all, usages...)
+	}
+	return all, answered
+}
+
 type quotaKey struct{ cli, alias string }
 
 type quotaResult struct {

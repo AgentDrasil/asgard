@@ -838,6 +838,10 @@ func BuildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 			fmt.Fprintf(&sb, "- %s %s: provider disabled\n", t.CLI, t.Model)
 			continue
 		}
+		if t.Reason != "" {
+			fmt.Fprintf(&sb, "- %s %s: %.0f%% remaining, below the quota policy (%s)\n", t.CLI, t.Model, t.Remaining*100, t.Reason)
+			continue
+		}
 		fmt.Fprintf(&sb, "- %s %s: %.0f%% remaining (automatic selection needs more than %.0f%%)\n", t.CLI, t.Model, t.Remaining*100, nq.MinThreshold*100)
 	}
 	sb.WriteString("\nYou can wait for quota to recover and continue, force a specific target with whatever quota is left, or cancel the run.")
@@ -850,7 +854,8 @@ func BuildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 func QuotaOptions(nq *run.NoQuotaError) []string {
 	opts := []string{"Wait for quota recovery, then continue"}
 	for _, t := range nq.Targets {
-		if t.Enabled && t.Remaining > 0 {
+		// A target the quota policy rejects would be refused again when forced.
+		if t.Enabled && t.Remaining > 0 && t.Reason == "" {
 			opts = append(opts, fmt.Sprintf("Use %s %s", t.CLI, t.Model))
 		}
 	}

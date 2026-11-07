@@ -535,3 +535,19 @@ func TestClassifyQuotaReply(t *testing.T) {
 		})
 	}
 }
+
+func TestQuotaPromptAndOptionsHonorPolicyReason(t *testing.T) {
+	nq := &run.NoQuotaError{AgentID: "a", MinThreshold: run.MinAutoQuotaThreshold, Targets: []run.QuotaTargetStatus{
+		{CLI: "claude", Model: "opus", Remaining: 0.08, Enabled: true, Reason: "weekly: 8% remaining"},
+		{CLI: "agy", Model: "gemini", Remaining: 0.05, Enabled: true},
+	}}
+	agent := &agentspec.Agent{Config: agentspec.AgentConfig{ID: "a", Name: "A"}}
+
+	prompt := BuildQuotaPrompt(nq, agent)
+	assert.Contains(t, prompt, "claude opus: 8% remaining, below the quota policy (weekly: 8% remaining)")
+	assert.Contains(t, prompt, "agy gemini: 5% remaining (automatic selection needs more than 10%)")
+
+	opts := QuotaOptions(nq)
+	assert.NotContains(t, opts, "Use claude opus", "a policy-rejected target would be refused again")
+	assert.Contains(t, opts, "Use agy gemini")
+}

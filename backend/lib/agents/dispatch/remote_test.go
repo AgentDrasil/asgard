@@ -240,7 +240,7 @@ func TestRun_QuotaRetryLoopUsesFreshRunIDs(t *testing.T) {
 		Error: "no quota",
 		NoQuota: &runnerpb.NoQuota{
 			AgentId: "a", ExplicitModel: "m1", MinThreshold: 0.1,
-			Targets:     []*runnerpb.TargetQuota{{Cli: "opencode", Model: "m1", Remaining: 0.05, Enabled: true}},
+			Targets:     []*runnerpb.TargetQuota{{Cli: "opencode", Model: "m1", Remaining: 0.05, Enabled: true, Reason: "weekly: 5% remaining"}},
 			PairingNote: "note",
 		},
 	}}
@@ -251,7 +251,7 @@ func TestRun_QuotaRetryLoopUsesFreshRunIDs(t *testing.T) {
 	assert.Equal(t, "a", nq.AgentID)
 	assert.Equal(t, "m1", nq.ExplicitModel)
 	assert.Equal(t, "note", nq.PairingNote)
-	assert.Equal(t, []run.QuotaTargetStatus{{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true}}, nq.Targets)
+	assert.Equal(t, []run.QuotaTargetStatus{{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true, Reason: "weekly: 5% remaining"}}, nq.Targets)
 
 	hub.handle = &fakeHandle{result: okResult("fine")}
 	_, err = d.Run(context.Background(), Request{ChatID: "c", Agent: testAgent(), Attempt: 2})

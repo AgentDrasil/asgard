@@ -180,7 +180,7 @@ func TestExecutorNoQuota(t *testing.T) {
 		ExplicitModel: "m1",
 		MinThreshold:  0.1,
 		PairingNote:   "pair",
-		Targets:       []run.QuotaTargetStatus{{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true}, {CLI: "agy", Model: "g", Enabled: false}},
+		Targets:       []run.QuotaTargetStatus{{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true, Reason: "weekly: 5% remaining"}, {CLI: "agy", Model: "g", Enabled: false}},
 	}
 	fn := func(context.Context, *agentspec.Agent, []agentspec.CLITarget, string, run.SessionMap, optional.Option[string], optional.Option[string], string, run.StatusScope, run.Options) (run.Result, error) {
 		return run.Result{}, fmt.Errorf("wrapped: %w", nq)
@@ -201,6 +201,7 @@ func TestExecutorNoQuota(t *testing.T) {
 	require.Len(t, got.GetTargets(), 2)
 	assert.Equal(t, "opencode", got.GetTargets()[0].GetCli())
 	assert.InDelta(t, 0.05, got.GetTargets()[0].GetRemaining(), 1e-9)
+	assert.Equal(t, "weekly: 5% remaining", got.GetTargets()[0].GetReason())
 	assert.False(t, got.GetTargets()[1].GetEnabled())
 	assert.Nil(t, res.GetSelectedTarget())
 }

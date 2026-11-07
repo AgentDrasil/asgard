@@ -301,6 +301,28 @@ func stderrTail(stderr string) string {
 
 const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection
 
+// policyReason returns why the quota policy rejects the target, or "" when
+// it does not (no verdict, or an accepting one).
+func policyReason(c agentwrapper.QuotaCheck) string {
+	if c.Usable == nil || *c.Usable {
+		return ""
+	}
+	if c.Reason != "" {
+		return c.Reason
+	}
+	return "not usable under the quota policy"
+}
+
+// explicitUsable reports whether an explicitly selected model may run: the
+// quota policy verdict decides when there is one, otherwise the model only
+// needs some quota left.
+func explicitUsable(c agentwrapper.QuotaCheck) bool {
+	if c.Usable != nil {
+		return *c.Usable
+	}
+	return c.Remaining > 0
+}
+
 // autoSelectable reports whether automatic selection may pick a target. The
 // account's quota policy verdict decides when there is one; otherwise the
 // fixed MinAutoQuotaThreshold applies.
@@ -317,6 +339,9 @@ type QuotaTargetStatus struct {
 	Model     string  `json:"model"`
 	Remaining float64 `json:"remaining"`
 	Enabled   bool    `json:"enabled"`
+	// Reason is set when the account's quota policy rejects the target, and
+	// says which limit fell below its threshold.
+	Reason string `json:"reason,omitempty"`
 }
 
 // NoQuotaError reports that no CLI target of an agent can currently be run:
@@ -347,6 +372,9 @@ func (e *NoQuotaError) Error() string {
 	}
 	for _, t := range e.Targets {
 		state := fmt.Sprintf("%.0f%% quota remaining", t.Remaining*100)
+		if t.Reason != "" {
+			state += " (" + t.Reason + ")"
+		}
 		if !t.Enabled {
 			state = "provider disabled"
 		}
@@ -366,7 +394,9 @@ func quotaStatuses(targets []agentspec.CLITarget, opts Options) []QuotaTargetSta
 			Enabled: opts.providerEnabled(target.CLI),
 		}
 		if st.Enabled {
-			st.Remaining = agentwrapper.CheckQuota(target.CLI, target.Model)
+			check := agentwrapper.CheckTarget(target.CLI, target.Model)
+			st.Remaining = check.Remaining
+			st.Reason = policyReason(check)
 		}
 		statuses = append(statuses, st)
 	}
@@ -401,7 +431,8 @@ func (m SessionMap) With(cli, sid string) SessionMap {
 // Run checks the remaining quota for each CLI target configured on the agent.
 // It runs the bubblewrap command for the selected target or the first target that has more than 10% quota remaining.
 // If a specific model is selected (modelOpt is Some), it checks if that model exists in agent.Config.CLI.
-// If selected model has <= 0 quota, it returns an error immediately with NO fallback.
+// If the selected model has no usable quota (none left, or its account's quota
+// policy rejects it), it returns an error immediately with NO fallback.
 // Quota exhaustion is reported as *NoQuotaError so callers can distinguish it
 // from execution failures and react (e.g. suspend for a user decision).
 func Run(ctx context.Context, agent *agentspec.Agent, prompt string, sessions SessionMap, runDirOpt optional.Option[string], modelOpt optional.Option[string], chatID string, statusScope StatusScope, conf *config.Config) ([]byte, agentspec.CLITarget, error) {
@@ -459,8 +490,7 @@ func RunWithOptions(ctx context.Context, agent *agentspec.Agent, candidates []ag
 		if !opts.providerEnabled(selectedTarget.CLI) {
 			return Result{}, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
 		}
-		quota := agentwrapper.CheckQuota(selectedTarget.CLI, selectedTarget.Model)
-		if quota <= 0 {
+		if !explicitUsable(agentwrapper.CheckTarget(selectedTarget.CLI, selectedTarget.Model)) {
 			return Result{}, &NoQuotaError{
 				AgentID:       agent.Config.ID,
 				ExplicitModel: reqModel,
@@ -478,7 +508,7 @@ func RunWithOptions(ctx context.Context, agent *agentspec.Agent, candidates []ag
 			}
 			hasEnabledTarget = true
 			check := agentwrapper.CheckTarget(target.CLI, target.Model)
-			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: check.Remaining, Enabled: true})
+			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: check.Remaining, Enabled: true, Reason: policyReason(check)})
 			if autoSelectable(check) {
 				selectedTarget = &target
 				break

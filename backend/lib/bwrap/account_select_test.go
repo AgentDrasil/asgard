@@ -314,3 +314,33 @@ func TestSetProfileEnv(t *testing.T) {
 	setProfileEnv(envs, "agy", accountSel{alias: "bound", ok: true}, false) // agent sandbox
 	assert.Empty(t, envs)
 }
+
+func TestAllAccountUsages(t *testing.T) {
+	f := &fakeQuota{
+		data: map[string][]llms.ModelUsage{
+			"a": {{Model: "claude", Remaining: 0.1}},
+			"b": {{Model: "claude", Remaining: 0.7}},
+		},
+		errs: map[string]error{"c": errors.New("no creds")},
+	}
+	setupSelector(t, []string{"a", "b", "c"}, f)
+
+	usages, ok := AllAccountUsages("claude")
+	require.True(t, ok)
+	require.Len(t, usages, 2, "the account that failed is skipped")
+
+	// An account override means no selection is in play.
+	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "a")
+	_, ok = AllAccountUsages("claude")
+	assert.False(t, ok)
+}
+
+func TestAllAccountUsages_SingleAccountOrNoAnswer(t *testing.T) {
+	setupSelector(t, []string{"a"}, &fakeQuota{data: map[string][]llms.ModelUsage{"a": {{Model: "claude"}}}})
+	_, ok := AllAccountUsages("claude")
+	assert.False(t, ok, "one account: the plain query is enough")
+
+	setupSelector(t, []string{"a", "b"}, &fakeQuota{errs: map[string]error{"a": errors.New("x"), "b": errors.New("y")}})
+	_, ok = AllAccountUsages("claude")
+	assert.False(t, ok, "no account answered")
+}

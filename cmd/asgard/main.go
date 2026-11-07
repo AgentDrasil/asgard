@@ -17,6 +17,7 @@ func main() {
 	// Models/usage queries invoke vendor CLIs non-interactively, which can
 	// fire their hooks; run them inside the agent sandbox, not on the host.
 	agentwrapper.SetQueryRunner(bwrap.RunQuery)
+	agentwrapper.SetAccountUsageProvider(bwrap.AllAccountUsages)
 
 	ctx := context.Background()
 	if err := app.Run(ctx); err != nil {

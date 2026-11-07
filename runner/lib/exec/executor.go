@@ -309,7 +309,7 @@ func NoQuotaToProto(e *run.NoQuotaError) *runnerpb.NoQuota {
 		PairingNote:   e.PairingNote,
 	}
 	for _, t := range e.Targets {
-		nq.Targets = append(nq.Targets, &runnerpb.TargetQuota{Cli: t.CLI, Model: t.Model, Remaining: t.Remaining, Enabled: t.Enabled})
+		nq.Targets = append(nq.Targets, &runnerpb.TargetQuota{Cli: t.CLI, Model: t.Model, Remaining: t.Remaining, Enabled: t.Enabled, Reason: t.Reason})
 	}
 	return nq
 }

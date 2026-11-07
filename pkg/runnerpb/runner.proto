@@ -28,6 +28,9 @@ message TargetQuota {
   double remaining = 3;
   // enabled is false when the provider is disabled on the runner.
   bool enabled = 4;
+  // reason is set when the account's quota policy rejects the target, and
+  // names the limit that fell below its threshold.
+  string reason = 5;
 }
 
 // NoQuota mirrors the backend's run.NoQuotaError.

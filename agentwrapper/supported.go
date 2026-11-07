@@ -77,6 +77,33 @@ func SetQueryRunner(r QueryRunner) {
 	queryRunner = r
 }
 
+// AccountUsageProvider returns the quota of every account of a CLI, each
+// entry tagged with its account. ok is false when the CLI has no multi-account
+// setup to consider (fewer than two accounts, or an account override), in
+// which case the plain query is used.
+type AccountUsageProvider func(cli string) (usages []types.ModelUsage, ok bool)
+
+var (
+	accountUsageMu       sync.RWMutex
+	accountUsageProvider AccountUsageProvider
+)
+
+// SetAccountUsageProvider makes CheckTarget consider every account of a CLI
+// instead of only the first one. Passing nil restores the plain query.
+func SetAccountUsageProvider(p AccountUsageProvider) {
+	accountUsageMu.Lock()
+	defer accountUsageMu.Unlock()
+
+	accountUsageProvider = p
+}
+
+func currentAccountUsageProvider() AccountUsageProvider {
+	accountUsageMu.RLock()
+	defer accountUsageMu.RUnlock()
+
+	return accountUsageProvider
+}
+
 func currentQueryRunner() QueryRunner {
 	queryRunnerMu.RLock()
 	defer queryRunnerMu.RUnlock()
@@ -270,6 +297,16 @@ func CheckTarget(cli string, model string) QuotaCheck {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+	// With several accounts the target is runnable when any account can serve
+	// it, so look at all of them and report the best one.
+	if provider := currentAccountUsageProvider(); provider != nil {
+		if usages, ok := provider(cli); ok {
+			if best, found := bestMatchingUsage(cli, model, usages); found {
+				return QuotaCheck{Remaining: best.Remaining, Usable: best.Usable, Reason: best.Reason}
+			}
+		}
+	}
+
 	var usages []types.ModelUsage
 	var err error
 	all := map[string][]types.ModelUsage{}
@@ -290,6 +327,24 @@ func CheckTarget(cli string, model string) QuotaCheck {
 	}
 
 	return QuotaCheck{}
+}
+
+// bestMatchingUsage picks, among the entries for model, the one a run should
+// count on: an entry the quota policy accepts wins, then the most remaining.
+func bestMatchingUsage(cli, model string, usages []types.ModelUsage) (best types.ModelUsage, found bool) {
+	accepted := func(u types.ModelUsage) bool { return u.Usable != nil && *u.Usable }
+	for _, u := range usages {
+		if u.IsStatusOnly() || !MatchesModel(cli, model, u.Model) {
+			continue
+		}
+		switch {
+		case !found,
+			accepted(u) && !accepted(best),
+			accepted(u) == accepted(best) && u.Remaining > best.Remaining:
+			best, found = u, true
+		}
+	}
+	return best, found
 }
 
 // CheckQuota returns the headline remaining quota fraction of a target.

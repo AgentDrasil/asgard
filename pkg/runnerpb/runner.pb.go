@@ -195,7 +195,10 @@ type TargetQuota struct {
 	// remaining is the fraction of quota left in [0, 1].
 	Remaining float64 `protobuf:"fixed64,3,opt,name=remaining,proto3" json:"remaining,omitempty"`
 	// enabled is false when the provider is disabled on the runner.
-	Enabled       bool `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Enabled bool `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// reason is set when the account's quota policy rejects the target, and
+	// names the limit that fell below its threshold.
+	Reason        string `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -256,6 +259,13 @@ func (x *TargetQuota) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *TargetQuota) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
 }
 
 // NoQuota mirrors the backend's run.NoQuotaError.
@@ -7105,12 +7115,13 @@ const file_runner_proto_rawDesc = "" +
 	"\frunner.proto\x12\x10asgard.runner.v1\"0\n" +
 	"\x06Target\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"m\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"\x85\x01\n" +
 	"\vTargetQuota\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x1c\n" +
 	"\tremaining\x18\x03 \x01(\x01R\tremaining\x12\x18\n" +
-	"\aenabled\x18\x04 \x01(\bR\aenabled\"\xcc\x01\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xcc\x01\n" +
 	"\aNoQuota\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12%\n" +
 	"\x0eexplicit_model\x18\x02 \x01(\tR\rexplicitModel\x12#\n" +
