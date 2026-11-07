@@ -249,6 +249,8 @@ func TestSingleAgentExecutor_NoCrossCLIFallback(t *testing.T) {
 
 	chatID := "test-chat-no-cross-cli"
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "quota-agent"}))
+	// An existing conversation on agy binds the chat to that CLI.
+	require.NoError(t, repo.UpdateAgentModel(chatID, "quota-agent", "agy-model-one"))
 
 	// Config with agy first and opencode second.
 	// When agy has no quota, it must not automatically fall back to opencode,
@@ -287,6 +289,7 @@ func TestSingleAgentExecutor_ForcedCrossCLITargetRebindsCandidates(t *testing.T)
 
 	chatID := "test-chat-forced-cross-cli"
 	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "quota-agent"}))
+	require.NoError(t, repo.UpdateAgentModel(chatID, "quota-agent", "agy-model-one"))
 
 	agent := &agentspec.Agent{
 		Config: agentspec.AgentConfig{
@@ -325,4 +328,37 @@ func TestSingleAgentExecutor_ForcedCrossCLITargetRebindsCandidates(t *testing.T)
 	// Second prompt: re-anchored to opencode (deliberate user choice).
 	assert.Contains(t, got[1], "opencode opencode-model")
 	assert.NotContains(t, got[1], "agy agy-model-one")
+}
+
+func TestSingleAgentExecutor_FreshChatKeepsAllCLICandidates(t *testing.T) {
+	repo := newQuotaTestRepo(t)
+	server := newQuotaTestServer(t, repo)
+
+	chatID := "test-chat-fresh-all-candidates"
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: chatID, CurrentAgent: "quota-agent"}))
+
+	agent := &agentspec.Agent{
+		Config: agentspec.AgentConfig{
+			ID:   "quota-agent",
+			Name: "Quota Agent",
+			CLI: []agentspec.CLITarget{
+				{CLI: "agy", Model: "agy-model-one"},
+				{CLI: "opencode", Model: "opencode-model"},
+			},
+		},
+	}
+	executor := NewSingleAgentExecutor(agent, &config.Config{}, repo, server, nil)
+
+	// A chat without history has nothing to preserve, so the quota check
+	// covers every CLI group instead of stopping at the first.
+	var suspendedPrompt string
+	executor.suspendQuota = func(_ context.Context, _, _, prompt string, _ []string) (string, error) {
+		suspendedPrompt = prompt
+		return "Cancel run", nil
+	}
+
+	_, err := executor.Execute(t.Context(), SingleAgentRunParams{ChatID: chatID, Prompt: "hello"})
+	require.Error(t, err)
+	assert.Contains(t, suspendedPrompt, "agy agy-model-one")
+	assert.Contains(t, suspendedPrompt, "opencode opencode-model")
 }

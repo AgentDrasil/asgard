@@ -124,7 +124,11 @@ func (e *SingleAgentExecutor) executeSequential(
 	if targetCLI == "" && session != nil {
 		targetCLI = cliForModel(e.agent.Config, storedAgentModel(session, e.agent.Config))
 	}
-	if targetCLI == "" && len(e.agent.Config.CLI) > 0 {
+	// Only a chat with prior history is bound to a CLI. A fresh chat has no
+	// session to preserve, so it keeps the full candidate list and quota
+	// fallback may move on to the next CLI group without asking the user.
+	hasHistory := len(sessions) > 0 || (session != nil && storedAgentModel(session, e.agent.Config) != "")
+	if targetCLI == "" && hasHistory && len(e.agent.Config.CLI) > 0 {
 		targetCLI = e.agent.Config.CLI[0].CLI
 	}
 	cliCandidates := targetsForCLI(e.agent.Config, targetCLI)
