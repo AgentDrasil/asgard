@@ -502,6 +502,9 @@ func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb
 	}
 	currentAgent := req.GetAgentId()
 	agentIcon := ""
+	if a, err := c.s.findAgentFor(nodeID, currentAgent); err == nil && a != nil {
+		agentIcon = a.Config.Icon
+	}
 	if existing != nil {
 		if existing.Title != "" {
 			title = existing.Title
@@ -509,11 +512,8 @@ func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb
 		if existing.CurrentAgent != "" {
 			currentAgent = existing.CurrentAgent
 		}
-		agentIcon = existing.AgentIcon
-	}
-	if agentIcon == "" && c.s != nil {
-		if a, err := c.s.findAgentFor(nodeID, currentAgent); err == nil && a != nil {
-			agentIcon = a.Config.Icon
+		if agentIcon == "" {
+			agentIcon = existing.AgentIcon
 		}
 	}
 	session := &dbmodels.Session{

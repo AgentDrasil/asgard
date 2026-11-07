@@ -514,81 +514,87 @@ describe("DashboardView.vue", () => {
       resetRunnersForTest();
       vi.useRealTimers();
 
-      const { runners, selectRunner, selectedRunnerId } = useRunners();
-      runners.value = [
-        { node_id: "runner-a", online: true },
-        { node_id: "runner-b", online: true },
-      ];
-      selectRunner("runner-a");
+      let app: any;
+      try {
+        const { runners, selectRunner, selectedRunnerId } = useRunners();
+        runners.value = [
+          { node_id: "runner-a", online: true },
+          { node_id: "runner-b", online: true },
+        ];
+        selectRunner("runner-a");
 
-      const sessionA: ChatSession = {
-        chatID: "sess-runner-a",
-        title: "Task on Runner A",
-        currentAgent: "coder",
-        agentIcon: "icon:coder-custom",
-        runnerId: "runner-a",
-        runDir: "/work",
-        isRunning: true,
-        isWaitingForUser: false,
-        isArchived: false,
-      };
-      const sessionB: ChatSession = {
-        chatID: "sess-runner-b",
-        title: "Task on Runner B",
-        currentAgent: "planner",
-        agentIcon: "icon:planner-custom",
-        runnerId: "runner-b",
-        runDir: "/work",
-        isRunning: true,
-        isWaitingForUser: false,
-        isArchived: false,
-      };
+        const sessionA: ChatSession = {
+          chatID: "sess-runner-a",
+          title: "Task on Runner A",
+          currentAgent: "coder",
+          agentIcon: "icon:coder-custom",
+          runnerId: "runner-a",
+          runDir: "/work",
+          isRunning: true,
+          isWaitingForUser: false,
+          isArchived: false,
+        };
+        const sessionB: ChatSession = {
+          chatID: "sess-runner-b",
+          title: "Task on Runner B",
+          currentAgent: "planner",
+          agentIcon: "icon:planner-custom",
+          runnerId: "runner-b",
+          runDir: "/work",
+          isRunning: true,
+          isWaitingForUser: false,
+          isArchived: false,
+        };
 
-      vi.spyOn(api, "getSessions").mockImplementation(async (archived = false) => {
-        if (archived) return [];
-        return [sessionA, sessionB];
-      });
-      vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
+        vi.spyOn(api, "getSessions").mockImplementation(async (archived = false) => {
+          if (archived) return [];
+          return [sessionA, sessionB];
+        });
+        vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
 
-      const app = createApp({
-        render() {
-          return h(DashboardView);
-        },
-      });
-      app.use(i18n);
-      app.mount(root);
+        app = createApp({
+          render() {
+            return h(DashboardView);
+          },
+        });
+        app.use(i18n);
+        app.mount(root);
 
-      await nextTick();
-      await new Promise((r) => setTimeout(r, 50));
+        await nextTick();
+        await new Promise((r) => setTimeout(r, 50));
 
-      expect(root.textContent).toContain("Task on Runner A");
-      expect(root.textContent).toContain("Task on Runner B");
+        expect(root.textContent).toContain("Task on Runner A");
+        expect(root.textContent).toContain("Task on Runner B");
 
-      // Verify agent icon custom fallback
-      const iconEl = root.querySelector('[data-icon="icon:coder-custom"]');
-      expect(iconEl).not.toBeNull();
+        // Verify agent icon custom fallback
+        const iconEl = root.querySelector('[data-icon="icon:coder-custom"]');
+        expect(iconEl).not.toBeNull();
 
-      // Test runner filter
-      const runnerSelect = root.querySelector('[data-test="runner-filter"]') as HTMLSelectElement;
-      expect(runnerSelect).not.toBeNull();
-      runnerSelect.value = "runner-b";
-      runnerSelect.dispatchEvent(new Event("change"));
-      await nextTick();
+        // Test runner filter
+        const runnerSelect = root.querySelector('[data-test="runner-filter"]') as HTMLSelectElement;
+        expect(runnerSelect).not.toBeNull();
+        runnerSelect.value = "runner-b";
+        runnerSelect.dispatchEvent(new Event("change"));
+        await nextTick();
 
-      expect(root.textContent).not.toContain("Task on Runner A");
-      expect(root.textContent).toContain("Task on Runner B");
+        expect(root.textContent).not.toContain("Task on Runner A");
+        expect(root.textContent).toContain("Task on Runner B");
 
-      // Clicking card with runner-b switches selectedRunnerId to runner-b
-      const card = root.querySelector('[data-test="session-card-running"]') as HTMLElement;
-      expect(card).not.toBeNull();
-      card.click();
-      await nextTick();
+        // Clicking card with runner-b switches selectedRunnerId to runner-b
+        const card = root.querySelector('[data-test="session-card-running"]') as HTMLElement;
+        expect(card).not.toBeNull();
+        card.click();
+        await nextTick();
 
-      expect(selectedRunnerId.value).toBe("runner-b");
-      expect(mockPush).toHaveBeenCalledWith("/chat/sess-runner-b");
-
-      app.unmount();
-      resetRunnersForTest();
+        expect(selectedRunnerId.value).toBe("runner-b");
+        expect(mockPush).toHaveBeenCalledWith("/chat/sess-runner-b");
+      } finally {
+        if (app) {
+          app.unmount();
+        }
+        resetRunnersForTest();
+        vi.useFakeTimers();
+      }
     });
   });
 });

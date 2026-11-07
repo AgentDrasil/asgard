@@ -90,11 +90,13 @@ onUnmounted(() => {
   }
 });
 
+const matchesRunnerFilter = (session: ChatSession): boolean => {
+  return selectedRunnerFilter.value === "all" || session.runnerId === selectedRunnerFilter.value;
+};
+
 const filterSession = (session: ChatSession, query: string): boolean => {
-  if (selectedRunnerFilter.value !== "all") {
-    if (session.runnerId !== selectedRunnerFilter.value) {
-      return false;
-    }
+  if (!matchesRunnerFilter(session)) {
+    return false;
   }
   if (!query) return true;
   const q = query.toLowerCase().trim();
@@ -144,20 +146,13 @@ const filteredArchivedSessions = computed(() => {
 // Total count metrics
 const totalRunningCount = computed(() => {
   return activeSessions.value.filter(
-    (s) =>
-      !s.isArchived &&
-      s.isRunning &&
-      !s.isWaitingForUser &&
-      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
+    (s) => !s.isArchived && s.isRunning && !s.isWaitingForUser && matchesRunnerFilter(s),
   ).length;
 });
 
 const totalWaitingCount = computed(() => {
   return activeSessions.value.filter(
-    (s) =>
-      !s.isArchived &&
-      s.isWaitingForUser &&
-      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
+    (s) => !s.isArchived && s.isWaitingForUser && matchesRunnerFilter(s),
   ).length;
 });
 
@@ -165,8 +160,7 @@ const totalRecentCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
     if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
-    if (selectedRunnerFilter.value !== "all" && s.runnerId !== selectedRunnerFilter.value)
-      return false;
+    if (!matchesRunnerFilter(s)) return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time < THREE_HOURS_MS;
   }).length;
@@ -176,19 +170,14 @@ const totalCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
     if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
-    if (selectedRunnerFilter.value !== "all" && s.runnerId !== selectedRunnerFilter.value)
-      return false;
+    if (!matchesRunnerFilter(s)) return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time >= THREE_HOURS_MS;
   }).length;
 });
 
 const totalArchivedCount = computed(() => {
-  return archivedSessions.value.filter(
-    (s) =>
-      s.isArchived &&
-      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
-  ).length;
+  return archivedSessions.value.filter((s) => s.isArchived && matchesRunnerFilter(s)).length;
 });
 
 const handleNavigate = (session: ChatSession) => {
@@ -376,7 +365,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
             </button>
           </div>
 
-          <!-- Runner Filter Dropdown (shown when runnerMode is active or runners exist) -->
+          <!-- Runner Filter Dropdown (shown when runnerMode is active) -->
           <div v-if="runnerMode" class="flex items-center gap-2">
             <label class="text-xs text-base-content/70 font-medium flex items-center gap-1.5">
               <Icon icon="lucide:server" class="w-3.5 h-3.5 text-base-content/50" />
