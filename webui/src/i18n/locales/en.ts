@@ -205,6 +205,12 @@ export const en = {
     voiceConnecting: "Connecting...",
     voiceStopping: "Processing transcription...",
     voiceInterimPlaceholder: "Listening...",
+    voiceModalTitle: "Voice Input",
+    voiceModalDesc:
+      "Speak clearly into your microphone. Real-time transcription will be inserted into your message.",
+    voiceActiveTip: "Click Stop or press shortcut to finish",
+    voiceCancel: "Cancel Recording",
+    voiceComplete: "Finish & Insert",
     micPermissionDenied: "Microphone access denied. Please grant permission in browser settings.",
     voiceSessionTimeout: "Voice session reached 10-minute limit.",
     voiceUnavailable: "Voice transcription service is currently unavailable.",
@@ -497,6 +503,10 @@ export const en = {
       jump_previous_user_message: {
         title: "Jump to Previous User Message",
         description: "Scroll the chat to the previous user message above the current view",
+      },
+      voice_input: {
+        title: "Voice Input",
+        description: "Toggle voice recording in chat",
       },
     },
   },

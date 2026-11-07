@@ -206,6 +206,11 @@ export const zhCN: MessageSchema = {
     voiceConnecting: "正在连接...",
     voiceStopping: "正在处理转录...",
     voiceInterimPlaceholder: "正在倾听...",
+    voiceModalTitle: "语音输入",
+    voiceModalDesc: "请清晰说话，实时转录文本将自动插入到输入框中。",
+    voiceActiveTip: "点击停止录音或按快捷键完成",
+    voiceCancel: "取消录音",
+    voiceComplete: "完成并填入",
     micPermissionDenied: "麦克风访问被拒绝，请在浏览器设置中开启权限。",
     voiceSessionTimeout: "语音输入已达 10 分钟时限。",
     voiceUnavailable: "语音转录服务暂时不可用。",
@@ -488,6 +493,10 @@ export const zhCN: MessageSchema = {
       jump_previous_user_message: {
         title: "跳转到上一条用户消息",
         description: "将聊天视图滚动到当前可视区域上方的上一条用户消息",
+      },
+      voice_input: {
+        title: "语音输入",
+        description: "在聊天中开启或停止语音录制",
       },
     },
   },

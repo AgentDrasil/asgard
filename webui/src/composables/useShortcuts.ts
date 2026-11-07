@@ -93,6 +93,10 @@ export function useShortcuts() {
     ),
   );
 
+  const voiceInputShortcut = computed(() =>
+    formatShortcutDisplay(activeBindings.value["voice_input"] || [], currentOS.value),
+  );
+
   // Helpers
   const matchShortcut = (event: KeyboardEvent, actionId: string): boolean => {
     const keys = activeBindings.value[actionId] || [];
@@ -186,6 +190,7 @@ export function useShortcuts() {
     findShortcut,
     newChatShortcut,
     jumpPrevUserShortcut,
+    voiceInputShortcut,
     // methods
     matchShortcut,
     updateShortcut,

@@ -123,6 +123,17 @@ export const DEFAULT_KEYBINDING_ACTIONS: KeybindingActionDef[] = [
       mac: "Shift+Home",
     },
   },
+  {
+    id: "voice_input",
+    title: "Voice Input",
+    description: "Toggle voice recording in chat",
+    category: "chat",
+    defaultKeys: {
+      linux: "Ctrl+Alt+V",
+      windows: "Ctrl+Alt+V",
+      mac: "Cmd+Alt+V",
+    },
+  },
 ];
 
 export function getDefaultBindingsForOS(os: SupportedOS): Record<string, string[]> {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount } from "vue";
+import { ref, watch, computed, onMounted, onBeforeUnmount } from "vue";
 import { Icon } from "@iconify/vue";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useToast } from "../composables/useToast";
@@ -9,10 +9,11 @@ import type { Attachment, VoiceErrorCode } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
+import VoiceInputModal from "./chat/VoiceInputModal.vue";
 import SlashCommandMenu from "./chat/SlashCommandMenu.vue";
 import { t } from "../i18n";
 
-const { modKey, sendShortcut, matchShortcut } = useShortcuts();
+const { modKey, sendShortcut, voiceInputShortcut, matchShortcut } = useShortcuts();
 const toast = useToast();
 
 const props = withDefaults(
@@ -57,6 +58,10 @@ const isQueueFull = computed(() => {
 
 const isInputDisabled = computed(() => {
   return isQueueMode.value ? isQueueFull.value : props.loading;
+});
+
+const isVoiceDisabled = computed(() => {
+  return props.loading || isUploading.value || props.isRunning;
 });
 
 const placeholderText = computed(() => {
@@ -188,6 +193,7 @@ watch(voiceError, (code) => {
 });
 
 const handleVoiceToggle = () => {
+  if (isVoiceDisabled.value) return;
   if (isRecording.value || isConnecting.value) {
     void stopRecording();
   } else {
@@ -195,7 +201,38 @@ const handleVoiceToggle = () => {
   }
 };
 
+const handleVoiceStop = () => {
+  if (isRecording.value || isConnecting.value) {
+    void stopRecording();
+  }
+};
+
+const handleVoiceCancel = () => {
+  cancelRecording();
+};
+
+const isVoiceModalOpen = computed(() => {
+  return isRecording.value || isConnecting.value || isStopping.value;
+});
+
+const handleGlobalVoiceKeydown = (e: KeyboardEvent) => {
+  if (matchShortcut(e, "voice_input")) {
+    e.preventDefault();
+    e.stopPropagation();
+    handleVoiceToggle();
+  }
+};
+
+onMounted(() => {
+  if (typeof window !== "undefined") {
+    window.addEventListener("keydown", handleGlobalVoiceKeydown, true);
+  }
+});
+
 onBeforeUnmount(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("keydown", handleGlobalVoiceKeydown, true);
+  }
   if (stopTimer) clearTimeout(stopTimer);
   cancelRecording();
 });
@@ -418,7 +455,7 @@ const handleDrop = (e: DragEvent) => {
             :is-recording="isRecording"
             :is-connecting="isConnecting"
             :is-stopping="isStopping"
-            :disabled="loading || isUploading"
+            :disabled="isVoiceDisabled"
             @toggle="handleVoiceToggle"
           />
         </div>
@@ -548,7 +585,7 @@ const handleDrop = (e: DragEvent) => {
               :is-recording="isRecording"
               :is-connecting="isConnecting"
               :is-stopping="isStopping"
-              :disabled="loading || isUploading"
+              :disabled="isVoiceDisabled"
               @toggle="handleVoiceToggle"
             />
 
@@ -579,5 +616,18 @@ const handleDrop = (e: DragEvent) => {
         <button @click="closeModal">close</button>
       </form>
     </dialog>
+
+    <!-- Voice Input Live Transcription Popup Modal -->
+    <VoiceInputModal
+      :is-open="isVoiceModalOpen"
+      :is-recording="isRecording"
+      :is-connecting="isConnecting"
+      :is-stopping="isStopping"
+      :live-preview-text="livePreviewText"
+      :interim-text="interimText"
+      :shortcut-display="voiceInputShortcut"
+      @stop="handleVoiceStop"
+      @cancel="handleVoiceCancel"
+    />
   </div>
 </template>

@@ -758,6 +758,124 @@ describe("ChatInput.vue", () => {
 
       app.unmount();
     });
+
+    it("should toggle voice recording on voice_input keyboard shortcut (Ctrl+Alt+V)", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      const voiceShortcutEvent = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        altKey: true,
+        key: "v",
+        code: "KeyV",
+        bubbles: true,
+      });
+      window.dispatchEvent(voiceShortcutEvent);
+      await nextTick();
+
+      expect(mockVoiceInputState.startRecording).toHaveBeenCalled();
+
+      mockVoiceInputState.isRecording.value = true;
+      window.dispatchEvent(voiceShortcutEvent);
+      await nextTick();
+
+      expect(mockVoiceInputState.stopRecording).toHaveBeenCalled();
+
+      app.unmount();
+    });
+
+    it("should render VoiceInputModal with larger pending text and stop button when recording", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      mockVoiceInputState.isRecording.value = true;
+      mockVoiceInputState.livePreviewText.value = "Transcribing words live";
+      await nextTick();
+
+      const modal = root.querySelector('[data-testid="voice-input-modal"]');
+      expect(modal).not.toBeNull();
+      const pendingText = root.querySelector('[data-testid="voice-modal-pending-text"]');
+      expect(pendingText).not.toBeNull();
+      expect(pendingText?.textContent).toContain("Transcribing words live");
+
+      const stopBtn = root.querySelector(
+        '[data-testid="voice-modal-stop-btn"]',
+      ) as HTMLButtonElement;
+      expect(stopBtn).not.toBeNull();
+      stopBtn.click();
+      await nextTick();
+      expect(mockVoiceInputState.stopRecording).toHaveBeenCalled();
+
+      const cancelBtn = root.querySelector(
+        '[data-testid="voice-modal-cancel-btn"]',
+      ) as HTMLButtonElement;
+      expect(cancelBtn).not.toBeNull();
+      cancelBtn.click();
+      await nextTick();
+      expect(mockVoiceInputState.cancelRecording).toHaveBeenCalled();
+
+      app.unmount();
+    });
+
+    it("locks both voice input and attachment buttons when isRunning is true", async () => {
+      const app = createApp({
+        render() {
+          return h(ChatInput, {
+            loading: false,
+            isRunning: true,
+            sessionId: "sess-lock-test",
+            modelValue: "",
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await nextTick();
+
+      // Voice input button disabled
+      const voiceBtns = root.querySelectorAll('button[aria-label="Voice Input"]');
+      expect(voiceBtns.length).toBeGreaterThan(0);
+      voiceBtns.forEach((btn) => {
+        expect((btn as HTMLButtonElement).disabled).toBe(true);
+      });
+
+      // Attachment button disabled
+      const attachBtn = root.querySelector(
+        '[data-testid="attach-file-button"]',
+      ) as HTMLButtonElement;
+      expect(attachBtn).not.toBeNull();
+      expect(attachBtn.disabled).toBe(true);
+
+      // Triggering voice shortcut should be ignored when running
+      const voiceShortcutEvent = new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        altKey: true,
+        key: "v",
+        code: "KeyV",
+        bubbles: true,
+      });
+      window.dispatchEvent(voiceShortcutEvent);
+      await nextTick();
+      expect(mockVoiceInputState.startRecording).not.toHaveBeenCalled();
+
+      app.unmount();
+    });
   });
 
   describe("Queue Mode and Limits", () => {

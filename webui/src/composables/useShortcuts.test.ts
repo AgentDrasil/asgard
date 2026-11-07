@@ -23,7 +23,7 @@ describe("useShortcuts", () => {
     vi.restoreAllMocks();
   });
 
-  it("provides 12 computed shortcut strings with modifier keys and isMac boolean", () => {
+  it("provides 13 computed shortcut strings with modifier keys and isMac boolean", () => {
     const {
       isMac: hookIsMac,
       modKey,
@@ -38,6 +38,8 @@ describe("useShortcuts", () => {
       toggleFileViewShortcut,
       findShortcut,
       newChatShortcut,
+      jumpPrevUserShortcut,
+      voiceInputShortcut,
     } = useShortcuts();
 
     expect(typeof hookIsMac).toBe("boolean");
@@ -56,6 +58,8 @@ describe("useShortcuts", () => {
     expect(toggleFileViewShortcut.value).toBe(`${expectedMod}+${expectedAlt}+F`);
     expect(findShortcut.value).toBe(`${expectedMod}+F`);
     expect(newChatShortcut.value).toBe(`${expectedMod}+${expectedAlt}+N`);
+    expect(jumpPrevUserShortcut.value).toBe("Shift+Home");
+    expect(voiceInputShortcut.value).toBe(`${expectedMod}+${expectedAlt}+V`);
   });
 
   it("dynamically updates computed shortcuts when updateShortcut is called", () => {

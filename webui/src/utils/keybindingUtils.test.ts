@@ -15,8 +15,8 @@ import {
 
 describe("keybindingUtils", () => {
   describe("DEFAULT_KEYBINDING_ACTIONS", () => {
-    it("defines 11 default actions with standard ASCII keys", () => {
-      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(11);
+    it("defines 12 default actions with standard ASCII keys", () => {
+      expect(DEFAULT_KEYBINDING_ACTIONS).toHaveLength(12);
       const ids = DEFAULT_KEYBINDING_ACTIONS.map((a) => a.id);
       expect(ids).toContain("toggle_sidebar");
       expect(ids).toContain("toggle_artifacts");
@@ -29,6 +29,7 @@ describe("keybindingUtils", () => {
       expect(ids).toContain("send_message");
       expect(ids).toContain("new_chat");
       expect(ids).toContain("jump_previous_user_message");
+      expect(ids).toContain("voice_input");
     });
 
     it("getDefaultBindingsForOS returns normalized array values", () => {
@@ -38,11 +39,13 @@ describe("keybindingUtils", () => {
       expect(linuxBindings["toggle_terminal"]).toEqual(["Ctrl+Backquote"]);
       expect(linuxBindings["toggle_sidebar"]).toEqual(["Ctrl+B"]);
       expect(linuxBindings["jump_previous_user_message"]).toEqual(["Shift+Home"]);
+      expect(linuxBindings["voice_input"]).toEqual(["Ctrl+Alt+V"]);
 
       const macBindings = getDefaultBindingsForOS("mac");
       expect(macBindings["search_files"]).toEqual(["Cmd+P"]);
       expect(macBindings["command_palette"]).toEqual(["Cmd+Shift+P", "F1"]);
       expect(macBindings["toggle_terminal"]).toEqual(["Cmd+Backquote"]);
+      expect(macBindings["voice_input"]).toEqual(["Cmd+Alt+V"]);
     });
   });
 
