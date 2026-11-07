@@ -848,6 +848,7 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		if err != nil {
 			return nil, err
 		}
+		setProfileEnv(envs, "agy", sel, allCLIs)
 		if args, err = appendAgyAccountToken(args, home, sel); err != nil {
 			return nil, err
 		}
@@ -859,6 +860,7 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		if err != nil {
 			return nil, err
 		}
+		setProfileEnv(envs, "claude", sel, allCLIs)
 		if args, err = appendClaudeAccountDir(args, home, sel, session); err != nil {
 			return nil, err
 		}
@@ -1620,6 +1622,28 @@ func CommandForGit(ctx context.Context, spec GitSandboxSpec) (*exec.Cmd, error) 
 		return nil, err
 	}
 	return exec.CommandContext(ctx, "bwrap", args...), nil
+}
+
+// readAccountProfile reads an account's quota profile binding; a variable so
+// tests can stub it.
+var readAccountProfile = accounts.ReadProfile
+
+// setProfileEnv hands the quota profile bound to the selected account to the
+// query sandbox, whose aw evaluates the quota policy with it. The binding
+// file lives in the account directory, which a query sandbox does not
+// necessarily see (agy only gets its token file), so the host passes the name.
+func setProfileEnv(envs map[string]string, cli string, sel accountSel, allCLIs bool) {
+	if !allCLIs || !sel.ok {
+		return
+	}
+	profile, err := readAccountProfile(cli, sel.alias)
+	if err != nil {
+		log.Warn().Err(err).Str("cli", cli).Str("account", sel.alias).Msg("ignoring unreadable quota profile binding")
+		return
+	}
+	if profile != "" {
+		envs[accounts.ProfileEnvName(cli)] = profile
+	}
 }
 
 // selectAccount picks the account alias for a CLI (env override or first

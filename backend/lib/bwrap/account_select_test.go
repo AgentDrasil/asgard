@@ -277,3 +277,40 @@ func TestBuildSandboxArgs_PinnedQueryAccounts(t *testing.T) {
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, indexOfSeq(args, "--bind", tok["a"], dest), 0)
 }
+
+func TestChooseAccount_PolicyVerdictOverridesRaw(t *testing.T) {
+	yes, no := true, false
+	// Account a still has 8% weekly, which its profile deems too little; b has
+	// less raw quota but its profile (a bigger plan) still accepts it.
+	f := &fakeQuota{data: map[string][]llms.ModelUsage{
+		"a": {{Model: "claude", Remaining: 0.08, Usable: &no, Reason: "weekly: 8% remaining"}},
+		"b": {{Model: "claude", Remaining: 0.04, Usable: &yes}},
+	}}
+	setupSelector(t, []string{"a", "b"}, f)
+
+	alias, ok, err := chooseAccount("claude", "claude")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "b", alias)
+}
+
+func TestSetProfileEnv(t *testing.T) {
+	old := readAccountProfile
+	t.Cleanup(func() { readAccountProfile = old })
+	readAccountProfile = func(cli, alias string) (string, error) {
+		if alias == "bound" {
+			return "pro20", nil
+		}
+		return "", nil
+	}
+
+	envs := map[string]string{}
+	setProfileEnv(envs, "agy", accountSel{alias: "bound", ok: true}, true)
+	assert.Equal(t, map[string]string{"ASGARD_AGY_PROFILE": "pro20"}, envs)
+
+	envs = map[string]string{}
+	setProfileEnv(envs, "agy", accountSel{alias: "unbound", ok: true}, true)
+	setProfileEnv(envs, "agy", accountSel{ok: false}, true)
+	setProfileEnv(envs, "agy", accountSel{alias: "bound", ok: true}, false) // agent sandbox
+	assert.Empty(t, envs)
+}

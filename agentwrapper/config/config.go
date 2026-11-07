@@ -12,6 +12,10 @@ import (
 // Config holds the allowed model patterns for each agent.
 type Config struct {
 	Agents []map[string][]string `yaml:"agents"`
+
+	// QuotaProfiles are the shared quota policy templates accounts bind to
+	// (see QuotaProfile).
+	QuotaProfiles map[string]QuotaProfile `yaml:"quota_profiles"`
 }
 
 // EnvPath names an environment variable that overrides the config file

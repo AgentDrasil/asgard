@@ -63,6 +63,15 @@ type ModelUsage struct {
 
 	// Message is the error text of a status-only entry.
 	Message string `json:"message,omitempty"`
+
+	// Usable is the quota policy verdict for this model on its account:
+	// whether the account may still be used. Nil when no quota policy
+	// applied, in which case consumers fall back to their own thresholds.
+	Usable *bool `json:"usable,omitempty"`
+
+	// Reason explains an unusable verdict (which limit fell below its
+	// threshold). Empty when Usable is nil or true.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Quota entry statuses (ModelUsage.Status).

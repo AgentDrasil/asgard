@@ -301,6 +301,16 @@ func stderrTail(stderr string) string {
 
 const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection
 
+// autoSelectable reports whether automatic selection may pick a target. The
+// account's quota policy verdict decides when there is one; otherwise the
+// fixed MinAutoQuotaThreshold applies.
+func autoSelectable(c agentwrapper.QuotaCheck) bool {
+	if c.Usable != nil {
+		return *c.Usable
+	}
+	return c.Remaining > MinAutoQuotaThreshold
+}
+
 // QuotaTargetStatus describes the quota state of one configured CLI target.
 type QuotaTargetStatus struct {
 	CLI       string  `json:"cli"`
@@ -467,9 +477,9 @@ func RunWithOptions(ctx context.Context, agent *agentspec.Agent, candidates []ag
 				continue
 			}
 			hasEnabledTarget = true
-			quota := agentwrapper.CheckQuota(target.CLI, target.Model)
-			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: quota, Enabled: true})
-			if quota > MinAutoQuotaThreshold {
+			check := agentwrapper.CheckTarget(target.CLI, target.Model)
+			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: check.Remaining, Enabled: true})
+			if autoSelectable(check) {
 				selectedTarget = &target
 				break
 			}

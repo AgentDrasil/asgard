@@ -31,8 +31,12 @@ var defaultCLIExecutor CLIExecutor = func(ctx context.Context, name string, env 
 var execCLI = defaultCLIExecutor
 
 var (
-	agyLoginForce    bool
-	claudeLoginForce bool
+	agyLoginForce      bool
+	claudeLoginForce   bool
+	agyLoginProfile    string
+	claudeLoginProfile string
+	agyProfileClear    bool
+	claudeProfileClear bool
 )
 
 const skipConfigAnnotation = "skipConfig"
@@ -63,6 +67,65 @@ func envWithKey(key, value string) []string {
 	return append(env, prefix+value)
 }
 
+// bindLoginProfile records the quota profile of a freshly logged-in account:
+// the one requested with --profile, else the one the account had before the
+// login replaced it, so re-logging in does not silently drop the binding.
+func bindLoginProfile(cli, alias, requested, previous string) error {
+	name := requested
+	if name == "" {
+		name = previous
+	}
+	if name == "" {
+		return nil
+	}
+	return accounts.WriteProfile(cli, alias, name)
+}
+
+// newProfileCmd builds `aw <cli> profile <alias> [name]`, which shows, sets
+// or (with --clear) removes the quota profile an account is bound to.
+func newProfileCmd(cli string, clear *bool) *cobra.Command {
+	cmd := markSkipConfig(&cobra.Command{
+		Use:   "profile <alias> [name]",
+		Short: "Show or set the quota profile of a " + cli + " account",
+		Long: "Without a name, prints the quota profile the account is bound to (empty when unbound).\n" +
+			"With a name, binds the account to that profile of the aw config's quota_profiles.\n" +
+			"With --clear, removes the binding so the account uses the default profile.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			alias := args[0]
+			if *clear {
+				if len(args) != 1 {
+					return errors.New("--clear takes no profile name")
+				}
+				dir, err := accounts.Dir(cli, alias)
+				if err != nil {
+					return err
+				}
+				if err := os.Remove(filepath.Join(dir, accounts.ProfileFileName)); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("removing profile binding: %w", err)
+				}
+				return nil
+			}
+			if len(args) == 2 {
+				return accounts.WriteProfile(cli, alias, args[1])
+			}
+			name, err := accounts.ReadProfile(cli, alias)
+			if err != nil {
+				return err
+			}
+			cmd.Println(name)
+			return nil
+		},
+	})
+	cmd.Flags().BoolVar(clear, "clear", false, "Remove the account's profile binding")
+	return cmd
+}
+
+var (
+	agyProfileCmd    = newProfileCmd("agy", &agyProfileClear)
+	claudeProfileCmd = newProfileCmd("claude", &claudeProfileClear)
+)
+
 // agyLoginCmd handles `aw agy login <alias>`
 var agyLoginCmd = markSkipConfig(&cobra.Command{
 	Use:   "login <alias>",
@@ -72,6 +135,12 @@ var agyLoginCmd = markSkipConfig(&cobra.Command{
 		alias := args[0]
 		if err := accounts.ValidateAlias(alias); err != nil {
 			return err
+		}
+
+		if agyLoginProfile != "" {
+			if err := accounts.ValidateProfile(agyLoginProfile); err != nil {
+				return err
+			}
 		}
 
 		accountDir, err := accounts.Dir("agy", alias)
@@ -160,6 +229,11 @@ var agyLoginCmd = markSkipConfig(&cobra.Command{
 			return fmt.Errorf("setting token file permissions: %w", err)
 		}
 
+		// The account dir survives a re-login, so an existing binding stays.
+		if err := bindLoginProfile("agy", alias, agyLoginProfile, ""); err != nil {
+			return err
+		}
+
 		cmd.Println(alias)
 		return nil
 	},
@@ -204,6 +278,12 @@ var claudeLoginCmd = markSkipConfig(&cobra.Command{
 			return err
 		}
 
+		if claudeLoginProfile != "" {
+			if err := accounts.ValidateProfile(claudeLoginProfile); err != nil {
+				return err
+			}
+		}
+
 		accountDir, err := accounts.Dir("claude", alias)
 		if err != nil {
 			return err
@@ -235,11 +315,16 @@ var claudeLoginCmd = markSkipConfig(&cobra.Command{
 		if _, statErr := os.Stat(filepath.Join(staging, ".credentials.json")); statErr != nil {
 			return errors.New("login did not produce .credentials.json")
 		}
+		// Replacing the dir would drop the binding; carry it over.
+		previousProfile, _ := accounts.ReadProfile("claude", alias)
 		if err := os.RemoveAll(accountDir); err != nil {
 			return fmt.Errorf("replacing account dir: %w", err)
 		}
 		if err := os.Rename(staging, accountDir); err != nil {
 			return fmt.Errorf("moving account dir into place: %w", err)
+		}
+		if err := bindLoginProfile("claude", alias, claudeLoginProfile, previousProfile); err != nil {
+			return err
 		}
 
 		cmd.Println(alias)
@@ -278,12 +363,16 @@ var claudeRemoveCmd = markSkipConfig(&cobra.Command{
 func init() {
 	agyLoginCmd.Flags().BoolVarP(&agyLoginForce, "force", "f", false, "Overwrite existing account alias")
 	claudeLoginCmd.Flags().BoolVarP(&claudeLoginForce, "force", "f", false, "Overwrite existing account alias")
+	agyLoginCmd.Flags().StringVar(&agyLoginProfile, "profile", "", "Quota profile to bind the account to")
+	claudeLoginCmd.Flags().StringVar(&claudeLoginProfile, "profile", "", "Quota profile to bind the account to")
 
 	agyCmd.AddCommand(agyLoginCmd)
 	agyCmd.AddCommand(agyListCmd)
 	agyCmd.AddCommand(agyRemoveCmd)
+	agyCmd.AddCommand(agyProfileCmd)
 
 	claudeCmd.AddCommand(claudeLoginCmd)
 	claudeCmd.AddCommand(claudeListCmd)
 	claudeCmd.AddCommand(claudeRemoveCmd)
+	claudeCmd.AddCommand(claudeProfileCmd)
 }

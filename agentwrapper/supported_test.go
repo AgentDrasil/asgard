@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	simplestpkg "github.com/AgentDrasil/asgard/simplest"
@@ -280,5 +281,47 @@ func TestQueryRunnerErrorFailsClosed(t *testing.T) {
 		if len(models) != 0 {
 			t.Fatalf("%s models = %v, want none", cli, models)
 		}
+	}
+}
+
+func TestCheckTargetCarriesPolicyVerdict(t *testing.T) {
+	SetQueryRunner(func(_ context.Context, args ...string) ([]byte, error) {
+		return []byte(`{"claude":[{"model":"m1","remaining":0.08,"usable":false,"reason":"weekly: 8% remaining"}]}`), nil
+	})
+	t.Cleanup(func() { SetQueryRunner(nil) })
+
+	got := CheckTarget("claude", "m1")
+	if got.Remaining != 0.08 || got.Usable == nil || *got.Usable || got.Reason != "weekly: 8% remaining" {
+		t.Fatalf("CheckTarget = %+v", got)
+	}
+	if got := CheckTarget("claude", "other"); got.Usable != nil || got.Remaining != 0 {
+		t.Fatalf("unknown model = %+v", got)
+	}
+}
+
+func TestApplyQuotaPolicyUsesProfileEnv(t *testing.T) {
+	cfg := &config.Config{QuotaProfiles: map[string]config.QuotaProfile{
+		"pro20":   {Thresholds: map[string]float64{"weekly": 0.05}},
+		"default": {Thresholds: map[string]float64{"*": 0.10}},
+	}}
+	usage := func() map[string][]types.ModelUsage {
+		return map[string][]types.ModelUsage{"claude": {{
+			Model: "m1", Remaining: 0.08,
+			Limits: []types.QuotaLimit{{Name: "weekly", Remaining: 0.08}},
+		}}}
+	}
+
+	t.Setenv("ASGARD_CLAUDE_PROFILE", "pro20")
+	res := usage()
+	applyQuotaPolicy(cfg, res)
+	if u := res["claude"][0].Usable; u == nil || !*u {
+		t.Fatalf("pro20 should accept 8%% weekly, got %v", u)
+	}
+
+	t.Setenv("ASGARD_CLAUDE_PROFILE", "")
+	res = usage()
+	applyQuotaPolicy(cfg, res)
+	if u := res["claude"][0].Usable; u == nil || *u {
+		t.Fatalf("default should reject 8%%, got %v", u)
 	}
 }

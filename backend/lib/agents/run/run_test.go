@@ -586,3 +586,22 @@ func TestResolveRunDir_Glob(t *testing.T) {
 	_, err = resolveRunDir(agentSymlinkOnly, optional.None[string]())
 	require.Error(t, err)
 }
+
+func TestAutoSelectable(t *testing.T) {
+	yes, no := true, false
+	tests := []struct {
+		name  string
+		check agentwrapper.QuotaCheck
+		want  bool
+	}{
+		{"no verdict above threshold", agentwrapper.QuotaCheck{Remaining: 0.5}, true},
+		{"no verdict at threshold", agentwrapper.QuotaCheck{Remaining: MinAutoQuotaThreshold}, false},
+		{"policy accepts below the legacy threshold", agentwrapper.QuotaCheck{Remaining: 0.04, Usable: &yes}, true},
+		{"policy rejects above the legacy threshold", agentwrapper.QuotaCheck{Remaining: 0.50, Usable: &no}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, autoSelectable(tt.check))
+		})
+	}
+}

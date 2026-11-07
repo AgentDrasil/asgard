@@ -28,7 +28,9 @@ import (
 //  3. Otherwise accounts are tried in sorted alias order and the first one
 //     that still has quota for the model wins. A model the account reports no
 //     entry for counts as available; an entry is exhausted when its Remaining
-//     or any of its limits' Remaining is <= 0.
+//     or any of its limits' Remaining is <= 0, or, when the aw query attached
+//     a quota policy verdict (the account's bound profile), when that
+//     verdict says it is not usable.
 //  4. An account whose quota cannot be fetched is never preferred (its
 //     pinned query fails on its own broken credentials): it is skipped with a
 //     warning. If no account was confirmed available and at least one
@@ -148,7 +150,14 @@ func modelMatches(want, have string) bool {
 	return strings.EqualFold(want, have) || strings.EqualFold(stripProvider(want), stripProvider(have))
 }
 
+// usageExhausted reports whether the account should not serve the model. The
+// quota policy verdict, when the aw query attached one, is authoritative: the
+// account's profile decides per window. Otherwise only a fully used limit
+// counts.
 func usageExhausted(u llms.ModelUsage) bool {
+	if u.Usable != nil {
+		return !*u.Usable
+	}
 	if u.Remaining <= 0 {
 		return true
 	}

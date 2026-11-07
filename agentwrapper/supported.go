@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 	"github.com/AgentDrasil/asgard/agentwrapper/agy"
 	"github.com/AgentDrasil/asgard/agentwrapper/claude"
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
@@ -210,7 +212,18 @@ func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsag
 		res[agentName] = filtered
 	}
 
+	applyQuotaPolicy(cfg, res)
 	return res
+}
+
+// applyQuotaPolicy attaches the quota policy verdict to every usage. The
+// profile of each CLI's account arrives through the environment because the
+// query sandbox cannot see the account's binding file; a CLI without a
+// binding uses the default profile.
+func applyQuotaPolicy(cfg *config.Config, res map[string][]types.ModelUsage) {
+	for cli, usages := range res {
+		cfg.ApplyQuotaPolicy(os.Getenv(accounts.ProfileEnvName(cli)), usages)
+	}
 }
 
 // GetCLIQuota returns the quota of a single CLI keyed by its name,
@@ -224,13 +237,34 @@ func GetCLIQuota(ctx context.Context, cli string) (map[string][]types.ModelUsage
 	if err != nil {
 		return nil, err
 	}
-	return map[string][]types.ModelUsage{cli: usages}, nil
+	res := map[string][]types.ModelUsage{cli: usages}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load aw config for quota policy")
+	}
+	applyQuotaPolicy(cfg, res)
+	return res, nil
 }
 
-func CheckQuota(cli string, model string) float64 {
+// QuotaCheck is the quota state of one (cli, model) target.
+type QuotaCheck struct {
+	// Remaining is the headline fraction of quota left; 0 when the query
+	// failed or the model has no entry.
+	Remaining float64
+
+	// Usable is the quota policy verdict of the account the query ran on,
+	// nil when no policy applied (callers then apply their own threshold).
+	Usable *bool
+
+	// Reason explains an unusable verdict.
+	Reason string
+}
+
+// CheckTarget queries the quota of a (cli, model) target.
+func CheckTarget(cli string, model string) QuotaCheck {
 	client, ok := registeredClients()[cli]
 	if !ok {
-		return 0.0
+		return QuotaCheck{}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -246,16 +280,21 @@ func CheckQuota(cli string, model string) float64 {
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check quota")
-		return 0.0
+		return QuotaCheck{}
 	}
 
 	for _, u := range usages {
 		if MatchesModel(cli, model, u.Model) {
-			return u.Remaining
+			return QuotaCheck{Remaining: u.Remaining, Usable: u.Usable, Reason: u.Reason}
 		}
 	}
 
-	return 0.0
+	return QuotaCheck{}
+}
+
+// CheckQuota returns the headline remaining quota fraction of a target.
+func CheckQuota(cli string, model string) float64 {
+	return CheckTarget(cli, model).Remaining
 }
 
 // GetSandboxSpec returns the SandboxSpec for the given CLI if implemented, or nil.

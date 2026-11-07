@@ -117,6 +117,23 @@ Claude sandboxes bind the selected account directory (read-write) as `~/.claude`
 - Otherwise each account's quota is read (cached per `(cli, alias)` for 60s, one shared fetch for concurrent runs). A model with no quota entry on an account counts as available; an entry is exhausted when its remaining fraction or any of its limits is `0`. If every account is exhausted, the account whose quota refreshes first is used.
 - If an account's quota cannot be fetched it is treated as available (a warning is logged), so selection falls back to the first alias.
 
+**Quota policy** decides per account when a quota is "too low to use", instead of one fixed 10% for everything. Profiles are shared plan templates in the aw config (`aw/config.yaml` in the etcd tree); each account is bound to one, so several accounts of the same plan share a profile:
+
+```yaml
+quota_profiles:
+  pro20:                          # a $20 plan: stop at 10% of the 5h window or 5% of the weekly one
+    thresholds: { 5h: 0.10, weekly: 0.05 }
+  max200:
+    thresholds: { 5h: 0.03, weekly: 0.02 }
+  default:                        # accounts without a binding
+    thresholds: { "*": 0.10 }
+```
+
+- Thresholds are per quota window (limit name, exact or a glob such as `weekly*`; `*` is the fallback) and apply independently: an account is unusable as soon as any window is at or below its own threshold. Without per-window limits the headline remaining fraction is checked against `*`. `unlimited: true` marks a pay-per-request profile.
+- Bind an account on the runner with `aw <cli> login <alias> --profile <name>` or `aw <cli> profile <alias> [name|--clear]` (`agy` and `claude`). The binding is the file `.asgard-profile` in the account directory; re-login keeps it. Unbound accounts use the `default` profile.
+- The host passes the selected account's profile into the query sandbox as `ASGARD_<CLI>_PROFILE`; `aw usage` evaluates it and attaches `usable` and `reason` to each model entry. Account selection and the automatic target selection of an agent run use that verdict. Without any `quota_profiles` no verdict is attached and the previous behavior (10% for automatic selection, exhausted at `0` for accounts) stays.
+- An explicitly selected model is still only refused when it has no quota at all.
+
 `/api/quota` reports quota per account for `agy` and `claude`: each runner queries every account separately (in a sandbox pinned to that account) and the usage entries carry an `"account": "<alias>"` field (omitted for CLIs without accounts). An account whose query fails (or has no credentials) yields a status-only entry instead: no `model`, `"status"` of `no_credentials` or `error`, and the error text in `"message"`; a CLI with no accounts and no login reports the same. The UI shows these as notices.
 
 ## Sandbox Architecture

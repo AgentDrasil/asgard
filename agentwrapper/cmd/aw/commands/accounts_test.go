@@ -405,3 +405,89 @@ func TestListAndRemoveCommands(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestClaudeLoginProfileBinding(t *testing.T) {
+	t.Setenv(accounts.EnvAccountsDir, t.TempDir())
+
+	origExec := execCLI
+	t.Cleanup(func() {
+		execCLI = origExec
+		claudeLoginForce = false
+		claudeLoginProfile = ""
+	})
+	execCLI = func(ctx context.Context, name string, env []string, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+		for _, e := range env {
+			if dir, ok := strings.CutPrefix(e, "CLAUDE_CONFIG_DIR="); ok {
+				return os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(`{}`), 0600)
+			}
+		}
+		return nil
+	}
+	login := func(force bool, profile string) error {
+		claudeLoginForce, claudeLoginProfile = force, profile
+		claudeLoginCmd.SetOut(io.Discard)
+		defer claudeLoginCmd.SetOut(nil)
+		return claudeLoginCmd.RunE(claudeLoginCmd, []string{"work"})
+	}
+
+	require.NoError(t, login(false, "pro20"))
+	got, err := accounts.ReadProfile("claude", "work")
+	require.NoError(t, err)
+	assert.Equal(t, "pro20", got)
+
+	// Re-login without --profile replaces the dir but keeps the binding.
+	require.NoError(t, login(true, ""))
+	got, err = accounts.ReadProfile("claude", "work")
+	require.NoError(t, err)
+	assert.Equal(t, "pro20", got)
+
+	// An explicit --profile rebinds.
+	require.NoError(t, login(true, "max200"))
+	got, err = accounts.ReadProfile("claude", "work")
+	require.NoError(t, err)
+	assert.Equal(t, "max200", got)
+
+	// An invalid profile is rejected before the interactive login runs.
+	ran := false
+	execCLI = func(context.Context, string, []string, io.Reader, io.Writer, io.Writer, ...string) error {
+		ran = true
+		return nil
+	}
+	require.Error(t, login(true, "Bad Name"))
+	assert.False(t, ran)
+}
+
+func TestProfileCommand(t *testing.T) {
+	t.Setenv(accounts.EnvAccountsDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(filepath.Join(accounts.Root(), "agy", "a1"), 0700))
+	t.Cleanup(func() { agyProfileClear = false })
+
+	run := func(args ...string) (string, error) {
+		buf := new(bytes.Buffer)
+		agyProfileCmd.SetOut(buf)
+		defer agyProfileCmd.SetOut(nil)
+		err := agyProfileCmd.RunE(agyProfileCmd, args)
+		return buf.String(), err
+	}
+
+	out, err := run("a1")
+	require.NoError(t, err)
+	assert.Equal(t, "\n", out, "unbound account prints an empty line")
+
+	_, err = run("a1", "pro20")
+	require.NoError(t, err)
+	out, err = run("a1")
+	require.NoError(t, err)
+	assert.Equal(t, "pro20\n", out)
+
+	_, err = run("missing", "pro20")
+	require.Error(t, err)
+
+	agyProfileClear = true
+	_, err = run("a1")
+	require.NoError(t, err)
+	agyProfileClear = false
+	out, err = run("a1")
+	require.NoError(t, err)
+	assert.Equal(t, "\n", out)
+}

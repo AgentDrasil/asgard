@@ -282,3 +282,26 @@ func TestSelect(t *testing.T) {
 	_, _, err = Select("bogus")
 	assert.Error(t, err)
 }
+
+func TestProfileBinding(t *testing.T) {
+	t.Setenv(EnvAccountsDir, t.TempDir())
+
+	require.NoError(t, os.MkdirAll(filepath.Join(Root(), "agy", "a1"), DirMode))
+
+	got, err := ReadProfile("agy", "a1")
+	require.NoError(t, err)
+	assert.Empty(t, got, "unbound account")
+
+	require.NoError(t, WriteProfile("agy", "a1", "pro20"))
+	got, err = ReadProfile("agy", "a1")
+	require.NoError(t, err)
+	assert.Equal(t, "pro20", got)
+
+	assert.Error(t, WriteProfile("agy", "missing", "pro20"))
+	assert.Error(t, WriteProfile("agy", "a1", "Bad Name"))
+
+	// The binding file does not make the account list differently.
+	aliases, err := List("agy")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a1"}, aliases)
+}

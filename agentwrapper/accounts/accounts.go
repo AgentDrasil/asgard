@@ -159,3 +159,65 @@ func Select(cli string) (alias string, ok bool, err error) {
 	}
 	return aliases[0], true, nil
 }
+
+// ProfileFileName is the file inside an account directory that binds the
+// account to a quota profile (see config.QuotaProfile). It holds the profile
+// name only.
+const ProfileFileName = ".asgard-profile"
+
+// ProfileEnvName is the env var through which the host passes an account's
+// bound profile name into a query sandbox, where the account directory is
+// not fully visible.
+func ProfileEnvName(cli string) string {
+	return "ASGARD_" + strings.ToUpper(cli) + "_PROFILE"
+}
+
+// ValidateProfile checks a quota profile name.
+func ValidateProfile(name string) error {
+	if !aliasRegex.MatchString(name) {
+		return fmt.Errorf("invalid profile %q: must match ^[a-z0-9][a-z0-9_-]{0,31}$", name)
+	}
+	return nil
+}
+
+// ReadProfile returns the quota profile bound to an account, or "" when the
+// account is unbound.
+func ReadProfile(cli, alias string) (string, error) {
+	dir, err := Dir(cli, alias)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ProfileFileName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading profile binding: %w", err)
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "", nil
+	}
+	if err := ValidateProfile(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// WriteProfile binds an existing account to a quota profile.
+func WriteProfile(cli, alias, name string) error {
+	if err := ValidateProfile(name); err != nil {
+		return err
+	}
+	dir, err := Dir(cli, alias)
+	if err != nil {
+		return err
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return fmt.Errorf("account %q does not exist: %w", alias, os.ErrNotExist)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ProfileFileName), []byte(name+"\n"), FileMode); err != nil {
+		return fmt.Errorf("writing profile binding: %w", err)
+	}
+	return nil
+}
