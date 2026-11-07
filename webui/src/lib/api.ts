@@ -291,6 +291,17 @@ export async function getSystemLogs(level?: string): Promise<SystemLogEntry[]> {
   }
 }
 
+// Clear the backend diagnostic logs and active error/warning snapshot (admin only).
+export async function clearSystemLogs(): Promise<boolean> {
+  try {
+    const res = await apiFetch("/api/system/logs", { method: "DELETE" });
+    return res.ok;
+  } catch (err) {
+    console.error("clearSystemLogs error:", err);
+    return false;
+  }
+}
+
 // Fetch command-output compression statistics (returns null on non-ok or network failure)
 export async function getCompressionMetrics(): Promise<CompressionMetrics | null> {
   try {

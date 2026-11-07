@@ -555,7 +555,8 @@ export const zhCN: MessageSchema = {
     backToSettings: "返回设置",
     refresh: "刷新",
     refreshTooltip: "刷新日志",
-    clearToastHistory: "清空通知历史",
+    clearToastHistory: "清空日志",
+    clearFailed: "清空后端日志失败",
     metrics: {
       total: "日志总数",
       errors: "错误数",

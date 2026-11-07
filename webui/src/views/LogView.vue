@@ -4,7 +4,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
-import { getSystemLogs, isAuthEnabled } from "../lib/api";
+import { clearSystemLogs, getSystemLogs, isAuthEnabled } from "../lib/api";
 import { useUserProfile } from "../composables/useUserProfile";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import type { SystemLogEntry } from "../types";
@@ -215,9 +215,13 @@ const handleCopyLog = async (item: UnifiedLogItem) => {
   }
 };
 
-const handleClear = () => {
+const handleClear = async () => {
   clearToastHistory();
-  void fetchLogs();
+  toast.clear();
+  if (isAdmin.value && !(await clearSystemLogs())) {
+    toast.error(t("logs.clearFailed"), { history: false });
+  }
+  await fetchLogs();
 };
 
 const navigateBackToSettings = () => {

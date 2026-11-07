@@ -594,6 +594,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /team", s.handleTeam)
 	mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	mux.HandleFunc("GET /api/system/logs", s.handleSystemLogs)
+	mux.HandleFunc("DELETE /api/system/logs", s.handleClearSystemLogs)
 	mux.HandleFunc("GET "+metrics.EndpointPath, s.handleGetCompressionMetrics)
 	mux.HandleFunc("GET /api/manage/proxy", s.handleGetManageProxy)
 	mux.HandleFunc("PUT /api/manage/proxy", s.handleSaveManageProxy)

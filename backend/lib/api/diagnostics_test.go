@@ -173,3 +173,24 @@ func TestSystemDiagnostics_ConcurrencyRace(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestSystemDiagnostics_Clear(t *testing.T) {
+	d := NewSystemDiagnostics()
+	d.AddError("config", "boom")
+	d.AddWarning("proxy", "slow")
+
+	d.Clear()
+
+	snap := d.Snapshot()
+	if snap.Status != "ok" || len(snap.Errors) != 0 || len(snap.Warnings) != 0 {
+		t.Fatalf("snapshot not cleared: %+v", snap)
+	}
+	if logs := d.GetLogs("all"); len(logs) != 0 {
+		t.Fatalf("logs not cleared: %d entries", len(logs))
+	}
+
+	d.AddError("config", "boom")
+	if got := len(d.GetLogs("all")); got != 1 {
+		t.Fatalf("expected a fresh log after clear, got %d", got)
+	}
+}

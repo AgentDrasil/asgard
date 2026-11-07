@@ -8,6 +8,9 @@ export interface ToastOptions {
   title?: string;
   duration?: number;
   translate?: boolean;
+  // Set to false for toasts that mirror a backend diagnostic: the backend log
+  // already lists them, so recording them in the UI history would show twice.
+  history?: boolean;
 }
 
 const toasts = ref<ToastItem[]>([]);
@@ -59,9 +62,11 @@ export function useToast() {
       timestamp: Date.now(),
     };
 
-    toastHistory.value.push(item);
-    if (toastHistory.value.length > 500) {
-      toastHistory.value.shift();
+    if (options?.history !== false) {
+      toastHistory.value.push(item);
+      if (toastHistory.value.length > 500) {
+        toastHistory.value.shift();
+      }
     }
 
     // Avoid duplicate toast with identical type and message in active floating toasts

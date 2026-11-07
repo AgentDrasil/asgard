@@ -565,7 +565,8 @@ export const en = {
     backToSettings: "Back to Settings",
     refresh: "Refresh",
     refreshTooltip: "Refresh Logs",
-    clearToastHistory: "Clear Toast History",
+    clearToastHistory: "Clear Logs",
+    clearFailed: "Failed to clear backend logs",
     metrics: {
       total: "Total Entries",
       errors: "Errors",

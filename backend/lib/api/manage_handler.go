@@ -155,6 +155,16 @@ func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(SystemLogsResponse{Logs: logs})
 }
 
+// handleClearSystemLogs handles DELETE /api/system/logs.
+func (s *Server) handleClearSystemLogs(w http.ResponseWriter, r *http.Request) {
+	if s.auth != nil && !auth.HasRole(r.Context(), auth.AdminRole) {
+		writeJSONError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	s.diagnostics.Clear()
+	writeStatusOK(w, "system logs cleared")
+}
+
 func writeStatusOK(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

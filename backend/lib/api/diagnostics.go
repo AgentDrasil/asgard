@@ -255,6 +255,22 @@ func (d *SystemDiagnostics) Snapshot() DiagnosticsSnapshot {
 	}
 }
 
+// Clear drops the log history together with the active error and warning
+// snapshot. Conditions that are still true are re-reported by their owners.
+func (d *SystemDiagnostics) Clear() {
+	if d == nil {
+		return
+	}
+	d.logMu.Lock()
+	d.logs = d.logs[:0]
+	d.logMu.Unlock()
+
+	d.mu.Lock()
+	d.errors = d.errors[:0]
+	d.warnings = d.warnings[:0]
+	d.mu.Unlock()
+}
+
 // GetLogs returns a chronological copy of log entries, optionally filtered by level ("all", "warn", "error").
 func (d *SystemDiagnostics) GetLogs(levelFilter string) []LogEntry {
 	if d == nil {
