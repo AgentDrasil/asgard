@@ -113,6 +113,8 @@ describe("auth capability discovery", () => {
   beforeEach(() => {
     installStorage();
     installLocation();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
     fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(200, { enabled: false }));
