@@ -16,9 +16,10 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 )
 
+// TestCobraDispatch is deliberately not parallel (nor are its subtests): Find
+// merges flags into cobra's shared command tree, which the parallel tests of
+// this package read too.
 func TestCobraDispatch(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		name        string
 		args        []string
@@ -36,7 +37,6 @@ func TestCobraDispatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			cmd, _, err := rootCmd.Find(tt.args)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedCmd, cmd)
@@ -53,8 +53,8 @@ func TestAccountCommandsSkipConfig(t *testing.T) {
 	}
 
 	for _, cmd := range accountCmds {
+		// Not parallel: the root PersistentPreRunE replaces the global logger.
 		t.Run(cmd.CommandPath(), func(t *testing.T) {
-			t.Parallel()
 			assert.True(t, isAccountCmd(cmd), "%s should be recognized as account command", cmd.Name())
 
 			// Calling rootCmd's PersistentPreRunE with an account command must not fail
