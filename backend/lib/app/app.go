@@ -150,6 +150,7 @@ type App struct {
 	scheduler    *cleanup.Scheduler
 	proxyManager *proxy.ProxyManager
 	runnerHub    *runnerhub.Hub
+	stopWatchers []context.CancelFunc
 	stopOnce     sync.Once
 	stopErr      error
 }
@@ -203,6 +204,8 @@ func New(opts ...Option) (*App, error) {
 	treeMgr := options.TreeManager
 	etcdClient := options.EtcdClient
 	var agentStore *config.AgentStore
+	// stopTree and stopAgents stop the etcd watchers started below.
+	var stopTree, stopAgents context.CancelFunc
 	var proxyHolder atomic.Pointer[proxy.ProxyManager]
 	var hubHolder atomic.Pointer[runnerhub.Hub]
 	var serverHolder atomic.Pointer[api.Server]
@@ -257,7 +260,9 @@ func New(opts ...Option) (*App, error) {
 					}
 				}
 			})
-			if startErr := treeMgr.Start(context.Background()); startErr != nil {
+			var startErr error
+			stopTree, startErr = config.StartBounded(context.Background(), configLoadTimeout, treeMgr.Start)
+			if startErr != nil {
 				if etcdClient != nil {
 					_ = etcdClient.Close()
 				}
@@ -267,6 +272,12 @@ func New(opts ...Option) (*App, error) {
 
 		treeCfg := treeMgr.Get()
 		if treeCfg == nil {
+			if stopTree != nil {
+				stopTree()
+			}
+			if etcdClient != nil {
+				_ = etcdClient.Close()
+			}
 			return nil, fmt.Errorf("%w: etcd configuration snapshot is nil", ErrConfigUnavailable)
 		}
 		syncGCPSAKey(&treeCfg.Credentials)
@@ -277,6 +288,9 @@ func New(opts ...Option) (*App, error) {
 			conf.SetProxy(&proxyCfg)
 		}
 		if err := conf.ApplyDefaultsAndValidate(); err != nil {
+			if stopTree != nil {
+				stopTree()
+			}
 			if etcdClient != nil {
 				_ = etcdClient.Close()
 			}
@@ -284,13 +298,24 @@ func New(opts ...Option) (*App, error) {
 		}
 		if etcdClient != nil {
 			agentStore = config.NewEtcdAgentStore(etcdClient, config.EtcdPrefix())
-			if err := agentStore.Start(context.Background()); err != nil {
+			var err error
+			stopAgents, err = config.StartBounded(context.Background(), configLoadTimeout, agentStore.Start)
+			if err != nil {
+				if stopTree != nil {
+					stopTree()
+				}
 				_ = etcdClient.Close()
 				return nil, fmt.Errorf("%w: failed to start agent definition store: %w", ErrConfigUnavailable, err)
 			}
 		}
 	}
 	configLoaded := true
+
+	if _, fromEnv := config.PortFromEnv(); !fromEnv && conf.LegacyPort != 0 && conf.LegacyPort != conf.Port {
+		msg := fmt.Sprintf("the etcd config sets port: %d, which is no longer read; listening on %d. Set %s=%d on the backend container", conf.LegacyPort, conf.Port, config.EnvPort, conf.LegacyPort)
+		log.Warn().Msg(msg)
+		diagnostics.AddWarning("config", msg)
+	}
 
 	// 2. Validate CLI agent setups (unless skipped or config failed to load)
 	if shouldValidateCLISetups(options.SkipAgentValidation, configLoaded, conf) {
@@ -512,7 +537,14 @@ func New(opts ...Option) (*App, error) {
 		syncCollisions()
 	}
 
+	var stopWatchers []context.CancelFunc
+	for _, stop := range []context.CancelFunc{stopTree, stopAgents} {
+		if stop != nil {
+			stopWatchers = append(stopWatchers, stop)
+		}
+	}
 	return &App{
+		stopWatchers: stopWatchers,
 		agentStore:   agentStore,
 		conf:         conf,
 		treeManager:  treeMgr,
@@ -651,6 +683,9 @@ func (a *App) Stop(ctx context.Context) error {
 		}
 		if a.agentStore != nil {
 			a.agentStore.Close()
+		}
+		for _, stop := range a.stopWatchers {
+			stop()
 		}
 		if a.etcdClient != nil {
 			_ = a.etcdClient.Close()

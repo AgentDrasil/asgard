@@ -86,7 +86,10 @@ type Config struct {
 	AgentDir string `yaml:"-" json:"-"`
 	// Port is the HTTP port. It comes from ASGARD_PORT (see PortFromEnv), never
 	// from the etcd configuration; the field is exported so tests can set it.
-	Port                               int                       `yaml:"-" json:"-"`
+	Port int `yaml:"-" json:"-"`
+	// LegacyPort is the removed port setting of older etcd configurations. It is
+	// never used; it only lets the backend warn that the port moved to ASGARD_PORT.
+	LegacyPort                         int                       `yaml:"port" json:"-"`
 	Host                               string                    `yaml:"host"`
 	WebUIPath                          string                    `yaml:"webui_path"`
 	GeminiAPIKey                       string                    `yaml:"gemini_api_key"`

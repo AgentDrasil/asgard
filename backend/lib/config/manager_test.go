@@ -2,7 +2,9 @@ package config
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -250,4 +252,42 @@ func TestPortComesFromEnv(t *testing.T) {
 		require.NoError(t, c.ApplyDefaultsAndValidate())
 		assert.Equal(t, DefaultPort, c.Port, bad)
 	}
+}
+
+func TestStartBounded(t *testing.T) {
+	t.Run("blocked start fails within the timeout", func(t *testing.T) {
+		begin := time.Now()
+		_, err := StartBounded(context.Background(), 100*time.Millisecond, func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		require.Error(t, err)
+		assert.Less(t, time.Since(begin), 5*time.Second)
+	})
+
+	t.Run("success keeps the context alive until stopped", func(t *testing.T) {
+		var watchCtx context.Context
+		stop, err := StartBounded(context.Background(), time.Second, func(ctx context.Context) error {
+			watchCtx = ctx
+			return nil
+		})
+		require.NoError(t, err)
+		assert.NoError(t, watchCtx.Err())
+		stop()
+		assert.Error(t, watchCtx.Err())
+	})
+
+	t.Run("a timeout firing after start returned is a failure", func(t *testing.T) {
+		_, err := StartBounded(context.Background(), 20*time.Millisecond, func(ctx context.Context) error {
+			<-ctx.Done() // the watchers' context is already dead when start "succeeds"
+			return nil
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("start error is returned and the context released", func(t *testing.T) {
+		boom := errors.New("boom")
+		_, err := StartBounded(context.Background(), time.Second, func(context.Context) error { return boom })
+		require.ErrorIs(t, err, boom)
+	})
 }

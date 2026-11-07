@@ -25,6 +25,11 @@ const (
 	configRetryDelay = 15 * time.Second
 )
 
+// configLoadTimeout bounds one attempt to read the configuration from etcd,
+// whose reads otherwise wait forever while it is unreachable (a variable so
+// tests can shorten it).
+var configLoadTimeout = 20 * time.Second
+
 // newWhenConfigAvailable builds the App, retrying while the configuration is
 // unavailable. Any other failure is returned as is. Meanwhile a degraded
 // status endpoint answers on the configured ASGARD_PORT with the reason, so the

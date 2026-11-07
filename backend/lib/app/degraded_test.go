@@ -83,3 +83,38 @@ func TestRetryConfig_StopsOnContextCancel(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 1, calls)
 }
+
+// With etcd unreachable the config read would block forever; the degraded
+// endpoint must still come up within the load timeout.
+func TestRetryConfig_UnreachableEtcdServesDegradedEndpoint(t *testing.T) {
+	old := configLoadTimeout
+	configLoadTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { configLoadTimeout = old })
+	t.Setenv("ETCD_ENDPOINTS", "127.0.0.1:1") // nothing listens here
+	addr := freeAddr(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := retryConfig(ctx, 50*time.Millisecond, addr, func() (*App, error) { return New() })
+		done <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		resp, err := http.Get("http://" + addr + "/api/system/status")
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 50*time.Millisecond, "degraded endpoint never came up")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(10 * time.Second):
+		t.Fatal("retryConfig did not stop after cancel")
+	}
+}

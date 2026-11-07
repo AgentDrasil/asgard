@@ -58,6 +58,27 @@ func PortFromEnv() (int, bool) {
 	return p, true
 }
 
+// StartBounded runs start with a context that is cancelled after timeout, so an
+// unreachable etcd (whose reads otherwise wait forever) fails the attempt
+// instead of hanging it. On success the context stays alive because start
+// launched watchers on it; the returned function stops them.
+func StartBounded(parent context.Context, timeout time.Duration, start func(context.Context) error) (context.CancelFunc, error) {
+	ctx, cancel := context.WithCancel(parent)
+	timer := time.AfterFunc(timeout, cancel)
+	err := start(ctx)
+	timer.Stop()
+	if err == nil && ctx.Err() != nil {
+		// The timer fired after start returned: the watchers it launched are
+		// already cancelled, so the attempt must not count as loaded.
+		err = fmt.Errorf("start did not finish within %s: %w", timeout, ctx.Err())
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return cancel, nil
+}
+
 // NewEtcdConfigManager connects to etcd and starts a ConfigManager for AsgardTreeConfig.
 // It fails fast if ETCD_ENDPOINTS is not configured or if connection/initial fetch fails.
 func NewEtcdConfigManager(ctx context.Context) (*configlib.ConfigManager[AsgardTreeConfig], *clientv3.Client, error) {
@@ -164,6 +185,7 @@ func (c *Config) Clone() *Config {
 		DSN:                                c.DSN,
 		AgentDir:                           c.AgentDir,
 		Port:                               c.Port,
+		LegacyPort:                         c.LegacyPort,
 		Host:                               c.Host,
 		WebUIPath:                          c.WebUIPath,
 		GeminiAPIKey:                       c.GeminiAPIKey,

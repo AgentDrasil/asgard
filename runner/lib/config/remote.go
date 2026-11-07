@@ -132,16 +132,12 @@ func (r *Remote) tryLoad() bool {
 // unreachable etcd cannot block forever. The context outlives a successful
 // step: it also drives the watchers the step launched.
 func (r *Remote) attempt(start func(context.Context) error) error {
-	ctx, cancel := context.WithCancel(r.ctx)
-	timer := time.AfterFunc(loadAttemptTimeout, cancel)
-	if err := start(ctx); err != nil {
-		timer.Stop()
-		cancel()
+	stop, err := config.StartBounded(r.ctx, loadAttemptTimeout, start)
+	if err != nil {
 		return err
 	}
-	timer.Stop()
 	r.mu.Lock()
-	r.stops = append(r.stops, cancel)
+	r.stops = append(r.stops, stop)
 	r.mu.Unlock()
 	return nil
 }
