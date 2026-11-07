@@ -293,6 +293,9 @@ type QuotaCheck struct {
 	Reason string
 }
 
+// checkTargetTimeout bounds one CheckTarget call; a variable for tests.
+var checkTargetTimeout = 20 * time.Second
+
 // CheckTarget queries the quota of a (cli, model) target.
 func CheckTarget(cli string, model string) QuotaCheck {
 	client, ok := registeredClients()[cli]
@@ -300,7 +303,7 @@ func CheckTarget(cli string, model string) QuotaCheck {
 		return QuotaCheck{}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), checkTargetTimeout)
 	defer cancel()
 
 	// With several accounts the target is runnable when any account can serve
@@ -311,6 +314,12 @@ func CheckTarget(cli string, model string) QuotaCheck {
 				return check
 			}
 		}
+	}
+
+	// The account check may have used up the whole budget; the plain query
+	// would only fail on the expired context and log a misleading error.
+	if ctx.Err() != nil {
+		return QuotaCheck{}
 	}
 
 	var usages []types.ModelUsage

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/agentwrapper/simplest"
@@ -400,5 +401,26 @@ func TestCheckTargetFallsBackWhenProviderHasNoAnswer(t *testing.T) {
 
 	if got := CheckTarget("claude", "m1"); got.Remaining != 0.5 {
 		t.Fatalf("CheckTarget = %+v", got)
+	}
+}
+
+func TestCheckTargetSkipsPlainQueryWhenBudgetIsSpent(t *testing.T) {
+	SetQueryRunner(func(context.Context, ...string) ([]byte, error) {
+		t.Fatal("the plain query must not run once the context has expired")
+		return nil, nil
+	})
+	// The provider outlives CheckTarget's 20s budget and then has no answer.
+	SetAccountUsageProvider(func(ctx context.Context, _ string) ([]AccountUsage, bool) {
+		<-ctx.Done()
+		return nil, false
+	})
+	t.Cleanup(func() { SetQueryRunner(nil); SetAccountUsageProvider(nil) })
+
+	restore := checkTargetTimeout
+	checkTargetTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { checkTargetTimeout = restore })
+
+	if got := CheckTarget("claude", "m1"); got != (QuotaCheck{}) {
+		t.Fatalf("CheckTarget = %+v, want the zero value", got)
 	}
 }
