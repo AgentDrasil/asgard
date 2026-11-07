@@ -166,3 +166,45 @@ func TestFetchQuota_EmptyToken(t *testing.T) {
 	_, _, _, err := FetchQuota(ctx, "", false)
 	assert.Error(t, err)
 }
+
+// A real Z.AI quota response: the token limit is the 5-hour window (unit 3 =
+// hours, number 5) and the time limit is the tool-call quota.
+const realQuotaResponse = `{
+  "code": 200, "msg": "Operation successful", "success": true,
+  "data": {
+    "limits": [
+      {"type": "TIME_LIMIT", "unit": 5, "number": 1, "usage": 100, "currentValue": 0, "remaining": 100,
+       "percentage": 0, "nextResetTime": 1795302946999,
+       "usageDetails": [{"modelCode": "search-prime", "usage": 0}, {"modelCode": "web-reader", "usage": 0}]},
+      {"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 14, "nextResetTime": 1794030723029}
+    ],
+    "level": "lite"
+  }
+}`
+
+func TestParseLimits_NamesHourWindowsLikeOtherProviders(t *testing.T) {
+	t.Parallel()
+
+	var qr quotaResponse
+	require.NoError(t, json.Unmarshal([]byte(realQuotaResponse), &qr))
+
+	rem, ref, limits := ParseLimits(qr.Data.Limits, true)
+	assert.InDelta(t, 0.86, rem, 0.0001, "the headline still follows TOKENS_LIMIT")
+	assert.Equal(t, int64(1794030723), ref)
+	require.Len(t, limits, 2)
+	assert.Equal(t, "TIME_LIMIT", limits[0].Name, "the tool-call quota keeps its name")
+	assert.Equal(t, "5h", limits[1].Name)
+	assert.InDelta(t, 0.86, limits[1].Remaining, 0.0001)
+}
+
+func TestLimitName(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "5h", limitName(Limit{Type: "TOKENS_LIMIT", Unit: 3, Number: 5}))
+	assert.Equal(t, "1h", limitName(Limit{Type: "TOKENS_LIMIT", Unit: 3, Number: 1}))
+	// Anything that is not known to be an hour window keeps its type.
+	assert.Equal(t, "TOKENS_LIMIT", limitName(Limit{Type: "TOKENS_LIMIT"}), "no unit given")
+	assert.Equal(t, "TOKENS_LIMIT", limitName(Limit{Type: "TOKENS_LIMIT", Unit: 6, Number: 1}), "unknown unit")
+	assert.Equal(t, "TOKENS_LIMIT", limitName(Limit{Type: "TOKENS_LIMIT", Unit: 3}), "no number")
+	assert.Equal(t, "TIME_LIMIT", limitName(Limit{Type: "TIME_LIMIT", Unit: 3, Number: 5}), "only token limits are renamed")
+}

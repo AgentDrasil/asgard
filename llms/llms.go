@@ -3,7 +3,7 @@ package llms
 
 import "strings"
 
-// QuotaLimit represents a single specific quota limit (e.g. TOKENS_LIMIT, 5h, weekly).
+// QuotaLimit represents a single specific quota limit (e.g. 5h, weekly, TIME_LIMIT).
 type QuotaLimit struct {
 	Name        string  `json:"name"`
 	Remaining   float64 `json:"remaining"`

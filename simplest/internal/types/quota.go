@@ -2,7 +2,7 @@ package types
 
 import "github.com/AgentDrasil/asgard/llms"
 
-// QuotaLimit represents a single specific quota limit (e.g. TOKENS_LIMIT, 5h, weekly).
+// QuotaLimit represents a single specific quota limit (e.g. 5h, weekly, TIME_LIMIT).
 type QuotaLimit = llms.QuotaLimit
 
 // ModelUsage represents the quota status for a single model.

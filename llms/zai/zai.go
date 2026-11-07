@@ -15,7 +15,11 @@ const DefaultQuotaEndpoint = "https://api.z.ai/api/monitor/usage/quota/limit"
 
 // Limit represents one quota limit item in the Z.AI API response.
 type Limit struct {
-	Type          string  `json:"type"`
+	Type string `json:"type"`
+	// Unit and Number give the length of the window: Unit 3 is hours, so
+	// {Unit: 3, Number: 5} is the 5-hour window. Other units are not known.
+	Unit          int     `json:"unit"`
+	Number        int     `json:"number"`
 	Usage         float64 `json:"usage"`
 	Remaining     float64 `json:"remaining"`
 	Percentage    float64 `json:"percentage"`
@@ -29,6 +33,20 @@ type quotaResponse struct {
 	Data    struct {
 		Limits []Limit `json:"limits"`
 	} `json:"data"`
+}
+
+// unitHours is the Limit.Unit of a window measured in hours.
+const unitHours = 3
+
+// limitName is the name a limit is reported under. A token limit measured in
+// hours is named like the other providers' windows ("5h"), so quota profiles
+// can use one threshold for it; everything else keeps the type zai gave it
+// (e.g. TIME_LIMIT, the tool-call quota) rather than guess at its window.
+func limitName(l Limit) string {
+	if l.Type == "TOKENS_LIMIT" && l.Unit == unitHours && l.Number > 0 {
+		return fmt.Sprintf("%dh", l.Number)
+	}
+	return l.Type
 }
 
 // ParseLimits processes limits returned from Z.AI quota API into remaining fraction, refresh date, and breakdown.
@@ -50,7 +68,7 @@ func ParseLimits(limitsData []Limit, detailed bool) (float64, int64, []llms.Quot
 
 		if detailed {
 			limits = append(limits, llms.QuotaLimit{
-				Name:        limit.Type,
+				Name:        limitName(limit),
 				Remaining:   remVal,
 				RefreshDate: refDate,
 			})

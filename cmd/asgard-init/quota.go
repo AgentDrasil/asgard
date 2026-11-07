@@ -36,7 +36,7 @@ const quotaSpecSyntax = `<name>:<window>=<ratio>[,<window>=<ratio>...]  or  <nam
 
 // parseQuotaProfile parses "<name>:<window>=<ratio>,..." or
 // "<name>:unlimited". A window is a limit name (e.g. 5h, weekly,
-// "weekly:sonnet only", TOKENS_LIMIT), a glob such as weekly*, or "*" for any
+// "weekly:sonnet only", TIME_LIMIT), a glob such as weekly*, or "*" for any
 // window; the ratio is the remaining fraction in [0, 1].
 func parseQuotaProfile(spec string) (quotaProfile, error) {
 	name, rest, ok := strings.Cut(spec, ":")
@@ -252,7 +252,7 @@ func PromptQuotaProfiles(r io.Reader, w io.Writer) []string {
 
 	_, _ = fmt.Fprintf(w, "\n%s--- quota profiles ---%s\n", colorCyan+colorBold, colorReset)
 	_, _ = fmt.Fprintf(w, "A profile says, per quota window, how little remaining quota an account may have before it\nis no longer used. Plans differ per CLI and size, so name them yourself (e.g. %sclaude-20%s,\n%sagy-50%s) and give one threshold per window the plan has.\n", colorYellow, colorReset, colorYellow, colorReset)
-	_, _ = fmt.Fprintf(w, "  • Window names are what the CLI reports: %sdocker exec -it asgard-<runner> aw usage --cli <cli>%s,\n    see limits[].name (claude: 5h, weekly, weekly:<model>; agy: 5h, weekly; other providers\n    name their own, e.g. TOKENS_LIMIT). Use * for any window.\n", colorCyan, colorReset)
+	_, _ = fmt.Fprintf(w, "  • Window names are what the CLI reports: %sdocker exec -it asgard-<runner> aw usage --cli <cli>%s,\n    see limits[].name (claude: 5h, weekly, weekly:<model>; agy and zai: 5h, plus weekly for agy;\n    other limits keep the provider's own name, e.g. TIME_LIMIT). Use * for any window.\n", colorCyan, colorReset)
 	_, _ = fmt.Fprintf(w, "  • Thresholds are remaining fractions: %s5h=0.10,weekly=0.05%s stops below 10%% of the 5h window or\n    5%% of the weekly one. A plan without a 5h window just leaves it out.\n", colorYellow, colorReset)
 	_, _ = fmt.Fprintf(w, "  • Type %sunlimited%s for pay-per-request accounts. Without any profile the fixed rule applies\n    (automatic selection needs more than 10%% remaining).\n", colorYellow, colorReset)
 
