@@ -222,7 +222,7 @@ func New(opts ...Option) (*App, error) {
 			var mgrErr error
 			treeMgr, etcdClient, mgrErr = config.NewEtcdConfigManager(context.Background())
 			if mgrErr != nil {
-				return nil, fmt.Errorf("failed to initialize etcd configuration: %w", mgrErr)
+				return nil, fmt.Errorf("%w: failed to initialize etcd configuration: %w", ErrConfigUnavailable, mgrErr)
 			}
 		}
 
@@ -261,13 +261,13 @@ func New(opts ...Option) (*App, error) {
 				if etcdClient != nil {
 					_ = etcdClient.Close()
 				}
-				return nil, fmt.Errorf("failed to start etcd config manager: %w", startErr)
+				return nil, fmt.Errorf("%w: failed to start etcd config manager: %w", ErrConfigUnavailable, startErr)
 			}
 		}
 
 		treeCfg := treeMgr.Get()
 		if treeCfg == nil {
-			return nil, fmt.Errorf("etcd configuration snapshot is nil")
+			return nil, fmt.Errorf("%w: etcd configuration snapshot is nil", ErrConfigUnavailable)
 		}
 		syncGCPSAKey(&treeCfg.Credentials)
 		mainCfg := treeCfg.Asgard.Config.Clone()
@@ -277,13 +277,16 @@ func New(opts ...Option) (*App, error) {
 			conf.SetProxy(&proxyCfg)
 		}
 		if err := conf.ApplyDefaultsAndValidate(); err != nil {
-			return nil, fmt.Errorf("invalid configuration from etcd: %w", err)
+			if etcdClient != nil {
+				_ = etcdClient.Close()
+			}
+			return nil, fmt.Errorf("%w: invalid configuration from etcd: %w", ErrConfigUnavailable, err)
 		}
 		if etcdClient != nil {
 			agentStore = config.NewEtcdAgentStore(etcdClient, config.EtcdPrefix())
 			if err := agentStore.Start(context.Background()); err != nil {
 				_ = etcdClient.Close()
-				return nil, fmt.Errorf("failed to start agent definition store: %w", err)
+				return nil, fmt.Errorf("%w: failed to start agent definition store: %w", ErrConfigUnavailable, err)
 			}
 		}
 	}
@@ -657,10 +660,16 @@ func (a *App) Stop(ctx context.Context) error {
 	return a.stopErr
 }
 
-// Run creates, starts, and manages the lifecycle of an App instance.
+// Run creates, starts, and manages the lifecycle of an App instance. While the
+// etcd configuration cannot be loaded it does not exit: it serves a degraded
+// status endpoint and keeps retrying, so the failure stays visible and
+// debuggable instead of turning into a restart loop.
 func Run(ctx context.Context, opts ...Option) error {
-	a, err := New(opts...)
+	a, err := newWhenConfigAvailable(ctx, opts...)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 
