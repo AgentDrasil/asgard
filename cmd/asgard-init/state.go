@@ -27,6 +27,7 @@ type InitState struct {
 	GCPSAKey         string          `json:"gcp_sa_key,omitempty"`
 	AgeRecipient     string          `json:"age_recipient,omitempty"`
 	Providers        []string        `json:"providers,omitempty"`
+	QuotaProfiles    []string        `json:"quota_profiles,omitempty"`
 	CompletedSteps   map[string]bool `json:"completed_steps,omitempty"`
 }
 

@@ -98,6 +98,7 @@ func run(args []string) (err error) {
 		gcpKmsFlag           = fs.String("gcp-kms", "", "Google Cloud KMS key resource ID for SOPS")
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
 		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
+		quotaProfilesFlag    = fs.String("quota-profiles", "", "Comma-separated quota policy profiles to generate into the aw config (supported: pro20, max200, ppr; default: none)")
 		addNewRunnerFlag     = fs.Bool("add-new-runner", false, "Add a new runner to an existing deployment (interactive; optionally pass the runner name: --add-new-runner <name>)")
 		gcpSAKeyFlag         = fs.String("gcp-sa-key", "", "GCP Service Account JSON key file path for GCP KMS")
 		resumeFlag           = fs.Bool("resume", false, "Resume deployment setup from saved state")
@@ -188,6 +189,11 @@ func run(args []string) (err error) {
 		}
 	}
 
+	cliQuotaProfiles, err := parseQuotaProfiles(*quotaProfilesFlag)
+	if err != nil {
+		return fmt.Errorf("invalid --quota-profiles: %w", err)
+	}
+
 	if *gcpSAKeyFlag != "" {
 		if err := validateJSONFile(*gcpSAKeyFlag); err != nil {
 			return fmt.Errorf("invalid --gcp-sa-key: %w", err)
@@ -206,6 +212,7 @@ func run(args []string) (err error) {
 		AuthTokenSource:  "access_token",
 		InitialRunner:    *runnerFlag,
 		Providers:        cliProviders,
+		QuotaProfiles:    cliQuotaProfiles,
 		GCPKMS:           *gcpKmsFlag,
 		GCPSAKey:         *gcpSAKeyFlag,
 		AgeRecipient:     *ageFlag,
@@ -299,6 +306,9 @@ func run(args []string) (err error) {
 	if !explicitFlags["providers"] && len(state.Providers) > 0 {
 		data.Providers = state.Providers
 	}
+	if !explicitFlags["quota-profiles"] && len(state.QuotaProfiles) > 0 {
+		data.QuotaProfiles = state.QuotaProfiles
+	}
 	if *gcpSAKeyFlag != "" {
 		data.GCPSAKey = *gcpSAKeyFlag
 	}
@@ -327,6 +337,7 @@ func run(args []string) (err error) {
 		state.GCPSAKey = data.GCPSAKey
 		state.AgeRecipient = data.AgeRecipient
 		state.Providers = data.Providers
+		state.QuotaProfiles = data.QuotaProfiles
 		_ = state.Save(targetDir)
 
 		if !state.IsCompleted("target_dir") {
@@ -548,6 +559,18 @@ func run(args []string) (err error) {
 			_ = state.Save(targetDir)
 		} else if len(data.Providers) == 0 && len(state.Providers) > 0 {
 			data.Providers = state.Providers
+		}
+
+		// Quota profiles only matter for the account-based CLIs.
+		if !state.IsCompleted("quota_profiles") {
+			if explicitFlags["quota-profiles"] {
+				data.QuotaProfiles = cliQuotaProfiles
+			} else if data.IsProviderEnabled("agy") || data.IsProviderEnabled("claude") {
+				data.QuotaProfiles = PromptQuotaProfiles(reader, os.Stdout)
+			}
+			state.QuotaProfiles = data.QuotaProfiles
+			state.MarkCompleted("quota_profiles")
+			_ = state.Save(targetDir)
 		}
 
 		credDirs := []string{
@@ -1087,6 +1110,7 @@ func printInitSuccess(dir string, data *ConfigData) {
 	fmt.Printf("  4. %sLog in to agy / claude on each runner%s (accounts live only on the runner, not in etcd):\n", colorBold, colorReset)
 	fmt.Printf("     %sdocker exec -it asgard-%s aw agy login <alias>%s\n", colorCyan, data.InitialRunner, colorReset)
 	fmt.Printf("     %sdocker exec -it asgard-%s aw claude login <alias>%s\n\n", colorCyan, data.InitialRunner, colorReset)
+	printQuotaBindingHint(data)
 
 	fmt.Printf("  5. %sCheck logs and status:%s\n", colorBold, colorReset)
 	fmt.Printf("     %sjust status%s\n", colorCyan, colorReset)

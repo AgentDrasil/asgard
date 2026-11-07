@@ -38,6 +38,7 @@ type ConfigData struct {
 	RunnerService                string
 	WorkspaceMounts              []string
 	Providers                    []string
+	QuotaProfiles                []string
 	GCPKMS                       string
 	GCPSAKey                     string
 	AgeRecipient                 string
