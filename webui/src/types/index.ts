@@ -74,6 +74,7 @@ export interface ChatSession {
   chatID: string;
   title: string;
   currentAgent: string;
+  agentIcon?: string;
   runDir: string;
   /** Node id of the runner the chat is bound to (absent in legacy mode). */
   runnerId?: string;

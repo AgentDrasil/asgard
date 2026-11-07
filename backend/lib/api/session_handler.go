@@ -21,6 +21,7 @@ type ChatSession struct {
 	ChatID            string                   `json:"chatID"`
 	Title             string                   `json:"title"`
 	CurrentAgent      string                   `json:"currentAgent"`
+	AgentIcon         string                   `json:"agentIcon,omitempty"`
 	RunDir            string                   `json:"runDir"`
 	AllowCrossSession bool                     `json:"allowCrossSession"`
 	RunnerID          string                   `json:"runnerId,omitempty"`
@@ -85,8 +86,17 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		runDirOpt = optional.Some(normalizedRunDir)
 	}
 
+	agentIcon := ""
+	if targetAgent, err := s.findAgentFor(runnerID, req.CurrentAgent); err == nil && targetAgent != nil {
+		agentIcon = targetAgent.Config.Icon
+	}
+
 	sub := s.userSubject(r)
-	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt, optional.Some(req.AllowCrossSession), sub); err != nil {
+	extraOpts := []any{optional.Some(req.AllowCrossSession), sub}
+	if agentIcon != "" {
+		extraOpts = append(extraOpts, dbmodels.SessionAgentIconOption(agentIcon))
+	}
+	if err := s.repo.UpdateAgentSession(chatID, req.CurrentAgent, "", "", runDirOpt, extraOpts...); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create session: " + err.Error()})
@@ -106,6 +116,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		RunnerID:          runnerID,
 		ChatID:            chatID,
 		CurrentAgent:      req.CurrentAgent,
+		AgentIcon:         agentIcon,
 		RunDir:            normalizedRunDir,
 		AllowCrossSession: req.AllowCrossSession,
 	})
@@ -174,6 +185,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		ChatID:            sess.ChatID,
 		Title:             sess.Title,
 		CurrentAgent:      sess.CurrentAgent,
+		AgentIcon:         sess.AgentIcon,
 		RunDir:            sess.RunDir,
 		AllowCrossSession: sess.AllowCrossSession,
 		RunnerID:          sess.RunnerNodeID,
@@ -265,6 +277,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			ChatID:            sess.ChatID,
 			Title:             sess.Title,
 			CurrentAgent:      sess.CurrentAgent,
+			AgentIcon:         sess.AgentIcon,
 			RunDir:            sess.RunDir,
 			AllowCrossSession: sess.AllowCrossSession,
 			RunnerID:          sess.RunnerNodeID,

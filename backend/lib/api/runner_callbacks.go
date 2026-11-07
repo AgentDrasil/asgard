@@ -501,6 +501,7 @@ func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb
 		title = fmt.Sprintf("Scheduled: %s", req.GetAgentId())
 	}
 	currentAgent := req.GetAgentId()
+	agentIcon := ""
 	if existing != nil {
 		if existing.Title != "" {
 			title = existing.Title
@@ -508,10 +509,17 @@ func (c *callbackService) InitWorkflowSession(ctx context.Context, req *runnerpb
 		if existing.CurrentAgent != "" {
 			currentAgent = existing.CurrentAgent
 		}
+		agentIcon = existing.AgentIcon
+	}
+	if agentIcon == "" && c.s != nil {
+		if a, err := c.s.findAgentFor(nodeID, currentAgent); err == nil && a != nil {
+			agentIcon = a.Config.Icon
+		}
 	}
 	session := &dbmodels.Session{
 		ChatID:       sessionID,
 		CurrentAgent: currentAgent,
+		AgentIcon:    agentIcon,
 		Title:        title,
 		RunnerNodeID: nodeID,
 	}

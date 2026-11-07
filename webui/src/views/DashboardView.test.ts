@@ -4,6 +4,7 @@ import { createApp, h, nextTick } from "vue";
 import DashboardView from "./DashboardView.vue";
 import * as api from "../lib/api";
 import { i18n, setLocale } from "../i18n";
+import { resetRunnersForTest, useRunners } from "../composables/useRunners";
 import type { ChatSession, AgentInfo } from "../types";
 
 // Mock @iconify/vue
@@ -507,6 +508,87 @@ describe("DashboardView.vue", () => {
       getSessionsSpy.mockClear();
       await vi.advanceTimersByTimeAsync(10000);
       expect(getSessionsSpy).not.toHaveBeenCalled();
+    });
+
+    it("filters sessions by runner and switches active runner on card click", async () => {
+      resetRunnersForTest();
+      vi.useRealTimers();
+
+      const { runners, selectRunner, selectedRunnerId } = useRunners();
+      runners.value = [
+        { node_id: "runner-a", online: true },
+        { node_id: "runner-b", online: true },
+      ];
+      selectRunner("runner-a");
+
+      const sessionA: ChatSession = {
+        chatID: "sess-runner-a",
+        title: "Task on Runner A",
+        currentAgent: "coder",
+        agentIcon: "icon:coder-custom",
+        runnerId: "runner-a",
+        runDir: "/work",
+        isRunning: true,
+        isWaitingForUser: false,
+        isArchived: false,
+      };
+      const sessionB: ChatSession = {
+        chatID: "sess-runner-b",
+        title: "Task on Runner B",
+        currentAgent: "planner",
+        agentIcon: "icon:planner-custom",
+        runnerId: "runner-b",
+        runDir: "/work",
+        isRunning: true,
+        isWaitingForUser: false,
+        isArchived: false,
+      };
+
+      vi.spyOn(api, "getSessions").mockImplementation(async (archived = false) => {
+        if (archived) return [];
+        return [sessionA, sessionB];
+      });
+      vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
+
+      const app = createApp({
+        render() {
+          return h(DashboardView);
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+
+      await nextTick();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(root.textContent).toContain("Task on Runner A");
+      expect(root.textContent).toContain("Task on Runner B");
+
+      // Verify agent icon custom fallback
+      const iconEl = root.querySelector('[data-icon="icon:coder-custom"]');
+      expect(iconEl).not.toBeNull();
+
+      // Test runner filter
+      const runnerSelect = root.querySelector('[data-test="runner-filter"]') as HTMLSelectElement;
+      expect(runnerSelect).not.toBeNull();
+      runnerSelect.value = "runner-b";
+      runnerSelect.dispatchEvent(new Event("change"));
+      await nextTick();
+
+      expect(root.textContent).not.toContain("Task on Runner A");
+      expect(root.textContent).toContain("Task on Runner B");
+
+      // Clicking card with runner-b switches selectedRunnerId to runner-b
+      const card = root.querySelector('[data-test="session-card-running"]') as HTMLElement;
+      expect(card).not.toBeNull();
+      card.click();
+      await nextTick();
+
+      expect(selectedRunnerId.value).toBe("runner-b");
+      expect(mockPush).toHaveBeenCalledWith("/chat/sess-runner-b");
+
+      app.unmount();
+      resetRunnersForTest();
     });
   });
 });

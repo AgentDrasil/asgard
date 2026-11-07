@@ -506,6 +506,8 @@ export const zhCN: MessageSchema = {
       kanban: "看板视图",
       archived: "查看归档",
     },
+    filterByRunner: "Runner 筛选",
+    allRunners: "全部 Runner",
     searchPlaceholder: "按标题、Agent 或路径搜索会话...",
     refreshTooltip: "刷新数据",
     loading: "正在加载会话数据...",

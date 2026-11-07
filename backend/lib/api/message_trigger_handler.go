@@ -268,7 +268,8 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			allowOpt = optional.Some(*req.AllowCrossSession)
 		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
+			agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -346,7 +347,8 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			allowOpt = optional.Some(*req.AllowCrossSession)
 		}
 		if s.repo != nil {
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
+			agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -465,7 +467,8 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		allowOpt = optional.Some(*req.AllowCrossSession)
 	}
 	if s.repo != nil {
-		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject); err != nil {
+		agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
+		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 		}
 	}

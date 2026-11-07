@@ -6,6 +6,7 @@ import { Icon } from "@iconify/vue";
 import { useToast } from "../composables/useToast";
 import { useShortcuts } from "../composables/useShortcuts";
 import { getSessions, archiveSession, getAgents, unlockSession } from "../lib/api";
+import { useRunners } from "../composables/useRunners";
 import { formatTimestamp } from "../lib/format";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import { getAgentIcon, formatPath } from "../utils/agentUtils";
@@ -20,6 +21,9 @@ const { toggleSidebarShortcut } = useShortcuts();
 const router = useRouter();
 const { t } = useI18n();
 const toast = useToast();
+
+const { runners, runnerMode, selectRunner } = useRunners();
+const selectedRunnerFilter = ref<string>("all");
 
 const activeSessions = ref<ChatSession[]>([]);
 const archivedSessions = ref<ChatSession[]>([]);
@@ -87,6 +91,11 @@ onUnmounted(() => {
 });
 
 const filterSession = (session: ChatSession, query: string): boolean => {
+  if (selectedRunnerFilter.value !== "all") {
+    if (session.runnerId !== selectedRunnerFilter.value) {
+      return false;
+    }
+  }
   if (!query) return true;
   const q = query.toLowerCase().trim();
   const title = (session.title || "").toLowerCase();
@@ -134,18 +143,30 @@ const filteredArchivedSessions = computed(() => {
 
 // Total count metrics
 const totalRunningCount = computed(() => {
-  return activeSessions.value.filter((s) => !s.isArchived && s.isRunning && !s.isWaitingForUser)
-    .length;
+  return activeSessions.value.filter(
+    (s) =>
+      !s.isArchived &&
+      s.isRunning &&
+      !s.isWaitingForUser &&
+      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
+  ).length;
 });
 
 const totalWaitingCount = computed(() => {
-  return activeSessions.value.filter((s) => !s.isArchived && s.isWaitingForUser).length;
+  return activeSessions.value.filter(
+    (s) =>
+      !s.isArchived &&
+      s.isWaitingForUser &&
+      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
+  ).length;
 });
 
 const totalRecentCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
     if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (selectedRunnerFilter.value !== "all" && s.runnerId !== selectedRunnerFilter.value)
+      return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time < THREE_HOURS_MS;
   }).length;
@@ -155,17 +176,27 @@ const totalCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
     if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (selectedRunnerFilter.value !== "all" && s.runnerId !== selectedRunnerFilter.value)
+      return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time >= THREE_HOURS_MS;
   }).length;
 });
 
 const totalArchivedCount = computed(() => {
-  return archivedSessions.value.length;
+  return archivedSessions.value.filter(
+    (s) =>
+      s.isArchived &&
+      (selectedRunnerFilter.value === "all" || s.runnerId === selectedRunnerFilter.value),
+  ).length;
 });
 
-const handleNavigate = (chatID: string) => {
+const handleNavigate = (session: ChatSession) => {
+  const chatID = session.chatID;
   if (!chatID) return;
+  if (session.runnerId) {
+    selectRunner(session.runnerId);
+  }
   router.push(`/chat/${encodeURIComponent(chatID)}`);
 };
 
@@ -313,35 +344,56 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
       <div
         class="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3"
       >
-        <!-- View Mode Switcher -->
-        <div class="join bg-base-300/60 p-0.5 rounded-lg border border-base-300 self-start">
-          <button
-            type="button"
-            class="join-item btn btn-sm border-none gap-2 font-medium"
-            :class="
-              viewMode === 'kanban' ? 'btn-primary shadow-sm' : 'btn-ghost text-base-content/70'
-            "
-            @click="viewMode = 'kanban'"
-            data-test="tab-kanban"
-          >
-            <Icon icon="lucide:kanban" class="w-4 h-4" />
-            {{ t("dashboard.tabs.kanban") }}
-          </button>
-          <button
-            type="button"
-            class="join-item btn btn-sm border-none gap-2 font-medium"
-            :class="
-              viewMode === 'archived' ? 'btn-primary shadow-sm' : 'btn-ghost text-base-content/70'
-            "
-            @click="viewMode = 'archived'"
-            data-test="tab-archived"
-          >
-            <Icon icon="lucide:archive" class="w-4 h-4" />
-            {{ t("dashboard.tabs.archived") }}
-            <span v-if="totalArchivedCount > 0" class="badge badge-xs badge-neutral">
-              {{ totalArchivedCount }}
-            </span>
-          </button>
+        <!-- View Mode Switcher & Runner Filter -->
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="join bg-base-300/60 p-0.5 rounded-lg border border-base-300 self-start">
+            <button
+              type="button"
+              class="join-item btn btn-sm border-none gap-2 font-medium"
+              :class="
+                viewMode === 'kanban' ? 'btn-primary shadow-sm' : 'btn-ghost text-base-content/70'
+              "
+              @click="viewMode = 'kanban'"
+              data-test="tab-kanban"
+            >
+              <Icon icon="lucide:kanban" class="w-4 h-4" />
+              {{ t("dashboard.tabs.kanban") }}
+            </button>
+            <button
+              type="button"
+              class="join-item btn btn-sm border-none gap-2 font-medium"
+              :class="
+                viewMode === 'archived' ? 'btn-primary shadow-sm' : 'btn-ghost text-base-content/70'
+              "
+              @click="viewMode = 'archived'"
+              data-test="tab-archived"
+            >
+              <Icon icon="lucide:archive" class="w-4 h-4" />
+              {{ t("dashboard.tabs.archived") }}
+              <span v-if="totalArchivedCount > 0" class="badge badge-xs badge-neutral">
+                {{ totalArchivedCount }}
+              </span>
+            </button>
+          </div>
+
+          <!-- Runner Filter Dropdown (shown when runnerMode is active or runners exist) -->
+          <div v-if="runnerMode" class="flex items-center gap-2">
+            <label class="text-xs text-base-content/70 font-medium flex items-center gap-1.5">
+              <Icon icon="lucide:server" class="w-3.5 h-3.5 text-base-content/50" />
+              <select
+                v-model="selectedRunnerFilter"
+                class="select select-bordered select-sm bg-base-100 text-xs font-normal"
+                data-test="runner-filter"
+                data-testid="runner-filter"
+                :aria-label="t('dashboard.filterByRunner')"
+              >
+                <option value="all">{{ t("dashboard.allRunners") }}</option>
+                <option v-for="r in runners" :key="r.node_id" :value="r.node_id">
+                  {{ r.node_id }} ({{ r.online ? t("runners.online") : t("runners.offline") }})
+                </option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <!-- Search and Refresh -->
@@ -411,7 +463,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
               v-for="session in runningSessions"
               :key="session.chatID"
               class="card bg-base-100 hover:border-primary/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session.chatID)"
+              @click="handleNavigate(session)"
               data-test="session-card-running"
             >
               <div class="flex items-start justify-between gap-2">
@@ -490,7 +542,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
                     class="w-3.5 h-3.5 text-primary"
                   />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
@@ -552,7 +604,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
               v-for="session in waitingSessions"
               :key="session.chatID"
               class="card bg-base-100 hover:border-warning/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session.chatID)"
+              @click="handleNavigate(session)"
               data-test="session-card-waiting"
             >
               <div class="flex items-start justify-between gap-2">
@@ -631,7 +683,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
                     class="w-3.5 h-3.5 text-warning"
                   />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
@@ -695,7 +747,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
               v-for="session in recentCompletedSessions"
               :key="session.chatID"
               class="card bg-base-100 hover:border-success/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session.chatID)"
+              @click="handleNavigate(session)"
               data-test="session-card-recent-completed"
             >
               <div class="flex items-start justify-between gap-2">
@@ -774,7 +826,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
                     class="w-3.5 h-3.5 text-success"
                   />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
@@ -838,7 +890,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
               v-for="session in completedSessions"
               :key="session.chatID"
               class="card bg-base-100 hover:border-base-content/30 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session.chatID)"
+              @click="handleNavigate(session)"
               data-test="session-card-completed"
             >
               <div class="flex items-start justify-between gap-2">
@@ -917,7 +969,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
                 >
                   <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents)"
+                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
                     class="w-3.5 h-3.5 text-base-content/70"
                   />
                   {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
@@ -985,7 +1037,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
             v-for="session in filteredArchivedSessions"
             :key="session.chatID"
             class="card bg-base-200/60 hover:bg-base-200 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-            @click="handleNavigate(session.chatID)"
+            @click="handleNavigate(session)"
             data-test="session-card-archived"
           >
             <div class="flex items-start justify-between gap-2">
@@ -1004,7 +1056,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-100 font-mono"
               >
                 <Icon
-                  :icon="getAgentIcon(session.currentAgent, agents)"
+                  :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
                   class="w-3.5 h-3.5 text-base-content/70"
                 />
                 {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}

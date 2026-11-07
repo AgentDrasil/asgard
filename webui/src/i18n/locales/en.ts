@@ -515,6 +515,8 @@ export const en = {
       kanban: "Kanban View",
       archived: "View Archive",
     },
+    filterByRunner: "Filter by Runner",
+    allRunners: "All Runners",
     searchPlaceholder: "Search sessions by title, agent, path...",
     refreshTooltip: "Refresh data",
     loading: "Loading session data...",

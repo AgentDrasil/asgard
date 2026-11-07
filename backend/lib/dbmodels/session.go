@@ -106,6 +106,8 @@ type Session struct {
 	ChatID string `gorm:"primaryKey"`
 	// name of current agent.
 	CurrentAgent string
+	// AgentIcon stores the icon identifier for the agent/session.
+	AgentIcon string `gorm:"column:agent_icon" json:"agentIcon,omitempty"`
 	// map of agents in json format.
 	Agents Agents `gorm:"type:text"`
 	// Dir agent running on
@@ -535,6 +537,9 @@ func (r *SessionRepository) UpsertSession(session *Session) error {
 			"current_agent": session.CurrentAgent,
 			"run_dir":       session.RunDir,
 		}
+		if session.AgentIcon != "" {
+			updates["agent_icon"] = session.AgentIcon
+		}
 		// An existing binding is never replaced.
 		if existing.RunnerNodeID == "" && session.RunnerNodeID != "" {
 			updates["runner_node_id"] = session.RunnerNodeID
@@ -581,7 +586,8 @@ func (r *SessionRepository) ChatIDsForRunnerWithQueue(runnerID string) ([]string
 }
 
 // UpdateAgentStatus updates the status for a specific agent in a session.
-func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, status AgentStatus) error {
+// An optional icon may be provided via extraOpts (e.g. SessionAgentIconOption).
+func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, status AgentStatus, extraOpts ...any) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
@@ -590,6 +596,12 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, sta
 				return nil
 			}
 			return err
+		}
+
+		for _, opt := range extraOpts {
+			if iconOpt, ok := opt.(SessionAgentIconOption); ok && iconOpt != "" {
+				session.AgentIcon = string(iconOpt)
+			}
 		}
 
 		found := false
@@ -611,8 +623,10 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, sta
 	})
 }
 
+type SessionAgentIconOption string
+
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
-// optionally updates the run directory, allow_cross_session, and user_subject. cliKey has the format "<cli>/<model>".
+// optionally updates the run directory, allow_cross_session, user_subject, and agent_icon. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
 func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cliKey string, sessionID string, runDirOpt optional.Option[string], extraOpts ...any) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
@@ -634,6 +648,10 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 
 		for _, opt := range extraOpts {
 			switch v := opt.(type) {
+			case SessionAgentIconOption:
+				if v != "" {
+					sessPtr.AgentIcon = string(v)
+				}
 			case optional.Option[bool]:
 				if v.IsSome() {
 					sessPtr.AllowCrossSession = v.Unwrap()

@@ -158,7 +158,8 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 	}
 
 	if e.repo != nil {
-		if preErr := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt); preErr != nil {
+		agentIconOpt := dbmodels.SessionAgentIconOption(e.agent.Config.Icon)
+		if preErr := e.repo.UpdateAgentSession(chatID, e.agent.Config.ID, "", "", runDirOpt, agentIconOpt); preErr != nil {
 			return "", fmt.Errorf("failed to pre-update agent session: %w", preErr)
 		}
 		// Save incoming message to session in DB
@@ -214,7 +215,7 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 
 		// Only update status if this is the primary/entry agent for the session
 		if session == nil || session.CurrentAgent == "" || session.CurrentAgent == e.agent.Config.Name || session.CurrentAgent == e.agent.Config.ID {
-			if statusErr := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning); statusErr != nil {
+			if statusErr := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning, agentIconOpt); statusErr != nil {
 				return "", fmt.Errorf("failed to update agent status to running: %w", statusErr)
 			}
 			if e.server != nil {

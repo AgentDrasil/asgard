@@ -1,14 +1,17 @@
 import type { AgentInfo } from "../types";
 
 /**
- * Returns the icon for an agent given its name/id and a list of available agents.
+ * Returns the icon for an agent given its name/id and a list of available agents,
+ * or an explicitly stored fallback icon (such as session.agentIcon).
  * Falls back to activeAgent icon or default bot icon.
  */
 export function getAgentIcon(
   agentName?: string,
   agents?: AgentInfo[],
   activeAgent?: AgentInfo | null,
+  fallbackIcon?: string,
 ): string {
+  if (fallbackIcon) return fallbackIcon;
   if (agentName && agents) {
     const matched = agents.find((a) => a.name === agentName || a.id === agentName);
     if (matched?.icon) return matched.icon;

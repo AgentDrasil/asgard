@@ -24,6 +24,7 @@ import (
 func localResolver(t *testing.T) (FSResolver, string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv(runnerpaths.EnvDataDir, t.TempDir())
 	sentinel := filepath.Join(t.TempDir(), "backend-local")
 	return func(chatID string) (runnerfs.FS, error) { return runnerfs.NewLocal(chatID), nil }, sentinel
 }
