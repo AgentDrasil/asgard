@@ -1,5 +1,6 @@
 ARG GO_VERSION=1.27.1
 ARG GOLANGCI_LINT_VERSION=v2.15.0
+ARG PROTOC_VERSION=36.2
 ARG NODE_VERSION=26
 ARG DEBIAN_VERSION=bookworm
 ARG AGY_VERSION=1.5.1
@@ -53,6 +54,7 @@ FROM base AS base_devtool
 ARG GO_VERSION
 ARG NODE_VERSION
 ARG GOLANGCI_LINT_VERSION
+ARG PROTOC_VERSION
 
 # Install Go
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
@@ -64,6 +66,20 @@ RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
 ENV PATH="/usr/lib/go/bin:${PATH}"
 RUN GOBIN=/usr/bin /usr/bin/go install golang.org/x/tools/cmd/goimports@latest
 RUN GOBIN=/usr/bin /usr/bin/go install github.com/elmhuangyu/configs/cmd/cfgctl@latest
+RUN GOBIN=/usr/bin /usr/bin/go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN GOBIN=/usr/bin /usr/bin/go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Install protoc
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64) PROTOC_ARCH="x86_64" ;; \
+        aarch64|arm64) PROTOC_ARCH="aarch_64" ;; \
+        *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; \
+    esac && \
+    wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" -O /tmp/protoc.zip && \
+    python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/usr/local')" && \
+    chmod 755 /usr/local/bin/protoc && \
+    rm /tmp/protoc.zip
 
 RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b /usr/bin ${GOLANGCI_LINT_VERSION}
 

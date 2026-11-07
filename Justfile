@@ -71,13 +71,9 @@ install-agent-validate:
 install-asgard-init:
     go install -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version={{version}}" ./cmd/asgard-init
 
-# Compile protobuf and gRPC definitions for fakebash
+# Compile protobuf and gRPC definitions
 compile-proto:
-    PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative fakebash/pb/fakebash.proto
-
-# Compile protobuf and gRPC definitions for the runner/backend protocol (uses buf; needs protoc-gen-go and protoc-gen-go-grpc in GOPATH/bin)
-compile-runner-proto:
-    cd pkg/runnerpb && PATH=$PATH:$(go env GOPATH)/bin GOWORK=off go run github.com/bufbuild/buf/cmd/buf@v1.50.0 generate
+    PATH=$PATH:$(go env GOPATH)/bin protoc -I. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative fakebash/pb/fakebash.proto pkg/runnerpb/runner.proto
 
 # Docker tag form of the version (':' is not allowed in tags)
 image_version := replace(version, ":", "-")
