@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -80,10 +81,40 @@ func mustParsePairingGateDefn(t *testing.T, yaml string) *workflowspec.WorkflowD
 	return defn
 }
 
+// stubAgentRunnerWithLookup satisfies NodeRunner for agent nodes and implements
+// the Lookup capability without running real external CLI commands.
+type stubAgentRunnerWithLookup struct {
+	agents map[string]*agentspec.Agent
+}
+
+func newStubAgentRunnerWithLookup(agents []*agentspec.Agent) *stubAgentRunnerWithLookup {
+	m := make(map[string]*agentspec.Agent, len(agents))
+	for _, a := range agents {
+		if a != nil && a.Config.ID != "" {
+			m[a.Config.ID] = a
+		}
+	}
+	return &stubAgentRunnerWithLookup{agents: m}
+}
+
+func (s *stubAgentRunnerWithLookup) Supports(t workflowspec.NodeType) bool {
+	return t == workflowspec.NodeTypeAgent
+}
+
+func (s *stubAgentRunnerWithLookup) Lookup(agentID string) (*agentspec.Agent, error) {
+	if a, ok := s.agents[agentID]; ok {
+		return a, nil
+	}
+	return nil, fmt.Errorf("agent %q not found", agentID)
+}
+
+func (s *stubAgentRunnerWithLookup) Run(ctx context.Context, nctx *NodeContext) (*workflowspec.NodeResult, error) {
+	return &workflowspec.NodeResult{Status: workflowspec.StatusSucceeded}, nil
+}
+
 func newPairingGateEngine(t *testing.T, agents []*agentspec.Agent) *Engine {
 	t.Helper()
-	runner := NewAgentRunner(nil, nil)
-	runner.(interface{ SetAgents([]*agentspec.Agent) }).SetAgents(agents)
+	runner := newStubAgentRunnerWithLookup(agents)
 	reg := NewNodeRunnerRegistry()
 	reg.Register(runner)
 	return NewEngine(reg)
