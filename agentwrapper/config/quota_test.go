@@ -111,3 +111,33 @@ func TestQuotaProfileThreshold_MostSpecificGlobWins(t *testing.T) {
 	assert.InDelta(t, 0.05, p.threshold("weekly:sonnet only"), 1e-9)
 	assert.InDelta(t, 0.50, p.threshold("daily"), 1e-9)
 }
+
+// One profile serves every model of an account, including models that lack a
+// window (agy lists a limit only for the windows a model has): only the
+// windows that exist are tested.
+func TestApplyQuotaPolicy_OnlyTestsWindowsTheModelHas(t *testing.T) {
+	cfg := &Config{QuotaProfiles: map[string]QuotaProfile{
+		"agy-20": {Thresholds: map[string]float64{"5h": 0.10, "weekly": 0.05}},
+	}}
+	lim := func(name string, r float64) llms.QuotaLimit { return llms.QuotaLimit{Name: name, Remaining: r} }
+	usages := []llms.ModelUsage{
+		{Model: "both-ok", Limits: []llms.QuotaLimit{lim("5h", 0.50), lim("weekly", 0.50)}},
+		{Model: "both-5h-low", Limits: []llms.QuotaLimit{lim("5h", 0.09), lim("weekly", 0.50)}},
+		{Model: "weekly-only-ok", Limits: []llms.QuotaLimit{lim("weekly", 0.06)}},
+		{Model: "weekly-only-low", Limits: []llms.QuotaLimit{lim("weekly", 0.04)}},
+		{Model: "5h-only-ok", Limits: []llms.QuotaLimit{lim("5h", 0.11)}},
+		{Model: "5h-only-low", Limits: []llms.QuotaLimit{lim("5h", 0.10)}},
+	}
+	cfg.ApplyQuotaPolicy("agy-20", usages)
+
+	want := map[string]bool{
+		"both-ok": true, "both-5h-low": false,
+		"weekly-only-ok": true, "weekly-only-low": false,
+		"5h-only-ok": true, "5h-only-low": false,
+	}
+	for _, u := range usages {
+		require.NotNil(t, u.Usable, u.Model)
+		assert.Equal(t, want[u.Model], *u.Usable, "%s: %s", u.Model, u.Reason)
+	}
+	assert.Contains(t, usages[3].Reason, "weekly", "the reason names the window that failed")
+}
