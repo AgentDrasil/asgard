@@ -764,10 +764,13 @@ func TestSandboxProxyOptions_DynamicRefresh(t *testing.T) {
 }
 
 func TestConfig_CommandResultCompassFields(t *testing.T) {
-	t.Parallel()
+	// The key getters fall back to the environment, so pin it: the test must
+	// not depend on (or be broken by) keys present on the machine. t.Setenv
+	// forbids t.Parallel, hence the subtests run serially.
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
 
 	t.Run("default values when omitted", func(t *testing.T) {
-		t.Parallel()
 		yamlContent := `
 host: "127.0.0.1"
 db: "sqlite"
@@ -780,12 +783,11 @@ gemini_model_for_chat_title: "gemini-3.1-flash-lite"
 		require.NotNil(t, cfg)
 
 		assert.Equal(t, "gemini-3.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
-		assert.Equal(t, os.Getenv("TYPESAFE_API_KEY"), cfg.GetTypesafeAPIKey())
+		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "test-key", cfg.GetGeminiAPIKey())
 	})
 
 	t.Run("custom values parsed correctly", func(t *testing.T) {
-		t.Parallel()
 		yamlContent := `
 host: "127.0.0.1"
 db: "sqlite"
@@ -810,11 +812,19 @@ typesafe_api_key: "test-typesafe-key-123"
 	})
 
 	t.Run("nil config safety", func(t *testing.T) {
-		t.Parallel()
 		var cfg *Config
 		assert.Equal(t, "gemini-3.5-flash-lite", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "", cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "", cfg.GetGeminiAPIKey())
+	})
+
+	t.Run("environment is the fallback for omitted keys", func(t *testing.T) {
+		t.Setenv("GEMINI_API_KEY", "env-gemini")
+		t.Setenv("TYPESAFE_API_KEY", "env-typesafe")
+		var cfg *Config
+		assert.Equal(t, "env-gemini", cfg.GetGeminiAPIKey())
+		assert.Equal(t, "env-typesafe", cfg.GetTypesafeAPIKey())
+		assert.Equal(t, "explicit", (&Config{GeminiAPIKey: "explicit"}).GetGeminiAPIKey())
 	})
 }
 
