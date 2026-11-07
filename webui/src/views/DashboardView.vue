@@ -107,11 +107,25 @@ const filterSession = (session: ChatSession, query: string): boolean => {
   return title.includes(q) || agent.includes(q) || dir.includes(q) || id.includes(q);
 };
 
-// 4 Kanban Columns for active sessions
+// 5 Kanban Columns for active sessions
 const runningSessions = computed(() => {
   return activeSessions.value.filter(
     (s) =>
-      !s.isArchived && s.isRunning && !s.isWaitingForUser && filterSession(s, searchQuery.value),
+      !s.isArchived &&
+      s.isRunning &&
+      !s.isWaitingForUser &&
+      !s.dirLock?.isWaitingForLock &&
+      filterSession(s, searchQuery.value),
+  );
+});
+
+const queuedSessions = computed(() => {
+  return activeSessions.value.filter(
+    (s) =>
+      !s.isArchived &&
+      !s.isWaitingForUser &&
+      Boolean(s.dirLock?.isWaitingForLock) &&
+      filterSession(s, searchQuery.value),
   );
 });
 
@@ -124,7 +138,8 @@ const waitingSessions = computed(() => {
 const recentCompletedSessions = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (s.isArchived || s.isRunning || s.isWaitingForUser || s.dirLock?.isWaitingForLock)
+      return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time < THREE_HOURS_MS && filterSession(s, searchQuery.value);
   });
@@ -133,7 +148,8 @@ const recentCompletedSessions = computed(() => {
 const completedSessions = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (s.isArchived || s.isRunning || s.isWaitingForUser || s.dirLock?.isWaitingForLock)
+      return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time >= THREE_HOURS_MS && filterSession(s, searchQuery.value);
   });
@@ -146,7 +162,22 @@ const filteredArchivedSessions = computed(() => {
 // Total count metrics
 const totalRunningCount = computed(() => {
   return activeSessions.value.filter(
-    (s) => !s.isArchived && s.isRunning && !s.isWaitingForUser && matchesRunnerFilter(s),
+    (s) =>
+      !s.isArchived &&
+      s.isRunning &&
+      !s.isWaitingForUser &&
+      !s.dirLock?.isWaitingForLock &&
+      matchesRunnerFilter(s),
+  ).length;
+});
+
+const totalQueuedCount = computed(() => {
+  return activeSessions.value.filter(
+    (s) =>
+      !s.isArchived &&
+      !s.isWaitingForUser &&
+      Boolean(s.dirLock?.isWaitingForLock) &&
+      matchesRunnerFilter(s),
   ).length;
 });
 
@@ -291,6 +322,14 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
             </span>
           </div>
           <div
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20"
+          >
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>
+              <strong>{{ t("dashboard.metrics.queued", { count: totalQueuedCount }) }}</strong>
+            </span>
+          </div>
+          <div
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-warning/10 text-warning border border-warning/20"
           >
             <span class="w-2 h-2 rounded-full bg-warning"></span>
@@ -425,10 +464,10 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
         <p class="text-sm text-base-content/60">{{ t("dashboard.loading") }}</p>
       </div>
 
-      <!-- Mode 1: Active Kanban View (4 Columns) -->
+      <!-- Mode 1: Active Kanban View (5 Columns) -->
       <div
         v-else-if="viewMode === 'kanban'"
-        class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start"
+        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 items-start"
         data-test="kanban-view"
       >
         <!-- Column 1: Running -->
@@ -462,18 +501,7 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
                   {{ session.title || session.chatID }}
                 </h3>
                 <div class="flex items-center gap-1">
-                  <span
-                    v-if="session.dirLock?.isWaitingForLock"
-                    class="badge badge-xs badge-warning gap-1 shrink-0"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-waiting-lock"
-                    data-test="badge-waiting-lock"
-                  >
-                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
-                    {{ t("dashboard.cards.waitingLockBadge") }}
-                  </span>
-                  <span v-else class="badge badge-xs badge-primary animate-pulse shrink-0">
+                  <span class="badge badge-xs badge-primary animate-pulse shrink-0">
                     {{ t("dashboard.cards.runningBadge") }}
                   </span>
                   <span
@@ -568,6 +596,146 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
             >
               <Icon icon="lucide:check-circle-2" class="w-8 h-8 mb-2 opacity-50" />
               <p class="text-xs">{{ t("dashboard.empty.running") }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: Queued / Waiting for Lock -->
+        <div
+          class="flex flex-col rounded-xl bg-base-200/50 border border-base-300 p-4 min-h-[500px]"
+          data-test="column-queued"
+        >
+          <div class="flex items-center justify-between pb-3 mb-3 border-b border-base-300">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+              <h2 class="font-semibold text-sm text-base-content">
+                {{ t("dashboard.columns.queued") }}
+              </h2>
+            </div>
+            <span
+              class="badge badge-sm badge-warning bg-amber-500/20 text-amber-500 border-amber-500/30 font-mono"
+              >{{ queuedSessions.length }}</span
+            >
+          </div>
+
+          <!-- Column Cards List -->
+          <div class="flex flex-col gap-3 flex-1">
+            <div
+              v-for="session in queuedSessions"
+              :key="session.chatID"
+              class="card bg-base-100 hover:border-amber-500/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
+              @click="handleNavigate(session)"
+              data-test="session-card-queued"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <h3
+                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-amber-500 transition-colors"
+                >
+                  {{ session.title || session.chatID }}
+                </h3>
+                <div class="flex items-center gap-1">
+                  <span
+                    class="badge badge-xs badge-warning gap-1 shrink-0"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-waiting-lock"
+                    data-test="badge-waiting-lock"
+                  >
+                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
+                    {{ t("dashboard.cards.waitingLockBadge") }}
+                  </span>
+                  <span
+                    v-if="session.dirLock?.isLocked"
+                    :class="[
+                      'badge badge-xs gap-1 shrink-0',
+                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+                    ]"
+                    :title="formatLockTooltip(session.dirLock, t)"
+                    :aria-label="formatLockTooltip(session.dirLock, t)"
+                    data-testid="badge-locked"
+                    data-test="badge-locked"
+                  >
+                    <Icon icon="lucide:lock" class="w-3 h-3" />
+                  </span>
+                  <button
+                    v-if="session.dirLock?.canUnlock"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
+                    :title="t('dirlock.unlockTooltip')"
+                    :aria-label="t('dirlock.unlockTooltip')"
+                    :disabled="isUnlocking[session.chatID]"
+                    :aria-busy="isUnlocking[session.chatID]"
+                    @click.stop="handleUnlock(session, $event)"
+                    data-testid="kanban-unlock-btn"
+                    data-test="kanban-unlock-btn"
+                  >
+                    <Icon
+                      v-if="isUnlocking[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
+                    :title="t('dashboard.cards.archiveTooltip')"
+                    :disabled="isArchiving[session.chatID]"
+                    @click.stop="handleArchive(session, $event)"
+                    data-test="btn-archive"
+                  >
+                    <Icon
+                      v-if="isArchiving[session.chatID]"
+                      icon="lucide:loader-2"
+                      class="w-3.5 h-3.5 animate-spin"
+                    />
+                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
+                >
+                  <Icon
+                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
+                    class="w-3.5 h-3.5 text-primary"
+                  />
+                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
+                </span>
+                <span
+                  v-if="session.runDir"
+                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
+                  :title="session.runDir"
+                >
+                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
+                  {{ formatPath(session.runDir) }}
+                </span>
+              </div>
+
+              <div
+                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
+              >
+                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
+                  {{
+                    t("dashboard.cards.activeTime", {
+                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
+                    })
+                  }}
+                </span>
+                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
+              </div>
+            </div>
+
+            <!-- Empty State -->
+            <div
+              v-if="queuedSessions.length === 0"
+              class="flex-1 flex flex-col items-center justify-center p-6 text-center text-base-content/40 border border-dashed border-base-300 rounded-lg"
+              data-test="empty-queued"
+            >
+              <Icon icon="lucide:clock" class="w-8 h-8 mb-2 opacity-50" />
+              <p class="text-xs">{{ t("dashboard.empty.queued") }}</p>
             </div>
           </div>
         </div>

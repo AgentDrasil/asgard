@@ -431,6 +431,9 @@ export const zhCN: MessageSchema = {
     unassigned: "未分配",
     record: "录制",
     recordTitle: "录制新快捷键",
+    addShortcutTitle: "添加另一组快捷键 (最多3组)",
+    removeShortcutTitle: "移除此组快捷键",
+    maxShortcutsReached: "已达到最多3组快捷键限制",
     clearTitle: "清除快捷键",
     resetTitle: "恢复默认",
     noMatch: '未找到匹配 "{query}" 的操作',
@@ -506,6 +509,7 @@ export const zhCN: MessageSchema = {
     subtitle: "实时监控多 Agent 会话状态与执行进度",
     metrics: {
       running: "运行中: {count}",
+      queued: "排队等待: {count}",
       waiting: "等待处理: {count}",
       recentCompleted: "近期完成: {count}",
       completed: "已完成: {count}",
@@ -526,6 +530,7 @@ export const zhCN: MessageSchema = {
     archiveUnexpectedError: "归档时发生未知错误",
     columns: {
       running: "运行中",
+      queued: "排队等待锁",
       waiting: "等待用户回复",
       recentCompleted: "近期完成",
       completed: "已完成",
@@ -546,6 +551,7 @@ export const zhCN: MessageSchema = {
     },
     empty: {
       running: "暂无运行中的任务",
+      queued: "暂无等待锁或排队中的任务",
       waiting: "暂无等待回复的提问",
       recentCompleted: "最近 3 小时内暂无已完成的会话",
       completed: "暂无更早完成的会话",

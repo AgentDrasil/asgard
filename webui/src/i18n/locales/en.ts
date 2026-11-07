@@ -440,6 +440,9 @@ export const en = {
     unassigned: "Unassigned",
     record: "Record",
     recordTitle: "Record new shortcut",
+    addShortcutTitle: "Add another shortcut (up to 3)",
+    removeShortcutTitle: "Remove shortcut",
+    maxShortcutsReached: "Maximum of 3 shortcuts reached",
     clearTitle: "Clear shortcut",
     resetTitle: "Reset to default",
     noMatch: 'No actions match "{query}"',
@@ -516,6 +519,7 @@ export const en = {
     subtitle: "Real-time monitoring of multi-agent session status and progress",
     metrics: {
       running: "Running: {count}",
+      queued: "Queued / Waiting: {count}",
       waiting: "Waiting: {count}",
       recentCompleted: "Recently Completed: {count}",
       completed: "Completed: {count}",
@@ -536,6 +540,7 @@ export const en = {
     archiveUnexpectedError: "Unexpected error while archiving",
     columns: {
       running: "Running",
+      queued: "Queued / Waiting for Lock",
       waiting: "Waiting for User",
       recentCompleted: "Recently Completed",
       completed: "Completed",
@@ -556,6 +561,7 @@ export const en = {
     },
     empty: {
       running: "No running tasks",
+      queued: "No tasks waiting for lock or queued",
       waiting: "No questions awaiting reply",
       recentCompleted: "No sessions completed recently",
       completed: "No earlier completed tasks",

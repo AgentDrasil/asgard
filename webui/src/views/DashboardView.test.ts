@@ -358,7 +358,7 @@ describe("DashboardView.vue", () => {
     app.unmount();
   });
 
-  it("reflects waiting for lock status and displays badge with tooltip", async () => {
+  it("reflects waiting for lock status in dedicated queued swimlane and displays badge with tooltip", async () => {
     const lockSession: ChatSession = {
       chatID: "sess-lock-waiting",
       title: "Session Waiting For Lock",
@@ -386,6 +386,15 @@ describe("DashboardView.vue", () => {
     app.use(i18n);
     app.mount(root);
     await flush();
+
+    // Must be placed in the dedicated Queued column
+    const queuedColumn = root.querySelector('[data-test="column-queued"]');
+    expect(queuedColumn).not.toBeNull();
+    expect(queuedColumn?.textContent).toContain("Session Waiting For Lock");
+
+    // Running column should show empty state
+    const runningEmpty = root.querySelector('[data-test="empty-running"]');
+    expect(runningEmpty).not.toBeNull();
 
     const waitingLockBadge = root.querySelector('[data-testid="badge-waiting-lock"]');
     expect(waitingLockBadge).not.toBeNull();

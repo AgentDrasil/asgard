@@ -35,8 +35,11 @@ const {
 const selectedOS = ref<SupportedOS>(currentOS.value);
 const searchQuery = ref("");
 const recordingActionId = ref<string | null>(null);
+const recordingKeyIndex = ref<number | null>(null); // null = record from scratch / replace, >=0 = edit index, -1 = add new slot
 const recordingKeys = ref<string[]>([]);
 const isSaving = ref(false);
+
+const MAX_SHORTCUTS_PER_ACTION = 3;
 
 const isCurrentOS = computed(() => selectedOS.value === currentOS.value);
 
@@ -149,14 +152,16 @@ const osDisplayName = (os: SupportedOS): string => {
 };
 
 // Recorder logic
-const startRecording = (actionId: string) => {
+const startRecording = (actionId: string, index: number | null = null) => {
   if (!isCurrentOS.value) return;
   recordingActionId.value = actionId;
+  recordingKeyIndex.value = index;
   recordingKeys.value = [];
 };
 
 const stopRecording = () => {
   recordingActionId.value = null;
+  recordingKeyIndex.value = null;
   recordingKeys.value = [];
 };
 
@@ -202,9 +207,39 @@ const handleKeyDown = (event: KeyboardEvent) => {
   const recordedShortcut = normalizeShortcut(parts.join("+"));
 
   if (recordedShortcut) {
-    updateShortcut(recordingActionId.value, recordedShortcut, selectedOS.value);
+    const actionId = recordingActionId.value;
+    const currentList = [...(selectedOSBindings.value[actionId] || [])];
+    const index = recordingKeyIndex.value;
+
+    if (index === null) {
+      // Direct record on unassigned or single replace
+      updateShortcut(actionId, [recordedShortcut], selectedOS.value);
+    } else if (index === -1) {
+      // Append as new shortcut (up to 3)
+      if (!currentList.includes(recordedShortcut)) {
+        if (currentList.length < MAX_SHORTCUTS_PER_ACTION) {
+          currentList.push(recordedShortcut);
+        }
+      }
+      updateShortcut(actionId, currentList, selectedOS.value);
+    } else if (index >= 0 && index < currentList.length) {
+      // Replace existing at index
+      currentList[index] = recordedShortcut;
+      // Deduplicate keeping order
+      const deduped = Array.from(new Set(currentList));
+      updateShortcut(actionId, deduped, selectedOS.value);
+    }
   }
   stopRecording();
+};
+
+const handleRemoveShortcutIndex = (actionId: string, index: number) => {
+  if (!isCurrentOS.value) return;
+  const currentList = [...(selectedOSBindings.value[actionId] || [])];
+  if (index >= 0 && index < currentList.length) {
+    currentList.splice(index, 1);
+    updateShortcut(actionId, currentList, selectedOS.value);
+  }
 };
 
 const handleClear = (actionId: string) => {
@@ -424,38 +459,92 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Right: Shortcut Badge & Controls -->
-                <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap">
                   <!-- Shortcut Badges -->
-                  <div class="flex items-center gap-1">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <!-- Global/All slot recording (when whole action is in recording mode and not index-specific) -->
                     <kbd
-                      v-if="recordingActionId === action.id"
+                      v-if="recordingActionId === action.id && recordingKeyIndex === null"
                       class="kbd kbd-sm bg-primary text-primary-content animate-pulse"
                     >
                       {{ t("keybindings.pressKeys") }}
                     </kbd>
                     <template v-else>
                       <template v-if="(selectedOSBindings[action.id] || []).length > 0">
-                        <kbd
+                        <div
                           v-for="(key, idx) in selectedOSBindings[action.id]"
                           :key="idx"
-                          class="kbd kbd-sm font-mono text-xs shadow-xs"
+                          class="inline-flex items-center gap-1 group"
                         >
-                          {{ formatShortcutDisplay(key, selectedOS) }}
-                        </kbd>
+                          <kbd
+                            v-if="recordingActionId === action.id && recordingKeyIndex === idx"
+                            class="kbd kbd-sm bg-primary text-primary-content animate-pulse"
+                          >
+                            {{ t("keybindings.pressKeys") }}
+                          </kbd>
+                          <button
+                            v-else
+                            type="button"
+                            class="kbd kbd-sm font-mono text-xs shadow-xs transition-colors hover:border-primary cursor-pointer"
+                            :title="t('keybindings.recordTitle')"
+                            :disabled="!isCurrentOS"
+                            @click="startRecording(action.id, idx)"
+                          >
+                            {{ formatShortcutDisplay(key, selectedOS) }}
+                          </button>
+
+                          <!-- Remove single shortcut button -->
+                          <button
+                            v-if="isCurrentOS"
+                            type="button"
+                            class="btn btn-ghost btn-circle btn-2xs text-base-content/40 hover:text-error hover:bg-base-300"
+                            :title="t('keybindings.removeShortcutTitle')"
+                            @click="handleRemoveShortcutIndex(action.id, idx)"
+                          >
+                            <Icon icon="material-symbols:close" class="w-3 h-3" />
+                          </button>
+                        </div>
                       </template>
                       <span v-else class="text-xs italic text-base-content/40 px-2">
                         {{ t("keybindings.unassigned") }}
                       </span>
+
+                      <!-- Slot in add mode (-1) -->
+                      <kbd
+                        v-if="recordingActionId === action.id && recordingKeyIndex === -1"
+                        class="kbd kbd-sm bg-primary text-primary-content animate-pulse"
+                      >
+                        {{ t("keybindings.pressKeys") }}
+                      </kbd>
                     </template>
                   </div>
 
-                  <!-- Controls (Record / Clear / Reset) -->
+                  <!-- Controls (Add / Record / Clear / Reset) -->
                   <div v-if="recordingActionId !== action.id" class="flex items-center gap-1 ml-2">
+                    <!-- Add another shortcut button (if count < 3) -->
                     <button
+                      v-if="
+                        (selectedOSBindings[action.id] || []).length > 0 &&
+                        (selectedOSBindings[action.id] || []).length < MAX_SHORTCUTS_PER_ACTION
+                      "
+                      class="btn btn-ghost btn-xs text-base-content/70 hover:text-primary"
+                      :title="t('keybindings.addShortcutTitle')"
+                      :disabled="!isCurrentOS"
+                      @click="startRecording(action.id, -1)"
+                    >
+                      <Icon icon="material-symbols:add" class="w-3.5 h-3.5" />
+                      <span class="hidden md:inline">{{
+                        t("common.actions") === "Actions" ? "+ Add" : "+ 添加"
+                      }}</span>
+                    </button>
+
+                    <!-- Record new shortcut (shown when unassigned or quick record) -->
+                    <button
+                      v-if="(selectedOSBindings[action.id] || []).length === 0"
                       class="btn btn-ghost btn-xs"
                       :title="t('keybindings.recordTitle')"
                       :disabled="!isCurrentOS"
-                      @click="startRecording(action.id)"
+                      @click="startRecording(action.id, null)"
                     >
                       <Icon icon="material-symbols:edit-outline" class="w-3.5 h-3.5" />
                       <span class="hidden md:inline">{{ t("keybindings.record") }}</span>

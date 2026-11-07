@@ -334,4 +334,80 @@ describe("KeyBindingsView.vue", () => {
 
     app.unmount();
   });
+
+  it("supports binding multiple shortcuts (up to 3) per action and removing individual shortcuts", async () => {
+    const app = createApp({
+      render() {
+        return h(KeyBindingsView);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    // 1. Initial state for toggle_sidebar: single key Ctrl+B
+    expect(root.textContent).toContain("Ctrl+B");
+
+    // 2. Click "+ Add" to add a 2nd shortcut
+    const addButtons = root.querySelectorAll('button[title^="Add another shortcut"]');
+    expect(addButtons.length).toBeGreaterThan(0);
+    (addButtons[0] as HTMLButtonElement).click();
+    await nextTick();
+
+    expect(root.textContent).toContain("Press shortcut keys... (Esc to cancel)");
+
+    // Press Alt+B
+    const altBEvent = new KeyboardEvent("keydown", {
+      key: "b",
+      code: "KeyB",
+      altKey: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(altBEvent);
+    await nextTick();
+
+    // Now has both Ctrl+B and Alt+B
+    expect(root.textContent).toContain("Ctrl+B");
+    expect(root.textContent).toContain("Alt+B");
+
+    // 3. Add a 3rd shortcut
+    const addButtonsAfter2 = root.querySelectorAll('button[title^="Add another shortcut"]');
+    expect(addButtonsAfter2.length).toBeGreaterThan(0);
+    (addButtonsAfter2[0] as HTMLButtonElement).click();
+    await nextTick();
+
+    // Press Ctrl+Alt+S
+    const thirdShortcutEvent = new KeyboardEvent("keydown", {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+      altKey: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(thirdShortcutEvent);
+    await nextTick();
+
+    expect(root.textContent).toContain("Ctrl+Alt+S");
+
+    // 4. Once 3 shortcuts are assigned, the "+ Add" button for that action is hidden (max 3 reached)
+    // Find toggle_sidebar container row:
+    const sidebarRow = root.querySelector("div.divide-y > div") as HTMLElement;
+    expect(sidebarRow.querySelectorAll('button[title^="Add another shortcut"]').length).toBe(0);
+
+    // 5. Remove the 2nd shortcut (Alt+B)
+    const removeButtons = sidebarRow.querySelectorAll('button[title="Remove shortcut"]');
+    expect(removeButtons.length).toBe(3);
+    (removeButtons[1] as HTMLButtonElement).click();
+    await nextTick();
+
+    // Alt+B should be removed, while Ctrl+B and Ctrl+Alt+S remain
+    expect(sidebarRow.textContent).toContain("Ctrl+B");
+    expect(sidebarRow.textContent).toContain("Ctrl+Alt+S");
+    expect(sidebarRow.textContent).not.toContain("Alt+B");
+
+    // "+ Add" button should be available again since count is now 2 < 3
+    expect(sidebarRow.querySelectorAll('button[title^="Add another shortcut"]').length).toBe(1);
+
+    app.unmount();
+  });
 });
