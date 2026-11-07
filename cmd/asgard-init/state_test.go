@@ -168,7 +168,7 @@ func TestState_InterruptedRun_PreservesStateAndResumes(t *testing.T) {
 	require.NoError(t, err)
 	cfgStr := string(cfgData)
 	assert.Contains(t, cfgStr, `host: "https://myasgard.test:7000"`)
-	assert.Contains(t, cfgStr, `port: 7777`)
+	assert.NotContains(t, cfgStr, "\nport:")
 
 	composeData, err := os.ReadFile(filepath.Join(deployDir, "compose.yaml"))
 	require.NoError(t, err)

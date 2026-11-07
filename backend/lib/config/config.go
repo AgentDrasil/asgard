@@ -83,8 +83,10 @@ type Config struct {
 	DSN   string `yaml:"dsn"`
 	// AgentDir is the fixed agent definitions root (~/asgard). It is not
 	// configurable; the field is exported so tests can inject a temp root.
-	AgentDir                           string                    `yaml:"-" json:"-"`
-	Port                               int                       `yaml:"port"`
+	AgentDir string `yaml:"-" json:"-"`
+	// Port is the HTTP port. It comes from ASGARD_PORT (see PortFromEnv), never
+	// from the etcd configuration; the field is exported so tests can set it.
+	Port                               int                       `yaml:"-" json:"-"`
 	Host                               string                    `yaml:"host"`
 	WebUIPath                          string                    `yaml:"webui_path"`
 	GeminiAPIKey                       string                    `yaml:"gemini_api_key"`

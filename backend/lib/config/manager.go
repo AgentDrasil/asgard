@@ -42,8 +42,7 @@ func EtcdPrefix() string {
 // to answer (even in a degraded state) when etcd cannot be loaded.
 const EnvPort = "ASGARD_PORT"
 
-// DefaultPort is the HTTP port used when neither ASGARD_PORT nor the legacy
-// port setting is given.
+// DefaultPort is the HTTP port used when ASGARD_PORT is not set.
 const DefaultPort = 8080
 
 // PortFromEnv returns the port set in ASGARD_PORT, if it is a valid one.
@@ -97,7 +96,8 @@ func NewEtcdConfigManager(ctx context.Context) (*configlib.ConfigManager[AsgardT
 
 // ApplyDefaultsAndValidate validates and applies default values to the Config struct.
 func (c *Config) ApplyDefaultsAndValidate() error {
-	// ASGARD_PORT wins over the legacy port setting from etcd.
+	// The port is never part of the etcd configuration; a Port already set
+	// (tests) is kept when the environment does not give one.
 	if p, ok := PortFromEnv(); ok {
 		c.Port = p
 	}

@@ -294,7 +294,7 @@ func TestGenerateDeployment(t *testing.T) {
 	cfgStr := string(configContent)
 
 	assert.Contains(t, cfgStr, "host: \"https://asgard.example.com\"")
-	assert.Contains(t, cfgStr, "port: 7000")
+	assert.NotContains(t, cfgStr, "\nport:")
 	assert.Contains(t, cfgStr, "tls_cert_file: \"/certs/backend.crt\"")
 	assert.Contains(t, cfgStr, "tls_key_file: \"/certs/backend.key\"")
 	assert.Contains(t, cfgStr, "client_ca_file: \"/certs/client-ca.crt\"")

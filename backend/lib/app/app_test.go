@@ -309,7 +309,6 @@ func TestApp_New_DegradedModeOnCorruptedConfig_FailsFast(t *testing.T) {
 	kvs := configlib.FlattenKVs{
 		"asgard/config.yaml": []byte(`
 host: "https://asgard.example.com"
-port: 7000
 db: "invalid_db"
 `),
 	}
@@ -582,7 +581,6 @@ func TestApp_New_WithTreeManager(t *testing.T) {
 		"asgard/config.yaml": []byte(`
 debug: true
 host: https://asgard.example.com
-port: 7000
 internal_port: 8081
 db: sqlite
 gemini_api_key: test-gemini-key
@@ -621,7 +619,7 @@ rules:
 	)
 	require.NoError(t, err)
 	require.NotNil(t, appInstance)
-	assert.Equal(t, 7000, appInstance.Config().Port)
+	assert.Equal(t, 8080, appInstance.Config().Port)
 	assert.True(t, appInstance.Config().IsProxyEnabled())
 	assert.Equal(t, []byte("{}"), mgr.Get().Credentials.Auth)
 
@@ -635,7 +633,6 @@ func TestApp_LiveReloadProxyFromEtcdSource(t *testing.T) {
 		"asgard/config.yaml": []byte(`
 debug: true
 host: https://asgard.example.com
-port: 7000
 internal_port: 8081
 db: sqlite
 gemini_api_key: test-gemini-key

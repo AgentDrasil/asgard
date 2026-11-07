@@ -11,8 +11,8 @@
 # Public base URL of the Asgard backend (required for OAuth/OIDC redirects)
 host: "{{ .Host }}"
 
-# HTTP port inside container
-port: {{ .BackendPort }}
+# The backend HTTP port is not configured here: it is the ASGARD_PORT
+# environment variable of the backend container (see compose.yaml).
 
 # Distributed Runner & mTLS Configuration
 # Asgard operates in a split architecture (Backend + Runner + etcd).

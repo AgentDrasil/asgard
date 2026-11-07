@@ -26,7 +26,6 @@ func TestAsgardTreeConfig_BindingFromMemorySource(t *testing.T) {
 		"asgard/config.yaml": []byte(`
 debug: true
 host: https://asgard.example.com
-port: 7000
 internal_port: 8081
 db: sqlite
 gemini_api_key: test-gemini-key
@@ -91,7 +90,6 @@ providers:
 	// Validate Asgard main config
 	assert.True(t, cfg.Asgard.Config.Debug)
 	assert.Equal(t, "https://asgard.example.com", cfg.Asgard.Config.Host)
-	assert.Equal(t, 7000, cfg.Asgard.Config.Port)
 	assert.Equal(t, "test-gemini-key", cfg.Asgard.Config.GeminiAPIKey)
 
 	// Validate Proxy
@@ -231,13 +229,16 @@ func TestSSHScope_ArbitraryNameBinding(t *testing.T) {
 	assert.NotContains(t, ssh.AllFiles(), "sub")
 }
 
-func TestPortFromEnvOverridesConfigPort(t *testing.T) {
+func TestPortComesFromEnv(t *testing.T) {
+	valid := func() *Config {
+		return &Config{DB: "sqlite", DSN: "test.db", Host: "127.0.0.1", GeminiAPIKey: "test-key", GeminiModelForChatTitle: "gemini-3.1-flash-lite"}
+	}
+
 	t.Setenv(EnvPort, "7123")
 	p, ok := PortFromEnv()
 	require.True(t, ok)
 	assert.Equal(t, 7123, p)
-
-	c := &Config{DB: "sqlite", DSN: "test.db", Host: "127.0.0.1", GeminiAPIKey: "test-key", GeminiModelForChatTitle: "gemini-3.1-flash-lite", Port: 9000}
+	c := valid()
 	require.NoError(t, c.ApplyDefaultsAndValidate())
 	assert.Equal(t, 7123, c.Port)
 
@@ -245,10 +246,8 @@ func TestPortFromEnvOverridesConfigPort(t *testing.T) {
 		t.Setenv(EnvPort, bad)
 		_, ok := PortFromEnv()
 		assert.False(t, ok, bad)
+		c = valid()
+		require.NoError(t, c.ApplyDefaultsAndValidate())
+		assert.Equal(t, DefaultPort, c.Port, bad)
 	}
-
-	t.Setenv(EnvPort, "")
-	c = &Config{DB: "sqlite", DSN: "test.db", Host: "127.0.0.1", GeminiAPIKey: "test-key", GeminiModelForChatTitle: "gemini-3.1-flash-lite", Port: 9000}
-	require.NoError(t, c.ApplyDefaultsAndValidate())
-	assert.Equal(t, 9000, c.Port, "legacy etcd port still works without the env")
 }
