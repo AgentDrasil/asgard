@@ -92,6 +92,10 @@ type Options struct {
 	// runner completes registration, so the host can resume work that waited
 	// for it (e.g. queued chat messages).
 	OnNodeOnline func(nodeID string)
+	// OnNodeHealth, when set, is called whenever the health a runner reports in
+	// its heartbeats changes: healthErr is the problem, or "" once healthy.
+	// It must not block.
+	OnNodeHealth func(nodeID, healthErr string)
 	// RegisterTimeout bounds how long a connection may take to complete the
 	// Register exchange (default 15s).
 	RegisterTimeout time.Duration

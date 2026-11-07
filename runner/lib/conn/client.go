@@ -75,6 +75,9 @@ type Options struct {
 	Quotas func() []*runnerpb.TargetQuota
 	// MaxRuns is the concurrent run capacity reported in Heartbeat.
 	MaxRuns uint32
+	// Health returns why the runner is unhealthy (nil = healthy); it is
+	// reported in every Heartbeat.
+	Health func() error
 	// Executor runs dispatched attempts (default NotImplementedExecutor).
 	Executor Executor
 	// Service is the RunnerService served to the backend (default: all
@@ -441,6 +444,17 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 	}
 }
 
+// maxHealthErrorLen bounds the health error carried by each heartbeat.
+const maxHealthErrorLen = 4096
+
+func truncateHealth(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if len(s) <= maxHealthErrorLen {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxHealthErrorLen], "") + "... [truncated]"
+}
+
 // sendHeartbeat queues a fresh Heartbeat, superseding any still-unacked one:
 // only the latest snapshot matters, so offline periods do not fill the queue.
 func (c *Client) sendHeartbeat() {
@@ -451,6 +465,11 @@ func (c *Client) sendHeartbeat() {
 			q.Cli = strings.ToValidUTF8(q.Cli, "\uFFFD")
 			q.Model = strings.ToValidUTF8(q.Model, "\uFFFD")
 			hb.Quotas = append(hb.Quotas, q)
+		}
+	}
+	if c.opts.Health != nil {
+		if err := c.opts.Health(); err != nil {
+			hb.HealthError = truncateHealth(err.Error())
 		}
 	}
 	msg := &runnerpb.RunnerMessage{Payload: &runnerpb.RunnerMessage_Heartbeat{Heartbeat: hb}}

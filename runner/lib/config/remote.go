@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
+	"github.com/rs/zerolog/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/AgentDrasil/asgard/backend/lib/config"
@@ -17,51 +19,197 @@ import (
 // Remote is the runner's live view of the shared etcd configuration: the
 // agent definitions effective for this node (agents/ plus
 // runners/<node>/agents/, materialized into the runner's data dir) and the aw/,
-// simplest/, credentials/ and asgard/proxy.yaml trees. Later commits consume
-// these when executing runs.
+// simplest/, credentials/ and asgard/proxy.yaml trees.
+//
+// A configuration that cannot be loaded (etcd unreachable, a SOPS signature or
+// decode failure) never makes the runner exit: the Remote keeps retrying in the
+// background and Health reports why it is not usable, so the runner can stay
+// connected to the backend as unhealthy and be debugged instead of crash-looping.
 type Remote struct {
 	nodeID string
+	// client, mgr and agents are nil when etcd could not be set up at all.
 	client *clientv3.Client
-	tree   interface {
+	mgr    interface {
+		Start(context.Context) error
 		Get() *config.AsgardTreeConfig
 	}
 	agents *config.AgentStore
 
-	mu     sync.Mutex
-	onTree []func(*config.AsgardTreeConfig)
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	mu       sync.Mutex
+	onTree   []func(*config.AsgardTreeConfig)
+	onAgents []func()
+	// loadErr is why the initial load has not completed yet.
+	loadErr error
+	// treeErr is the latest rejected configuration revision; the next accepted
+	// revision clears it. The previous good tree stays in use meanwhile.
+	treeErr     error
+	treeReady   bool
+	agentsReady bool
+	stops       []context.CancelFunc
 }
 
+const (
+	loadRetryDelay     = 10 * time.Second
+	loadAttemptTimeout = 20 * time.Second
+)
+
 // NewRemote connects to etcd (ETCD_ENDPOINTS / ETCD_PREFIX, like the backend)
-// and starts watching. clis is the supported CLI/model map of this runner.
-func NewRemote(ctx context.Context, nodeID string, clis map[string][]string) (*Remote, error) {
-	mgr, client, err := config.NewEtcdConfigManager(ctx)
+// and starts watching. clis is the supported CLI/model map of this runner. It
+// never fails: see Remote and Health.
+func NewRemote(ctx context.Context, nodeID string, clis map[string][]string) *Remote {
+	r := &Remote{nodeID: nodeID}
+	r.ctx, r.cancel = context.WithCancel(ctx)
+	mgr, client, err := config.NewEtcdConfigManager(r.ctx)
 	if err != nil {
-		return nil, err
+		// Not retryable: the environment itself is wrong.
+		r.loadErr = fmt.Errorf("etcd configuration unavailable: %w", err)
+		log.Error().Err(err).Msg("etcd configuration unavailable; runner is unhealthy")
+		return r
 	}
-	r := &Remote{nodeID: nodeID, client: client, tree: mgr}
+	r.mgr, r.client = mgr, client
 	mgr.OnChange(func(_, newTree *config.AsgardTreeConfig) {
 		if newTree == nil {
 			return
 		}
 		r.mu.Lock()
-		fns := slices.Clone(r.onTree)
+		r.treeErr = nil
 		r.mu.Unlock()
-		for _, fn := range fns {
-			fn(newTree)
-		}
+		r.fireTree(newTree)
 	})
-	if err := mgr.Start(ctx); err != nil {
-		_ = client.Close()
-		return nil, fmt.Errorf("start etcd config: %w", err)
-	}
+	mgr.OnError(func(err error) {
+		log.Error().Err(err).Msg("etcd configuration rejected; keeping the previous configuration")
+		r.mu.Lock()
+		r.treeErr = fmt.Errorf("etcd configuration rejected: %w", err)
+		r.mu.Unlock()
+	})
 	store := config.NewEtcdAgentStore(client, config.EtcdPrefix())
 	store.SetSupportedCLIs(clis)
-	if err := store.Start(ctx); err != nil {
-		_ = client.Close()
-		return nil, fmt.Errorf("start agent store: %w", err)
-	}
+	store.OnChange(r.fireAgents)
 	r.agents = store
-	return r, nil
+
+	if !r.tryLoad() {
+		r.wg.Add(1)
+		go r.retryLoop()
+	}
+	return r
+}
+
+// tryLoad starts whatever is not loaded yet and reports whether all of it is.
+func (r *Remote) tryLoad() bool {
+	r.mu.Lock()
+	treeReady, agentsReady := r.treeReady, r.agentsReady
+	r.mu.Unlock()
+
+	if !treeReady {
+		if err := r.attempt(r.mgr.Start); err != nil {
+			r.setLoadErr(fmt.Errorf("start etcd config: %w", err))
+			return false
+		}
+		r.mu.Lock()
+		r.treeReady = true
+		r.mu.Unlock()
+		r.fireTree(r.mgr.Get())
+	}
+	if !agentsReady {
+		if err := r.attempt(r.agents.Start); err != nil {
+			r.setLoadErr(fmt.Errorf("start agent store: %w", err))
+			return false
+		}
+		r.mu.Lock()
+		r.agentsReady = true
+		r.mu.Unlock()
+		r.fireAgents()
+	}
+	r.setLoadErr(nil)
+	return true
+}
+
+// attempt runs one start step, giving up after loadAttemptTimeout so an
+// unreachable etcd cannot block forever. The context outlives a successful
+// step: it also drives the watchers the step launched.
+func (r *Remote) attempt(start func(context.Context) error) error {
+	ctx, cancel := context.WithCancel(r.ctx)
+	timer := time.AfterFunc(loadAttemptTimeout, cancel)
+	if err := start(ctx); err != nil {
+		timer.Stop()
+		cancel()
+		return err
+	}
+	timer.Stop()
+	r.mu.Lock()
+	r.stops = append(r.stops, cancel)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Remote) setLoadErr(err error) {
+	r.mu.Lock()
+	changed := (r.loadErr == nil) != (err == nil)
+	r.loadErr = err
+	r.mu.Unlock()
+	switch {
+	case err != nil:
+		log.Error().Err(err).Msg("configuration not loaded; runner is unhealthy, retrying")
+	case changed:
+		log.Info().Msg("configuration loaded; runner is healthy again")
+	}
+}
+
+func (r *Remote) retryLoop() {
+	defer r.wg.Done()
+	t := time.NewTicker(loadRetryDelay)
+	defer t.Stop()
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-t.C:
+			if r.tryLoad() {
+				return
+			}
+		}
+	}
+}
+
+func (r *Remote) fireTree(tree *config.AsgardTreeConfig) {
+	r.mu.Lock()
+	fns := slices.Clone(r.onTree)
+	r.mu.Unlock()
+	for _, fn := range fns {
+		fn(tree)
+	}
+}
+
+func (r *Remote) fireAgents() {
+	r.mu.Lock()
+	fns := slices.Clone(r.onAgents)
+	r.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// Health returns why the configuration is not usable, or nil when it is
+// loaded and valid. The runner reports it to the backend in every heartbeat.
+func (r *Remote) Health() error {
+	r.mu.Lock()
+	loadErr, treeErr, agentsReady := r.loadErr, r.treeErr, r.agentsReady
+	r.mu.Unlock()
+	switch {
+	case loadErr != nil:
+		return loadErr
+	case treeErr != nil:
+		return treeErr
+	case agentsReady:
+		if _, err := r.agents.AgentsFor(r.nodeID); err != nil {
+			return fmt.Errorf("agent definitions: %w", err)
+		}
+	}
+	return nil
 }
 
 // OnTreeChange registers fn, called with the new tree after the aw/, simplest/,
@@ -72,13 +220,23 @@ func (r *Remote) OnTreeChange(fn func(*config.AsgardTreeConfig)) {
 	r.onTree = append(r.onTree, fn)
 }
 
+// notLoaded explains why the configuration is not available.
+func (r *Remote) notLoaded() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.loadErr != nil {
+		return fmt.Errorf("configuration not loaded: %w", r.loadErr)
+	}
+	return errors.New("configuration not loaded")
+}
+
 // SandboxConfig builds the backend-style config the sandboxes are set up
 // from: the shared asgard/config.yaml values, the proxy configuration (as the
 // backend applies it at startup) and the local config path to mask.
 func (r *Remote) SandboxConfig() (*config.Config, error) {
-	tree := r.tree.Get()
+	tree := r.Tree()
 	if tree == nil {
-		return nil, errors.New("configuration not loaded")
+		return nil, r.notLoaded()
 	}
 	return SandboxConfigFromTree(tree)
 }
@@ -98,17 +256,47 @@ func SandboxConfigFromTree(tree *config.AsgardTreeConfig) (*config.Config, error
 }
 
 // Agents returns the effective agent list of this runner.
-func (r *Remote) Agents() ([]*agentspec.Agent, error) { return r.agents.AgentsFor(r.nodeID) }
+func (r *Remote) Agents() ([]*agentspec.Agent, error) {
+	r.mu.Lock()
+	ready := r.agentsReady
+	r.mu.Unlock()
+	if !ready {
+		return nil, r.notLoaded()
+	}
+	return r.agents.AgentsFor(r.nodeID)
+}
 
-// OnAgentsChange registers fn, called after the agent definitions changed.
-func (r *Remote) OnAgentsChange(fn func()) { r.agents.OnChange(fn) }
+// OnAgentsChange registers fn, called after the agent definitions changed or
+// became available for the first time.
+func (r *Remote) OnAgentsChange(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onAgents = append(r.onAgents, fn)
+}
 
 // Tree returns the latest aw/, simplest/, credentials/ and proxy
 // configuration (nil before the first load).
-func (r *Remote) Tree() *config.AsgardTreeConfig { return r.tree.Get() }
+func (r *Remote) Tree() *config.AsgardTreeConfig {
+	if r.mgr == nil {
+		return nil
+	}
+	return r.mgr.Get()
+}
 
 // Close stops the watchers and the etcd client.
 func (r *Remote) Close() {
-	r.agents.Close()
-	_ = r.client.Close()
+	r.cancel()
+	r.wg.Wait()
+	r.mu.Lock()
+	stops := r.stops
+	r.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
+	if r.agents != nil {
+		r.agents.Close()
+	}
+	if r.client != nil {
+		_ = r.client.Close()
+	}
 }

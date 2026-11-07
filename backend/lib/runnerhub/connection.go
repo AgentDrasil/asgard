@@ -323,12 +323,19 @@ func (h *Hub) handleUpstream(c *connection, msg *runnerpb.RunnerMessage) error {
 func (h *Hub) apply(c *connection, msg *runnerpb.RunnerMessage) error {
 	switch p := msg.GetPayload().(type) {
 	case *runnerpb.RunnerMessage_Heartbeat:
+		healthErr := p.Heartbeat.GetHealthError()
+		changed := false
 		h.mu.Lock()
 		if n := h.nodes[c.nodeID]; n != nil {
 			n.quotas = p.Heartbeat.GetQuotas()
 			n.maxRuns = p.Heartbeat.GetMaxRuns()
+			changed = n.healthError != healthErr
+			n.healthError = healthErr
 		}
 		h.mu.Unlock()
+		if changed && h.opts.OnNodeHealth != nil {
+			h.opts.OnNodeHealth(c.nodeID, healthErr)
+		}
 	case *runnerpb.RunnerMessage_RunEvent:
 		if r := h.runFor(c, p.RunEvent.GetRunId()); r != nil {
 			r.addEvent(p.RunEvent)

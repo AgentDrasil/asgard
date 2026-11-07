@@ -167,6 +167,10 @@ message Heartbeat {
   repeated TargetQuota quotas = 1;
   uint32 active_runs = 2;
   uint32 max_runs = 3;
+  // health_error is why the runner is unhealthy (for example its etcd
+  // configuration cannot be loaded or decoded); empty when healthy. An
+  // unhealthy runner stays connected so the problem can be debugged remotely.
+  string health_error = 4;
 }
 
 // RunEvent is a status update of a run; modeled on the backend's

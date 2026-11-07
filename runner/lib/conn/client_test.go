@@ -2,6 +2,8 @@ package conn
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -418,4 +420,30 @@ func TestHeartbeatSanitizesQuotaStrings(t *testing.T) {
 	assert.Equal(t, "m\uFFFD", q.GetModel())
 	_, err := proto.Marshal(c.queue[0])
 	assert.NoError(t, err)
+}
+
+func TestHeartbeatCarriesHealthError(t *testing.T) {
+	t.Parallel()
+
+	lastHeartbeat := func(c *Client) *runnerpb.Heartbeat {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		require.Len(t, c.queue, 1, "a new heartbeat supersedes the unacked one")
+		return c.queue[0].GetHeartbeat()
+	}
+
+	healthErr := errors.New("sops signature mismatch")
+	c := New(Options{Addr: "127.0.0.1:1", NodeID: "r1", Health: func() error { return healthErr }})
+	c.sendHeartbeat()
+	assert.Equal(t, "sops signature mismatch", lastHeartbeat(c).GetHealthError())
+
+	healthErr = nil
+	c.sendHeartbeat()
+	assert.Empty(t, lastHeartbeat(c).GetHealthError())
+
+	healthErr = errors.New(strings.Repeat("x", 2*maxHealthErrorLen))
+	c.sendHeartbeat()
+	got := lastHeartbeat(c).GetHealthError()
+	assert.LessOrEqual(t, len(got), maxHealthErrorLen+len("... [truncated]"))
+	assert.True(t, strings.HasSuffix(got, "[truncated]"))
 }

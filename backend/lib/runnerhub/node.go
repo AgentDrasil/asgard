@@ -22,7 +22,9 @@ type node struct {
 	maxRuns         uint32
 	supportedCLIs   map[string][]string
 	quotas          []*runnerpb.TargetQuota
-	conn            *connection
+	// healthError is the runner's self-reported problem ("" = healthy).
+	healthError string
+	conn        *connection
 
 	// nextSeq is the last backend seq assigned (per backend boot id).
 	nextSeq uint64

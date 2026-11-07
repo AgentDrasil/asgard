@@ -738,3 +738,33 @@ func TestHandlerPanicDoesNotCrashHub(t *testing.T) {
 	_, err = client.AskUser(context.Background(), &runnerpb.AskUserRequest{})
 	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }
+
+func TestHeartbeatReportsHealthChanges(t *testing.T) {
+	t.Parallel()
+
+	type report struct{ node, err string }
+	var mu sync.Mutex
+	var reports []report
+	env := newTestEnv(t, nil, nil, "runner-a")
+	env.opts.OnNodeHealth = func(node, healthErr string) {
+		mu.Lock()
+		defer mu.Unlock()
+		reports = append(reports, report{node, healthErr})
+	}
+	env.restartHub(env.opts.Store)
+
+	f := env.newRunner("runner-a")
+	f.mustConnect()
+	hb := func(healthErr string) {
+		seq := f.send(&runnerpb.RunnerMessage{Payload: &runnerpb.RunnerMessage_Heartbeat{Heartbeat: &runnerpb.Heartbeat{HealthError: healthErr}}})
+		f.waitAck(seq)
+	}
+	hb("")         // healthy and unchanged: no report
+	hb("sops bad") // becomes unhealthy
+	hb("sops bad") // unchanged: no report
+	hb("")         // recovers
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []report{{"runner-a", "sops bad"}, {"runner-a", ""}}, reports)
+}

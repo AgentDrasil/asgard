@@ -52,10 +52,7 @@ func run() error {
 
 	// Probing the CLIs execs them, so do it once for Register and etcd parsing.
 	clis := agentwrapper.GetSupportedCLIsAndModels()
-	remote, err := config.NewRemote(ctx, nodeID, clis)
-	if err != nil {
-		return err
-	}
+	remote := config.NewRemote(ctx, nodeID, clis)
 	if agents, err := remote.Agents(); err != nil {
 		log.Warn().Err(err).Msg("agent definitions not usable yet")
 	} else {
@@ -113,6 +110,12 @@ func run() error {
 		NodeID:        nodeID,
 		TLSConfig:     boot.TLSConfig,
 		SupportedCLIs: func() map[string][]string { return clis },
+		Health: func() error {
+			if err := remote.Health(); err != nil {
+				return err
+			}
+			return sb.Ready()
+		},
 	})
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
 		return err

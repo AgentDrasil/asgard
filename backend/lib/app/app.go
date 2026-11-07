@@ -383,6 +383,13 @@ func New(opts ...Option) (*App, error) {
 			ClientCAFile: rc.ClientCAFile,
 			Addr:         fmt.Sprintf(":%d", rc.RegistryPort),
 			AllowedNodes: conf.AllowedRunnerNodes,
+			OnNodeHealth: func(nodeID, healthErr string) {
+				source := "runner:" + nodeID
+				diagnostics.ResetSource(source)
+				if healthErr != "" {
+					diagnostics.AddError(source, fmt.Sprintf("runner %s is unhealthy: %s", nodeID, healthErr))
+				}
+			},
 			OnNodeOnline: func(nodeID string) {
 				if srv := serverHolder.Load(); srv != nil {
 					srv.RunnerOnline(nodeID)

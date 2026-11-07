@@ -980,10 +980,14 @@ func (x *ModelList) GetModels() []string {
 
 // Heartbeat is sent periodically with a fresh quota/load snapshot.
 type Heartbeat struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Quotas        []*TargetQuota         `protobuf:"bytes,1,rep,name=quotas,proto3" json:"quotas,omitempty"`
-	ActiveRuns    uint32                 `protobuf:"varint,2,opt,name=active_runs,json=activeRuns,proto3" json:"active_runs,omitempty"`
-	MaxRuns       uint32                 `protobuf:"varint,3,opt,name=max_runs,json=maxRuns,proto3" json:"max_runs,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Quotas     []*TargetQuota         `protobuf:"bytes,1,rep,name=quotas,proto3" json:"quotas,omitempty"`
+	ActiveRuns uint32                 `protobuf:"varint,2,opt,name=active_runs,json=activeRuns,proto3" json:"active_runs,omitempty"`
+	MaxRuns    uint32                 `protobuf:"varint,3,opt,name=max_runs,json=maxRuns,proto3" json:"max_runs,omitempty"`
+	// health_error is why the runner is unhealthy (for example its etcd
+	// configuration cannot be loaded or decoded); empty when healthy. An
+	// unhealthy runner stays connected so the problem can be debugged remotely.
+	HealthError   string `protobuf:"bytes,4,opt,name=health_error,json=healthError,proto3" json:"health_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1037,6 +1041,13 @@ func (x *Heartbeat) GetMaxRuns() uint32 {
 		return x.MaxRuns
 	}
 	return 0
+}
+
+func (x *Heartbeat) GetHealthError() string {
+	if x != nil {
+		return x.HealthError
+	}
+	return ""
 }
 
 // RunEvent is a status update of a run; modeled on the backend's
@@ -7174,12 +7185,13 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
 	"\x05value\x18\x02 \x01(\v2\x1b.asgard.runner.v1.ModelListR\x05value:\x028\x01\"#\n" +
 	"\tModelList\x12\x16\n" +
-	"\x06models\x18\x01 \x03(\tR\x06models\"~\n" +
+	"\x06models\x18\x01 \x03(\tR\x06models\"\xa1\x01\n" +
 	"\tHeartbeat\x125\n" +
 	"\x06quotas\x18\x01 \x03(\v2\x1d.asgard.runner.v1.TargetQuotaR\x06quotas\x12\x1f\n" +
 	"\vactive_runs\x18\x02 \x01(\rR\n" +
 	"activeRuns\x12\x19\n" +
-	"\bmax_runs\x18\x03 \x01(\rR\amaxRuns\"\xe0\x02\n" +
+	"\bmax_runs\x18\x03 \x01(\rR\amaxRuns\x12!\n" +
+	"\fhealth_error\x18\x04 \x01(\tR\vhealthError\"\xe0\x02\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x17\n" +
 	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x17\n" +
