@@ -252,7 +252,7 @@ func RunClient(args []string) error {
 	if len(args) > 1 {
 		var cmdArgs []string
 		var ok bool
-		if strings.HasPrefix(args[1], "-") {
+		if strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[1], "+") {
 			cmdArgs, ok = unpackCommand(append([]string{"bash"}, args[1:]...))
 		} else {
 			cmdArgs, ok = unpackCommand(args[1:])
@@ -313,6 +313,58 @@ func RunClient(args []string) error {
 	return nil
 }
 
+// isShellOptionArg reports whether arg looks like a shell option: a
+// "-x"/"+x" cluster or a "--long" option, but not a bare "-", "+" or "--".
+func isShellOptionArg(arg string) bool {
+	return len(arg) >= 2 && (arg[0] == '-' || arg[0] == '+') && arg != "--"
+}
+
+// shellOptionValueCount returns how many following arguments a short option
+// cluster consumes: bash takes one value for every 'o' (set -o) or 'O'
+// (shopt -O) character in the cluster, wherever it appears (-euo, -oc, -Oc).
+func shellOptionValueCount(arg string) int {
+	if strings.HasPrefix(arg, "--") {
+		return 0
+	}
+	return strings.Count(arg, "o") + strings.Count(arg, "O")
+}
+
+// parseShellInvocation parses shell arguments (excluding the shell name) of
+// the form "[opts...] -c [opts...] [--] <cmd> [positional...]". opts holds
+// everything before cmd verbatim (including the cluster containing 'c', e.g.
+// -c, -ec, -lc, and any "--"). Each 'o'/'O' in a cluster (-o, +o, -euo, -oc,
+// -O ...) consumes the next argument as its value. Long options (--norc) are
+// accepted. ok is false when no -c cluster with a command string is found.
+func parseShellInvocation(args []string) (opts []string, cmdStr string, rest []string, ok bool) {
+	seenC := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			if !seenC || i+1 >= len(args) {
+				return nil, "", nil, false
+			}
+			return args[:i+1], args[i+1], args[i+2:], true
+		}
+		if !isShellOptionArg(arg) {
+			if !seenC {
+				return nil, "", nil, false
+			}
+			return args[:i], arg, args[i+1:], true
+		}
+		// Like bash, "+c" also selects command mode.
+		if !strings.HasPrefix(arg, "--") && strings.Contains(arg, "c") {
+			seenC = true
+		}
+		if n := shellOptionValueCount(arg); n > 0 {
+			i += n
+			if i >= len(args) {
+				return nil, "", nil, false
+			}
+		}
+	}
+	return nil, "", nil, false
+}
+
 type fakebashServer struct {
 	pb.UnimplementedFakebashServiceServer
 }
@@ -321,10 +373,18 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 	var cmd *exec.Cmd
 	var cmdStr string
 	if len(req.Args) > 0 {
-		if req.Args[0] == "-c" {
-			if len(req.Args) > 1 {
-				cmdStr = req.Args[1]
-				cmd = exec.CommandContext(stream.Context(), "bash", append([]string{"-c"}, req.Args[1:]...)...)
+		if len(req.Args[0]) >= 2 && (req.Args[0][0] == '-' || req.Args[0][0] == '+') {
+			if opts, c, rest, ok := parseShellInvocation(req.Args); ok {
+				cmdStr = c
+				bashArgs := append([]string(nil), opts...)
+				bashArgs = append(bashArgs, c)
+				bashArgs = append(bashArgs, rest...)
+				cmd = exec.CommandContext(stream.Context(), "bash", bashArgs...)
+			} else {
+				// Not a recognizable "-c" invocation: let real bash handle
+				// (and report errors for) the arguments verbatim.
+				cmdStr = strings.Join(req.Args, " ")
+				cmd = exec.CommandContext(stream.Context(), "bash", req.Args...)
 			}
 		} else {
 			cmdStr = strings.Join(req.Args, " ")
@@ -647,28 +707,8 @@ func unpackCommand(cmd []string) ([]string, bool) {
 	}
 
 	if base == "bash" || base == "sh" {
-		cIdx := -1
-		for i := 1; i < len(cmd); i++ {
-			arg := cmd[i]
-			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-				if strings.Contains(arg, "c") {
-					cIdx = i
-					break
-				}
-			}
-		}
-
-		if cIdx != -1 {
-			var innerCmdStr string
-			for i := cIdx + 1; i < len(cmd); i++ {
-				arg := cmd[i]
-				if strings.HasPrefix(arg, "-") {
-					continue
-				}
-				innerCmdStr = arg
-				break
-			}
-
+		_, innerCmdStr, _, found := parseShellInvocation(cmd[1:])
+		if found {
 			if innerCmdStr != "" {
 				innerCmds := splitCommandString(innerCmdStr)
 

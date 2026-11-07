@@ -98,6 +98,89 @@ func TestFakebashGRPC_Integration(t *testing.T) {
 			wantExitCode: "0",
 		},
 		{
+			name:         "leading -u option before -c",
+			args:         []string{"-u", "-c", "echo hi"},
+			cwd:          tmpDir,
+			wantStdout:   "hi\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-u makes unset variable fail",
+			args:         []string{"-u", "-c", "echo $UNSET_FAKEBASH_VAR"},
+			cwd:          tmpDir,
+			wantStderr:   "bash: line 1: UNSET_FAKEBASH_VAR: unbound variable\n",
+			wantExitCode: "127",
+		},
+		{
+			name:         "-eu then -c",
+			args:         []string{"-eu", "-c", "echo hi"},
+			cwd:          tmpDir,
+			wantStdout:   "hi\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-ec cluster with positional",
+			args:         []string{"-ec", "echo $0 $1", "zero", "one"},
+			cwd:          tmpDir,
+			wantStdout:   "zero one\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-euo pipefail -c",
+			args:         []string{"-euo", "pipefail", "-c", "echo euo"},
+			cwd:          tmpDir,
+			wantStdout:   "euo\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "+x -c",
+			args:         []string{"+x", "-c", "echo plusx"},
+			cwd:          tmpDir,
+			wantStdout:   "plusx\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-O extglob -c",
+			args:         []string{"-O", "extglob", "-c", "echo extglob"},
+			cwd:          tmpDir,
+			wantStdout:   "extglob\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "--norc -c",
+			args:         []string{"--norc", "-c", "echo norc"},
+			cwd:          tmpDir,
+			wantStdout:   "norc\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-c -- cmd",
+			args:         []string{"-c", "--", "echo dd"},
+			cwd:          tmpDir,
+			wantStdout:   "dd\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-oc value then cmd",
+			args:         []string{"-oc", "pipefail", "echo oc"},
+			cwd:          tmpDir,
+			wantStdout:   "oc\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "+c acts as command mode",
+			args:         []string{"+c", "echo plusc"},
+			cwd:          tmpDir,
+			wantStdout:   "plusc\n",
+			wantExitCode: "0",
+		},
+		{
+			name:         "-o pipefail -c",
+			args:         []string{"-o", "pipefail", "-c", "false | true"},
+			cwd:          tmpDir,
+			wantExitCode: "1",
+		},
+		{
 			name:         "command exits while background process holds pipe open",
 			args:         []string{"-c", "sleep 10 & echo done"},
 			cwd:          tmpDir,
@@ -249,6 +332,72 @@ func TestUnpackCommand(t *testing.T) {
 			wantOk:  false,
 		},
 		{
+			name:    "opts: -u -o pipefail -c",
+			args:    []string{"-u", "-o", "pipefail", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: -euo pipefail -c",
+			args:    []string{"-euo", "pipefail", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: -c -- cmd",
+			args:    []string{"-c", "--", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: +o pipefail -c",
+			args:    []string{"+o", "pipefail", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: +x -c",
+			args:    []string{"+x", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: -O extglob -c",
+			args:    []string{"-O", "extglob", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: --norc -c",
+			args:    []string{"--norc", "-c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: dangling -o",
+			args:    []string{"-c", "-o"},
+			wantCmd: nil,
+			wantOk:  false,
+		},
+		{
+			name:    "opts: -oc value then cmd",
+			args:    []string{"-oc", "pipefail", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
+			name:    "opts: -oc eats the command",
+			args:    []string{"-oc", "agystatusline"},
+			wantCmd: nil,
+			wantOk:  false,
+		},
+		{
+			name:    "opts: +c",
+			args:    []string{"+c", "agystatusline"},
+			wantCmd: []string{"agystatusline"},
+			wantOk:  true,
+		},
+		{
 			name:    "bypass attempt: chained command no spaces",
 			args:    []string{"-c", "find-peer;ls"},
 			wantCmd: nil,
@@ -268,7 +417,7 @@ func TestUnpackCommand(t *testing.T) {
 
 			var gotCmd []string
 			var gotOk bool
-			if len(tt.args) > 0 && strings.HasPrefix(tt.args[0], "-") {
+			if len(tt.args) > 0 && (strings.HasPrefix(tt.args[0], "-") || strings.HasPrefix(tt.args[0], "+")) {
 				gotCmd, gotOk = unpackCommand(append([]string{"bash"}, tt.args...))
 			} else {
 				gotCmd, gotOk = unpackCommand(tt.args)
@@ -854,4 +1003,100 @@ func TestFakebashGRPC_CapThenWatchdog_NoOutputGap(t *testing.T) {
 	// Ensure no raw storage protocol headers/footers leak into stdout
 	assert.NotContains(t, out, "# CMD:")
 	assert.NotContains(t, out, "# EXIT:")
+}
+
+func TestParseShellInvocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     []string
+		wantOpts []string
+		wantCmd  string
+		wantRest []string
+		wantOK   bool
+	}{
+		{"-c", []string{"-c", "x"}, []string{"-c"}, "x", []string{}, true},
+		{"-u -c", []string{"-u", "-c", "x"}, []string{"-u", "-c"}, "x", []string{}, true},
+		{"-eu -c", []string{"-eu", "-c", "x"}, []string{"-eu", "-c"}, "x", []string{}, true},
+		{"-ec", []string{"-ec", "x"}, []string{"-ec"}, "x", []string{}, true},
+		{"-lc", []string{"-lc", "x"}, []string{"-lc"}, "x", []string{}, true},
+		{"-o pipefail -c", []string{"-o", "pipefail", "-c", "x"}, []string{"-o", "pipefail", "-c"}, "x", []string{}, true},
+		{"positional", []string{"-ec", "x", "a", "-b"}, []string{"-ec"}, "x", []string{"a", "-b"}, true},
+		{"opts after -c", []string{"-c", "-l", "x", "y"}, []string{"-c", "-l"}, "x", []string{"y"}, true},
+		{"missing command", []string{"-u", "-c"}, nil, "", nil, false},
+		{"no c", []string{"-u", "foo"}, nil, "", nil, false},
+		{"long option", []string{"--norc", "-c", "x"}, []string{"--norc", "-c"}, "x", []string{}, true},
+		{"-euo pipefail -c", []string{"-euo", "pipefail", "-c", "x"}, []string{"-euo", "pipefail", "-c"}, "x", []string{}, true},
+		{"-eo pipefail -c", []string{"-eo", "pipefail", "-c", "x"}, []string{"-eo", "pipefail", "-c"}, "x", []string{}, true},
+		{"+x -c", []string{"+x", "-c", "x"}, []string{"+x", "-c"}, "x", []string{}, true},
+		{"+o pipefail -c", []string{"+o", "pipefail", "-c", "x"}, []string{"+o", "pipefail", "-c"}, "x", []string{}, true},
+		{"-O extglob -c", []string{"-O", "extglob", "-c", "x"}, []string{"-O", "extglob", "-c"}, "x", []string{}, true},
+		{"-c -O extglob cmd", []string{"-c", "-O", "extglob", "x"}, []string{"-c", "-O", "extglob"}, "x", []string{}, true},
+		{"-c -- cmd", []string{"-c", "--", "x", "y"}, []string{"-c", "--"}, "x", []string{"y"}, true},
+		{"-oc value then cmd", []string{"-oc", "pipefail", "x", "y"}, []string{"-oc", "pipefail"}, "x", []string{"y"}, true},
+		{"-co value then cmd", []string{"-co", "pipefail", "x"}, []string{"-co", "pipefail"}, "x", []string{}, true},
+		{"-oc eats command", []string{"-oc", "x"}, nil, "", nil, false},
+		{"-Oc value then cmd", []string{"-Oc", "extglob", "x"}, []string{"-Oc", "extglob"}, "x", []string{}, true},
+		{"+c", []string{"+c", "x"}, []string{"+c"}, "x", []string{}, true},
+		{"-- before -c", []string{"--", "-c", "x"}, nil, "", nil, false},
+		{"dangling -o", []string{"-c", "-o"}, nil, "", nil, false},
+		{"dangling -euo", []string{"-euo"}, nil, "", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts, cmd, rest, ok := parseShellInvocation(tt.args)
+			assert.Equal(t, tt.wantOK, ok)
+			if !ok {
+				return
+			}
+			assert.Equal(t, tt.wantOpts, opts)
+			assert.Equal(t, tt.wantCmd, cmd)
+			assert.Equal(t, tt.wantRest, append([]string{}, rest...))
+		})
+	}
+}
+
+func TestFakebashd_ParseFailureNotSilentSuccess(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	listener, err := net.Listen("unix", filepath.Join(tmpDir, "f.sock"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	grpcServer := grpc.NewServer()
+	pb.RegisterFakebashServiceServer(grpcServer, &fakebashServer{})
+	go func() { _ = grpcServer.Serve(listener) }()
+	t.Cleanup(func() { grpcServer.Stop() })
+	conn, err := grpc.NewClient("unix://"+filepath.Join(tmpDir, "f.sock"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	stream, err := pb.NewFakebashServiceClient(conn).RunCommand(ctx, &pb.CommandRequest{
+		Args: []string{"-u", "--bogus-option-xyz"},
+		Cwd:  tmpDir,
+	})
+	require.NoError(t, err)
+
+	var stderr strings.Builder
+	var exit string
+	for {
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		switch resp.Type {
+		case pb.CommandResponse_STDERR:
+			stderr.Write(resp.Payload)
+		case pb.CommandResponse_EXIT:
+			exit = string(resp.Payload)
+		}
+	}
+	assert.NotEqual(t, "0", exit)
+	assert.NotEmpty(t, stderr.String())
 }
