@@ -51,7 +51,7 @@ func TestRetryConfig_RetriesUntilConfigLoads(t *testing.T) {
 	select {
 	case body := <-statusSeen:
 		assert.Contains(t, body, `"status":"degraded"`)
-		assert.NotContains(t, body, "sops", "error details must not leak without auth")
+		assert.Contains(t, body, "sops signature mismatch", "the reason must be visible without the logs")
 	default:
 		t.Fatal("degraded status endpoint did not answer")
 	}

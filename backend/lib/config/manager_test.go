@@ -230,3 +230,25 @@ func TestSSHScope_ArbitraryNameBinding(t *testing.T) {
 	assert.Equal(t, map[string][]byte{"huangyu": []byte(pemKey)}, ssh.PrivateKeys())
 	assert.NotContains(t, ssh.AllFiles(), "sub")
 }
+
+func TestPortFromEnvOverridesConfigPort(t *testing.T) {
+	t.Setenv(EnvPort, "7123")
+	p, ok := PortFromEnv()
+	require.True(t, ok)
+	assert.Equal(t, 7123, p)
+
+	c := &Config{DB: "sqlite", DSN: "test.db", Host: "127.0.0.1", GeminiAPIKey: "test-key", GeminiModelForChatTitle: "gemini-3.1-flash-lite", Port: 9000}
+	require.NoError(t, c.ApplyDefaultsAndValidate())
+	assert.Equal(t, 7123, c.Port)
+
+	for _, bad := range []string{"", "abc", "0", "70000"} {
+		t.Setenv(EnvPort, bad)
+		_, ok := PortFromEnv()
+		assert.False(t, ok, bad)
+	}
+
+	t.Setenv(EnvPort, "")
+	c = &Config{DB: "sqlite", DSN: "test.db", Host: "127.0.0.1", GeminiAPIKey: "test-key", GeminiModelForChatTitle: "gemini-3.1-flash-lite", Port: 9000}
+	require.NoError(t, c.ApplyDefaultsAndValidate())
+	assert.Equal(t, 9000, c.Port, "legacy etcd port still works without the env")
+}

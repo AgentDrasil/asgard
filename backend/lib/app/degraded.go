@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/version"
 )
 
@@ -19,19 +21,21 @@ import (
 var ErrConfigUnavailable = errors.New("configuration unavailable")
 
 const (
-	// degradedAddr is where the degraded status endpoint listens; the real
-	// port lives in the configuration that could not be loaded.
-	degradedAddr = ":8080"
 	// configRetryDelay is the pause between configuration load attempts.
 	configRetryDelay = 15 * time.Second
 )
 
 // newWhenConfigAvailable builds the App, retrying while the configuration is
 // unavailable. Any other failure is returned as is. Meanwhile a degraded
-// status endpoint answers, without error details: authentication is configured
-// by the very configuration that is missing, so the reason is only logged.
+// status endpoint answers on the configured ASGARD_PORT with the reason, so the
+// failure can be diagnosed without access to the logs. Authentication is part
+// of the missing configuration, so that endpoint is necessarily unauthenticated.
 func newWhenConfigAvailable(ctx context.Context, opts ...Option) (*App, error) {
-	return retryConfig(ctx, configRetryDelay, degradedAddr, func() (*App, error) { return New(opts...) })
+	port, ok := config.PortFromEnv()
+	if !ok {
+		port = config.DefaultPort
+	}
+	return retryConfig(ctx, configRetryDelay, fmt.Sprintf(":%d", port), func() (*App, error) { return New(opts...) })
 }
 
 func retryConfig(ctx context.Context, delay time.Duration, addr string, build func() (*App, error)) (*App, error) {
@@ -48,6 +52,7 @@ func retryConfig(ctx context.Context, delay time.Duration, addr string, build fu
 	defer stopDegraded()
 
 	var lastErr error
+	var reason atomic.Value // latest error text, shown by the degraded endpoint
 	attempts := 0
 	for {
 		a, err := build()
@@ -63,9 +68,10 @@ func retryConfig(ctx context.Context, delay time.Duration, addr string, build fu
 		}
 		attempts++
 		lastErr = err
+		reason.Store(err.Error())
 		log.Error().Err(err).Int("attempt", attempts).Dur("retry_in", delay).Msg("configuration unavailable; backend is degraded and will retry")
 		if degraded == nil {
-			degraded = serveDegraded(addr)
+			degraded = serveDegraded(addr, &reason)
 		}
 		select {
 		case <-ctx.Done():
@@ -76,13 +82,14 @@ func retryConfig(ctx context.Context, delay time.Duration, addr string, build fu
 }
 
 // serveDegraded starts the status endpoint of a backend without configuration.
-func serveDegraded(addr string) *http.Server {
+func serveDegraded(addr string, reason *atomic.Value) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/system/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		msg, _ := reason.Load().(string)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":   "degraded",
-			"errors":   []string{"configuration not loaded; see the backend logs for the reason"},
+			"errors":   []string{"configuration not loaded: " + msg},
 			"warnings": []string{},
 			"version":  version.Get(),
 		})
@@ -90,7 +97,8 @@ func serveDegraded(addr string) *http.Server {
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":"backend configuration not loaded"}`))
+		msg, _ := reason.Load().(string)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "backend configuration not loaded: " + msg})
 	})
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {

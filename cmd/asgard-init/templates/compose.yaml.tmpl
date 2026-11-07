@@ -24,6 +24,7 @@ services:
     environment:
       - ETCD_ENDPOINTS={{ .EtcdEndpoints }}
       - ETCD_PREFIX={{ .EtcdPrefix }}
+      - ASGARD_PORT={{ .BackendPort }}
 {{- if .GoogleApplicationCredentials }}
       - GOOGLE_APPLICATION_CREDENTIALS={{ .GoogleApplicationCredentials }}
 {{- end }}

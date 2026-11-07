@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,28 @@ func EtcdPrefix() string {
 		return DefaultEtcdPrefix
 	}
 	return prefix
+}
+
+// EnvPort is the environment variable holding the backend's HTTP port. Unlike
+// the rest of the configuration it must not live in etcd: the port is needed
+// to answer (even in a degraded state) when etcd cannot be loaded.
+const EnvPort = "ASGARD_PORT"
+
+// DefaultPort is the HTTP port used when neither ASGARD_PORT nor the legacy
+// port setting is given.
+const DefaultPort = 8080
+
+// PortFromEnv returns the port set in ASGARD_PORT, if it is a valid one.
+func PortFromEnv() (int, bool) {
+	v := strings.TrimSpace(os.Getenv(EnvPort))
+	if v == "" {
+		return 0, false
+	}
+	p, err := strconv.Atoi(v)
+	if err != nil || p < 1 || p > 65535 {
+		return 0, false
+	}
+	return p, true
 }
 
 // NewEtcdConfigManager connects to etcd and starts a ConfigManager for AsgardTreeConfig.
@@ -74,8 +97,12 @@ func NewEtcdConfigManager(ctx context.Context) (*configlib.ConfigManager[AsgardT
 
 // ApplyDefaultsAndValidate validates and applies default values to the Config struct.
 func (c *Config) ApplyDefaultsAndValidate() error {
+	// ASGARD_PORT wins over the legacy port setting from etcd.
+	if p, ok := PortFromEnv(); ok {
+		c.Port = p
+	}
 	if c.Port <= 0 {
-		c.Port = 8080
+		c.Port = DefaultPort
 	}
 	if c.ChatLang == "" {
 		c.ChatLang = DefaultLanguage

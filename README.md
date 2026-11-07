@@ -30,7 +30,7 @@ Asgard is split into a **backend** and one or more **runners**. There is no sche
 - **Connection**: the runner dials the backend's registry port (`runner.registry_port`, default `9311`) over mutual TLS. The client certificate CN is the runner's node id and must be listed in `runner.allowed_nodes`. One yamux session carries two gRPC directions: runner to backend (`NodeControl` bidi stream for run dispatch/events/acks, `AgentCallback` for sandbox callbacks) and backend to runner (`RunnerService`).
 - **No message queue**: run events are cached on the runner and replayed to the backend on reconnect (sequence numbers and acks make delivery idempotent). While a runner is offline, messages for its chats stay queued and resume when it reconnects.
 - **Chat pinning**: a chat is bound to one runner when it is created (the user picks it in the WebUI sidebar runner dropdown) and the binding is immutable. `call-peer` can only reach agents on the same runner; it may also target an agent in the caller's own chat, with cycle detection and a maximum call chain depth of 4.
-- **Config**: runner and agent configuration live in etcd (`ETCD_ENDPOINTS`, `ETCD_PREFIX`, default prefix `/asgard/configs`); both backend and runner need etcd access.
+- **Config**: runner and agent configuration live in etcd (`ETCD_ENDPOINTS`, `ETCD_PREFIX`, default prefix `/asgard/configs`); both backend and runner need etcd access. The backend's HTTP port is the exception: set `ASGARD_PORT` (default 8080; it overrides the legacy `port:` in etcd) so that, if the etcd configuration cannot be loaded, the backend stays up on the right port and `/api/system/status` reports the reason instead of the process restarting.
 
 ## Filesystem Layout
 
