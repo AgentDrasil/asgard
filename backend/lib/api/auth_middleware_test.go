@@ -399,7 +399,7 @@ func TestDocumentCSP(t *testing.T) {
 		csp := rec.Header().Get("Content-Security-Policy")
 		require.NotEmpty(t, csp)
 		// Inline scripts stay forbidden; they are the whole point of the policy.
-		assert.Contains(t, csp, "script-src 'self'")
+		assert.Contains(t, csp, "script-src 'self' 'wasm-unsafe-eval' blob:")
 		assert.NotContains(t, csp, "script-src 'self' 'unsafe-inline'")
 		// Runtime icon data and FCM Web Push must stay reachable.
 		for _, origin := range []string{

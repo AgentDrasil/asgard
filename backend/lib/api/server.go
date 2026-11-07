@@ -470,8 +470,10 @@ const authStatusPath = "/api/auth/status"
 // script-src additionally allows 'wasm-unsafe-eval' (WebAssembly compilation
 // only, not JS eval) because Shiki's default Oniguruma regex engine is a WASM
 // module; without it syntax highlighting silently falls back to plain text.
+// AudioWorklet processor modules loaded via blob: URLs also evaluate under
+// script-src (worklets do not fall under worker-src per the CSP spec).
 const documentCSP = "default-src 'self'; " +
-	"script-src 'self' 'wasm-unsafe-eval'; " +
+	"script-src 'self' 'wasm-unsafe-eval' blob:; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data:; " +
