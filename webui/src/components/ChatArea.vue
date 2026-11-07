@@ -309,15 +309,6 @@ onUnmounted(() => {
               }}</span>
             </p>
             <p
-              v-if="runnerId"
-              class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
-              data-testid="chat-runner"
-            >
-              <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
-                $t("runners.boundRunner", { id: runnerId })
-              }}</span>
-            </p>
-            <p
               v-if="gitRoot"
               class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
             >

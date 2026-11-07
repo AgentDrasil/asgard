@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, nextTick, h } from "vue";
 import Sidebar from "./Sidebar.vue";
 import { i18n, setLocale } from "../i18n";
-import { isAuthEnabled, logout } from "../lib/api";
+import { isAuthEnabled } from "../lib/api";
 import type { ChatSession } from "../types";
 
 vi.mock("@iconify/vue", () => ({
@@ -59,16 +59,13 @@ describe("Sidebar.vue authentication entry points", () => {
     document.body.removeChild(root);
   });
 
-  it("shows a sign-out action and calls logout when clicked", async () => {
+  it("does not show a sign-out action even when auth is enabled", async () => {
     vi.mocked(isAuthEnabled).mockReturnValue(true);
     mountSidebar(root);
     await nextTick();
 
     const button = root.querySelector<HTMLButtonElement>('button[title="Sign out"]');
-    expect(button).not.toBeNull();
-
-    button!.click();
-    expect(logout).toHaveBeenCalledTimes(1);
+    expect(button).toBeNull();
   });
 
   it("hides the sign-out action when the backend has no auth", async () => {

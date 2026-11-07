@@ -39,6 +39,22 @@ describe("SettingsView.vue", () => {
 
     vi.spyOn(api, "getRunners").mockResolvedValue(null);
     vi.spyOn(api, "getManageRunners").mockResolvedValue(null);
+    vi.spyOn(api, "apiFetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/auth/me") {
+        return {
+          ok: true,
+          json: async () => ({
+            subject: "user-1",
+            name: "Test User",
+            email: "test@example.com",
+            avatarUrl: "/api/auth/avatar",
+            isAdmin: false,
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
     vi.spyOn(api, "getSystemLogs").mockResolvedValue([
       {
         id: 1,
@@ -130,7 +146,12 @@ describe("SettingsView.vue", () => {
     await flush();
 
     expect(root.textContent).toContain("Account & Access");
-    expect(root.textContent).toContain("Signed in via OIDC");
+    expect(root.textContent).toContain("Test User");
+    expect(root.textContent).toContain("test@example.com");
+
+    const avatar = root.querySelector<HTMLImageElement>('[data-testid="user-avatar"]');
+    expect(avatar).not.toBeNull();
+    expect(avatar?.src).toContain("/api/auth/avatar");
 
     app.unmount();
   });
@@ -146,7 +167,8 @@ describe("SettingsView.vue", () => {
     app.mount(root);
     await flush();
 
-    expect(root.textContent).not.toContain("Signed in via OIDC");
+    expect(root.querySelector('[data-testid="auth-user-profile"]')).toBeNull();
+    expect(root.textContent).not.toContain("Test User");
 
     app.unmount();
   });
