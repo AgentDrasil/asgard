@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 	"github.com/AgentDrasil/asgard/llms"
 )
@@ -79,11 +80,12 @@ func QueryAccountQuota(ctx context.Context, cli, alias string) ([]llms.ModelUsag
 	return usages, nil
 }
 
-// AllAccountUsages returns the cached quota of every account of cli, tagged
-// with the account, for agentwrapper.CheckTarget. ok is false when account
-// selection is not in play (an account override, or fewer than two accounts)
-// or no account answered.
-func AllAccountUsages(cli string) ([]llms.ModelUsage, bool) {
+// AllAccountUsages returns the cached quota of every account of cli for
+// agentwrapper.CheckTarget. Accounts are fetched concurrently, and accounts
+// that have not answered when ctx ends are left out (their fetch continues
+// and fills the cache). ok is false when account selection is not in play (an
+// account override, or fewer than two accounts) or no account answered.
+func AllAccountUsages(ctx context.Context, cli string) ([]agentwrapper.AccountUsage, bool) {
 	if os.Getenv(accountEnvName(cli)) != "" {
 		return nil, false
 	}
@@ -91,18 +93,43 @@ func AllAccountUsages(cli string) ([]llms.ModelUsage, bool) {
 	if err != nil || len(aliases) < 2 {
 		return nil, false
 	}
-	var all []llms.ModelUsage
-	answered := false
-	for _, alias := range aliases {
-		usages, err := cachedAccountQuota(cli, alias)
-		if err != nil {
-			log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota unavailable, skipping it")
-			continue
-		}
-		answered = true
-		all = append(all, usages...)
+
+	type answer struct {
+		idx    int
+		usages []llms.ModelUsage
+		err    error
 	}
-	return all, answered
+	answers := make(chan answer, len(aliases))
+	for i, alias := range aliases {
+		go func() {
+			usages, err := cachedAccountQuota(cli, alias)
+			answers <- answer{i, usages, err}
+		}()
+	}
+
+	byIdx := make([]*agentwrapper.AccountUsage, len(aliases))
+collect:
+	for range aliases {
+		select {
+		case a := <-answers:
+			if a.err != nil {
+				log.Warn().Err(a.err).Str("cli", cli).Str("account", aliases[a.idx]).Msg("account quota unavailable, skipping it")
+				continue
+			}
+			byIdx[a.idx] = &agentwrapper.AccountUsage{Account: aliases[a.idx], Usages: a.usages}
+		case <-ctx.Done():
+			log.Warn().Str("cli", cli).Msg("timed out waiting for account quota, using the accounts that answered")
+			break collect
+		}
+	}
+
+	var all []agentwrapper.AccountUsage
+	for _, a := range byIdx {
+		if a != nil {
+			all = append(all, *a)
+		}
+	}
+	return all, len(all) > 0
 }
 
 type quotaKey struct{ cli, alias string }

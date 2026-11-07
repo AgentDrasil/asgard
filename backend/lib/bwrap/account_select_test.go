@@ -31,6 +31,8 @@ type fakeQuota struct {
 	errs  map[string]error
 	calls map[string]int
 	delay time.Duration
+	// gate, when set, blocks every fetch until it is closed.
+	gate chan struct{}
 }
 
 func (f *fakeQuota) fetch(_ context.Context, _, alias string) ([]llms.ModelUsage, error) {
@@ -39,6 +41,9 @@ func (f *fakeQuota) fetch(_ context.Context, _, alias string) ([]llms.ModelUsage
 	d, err := f.data[alias], f.errs[alias]
 	f.mu.Unlock()
 	time.Sleep(f.delay)
+	if f.gate != nil {
+		<-f.gate
+	}
 	return d, err
 }
 
@@ -325,22 +330,59 @@ func TestAllAccountUsages(t *testing.T) {
 	}
 	setupSelector(t, []string{"a", "b", "c"}, f)
 
-	usages, ok := AllAccountUsages("claude")
+	accounts, ok := AllAccountUsages(t.Context(), "claude")
 	require.True(t, ok)
-	require.Len(t, usages, 2, "the account that failed is skipped")
+	require.Len(t, accounts, 2, "the account that failed is skipped")
+	assert.Equal(t, "a", accounts[0].Account)
+	assert.Equal(t, "b", accounts[1].Account)
 
 	// An account override means no selection is in play.
 	t.Setenv("ASGARD_CLAUDE_ACCOUNT", "a")
-	_, ok = AllAccountUsages("claude")
+	_, ok = AllAccountUsages(t.Context(), "claude")
 	assert.False(t, ok)
 }
 
 func TestAllAccountUsages_SingleAccountOrNoAnswer(t *testing.T) {
 	setupSelector(t, []string{"a"}, &fakeQuota{data: map[string][]llms.ModelUsage{"a": {{Model: "claude"}}}})
-	_, ok := AllAccountUsages("claude")
+	_, ok := AllAccountUsages(t.Context(), "claude")
 	assert.False(t, ok, "one account: the plain query is enough")
 
 	setupSelector(t, []string{"a", "b"}, &fakeQuota{errs: map[string]error{"a": errors.New("x"), "b": errors.New("y")}})
-	_, ok = AllAccountUsages("claude")
+	_, ok = AllAccountUsages(t.Context(), "claude")
 	assert.False(t, ok, "no account answered")
+}
+
+func TestAllAccountUsages_FetchesConcurrentlyAndHonorsContext(t *testing.T) {
+	f := &fakeQuota{
+		data:  map[string][]llms.ModelUsage{"a": {{Model: "claude"}}, "b": {{Model: "claude"}}, "c": {{Model: "claude"}}},
+		delay: 200 * time.Millisecond,
+	}
+	setupSelector(t, []string{"a", "b", "c"}, f)
+
+	start := time.Now()
+	accounts, ok := AllAccountUsages(t.Context(), "claude")
+	require.True(t, ok)
+	assert.Len(t, accounts, 3)
+	assert.Less(t, time.Since(start), 500*time.Millisecond, "accounts are queried in parallel, not one after another")
+
+	// A context that ends first leaves the slow accounts out.
+	gate := make(chan struct{})
+	setupSelector(t, []string{"a", "b"}, &fakeQuota{
+		data: map[string][]llms.ModelUsage{"a": {{Model: "claude"}}, "b": {{Model: "claude"}}},
+		gate: gate,
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	_, ok = AllAccountUsages(ctx, "claude")
+	assert.False(t, ok, "no account answered in time")
+	assert.Less(t, time.Since(start), time.Second)
+
+	// Let the stragglers finish before the stubs are restored.
+	close(gate)
+	require.Eventually(t, func() bool {
+		quotaCache.mu.Lock()
+		defer quotaCache.mu.Unlock()
+		return len(quotaCache.inflight) == 0
+	}, 2*time.Second, 5*time.Millisecond)
 }

@@ -103,3 +103,11 @@ quota_profiles:
 	(*Config)(nil).ApplyQuotaPolicy("pro20", usages)
 	assert.Nil(t, usages[0].Usable)
 }
+
+func TestQuotaProfileThreshold_MostSpecificGlobWins(t *testing.T) {
+	p := QuotaProfile{Thresholds: map[string]float64{"*": 0.50, "5*": 0.20, "5h*": 0.10, "weekly*": 0.05}}
+	assert.InDelta(t, 0.10, p.threshold("5h"), 1e-9, "5h* is more specific than 5*, though it sorts after it")
+	assert.InDelta(t, 0.20, p.threshold("5d"), 1e-9)
+	assert.InDelta(t, 0.05, p.threshold("weekly:sonnet only"), 1e-9)
+	assert.InDelta(t, 0.50, p.threshold("daily"), 1e-9)
+}

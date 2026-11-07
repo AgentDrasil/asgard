@@ -335,14 +335,15 @@ func TestCheckTargetPicksBestAccount(t *testing.T) {
 	})
 	t.Cleanup(func() { SetQueryRunner(nil); SetAccountUsageProvider(nil) })
 
-	provide := func(usages ...types.ModelUsage) {
-		SetAccountUsageProvider(func(string) ([]types.ModelUsage, bool) { return usages, true })
+	provide := func(accounts ...AccountUsage) {
+		SetAccountUsageProvider(func(context.Context, string) ([]AccountUsage, bool) { return accounts, true })
 	}
+	acct := func(name string, u ...types.ModelUsage) AccountUsage { return AccountUsage{Account: name, Usages: u} }
 
 	// The first account is below its policy, the second is fine.
 	provide(
-		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.08, Usable: &no, Reason: "low"},
-		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.30, Usable: &yes},
+		acct("a", types.ModelUsage{Model: "m1", Remaining: 0.08, Usable: &no, Reason: "low"}),
+		acct("b", types.ModelUsage{Model: "m1", Remaining: 0.30, Usable: &yes}),
 	)
 	if got := CheckTarget("claude", "m1"); got.Usable == nil || !*got.Usable || got.Remaining != 0.30 {
 		t.Fatalf("CheckTarget = %+v, want the usable account", got)
@@ -350,8 +351,8 @@ func TestCheckTargetPicksBestAccount(t *testing.T) {
 
 	// A policy-accepted account beats one with more raw quota.
 	provide(
-		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.90, Usable: &no},
-		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.04, Usable: &yes},
+		acct("a", types.ModelUsage{Model: "m1", Remaining: 0.90, Usable: &no}),
+		acct("b", types.ModelUsage{Model: "m1", Remaining: 0.04, Usable: &yes}),
 	)
 	if got := CheckTarget("claude", "m1"); got.Usable == nil || !*got.Usable {
 		t.Fatalf("CheckTarget = %+v, want the account the policy accepts", got)
@@ -359,12 +360,34 @@ func TestCheckTargetPicksBestAccount(t *testing.T) {
 
 	// Without verdicts the account with the most quota is reported.
 	provide(
-		types.ModelUsage{Model: "m1", Account: "a", Remaining: 0.05},
-		types.ModelUsage{Model: "m1", Account: "b", Remaining: 0.60},
-		types.ModelUsage{Status: llms.QuotaStatusError},
+		acct("a", types.ModelUsage{Model: "m1", Remaining: 0.05}),
+		acct("b", types.ModelUsage{Model: "m1", Remaining: 0.60}, types.ModelUsage{Status: llms.QuotaStatusError}),
 	)
 	if got := CheckTarget("claude", "m1"); got.Remaining != 0.60 {
 		t.Fatalf("CheckTarget = %+v, want 0.60", got)
+	}
+}
+
+func TestBestAccountCheckTreatsMissingEntryAsAvailable(t *testing.T) {
+	no := false
+	rejected := AccountUsage{Account: "a", Usages: []types.ModelUsage{{Model: "m1", Remaining: 0.08, Usable: &no, Reason: "low"}}}
+	noEntry := AccountUsage{Account: "b", Usages: []types.ModelUsage{{Model: "other", Remaining: 0.9}}}
+
+	// Account selection would run m1 on b, so the check must agree.
+	got, found := bestAccountCheck("claude", "m1", []AccountUsage{rejected, noEntry})
+	if !found || got.Usable == nil || !*got.Usable || got.Reason != "" {
+		t.Fatalf("check = %+v found=%v, want usable", got, found)
+	}
+
+	// Without such an account the rejection stands.
+	got, found = bestAccountCheck("claude", "m1", []AccountUsage{rejected})
+	if !found || got.Usable == nil || *got.Usable {
+		t.Fatalf("check = %+v found=%v, want rejected", got, found)
+	}
+
+	// No account knows the model at all: nothing found.
+	if _, found := bestAccountCheck("claude", "m1", []AccountUsage{noEntry}); found {
+		t.Fatal("want not found")
 	}
 }
 
@@ -372,7 +395,7 @@ func TestCheckTargetFallsBackWhenProviderHasNoAnswer(t *testing.T) {
 	SetQueryRunner(func(context.Context, ...string) ([]byte, error) {
 		return []byte(`{"claude":[{"model":"m1","remaining":0.5}]}`), nil
 	})
-	SetAccountUsageProvider(func(string) ([]types.ModelUsage, bool) { return nil, false })
+	SetAccountUsageProvider(func(context.Context, string) ([]AccountUsage, bool) { return nil, false })
 	t.Cleanup(func() { SetQueryRunner(nil); SetAccountUsageProvider(nil) })
 
 	if got := CheckTarget("claude", "m1"); got.Remaining != 0.5 {

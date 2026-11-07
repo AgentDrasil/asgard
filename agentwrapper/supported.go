@@ -77,11 +77,17 @@ func SetQueryRunner(r QueryRunner) {
 	queryRunner = r
 }
 
-// AccountUsageProvider returns the quota of every account of a CLI, each
-// entry tagged with its account. ok is false when the CLI has no multi-account
-// setup to consider (fewer than two accounts, or an account override), in
-// which case the plain query is used.
-type AccountUsageProvider func(cli string) (usages []types.ModelUsage, ok bool)
+// AccountUsage is the quota one account reported for its CLI.
+type AccountUsage struct {
+	Account string
+	Usages  []types.ModelUsage
+}
+
+// AccountUsageProvider returns the quota of every account of a CLI that
+// answered within ctx. ok is false when the CLI has no multi-account setup to
+// consider (fewer than two accounts, or an account override), in which case
+// the plain query is used.
+type AccountUsageProvider func(ctx context.Context, cli string) (accounts []AccountUsage, ok bool)
 
 var (
 	accountUsageMu       sync.RWMutex
@@ -300,9 +306,9 @@ func CheckTarget(cli string, model string) QuotaCheck {
 	// With several accounts the target is runnable when any account can serve
 	// it, so look at all of them and report the best one.
 	if provider := currentAccountUsageProvider(); provider != nil {
-		if usages, ok := provider(cli); ok {
-			if best, found := bestMatchingUsage(cli, model, usages); found {
-				return QuotaCheck{Remaining: best.Remaining, Usable: best.Usable, Reason: best.Reason}
+		if accounts, ok := provider(ctx, cli); ok {
+			if check, found := bestAccountCheck(cli, model, accounts); found {
+				return check
 			}
 		}
 	}
@@ -345,6 +351,32 @@ func bestMatchingUsage(cli, model string, usages []types.ModelUsage) (best types
 		}
 	}
 	return best, found
+}
+
+// bestAccountCheck reports the best account for model. Like account
+// selection, an account that answered but has no entry for the model counts
+// as available, so when the quota policy rejects every account that does have
+// an entry, such an account still makes the target usable. found is false
+// when no account has an entry for the model.
+func bestAccountCheck(cli, model string, accounts []AccountUsage) (QuotaCheck, bool) {
+	var all []types.ModelUsage
+	missing := false
+	for _, a := range accounts {
+		if _, ok := bestMatchingUsage(cli, model, a.Usages); !ok {
+			missing = true
+		}
+		all = append(all, a.Usages...)
+	}
+	best, found := bestMatchingUsage(cli, model, all)
+	if !found {
+		return QuotaCheck{}, false
+	}
+	check := QuotaCheck{Remaining: best.Remaining, Usable: best.Usable, Reason: best.Reason}
+	if missing && best.Usable != nil && !*best.Usable {
+		usable := true
+		check.Usable, check.Reason = &usable, ""
+	}
+	return check, true
 }
 
 // CheckQuota returns the headline remaining quota fraction of a target.

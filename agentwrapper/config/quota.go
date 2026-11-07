@@ -21,6 +21,8 @@ type QuotaProfile struct {
 	// "weekly*") to the remaining fraction at or below which the account is
 	// not used. The key "*" is the fallback for limits without their own
 	// entry. A limit with no matching entry is only unusable when exhausted.
+	// When several globs match, the most specific one (most literal
+	// characters) wins.
 	Thresholds map[string]float64 `yaml:"thresholds"`
 
 	// Unlimited marks pay-per-request accounts: always usable.
@@ -28,7 +30,8 @@ type QuotaProfile struct {
 }
 
 // threshold returns the cutoff for the named limit: an exact key first, then
-// the first matching glob in key order, then the "*" fallback.
+// the most specific matching glob (the one with the most literal characters,
+// ties in key order), then the "*" fallback.
 func (p QuotaProfile) threshold(limit string) float64 {
 	name := strings.ToLower(limit)
 	keys := make([]string, 0, len(p.Thresholds))
@@ -41,15 +44,27 @@ func (p QuotaProfile) threshold(limit string) float64 {
 			return p.Thresholds[k]
 		}
 	}
+	best, bestLiterals := "", -1
 	for _, k := range keys {
 		if k == "*" {
 			continue
 		}
-		if ok, _ := path.Match(strings.ToLower(k), name); ok {
-			return p.Thresholds[k]
+		if ok, _ := path.Match(strings.ToLower(k), name); !ok {
+			continue
+		}
+		if n := literalChars(k); n > bestLiterals {
+			best, bestLiterals = k, n
 		}
 	}
+	if bestLiterals >= 0 {
+		return p.Thresholds[best]
+	}
 	return p.Thresholds["*"]
+}
+
+// literalChars counts the characters of a glob that are not wildcards.
+func literalChars(glob string) int {
+	return len(glob) - strings.Count(glob, "*") - strings.Count(glob, "?")
 }
 
 // ProfileFor returns the profile bound to an account: the named one, else the
