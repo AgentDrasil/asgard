@@ -5,26 +5,14 @@
 #   agy:
 #     - simplest
 {{if .QuotaProfiles}}
-# Quota policy profiles: per quota window, the remaining fraction at or below
-# which an account is no longer used. Bind accounts on the runner with
-# `aw <agy|claude> login <alias> --profile <name>` or
-# `aw <agy|claude> profile <alias> <name>`. Accounts without a binding use the
-# `default` profile when defined; with no profile at all the fixed rule applies
-# (automatic selection needs more than 10% remaining).
-quota_profiles:
-{{- range .QuotaProfileDefs}}
-  {{.Name}}:  # {{.Desc}}
-{{- if .Unlimited}}
-    unlimited: true
-{{- else}}
-    thresholds: { {{range $i, $t := .Thresholds}}{{if $i}}, {{end}}{{$t.Window}}: {{$t.Value}}{{end}} }
-{{- end}}
-{{- end}}
+{{.QuotaProfilesBlock}}
 {{else}}
-# Quota policy profiles (see asgard-init --quota-profiles). Example:
+# Quota policy profiles (see asgard-init --quota-profile). Example:
 # quota_profiles:
-#   pro20:
-#     thresholds: { 5h: 0.10, weekly: 0.05 }
+#   claude-20:
+#     thresholds: { "5h": 0.10, "weekly": 0.05 }
+#   agy-50:
+#     thresholds: { "weekly": 0.08 }
 #   ppr:
 #     unlimited: true
 {{end -}}

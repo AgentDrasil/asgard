@@ -98,13 +98,17 @@ func run(args []string) (err error) {
 		gcpKmsFlag           = fs.String("gcp-kms", "", "Google Cloud KMS key resource ID for SOPS")
 		ageFlag              = fs.String("age", "", "Age recipient public key for SOPS")
 		providersFlag        = fs.String("providers", "", "Comma-separated list of CLI providers to activate (supported: agy, claude, opencode, simplest; default: all)")
-		quotaProfilesFlag    = fs.String("quota-profiles", "", "Comma-separated quota policy profiles to generate into the aw config (supported: pro20, max200, ppr; default: none)")
+		quotaProfilesFlag    = fs.String("quota-profiles", "", "Takes no value: pass it alone to interactively add quota profiles to an existing deployment's aw config (to define profiles up front use --quota-profile)")
 		addNewRunnerFlag     = fs.Bool("add-new-runner", false, "Add a new runner to an existing deployment (interactive; optionally pass the runner name: --add-new-runner <name>)")
 		gcpSAKeyFlag         = fs.String("gcp-sa-key", "", "GCP Service Account JSON key file path for GCP KMS")
 		resumeFlag           = fs.Bool("resume", false, "Resume deployment setup from saved state")
 	)
 
+	var quotaProfileSpecs stringList
+	fs.Var(&quotaProfileSpecs, "quota-profile", "Quota policy profile to generate into the aw config, repeatable: <name>:<window>=<ratio>[,<window>=<ratio>...] or <name>:unlimited (e.g. claude-20:5h=0.10,weekly=0.05)")
+
 	args, addRunnerName := extractAddRunnerName(args)
+	args, quotaProfilesUpdate := extractBareQuotaProfiles(args)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -116,6 +120,22 @@ func run(args []string) (err error) {
 	fs.Visit(func(f *flag.Flag) {
 		explicitFlags[f.Name] = true
 	})
+
+	// Mode: --quota-profiles without a value, an interactive update of the
+	// aw config of an existing deployment (needs no cfgctl).
+	if quotaProfilesUpdate {
+		if *nonInteractiveFlag {
+			return fmt.Errorf("--quota-profiles without a value is interactive; define profiles non-interactively with --quota-profile %s", quotaSpecSyntax)
+		}
+		if defaultStdinReader == nil {
+			defaultStdinReader = bufio.NewReader(os.Stdin)
+		}
+		dir, err := filepath.Abs(*dirFlag)
+		if err != nil {
+			return fmt.Errorf("resolve target directory: %w", err)
+		}
+		return runQuotaProfilesUpdate(dir, defaultStdinReader, os.Stdout)
+	}
 
 	// Mandatory check: cfgctl must be installed
 	if err := checkCfgctl(); err != nil {
@@ -189,9 +209,12 @@ func run(args []string) (err error) {
 		}
 	}
 
-	cliQuotaProfiles, err := parseQuotaProfiles(*quotaProfilesFlag)
+	if *quotaProfilesFlag != "" {
+		return fmt.Errorf("--quota-profiles takes no value; define profiles with --quota-profile %s", quotaSpecSyntax)
+	}
+	cliQuotaProfiles, err := normalizeQuotaProfiles(quotaProfileSpecs)
 	if err != nil {
-		return fmt.Errorf("invalid --quota-profiles: %w", err)
+		return fmt.Errorf("invalid --quota-profile: %w", err)
 	}
 
 	if *gcpSAKeyFlag != "" {
@@ -306,7 +329,7 @@ func run(args []string) (err error) {
 	if !explicitFlags["providers"] && len(state.Providers) > 0 {
 		data.Providers = state.Providers
 	}
-	if !explicitFlags["quota-profiles"] && len(state.QuotaProfiles) > 0 {
+	if !explicitFlags["quota-profile"] && len(state.QuotaProfiles) > 0 {
 		data.QuotaProfiles = state.QuotaProfiles
 	}
 	if *gcpSAKeyFlag != "" {
@@ -563,7 +586,7 @@ func run(args []string) (err error) {
 
 		// Quota profiles only matter for the account-based CLIs.
 		if !state.IsCompleted("quota_profiles") {
-			if explicitFlags["quota-profiles"] {
+			if explicitFlags["quota-profile"] {
 				data.QuotaProfiles = cliQuotaProfiles
 			} else if data.IsProviderEnabled("agy") || data.IsProviderEnabled("claude") {
 				data.QuotaProfiles = PromptQuotaProfiles(reader, os.Stdout)

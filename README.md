@@ -121,16 +121,19 @@ Claude sandboxes bind the selected account directory (read-write) as `~/.claude`
 
 ```yaml
 quota_profiles:
-  pro20:                          # a $20 plan: stop at 10% of the 5h window or 5% of the weekly one
-    thresholds: { 5h: 0.10, weekly: 0.05 }
-  max200:
-    thresholds: { 5h: 0.03, weekly: 0.02 }
-  default:                        # accounts without a binding
+  "claude-20":                    # a claude $20 plan: stop at 10% of the 5h window or 5% of the weekly one
+    thresholds: { "5h": 0.10, "weekly": 0.05 }
+  "agy-50":                       # an agy plan that only has a weekly window
+    thresholds: { "weekly": 0.08 }
+  "ppr":
+    unlimited: true
+  "default":                      # accounts without a binding
     thresholds: { "*": 0.10 }
 ```
 
 - Thresholds are per quota window (limit name, exact or a glob such as `weekly*`, the most specific matching glob winning; `*` is the fallback) and apply independently: an account is unusable as soon as any window is at or below its own threshold. Without per-window limits the headline remaining fraction is checked against `*`. `unlimited: true` marks a pay-per-request profile.
-- `asgard-init` can generate these profiles: `--quota-profiles pro20,max200,ppr` (or the interactive quota step) writes the presets into `etcd-tree/aw/config.yaml` (`pro20`: 5h 0.10 / weekly 0.05, `max200`: 5h 0.03 / weekly 0.02, `ppr`: unlimited) and prints the binding commands. It never defines `default`, so without the option nothing changes.
+- Profiles are free-form: name them per CLI and plan size (`claude-20`, `agy-50`, ...) and list only the windows the plan has. A window is a limit name exactly as `aw usage --cli <cli>` reports it in `limits[].name` (claude: `5h`, `weekly`, `weekly:<model>`; agy: `5h`, `weekly`; other providers name their own, e.g. `TOKENS_LIMIT`), matched case-insensitively; windows the plan lacks are ignored, so a weekly-only plan just omits `5h`. Quote keys that are not plain words (`"*"`, `"weekly:sonnet only"`).
+- `asgard-init` generates them: `--quota-profile claude-20:5h=0.10,weekly=0.05 --quota-profile agy-50:weekly=0.08 --quota-profile ppr:unlimited` (repeatable; `<name>:<window>=<ratio>,...` or `<name>:unlimited`, keys are quoted for you) writes them into `etcd-tree/aw/config.yaml`. On an existing deployment, run `asgard-init --quota-profiles` without a value (interactive): it asks for each profile and window thresholds and adds them to the config, leaving everything else, including profiles you already defined, as it is; then `just publish`. It never defines `default`, so without profiles nothing changes.
 - Bind an account on the runner with `aw <cli> login <alias> --profile <name>` or `aw <cli> profile <alias> [name|--clear]` (`agy` and `claude`). The binding is the file `.asgard-profile` in the account directory; re-login keeps it. Unbound accounts use the `default` profile.
 - The host passes the selected account's profile into the query sandbox as `ASGARD_<CLI>_PROFILE`; `aw usage` evaluates it and attaches `usable` and `reason` to each model entry. Account selection and the automatic target selection of an agent run use that verdict. Without any `quota_profiles` no verdict is attached and the previous behavior (10% for automatic selection, exhausted at `0` for accounts) stays.
 - With two or more accounts of a CLI, the automatic target selection of a run looks at every account (cached per account for 60s) and counts the target as available when any account can serve it, so one low account no longer rules the whole CLI out; `chooseAccount` then picks that account. Accounts are queried concurrently and the check is bounded by 20s; like `chooseAccount`, an account that has no entry for the model counts as available.
