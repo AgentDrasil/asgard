@@ -37,6 +37,7 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var assignedRunners map[string]bool
 	if s.bindingEnforced() {
 		if sess.RunnerNodeID == "" {
 			http.Error(w, `{"error":"chat not bound to runner"}`, http.StatusBadRequest)
@@ -45,6 +46,11 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		if aerr := s.authorizeRunner(r, sess.RunnerNodeID); aerr != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, aerr.msg), aerr.status)
 			return
+		}
+		var aerr error
+		assignedRunners, aerr = s.assignedRunners(r)
+		if aerr != nil {
+			log.Error().Err(aerr).Str("chat_id", id).Msg("failed to load assigned runners for SSE")
 		}
 	}
 
@@ -101,6 +107,11 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		case ev, ok := <-eventCh:
 			if !ok {
 				return
+			}
+			if ev.ChatID != "" && ev.ChatID != id && s.bindingEnforced() {
+				if !s.canSeeChat(assignedRunners, ev.ChatID) {
+					continue
+				}
 			}
 			data, err := json.Marshal(ev)
 			if err != nil {

@@ -195,9 +195,7 @@ func (h *SessionEventHub) Publish(chatID string, ev SessionEvent) {
 	t.publish(ev)
 }
 
-// Broadcast sends an event to all active topics.
-// If chatID is provided on ev, it is preserved; if ev.ChatID is empty and fallbackChatID is non-empty,
-// it is populated.
+// Broadcast sends ev to all active topics; ev.ChatID is preserved as-is.
 func (h *SessionEventHub) Broadcast(ev SessionEvent) {
 	h.topicsMu.RLock()
 	topics := make([]*sessionTopic, 0, len(h.topics))

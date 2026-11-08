@@ -296,3 +296,82 @@ func TestSessionEventsHandler_EvictedResync(t *testing.T) {
 	body := rr.body()
 	assert.Contains(t, body, "event: resync")
 }
+
+func TestSessionEventsHandler_RunnerBindingCrossChatFilter(t *testing.T) {
+	t.Parallel()
+
+	srv, p := newAccessServer(t)
+	srv.eventHub = NewSessionEventHub()
+	t.Cleanup(srv.eventHub.Close)
+	admin := bearer(t, p, "admin-1", "admin")
+	user := bearer(t, p, "user-1")
+
+	// Trigger registration
+	_ = doJSON(srv, http.MethodGet, "/api/runners", user, nil)
+	_ = doJSON(srv, http.MethodGet, "/api/runners", admin, nil)
+
+	// Create sessions on runner-a and runner-b
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-user-a",
+		Title:        "Alpha Chat",
+		RunnerNodeID: "runner-a",
+	}))
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-unauthorized-b",
+		Title:        "Beta Chat",
+		RunnerNodeID: "runner-b",
+	}))
+	require.NoError(t, srv.repo.SaveSession(&dbmodels.Session{
+		ChatID:       "chat-authorized-a2",
+		Title:        "Alpha Chat 2",
+		RunnerNodeID: "runner-a",
+	}))
+
+	// Admin assigns runner-a to user-1
+	rec := doJSON(srv, http.MethodPut, "/api/manage/runners/runner-a/users", admin, SetRunnerUsersRequest{Users: []string{"user-1"}})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	token := user["Authorization"][len("Bearer "):]
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/chat-user-a/events?access_token="+token, nil).WithContext(ctx)
+	rr := newSyncRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.ServeHTTP(rr, req)
+	}()
+
+	waitSubscriber(t, srv.eventHub, "chat-user-a")
+
+	// 1. Broadcast an event for an authorized session on runner-a
+	srv.BroadcastSessionEvent(SessionEvent{
+		ChatID: "chat-authorized-a2",
+		Type:   EventTypeStatus,
+		Payload: map[string]any{
+			"test": "authorized-message",
+		},
+	})
+
+	// 2. Broadcast an event for an unauthorized session on runner-b
+	srv.BroadcastSessionEvent(SessionEvent{
+		ChatID: "chat-unauthorized-b",
+		Type:   EventTypeStatus,
+		Payload: map[string]any{
+			"test": "secret-unauthorized-message",
+		},
+	})
+
+	// Wait for authorized event in stream
+	rr.waitBody(t, "authorized-message")
+
+	cancel()
+	<-done
+
+	body := rr.body()
+	assert.Contains(t, body, "authorized-message")
+	assert.NotContains(t, body, "secret-unauthorized-message")
+	assert.NotContains(t, body, "chat-unauthorized-b")
+}

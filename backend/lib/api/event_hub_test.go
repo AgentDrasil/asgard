@@ -358,6 +358,7 @@ func TestSessionEventHub_Broadcast(t *testing.T) {
 	case ev := <-sub1:
 		assert.Equal(t, chat1, ev.ChatID)
 		assert.Equal(t, EventTypeStatus, ev.Type)
+		assert.Nil(t, ev.Payload["dirLock"])
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for broadcast on sub1")
 	}
@@ -366,6 +367,7 @@ func TestSessionEventHub_Broadcast(t *testing.T) {
 	case ev := <-sub2:
 		assert.Equal(t, chat1, ev.ChatID)
 		assert.Equal(t, EventTypeStatus, ev.Type)
+		assert.Nil(t, ev.Payload["dirLock"])
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for broadcast on sub2")
 	}

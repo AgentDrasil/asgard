@@ -121,6 +121,19 @@ func (s *Server) authorizeSession(r *http.Request, chatID string) (*dbmodels.Ses
 	return nil, nil
 }
 
+// canSeeChat reports whether a cross-chat event for otherChatID may be forwarded
+// given the requester's assigned runner set. It fails closed.
+func (s *Server) canSeeChat(assignedRunners map[string]bool, otherChatID string) bool {
+	if s == nil || s.repo == nil || otherChatID == "" || len(assignedRunners) == 0 {
+		return false
+	}
+	meta, err := s.repo.GetSessionMeta(otherChatID)
+	if err != nil || meta == nil || meta.RunnerNodeID == "" {
+		return false
+	}
+	return assignedRunners[meta.RunnerNodeID]
+}
+
 // ManageRunnerResponse is one runner in GET /api/manage/runners.
 type ManageRunnerResponse struct {
 	NodeID string   `json:"node_id"`

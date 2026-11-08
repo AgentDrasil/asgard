@@ -50,10 +50,12 @@ func setupDirLockTestServer(t *testing.T) (*Server, *dbmodels.SessionRepository,
 		Host: "http://localhost:8080",
 	}
 
+	hub := NewSessionEventHub()
+	t.Cleanup(hub.Close)
 	server := &Server{
 		conf:     conf,
 		repo:     repo,
-		eventHub: NewSessionEventHub(),
+		eventHub: hub,
 	}
 	server.dirLocks = dirlock.NewManager(func(chatID string) {
 		server.BroadcastSessionEvent(SessionEvent{
