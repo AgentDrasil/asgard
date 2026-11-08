@@ -71,19 +71,24 @@ onUnmounted(() => {
     >
       <!-- Header -->
       <div class="flex items-center justify-between pb-3 border-b border-base-200">
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-3">
           <div
-            class="relative flex items-center justify-center w-8 h-8 rounded-full bg-error/15 text-error"
+            class="relative flex items-center justify-center w-9 h-9 rounded-full bg-error/15 text-error shrink-0"
           >
+            <!-- 录音呼吸灯光晕特效 -->
             <span
               v-if="isRecording"
-              class="absolute inline-flex h-full w-full rounded-full bg-error opacity-40 animate-ping"
+              class="absolute -inset-1 rounded-full bg-error/30 animate-pulse pointer-events-none"
+            ></span>
+            <span
+              v-if="isRecording"
+              class="absolute -inset-2.5 rounded-full bg-error/15 animate-ping pointer-events-none"
             ></span>
             <Icon icon="material-symbols:mic" class="w-5 h-5 relative z-10" />
           </div>
           <div>
             <h3 class="font-bold text-base sm:text-lg flex items-center gap-2">
-              {{ t("chat.voiceModalTitle") }}
+              <span>{{ t("chat.voiceModalTitle") }}</span>
               <span
                 v-if="shortcutDisplay"
                 class="kbd kbd-sm text-2xs font-mono font-normal opacity-70 hidden sm:inline-flex"
@@ -92,33 +97,18 @@ onUnmounted(() => {
                 {{ shortcutDisplay }}
               </span>
             </h3>
-            <p class="text-xs text-base-content/60">{{ t("chat.voiceModalDesc") }}</p>
           </div>
         </div>
 
-        <button
-          type="button"
-          @click="handleCancel"
-          class="btn btn-sm btn-circle btn-ghost"
-          :title="t('chat.voiceCancel')"
-          data-testid="voice-modal-close-btn"
-        >
-          <Icon icon="material-symbols:close" class="h-5 w-5" />
-        </button>
-      </div>
-
-      <!-- Live Wave / Status Indicator -->
-      <div
-        class="flex items-center justify-between px-3 py-2 rounded-xl bg-base-200/70 border border-base-300/50 text-xs text-base-content/80"
-      >
-        <div class="flex items-center gap-2 min-w-0">
+        <!-- 录音状态简要标签 -->
+        <div class="flex items-center gap-1.5 text-xs text-base-content/70">
           <span v-if="isConnecting" class="loading loading-spinner loading-xs text-warning"></span>
           <span v-else-if="isStopping" class="loading loading-spinner loading-xs text-info"></span>
           <span
             v-else-if="isRecording"
-            class="w-2.5 h-2.5 rounded-full bg-error animate-pulse shrink-0"
+            class="w-2 h-2 rounded-full bg-error animate-pulse shrink-0"
           ></span>
-          <span class="font-medium truncate">
+          <span class="font-medium">
             {{
               isConnecting
                 ? t("chat.voiceConnecting")
@@ -128,9 +118,6 @@ onUnmounted(() => {
             }}
           </span>
         </div>
-        <span class="text-2xs opacity-60 shrink-0 hidden sm:inline">
-          {{ t("chat.voiceActiveTip") }}
-        </span>
       </div>
 
       <!-- Large Pending Text Transcription Area -->
@@ -162,8 +149,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Actions Footer -->
-      <div class="flex items-center justify-between gap-3 pt-2 border-t border-base-200">
+      <!-- Actions Footer: 仅保留 Cancel 与 Stop 两个按钮 -->
+      <div class="flex items-center justify-end gap-3 pt-2 border-t border-base-200">
         <button
           type="button"
           @click="handleCancel"
@@ -178,12 +165,16 @@ onUnmounted(() => {
           type="button"
           @click="handleStop"
           :disabled="isStopping"
-          class="btn btn-error btn-sm sm:btn-md px-5 sm:px-6 shadow-md gap-2 font-medium"
+          class="btn btn-error btn-sm sm:btn-md px-5 sm:px-6 shadow-md gap-2 font-medium relative overflow-hidden"
           data-testid="voice-modal-stop-btn"
         >
-          <span v-if="isBusy" class="loading loading-spinner loading-xs"></span>
-          <Icon v-else icon="akar-icons:square-fill" class="w-4 h-4 fill-current" />
-          <span>{{ t("chat.stopRecording") }}</span>
+          <span
+            v-if="isRecording"
+            class="absolute inset-0 bg-white/20 animate-pulse pointer-events-none"
+          ></span>
+          <span v-if="isBusy" class="loading loading-spinner loading-xs relative z-10"></span>
+          <Icon v-else icon="akar-icons:square-fill" class="w-4 h-4 fill-current relative z-10" />
+          <span class="relative z-10">{{ t("chat.stopRecording") }}</span>
         </button>
       </div>
     </div>
