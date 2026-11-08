@@ -195,6 +195,22 @@ func (h *SessionEventHub) Publish(chatID string, ev SessionEvent) {
 	t.publish(ev)
 }
 
+// Broadcast sends an event to all active topics.
+// If chatID is provided on ev, it is preserved; if ev.ChatID is empty and fallbackChatID is non-empty,
+// it is populated.
+func (h *SessionEventHub) Broadcast(ev SessionEvent) {
+	h.topicsMu.RLock()
+	topics := make([]*sessionTopic, 0, len(h.topics))
+	for _, t := range h.topics {
+		topics = append(topics, t)
+	}
+	h.topicsMu.RUnlock()
+
+	for _, t := range topics {
+		t.publish(ev)
+	}
+}
+
 // Subscribe registers a listener on the chat's event stream. If lastEventID > 0,
 // missed events are replayed. If requested lastEventID was evicted from the ring
 // buffer, or the topic is empty (e.g. after GC), a resync event is sent immediately.

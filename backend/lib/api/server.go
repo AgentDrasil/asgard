@@ -305,8 +305,9 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	s.dirLocks = dirlock.NewManager(func(chatID string) {
-		s.PublishSessionEvent(chatID, SessionEvent{
-			Type: EventTypeStatus,
+		s.BroadcastSessionEvent(SessionEvent{
+			ChatID: chatID,
+			Type:   EventTypeStatus,
 			Payload: map[string]any{
 				"dirLock": s.dirLocks.StatusForChat(chatID),
 			},
@@ -855,6 +856,14 @@ func (s *Server) PublishSessionEvent(chatID string, ev SessionEvent) {
 		return
 	}
 	s.eventHub.Publish(chatID, ev)
+}
+
+// BroadcastSessionEvent sends an event to all active session topics if the event hub is initialized.
+func (s *Server) BroadcastSessionEvent(ev SessionEvent) {
+	if s == nil || s.eventHub == nil {
+		return
+	}
+	s.eventHub.Broadcast(ev)
 }
 
 func (s *Server) isSessionRunning(sess *dbmodels.Session) bool {

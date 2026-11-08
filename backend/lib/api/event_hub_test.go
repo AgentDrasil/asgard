@@ -330,3 +330,43 @@ func TestSessionEventHub_ReplayAfterGC_Resync(t *testing.T) {
 		t.Fatal("timed out waiting for resync event after GC")
 	}
 }
+
+func TestSessionEventHub_Broadcast(t *testing.T) {
+	t.Parallel()
+
+	hub := NewSessionEventHubWithCapacity(10)
+	t.Cleanup(hub.Close)
+
+	chat1 := "chat-broadcast-1"
+	chat2 := "chat-broadcast-2"
+
+	sub1, _, cancel1 := hub.Subscribe(chat1, 0)
+	t.Cleanup(cancel1)
+	sub2, _, cancel2 := hub.Subscribe(chat2, 0)
+	t.Cleanup(cancel2)
+
+	broadcastEv := SessionEvent{
+		ChatID: chat1,
+		Type:   EventTypeStatus,
+		Payload: map[string]any{
+			"dirLock": nil,
+		},
+	}
+	hub.Broadcast(broadcastEv)
+
+	select {
+	case ev := <-sub1:
+		assert.Equal(t, chat1, ev.ChatID)
+		assert.Equal(t, EventTypeStatus, ev.Type)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for broadcast on sub1")
+	}
+
+	select {
+	case ev := <-sub2:
+		assert.Equal(t, chat1, ev.ChatID)
+		assert.Equal(t, EventTypeStatus, ev.Type)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for broadcast on sub2")
+	}
+}

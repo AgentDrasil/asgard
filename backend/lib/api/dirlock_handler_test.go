@@ -56,8 +56,9 @@ func setupDirLockTestServer(t *testing.T) (*Server, *dbmodels.SessionRepository,
 		eventHub: NewSessionEventHub(),
 	}
 	server.dirLocks = dirlock.NewManager(func(chatID string) {
-		server.PublishSessionEvent(chatID, SessionEvent{
-			Type: EventTypeStatus,
+		server.BroadcastSessionEvent(SessionEvent{
+			ChatID: chatID,
+			Type:   EventTypeStatus,
 			Payload: map[string]any{
 				"dirLock": server.dirLocks.StatusForChat(chatID),
 			},

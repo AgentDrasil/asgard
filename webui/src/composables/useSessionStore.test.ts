@@ -1405,5 +1405,58 @@ describe("useSessionStore", () => {
       const inList = store.sessions.value.find((s) => s.chatID === "session-lock-2");
       expect(inList?.dirLock).toBeUndefined();
     });
+
+    it("updates dirLock for another session when user is in a different session", async () => {
+      const sessionActive: ChatSession = {
+        chatID: "session-active",
+        title: "Active Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+      };
+      const sessionOther: ChatSession = {
+        chatID: "session-other",
+        title: "Other Session",
+        currentAgent: "agent-1",
+        runDir: "/workspace",
+        messages: [],
+        dirLock: {
+          isLocked: true,
+          lockReason: "uncommitted",
+          canUnlock: true,
+          lockedDir: "/workspace",
+        },
+      };
+
+      vi.spyOn(api, "getSessions").mockResolvedValue([sessionActive, sessionOther]);
+      vi.spyOn(api, "getSession").mockResolvedValue(sessionActive);
+
+      const store = useSessionStore();
+      await store.loadSessions();
+      await store.openSession("session-active");
+
+      const es = MockEventSource.instances[0];
+      expect(es).toBeDefined();
+
+      const otherBefore = store.sessions.value.find((s) => s.chatID === "session-other");
+      expect(otherBefore?.dirLock?.isLocked).toBe(true);
+
+      // Status event arrives for session-other releasing lock (dirLock: null)
+      const statusEv: SessionEvent = {
+        eventId: 101,
+        chatId: "session-other",
+        type: "status",
+        payload: {
+          dirLock: null,
+        },
+        timestamp: 2000,
+      };
+      es.emit("status", statusEv);
+
+      const otherAfter = store.sessions.value.find((s) => s.chatID === "session-other");
+      expect(otherAfter?.dirLock).toBeUndefined();
+      // Active session's dirLock should not be affected
+      expect(store.activeSession.value?.dirLock).toBeUndefined();
+    });
   });
 });

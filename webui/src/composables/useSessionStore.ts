@@ -129,7 +129,26 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   };
 
   const handleSessionStatusEvent = (ev: SessionEvent) => {
-    if (ev.chatId && ev.chatId !== activeSessionId.value) return;
+    if (ev.payload && "dirLock" in ev.payload) {
+      const dirLock = (ev.payload.dirLock as DirLockStatus) || undefined;
+      if (activeSession.value && ev.chatId === activeSessionId.value) {
+        activeSession.value.dirLock = dirLock;
+      }
+      const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
+      if (sIdx > -1) {
+        sessions.value[sIdx] = { ...sessions.value[sIdx], dirLock };
+      }
+    }
+
+    if (ev.chatId && ev.chatId !== activeSessionId.value) {
+      if (ev.payload?.isRunning !== undefined) {
+        const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
+        if (sIdx > -1) {
+          sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: !!ev.payload.isRunning };
+        }
+      }
+      return;
+    }
 
     if (ev.payload?.isRunning !== undefined) {
       const hasUnrepliedAskUser = rawMessages.value.some(
@@ -144,17 +163,6 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
       if (sIdx > -1) {
         sessions.value[sIdx] = { ...sessions.value[sIdx], isRunning: running };
-      }
-    }
-
-    if (ev.payload && "dirLock" in ev.payload) {
-      const dirLock = (ev.payload.dirLock as DirLockStatus) || undefined;
-      if (activeSession.value) {
-        activeSession.value.dirLock = dirLock;
-      }
-      const sIdx = sessions.value.findIndex((s) => s.chatID === ev.chatId);
-      if (sIdx > -1) {
-        sessions.value[sIdx] = { ...sessions.value[sIdx], dirLock };
       }
     }
 
