@@ -251,6 +251,7 @@ export const zhCN: MessageSchema = {
     send: "发送",
     stop: "终止",
     stopExecution: "终止执行",
+    stopExecutionFailed: "终止执行失败",
     cancelled: "已取消",
     cancelledByUser: "执行已由用户终止",
     sendMessageShortcut: "发送消息 ({shortcut})",

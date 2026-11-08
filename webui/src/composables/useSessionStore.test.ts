@@ -1459,4 +1459,81 @@ describe("useSessionStore", () => {
       expect(store.activeSession.value?.dirLock).toBeUndefined();
     });
   });
+
+  describe("stopExecution", () => {
+    it("stops running session, resets isRunning optimistically, and clears queue", async () => {
+      const stopSpy = vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
+      const store = useSessionStore();
+      store.activeSessionId.value = "chat-stop-1";
+      store.isRunning.value = true;
+      store.loading.value = true;
+      store.queuedMessages.value = [
+        {
+          id: "q1",
+          chatId: "chat-stop-1",
+          prompt: "queued",
+          model: "m",
+          createdAt: "2026-11-08T00:00:00Z",
+          updatedAt: "2026-11-08T00:00:00Z",
+        },
+      ];
+
+      const ok = await store.stopExecution();
+      expect(ok).toBe(true);
+      expect(stopSpy).toHaveBeenCalledWith("chat-stop-1");
+      expect(store.isRunning.value).toBe(false);
+      expect(store.loading.value).toBe(false);
+      expect(store.queuedMessages.value).toEqual([]);
+      expect(store.isStoppingSession.value).toBe(false);
+    });
+
+    it("prevents concurrent stop calls while one is in progress", async () => {
+      let resolveStop: (val: boolean) => void = () => {};
+      const stopPromise = new Promise<boolean>((resolve) => {
+        resolveStop = resolve;
+      });
+      const stopSpy = vi.spyOn(api, "stopSessionExecution").mockReturnValue(stopPromise);
+      const store = useSessionStore();
+      store.activeSessionId.value = "chat-stop-2";
+      store.isRunning.value = true;
+
+      const p1 = store.stopExecution();
+      expect(store.isStoppingSession.value).toBe(true);
+      const p2 = store.stopExecution();
+      expect(await p2).toBe(false);
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+
+      resolveStop(true);
+      expect(await p1).toBe(true);
+      expect(store.isStoppingSession.value).toBe(false);
+    });
+
+    it("prevents sending new messages while stopExecution is in progress", async () => {
+      let resolveStop: (val: boolean) => void = () => {};
+      const stopPromise = new Promise<boolean>((resolve) => {
+        resolveStop = resolve;
+      });
+      vi.spyOn(api, "stopSessionExecution").mockReturnValue(stopPromise);
+      const triggerSpy = vi
+        .spyOn(api, "triggerAgentMessage")
+        .mockResolvedValue({ status: "accepted", chatId: "chat-stop-3" });
+
+      const store = useSessionStore();
+      store.activeSessionId.value = "chat-stop-3";
+      store.sessions.value = [
+        { chatID: "chat-stop-3", title: "Stop Chat", currentAgent: "agent-1", runDir: "/tmp" },
+      ];
+      store.isRunning.value = true;
+
+      const stopCall = store.stopExecution();
+      expect(store.isStoppingSession.value).toBe(true);
+
+      // Attempt sending while stop is in-flight
+      await store.sendMessage("should be rejected");
+      expect(triggerSpy).not.toHaveBeenCalled();
+
+      resolveStop(true);
+      await stopCall;
+    });
+  });
 });

@@ -252,6 +252,7 @@ export const en = {
     sendMessageShortcut: "Send message ({shortcut})",
     stop: "Stop",
     stopExecution: "Stop execution",
+    stopExecutionFailed: "Failed to stop execution",
     cancelled: "Cancelled",
     cancelledByUser: "Execution stopped by user",
     pressToSend: "Press {mod} + Enter to send",

@@ -411,24 +411,32 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   // stopExecution aborts the in-flight task of a session (defaults to the
   // active session). The backend broadcasts queue/status/done over SSE; the
   // local state is reset optimistically so the input unlocks immediately.
+  const isStoppingSession = ref(false);
   const stopExecution = async (sessionId?: string): Promise<boolean> => {
     const targetId = sessionId || activeSessionId.value;
-    if (!targetId) return false;
-    const ok = await stopSessionExecution(targetId);
-    if (ok) {
-      queuedMessages.value = [];
-      isRunning.value = false;
-      loading.value = false;
-      workingAgentLabel.value = null;
-      if (activeSession.value) {
-        activeSession.value.isRunning = false;
+    if (!targetId || isStoppingSession.value) return false;
+    isStoppingSession.value = true;
+    try {
+      const ok = await stopSessionExecution(targetId);
+      if (ok) {
+        queuedMessages.value = [];
+        isRunning.value = false;
+        loading.value = false;
+        workingAgentLabel.value = null;
+        if (activeSession.value) {
+          activeSession.value.isRunning = false;
+        }
+        const idx = sessions.value.findIndex((s) => s.chatID === targetId);
+        if (idx > -1) {
+          sessions.value[idx] = { ...sessions.value[idx], isRunning: false };
+        }
+      } else {
+        useToast().error(t("chat.stopExecutionFailed"));
       }
-      const idx = sessions.value.findIndex((s) => s.chatID === targetId);
-      if (idx > -1) {
-        sessions.value[idx] = { ...sessions.value[idx], isRunning: false };
-      }
+      return ok;
+    } finally {
+      isStoppingSession.value = false;
     }
-    return ok;
   };
 
   const sendMessage = async (
@@ -444,6 +452,10 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     },
   ) => {
     let currentThreadId = activeSessionId.value;
+
+    if (currentThreadId && isStoppingSession.value) {
+      return;
+    }
 
     if (currentThreadId && (isRunning.value || queuedMessages.value.length > 0)) {
       if (
@@ -470,7 +482,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
     if (currentThreadId) {
       const activeSess = sessions.value.find((s) => s.chatID === currentThreadId);
-      if (activeSess?.isRunning || isInputBusy.value) {
+      if (activeSess?.isRunning || isInputBusy.value || isStoppingSession.value) {
         return;
       }
     }
@@ -727,6 +739,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     loading,
     workingAgentLabel,
     isInputBusy,
+    isStoppingSession,
     openSession,
     closeSession,
     loadSessions,

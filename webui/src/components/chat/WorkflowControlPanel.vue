@@ -148,7 +148,7 @@ const handleStop = () => {
   stopTimer = setTimeout(() => {
     isStopping.value = false;
     stopTimer = null;
-  }, 15000);
+  }, 5000);
 };
 
 onBeforeUnmount(() => {

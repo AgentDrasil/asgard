@@ -90,7 +90,8 @@ const canSend = computed(() => {
 
 // Stop control shown in place of the send button while the agent is running.
 // It stays disabled (spinner) until the backend confirms the stop over SSE and
-// flips isRunning back to false.
+// flips isRunning back to false. A timeout fallback re-enables the button in
+// case the SSE stream never arrives.
 const isStoppingExecution = ref(false);
 let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -118,7 +119,7 @@ const handleStop = () => {
   stopTimer = setTimeout(() => {
     isStoppingExecution.value = false;
     stopTimer = null;
-  }, 15000);
+  }, 5000);
 };
 
 // Sync when parent pushes a new value (e.g. appending diff comments)

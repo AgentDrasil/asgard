@@ -1152,7 +1152,7 @@ describe("ChatInput.vue", () => {
       await nextTick();
       expect(stopBtn.disabled).toBe(true);
 
-      vi.advanceTimersByTime(16000);
+      vi.advanceTimersByTime(6000);
       await nextTick();
       expect(stopBtn.disabled).toBe(false);
       vi.useRealTimers();
