@@ -377,12 +377,71 @@ describe("auth capability discovery", () => {
         // Allow handoff check to complete; since the tab is hidden, no navigation should occur.
         await new Promise((resolve) => setTimeout(resolve, 3100));
         expect(navigations).toHaveLength(0);
+
+        // When the tab becomes visible and tokens are still missing, it should redirect to login.
+        logout();
+        navigations.length = 0;
+        Object.defineProperty(document, "visibilityState", {
+          value: "visible",
+          configurable: true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(navigations).toHaveLength(1);
+        expect(navigations[0]).toContain("/auth/login?redirect=");
       } finally {
         Object.defineProperty(document, "visibilityState", {
           value: "visible",
           configurable: true,
         });
       }
+    });
+
+    it("falls back to in-page dedup when localStorage is blocked without spending 10s timeout", async () => {
+      // Simulate Safari private mode or blocked storage where setItem throws on lock keys.
+      const storageData: Record<string, string> = {
+        asgard_auth: JSON.stringify(TOKENS),
+      };
+      const throwingStorage = {
+        getItem: vi.fn((k: string) => storageData[k] ?? null),
+        setItem: vi.fn((k: string, v: string) => {
+          if (k.startsWith("asgard_auth_refresh_lock")) {
+            throw new Error("QuotaExceededError");
+          }
+          storageData[k] = v;
+        }),
+        removeItem: vi.fn((k: string) => {
+          delete storageData[k];
+        }),
+        clear: vi.fn(() => {
+          for (const k of Object.keys(storageData)) delete storageData[k];
+        }),
+        length: 1,
+        key: vi.fn(() => "asgard_auth"),
+      };
+      Object.defineProperty(window, "localStorage", {
+        value: throwingStorage,
+        configurable: true,
+      });
+
+      const fresh: StoredTokens = {
+        ...TOKENS,
+        access_token: "access-2",
+        refresh_token: "refresh-2",
+      };
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/auth/refresh") return jsonResponse(200, fresh);
+        const auth = new Headers(init?.headers).get("Authorization");
+        return auth === "Bearer access-2" ? jsonResponse(200, { ok: true }) : jsonResponse(401);
+      });
+
+      const startTime = Date.now();
+      const res = await apiFetch("/api/agents");
+      const elapsed = Date.now() - startTime;
+
+      expect(res.status).toBe(200);
+      // Ensure we didn't spin waiting for TAB_LOCK_WAIT_MS (10s)
+      expect(elapsed).toBeLessThan(2000);
     });
 
     it("appends the token to native-channel URLs", () => {

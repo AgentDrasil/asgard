@@ -96,13 +96,16 @@ export function getStoredTokens(): StoredTokens | null {
   }
 }
 
+function getBroadcastChannelCtor(): typeof BroadcastChannel | undefined {
+  if (typeof BroadcastChannel !== "undefined") {
+    return BroadcastChannel;
+  }
+  return (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
+}
+
 function broadcastSessionUpdate(tokens: StoredTokens): void {
   try {
-    const Channel =
-      typeof BroadcastChannel !== "undefined"
-        ? BroadcastChannel
-        : (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel })
-            .BroadcastChannel;
+    const Channel = getBroadcastChannelCtor();
     if (Channel) {
       const channel = new Channel(AUTH_CHANNEL_NAME);
       channel.postMessage({ type: "session_updated", tokens });
@@ -216,11 +219,7 @@ function sessionRefreshedElsewhere(before: SessionStamp): Promise<boolean> {
     };
 
     try {
-      const Channel =
-        typeof BroadcastChannel !== "undefined"
-          ? BroadcastChannel
-          : (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel })
-              .BroadcastChannel;
+      const Channel = getBroadcastChannelCtor();
       if (Channel) {
         channel = new Channel(AUTH_CHANNEL_NAME);
         channel.onmessage = (event: MessageEvent) => {
@@ -293,6 +292,17 @@ function removeTabLock(): void {
   }
 }
 
+function isStorageUsable(): boolean {
+  try {
+    const probe = `${TAB_LOCK_KEY}:probe:${randomId()}`;
+    localStorage.setItem(probe, "1");
+    localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // acquireTabLock serialises refreshes across tabs when Web Locks is unavailable.
 // Every contender publishes its own lock, waits for concurrent writes to
 // surface, then reads back: only the tab whose id survives is the holder. Others
@@ -300,7 +310,14 @@ function removeTabLock(): void {
 // token and one of them is not mistaken for a replay. Returns null when the wait
 // budget is exhausted, in which case the caller may still refresh (the caller
 // re-checks whether another tab already handed off a session).
+// If localStorage is unavailable (e.g. private browsing or storage disabled),
+// acquireTabLock returns a no-op release callback immediately so that callers
+// do not spin and exhaust the 10-second timeout.
 async function acquireTabLock(): Promise<(() => void) | null> {
+  if (!isStorageUsable()) {
+    return () => {};
+  }
+
   const me: TabLock = { id: randomId(), ts: Date.now() };
   const deadline = Date.now() + TAB_LOCK_WAIT_MS;
 
@@ -475,6 +492,20 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
         // state invalidations with active tabs. Wait until the user activates
         // the tab instead.
         if (isTabHidden()) {
+          // Listen for tab activation to re-evaluate the session: another tab
+          // may have logged in or refreshed by the time the user returns. If
+          // still expired, trigger the login redirect.
+          if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+            const onVisible = (): void => {
+              if (document.visibilityState === "visible") {
+                document.removeEventListener("visibilitychange", onVisible);
+                if (!getStoredTokens()?.access_token) {
+                  redirectToLogin();
+                }
+              }
+            };
+            document.addEventListener("visibilitychange", onVisible);
+          }
           return new Promise<Response>(() => {});
         }
         redirectToLogin();
