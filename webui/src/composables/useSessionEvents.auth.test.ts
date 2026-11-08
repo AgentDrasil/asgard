@@ -217,7 +217,7 @@ describe("useSessionEvents auth handling", () => {
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
-    await vi.waitFor(() => expect(navigations).toHaveLength(1));
+    await vi.waitFor(() => expect(navigations).toHaveLength(1), { timeout: 5000 });
     expect(navigations[0]).toBe("/auth/login?redirect=%2Fdashboard");
     expect(MockEventSource.instances).toHaveLength(1);
   });
@@ -237,7 +237,7 @@ describe("useSessionEvents auth handling", () => {
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(100);
     expect(MockEventSource.instances).toHaveLength(1);
     expect(navigations).toHaveLength(0);
 

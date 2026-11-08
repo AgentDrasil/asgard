@@ -227,7 +227,7 @@ describe("auth capability discovery", () => {
       // The promise never settles: the browser is navigating to the provider.
       void apiFetch("/api/agents");
 
-      await vi.waitFor(() => expect(navigations).toHaveLength(1));
+      await vi.waitFor(() => expect(navigations).toHaveLength(1), { timeout: 5000 });
       expect(navigations[0]).toBe("/auth/login?redirect=%2Fdashboard%3Fx%3D1");
     });
 
@@ -305,6 +305,84 @@ describe("auth capability discovery", () => {
         (call: unknown[]) => String(call[0]) === "/auth/refresh",
       );
       expect(refreshes).toHaveLength(1);
+    });
+
+    it("adopts another tab's session when it loses the refresh race", async () => {
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/auth/refresh") {
+          // A concurrent tab exchanged the single-use refresh token first and
+          // published its session before our attempt was rejected as a replay.
+          setStoredTokens({
+            ...TOKENS,
+            access_token: "access-winner",
+            refresh_token: "refresh-winner",
+          });
+          return jsonResponse(401, { error: "invalid_grant" });
+        }
+        const auth = new Headers(init?.headers).get("Authorization");
+        return auth === "Bearer access-winner"
+          ? jsonResponse(200, { ok: true })
+          : jsonResponse(401);
+      });
+
+      const res = await apiFetch("/api/agents");
+      expect(res.status).toBe(200);
+      expect(navigations).toHaveLength(0);
+      expect(getStoredTokens()?.access_token).toBe("access-winner");
+    });
+
+    it("waits for the winning tab to publish its session via storage event", async () => {
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/auth/refresh") {
+          return jsonResponse(401, { error: "invalid_grant" });
+        }
+        const auth = new Headers(init?.headers).get("Authorization");
+        return auth === "Bearer access-winner"
+          ? jsonResponse(200, { ok: true })
+          : jsonResponse(401);
+      });
+
+      const pending = apiFetch("/api/agents");
+      setTimeout(() => {
+        setStoredTokens({
+          ...TOKENS,
+          access_token: "access-winner",
+          refresh_token: "refresh-winner",
+        });
+        window.dispatchEvent(new StorageEvent("storage", { key: "asgard_auth" }));
+      }, 50);
+
+      const res = await pending;
+      expect(res.status).toBe(200);
+      expect(navigations).toHaveLength(0);
+    });
+
+    it("does not redirect to login when refresh fails in a hidden tab", async () => {
+      Object.defineProperty(document, "visibilityState", {
+        value: "hidden",
+        configurable: true,
+      });
+
+      try {
+        fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === "/auth/refresh") return jsonResponse(401, { error: "refresh failed" });
+          return jsonResponse(401);
+        });
+
+        void apiFetch("/api/agents");
+
+        // Allow handoff check to complete; since the tab is hidden, no navigation should occur.
+        await new Promise((resolve) => setTimeout(resolve, 3100));
+        expect(navigations).toHaveLength(0);
+      } finally {
+        Object.defineProperty(document, "visibilityState", {
+          value: "visible",
+          configurable: true,
+        });
+      }
     });
 
     it("appends the token to native-channel URLs", () => {
