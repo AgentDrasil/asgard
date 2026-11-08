@@ -247,6 +247,27 @@ function isTabHidden(): boolean {
   return document.visibilityState === "hidden";
 }
 
+// backgroundTabWaitingRedirect indicates whether a visibilitychange listener
+// is currently pending to re-evaluate auth status upon tab activation.
+let backgroundTabWaitingRedirect = false;
+
+function listenForTabActivationRedirect(): void {
+  if (backgroundTabWaitingRedirect) return;
+  if (typeof document === "undefined" || typeof document.addEventListener !== "function") return;
+
+  backgroundTabWaitingRedirect = true;
+  const onVisible = (): void => {
+    if (document.visibilityState === "visible") {
+      backgroundTabWaitingRedirect = false;
+      document.removeEventListener("visibilitychange", onVisible);
+      if (!getStoredTokens()?.access_token) {
+        redirectToLogin();
+      }
+    }
+  };
+  document.addEventListener("visibilitychange", onVisible);
+}
+
 // refreshing deduplicates refreshes within this tab for browsers without the
 // Web Locks API (old Safari, WebViews, insecure origins).
 let refreshing: Promise<RefreshResult> | null = null;
@@ -293,14 +314,18 @@ function removeTabLock(): void {
 }
 
 function isStorageUsable(): boolean {
+  const probe = `${TAB_LOCK_KEY}:probe:${randomId()}`;
   try {
-    const probe = `${TAB_LOCK_KEY}:probe:${randomId()}`;
     localStorage.setItem(probe, "1");
-    localStorage.removeItem(probe);
-    return true;
   } catch {
     return false;
   }
+  try {
+    localStorage.removeItem(probe);
+  } catch {
+    /* ignore remove failure in degraded storage */
+  }
+  return true;
 }
 
 // acquireTabLock serialises refreshes across tabs when Web Locks is unavailable.
@@ -406,6 +431,7 @@ export async function recoverSession(): Promise<"recovered" | "login" | "retry">
       return "recovered";
     }
     if (isTabHidden()) {
+      listenForTabActivationRedirect();
       return "retry";
     }
     redirectToLogin();
@@ -495,17 +521,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
           // Listen for tab activation to re-evaluate the session: another tab
           // may have logged in or refreshed by the time the user returns. If
           // still expired, trigger the login redirect.
-          if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
-            const onVisible = (): void => {
-              if (document.visibilityState === "visible") {
-                document.removeEventListener("visibilitychange", onVisible);
-                if (!getStoredTokens()?.access_token) {
-                  redirectToLogin();
-                }
-              }
-            };
-            document.addEventListener("visibilitychange", onVisible);
-          }
+          listenForTabActivationRedirect();
           return new Promise<Response>(() => {});
         }
         redirectToLogin();

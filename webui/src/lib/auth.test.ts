@@ -397,51 +397,66 @@ describe("auth capability discovery", () => {
     });
 
     it("falls back to in-page dedup when localStorage is blocked without spending 10s timeout", async () => {
-      // Simulate Safari private mode or blocked storage where setItem throws on lock keys.
-      const storageData: Record<string, string> = {
-        asgard_auth: JSON.stringify(TOKENS),
-      };
-      const throwingStorage = {
-        getItem: vi.fn((k: string) => storageData[k] ?? null),
-        setItem: vi.fn((k: string, v: string) => {
-          if (k.startsWith("asgard_auth_refresh_lock")) {
-            throw new Error("QuotaExceededError");
-          }
-          storageData[k] = v;
-        }),
-        removeItem: vi.fn((k: string) => {
-          delete storageData[k];
-        }),
-        clear: vi.fn(() => {
-          for (const k of Object.keys(storageData)) delete storageData[k];
-        }),
-        length: 1,
-        key: vi.fn(() => "asgard_auth"),
-      };
-      Object.defineProperty(window, "localStorage", {
-        value: throwingStorage,
+      // Explicitly stub navigator.locks to undefined to ensure this test exercises
+      // the localStorage fallback path even if the environment provides Web Locks.
+      const originalLocks = (navigator as any).locks;
+      Object.defineProperty(navigator, "locks", {
+        value: undefined,
         configurable: true,
       });
 
-      const fresh: StoredTokens = {
-        ...TOKENS,
-        access_token: "access-2",
-        refresh_token: "refresh-2",
-      };
-      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url === "/auth/refresh") return jsonResponse(200, fresh);
-        const auth = new Headers(init?.headers).get("Authorization");
-        return auth === "Bearer access-2" ? jsonResponse(200, { ok: true }) : jsonResponse(401);
-      });
+      try {
+        // Simulate Safari private mode or blocked storage where setItem throws on lock keys.
+        const storageData: Record<string, string> = {
+          asgard_auth: JSON.stringify(TOKENS),
+        };
+        const throwingStorage = {
+          getItem: vi.fn<(k: string) => string | null>((k: string) => storageData[k] ?? null),
+          setItem: vi.fn<(k: string, v: string) => void>((k: string, v: string) => {
+            if (k.startsWith("asgard_auth_refresh_lock")) {
+              throw new Error("QuotaExceededError");
+            }
+            storageData[k] = v;
+          }),
+          removeItem: vi.fn<(k: string) => void>((k: string) => {
+            delete storageData[k];
+          }),
+          clear: vi.fn<() => void>(() => {
+            for (const k of Object.keys(storageData)) delete storageData[k];
+          }),
+          length: 1,
+          key: vi.fn<(i: number) => string | null>(() => "asgard_auth"),
+        };
+        Object.defineProperty(window, "localStorage", {
+          value: throwingStorage,
+          configurable: true,
+        });
 
-      const startTime = Date.now();
-      const res = await apiFetch("/api/agents");
-      const elapsed = Date.now() - startTime;
+        const fresh: StoredTokens = {
+          ...TOKENS,
+          access_token: "access-2",
+          refresh_token: "refresh-2",
+        };
+        fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === "/auth/refresh") return jsonResponse(200, fresh);
+          const auth = new Headers(init?.headers).get("Authorization");
+          return auth === "Bearer access-2" ? jsonResponse(200, { ok: true }) : jsonResponse(401);
+        });
 
-      expect(res.status).toBe(200);
-      // Ensure we didn't spin waiting for TAB_LOCK_WAIT_MS (10s)
-      expect(elapsed).toBeLessThan(2000);
+        const startTime = Date.now();
+        const res = await apiFetch("/api/agents");
+        const elapsed = Date.now() - startTime;
+
+        expect(res.status).toBe(200);
+        // Ensure we didn't spin waiting for TAB_LOCK_WAIT_MS (10s)
+        expect(elapsed).toBeLessThan(2000);
+      } finally {
+        Object.defineProperty(navigator, "locks", {
+          value: originalLocks,
+          configurable: true,
+        });
+      }
     });
 
     it("appends the token to native-channel URLs", () => {
