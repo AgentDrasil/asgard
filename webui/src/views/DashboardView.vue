@@ -10,7 +10,7 @@ import { useRunners } from "../composables/useRunners";
 import { formatTimestamp } from "../lib/format";
 import { formatRelativeTime } from "../i18n/timeUtils";
 import { getAgentIcon, formatPath } from "../utils/agentUtils";
-import { formatLockTooltip } from "../utils/dirLockUtils";
+import KanbanSessionCard from "../components/dashboard/KanbanSessionCard.vue";
 import type { ChatSession, AgentInfo } from "../types";
 
 const emit = defineEmits<{
@@ -123,6 +123,7 @@ const queuedSessions = computed(() => {
   return activeSessions.value.filter(
     (s) =>
       !s.isArchived &&
+      s.isRunning &&
       !s.isWaitingForUser &&
       Boolean(s.dirLock?.isWaitingForLock) &&
       filterSession(s, searchQuery.value),
@@ -175,6 +176,7 @@ const totalQueuedCount = computed(() => {
   return activeSessions.value.filter(
     (s) =>
       !s.isArchived &&
+      s.isRunning &&
       !s.isWaitingForUser &&
       Boolean(s.dirLock?.isWaitingForLock) &&
       matchesRunnerFilter(s),
@@ -190,7 +192,8 @@ const totalWaitingCount = computed(() => {
 const totalRecentCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (s.isArchived || s.isRunning || s.isWaitingForUser || s.dirLock?.isWaitingForLock)
+      return false;
     if (!matchesRunnerFilter(s)) return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time < THREE_HOURS_MS;
@@ -200,7 +203,8 @@ const totalRecentCompletedCount = computed(() => {
 const totalCompletedCount = computed(() => {
   const now = Date.now();
   return activeSessions.value.filter((s) => {
-    if (s.isArchived || s.isRunning || s.isWaitingForUser) return false;
+    if (s.isArchived || s.isRunning || s.isWaitingForUser || s.dirLock?.isWaitingForLock)
+      return false;
     if (!matchesRunnerFilter(s)) return false;
     const time = new Date(s.updatedAt || s.createdAt || 0).getTime();
     return now - time >= THREE_HOURS_MS;
@@ -487,106 +491,18 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
-            <div
+            <KanbanSessionCard
               v-for="session in runningSessions"
               :key="session.chatID"
-              class="card bg-base-100 hover:border-primary/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session)"
-              data-test="session-card-running"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <h3
-                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-primary transition-colors"
-                >
-                  {{ session.title || session.chatID }}
-                </h3>
-                <div class="flex items-center gap-1">
-                  <span class="badge badge-xs badge-primary animate-pulse shrink-0">
-                    {{ t("dashboard.cards.runningBadge") }}
-                  </span>
-                  <span
-                    v-if="session.dirLock?.isLocked"
-                    :class="[
-                      'badge badge-xs gap-1 shrink-0',
-                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-                    ]"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-locked"
-                    data-test="badge-locked"
-                  >
-                    <Icon icon="lucide:lock" class="w-3 h-3" />
-                  </span>
-                  <button
-                    v-if="session.dirLock?.canUnlock"
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
-                    :title="t('dirlock.unlockTooltip')"
-                    :aria-label="t('dirlock.unlockTooltip')"
-                    :disabled="isUnlocking[session.chatID]"
-                    :aria-busy="isUnlocking[session.chatID]"
-                    @click.stop="handleUnlock(session, $event)"
-                    data-testid="kanban-unlock-btn"
-                    data-test="kanban-unlock-btn"
-                  >
-                    <Icon
-                      v-if="isUnlocking[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    :title="t('dashboard.cards.archiveTooltip')"
-                    :disabled="isArchiving[session.chatID]"
-                    @click.stop="handleArchive(session, $event)"
-                    data-test="btn-archive"
-                  >
-                    <Icon
-                      v-if="isArchiving[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                <span
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
-                >
-                  <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
-                    class="w-3.5 h-3.5 text-primary"
-                  />
-                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
-                </span>
-                <span
-                  v-if="session.runDir"
-                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
-                  :title="session.runDir"
-                >
-                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ formatPath(session.runDir) }}
-                </span>
-              </div>
-
-              <div
-                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
-              >
-                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  {{
-                    t("dashboard.cards.activeTime", {
-                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
-                    })
-                  }}
-                </span>
-                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
-              </div>
-            </div>
+              :session="session"
+              :agents="agents"
+              variant="running"
+              :is-unlocking="Boolean(isUnlocking[session.chatID])"
+              :is-archiving="Boolean(isArchiving[session.chatID])"
+              @navigate="handleNavigate"
+              @unlock="handleUnlock"
+              @archive="handleArchive"
+            />
 
             <!-- Empty State -->
             <div
@@ -620,113 +536,18 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
-            <div
+            <KanbanSessionCard
               v-for="session in queuedSessions"
               :key="session.chatID"
-              class="card bg-base-100 hover:border-amber-500/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session)"
-              data-test="session-card-queued"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <h3
-                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-amber-500 transition-colors"
-                >
-                  {{ session.title || session.chatID }}
-                </h3>
-                <div class="flex items-center gap-1">
-                  <span
-                    class="badge badge-xs badge-warning gap-1 shrink-0"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-waiting-lock"
-                    data-test="badge-waiting-lock"
-                  >
-                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
-                    {{ t("dashboard.cards.waitingLockBadge") }}
-                  </span>
-                  <span
-                    v-if="session.dirLock?.isLocked"
-                    :class="[
-                      'badge badge-xs gap-1 shrink-0',
-                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-                    ]"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-locked"
-                    data-test="badge-locked"
-                  >
-                    <Icon icon="lucide:lock" class="w-3 h-3" />
-                  </span>
-                  <button
-                    v-if="session.dirLock?.canUnlock"
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
-                    :title="t('dirlock.unlockTooltip')"
-                    :aria-label="t('dirlock.unlockTooltip')"
-                    :disabled="isUnlocking[session.chatID]"
-                    :aria-busy="isUnlocking[session.chatID]"
-                    @click.stop="handleUnlock(session, $event)"
-                    data-testid="kanban-unlock-btn"
-                    data-test="kanban-unlock-btn"
-                  >
-                    <Icon
-                      v-if="isUnlocking[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    :title="t('dashboard.cards.archiveTooltip')"
-                    :disabled="isArchiving[session.chatID]"
-                    @click.stop="handleArchive(session, $event)"
-                    data-test="btn-archive"
-                  >
-                    <Icon
-                      v-if="isArchiving[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                <span
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
-                >
-                  <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
-                    class="w-3.5 h-3.5 text-primary"
-                  />
-                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
-                </span>
-                <span
-                  v-if="session.runDir"
-                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
-                  :title="session.runDir"
-                >
-                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ formatPath(session.runDir) }}
-                </span>
-              </div>
-
-              <div
-                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
-              >
-                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  {{
-                    t("dashboard.cards.activeTime", {
-                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
-                    })
-                  }}
-                </span>
-                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
-              </div>
-            </div>
+              :session="session"
+              :agents="agents"
+              variant="queued"
+              :is-unlocking="Boolean(isUnlocking[session.chatID])"
+              :is-archiving="Boolean(isArchiving[session.chatID])"
+              @navigate="handleNavigate"
+              @unlock="handleUnlock"
+              @archive="handleArchive"
+            />
 
             <!-- Empty State -->
             <div
@@ -757,117 +578,18 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
-            <div
+            <KanbanSessionCard
               v-for="session in waitingSessions"
               :key="session.chatID"
-              class="card bg-base-100 hover:border-warning/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session)"
-              data-test="session-card-waiting"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <h3
-                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-warning transition-colors"
-                >
-                  {{ session.title || session.chatID }}
-                </h3>
-                <div class="flex items-center gap-1">
-                  <span
-                    v-if="session.dirLock?.isWaitingForLock"
-                    class="badge badge-xs badge-warning gap-1 shrink-0"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-waiting-lock"
-                    data-test="badge-waiting-lock"
-                  >
-                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
-                    {{ t("dashboard.cards.waitingLockBadge") }}
-                  </span>
-                  <span v-else class="badge badge-xs badge-warning shrink-0">
-                    {{ t("dashboard.cards.waitingBadge") }}
-                  </span>
-                  <span
-                    v-if="session.dirLock?.isLocked"
-                    :class="[
-                      'badge badge-xs gap-1 shrink-0',
-                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-                    ]"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-locked"
-                    data-test="badge-locked"
-                  >
-                    <Icon icon="lucide:lock" class="w-3 h-3" />
-                  </span>
-                  <button
-                    v-if="session.dirLock?.canUnlock"
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
-                    :title="t('dirlock.unlockTooltip')"
-                    :aria-label="t('dirlock.unlockTooltip')"
-                    :disabled="isUnlocking[session.chatID]"
-                    :aria-busy="isUnlocking[session.chatID]"
-                    @click.stop="handleUnlock(session, $event)"
-                    data-testid="kanban-unlock-btn"
-                    data-test="kanban-unlock-btn"
-                  >
-                    <Icon
-                      v-if="isUnlocking[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    :title="t('dashboard.cards.archiveTooltip')"
-                    :disabled="isArchiving[session.chatID]"
-                    @click.stop="handleArchive(session, $event)"
-                    data-test="btn-archive"
-                  >
-                    <Icon
-                      v-if="isArchiving[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                <span
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
-                >
-                  <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
-                    class="w-3.5 h-3.5 text-warning"
-                  />
-                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
-                </span>
-                <span
-                  v-if="session.runDir"
-                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
-                  :title="session.runDir"
-                >
-                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ formatPath(session.runDir) }}
-                </span>
-              </div>
-
-              <div
-                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
-              >
-                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  {{
-                    t("dashboard.cards.askedTime", {
-                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
-                    })
-                  }}
-                </span>
-                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
-              </div>
-            </div>
+              :session="session"
+              :agents="agents"
+              variant="waiting"
+              :is-unlocking="Boolean(isUnlocking[session.chatID])"
+              :is-archiving="Boolean(isArchiving[session.chatID])"
+              @navigate="handleNavigate"
+              @unlock="handleUnlock"
+              @archive="handleArchive"
+            />
 
             <!-- Empty State -->
             <div
@@ -900,117 +622,18 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
-            <div
+            <KanbanSessionCard
               v-for="session in recentCompletedSessions"
               :key="session.chatID"
-              class="card bg-base-100 hover:border-success/50 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session)"
-              data-test="session-card-recent-completed"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <h3
-                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-success transition-colors"
-                >
-                  {{ session.title || session.chatID }}
-                </h3>
-                <div class="flex items-center gap-1">
-                  <span
-                    v-if="session.dirLock?.isWaitingForLock"
-                    class="badge badge-xs badge-warning gap-1 shrink-0"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-waiting-lock"
-                    data-test="badge-waiting-lock"
-                  >
-                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
-                    {{ t("dashboard.cards.waitingLockBadge") }}
-                  </span>
-                  <span v-else class="badge badge-xs badge-success shrink-0">
-                    {{ t("dashboard.cards.recentCompletedBadge") }}
-                  </span>
-                  <span
-                    v-if="session.dirLock?.isLocked"
-                    :class="[
-                      'badge badge-xs gap-1 shrink-0',
-                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-                    ]"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-locked"
-                    data-test="badge-locked"
-                  >
-                    <Icon icon="lucide:lock" class="w-3 h-3" />
-                  </span>
-                  <button
-                    v-if="session.dirLock?.canUnlock"
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
-                    :title="t('dirlock.unlockTooltip')"
-                    :aria-label="t('dirlock.unlockTooltip')"
-                    :disabled="isUnlocking[session.chatID]"
-                    :aria-busy="isUnlocking[session.chatID]"
-                    @click.stop="handleUnlock(session, $event)"
-                    data-testid="kanban-unlock-btn"
-                    data-test="kanban-unlock-btn"
-                  >
-                    <Icon
-                      v-if="isUnlocking[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    :title="t('dashboard.cards.archiveTooltip')"
-                    :disabled="isArchiving[session.chatID]"
-                    @click.stop="handleArchive(session, $event)"
-                    data-test="btn-archive"
-                  >
-                    <Icon
-                      v-if="isArchiving[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                <span
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
-                >
-                  <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
-                    class="w-3.5 h-3.5 text-success"
-                  />
-                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
-                </span>
-                <span
-                  v-if="session.runDir"
-                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
-                  :title="session.runDir"
-                >
-                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ formatPath(session.runDir) }}
-                </span>
-              </div>
-
-              <div
-                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
-              >
-                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  {{
-                    t("dashboard.cards.completedTime", {
-                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
-                    })
-                  }}
-                </span>
-                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
-              </div>
-            </div>
+              :session="session"
+              :agents="agents"
+              variant="recentCompleted"
+              :is-unlocking="Boolean(isUnlocking[session.chatID])"
+              :is-archiving="Boolean(isArchiving[session.chatID])"
+              @navigate="handleNavigate"
+              @unlock="handleUnlock"
+              @archive="handleArchive"
+            />
 
             <!-- Empty State -->
             <div
@@ -1043,117 +666,18 @@ const handleUnlock = async (session: ChatSession, event?: Event) => {
 
           <!-- Column Cards List -->
           <div class="flex flex-col gap-3 flex-1">
-            <div
+            <KanbanSessionCard
               v-for="session in completedSessions"
               :key="session.chatID"
-              class="card bg-base-100 hover:border-base-content/30 border border-base-300 shadow-sm hover:shadow-md transition-all cursor-pointer p-4 group"
-              @click="handleNavigate(session)"
-              data-test="session-card-completed"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <h3
-                  class="font-medium text-sm text-base-content line-clamp-2 flex-1 group-hover:text-primary transition-colors"
-                >
-                  {{ session.title || session.chatID }}
-                </h3>
-                <div class="flex items-center gap-1">
-                  <span
-                    v-if="session.dirLock?.isWaitingForLock"
-                    class="badge badge-xs badge-warning gap-1 shrink-0"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-waiting-lock"
-                    data-test="badge-waiting-lock"
-                  >
-                    <Icon icon="lucide:clock" class="w-3 h-3 animate-pulse" />
-                    {{ t("dashboard.cards.waitingLockBadge") }}
-                  </span>
-                  <span v-else class="badge badge-xs badge-neutral shrink-0">
-                    {{ t("dashboard.cards.completedBadge") }}
-                  </span>
-                  <span
-                    v-if="session.dirLock?.isLocked"
-                    :class="[
-                      'badge badge-xs gap-1 shrink-0',
-                      session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-                    ]"
-                    :title="formatLockTooltip(session.dirLock, t)"
-                    :aria-label="formatLockTooltip(session.dirLock, t)"
-                    data-testid="badge-locked"
-                    data-test="badge-locked"
-                  >
-                    <Icon icon="lucide:lock" class="w-3 h-3" />
-                  </span>
-                  <button
-                    v-if="session.dirLock?.canUnlock"
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square text-accent hover:bg-accent/15"
-                    :title="t('dirlock.unlockTooltip')"
-                    :aria-label="t('dirlock.unlockTooltip')"
-                    :disabled="isUnlocking[session.chatID]"
-                    :aria-busy="isUnlocking[session.chatID]"
-                    @click.stop="handleUnlock(session, $event)"
-                    data-testid="kanban-unlock-btn"
-                    data-test="kanban-unlock-btn"
-                  >
-                    <Icon
-                      v-if="isUnlocking[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:lock-open" class="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs btn-square opacity-70 hover:opacity-100 hover:text-error"
-                    :title="t('dashboard.cards.archiveTooltip')"
-                    :disabled="isArchiving[session.chatID]"
-                    @click.stop="handleArchive(session, $event)"
-                    data-test="btn-archive"
-                  >
-                    <Icon
-                      v-if="isArchiving[session.chatID]"
-                      icon="lucide:loader-2"
-                      class="w-3.5 h-3.5 animate-spin"
-                    />
-                    <Icon v-else icon="lucide:archive" class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                <span
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-base-200 font-mono"
-                >
-                  <Icon
-                    :icon="getAgentIcon(session.currentAgent, agents, null, session.agentIcon)"
-                    class="w-3.5 h-3.5 text-base-content/70"
-                  />
-                  {{ session.currentAgent || t("dashboard.cards.defaultAgent") }}
-                </span>
-                <span
-                  v-if="session.runDir"
-                  class="inline-flex items-center gap-1 text-base-content/60 truncate max-w-[160px]"
-                  :title="session.runDir"
-                >
-                  <Icon icon="lucide:folder" class="w-3.5 h-3.5 shrink-0" />
-                  {{ formatPath(session.runDir) }}
-                </span>
-              </div>
-
-              <div
-                class="mt-3 pt-2 border-t border-base-200 flex items-center justify-between text-[11px] text-base-content/50"
-              >
-                <span :title="formatTimestamp(session.updatedAt || session.createdAt)">
-                  {{
-                    t("dashboard.cards.completedTime", {
-                      time: formatRelativeTime(session.updatedAt || session.createdAt, t),
-                    })
-                  }}
-                </span>
-                <span class="font-mono">{{ session.chatID.slice(0, 8) }}</span>
-              </div>
-            </div>
+              :session="session"
+              :agents="agents"
+              variant="completed"
+              :is-unlocking="Boolean(isUnlocking[session.chatID])"
+              :is-archiving="Boolean(isArchiving[session.chatID])"
+              @navigate="handleNavigate"
+              @unlock="handleUnlock"
+              @archive="handleArchive"
+            />
 
             <!-- Empty State -->
             <div

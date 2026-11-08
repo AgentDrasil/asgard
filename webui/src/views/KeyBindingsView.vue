@@ -36,7 +36,6 @@ const selectedOS = ref<SupportedOS>(currentOS.value);
 const searchQuery = ref("");
 const recordingActionId = ref<string | null>(null);
 const recordingKeyIndex = ref<number | null>(null); // null = record from scratch / replace, >=0 = edit index, -1 = add new slot
-const recordingKeys = ref<string[]>([]);
 const isSaving = ref(false);
 
 const MAX_SHORTCUTS_PER_ACTION = 3;
@@ -156,13 +155,11 @@ const startRecording = (actionId: string, index: number | null = null) => {
   if (!isCurrentOS.value) return;
   recordingActionId.value = actionId;
   recordingKeyIndex.value = index;
-  recordingKeys.value = [];
 };
 
 const stopRecording = () => {
   recordingActionId.value = null;
   recordingKeyIndex.value = null;
-  recordingKeys.value = [];
 };
 
 const handleKeyDown = (event: KeyboardEvent) => {
@@ -216,18 +213,22 @@ const handleKeyDown = (event: KeyboardEvent) => {
       updateShortcut(actionId, [recordedShortcut], selectedOS.value);
     } else if (index === -1) {
       // Append as new shortcut (up to 3)
-      if (!currentList.includes(recordedShortcut)) {
-        if (currentList.length < MAX_SHORTCUTS_PER_ACTION) {
-          currentList.push(recordedShortcut);
-        }
+      if (currentList.includes(recordedShortcut)) {
+        toast.warning(t("keybindings.duplicateShortcut"));
+      } else if (currentList.length >= MAX_SHORTCUTS_PER_ACTION) {
+        toast.warning(t("keybindings.maxShortcutsReached"));
+      } else {
+        currentList.push(recordedShortcut);
+        updateShortcut(actionId, currentList, selectedOS.value);
       }
-      updateShortcut(actionId, currentList, selectedOS.value);
     } else if (index >= 0 && index < currentList.length) {
       // Replace existing at index
-      currentList[index] = recordedShortcut;
-      // Deduplicate keeping order
-      const deduped = Array.from(new Set(currentList));
-      updateShortcut(actionId, deduped, selectedOS.value);
+      if (currentList[index] !== recordedShortcut && currentList.includes(recordedShortcut)) {
+        toast.warning(t("keybindings.duplicateShortcut"));
+      } else {
+        currentList[index] = recordedShortcut;
+        updateShortcut(actionId, currentList, selectedOS.value);
+      }
     }
   }
   stopRecording();
@@ -235,6 +236,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 const handleRemoveShortcutIndex = (actionId: string, index: number) => {
   if (!isCurrentOS.value) return;
+  if (recordingActionId.value !== null) {
+    stopRecording();
+  }
   const currentList = [...(selectedOSBindings.value[actionId] || [])];
   if (index >= 0 && index < currentList.length) {
     currentList.splice(index, 1);
@@ -485,9 +489,10 @@ onUnmounted(() => {
                           <button
                             v-else
                             type="button"
-                            class="kbd kbd-sm font-mono text-xs shadow-xs transition-colors hover:border-primary cursor-pointer"
+                            class="kbd kbd-sm font-mono text-xs shadow-xs transition-colors hover:border-primary hover:bg-base-200 cursor-pointer"
                             :title="t('keybindings.recordTitle')"
-                            :disabled="!isCurrentOS"
+                            :aria-label="`${t('keybindings.recordTitle')}: ${formatShortcutDisplay(key, selectedOS)}`"
+                            :disabled="!isCurrentOS || recordingActionId !== null"
                             @click="startRecording(action.id, idx)"
                           >
                             {{ formatShortcutDisplay(key, selectedOS) }}
@@ -499,6 +504,8 @@ onUnmounted(() => {
                             type="button"
                             class="btn btn-ghost btn-circle btn-2xs text-base-content/40 hover:text-error hover:bg-base-300"
                             :title="t('keybindings.removeShortcutTitle')"
+                            :aria-label="t('keybindings.removeShortcutTitle')"
+                            :disabled="recordingActionId !== null"
                             @click="handleRemoveShortcutIndex(action.id, idx)"
                           >
                             <Icon icon="material-symbols:close" class="w-3 h-3" />
@@ -533,9 +540,7 @@ onUnmounted(() => {
                       @click="startRecording(action.id, -1)"
                     >
                       <Icon icon="material-symbols:add" class="w-3.5 h-3.5" />
-                      <span class="hidden md:inline">{{
-                        t("common.actions") === "Actions" ? "+ Add" : "+ 添加"
-                      }}</span>
+                      <span class="hidden md:inline">+ {{ t("keybindings.add") }}</span>
                     </button>
 
                     <!-- Record new shortcut (shown when unassigned or quick record) -->

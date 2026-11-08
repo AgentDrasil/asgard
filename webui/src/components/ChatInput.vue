@@ -193,6 +193,10 @@ watch(voiceError, (code) => {
 });
 
 const handleVoiceToggle = () => {
+  if (props.isRunning) {
+    toast.info(t("chat.voiceLockedWhileRunning"));
+    return;
+  }
   if (isVoiceDisabled.value) return;
   if (isRecording.value || isConnecting.value) {
     void stopRecording();
@@ -394,19 +398,6 @@ const handleDrop = (e: DragEvent) => {
         @remove="removeAttachment"
       />
 
-      <!-- Voice Recording Interim Preview Banner -->
-      <div
-        v-if="isRecording && (livePreviewText || interimText)"
-        class="flex items-center gap-2 px-3 py-2 bg-base-200/90 border border-primary/30 rounded-xl text-xs text-base-content/90 animate-fade-in shadow-xs"
-        data-testid="voice-preview-banner"
-      >
-        <span class="loading loading-ring loading-xs text-primary shrink-0"></span>
-        <span class="font-medium text-primary shrink-0">{{ $t("chat.recording") }}</span>
-        <span class="truncate italic opacity-85">
-          {{ livePreviewText || interimText || $t("chat.voiceInterimPlaceholder") }}
-        </span>
-      </div>
-
       <!-- Queue Limit Alert Banner -->
       <div
         v-if="isQueueFull"
@@ -531,19 +522,6 @@ const handleDrop = (e: DragEvent) => {
             :is-uploading="isUploading"
             @remove="removeAttachment"
           />
-        </div>
-
-        <!-- Voice Recording Interim Preview Banner inside Modal -->
-        <div
-          v-if="isRecording && (livePreviewText || interimText)"
-          class="flex items-center gap-2 px-3 py-2 mb-3 bg-base-200/90 border border-primary/30 rounded-xl text-xs text-base-content/90 animate-fade-in shadow-xs"
-          data-testid="modal-voice-preview-banner"
-        >
-          <span class="loading loading-ring loading-xs text-primary shrink-0"></span>
-          <span class="font-medium text-primary shrink-0">{{ $t("chat.recording") }}</span>
-          <span class="truncate italic opacity-85">
-            {{ livePreviewText || interimText || $t("chat.voiceInterimPlaceholder") }}
-          </span>
         </div>
 
         <div class="flex-1 min-h-[250px] flex flex-col mb-4">

@@ -592,7 +592,7 @@ describe("ChatInput.vue", () => {
       app.unmount();
     });
 
-    it("should render interim text preview banner when recording with interimText or livePreviewText", async () => {
+    it("should render interim text preview in VoiceInputModal when recording with interimText or livePreviewText", async () => {
       const app = createApp({
         render() {
           return h(ChatInput, {
@@ -604,16 +604,15 @@ describe("ChatInput.vue", () => {
       app.use(i18n);
       app.mount(root);
 
-      expect(root.querySelector('[data-testid="voice-preview-banner"]')).toBeNull();
+      expect(root.querySelector('[data-testid="voice-modal-pending-text"]')).toBeNull();
 
       mockVoiceInputState.isRecording.value = true;
       mockVoiceInputState.livePreviewText.value = "Hello from speech";
       await nextTick();
 
-      const banner = root.querySelector('[data-testid="voice-preview-banner"]');
-      expect(banner).not.toBeNull();
-      expect(banner?.textContent).toContain("Hello from speech");
-      expect(banner?.textContent).toContain("Recording...");
+      const modalText = root.querySelector('[data-testid="voice-modal-pending-text"]');
+      expect(modalText).not.toBeNull();
+      expect(modalText?.textContent).toContain("Hello from speech");
 
       app.unmount();
     });
@@ -834,6 +833,15 @@ describe("ChatInput.vue", () => {
     });
 
     it("locks both voice input and attachment buttons when isRunning is true", async () => {
+      const toastModule = await import("../composables/useToast");
+      const mockToastInfo = vi.fn<(...args: any[]) => void>();
+      vi.spyOn(toastModule, "useToast").mockReturnValue({
+        error: vi.fn<(...args: any[]) => void>(),
+        success: vi.fn<(...args: any[]) => void>(),
+        warning: vi.fn<(...args: any[]) => void>(),
+        info: mockToastInfo,
+      } as any);
+
       const app = createApp({
         render() {
           return h(ChatInput, {
@@ -862,7 +870,7 @@ describe("ChatInput.vue", () => {
       expect(attachBtn).not.toBeNull();
       expect(attachBtn.disabled).toBe(true);
 
-      // Triggering voice shortcut should be ignored when running
+      // Triggering voice shortcut should be ignored and show toast when running
       const voiceShortcutEvent = new KeyboardEvent("keydown", {
         ctrlKey: true,
         altKey: true,
@@ -873,6 +881,7 @@ describe("ChatInput.vue", () => {
       window.dispatchEvent(voiceShortcutEvent);
       await nextTick();
       expect(mockVoiceInputState.startRecording).not.toHaveBeenCalled();
+      expect(mockToastInfo).toHaveBeenCalledWith("Voice input is locked while agent is running.");
 
       app.unmount();
     });

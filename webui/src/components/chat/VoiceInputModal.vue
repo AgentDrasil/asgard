@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
 import { t } from "../../i18n";
 
@@ -33,10 +33,38 @@ const handleStop = () => {
 const handleCancel = () => {
   emit("cancel");
 };
+
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.key === "Escape" && props.isOpen) {
+    e.preventDefault();
+    handleCancel();
+  }
+};
+
+watch(
+  () => props.isOpen,
+  (open) => {
+    if (open) {
+      window.addEventListener("keydown", handleKeyDown);
+    } else {
+      window.removeEventListener("keydown", handleKeyDown);
+    }
+  },
+  { immediate: true },
+);
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+});
 </script>
 
 <template>
-  <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': isOpen }">
+  <dialog
+    role="dialog"
+    aria-modal="true"
+    class="modal modal-bottom sm:modal-middle"
+    :class="{ 'modal-open': isOpen }"
+  >
     <div
       class="modal-box w-full max-w-xl p-5 sm:p-6 bg-base-100 text-base-content border border-base-300 shadow-2xl rounded-t-3xl sm:rounded-2xl flex flex-col gap-4 max-h-[85vh] sm:max-h-[75vh]"
       data-testid="voice-input-modal"
