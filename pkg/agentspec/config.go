@@ -19,6 +19,37 @@ const (
 	LockModeReadOnly  LockMode = "readonly"
 )
 
+// WorktreeConfig lets an agent offer git worktree isolation. The user opts in
+// per chat; the runner then creates the worktree under Root and runs the agent
+// there instead of in the shared run directory.
+type WorktreeConfig struct {
+	// Enabled offers the worktree option for git run directories.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Root is the directory the per-chat worktrees are created in. It must not
+	// overlap any run or read-write mount directory, otherwise the worktree
+	// would contend for the same directory lock as the main checkout.
+	Root string `yaml:"root" json:"root"`
+}
+
+// WorktreeRun is the per-run description of a chat's git worktree, set by the
+// runner on the effective config once the worktree exists (never loaded from
+// YAML). The sandboxes bind exactly these paths writable inside the otherwise
+// read-only git directory, so the agent can commit on its own branch
+// namespace but cannot touch other refs, the config, or the shared objects.
+type WorktreeRun struct {
+	// GitDir is the main repository's common git directory (<repo>/.git).
+	GitDir string
+	// Name is the worktree's administrative name under GitDir/worktrees.
+	Name string
+	// RefNamespace is the branch prefix owned by this chat, relative to
+	// refs/heads (for example "asgard/<chat-id>").
+	RefNamespace string
+	// ObjectsDir is the chat's private object directory; the shared object
+	// store stays read-only and is only an alternate.
+	ObjectsDir string
+}
+
 type MaskMode string
 
 const (
@@ -378,6 +409,13 @@ type AgentConfig struct {
 	// LockMode controls file locking mode: "exclusive" (default) or "readonly".
 	LockMode LockMode `yaml:"lock_mode,omitempty" json:"lock_mode,omitempty"`
 
+	// Worktree optionally offers per-chat git worktree isolation.
+	Worktree WorktreeConfig `yaml:"worktree,omitempty" json:"worktree,omitempty"`
+
+	// WorktreeRun is runtime state for a run inside a chat's worktree; the
+	// run directories of such an effective config are the worktree only.
+	WorktreeRun *WorktreeRun `yaml:"-" json:"-"`
+
 	// SessionMode controls whether the CLI session is resumed across calls.
 	// "resume" (default): reuse the previous session ID stored in DB.
 	// "fresh": always start a new session; do not persist the returned session ID.
@@ -501,6 +539,10 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 		}
 	}
 
+	if err := cfg.validateWorktree(); err != nil {
+		return err
+	}
+
 	for _, dir := range cfg.MountDirs.ReadOnly {
 		if err := validateConfigPath(dir, "mount readonly directory"); err != nil {
 			return err
@@ -560,6 +602,55 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	}
 
 	return nil
+}
+
+func (cfg *AgentConfig) validateWorktree() error {
+	wt := cfg.Worktree
+	if !wt.Enabled {
+		if wt.Root != "" {
+			return fmt.Errorf("worktree.root is set but worktree is not enabled")
+		}
+		return nil
+	}
+	if cfg.IsReadOnly() {
+		return fmt.Errorf("agent with lock_mode %q cannot enable worktree", cfg.LockMode)
+	}
+	if err := validateConfigPath(wt.Root, "worktree root"); err != nil {
+		return err
+	}
+	if strings.ContainsAny(wt.Root, "*?[") {
+		return fmt.Errorf("worktree root cannot contain glob patterns: %q", wt.Root)
+	}
+	if len(cfg.RunDirs) == 0 {
+		return fmt.Errorf("worktree requires at least one run_dir")
+	}
+
+	var rwMounts []string
+	for _, entry := range cfg.MountDirs.EffectiveReadWriteEntries() {
+		rwMounts = append(rwMounts, entry.Path)
+	}
+	for _, dir := range append(append([]string(nil), cfg.RunDirs...), rwMounts...) {
+		if pathsOverlap(wt.Root, dir) {
+			return fmt.Errorf("worktree root %q overlaps directory %q", wt.Root, dir)
+		}
+	}
+	// A writable mount over a run dir would hand the agent the main checkout
+	// the worktree is meant to keep it out of.
+	for _, rw := range rwMounts {
+		for _, run := range cfg.RunDirs {
+			if pathsOverlap(rw, run) {
+				return fmt.Errorf("worktree: readwrite mount %q overlaps run directory %q", rw, run)
+			}
+		}
+	}
+	return nil
+}
+
+// pathsOverlap reports whether a and b are equal or one contains the other.
+func pathsOverlap(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	return a == b || a == "/" || b == "/" ||
+		strings.HasPrefix(b, a+"/") || strings.HasPrefix(a, b+"/")
 }
 
 func validateConfigPath(path string, desc string) error {

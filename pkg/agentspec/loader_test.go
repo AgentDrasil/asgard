@@ -1573,3 +1573,125 @@ func TestMountConfig_MaskRuleFor_Glob(t *testing.T) {
 	require.NotNil(t, matchedSub)
 	assert.Equal(t, []string{"keep-dir"}, matchedSub.KeepRW)
 }
+
+func TestAgentConfig_Validate_Worktree(t *testing.T) {
+	t.Parallel()
+
+	supportedCLIs := map[string][]string{"opencode": {"deepseek-chat"}}
+	baseConfig := func() AgentConfig {
+		return AgentConfig{
+			ID:          "test-agent",
+			Name:        "test-agent",
+			Description: "Test agent description",
+			CLI:         []CLITarget{{CLI: "opencode", Model: "deepseek-chat"}},
+			RunDirs:     []string{"/workspace/src/repo"},
+			Worktree:    WorktreeConfig{Enabled: true, Root: "/workspace/src/wt"},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		modify    func(cfg *AgentConfig)
+		errSubstr string
+	}{
+		{name: "valid sibling root", modify: func(cfg *AgentConfig) {}},
+		{
+			name:   "disabled without root",
+			modify: func(cfg *AgentConfig) { cfg.Worktree = WorktreeConfig{} },
+		},
+		{
+			name:      "root without enabled",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Enabled = false },
+			errSubstr: "not enabled",
+		},
+		{
+			name:      "missing root",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "" },
+			errSubstr: "worktree root cannot be empty",
+		},
+		{
+			name:      "relative root",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "wt" },
+			errSubstr: "absolute",
+		},
+		{
+			name:      "glob root",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "/workspace/src/w*" },
+			errSubstr: "glob",
+		},
+		{
+			name:      "root inside run dir",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "/workspace/src/repo/wt" },
+			errSubstr: "overlaps",
+		},
+		{
+			name:      "root contains run dir",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "/workspace/src" },
+			errSubstr: "overlaps",
+		},
+		{
+			name:      "root equals run dir",
+			modify:    func(cfg *AgentConfig) { cfg.Worktree.Root = "/workspace/src/repo/" },
+			errSubstr: "overlaps",
+		},
+		{
+			name:   "similar prefix is not overlap",
+			modify: func(cfg *AgentConfig) { cfg.Worktree.Root = "/workspace/src/repo-wt" },
+		},
+		{
+			name: "root overlaps rw mount",
+			modify: func(cfg *AgentConfig) {
+				cfg.MountDirs.ReadWrite = []string{"/workspace/src/wt/shared"}
+			},
+			errSubstr: "overlaps",
+		},
+		{
+			name: "readonly agent cannot enable",
+			modify: func(cfg *AgentConfig) {
+				cfg.LockMode = LockModeReadOnly
+			},
+			errSubstr: "cannot enable worktree",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig()
+			tt.modify(&cfg)
+			err := cfg.ValidateWithCLIs(supportedCLIs)
+			if tt.errSubstr != "" {
+				require.ErrorContains(t, err, tt.errSubstr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestAgentConfig_Worktree_YAML(t *testing.T) {
+	t.Parallel()
+
+	var cfg AgentConfig
+	require.NoError(t, yaml.Unmarshal([]byte("worktree:\n  enabled: true\n  root: /workspace/src/wt\n"), &cfg))
+	assert.Equal(t, WorktreeConfig{Enabled: true, Root: "/workspace/src/wt"}, cfg.Worktree)
+}
+
+func TestAgentConfig_Validate_WorktreeRWMountOverRunDir(t *testing.T) {
+	t.Parallel()
+
+	cfg := AgentConfig{
+		ID: "a", Name: "a", Description: "d",
+		CLI:      []CLITarget{{CLI: "opencode", Model: "deepseek-chat"}},
+		RunDirs:  []string{"/workspace/src/repo"},
+		Worktree: WorktreeConfig{Enabled: true, Root: "/workspace/wt"},
+	}
+	cfg.MountDirs.ReadWrite = []string{"/workspace/src"}
+	err := cfg.ValidateWithCLIs(map[string][]string{"opencode": {"deepseek-chat"}})
+	require.ErrorContains(t, err, "readwrite mount")
+
+	// The same mount is fine when worktrees are off.
+	cfg.Worktree = WorktreeConfig{}
+	require.NoError(t, cfg.ValidateWithCLIs(map[string][]string{"opencode": {"deepseek-chat"}}))
+}
