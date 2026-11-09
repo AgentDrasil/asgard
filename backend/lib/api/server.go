@@ -85,6 +85,12 @@ type Server struct {
 	fsResolver   func(chatID string) (runnerfs.FS, error)
 	// dispatcher executes agent runs (the chat's runner in production).
 	dispatcher dispatch.Dispatcher
+	// activeRuns and injector serve send-now (mid-run injection); both are nil
+	// without a runner hub, where nothing can be injected.
+	activeRuns activeRunLookup
+	injector   runInjector
+	// requeueFn replaces SessionRepository.RequeueFront in tests (fault injection).
+	requeueFn func(*dbmodels.QueuedMessage) error
 	// queueParks (chatID -> queuePark) keeps queues whose consumer gave up from
 	// being restarted in a loop.
 	queueParks       sync.Map
@@ -623,6 +629,7 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("POST /api/sessions/{id}/queue", s.handleEnqueueMessage)
 	mux.HandleFunc("PATCH /api/sessions/{id}/queue/{messageId}", s.handleUpdateQueuedMessage)
 	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{messageId}", s.handleDeleteQueuedMessage)
+	mux.HandleFunc("POST /api/sessions/{id}/queue/{messageId}/send-now", s.handleSendQueuedNow)
 	mux.HandleFunc("DELETE /api/sessions/{id}/queue", s.handleClearQueue)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.handleStopSession)
 	mux.HandleFunc("POST /api/workflows/{runID}/stop", s.handleStopWorkflowRun)

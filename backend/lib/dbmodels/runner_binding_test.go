@@ -119,3 +119,50 @@ func TestRequeueFrontRestoresHead(t *testing.T) {
 	assert.Equal(t, first.ID, head.ID)
 	assert.Equal(t, "m", head.Model)
 }
+
+func TestClaimQueuedMessageIsExclusiveAndRestorable(t *testing.T) {
+	repo := newBindingRepo(t)
+	a, err := repo.EnqueueMessage("c", "a", "m")
+	require.NoError(t, err)
+	b, err := repo.EnqueueMessage("c", "b", "")
+	require.NoError(t, err)
+
+	claimed, err := repo.ClaimQueuedMessage("c", a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, a.ID, claimed.ID)
+	_, err = repo.ClaimQueuedMessage("c", a.ID)
+	assert.ErrorIs(t, err, ErrQueuedMessageNotFound, "a second claim finds nothing")
+	_, err = repo.ClaimQueuedMessage("other", b.ID)
+	assert.ErrorIs(t, err, ErrQueuedMessageNotFound, "claims are scoped to the chat")
+
+	require.NoError(t, repo.RequeueFront(claimed))
+	q, err := repo.GetQueuedMessages("c")
+	require.NoError(t, err)
+	require.Len(t, q, 2)
+	assert.Equal(t, a.ID, q[0].ID, "restored at its original position")
+	assert.Equal(t, a.CreatedAt.UnixNano(), q[0].CreatedAt.UnixNano())
+	assert.Equal(t, "m", q[0].Model)
+}
+
+func TestRequeueMayExceedQueueLimitByDesign(t *testing.T) {
+	repo := newBindingRepo(t)
+	first, err := repo.EnqueueMessage("c", "first", "")
+	require.NoError(t, err)
+	for i := 1; i < MaxQueuedMessagesPerSession; i++ {
+		_, err = repo.EnqueueMessage("c", "x", "")
+		require.NoError(t, err)
+	}
+	claimed, err := repo.ClaimQueuedMessage("c", first.ID)
+	require.NoError(t, err)
+	// Someone else takes the freed slot while the claim is outstanding.
+	_, err = repo.EnqueueMessage("c", "late", "")
+	require.NoError(t, err)
+	_, err = repo.EnqueueMessage("c", "over", "")
+	assert.ErrorIs(t, err, ErrQueueFull)
+
+	require.NoError(t, repo.RequeueFront(claimed), "restoring must never lose the message")
+	q, err := repo.GetQueuedMessages("c")
+	require.NoError(t, err)
+	assert.Len(t, q, MaxQueuedMessagesPerSession+1)
+	assert.Equal(t, first.ID, q[0].ID)
+}

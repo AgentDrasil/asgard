@@ -19,7 +19,10 @@ func WithRunnerHub(hub *runnerhub.Hub) ServerOption {
 	return func(s *Server) {
 		s.runners = hub
 		s.runnerClient = hub.Client
-		s.dispatcher = dispatch.NewRemote(dispatch.FromHub(hub), s.chatRunner, s.conf)
+		remote := dispatch.NewRemote(dispatch.FromHub(hub), s.chatRunner, s.conf)
+		s.dispatcher = remote
+		s.activeRuns = remote.ActiveRuns()
+		s.injector = hub
 		// The sandbox calls the runners forward (ask-user, call-peer, ...).
 		hub.SetCallbacks(newCallbackService(s, hub))
 	}

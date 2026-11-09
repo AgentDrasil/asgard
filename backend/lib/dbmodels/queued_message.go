@@ -204,9 +204,46 @@ func (r *SessionRepository) ClearQueuedMessages(chatID string) (int64, error) {
 	return result.RowsAffected, nil
 }
 
-// RequeueFront puts a previously popped message back with its original id and
-// created_at, so it is again the head of the queue. It is exempt from the
-// queue limit: the slot it occupied was only released by the pop.
+// ClaimQueuedMessage atomically removes a specific queued message and returns
+// it, or ErrQueuedMessageNotFound if it is not (or no longer) queued. Under the
+// same per-session lock as PopNextQueuedMessage, so exactly one of a claimer
+// and the queue consumer gets a given message. The caller owns the message
+// and must either deliver it or give it back with RequeueFront.
+func (r *SessionRepository) ClaimQueuedMessage(chatID, msgID string) (*QueuedMessage, error) {
+	lock := r.getSessionLock(chatID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	var msg QueuedMessage
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("chat_id = ? AND id = ?", chatID, msgID).First(&msg).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrQueuedMessageNotFound
+			}
+			return err
+		}
+		res := tx.Delete(&QueuedMessage{}, "chat_id = ? AND id = ?", chatID, msgID)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrQueuedMessageNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// RequeueFront puts a previously popped or claimed message back with its
+// original id and created_at, so it returns to its original queue position.
+// It is exempt from the queue limit on purpose: losing a message the user
+// already accepted is worse than a transient overshoot. The overshoot is
+// bounded: the slot it occupied was only released by the pop/claim, so the
+// queue can exceed the limit only by the number of messages concurrently
+// handed out and given back.
 func (r *SessionRepository) RequeueFront(msg *QueuedMessage) error {
 	lock := r.getSessionLock(msg.ChatID)
 	lock.Lock()

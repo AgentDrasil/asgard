@@ -50,13 +50,17 @@ type Remote struct {
 	conf    *config.Config
 	newRun  func() string
 	timeout time.Duration
+	active  *ActiveRuns
 }
 
 // NewRemote creates a Remote dispatcher. conf supplies the provider switches
 // and language rules the runner applies.
 func NewRemote(hub Hub, runner RunnerResolver, conf *config.Config) *Remote {
-	return &Remote{hub: hub, runner: runner, conf: conf, newRun: func() string { return uuid.NewV7().String() }, timeout: cancelGrace}
+	return &Remote{hub: hub, runner: runner, conf: conf, newRun: func() string { return uuid.NewV7().String() }, timeout: cancelGrace, active: NewActiveRuns()}
 }
+
+// ActiveRuns exposes the registry of runs currently executing through d.
+func (d *Remote) ActiveRuns() *ActiveRuns { return d.active }
 
 // Run implements Dispatcher: it builds a StartRun with a fresh run id,
 // dispatches it, feeds the RunEvents to req.OnEvent and maps the RunResult.
@@ -81,6 +85,10 @@ func (d *Remote) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		return Result{}, NotDispatched(fmt.Errorf("dispatching run to runner %s: %w", nodeID, err))
 	}
+
+	// Registered only once the runner has the run, and removed on every way
+	// out of Run, so a lookup never names a run that is gone for long.
+	defer d.active.Register(req.ChatID, req.Agent.Config.ID, nodeID, sr.GetRunId())()
 
 	pumpCtx, stopPump := context.WithCancel(context.Background())
 	defer stopPump()
