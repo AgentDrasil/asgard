@@ -405,7 +405,7 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 			ChatId: "chat-1",
 			UserId: "user-test",
 		}
-		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		assert.Equal(t, "secret-proxy-123", opts.Proxy.EnvVars["PROXY_SECRET"])
 		assert.Equal(t, "custom-val-456", opts.Proxy.EnvVars["CUSTOM_VAR"])
 		require.NotNil(t, fake.lastProxyKeysReq)
@@ -427,7 +427,7 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 			ChatId: "chat-1",
 			UserId: "user-test-2",
 		}
-		opts := customEx.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		opts := customEx.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		assert.Equal(t, "ai-studio-key-789", opts.Proxy.GeminiAPIKey)
 		assert.Equal(t, "ai-studio-key-789", opts.Proxy.EnvVars["GEMINI_API_KEY"])
 	})
@@ -438,7 +438,7 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 			ChatId: "chat-1",
 			UserId: "",
 		}
-		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
+		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		assert.Empty(t, opts.Proxy.EnvVars)
 	})
 }

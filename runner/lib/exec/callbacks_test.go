@@ -39,6 +39,15 @@ type fakeCallbacks struct {
 	proxyKeys        map[string]string
 	proxyErr         error
 	lastProxyKeysReq *runnerpb.GetUserProxyKeysRequest
+	// holdHook, when set, answers HoldMergeLock.
+	holdHook func(ctx context.Context, req *runnerpb.HoldMergeLockRequest) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error)
+}
+
+func (f *fakeCallbacks) HoldMergeLock(ctx context.Context, req *runnerpb.HoldMergeLockRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {
+	if f.holdHook == nil {
+		return nil, status.Error(codes.Unimplemented, "no hold hook")
+	}
+	return f.holdHook(ctx, req)
 }
 
 func (f *fakeCallbacks) AskUser(ctx context.Context, req *runnerpb.AskUserRequest, _ ...grpc.CallOption) (*runnerpb.AskUserResponse, error) {

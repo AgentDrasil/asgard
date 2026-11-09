@@ -580,6 +580,14 @@ func (p callbackProxy) WorkflowRunSettle(ctx context.Context, req *runnerpb.Work
 	return cb.WorkflowRunSettle(ctx, req)
 }
 
+func (p callbackProxy) HoldMergeLock(req *runnerpb.HoldMergeLockRequest, stream grpc.ServerStreamingServer[runnerpb.HoldMergeLockResponse]) error {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.HoldMergeLock(req, stream)
+}
+
 func (h *Hub) currentCallbacks() runnerpb.AgentCallbackServiceServer {
 	h.mu.Lock()
 	defer h.mu.Unlock()

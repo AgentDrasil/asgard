@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/worktree"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -62,6 +63,10 @@ type statusServer struct {
 	ctx     context.Context
 	mu      sync.Mutex // serializes event_index assignment and sink delivery
 	nextIdx uint64
+
+	// worktree is the run's worktree (nil for runs in a plain directory); it
+	// is what /merge merges.
+	worktree *worktree.Plan
 
 	// callbacks reaches the backend's AgentCallbackService; nil rejects the
 	// callback routes.

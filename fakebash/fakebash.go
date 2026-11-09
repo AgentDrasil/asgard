@@ -31,6 +31,7 @@ var allowlist = map[string]struct{}{
 	"ask-user":      {},
 	"ask_user":      {},
 	"show-output":   {},
+	"asgard-merge":  {},
 }
 
 var ProtectedProxyEnvKeys = []string{

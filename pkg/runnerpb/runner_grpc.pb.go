@@ -136,6 +136,7 @@ const (
 	AgentCallbackService_ReportWorkflowEvent_FullMethodName = "/asgard.runner.v1.AgentCallbackService/ReportWorkflowEvent"
 	AgentCallbackService_WorkflowRunStart_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/WorkflowRunStart"
 	AgentCallbackService_WorkflowRunSettle_FullMethodName   = "/asgard.runner.v1.AgentCallbackService/WorkflowRunSettle"
+	AgentCallbackService_HoldMergeLock_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/HoldMergeLock"
 )
 
 // AgentCallbackServiceClient is the client API for AgentCallbackService service.
@@ -154,6 +155,10 @@ type AgentCallbackServiceClient interface {
 	ReportWorkflowEvent(ctx context.Context, in *ReportWorkflowEventRequest, opts ...grpc.CallOption) (*ReportWorkflowEventResponse, error)
 	WorkflowRunStart(ctx context.Context, in *WorkflowRunStartRequest, opts ...grpc.CallOption) (*WorkflowRunStartResponse, error)
 	WorkflowRunSettle(ctx context.Context, in *WorkflowRunSettleRequest, opts ...grpc.CallOption) (*WorkflowRunSettleResponse, error)
+	// HoldMergeLock takes the exclusive lock on a main checkout for a worktree
+	// chat's merge. The first message means the lock is held; it stays held
+	// until the runner cancels the call or the connection drops.
+	HoldMergeLock(ctx context.Context, in *HoldMergeLockRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HoldMergeLockResponse], error)
 }
 
 type agentCallbackServiceClient struct {
@@ -254,6 +259,25 @@ func (c *agentCallbackServiceClient) WorkflowRunSettle(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *agentCallbackServiceClient) HoldMergeLock(ctx context.Context, in *HoldMergeLockRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HoldMergeLockResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentCallbackService_ServiceDesc.Streams[0], AgentCallbackService_HoldMergeLock_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HoldMergeLockRequest, HoldMergeLockResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentCallbackService_HoldMergeLockClient = grpc.ServerStreamingClient[HoldMergeLockResponse]
+
 // AgentCallbackServiceServer is the server API for AgentCallbackService service.
 // All implementations must embed UnimplementedAgentCallbackServiceServer
 // for forward compatibility.
@@ -270,6 +294,10 @@ type AgentCallbackServiceServer interface {
 	ReportWorkflowEvent(context.Context, *ReportWorkflowEventRequest) (*ReportWorkflowEventResponse, error)
 	WorkflowRunStart(context.Context, *WorkflowRunStartRequest) (*WorkflowRunStartResponse, error)
 	WorkflowRunSettle(context.Context, *WorkflowRunSettleRequest) (*WorkflowRunSettleResponse, error)
+	// HoldMergeLock takes the exclusive lock on a main checkout for a worktree
+	// chat's merge. The first message means the lock is held; it stays held
+	// until the runner cancels the call or the connection drops.
+	HoldMergeLock(*HoldMergeLockRequest, grpc.ServerStreamingServer[HoldMergeLockResponse]) error
 	mustEmbedUnimplementedAgentCallbackServiceServer()
 }
 
@@ -306,6 +334,9 @@ func (UnimplementedAgentCallbackServiceServer) WorkflowRunStart(context.Context,
 }
 func (UnimplementedAgentCallbackServiceServer) WorkflowRunSettle(context.Context, *WorkflowRunSettleRequest) (*WorkflowRunSettleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WorkflowRunSettle not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) HoldMergeLock(*HoldMergeLockRequest, grpc.ServerStreamingServer[HoldMergeLockResponse]) error {
+	return status.Error(codes.Unimplemented, "method HoldMergeLock not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) mustEmbedUnimplementedAgentCallbackServiceServer() {}
 func (UnimplementedAgentCallbackServiceServer) testEmbeddedByValue()                              {}
@@ -490,6 +521,17 @@ func _AgentCallbackService_WorkflowRunSettle_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentCallbackService_HoldMergeLock_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(HoldMergeLockRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentCallbackServiceServer).HoldMergeLock(m, &grpc.GenericServerStream[HoldMergeLockRequest, HoldMergeLockResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentCallbackService_HoldMergeLockServer = grpc.ServerStreamingServer[HoldMergeLockResponse]
+
 // AgentCallbackService_ServiceDesc is the grpc.ServiceDesc for AgentCallbackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -534,7 +576,13 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentCallbackService_WorkflowRunSettle_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "HoldMergeLock",
+			Handler:       _AgentCallbackService_HoldMergeLock_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "pkg/runnerpb/runner.proto",
 }
 

@@ -46,6 +46,7 @@ func (s *statusServer) registerCallbacks(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathCallPeer, s.handleCallPeer)
 	mux.HandleFunc("GET "+sandboxsock.PathFindPeer, s.handleFindPeer)
 	mux.HandleFunc("POST "+sandboxsock.PathMetrics, s.handleMetrics)
+	mux.HandleFunc("POST "+sandboxsock.PathMerge, s.handleMerge)
 }
 
 // nextCallSeq allocates the call_seq of a new sandbox call; it increases per

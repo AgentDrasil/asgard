@@ -31,6 +31,7 @@ const (
 	PathCallPeer = "/call-peer"
 	PathFindPeer = "/find-peer"
 	PathMetrics  = "/metrics"
+	PathMerge    = "/merge"
 
 	// host is the placeholder request host; the dialer ignores it.
 	host = "http://asgard"
@@ -64,6 +65,15 @@ type CallPeerResponse struct {
 	Status string `json:"status"`
 	Output string `json:"output,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+// MergeResponse is the answer of POST /merge. Status is a worktree merge
+// status ("merged", "main_moved", ...); Message tells the agent what to do
+// next. OK is true when the agent has nothing left to do for the merge.
+type MergeResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	OK      bool   `json:"ok"`
 }
 
 // Client talks HTTP over the runner's unix socket.

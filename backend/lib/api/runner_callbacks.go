@@ -6,17 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/metrics"
@@ -674,6 +677,72 @@ func (c *callbackService) WorkflowRunSettle(ctx context.Context, req *runnerpb.W
 		return nil, status.Errorf(codes.Internal, "settle workflow run: %v", err)
 	}
 	return &runnerpb.WorkflowRunSettleResponse{Ok: true}, nil
+}
+
+// HoldMergeLock implements runnerpb.AgentCallbackServiceServer. It takes the
+// exclusive lock on the main checkout for the merge of a worktree chat, queued
+// behind every chat that works there (with or without a worktree). The first
+// message tells the runner the lock is held; the lock is released when the
+// runner ends the call, the connection drops or the run finishes. Unlike the
+// other callbacks it is not deduplicated by call_seq: a retry after a lost
+// connection must queue for the lock again, never inherit one that is gone.
+func (c *callbackService) HoldMergeLock(req *runnerpb.HoldMergeLockRequest, stream grpc.ServerStreamingServer[runnerpb.HoldMergeLockResponse]) error {
+	ctx := stream.Context()
+	nodeID, ok := c.nodeID(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "unknown runner")
+	}
+	runID := req.GetMeta().GetRunId()
+	if runID == "" {
+		return status.Error(codes.InvalidArgument, "meta.run_id is required")
+	}
+	info, ok := c.runs.ActiveRun(runID, nodeID)
+	if !ok {
+		return status.Error(codes.FailedPrecondition, "run is not active on this runner")
+	}
+	repoDir := req.GetRepoDir()
+	if !filepath.IsAbs(repoDir) || filepath.Clean(repoDir) != repoDir || dirlock.IsExemptDir(info.ChatID, repoDir) {
+		return status.Errorf(codes.InvalidArgument, "invalid repo_dir %q", repoDir)
+	}
+	if c.s == nil || c.s.dirLocks == nil {
+		return status.Error(codes.FailedPrecondition, "directory locks are not enabled")
+	}
+
+	title := ""
+	if c.s.repo != nil {
+		if meta, err := c.s.repo.GetSessionMeta(info.ChatID); err == nil && meta != nil {
+			title = meta.Title
+		}
+	}
+	// Give up when the run ends too: a lock must not outlive the run that asked.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if info.Done != nil {
+		go func() {
+			select {
+			case <-info.Done:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+
+	release, err := c.s.dirLocks.AcquireMerge(ctx, dirlock.AcquireRequest{
+		ChatID:   info.ChatID,
+		Title:    title,
+		RunnerID: nodeID,
+		Dirs:     []string{repoDir},
+	})
+	if err != nil {
+		return status.FromContextError(err).Err()
+	}
+	defer release()
+
+	if err := stream.Send(&runnerpb.HoldMergeLockResponse{Granted: true}); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	return nil
 }
 
 // responseCapture is an in-memory http.ResponseWriter, so the handlers' shared

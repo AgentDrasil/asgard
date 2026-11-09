@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/backend/lib/worktree"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -199,6 +200,18 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 	if runDir != "" {
 		runDirOpt = optional.Some(runDir)
 	}
+	// repoDir is the directory the user sees; with a worktree the agent runs
+	// in the chat's checkout of it.
+	repoDir := runDir
+	var plan *worktree.Plan
+	if sr.GetWorktree() {
+		wtAgent, p, err := prepareWorktree(ctx, agent, sr.GetChatId(), runDir)
+		if err != nil {
+			return outcome{err: err}
+		}
+		agent, plan, repoDir = wtAgent, &p, p.RepoDir
+		runDirOpt = optional.Some(p.Path)
+	}
 
 	candidates := make([]agentspec.CLITarget, 0, len(sr.GetCandidates()))
 	for _, c := range sr.GetCandidates() {
@@ -216,15 +229,18 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 		AllowCrossSession: sr.GetStatusScope().GetAllowCrossSession(),
 	}
 
-	opts := e.runOptions(ctx, sr, agent, conf, sink)
+	opts := e.runOptions(ctx, sr, agent, conf, sink, plan)
 	res, err := e.opts.run(ctx, agent, candidates, sr.GetPrompt(), sessions, runDirOpt, modelOpt, sr.GetChatId(), scope, opts)
+	if plan != nil && res.RunDir != "" {
+		res.RunDir = repoDir
+	}
 	return outcome{output: res.Output, target: res.Target, runDir: res.RunDir, err: err}
 }
 
 // runOptions builds the sandbox inputs of a run. The runner's socket is served
 // from the run's sock dir: status updates and every other sandbox call
 // (ask-user, call-peer, find-peer, metrics) go through it.
-func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, conf *config.Config, sink conn.Sink) run.Options {
+func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, conf *config.Config, sink conn.Sink, plan *worktree.Plan) run.Options {
 	opts := run.Options{
 		LangRules:  sr.GetLangRules(),
 		ConfigPath: conf.GetConfigPath(),
@@ -235,6 +251,7 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 		OnSockDir: func(sockDir, runDir string) (func(), error) {
 			srv := newStatusServer(ctx, sr, agent, runDir, sink)
 			srv.callbacks = e.opts.Callbacks
+			srv.worktree = plan
 			stop, err := srv.serve(sockDir)
 			if err != nil {
 				return nil, err

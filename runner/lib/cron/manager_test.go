@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -460,4 +462,8 @@ func TestRemoteRunStore(t *testing.T) {
 	msgWaiting, err := store.FindWaitingHumanByMessageID("m-1")
 	assert.NoError(t, err)
 	assert.Nil(t, msgWaiting)
+}
+
+func (f *fakeCallbacks) HoldMergeLock(context.Context, *runnerpb.HoldMergeLockRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {
+	return nil, status.Error(codes.Unimplemented, "not used")
 }

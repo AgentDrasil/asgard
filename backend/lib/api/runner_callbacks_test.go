@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -25,6 +26,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/kms"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
@@ -834,4 +836,149 @@ func TestCallbackWorkflowExecutionMethods(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
+}
+
+// holdServer is the server side of a HoldMergeLock stream.
+type holdServer struct {
+	grpc.ServerStream
+	ctx  context.Context
+	sent chan *runnerpb.HoldMergeLockResponse
+}
+
+func newHoldServer(ctx context.Context) *holdServer {
+	return &holdServer{ctx: ctx, sent: make(chan *runnerpb.HoldMergeLockResponse, 4)}
+}
+
+func (h *holdServer) Context() context.Context { return h.ctx }
+func (h *holdServer) Send(m *runnerpb.HoldMergeLockResponse) error {
+	h.sent <- m
+	return nil
+}
+
+func holdRequest(runID, repoDir string) *runnerpb.HoldMergeLockRequest {
+	return &runnerpb.HoldMergeLockRequest{Meta: meta(runID, 1), RepoDir: repoDir}
+}
+
+func TestCallbackHoldMergeLockValidates(t *testing.T) {
+	rig := newCallbackRig(t)
+	rig.server.dirLocks = dirlock.NewManager(nil)
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		req  *runnerpb.HoldMergeLockRequest
+		want codes.Code
+	}{
+		{"no runner identity", context.Background(), holdRequest(rigRun, "/src/repo"), codes.Unauthenticated},
+		{"missing run id", rig.ctx(), &runnerpb.HoldMergeLockRequest{RepoDir: "/src/repo"}, codes.InvalidArgument},
+		{"unknown run", rig.ctx(), holdRequest("run-ghost", "/src/repo"), codes.FailedPrecondition},
+		{"relative dir", rig.ctx(), holdRequest(rigRun, "src/repo"), codes.InvalidArgument},
+		{"unclean dir", rig.ctx(), holdRequest(rigRun, "/src/../repo"), codes.InvalidArgument},
+		{"session dir is exempt", rig.ctx(), holdRequest(rigRun, "/session/x"), codes.InvalidArgument},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := rig.svc.HoldMergeLock(tt.req, newHoldServer(tt.ctx))
+			assert.Equal(t, tt.want, status.Code(err))
+		})
+	}
+
+	t.Run("locks disabled", func(t *testing.T) {
+		rig.server.dirLocks = nil
+		err := rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), newHoldServer(rig.ctx()))
+		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
+}
+
+func TestCallbackHoldMergeLockHoldsUntilCancelled(t *testing.T) {
+	rig := newCallbackRig(t)
+	locks := dirlock.NewManager(nil)
+	rig.server.dirLocks = locks
+
+	ctx, cancel := context.WithCancel(rig.ctx())
+	stream := newHoldServer(ctx)
+	errc := make(chan error, 1)
+	go func() { errc <- rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), stream) }()
+
+	select {
+	case m := <-stream.sent:
+		assert.True(t, m.GetGranted())
+	case <-time.After(5 * time.Second):
+		t.Fatal("lock was not granted")
+	}
+
+	// While held, a chat working in the main checkout has to wait.
+	blocked, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer stop()
+	_, err := locks.Acquire(blocked, dirlock.AcquireRequest{ChatID: "plain", RunnerID: rigNode, Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	// The worktree itself is a sibling and stays free.
+	relWT, err := locks.Acquire(context.Background(), dirlock.AcquireRequest{ChatID: rigChat, RunnerID: rigNode, Dirs: []string{"/src/wt/repo-chat"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err)
+	defer relWT(false)
+
+	cancel()
+	select {
+	case err := <-errc:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("hold did not end on cancel")
+	}
+	rel, err := locks.Acquire(context.Background(), dirlock.AcquireRequest{ChatID: "plain", RunnerID: rigNode, Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err, "the lock is free again")
+	rel(false)
+}
+
+func TestCallbackHoldMergeLockQueuesBehindMainCheckoutChat(t *testing.T) {
+	rig := newCallbackRig(t)
+	locks := dirlock.NewManager(nil)
+	rig.server.dirLocks = locks
+
+	relPlain, err := locks.Acquire(context.Background(), dirlock.AcquireRequest{ChatID: "plain", RunnerID: rigNode, Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(rig.ctx())
+	defer cancel()
+	stream := newHoldServer(ctx)
+	go func() { _ = rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), stream) }()
+
+	require.Eventually(t, func() bool {
+		st := locks.StatusForChat(rigChat)
+		return st != nil && st.IsWaitingForLock && st.LockedByChatID == "plain"
+	}, 5*time.Second, 10*time.Millisecond)
+	select {
+	case <-stream.sent:
+		t.Fatal("granted while another chat holds the main checkout")
+	default:
+	}
+
+	relPlain(false)
+	select {
+	case m := <-stream.sent:
+		assert.True(t, m.GetGranted())
+	case <-time.After(5 * time.Second):
+		t.Fatal("not granted after the main checkout was released")
+	}
+}
+
+func TestCallbackHoldMergeLockEndsWithRun(t *testing.T) {
+	rig := newCallbackRig(t)
+	locks := dirlock.NewManager(nil)
+	rig.server.dirLocks = locks
+
+	stream := newHoldServer(rig.ctx())
+	errc := make(chan error, 1)
+	go func() { errc <- rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), stream) }()
+	<-stream.sent
+
+	close(rig.done) // the run finished without releasing
+	select {
+	case err := <-errc:
+		_ = err
+	case <-time.After(5 * time.Second):
+		t.Fatal("hold outlived its run")
+	}
+	rel, err := locks.Acquire(context.Background(), dirlock.AcquireRequest{ChatID: "plain", RunnerID: rigNode, Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err)
+	rel(false)
 }

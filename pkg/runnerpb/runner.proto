@@ -308,6 +308,10 @@ message StartRun {
   repeated string mount_dirs_readonly = 16;
   repeated string mount_dirs_readwrite = 17;
   string user_id = 18;
+  // worktree asks the runner to run the agent in a per-chat git worktree of
+  // run_dir (the user opted in; the agent must offer it in its config). The
+  // backend locks the worktree directory, not run_dir.
+  bool worktree = 19;
 }
 
 message CancelRun {
@@ -375,6 +379,19 @@ service AgentCallbackService {
   rpc ReportWorkflowEvent(ReportWorkflowEventRequest) returns (ReportWorkflowEventResponse);
   rpc WorkflowRunStart(WorkflowRunStartRequest) returns (WorkflowRunStartResponse);
   rpc WorkflowRunSettle(WorkflowRunSettleRequest) returns (WorkflowRunSettleResponse);
+  // HoldMergeLock takes the exclusive lock on a main checkout for a worktree
+  // chat's merge. The first message means the lock is held; it stays held
+  // until the runner cancels the call or the connection drops.
+  rpc HoldMergeLock(HoldMergeLockRequest) returns (stream HoldMergeLockResponse);
+}
+
+message HoldMergeLockRequest {
+  CallMeta meta = 1;
+  // repo_dir is the main checkout the worktree merges into.
+  string repo_dir = 2;
+}
+message HoldMergeLockResponse {
+  bool granted = 1;
 }
 
 message CallMeta {
