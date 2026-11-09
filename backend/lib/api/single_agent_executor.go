@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/llm"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/backend/lib/worktree"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
@@ -69,6 +71,13 @@ func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *d
 		llmClient:  llmClient,
 		dispatcher: d,
 	}
+}
+
+// useWorktree reports whether this run happens in the chat's git worktree: the
+// chat opted in and this agent offers worktrees (a peer of the chat that does
+// not, runs in the plain directory).
+func (e *SingleAgentExecutor) useWorktree(session *dbmodels.Session) bool {
+	return session != nil && session.Worktree && e.agent.Config.Worktree.Enabled
 }
 
 // Execute handles the agent execution.
@@ -232,10 +241,26 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		}
 	}
 
+	// A worktree chat locks its own worktree directory instead of the shared
+	// checkout, so it runs alongside chats working in the main checkout. The
+	// path is derived exactly as the runner derives it when it creates it.
+	lockDir := normalizedRunDir
+	useWorktree := e.useWorktree(session)
+	if useWorktree {
+		if normalizedRunDir == "" {
+			return "", errors.New("a worktree chat needs a run directory")
+		}
+		wtPath, wtErr := worktree.PathFor(e.agent.Config.Worktree.Root, normalizedRunDir, chatID)
+		if wtErr != nil {
+			return "", fmt.Errorf("worktree for run directory %q: %w", normalizedRunDir, wtErr)
+		}
+		lockDir = wtPath
+	}
+
 	var releaseLock func(bool)
 	if e.server != nil && e.server.dirLocks != nil {
 		var lockErr error
-		releaseLock, lockErr = e.server.acquireChatDirLock(ctx, chatID, e.agent, normalizedRunDir)
+		releaseLock, lockErr = e.server.acquireChatDirLock(ctx, chatID, e.agent, lockDir)
 		if lockErr != nil {
 			return "", lockErr
 		}
@@ -250,7 +275,9 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 						hasQueued = true
 					}
 				}
-				if hasQueued || (e.server != nil && e.server.hasUncommittedChanges(chatID, normalizedRunDir)) {
+				// A worktree is private to the chat: nobody else waits on its
+				// uncommitted changes, and the main checkout's are not ours.
+				if hasQueued || (!useWorktree && e.server != nil && e.server.hasUncommittedChanges(chatID, normalizedRunDir)) {
 					keepUncommitted = true
 				}
 			}

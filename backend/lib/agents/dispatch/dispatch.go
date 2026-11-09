@@ -35,6 +35,8 @@ type Request struct {
 	RunDir optional.Option[string]
 	Model  optional.Option[string]
 	Scope  run.StatusScope
+	// Worktree runs the agent in the chat's own git worktree of RunDir.
+	Worktree bool
 	// Attempt is the 1-based attempt counter of the logical run.
 	Attempt uint32
 	// OnEvent receives the RunEvents of the run, in order, before Run
@@ -81,6 +83,9 @@ func NewLocal(conf *config.Config) *Local { return &Local{conf: conf} }
 
 // Run implements Dispatcher.
 func (l *Local) Run(ctx context.Context, req Request) (Result, error) {
+	if req.Worktree {
+		return Result{}, NotDispatched(errors.New("worktrees need a runner"))
+	}
 	res, err := run.RunWithOptions(ctx, req.Agent, req.Candidates, req.Prompt, req.Sessions, req.RunDir, req.Model, req.ChatID, req.Scope, run.OptionsFromConfig(l.conf))
 	return Result{Output: res.Output, Target: res.Target, RunDir: res.RunDir}, err
 }

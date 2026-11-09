@@ -20,6 +20,9 @@ type AgentInfo struct {
 	RunDirs     []string `json:"run_dirs"`
 	MainAgent   bool     `json:"main_agent"`
 	Models      []string `json:"models"`
+	// Worktree is true when a chat with this agent can opt in to running in its
+	// own git worktree.
+	Worktree bool `json:"worktree,omitempty"`
 	// RunnerID is the owning runner of a runner-scoped agent (empty for
 	// global ones).
 	RunnerID string `json:"runner_id,omitempty"`
@@ -68,6 +71,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			RunDirs:     s.expandAgentRunDirs(r, agent, rFS),
 			MainAgent:   agent.Config.IsMainAgent(),
 			Models:      models,
+			Worktree:    worktreeOptInError(agent) == "",
 			RunnerID:    agent.NodeID,
 		})
 	}

@@ -133,6 +133,10 @@ type Session struct {
 	// AllowCrossSession allows accessing host ~/tmp, ~/data, and database files inside sandbox
 	AllowCrossSession bool `gorm:"column:allow_cross_session;default:false" json:"allowCrossSession"`
 
+	// Worktree marks a chat that opted in to run in its own git worktree of
+	// RunDir. It is decided when the chat starts and never changes afterwards.
+	Worktree bool `gorm:"column:worktree;default:false" json:"worktree"`
+
 	// QuotaResetIDs is the journal of an in-progress orphaned-quota reset: a
 	// JSON list of the quota ask messages being retired. It is non-empty only
 	// between the steps of the reset (see resetQuotaSuspension).
@@ -625,6 +629,11 @@ func (r *SessionRepository) UpdateAgentStatus(chatID string, agentID string, sta
 
 type SessionAgentIconOption string
 
+// SessionWorktreeOption opts a chat in to worktree isolation. It only takes
+// effect while the chat has no messages: switching a running chat between the
+// main checkout and a worktree would strand its work.
+type SessionWorktreeOption bool
+
 // UpdateAgentSession updates the session ID for a specific agent+CLI in a chat and
 // optionally updates the run directory, allow_cross_session, user_subject, and agent_icon. cliKey has the format "<cli>/<model>".
 // Pass an empty sessionID to skip updating the session map entry.
@@ -651,6 +660,10 @@ func (r *SessionRepository) UpdateAgentSession(chatID string, agentID string, cl
 			case SessionAgentIconOption:
 				if v != "" {
 					sessPtr.AgentIcon = string(v)
+				}
+			case SessionWorktreeOption:
+				if v && sessPtr.MessageCount == 0 {
+					sessPtr.Worktree = true
 				}
 			case optional.Option[bool]:
 				if v.IsSome() {

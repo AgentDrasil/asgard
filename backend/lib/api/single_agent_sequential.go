@@ -157,6 +157,7 @@ func (e *SingleAgentExecutor) executeSequential(
 				Prompt:     prompt,
 				Sessions:   sessions,
 				RunDir:     runDirOpt,
+				Worktree:   e.useWorktree(session),
 				Model:      mOpt,
 				Scope:      run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
 				Attempt:    attempt,

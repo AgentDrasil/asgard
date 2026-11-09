@@ -44,6 +44,9 @@ type TriggerMessageRequest struct {
 	Wait              bool   `json:"wait,omitempty"`
 	Headless          bool   `json:"-"`
 	AllowCrossSession *bool  `json:"allowCrossSession,omitempty"`
+	// Worktree opts a new chat in to its own git worktree of RunDir. It is
+	// only honoured while the chat has no messages.
+	Worktree bool `json:"worktree,omitempty"`
 
 	Metadata map[string]any `json:"metadata,omitempty"`
 
@@ -223,6 +226,12 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			return
 		}
 	}
+	if req.Worktree {
+		if msg := worktreeOptInError(targetAgent); msg != "" {
+			writeJSONError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 	if needBind {
 		if berr := s.persistRunnerBinding(chatID, runnerID); berr != nil {
 			writeJSONError(w, berr.status, berr.msg)
@@ -269,7 +278,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		}
 		if s.repo != nil {
 			agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt, dbmodels.SessionWorktreeOption(req.Worktree)); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -348,7 +357,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		}
 		if s.repo != nil {
 			agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
-			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
+			if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt, dbmodels.SessionWorktreeOption(req.Worktree)); err != nil {
 				log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 			}
 		}
@@ -468,7 +477,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 	}
 	if s.repo != nil {
 		agentIconOpt := dbmodels.SessionAgentIconOption(targetAgent.Config.Icon)
-		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt); err != nil {
+		if err := s.repo.UpdateAgentSession(chatID, targetAgent.Config.ID, "", "", runDirOpt, allowOpt, callerSubject, agentIconOpt, dbmodels.SessionWorktreeOption(req.Worktree)); err != nil {
 			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to update agent session on trigger message")
 		}
 	}

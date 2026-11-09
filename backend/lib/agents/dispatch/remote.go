@@ -169,6 +169,7 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 		Sessions:  map[string]string(req.Sessions),
 		RunDir:    dirRefFor(req.ChatID, req.RunDir.TakeOr("")),
 		Attempt:   req.Attempt,
+		Worktree:  req.Worktree,
 		RunDirs:   append([]string(nil), req.Agent.Config.RunDirs...),
 		StatusScope: &runnerpb.StatusScope{
 			NodeId:            req.Scope.NodeID,

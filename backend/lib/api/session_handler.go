@@ -24,6 +24,7 @@ type ChatSession struct {
 	AgentIcon         string                   `json:"agentIcon,omitempty"`
 	RunDir            string                   `json:"runDir"`
 	AllowCrossSession bool                     `json:"allowCrossSession"`
+	Worktree          bool                     `json:"worktree,omitempty"`
 	RunnerID          string                   `json:"runnerId,omitempty"`
 	IsRunning         bool                     `json:"isRunning"`
 	IsWaitingForUser  bool                     `json:"isWaitingForUser,omitempty"`
@@ -40,6 +41,8 @@ type CreateSessionRequest struct {
 	CurrentAgent      string `json:"currentAgent"`
 	RunDir            string `json:"runDir"`
 	AllowCrossSession bool   `json:"allowCrossSession"`
+	// Worktree runs the chat in its own git worktree of RunDir (opt-in).
+	Worktree bool `json:"worktree"`
 	// RunnerID is the runner the chat executes on; required when runner
 	// binding is enabled.
 	RunnerID string `json:"runnerId"`
@@ -87,12 +90,19 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentIcon := ""
-	if targetAgent, err := s.findAgentFor(runnerID, req.CurrentAgent); err == nil && targetAgent != nil {
+	targetAgent, _ := s.findAgentFor(runnerID, req.CurrentAgent)
+	if targetAgent != nil {
 		agentIcon = targetAgent.Config.Icon
+	}
+	if req.Worktree {
+		if msg := worktreeOptInError(targetAgent); msg != "" {
+			writeJSONError(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 
 	sub := s.userSubject(r)
-	extraOpts := []any{optional.Some(req.AllowCrossSession), sub}
+	extraOpts := []any{optional.Some(req.AllowCrossSession), sub, dbmodels.SessionWorktreeOption(req.Worktree)}
 	if agentIcon != "" {
 		extraOpts = append(extraOpts, dbmodels.SessionAgentIconOption(agentIcon))
 	}
@@ -119,6 +129,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		AgentIcon:         agentIcon,
 		RunDir:            normalizedRunDir,
 		AllowCrossSession: req.AllowCrossSession,
+		Worktree:          req.Worktree,
 	})
 }
 
@@ -188,6 +199,7 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 		AgentIcon:         sess.AgentIcon,
 		RunDir:            sess.RunDir,
 		AllowCrossSession: sess.AllowCrossSession,
+		Worktree:          sess.Worktree,
 		RunnerID:          sess.RunnerNodeID,
 		IsRunning:         s.isSessionRunning(sess),
 		IsWaitingForUser:  sess.HasUnrepliedAskUser(),
@@ -280,6 +292,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			AgentIcon:         sess.AgentIcon,
 			RunDir:            sess.RunDir,
 			AllowCrossSession: sess.AllowCrossSession,
+			Worktree:          sess.Worktree,
 			RunnerID:          sess.RunnerNodeID,
 			IsRunning:         s.isSessionRunning(&sessCopy),
 			IsWaitingForUser:  sess.HasUnrepliedAskUser(),
