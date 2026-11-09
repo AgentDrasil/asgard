@@ -46,7 +46,7 @@ func collectCalls(ndjson string) (sessionID, lastContent string, inputTokens int
 	cb := types.ReportFunc(func(si int, src, et, content string, _ map[string]any) {
 		calls = append(calls, streamCall{si, src, et, content})
 	})
-	sessionID, lastContent, inputTokens, _, _ = parseStream(strings.NewReader(ndjson), cb, 1048576)
+	sessionID, lastContent, inputTokens, _, _ = parseStream(strings.NewReader(ndjson), cb, 1048576, nil)
 	return
 }
 
@@ -83,7 +83,7 @@ func TestParseStream_Replay(t *testing.T) {
 // TestParseStream_NilCallback verifies that parseStream still returns the
 // correct sessionID and lastContent when no callback is registered.
 func TestParseStream_NilCallback(t *testing.T) {
-	sessionID, lastContent, inputTokens, maxTokens, runErr := parseStream(strings.NewReader(realNDJSON), nil, 1048576)
+	sessionID, lastContent, inputTokens, maxTokens, runErr := parseStream(strings.NewReader(realNDJSON), nil, 1048576, nil)
 	assert.Equal(t, "57659af8-fee7-4694-8913-6ad09e91234a", sessionID)
 	assert.Equal(t, wantResponse, lastContent)
 	assert.Equal(t, 4555, inputTokens)
@@ -97,7 +97,7 @@ func TestParseStream_NilCallback(t *testing.T) {
 func TestParseStream_ErrorResult(t *testing.T) {
 	ndjson := `{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"authentication failed or timed out","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}}`
 
-	_, lastContent, _, _, runErr := parseStream(strings.NewReader(ndjson), nil, 256000)
+	_, lastContent, _, _, runErr := parseStream(strings.NewReader(ndjson), nil, 256000, nil)
 	assert.Equal(t, "", lastContent)
 	require.Error(t, runErr)
 	assert.Contains(t, runErr.Error(), "authentication failed or timed out")
@@ -108,7 +108,7 @@ func TestParseStream_ErrorResult(t *testing.T) {
 func TestParseStream_ErrorResultNoMessage(t *testing.T) {
 	ndjson := `{"event":"result","result":{"conversation_id":"c1","status":"ERROR","response":""}}`
 
-	_, _, _, _, runErr := parseStream(strings.NewReader(ndjson), nil, 256000)
+	_, _, _, _, runErr := parseStream(strings.NewReader(ndjson), nil, 256000, nil)
 	require.Error(t, runErr)
 	assert.Contains(t, runErr.Error(), "status ERROR")
 }
@@ -128,7 +128,7 @@ func TestParseStream_AutoCompact_AntiPollution(t *testing.T) {
 		lastMetadata = meta
 	})
 
-	sessionID, lastContent, inputTokens, maxTokens, runErr := parseStream(strings.NewReader(ndjson), cb, 200000)
+	sessionID, lastContent, inputTokens, maxTokens, runErr := parseStream(strings.NewReader(ndjson), cb, 200000, nil)
 	assert.Equal(t, "compact-session-1", sessionID)
 	assert.Equal(t, "compacted", lastContent)
 	assert.Equal(t, 30000, inputTokens)
@@ -154,14 +154,14 @@ func TestParseStream_DynamicMaxTokens(t *testing.T) {
 	// Claude (256K)
 	claudeLimit := types.GetModelContextWindow("claude-sonnet-4-6")
 	assert.Equal(t, 256000, claudeLimit)
-	_, _, _, outMax, _ := parseStream(strings.NewReader(ndjson), cb, claudeLimit)
+	_, _, _, outMax, _ := parseStream(strings.NewReader(ndjson), cb, claudeLimit, nil)
 	assert.Equal(t, 256000, outMax)
 	assert.Equal(t, 256000, lastMetadata["max_tokens"])
 
 	// OpenCode Big Pickle (200K)
 	pickleLimit := types.GetModelContextWindow("opencode/big-pickle")
 	assert.Equal(t, 200000, pickleLimit)
-	_, _, _, outMax, _ = parseStream(strings.NewReader(ndjson), cb, pickleLimit)
+	_, _, _, outMax, _ = parseStream(strings.NewReader(ndjson), cb, pickleLimit, nil)
 	assert.Equal(t, 200000, outMax)
 	assert.Equal(t, 200000, lastMetadata["max_tokens"])
 }

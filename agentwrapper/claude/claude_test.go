@@ -37,7 +37,7 @@ func TestConsumeStream(t *testing.T) {
 	var got []entry
 	out, err := consumeStream(strings.NewReader(sampleStream), 200000, func(_ int, _, typ, content string, meta map[string]any) {
 		got = append(got, entry{typ, content, meta})
-	})
+	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "s-1", out.sessionID)
 	assert.Equal(t, "Done.", out.lastContent)
@@ -57,26 +57,27 @@ func TestConsumeStream(t *testing.T) {
 
 func TestConsumeStreamError(t *testing.T) {
 	t.Parallel()
-	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}`), 0, nil)
+	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}`), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "boom", out.errMessage)
 }
 
 func TestBuildPromptArgv(t *testing.T) {
 	t.Parallel()
-	argv := buildPromptArgv("hi", types.PromptOptions{Model: "opus/high"},
+	argv := buildPromptArgv(types.PromptOptions{Model: "opus/high"},
 		agentSetup{appendPromptFile: "/tmp/p.md", disallowedTools: []string{"AskUserQuestion", "Bash"}}, "uuid-1", false)
 	assert.Equal(t, []string{
-		"--print", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions",
+		"--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+		"--replay-user-messages", "--dangerously-skip-permissions",
 		"--session-id", "uuid-1", "--model", "opus", "--effort", "high",
 		"--append-system-prompt-file", "/tmp/p.md", "--disallowedTools", "AskUserQuestion,Bash",
-		"--", "hi",
 	}, argv)
 
-	argv = buildPromptArgv("hi", types.PromptOptions{Model: "sonnet"}, agentSetup{}, "uuid-2", true)
+	argv = buildPromptArgv(types.PromptOptions{Model: "sonnet"}, agentSetup{}, "uuid-2", true)
 	assert.Equal(t, []string{
-		"--print", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions",
-		"--resume", "uuid-2", "--model", "sonnet", "--", "hi",
+		"--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+		"--replay-user-messages", "--dangerously-skip-permissions",
+		"--resume", "uuid-2", "--model", "sonnet",
 	}, argv)
 }
 
@@ -178,7 +179,7 @@ func TestConsumeStreamOversizedLineAndDrain(t *testing.T) {
 	in := `{"type":"assistant","message":{"content":[{"type":"text","text":"before"}]}}` + "\n" +
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"` + huge + `"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","result":"after","session_id":"s"}` + "\n"
-	out, err := consumeStream(strings.NewReader(in), 0, nil)
+	out, err := consumeStream(strings.NewReader(in), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "after", out.lastContent)
 	assert.Equal(t, "s", out.sessionID)
@@ -189,7 +190,7 @@ func TestConsumeStreamMultipleResults(t *testing.T) {
 	in := `{"type":"result","is_error":true,"result":"early failure"}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":false,"result":"real answer"}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":false,"result":""}` + "\n"
-	out, err := consumeStream(strings.NewReader(in), 0, nil)
+	out, err := consumeStream(strings.NewReader(in), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "real answer", out.lastContent)
 	assert.Empty(t, out.errMessage)
@@ -197,7 +198,7 @@ func TestConsumeStreamMultipleResults(t *testing.T) {
 
 func TestConsumeStreamErrorSubtypeWithoutIsError(t *testing.T) {
 	t.Parallel()
-	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_max_turns","is_error":false,"errors":["max turns"]}`), 0, nil)
+	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_max_turns","is_error":false,"errors":["max turns"]}`), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "max turns", out.errMessage)
 	assert.Empty(t, out.lastContent, "error text must not become the answer")
@@ -207,14 +208,14 @@ func TestConsumeStreamOversizedResultLineIsAnError(t *testing.T) {
 	t.Parallel()
 	in := `{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","result":"` + strings.Repeat("x", maxLineBytes+10) + `"}` + "\n"
-	out, err := consumeStream(strings.NewReader(in), 0, nil)
+	out, err := consumeStream(strings.NewReader(in), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Contains(t, out.errMessage, "size limit")
 }
 
 func TestConsumeStreamErrorsArray(t *testing.T) {
 	t.Parallel()
-	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":null,"errors":["No conversation found","x"]}`), 0, nil)
+	out, err := consumeStream(strings.NewReader(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":null,"errors":["No conversation found","x"]}`), 0, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "No conversation found; x", out.errMessage)
 }
@@ -223,7 +224,7 @@ func TestConsumeStreamToolResultIsError(t *testing.T) {
 	t.Parallel()
 	in := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"nope","is_error":true}]}}`
 	var meta map[string]any
-	_, err := consumeStream(strings.NewReader(in), 0, func(_ int, _, _, _ string, m map[string]any) { meta = m })
+	_, err := consumeStream(strings.NewReader(in), 0, func(_ int, _, _, _ string, m map[string]any) { meta = m }, nil)
 	require.NoError(t, err)
 	assert.Equal(t, true, meta["is_error"])
 }
@@ -414,7 +415,7 @@ func TestConsumeStreamIgnoresSyntheticUsageAndReportsTokens(t *testing.T) {
 	t.Parallel()
 	in := `{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"slash output"}],"usage":{"input_tokens":50}}}` + "\n"
 	var metas []map[string]any
-	out, err := consumeStream(strings.NewReader(in+sampleStream), 1000, func(_ int, _, _, _ string, m map[string]any) { metas = append(metas, m) })
+	out, err := consumeStream(strings.NewReader(in+sampleStream), 1000, func(_ int, _, _, _ string, m map[string]any) { metas = append(metas, m) }, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 19002, out.inputTokens)
 
@@ -427,12 +428,12 @@ func TestConsumeStreamIgnoresSyntheticUsageAndReportsTokens(t *testing.T) {
 func TestBuildPromptArgvEffortGate(t *testing.T) {
 	t.Parallel()
 	for _, model := range []string{"opus/thinking", "opus/minimal", "opus"} {
-		argv := buildPromptArgv("hi", types.PromptOptions{Model: model}, agentSetup{}, "id", false)
+		argv := buildPromptArgv(types.PromptOptions{Model: model}, agentSetup{}, "id", false)
 		assert.NotContains(t, argv, "--effort", model)
 		assert.Contains(t, argv, "opus", model)
 	}
 	for _, v := range []string{"low", "medium", "high", "xhigh", "max"} {
-		argv := buildPromptArgv("hi", types.PromptOptions{Model: "opus/" + v}, agentSetup{}, "id", false)
+		argv := buildPromptArgv(types.PromptOptions{Model: "opus/" + v}, agentSetup{}, "id", false)
 		assert.Contains(t, strings.Join(argv, " "), "--effort "+v)
 	}
 }
@@ -541,4 +542,99 @@ func TestParseUsageTextNotLoggedInIsNoCredentials(t *testing.T) {
 	_, err := parseUsageText("Not logged in · Please run /login", time.Now())
 	require.Error(t, err)
 	assert.True(t, llms.IsNoCredentialsText(err.Error()))
+}
+
+const okResult = `{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"s"}`
+
+func TestPromptSendsInitialPromptOnStdinAndClosesAfterResult(t *testing.T) {
+	inFile := filepath.Join(t.TempDir(), "in")
+	argsFile := filepath.Join(t.TempDir(), "args")
+	// The trailing cat only returns on EOF, like claude in stream-json mode.
+	fakeClaude(t, `printf '%s\n' "$@" > `+argsFile+`
+read -r line
+echo "$line" > `+inFile+`
+echo "$line"
+echo '`+okResult+`'
+cat > /dev/null`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var reported []string
+	res, err := Prompt(ctx, "say \"hi\"", types.PromptOptions{ReportCallback: func(_ int, _, typ, content string, _ map[string]any) {
+		reported = append(reported, typ+":"+content)
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", res.LastContent)
+	assert.Empty(t, reported, "replayed user messages are not agent output")
+
+	got, err := os.ReadFile(inFile)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"user","message":{"role":"user","content":"say \"hi\""}}`, string(got))
+	args, err := os.ReadFile(argsFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(args), "--input-format\nstream-json\n")
+	assert.Contains(t, string(args), "--replay-user-messages\n")
+	assert.NotContains(t, string(args), "say")
+}
+
+func TestPromptInjectMidRun(t *testing.T) {
+	inFile := filepath.Join(t.TempDir(), "in")
+	fakeClaude(t, `read -r l1
+read -r l2
+printf '%s\n%s\n' "$l1" "$l2" > `+inFile+`
+# Like the real CLI: both messages are echoed, then ONE result covers the
+# merged turn. Counting results would never close stdin here.
+echo "$l1"
+echo "$l2"
+echo '{"type":"result","subtype":"success","is_error":false,"result":"second","session_id":"s"}'
+cat > /dev/null`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var injectErr error
+	calls := 0
+	res, err := Prompt(ctx, "first", types.PromptOptions{OnInjectable: func(inject func(string) error) {
+		calls++
+		injectErr = inject("second")
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls)
+	require.NoError(t, injectErr)
+	assert.Equal(t, "second", res.LastContent)
+
+	got, err := os.ReadFile(inFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"content":"first"`)
+	assert.Contains(t, string(got), `"content":"second"`)
+}
+
+func TestPromptInjectAfterFinishIsRejected(t *testing.T) {
+	var saved func(string) error
+	fakeClaude(t, `read -r line
+echo "$line"
+echo '`+okResult+`'
+cat > /dev/null`)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := Prompt(ctx, "hello", types.PromptOptions{OnInjectable: func(inject func(string) error) { saved = inject }})
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	assert.ErrorIs(t, saved("late"), types.ErrNotInjectable)
+}
+
+func TestConsumeStreamHooksReportBackgroundTasks(t *testing.T) {
+	in := `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a"}]}` + "\n" +
+		`{"type":"system","subtype":"background_tasks_changed","tasks":[]}` + "\n" +
+		`{"type":"user","message":{"role":"user","content":"hi"}}` + "\n" + okResult + "\n"
+	var tasks []int
+	echoes, results := 0, 0
+	_, err := consumeStream(strings.NewReader(in), 0, nil, &streamHooks{
+		onEcho:            func() { echoes++ },
+		onBackgroundTasks: func(n int) { tasks = append(tasks, n) },
+		onResult:          func() { results++ },
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 0}, tasks)
+	assert.Equal(t, 1, echoes)
+	assert.Equal(t, 1, results)
 }

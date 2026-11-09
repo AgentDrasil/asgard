@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -124,7 +125,19 @@ type PromptOptions struct {
 	// produced by the agent during execution. It is safe to be nil; callers that
 	// do not need streaming updates can omit it.
 	ReportCallback ReportFunc
+
+	// OnInjectable, if non-nil, is called exactly once right after the CLI
+	// process started, with a goroutine-safe inject func that delivers an
+	// extra user message into the running session. inject returns
+	// ErrNotInjectable once stdin has been closed or the process ended. CLIs
+	// that cannot take mid-run messages never call it, which is how callers
+	// learn the capability is missing.
+	OnInjectable func(inject func(prompt string) error)
 }
+
+// ErrNotInjectable is returned by an inject func when the run has finished
+// and no longer reads further user messages.
+var ErrNotInjectable = errors.New("run is no longer accepting injected messages")
 
 func (o *PromptOptions) StartupDelayOrDefault() time.Duration {
 	if o.StartupDelay > 0 {

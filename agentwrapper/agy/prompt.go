@@ -1,7 +1,6 @@
 package agy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
 
@@ -120,18 +120,18 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	}
 	defer restoreContract()
 
-	inputBytes, err := formatPromptInput(prompt)
-	if err != nil {
-		return nil, err
-	}
-
 	argv := buildPromptArgv(runDir, opts)
 
 	log.Debug().Interface("argv", argv).Msg("agy/prompt: starting")
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = runDir
-	cmd.Stdin = bytes.NewReader(inputBytes)
+	// Stdin stays open so more messages can be injected; the injector closes
+	// it once every sent message has its result, which lets agy exit.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating stdin pipe: %w", err)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -142,8 +142,23 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		return nil, fmt.Errorf("starting agy: %w", err)
 	}
 
+	inj := common.NewInjector(stdin, formatPromptInput, false)
+	// Release stdin on every exit path (cancel, crash, parse failure).
+	defer inj.Close()
+	// A failed write means agy already exited; the exit status below explains
+	// why, which beats a bare broken-pipe error here.
+	if err := inj.Send(prompt); err != nil {
+		log.Debug().Err(err).Msg("agy/prompt: writing initial prompt failed")
+	}
+	if opts.OnInjectable != nil {
+		opts.OnInjectable(func(p string) error { return inj.Send(p) })
+	}
+
 	maxTokens := types.GetModelContextWindow(opts.Model)
-	sessionID, lastContent, inputTokens, outMaxTokens, runErr := parseStream(stdout, opts.ReportCallback, maxTokens)
+	sessionID, lastContent, inputTokens, outMaxTokens, runErr := parseStream(stdout, opts.ReportCallback, maxTokens, inj.OnResult)
+	// Stdout ended, so the process is done or dying: reject late injections
+	// and unblock a CLI still waiting for EOF before Wait.
+	inj.Close()
 
 	// Wait for the subprocess. A non-zero exit after successful output is
 	// non-fatal — log and continue. A non-zero exit with no output at all

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
@@ -66,8 +69,11 @@ func prepareAgent(opts types.PromptOptions) (agentSetup, error) {
 
 // buildPromptArgv constructs the claude CLI arguments. sessionID is the
 // already-resolved id and resume tells whether it continues an existing one.
-func buildPromptArgv(prompt string, opts types.PromptOptions, setup agentSetup, sessionID string, resume bool) []string {
-	argv := []string{"--print", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
+func buildPromptArgv(opts types.PromptOptions, setup agentSetup, sessionID string, resume bool) []string {
+	// The prompt goes over stdin as stream-json (see formatPromptInput) so
+	// further messages can be injected while the run is in progress.
+	argv := []string{"--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+		"--replay-user-messages", "--dangerously-skip-permissions"}
 	if resume {
 		argv = append(argv, "--resume", sessionID)
 	} else {
@@ -86,7 +92,26 @@ func buildPromptArgv(prompt string, opts types.PromptOptions, setup agentSetup, 
 	if len(setup.disallowedTools) > 0 {
 		argv = append(argv, "--disallowedTools", strings.Join(setup.disallowedTools, ","))
 	}
-	return append(argv, "--", prompt)
+	return argv
+}
+
+type streamUserInput struct {
+	Type    string          `json:"type"`
+	Message streamUserInMsg `json:"message"`
+}
+
+type streamUserInMsg struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// formatPromptInput renders one user message as a stream-json input line.
+func formatPromptInput(prompt string) ([]byte, error) {
+	data, err := json.Marshal(streamUserInput{Type: "user", Message: streamUserInMsg{Role: "user", Content: prompt}})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling prompt input: %w", err)
+	}
+	return append(data, '\n'), nil
 }
 
 // Prompt sends a prompt to claude and parses its stream-json output in
@@ -122,7 +147,7 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "claude", buildPromptArgv(prompt, opts, setup, sessionID, resume)...)
+	cmd := exec.CommandContext(ctx, "claude", buildPromptArgv(opts, setup, sessionID, resume)...)
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
@@ -136,12 +161,30 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating claude stdin pipe: %w", err)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("creating claude stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting claude: %w", err)
+	}
+
+	// claude keeps reading stdin in stream-json mode and only exits on EOF,
+	// so the injector closes it once every sent message got its result.
+	inj := common.NewInjector(stdin, formatPromptInput, true)
+	// Release stdin on every exit path (cancel, crash, parse failure).
+	defer inj.Close()
+	// A failed write means claude already exited; its exit status and stderr
+	// below explain why, which beats a bare broken-pipe error here.
+	if err := inj.Send(prompt); err != nil {
+		log.Debug().Err(err).Msg("claude/prompt: writing initial prompt failed")
+	}
+	if opts.OnInjectable != nil {
+		opts.OnInjectable(func(p string) error { return inj.Send(p) })
 	}
 
 	// A descendant that outlives claude (and keeps stdout open) would leave
@@ -154,7 +197,11 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	defer stop()
 
 	maxTokens := types.GetModelContextWindow(types.StripVariant(opts.Model))
-	out, parseErr := consumeStream(stdout, maxTokens, opts.ReportCallback)
+	out, parseErr := consumeStream(stdout, maxTokens, opts.ReportCallback,
+		&streamHooks{onEcho: inj.OnEcho, onBackgroundTasks: inj.OnBackgroundTasks, onResult: inj.OnResult})
+	// Stdout ended, so the process is done or dying: reject late injections
+	// and unblock a CLI still waiting for EOF before Wait.
+	inj.Close()
 	waitErr := cmd.Wait()
 
 	if waitErr != nil || (out != nil && out.errMessage != "") {

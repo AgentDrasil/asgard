@@ -15,7 +15,9 @@ type streamLine struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype"`
 	SessionID string `json:"session_id"`
-	Message   struct {
+	// background_tasks_changed system line: the full list of running tasks.
+	Tasks   []json.RawMessage `json:"tasks"`
+	Message struct {
 		Model   string `json:"model"`
 		Content []struct {
 			Type      string          `json:"type"`
@@ -132,9 +134,22 @@ func toolResultText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
+// streamHooks are optional callbacks fired while the stream is consumed. Any
+// field may be nil.
+type streamHooks struct {
+	// onEcho fires for every replayed user prompt (--replay-user-messages).
+	onEcho func()
+	// onBackgroundTasks fires with the number of running background tasks.
+	onBackgroundTasks func(n int)
+	// onResult fires for every result line, before the final-text bookkeeping.
+	onResult func()
+}
+
 // consumeStream reads stream-json from r, forwarding meaningful entries to
 // report (may be nil), and returns the aggregate outcome.
-func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc) (*streamOutcome, error) {
+//
+// hooks (may be nil) lets the caller tell when stdin may be closed.
+func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc, hooks *streamHooks) (*streamOutcome, error) {
 	out := &streamOutcome{}
 	toolNames := map[string]string{} // tool_use id -> tool name
 	stepIndex := 0
@@ -172,6 +187,17 @@ func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc) (*stream
 		}
 		var l streamLine
 		if err := json.Unmarshal([]byte(trimmed), &l); err != nil {
+			// With --replay-user-messages our own prompts come back as user
+			// lines with string content, which does not fit the block array.
+			var echo struct {
+				Type    string `json:"type"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}
+			if hooks != nil && hooks.onEcho != nil && json.Unmarshal([]byte(trimmed), &echo) == nil && echo.Type == "user" {
+				hooks.onEcho()
+			}
 			continue
 		}
 		if l.SessionID != "" {
@@ -179,6 +205,10 @@ func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc) (*stream
 		}
 
 		switch l.Type {
+		case "system":
+			if l.Subtype == "background_tasks_changed" && hooks != nil && hooks.onBackgroundTasks != nil {
+				hooks.onBackgroundTasks(len(l.Tasks))
+			}
 		case "assistant":
 			// Skip claude's synthetic messages (e.g. slash-command output).
 			if u := l.Message.Usage; l.Message.Model != "<synthetic>" && u.InputTokens+u.CacheReadTokens+u.CacheCreationTokens > 0 {
@@ -221,6 +251,9 @@ func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc) (*stream
 			// carry nothing, and the last meaningful one decides the outcome.
 			// A non-success subtype is an error whatever is_error says.
 			out.sawResult = true
+			if hooks != nil && hooks.onResult != nil {
+				hooks.onResult()
+			}
 			failed := l.IsError || (l.Subtype != "" && l.Subtype != "success")
 			msg := l.Result
 			if msg == "" {
@@ -251,7 +284,7 @@ func consumeStream(r io.Reader, maxTokens int, report types.ReportFunc) (*stream
 // extractResultText returns the text of the final `result` line (or the last
 // assistant text block) from a complete stream, used for slash commands.
 func extractResultText(data []byte) (string, error) {
-	out, err := consumeStream(strings.NewReader(string(data)), 0, nil)
+	out, err := consumeStream(strings.NewReader(string(data)), 0, nil, nil)
 	if err != nil {
 		return "", err
 	}

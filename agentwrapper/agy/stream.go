@@ -86,8 +86,8 @@ type streamResult struct {
 //   - "step_update" (tool ACTIVE)          → cb("TOOL", "tool_call",   "name({...params...})")
 //   - "step_update" (tool DONE/ERROR)      → cb("TOOL", "tool_result", "name → output")
 //   - "step_update" (agent_response DONE)  → cb("MODEL","agent_response", accumulated text_delta)
-//   - "result"      → captures response + usage; status ERROR → runErr
-func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, lastContent string, inputTokens, outMaxTokens int, runErr error) {
+//   - "result"      → captures response + usage; status ERROR → runErr; onResult (may be nil) fires first
+func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int, onResult func()) (sessionID, lastContent string, inputTokens, outMaxTokens int, runErr error) {
 	outMaxTokens = maxTokens
 	if outMaxTokens <= 0 {
 		outMaxTokens = types.DefaultContextWindow
@@ -186,6 +186,9 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int) (sessionID, la
 		case "result":
 			if ev.Result == nil {
 				continue
+			}
+			if onResult != nil {
+				onResult()
 			}
 			res := ev.Result
 			if res.ConversationID != "" {
