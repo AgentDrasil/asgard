@@ -646,3 +646,146 @@ func TestManager_ReentrantExpansionConflict(t *testing.T) {
 	assert.ErrorContains(t, errExpanded, "cannot expand or upgrade held directory lock for chat chat-a")
 	assert.ErrorContains(t, errExpanded, "chat-b")
 }
+
+func TestManager_MergeCompetesWithMainDirHolder(t *testing.T) {
+	t.Parallel()
+
+	mgr := dirlock.NewManager(nil)
+	ctx := context.Background()
+
+	// A non-worktree chat works in the main checkout; the worktree chat holds
+	// its sibling worktree dir without conflict.
+	relMain, err := mgr.Acquire(ctx, dirlock.AcquireRequest{
+		ChatID: "plain", RunnerID: "r1", Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive,
+	})
+	require.NoError(t, err)
+	relWT, err := mgr.Acquire(ctx, dirlock.AcquireRequest{
+		ChatID: "wt", RunnerID: "r1", Dirs: []string{"/src/wt/repo-wt"}, Mode: dirlock.ModeExclusive,
+	})
+	require.NoError(t, err)
+	defer relWT(false)
+
+	merged := make(chan func(), 1)
+	go func() {
+		rel, mergeErr := mgr.AcquireMerge(ctx, dirlock.AcquireRequest{
+			ChatID: "wt", RunnerID: "r1", Dirs: []string{"/src/repo"},
+		})
+		if mergeErr == nil {
+			merged <- rel
+		}
+	}()
+
+	assert.Eventually(t, func() bool {
+		st := mgr.StatusForChat("wt")
+		return st != nil && st.IsWaitingForLock && st.LockedByChatID == "plain"
+	}, 2*time.Second, 10*time.Millisecond)
+
+	select {
+	case <-merged:
+		t.Fatal("merge acquired the main dir while another chat held it")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	relMain(false)
+
+	var relMerge func()
+	select {
+	case relMerge = <-merged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("merge did not acquire the main dir after release")
+	}
+
+	// While merging, a plain chat has to wait for the main dir.
+	blockedCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_, err = mgr.Acquire(blockedCtx, dirlock.AcquireRequest{
+		ChatID: "plain2", RunnerID: "r1", Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive,
+	})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// The worktree lock is unaffected and the merge lock vanishes on release.
+	st := mgr.StatusForChat("wt")
+	require.NotNil(t, st)
+	assert.True(t, st.IsLocked)
+	relMerge()
+	relMerge() // idempotent
+
+	relAgain, err := mgr.Acquire(ctx, dirlock.AcquireRequest{
+		ChatID: "plain3", RunnerID: "r1", Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive,
+	})
+	require.NoError(t, err)
+	relAgain(false)
+}
+
+func TestManager_MergeBlockedByUncommittedMainDir(t *testing.T) {
+	t.Parallel()
+
+	mgr := dirlock.NewManager(nil)
+	ctx := context.Background()
+
+	relMain, err := mgr.Acquire(ctx, dirlock.AcquireRequest{
+		ChatID: "plain", RunnerID: "r1", Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive,
+	})
+	require.NoError(t, err)
+	relMain(true) // run ended with uncommitted changes: lock stays
+
+	mergeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_, err = mgr.AcquireMerge(mergeCtx, dirlock.AcquireRequest{
+		ChatID: "wt", RunnerID: "r1", Dirs: []string{"/src/repo"},
+	})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, mgr.StatusForChat("wt"), "cancelled merge leaves no waiter")
+}
+
+func TestManager_MergeNotifiesBaseChatAndForceRelease(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	notified := map[string]bool{}
+	mgr := dirlock.NewManager(func(id string) {
+		mu.Lock()
+		defer mu.Unlock()
+		notified[id] = true
+	})
+	ctx := context.Background()
+
+	rel, err := mgr.AcquireMerge(ctx, dirlock.AcquireRequest{
+		ChatID: "wt", Title: "wt chat", RunnerID: "r1", Dirs: []string{"/src/repo"},
+	})
+	require.NoError(t, err)
+	defer rel()
+
+	mu.Lock()
+	assert.True(t, notified["wt"])
+	assert.False(t, notified[dirlock.MergeHolderID("wt")])
+	mu.Unlock()
+
+	other := make(chan struct{})
+	go func() {
+		r, acqErr := mgr.Acquire(ctx, dirlock.AcquireRequest{
+			ChatID: "plain", RunnerID: "r1", Dirs: []string{"/src/repo"}, Mode: dirlock.ModeExclusive,
+		})
+		if acqErr == nil {
+			r(false)
+			close(other)
+		}
+	}()
+	assert.Eventually(t, func() bool {
+		st := mgr.StatusForChat("plain")
+		return st != nil && st.LockedByChatID == "wt" && st.LockedByTitle == "wt chat"
+	}, 2*time.Second, 10*time.Millisecond)
+
+	mgr.UpdateChatTitle("wt", "renamed")
+	assert.Eventually(t, func() bool {
+		st := mgr.StatusForChat("plain")
+		return st != nil && st.LockedByTitle == "renamed"
+	}, 2*time.Second, 10*time.Millisecond)
+
+	mgr.ForceReleaseChat("wt")
+	select {
+	case <-other:
+	case <-time.After(2 * time.Second):
+		t.Fatal("force release did not drop the merge holder")
+	}
+}

@@ -27,6 +27,18 @@ const (
 	ReasonUncommitted Reason = "uncommitted"
 )
 
+// mergeSuffix marks the holder a worktree chat takes on the main checkout while
+// it merges. It is a separate holder from the chat's own (worktree) lock so the
+// two never interfere, and it competes for the main directory like any chat.
+const mergeSuffix = "#merge"
+
+// MergeHolderID returns the lock holder id used for chatID's merge into the
+// main checkout.
+func MergeHolderID(chatID string) string { return chatID + mergeSuffix }
+
+// baseChatID maps a merge holder id back to the chat it belongs to.
+func baseChatID(id string) string { return strings.TrimSuffix(id, mergeSuffix) }
+
 var ErrLockActiveRun = errors.New("cannot unlock directory while session is actively running")
 
 type Status struct {
@@ -348,6 +360,20 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 	}
 }
 
+// AcquireMerge takes the exclusive lock on the main checkout dir (req.Dirs) for
+// chatID's merge, queueing FIFO behind any chat, worktree or not, that holds or
+// awaits it. req.ChatID is the worktree chat; req.Mode is ignored. The returned
+// release always drops the lock completely.
+func (m *Manager) AcquireMerge(ctx context.Context, req AcquireRequest) (func(), error) {
+	req.ChatID = MergeHolderID(req.ChatID)
+	req.Mode = ModeExclusive
+	release, err := m.Acquire(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return func() { release(false) }, nil
+}
+
 func (m *Manager) findConflictLocked(req AcquireRequest) (bool, *lockHolder, string) {
 	// Check against current holders
 	for _, h := range m.holders {
@@ -612,24 +638,26 @@ func (m *Manager) UnlockIdle(chatID string) (bool, error) {
 	return true, nil
 }
 
-// ForceReleaseChat removes any held lock and waiter for chatID, waking eligible waiters.
+// ForceReleaseChat removes any held lock and waiter for chatID (including its
+// merge holder), waking eligible waiters.
 func (m *Manager) ForceReleaseChat(chatID string) {
 	m.mu.Lock()
 	var notified []string
-	if _, ok := m.holders[chatID]; ok {
-		delete(m.holders, chatID)
-		notified = append(notified, chatID)
-	}
-
-	for i := 0; i < len(m.waiters); {
-		if m.waiters[i].req.ChatID == chatID {
-			w := m.waiters[i]
-			m.waiters = append(m.waiters[:i], m.waiters[i+1:]...)
-			close(w.ready)
+	for _, id := range []string{chatID, MergeHolderID(chatID)} {
+		if _, ok := m.holders[id]; ok {
+			delete(m.holders, id)
 			notified = append(notified, chatID)
-			continue
 		}
-		i++
+		for i := 0; i < len(m.waiters); {
+			if m.waiters[i].req.ChatID == id {
+				w := m.waiters[i]
+				m.waiters = append(m.waiters[:i], m.waiters[i+1:]...)
+				close(w.ready)
+				notified = append(notified, chatID)
+				continue
+			}
+			i++
+		}
 	}
 
 	woken := m.processWaitersLocked()
@@ -645,16 +673,18 @@ func (m *Manager) UpdateChatTitle(chatID, title string) {
 	}
 	m.mu.Lock()
 	var notified []string
-	if h, ok := m.holders[chatID]; ok {
-		h.title = title
-		notified = append(notified, chatID)
+	for _, id := range []string{chatID, MergeHolderID(chatID)} {
+		if h, ok := m.holders[id]; ok {
+			h.title = title
+			notified = append(notified, chatID)
+		}
 	}
 	for _, w := range m.waiters {
-		if w.req.ChatID == chatID {
+		if w.req.ChatID == chatID || w.req.ChatID == MergeHolderID(chatID) {
 			w.req.Title = title
 			notified = append(notified, chatID)
 		}
-		if w.blockedByChatID == chatID {
+		if baseChatID(w.blockedByChatID) == chatID {
 			w.blockedByTitle = title
 			notified = append(notified, w.req.ChatID)
 		}
@@ -670,6 +700,13 @@ func (m *Manager) StatusForChat(chatID string) *Status {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// A chat queued for its merge is waiting, whatever lock it holds meanwhile.
+	for _, w := range m.waiters {
+		if w.req.ChatID == MergeHolderID(chatID) {
+			return waitingStatus(w)
+		}
+	}
 
 	if h, ok := m.holders[chatID]; ok {
 		dir := ""
@@ -687,21 +724,25 @@ func (m *Manager) StatusForChat(chatID string) *Status {
 
 	for _, w := range m.waiters {
 		if w.req.ChatID == chatID {
-			dir := w.blockedDir
-			if dir == "" && len(w.req.Dirs) > 0 {
-				dir = w.req.Dirs[0]
-			}
-			return &Status{
-				IsWaitingForLock: true,
-				LockedDir:        dir,
-				LockedByChatID:   w.blockedByChatID,
-				LockedByTitle:    w.blockedByTitle,
-				BlockingReason:   w.blockedByReason,
-			}
+			return waitingStatus(w)
 		}
 	}
 
 	return nil
+}
+
+func waitingStatus(w *waiter) *Status {
+	dir := w.blockedDir
+	if dir == "" && len(w.req.Dirs) > 0 {
+		dir = w.req.Dirs[0]
+	}
+	return &Status{
+		IsWaitingForLock: true,
+		LockedDir:        dir,
+		LockedByChatID:   baseChatID(w.blockedByChatID),
+		LockedByTitle:    w.blockedByTitle,
+		BlockingReason:   w.blockedByReason,
+	}
 }
 
 // LockedDirsForChat returns a copy of all locked directories currently held by chatID, or nil.
@@ -726,6 +767,7 @@ func (m *Manager) notify(chatIDs []string) {
 	}
 	seen := make(map[string]struct{}, len(chatIDs))
 	for _, id := range chatIDs {
+		id = baseChatID(id)
 		if id == "" {
 			continue
 		}
