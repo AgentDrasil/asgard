@@ -99,13 +99,15 @@ var agyCmd = &cobra.Command{
 			}
 		}
 
-		result, err := agy.Prompt(ctx, prompt, types.PromptOptions{
+		opts := types.PromptOptions{
 			Dir:            dir,
 			SessionID:      agySession,
 			Model:          agyModel,
 			AddTmpToDir:    agyAddTmpToDir,
 			ReportCallback: buildHTTPReporter(),
-		})
+		}
+		defer startInjectServer(&opts)()
+		result, err := agy.Prompt(ctx, prompt, opts)
 		if err != nil {
 			return fmt.Errorf("running prompt: %w", err)
 		}

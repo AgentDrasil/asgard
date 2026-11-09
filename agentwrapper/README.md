@@ -237,6 +237,11 @@ Register `myagentCmd` in `backend/agentwrapper/cmd/aw/commands/root.go`:
 rootCmd.AddCommand(myagentCmd)
 ```
 
+### Mid-run message injection (`inject` socket)
+`aw claude` and `aw agy` listen on a unix socket so the host can push a user message into the running session. The per-run host socket directory is bind-mounted at `/fakebash` in the agent sandbox, so aw listens on `/fakebash/inject.sock` (override with `ASGARD_INJECT_SOCK`; outside the sandbox, with no override and no `/fakebash`, the feature is off) and the host dials `<sockDir>/inject.sock`. `opencode` and `simplest` do not listen, so connecting fails and the caller queues the message instead.
+
+Protocol (package `agentwrapper/inject`): the client writes one JSON line `{"prompt":"..."}` (max 16 MiB) and the server replies with one line after the injection returned, then closes: `{"ok":true}` or `{"ok":false,"reason":"not_injectable"|"bad_request"|"internal","error":"..."}`. `inject.Send` returns nil on success and an error wrapping `types.ErrNotInjectable` when the message was not delivered and should be queued (run over, not yet started, or no listener, which also wraps `inject.ErrUnavailable`).
+
 ---
 
 ## 4. Testing

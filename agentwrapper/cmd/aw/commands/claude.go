@@ -85,12 +85,14 @@ var claudeCmd = &cobra.Command{
 			}
 		}
 
-		result, err := claude.Prompt(ctx, prompt, types.PromptOptions{
+		opts := types.PromptOptions{
 			Dir:            dir,
 			SessionID:      claudeSession,
 			Model:          claudeModel,
 			ReportCallback: buildHTTPReporter(),
-		})
+		}
+		defer startInjectServer(&opts)()
+		result, err := claude.Prompt(ctx, prompt, opts)
 		if err != nil {
 			return fmt.Errorf("running prompt: %w", err)
 		}
