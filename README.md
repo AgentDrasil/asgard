@@ -146,7 +146,7 @@ quota_profiles:
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).
 
-The sandboxes are started by the **runner** (the backend only dispatches runs to it); the bwrap argument construction lives in [bwrap.go](backend/lib/bwrap/bwrap.go). Sandbox callbacks (ask-user, call-peer, find-peer, show-output, status, metrics) go agent sandbox → runner (`/fakebash/asgard.sock`) → backend over the runner connection.
+The sandboxes are started by the **runner** (the backend only dispatches runs to it); the bwrap argument construction lives in [bwrap.go](backend/lib/bwrap/bwrap.go). Sandbox callbacks (ask-user, call-peer, find-peer, show-output, asgard-merge, status, metrics) go agent sandbox → runner (`/fakebash/asgard.sock`) → backend over the runner connection.
 
 ```mermaid
 graph TD
@@ -448,14 +448,36 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **File Tree** (`GET /api/files/tree`): Lists directory contents and files within session workspace, session tmp, or session `/session` directory. Supports `session_id`, optional `path`, and optional `scope` (`tmp`, `session`, or `workspace`).
 *   **File Search** (`GET /api/files/search`): Searches for files by query inside session workspace, session tmp (`/tmp` prefix), and session directory (`/session` prefix).
 
-### 3. Management & Coordination API
+### 3. Git Worktree Isolation (opt-in per chat)
+
+By default two chats cannot work in the same directory at once: the directory lock (`backend/lib/dirlock`) is exclusive. An agent can offer **git worktrees** so that chats working in one repository do not wait for each other:
+
+```yaml
+# agent config.yaml
+worktree:
+  enabled: true
+  root: /workspace/src/wt   # where per-chat worktrees are created
+```
+
+`root` must not overlap any `run_dirs` entry or read-write mount (so the worktree and the main checkout are different lock paths), `lock_mode: readonly` agents cannot enable it, and no read-write mount may cover a run directory (that would hand the agent the main checkout). The web UI shows a "Work in a separate git worktree" checkbox for such agents when a chat is started; `POST /api/sessions` and the first `POST /api/agents/{id}/message` take `"worktree": true`. It is the user's choice, decided when the chat starts and kept for its life (400 if the agent does not offer it or is a workflow agent). The chosen run directory must be the root of a git checkout, otherwise the runner refuses the run.
+
+*   **Who creates the worktree.** The runner, before the agent starts: `<root>/<repo>-<chat-id>` on the branch `asgard/<chat-id>/work`, from the checkout's current `HEAD`. A resumed chat reuses it. The agent's only run directory is the worktree, so the main checkout is never mounted writable.
+*   **Locks.** The backend locks the worktree path, not the repository, so a worktree chat runs next to chats that work in the main checkout (and next to other worktree chats).
+*   **Sandbox view of git.** The repository's `.git` is read-only; only `worktrees/<name>`, the chat's branch namespace `refs/heads/asgard/<chat-id>` (with its reflog) and a private object directory are writable, and the shared object store is a read-only alternate (`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`). The agent can commit, amend and rebase, but cannot move `main` or another chat's branch, change the git config, or damage the shared objects. The same bindings apply to the command sandbox (`fakebashd`), where `git` runs.
+*   **Merging: `asgard-merge`.** The agent delivers its work by running `asgard-merge` (sandbox tool → runner → backend). The runner asks the backend for the exclusive lock on the **main checkout** (`AgentCallbackService.HoldMergeLock`, a stream that holds the lock until it ends), so a merge queues FIFO with every other chat that holds or awaits that directory, worktree or not, and a non-worktree chat with uncommitted changes in the checkout keeps the merge waiting. Under the lock the runner imports the objects the branch adds (`git pack-objects | git index-pack --strict`, so the agent's private objects are verified before they enter the shared store) and fast-forwards the checkout's branch with `git merge --ff-only`. Everything slow happens before the lock, in the worktree and by the agent: rebase, conflict resolution and the project's checks; the locked part takes a moment. The worktree is kept after a merge so the chat can go on.
+*   **Failures are the agent's to fix.** `asgard-merge` exits non-zero and prints what to do for each status: `main_moved` (rebase, re-run the checks, merge again), `dirty_worktree` (commit or discard), `invalid_objects` (recreate the commits), `main_dirty` / `main_detached` (not the agent's to fix: report to the user). The agent contract gets a short worktree section (`AW_AGENTS.md`); the case-by-case guidance comes with the tool output, not the static prompt.
+*   **Runner-side git hardening.** The runner's git commands (create, merge) run outside the agent sandbox on a repository other chats may write, so they carry the same hardening as the runner's file-system git API (hooks off, redirecting `GIT_*` variables dropped, dangerous repository config refused), and the worktree's administrative directory, which the agent can write, is validated before any command touches it (`commondir` must still point at the main repository, no symlinks, no `config.worktree`).
+
+Known limitations: the file browser, diff and git push/pull panels of the web UI use the run directory's own `.git` and do not support a worktree (a `.git` file) yet; worktrees are not removed automatically when a chat is deleted (the chat's private objects are, in its session directory; remove a leftover worktree with `git worktree remove` and `git branch -D asgard/<chat-id>/work`); worktree chats need a runner. The main checkout is mounted read-only in both sandboxes of a worktree run (also where an ancestor such as `$HOME` is writable).
+
+### 4. Management & Coordination API
 *   **Public Config** (`GET /api/config`): Returns public configuration settings to web clients (including Web Push configuration `firebase_webpush_web`).
 *   **Team Discovery** (`GET /team`):
     *   Finds the agent linked to the session queried by chat ID.
     *   Identifies that agent's team configurations.
     *   Returns details on all other agents that belong to the same team.
 
-### 4. Compression Telemetry API
+### 5. Compression Telemetry API
 *   **Record Metrics** (`AgentCallbackService.RecordMetrics`, over the runner connection; there is no HTTP endpoint): Ingests batches of `{kind, tokens, bytes}` events reported by `fakebash` and `show-output` as they compress, truncate, or surface command output. The server aggregates them and persists the tally to `~/asgard/data/compression-metrics.json`.
 *   **Read Metrics** (`GET /api/compression-metrics`): Returns the aggregated counters rendered by the WebUI compression statistics page: Jev and compass calls, tokens and per-call token averages, compressed outputs, truncations, and `show-output` calls with the raw bytes retrieved. It also derives the **retrieval rate** (show-output calls over compressed outputs), the headline quality signal — the agent calls `show-output` because the summary or classification dropped detail it needed, so a rising rate points at the classifier or summarizer prompt.
 
