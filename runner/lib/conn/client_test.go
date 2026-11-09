@@ -3,6 +3,7 @@ package conn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
@@ -342,6 +344,10 @@ func (e *orderExecutor) StartRun(_ context.Context, sr *runnerpb.StartRun, _ Sin
 	e.mu.Unlock()
 }
 
+func (e *orderExecutor) InjectMessage(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+
 func (e *orderExecutor) CancelRun(id string) {
 	e.mu.Lock()
 	e.calls = append(e.calls, "cancel:"+id)
@@ -446,4 +452,171 @@ func TestHeartbeatCarriesHealthError(t *testing.T) {
 	got := lastHeartbeat(c).GetHealthError()
 	assert.LessOrEqual(t, len(got), maxHealthErrorLen+len("... [truncated]"))
 	assert.True(t, strings.HasSuffix(got, "[truncated]"))
+}
+
+func injectMsg(seq uint64, runID, injectID, prompt string, deadline time.Time) *runnerpb.BackendMessage {
+	return &runnerpb.BackendMessage{Seq: seq, Payload: &runnerpb.BackendMessage_InjectMessage{InjectMessage: &runnerpb.InjectMessage{
+		RunId: runID, InjectId: injectID, Prompt: prompt, DeadlineUnixMs: deadline.UnixMilli(),
+	}}}
+}
+
+// injectBackend sends msgs after the accept and forwards the InjectResults it
+// receives on the returned channel.
+func injectBackend(t *testing.T, msgs ...*runnerpb.BackendMessage) (*fakeBackend, <-chan *runnerpb.InjectResult) {
+	t.Helper()
+	results := make(chan *runnerpb.InjectResult, 16)
+	fb := newFakeBackend(t, func(_ int, _ *runnerpb.Register, stream grpc.BidiStreamingServer[runnerpb.RunnerMessage, runnerpb.BackendMessage]) error {
+		if err := stream.Send(accept("b1")); err != nil {
+			return err
+		}
+		for _, m := range msgs {
+			if err := stream.Send(m); err != nil {
+				return err
+			}
+		}
+		for {
+			m, err := stream.Recv()
+			if err != nil {
+				return err
+			}
+			if r := m.GetInjectResult(); r != nil {
+				results <- r
+			}
+		}
+	})
+	return fb, results
+}
+
+func nextInject(t *testing.T, ch <-chan *runnerpb.InjectResult) *runnerpb.InjectResult {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(5 * time.Second):
+		t.Fatal("no InjectResult")
+		return nil
+	}
+}
+
+func TestInjectResultMapping(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	exec.injectFn = func(_ context.Context, _, injectID, _ string) error {
+		switch injectID {
+		case "ok":
+			return nil
+		case "ni":
+			return fmt.Errorf("wrapped: %w", types.ErrNotInjectable)
+		default:
+			return errors.New("boom")
+		}
+	}
+	dl := time.Now().Add(time.Minute)
+	fb, results := injectBackend(t,
+		injectMsg(1, "r1", "ok", "hi", dl),
+		injectMsg(2, "r1", "ni", "hi", dl),
+		injectMsg(3, "r1", "err", "hi", dl),
+	)
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	got := map[string]*runnerpb.InjectResult{}
+	for range 3 {
+		r := nextInject(t, results)
+		got[r.GetInjectId()] = r
+	}
+	assert.True(t, got["ok"].GetOk())
+	assert.False(t, got["ni"].GetOk())
+	assert.Equal(t, InjectNotInjectable, got["ni"].GetReason())
+	assert.False(t, got["err"].GetOk())
+	assert.Equal(t, InjectError, got["err"].GetReason())
+	assert.Contains(t, got["err"].GetError(), "boom")
+}
+
+func TestInjectExpiredDeadlineNeverReachesExecutor(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	fb, results := injectBackend(t, injectMsg(1, "r1", "late", "hi", time.Now().Add(-time.Second)))
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	r := nextInject(t, results)
+	assert.False(t, r.GetOk())
+	assert.Equal(t, InjectNotInjectable, r.GetReason())
+	assert.Empty(t, exec.injectedCalls(), "an expired inject must never be executed")
+}
+
+func TestInjectReplayIsIdempotent(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	dl := time.Now().Add(time.Minute)
+	// The same inject_id arrives again under a new seq (as after a backend
+	// restart that re-sends it): the cached result is returned, no second inject.
+	fb, results := injectBackend(t,
+		injectMsg(1, "r1", "i1", "hi", dl),
+		injectMsg(2, "r1", "i1", "hi", dl),
+	)
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	// The duplicate either arrives while the first call is still running (the
+	// first call's result is the only answer) or after it (cached result is
+	// resent); both must leave exactly one injection.
+	first := nextInject(t, results)
+	assert.True(t, first.GetOk())
+	select {
+	case second := <-results:
+		assert.True(t, second.GetOk())
+	case <-time.After(300 * time.Millisecond):
+	}
+	assert.Equal(t, []string{"i1:hi"}, exec.injectedCalls())
+}
+
+func TestInjectDoesNotBlockCancel(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	exec.injectFn = func(ctx context.Context, _, _, _ string) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}
+	fb, _ := injectBackend(t,
+		injectMsg(1, "r1", "slow", "hi", time.Now().Add(time.Minute)),
+		&runnerpb.BackendMessage{Seq: 2, Payload: &runnerpb.BackendMessage_CancelRun{CancelRun: &runnerpb.CancelRun{RunId: "r1"}}},
+	)
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	require.Eventually(t, func() bool {
+		exec.mu.Lock()
+		defer exec.mu.Unlock()
+		return len(exec.cancelled) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestNotImplementedExecutorInjectNotInjectable(t *testing.T) {
+	t.Parallel()
+	err := NotImplementedExecutor{}.InjectMessage(context.Background(), "r", "i", "p", time.Now())
+	assert.ErrorIs(t, err, types.ErrNotInjectable)
+}
+
+func TestInjectsOfOneRunStayOrdered(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	exec.injectFn = func(_ context.Context, _, injectID, _ string) error {
+		if injectID == "first" {
+			time.Sleep(200 * time.Millisecond) // a later inject must not overtake it
+		}
+		return nil
+	}
+	dl := time.Now().Add(time.Minute)
+	fb, results := injectBackend(t,
+		injectMsg(1, "r1", "first", "a", dl),
+		injectMsg(2, "r1", "second", "b", dl),
+	)
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	assert.Equal(t, "first", nextInject(t, results).GetInjectId())
+	assert.Equal(t, "second", nextInject(t, results).GetInjectId())
+	assert.Equal(t, []string{"first:a", "second:b"}, exec.injectedCalls())
 }

@@ -196,6 +196,7 @@ type fakeRunner struct {
 	cc        *grpc.ClientConn
 	stream    grpc.BidiStreamingClient[runnerpb.RunnerMessage, runnerpb.BackendMessage]
 	cancel    context.CancelFunc
+	msgsMu    sync.Mutex
 	msgs      chan *runnerpb.BackendMessage
 	regResult *runnerpb.RegisterResult
 	svc       *grpc.Server
@@ -296,15 +297,21 @@ func (f *fakeRunner) connect() error {
 		return nil
 	}
 	f.lastBackendBoot = f.regResult.GetBackendBootId()
-	f.msgs = make(chan *runnerpb.BackendMessage, 256)
+	// Each connection's reader owns its channel: a previous connection's
+	// goroutine may still be closing its own while a new one is set up.
+	msgs := make(chan *runnerpb.BackendMessage, 256)
+	stream := f.stream
+	f.msgsMu.Lock()
+	f.msgs = msgs
+	f.msgsMu.Unlock()
 	go func() {
 		for {
-			m, err := f.stream.Recv()
+			m, err := stream.Recv()
 			if err != nil {
-				close(f.msgs)
+				close(msgs)
 				return
 			}
-			f.msgs <- m
+			msgs <- m
 		}
 	}()
 	return nil
@@ -348,7 +355,7 @@ func (f *fakeRunner) nextBackend() *runnerpb.BackendMessage {
 	f.t.Helper()
 	for {
 		select {
-		case m, ok := <-f.msgs:
+		case m, ok := <-f.msgsChan():
 			require.True(f.t, ok, "backend stream closed")
 			if m.GetAck() == nil {
 				return m
@@ -365,7 +372,7 @@ func (f *fakeRunner) expectNoBackend() {
 	deadline := time.After(200 * time.Millisecond)
 	for {
 		select {
-		case m, ok := <-f.msgs:
+		case m, ok := <-f.msgsChan():
 			if !ok {
 				return
 			}
@@ -382,7 +389,7 @@ func (f *fakeRunner) waitAck(seq uint64) {
 	timeout := time.After(5 * time.Second)
 	for {
 		select {
-		case m, ok := <-f.msgs:
+		case m, ok := <-f.msgsChan():
 			require.True(f.t, ok, "backend stream closed")
 			if a := m.GetAck(); a != nil && a.GetAckSeq() >= seq {
 				return
@@ -424,4 +431,11 @@ func mustWait(t *testing.T, r *Run) *Result {
 	res, err := r.Wait(ctx)
 	require.NoError(t, err)
 	return res
+}
+
+// msgsChan returns the message channel of the current connection.
+func (f *fakeRunner) msgsChan() chan *runnerpb.BackendMessage {
+	f.msgsMu.Lock()
+	defer f.msgsMu.Unlock()
+	return f.msgs
 }

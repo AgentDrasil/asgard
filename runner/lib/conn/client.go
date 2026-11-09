@@ -25,9 +25,18 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/pkg/version"
 	"github.com/AgentDrasil/asgard/runner/lib/runs"
+)
+
+// InjectResult.reason values.
+const (
+	// InjectNotInjectable: nothing was delivered; the backend queues the message.
+	InjectNotInjectable = "not_injectable"
+	// InjectError: the delivery state is unknown.
+	InjectError = "error"
 )
 
 const (
@@ -115,6 +124,22 @@ type Client struct {
 	callbacks      runnerpb.AgentCallbackServiceClient
 	// workers holds the pending executor calls of each run_id (guarded by mu).
 	workers map[string][]func()
+	// injects remembers recent InjectMessage ids (guarded by mu) so a replay
+	// never injects twice; injectOrder evicts the oldest first.
+	injects     map[string]*injectEntry
+	injectOrder []string
+	// injectQueues holds the pending injects of each run_id (guarded by mu).
+	injectQueues map[string][]func()
+}
+
+// maxInjectCache bounds the remembered inject ids. Replays only span the
+// unacked window, and inject ids are only replayed within a few seconds of
+// their deadline, so a small cache is enough.
+const maxInjectCache = 1024
+
+// injectEntry is the state of one inject_id: result is nil while it runs.
+type injectEntry struct {
+	result *runnerpb.InjectResult
 }
 
 // New creates a Client. Call Run to connect.
@@ -152,6 +177,9 @@ func New(opts Options) *Client {
 		wake:    make(chan struct{}, 1),
 		space:   make(chan struct{}),
 		workers: make(map[string][]func()),
+		injects: make(map[string]*injectEntry),
+
+		injectQueues: make(map[string][]func()),
 	}
 }
 
@@ -556,8 +584,64 @@ func (c *Client) handle(msg *runnerpb.BackendMessage) {
 	case *runnerpb.BackendMessage_CancelRun:
 		id := p.CancelRun.GetRunId()
 		c.dispatch(id, func() { c.opts.Executor.CancelRun(id) })
+	case *runnerpb.BackendMessage_InjectMessage:
+		// Not through dispatch: the per-run worker also runs CancelRun, which
+		// must not wait behind an inject that may block until its deadline.
+		// Injects of one run still run strictly in arrival order, so two
+		// messages never reach the CLI swapped.
+		im := p.InjectMessage
+		c.dispatchInject(im.GetRunId(), func() { c.handleInject(ctx, im) })
 	default:
 		log.Warn().Msgf("ignoring unknown backend message %T", p)
+	}
+}
+
+// handleInject applies one InjectMessage and queues its InjectResult.
+//
+// An inject must never execute late: unacked downstream messages are replayed
+// after a reconnect, and by then the backend may have given up and queued the
+// message as a normal one. So an expired deadline is answered not_injectable
+// without touching the run, and a repeated inject_id gets the cached result
+// instead of a second injection.
+func (c *Client) handleInject(ctx context.Context, im *runnerpb.InjectMessage) {
+	id := im.GetInjectId()
+	c.mu.Lock()
+	if e, ok := c.injects[id]; ok {
+		res := e.result
+		c.mu.Unlock()
+		// Still running: the original call sends the result. Done: resend the
+		// cached one (the first may have been lost with the backend's state).
+		if res != nil {
+			_ = c.enqueue(ctx, &runnerpb.RunnerMessage{Payload: &runnerpb.RunnerMessage_InjectResult{InjectResult: proto.Clone(res).(*runnerpb.InjectResult)}})
+		}
+		return
+	}
+	entry := &injectEntry{}
+	c.injects[id] = entry
+	c.injectOrder = append(c.injectOrder, id)
+	for len(c.injectOrder) > maxInjectCache {
+		delete(c.injects, c.injectOrder[0])
+		c.injectOrder = c.injectOrder[1:]
+	}
+	c.mu.Unlock()
+
+	res := &runnerpb.InjectResult{InjectId: id}
+	deadline := time.UnixMilli(im.GetDeadlineUnixMs())
+	if !time.Now().Before(deadline) {
+		res.Reason, res.Error = InjectNotInjectable, "deadline expired"
+	} else if err := c.opts.Executor.InjectMessage(ctx, im.GetRunId(), id, im.GetPrompt(), deadline); err == nil {
+		res.Ok = true
+	} else if errors.Is(err, types.ErrNotInjectable) {
+		res.Reason, res.Error = InjectNotInjectable, truncateHealth(err.Error())
+	} else {
+		res.Reason, res.Error = InjectError, truncateHealth(err.Error())
+	}
+
+	c.mu.Lock()
+	entry.result = res
+	c.mu.Unlock()
+	if err := c.enqueue(ctx, &runnerpb.RunnerMessage{Payload: &runnerpb.RunnerMessage_InjectResult{InjectResult: res}}); err != nil {
+		log.Warn().Err(err).Str("inject_id", id).Msg("failed to queue inject result")
 	}
 }
 
@@ -637,6 +721,35 @@ func (c *Client) trimLocked(acked uint64) {
 	c.queue = c.queue[i:]
 	close(c.space)
 	c.space = make(chan struct{})
+}
+
+// dispatchInject runs fn on a per-run FIFO worker that is separate from the
+// one dispatch uses (StartRun/CancelRun), so a slow inject delays only later
+// injects of the same run. The worker goroutine exits when its queue is empty.
+func (c *Client) dispatchInject(runID string, fn func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending, busy := c.injectQueues[runID]
+	c.injectQueues[runID] = append(pending, fn)
+	if busy {
+		return
+	}
+	go func() {
+		for {
+			c.mu.Lock()
+			q := c.injectQueues[runID]
+			if len(q) == 0 {
+				delete(c.injectQueues, runID)
+				c.mu.Unlock()
+				return
+			}
+			next := q[0]
+			q[0] = nil
+			c.injectQueues[runID] = q[1:]
+			c.mu.Unlock()
+			next()
+		}
+	}()
 }
 
 // dispatch runs fn on the serial worker of runID, so executor calls of one run

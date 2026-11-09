@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/moznion/go-optional"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/inject"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -65,6 +68,10 @@ type Executor struct {
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
+	// sockDirs maps a running run to the host view of its per-run socket
+	// directory (where aw listens on inject.sock). It only exists while the
+	// sandboxes of the current target run.
+	sockDirs map[string]string
 }
 
 var _ conn.Executor = (*Executor)(nil)
@@ -80,7 +87,7 @@ func New(opts Options) *Executor {
 	if opts.run == nil {
 		opts.run = run.RunWithOptions
 	}
-	return &Executor{opts: opts, cancels: make(map[string]context.CancelFunc)}
+	return &Executor{opts: opts, cancels: make(map[string]context.CancelFunc), sockDirs: make(map[string]string)}
 }
 
 // StartRun implements conn.Executor. It returns right away: the run executes
@@ -114,6 +121,47 @@ func (e *Executor) CancelRun(runID string) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (e *Executor) setSockDir(runID, dir string) {
+	e.mu.Lock()
+	e.sockDirs[runID] = dir
+	e.mu.Unlock()
+}
+
+func (e *Executor) clearSockDir(runID, dir string) {
+	e.mu.Lock()
+	if e.sockDirs[runID] == dir {
+		delete(e.sockDirs, runID)
+	}
+	e.mu.Unlock()
+}
+
+// InjectMessage implements conn.Executor: it hands prompt to the aw process of
+// the run over <sockDir>/inject.sock. Everything that means "the message was
+// not delivered" (unknown run, no sock dir yet, socket missing or closed) maps
+// to types.ErrNotInjectable so the backend queues the message instead.
+func (e *Executor) InjectMessage(ctx context.Context, runID, injectID, prompt string, deadline time.Time) error {
+	e.mu.Lock()
+	dir, ok := e.sockDirs[runID]
+	e.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: run %q has no socket dir", types.ErrNotInjectable, runID)
+	}
+	// inject.Send requires a deadline: a frozen aw must not hang the call.
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	if err := inject.Send(ctx, filepath.Join(dir, inject.SocketName), prompt); err != nil {
+		if ctx.Err() != nil && !errors.Is(err, types.ErrNotInjectable) {
+			// Timed out mid-exchange: the reply was lost, so the message
+			// may or may not have been delivered. It is reported as an error
+			// (not not_injectable) to say the delivery state is unknown; the
+			// backend cannot tell the two apart and queues on any failure.
+			log.Warn().Err(err).Str("run_id", runID).Str("inject_id", injectID).Msg("inject timed out")
+		}
+		return err
+	}
+	return nil
 }
 
 // outcome is what execute learned about a run.
@@ -187,7 +235,20 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 		OnSockDir: func(sockDir, runDir string) (func(), error) {
 			srv := newStatusServer(ctx, sr, agent, runDir, sink)
 			srv.callbacks = e.opts.Callbacks
-			return srv.serve(sockDir)
+			stop, err := srv.serve(sockDir)
+			if err != nil {
+				return nil, err
+			}
+			e.setSockDir(sr.GetRunId(), sockDir)
+			return func() {
+				// Forget the dir before the status server stops and the
+				// dir is removed, so no inject dials a vanishing socket.
+				// Only drop our own entry.
+				e.clearSockDir(sr.GetRunId(), sockDir)
+				if stop != nil {
+					stop()
+				}
+			}, nil
 		},
 	}
 	if sr.GetUserId() != "" && e.opts.Callbacks != nil {

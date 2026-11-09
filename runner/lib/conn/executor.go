@@ -2,7 +2,9 @@ package conn
 
 import (
 	"context"
+	"time"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
@@ -31,6 +33,15 @@ type Executor interface {
 	StartRun(ctx context.Context, sr *runnerpb.StartRun, sink Sink)
 	// CancelRun stops the run if it is still executing.
 	CancelRun(runID string)
+	// InjectMessage pushes prompt into the still-running agent CLI of runID.
+	// It is called off the reader goroutine and, unlike StartRun/CancelRun,
+	// NOT serialized with the run's other calls (it may block up to deadline
+	// and must not delay a CancelRun). The caller has already checked that
+	// deadline has not passed. It returns nil when the message was injected,
+	// an error matching types.ErrNotInjectable when it was definitely not
+	// delivered (unknown or finished run, CLI without injection), and any
+	// other error when the delivery state is unknown. injectID is for logging.
+	InjectMessage(ctx context.Context, runID, injectID, prompt string, deadline time.Time) error
 }
 
 // ErrNotImplemented is the RunResult.error of the placeholder executor.
@@ -53,3 +64,8 @@ func (NotImplementedExecutor) StartRun(ctx context.Context, sr *runnerpb.StartRu
 
 // CancelRun implements Executor.
 func (NotImplementedExecutor) CancelRun(string) {}
+
+// InjectMessage implements Executor: nothing runs, so nothing is injectable.
+func (NotImplementedExecutor) InjectMessage(context.Context, string, string, string, time.Time) error {
+	return types.ErrNotInjectable
+}

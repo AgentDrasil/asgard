@@ -68,6 +68,13 @@ message NoQuota {
 // persisted: RunEvents are keyed by (run_id, event_index), RunResult is
 // finalized at most once per run_id.
 //
+// InjectMessage is the one downstream message that must NEVER take effect
+// late: it is replayable like any seq'd message, but the runner drops it
+// (InjectResult not_injectable) when deadline_unix_ms has passed at the time it
+// processes it, and answers a repeated inject_id with the cached result without
+// injecting again. The backend therefore waits past the deadline for the
+// result instead of giving up at it (see InjectMessage).
+//
 // Size limits: gRPC MaxRecvMsgSize/MaxSendMsgSize is 16 MiB in both
 // directions. Any single control-stream message is capped at 12 MiB as a
 // whole; the sender must split or reject. RunOutputChunk is at most 1 MiB;
@@ -93,6 +100,7 @@ message RunnerMessage {
     RunResult run_result = 5;
     Ack ack = 6;
     RunOutputChunk run_output = 7;
+    InjectResult inject_result = 8;
   }
 }
 
@@ -105,6 +113,7 @@ message BackendMessage {
     StartRun start_run = 3;
     CancelRun cancel_run = 4;
     Ack ack = 5;
+    InjectMessage inject_message = 6;
   }
 }
 
@@ -303,6 +312,42 @@ message StartRun {
 
 message CancelRun {
   string run_id = 1;
+}
+
+// InjectMessage asks the runner to push a user message into the still-running
+// agent CLI of run_id (mid-run injection). It is a best effort fast path: if
+// the message cannot be injected the backend queues it as a normal message.
+//
+// Because unacked downstream messages are replayed after a reconnect, a late
+// replay must not inject a stale message that the backend has already given up
+// on and queued (that would deliver it twice). So:
+//   - deadline_unix_ms is the absolute (backend clock) time after which the
+//     runner must not inject; when it has passed at processing time the runner
+//     answers InjectResult{ok=false, reason="not_injectable"} without touching
+//     the run. Runner and backend clocks are assumed to agree within a few
+//     hundred ms (NTP); the backend waits deadline + a margin for the result
+//     before treating the message as not injected.
+//   - inject_id is unique per attempt; the runner caches recent results and a
+//     replay of a processed inject_id returns the cached result, never
+//     injecting twice.
+message InjectMessage {
+  string run_id = 1;
+  string inject_id = 2;
+  string prompt = 3;
+  int64 deadline_unix_ms = 4;
+}
+
+// InjectResult answers one InjectMessage (runner -> backend, seq'd).
+message InjectResult {
+  string inject_id = 1;
+  // ok is true when the message was accepted by the run's injector.
+  bool ok = 2;
+  // reason is set when ok is false: "not_injectable" (nothing was delivered:
+  // unknown/finished run, CLI without injection, or deadline expired; the
+  // caller should queue the message) or "error" (unknown delivery state).
+  string reason = 3;
+  // error carries the error text for reason "error" (and detail otherwise).
+  string error = 4;
 }
 
 // ---------------------------------------------------------------------------

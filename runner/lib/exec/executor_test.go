@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AgentDrasil/asgard/agentwrapper/inject"
+	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -439,4 +441,53 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 		opts := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink())
 		assert.Empty(t, opts.Proxy.EnvVars)
 	})
+}
+
+// InjectMessage dials <sockDir>/inject.sock of the running run, and a run
+// without a (still registered) sock dir is simply not injectable.
+func TestExecutorInjectMessage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var got []string
+	fn := func(_ context.Context, _ *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		sockDir := shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		srv, err := inject.Listen(filepath.Join(sockDir, inject.SocketName))
+		require.NoError(t, err)
+		defer func() { _ = srv.Close() }()
+		srv.SetInject(func(p string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, p)
+			return nil
+		})
+		close(ready)
+		<-release
+		return run.Result{Target: agentspec.CLITarget{CLI: "claude", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	ex := newTestExecutor(t, fn, testAgent("a", "h1", ""))
+	dl := func() time.Time { return time.Now().Add(2 * time.Second) }
+
+	// Unknown run: nothing to dial.
+	err := ex.InjectMessage(context.Background(), "run-1", "i0", "x", dl())
+	require.ErrorIs(t, err, types.ErrNotInjectable)
+
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), baseStartRun(), sink)
+	<-ready
+	require.NoError(t, ex.InjectMessage(context.Background(), "run-1", "i1", "hello", dl()))
+	mu.Lock()
+	assert.Equal(t, []string{"hello"}, got)
+	mu.Unlock()
+
+	close(release)
+	sink.wait(t)
+	// The run ended: its sock dir is forgotten again.
+	require.Eventually(t, func() bool {
+		return errors.Is(ex.InjectMessage(context.Background(), "run-1", "i2", "late", dl()), types.ErrNotInjectable)
+	}, 5*time.Second, 10*time.Millisecond)
 }

@@ -113,7 +113,9 @@ type Hub struct {
 	callbacks runnerpb.AgentCallbackServiceServer
 	nodes     map[string]*node
 	runs      map[string]*Run
-	conns     map[*connection]struct{}
+	// injects are the waiters of in-flight Inject calls by inject_id.
+	injects map[string]*injectWaiter
+	conns   map[*connection]struct{}
 	// raw tracks accepted connections still in the TLS handshake.
 	raw    map[net.Conn]struct{}
 	ln     net.Listener
@@ -143,6 +145,7 @@ func New(opts Options) *Hub {
 		cancel:    cancel,
 		nodes:     make(map[string]*node),
 		runs:      make(map[string]*Run),
+		injects:   make(map[string]*injectWaiter),
 		conns:     make(map[*connection]struct{}),
 		raw:       make(map[net.Conn]struct{}),
 	}

@@ -292,6 +292,9 @@ type recordingExecutor struct {
 	cancelled []string
 	hold      chan struct{} // when non-nil, results wait for it to close
 	startedCh chan string
+	// injectFn, when set, answers InjectMessage (default: nil = injected).
+	injectFn func(ctx context.Context, runID, injectID, prompt string) error
+	injected []string
 }
 
 func newRecordingExecutor(hold chan struct{}) *recordingExecutor {
@@ -339,4 +342,21 @@ func pemPair(t *testing.T, c tls.Certificate) (certPEM, keyPEM []byte) {
 	keyDER, err := x509.MarshalECPrivateKey(c.PrivateKey.(*ecdsa.PrivateKey))
 	require.NoError(t, err)
 	return pemCert(c.Certificate[0]), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+}
+
+func (e *recordingExecutor) InjectMessage(ctx context.Context, runID, injectID, prompt string, _ time.Time) error {
+	e.mu.Lock()
+	e.injected = append(e.injected, injectID+":"+prompt)
+	fn := e.injectFn
+	e.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, runID, injectID, prompt)
+	}
+	return nil
+}
+
+func (e *recordingExecutor) injectedCalls() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.injected...)
 }

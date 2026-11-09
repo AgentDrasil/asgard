@@ -200,3 +200,27 @@ func TestAgentSourceDense(t *testing.T) {
 	assert.True(t, (&GitDiffFile{HunksTruncated: true}).GetHunksTruncated())
 	assert.True(t, (&RegisterResult{RejectReasonTruncated: true}).GetRejectReasonTruncated())
 }
+
+func TestInjectRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	in := &BackendMessage{Seq: 3, Payload: &BackendMessage_InjectMessage{InjectMessage: &InjectMessage{
+		RunId: "r1", InjectId: "i1", Prompt: "hi", DeadlineUnixMs: 1234,
+	}}}
+	b, err := proto.Marshal(in)
+	require.NoError(t, err)
+	out := &BackendMessage{}
+	require.NoError(t, proto.Unmarshal(b, out))
+	assert.True(t, proto.Equal(in, out))
+	assert.EqualValues(t, 1234, out.GetInjectMessage().GetDeadlineUnixMs())
+
+	res := &RunnerMessage{Seq: 4, Payload: &RunnerMessage_InjectResult{InjectResult: &InjectResult{
+		InjectId: "i1", Reason: "not_injectable", Error: "expired",
+	}}}
+	b, err = proto.Marshal(res)
+	require.NoError(t, err)
+	got := &RunnerMessage{}
+	require.NoError(t, proto.Unmarshal(b, got))
+	assert.True(t, proto.Equal(res, got))
+	assert.False(t, got.GetInjectResult().GetOk())
+}

@@ -348,6 +348,8 @@ func (h *Hub) apply(c *connection, msg *runnerpb.RunnerMessage) error {
 		}
 	case *runnerpb.RunnerMessage_RunResult:
 		return h.applyResult(c, p.RunResult)
+	case *runnerpb.RunnerMessage_InjectResult:
+		h.applyInjectResult(c, p.InjectResult)
 	default:
 		return fmt.Errorf("unexpected runner message %T", p)
 	}
