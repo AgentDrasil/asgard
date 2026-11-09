@@ -32,12 +32,14 @@ const props = withDefaults(
     terminalType?: "session" | "sidebar";
     workingAgentLabel?: string | null;
     queuedMessages?: QueuedMessage[];
+    sendingQueuedIds?: string[];
     isRunning?: boolean;
     dirLock?: DirLockStatus;
     isUnlocking?: boolean;
   }>(),
   {
     queuedMessages: () => [],
+    sendingQueuedIds: () => [],
     isRunning: false,
     isUnlocking: false,
   },
@@ -67,6 +69,7 @@ const emit = defineEmits<{
   (e: "ask-replied", msgId?: string, text?: string): void;
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
+  (e: "send-now-queued", id: string): void;
   (e: "stop"): void;
   (e: "retry"): void;
   (e: "unlock"): void;
@@ -227,6 +230,7 @@ function navigateToVcs(gitRoot?: string) {
         :isArtifactDrawerOpen="isArtifactDrawerOpen"
         :workingAgentLabel="workingAgentLabel"
         :queuedMessages="queuedMessages"
+        :sendingQueuedIds="sendingQueuedIds"
         :isRunning="isRunning"
         :dirLock="dirLock"
         :isUnlocking="isUnlocking"
@@ -241,6 +245,7 @@ function navigateToVcs(gitRoot?: string) {
         @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
         @edit-queued="(id, text) => emit('edit-queued', id, text)"
         @delete-queued="(id) => emit('delete-queued', id)"
+        @send-now-queued="(id) => emit('send-now-queued', id)"
         @retry="emit('retry')"
         @unlock="emit('unlock')"
       />

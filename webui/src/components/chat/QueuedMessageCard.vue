@@ -3,15 +3,21 @@ import { ref, watch, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import type { QueuedMessage } from "../../types";
 
-const props = defineProps<{
-  message: QueuedMessage;
-  index: number;
-  total?: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    message: QueuedMessage;
+    index: number;
+    total?: number;
+    sending?: boolean;
+    allowSendNow?: boolean;
+  }>(),
+  { allowSendNow: true },
+);
 
 const emit = defineEmits<{
   (e: "edit", id: string, text: string): void;
   (e: "delete", id: string): void;
+  (e: "send-now", id: string): void;
 }>();
 
 const isEditing = ref(false);
@@ -46,6 +52,11 @@ const saveEdit = () => {
   isEditing.value = false;
 };
 
+const handleSendNow = () => {
+  if (props.sending) return;
+  emit("send-now", props.message.id);
+};
+
 const handleDelete = () => {
   emit("delete", props.message.id);
 };
@@ -73,6 +84,22 @@ const handleDelete = () => {
 
       <!-- Action Buttons (when not editing) -->
       <div v-if="!isEditing" class="flex items-center gap-1">
+        <button
+          v-if="allowSendNow"
+          type="button"
+          @click="handleSendNow"
+          :disabled="sending"
+          class="btn btn-ghost btn-xs btn-square text-primary/70 hover:text-primary"
+          :title="$t('chat.sendNow')"
+          data-testid="send-now-queued-button"
+        >
+          <span
+            v-if="sending"
+            class="loading loading-spinner loading-xs"
+            data-testid="send-now-loading"
+          ></span>
+          <Icon v-else icon="material-symbols:send-outline" class="w-4 h-4" />
+        </button>
         <button
           type="button"
           @click="startEdit"

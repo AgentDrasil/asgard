@@ -45,6 +45,7 @@ const props = withDefaults(
     isArtifactDrawerOpen?: boolean;
     workingAgentLabel?: string | null;
     queuedMessages?: QueuedMessage[];
+    sendingQueuedIds?: string[];
     isRunning?: boolean;
     dirLock?: DirLockStatus;
     isUnlocking?: boolean;
@@ -57,6 +58,7 @@ const props = withDefaults(
     isArtifactDrawerOpen: false,
     workingAgentLabel: null,
     queuedMessages: () => [],
+    sendingQueuedIds: () => [],
     isRunning: false,
     isUnlocking: false,
   },
@@ -74,6 +76,7 @@ const emit = defineEmits<{
   (e: "ask-replied", msgId?: string, text?: string): void;
   (e: "edit-queued", id: string, text: string): void;
   (e: "delete-queued", id: string): void;
+  (e: "send-now-queued", id: string): void;
   (e: "retry"): void;
   (e: "unlock"): void;
 }>();
@@ -601,7 +604,10 @@ onUnmounted(() => {
                 :index="idx"
                 :total="queuedMessages.length"
                 @edit="(id, text) => emit('edit-queued', id, text)"
+                :sending="sendingQueuedIds.includes(qMsg.id)"
+                :allowSendNow="activeAgent?.type !== 'workflow'"
                 @delete="(id) => emit('delete-queued', id)"
+                @send-now="(id) => emit('send-now-queued', id)"
               />
             </div>
           </div>

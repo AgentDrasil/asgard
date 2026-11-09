@@ -172,4 +172,53 @@ describe("QueuedMessageCard.vue", () => {
 
     app.unmount();
   });
+
+  const mountCard = (props: Record<string, unknown>) => {
+    const app = createApp({
+      render() {
+        return h(QueuedMessageCard, { message: dummyMessage, index: 0, ...props });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    return app;
+  };
+
+  it("emits send-now with the message id when the send now button is clicked", async () => {
+    let sentId = "";
+    const app = mountCard({ onSendNow: (id: string) => (sentId = id) });
+    await nextTick();
+    const btn = root.querySelector('[data-testid="send-now-queued-button"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    expect(sentId).toBe(dummyMessage.id);
+    app.unmount();
+  });
+
+  it("disables send now and shows a spinner while sending", async () => {
+    let calls = 0;
+    const app = mountCard({ sending: true, onSendNow: () => calls++ });
+    await nextTick();
+    const btn = root.querySelector('[data-testid="send-now-queued-button"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(root.querySelector('[data-testid="send-now-loading"]')).not.toBeNull();
+    btn.click();
+    expect(calls).toBe(0);
+    app.unmount();
+  });
+
+  it("hides send now while editing and when not allowed", async () => {
+    const app = mountCard({});
+    await nextTick();
+    (root.querySelector('[data-testid="edit-queued-button"]') as HTMLButtonElement).click();
+    await nextTick();
+    expect(root.querySelector('[data-testid="send-now-queued-button"]')).toBeNull();
+    app.unmount();
+
+    const app2 = mountCard({ allowSendNow: false });
+    await nextTick();
+    expect(root.querySelector('[data-testid="send-now-queued-button"]')).toBeNull();
+    app2.unmount();
+  });
 });

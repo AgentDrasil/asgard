@@ -14,6 +14,8 @@ import type {
   KeybindingsApiResponse,
   KeybindingsOverrides,
   QueuedMessage,
+  SendNowResult,
+  SendNowReason,
   RunnersResponse,
   ManageRunnersResponse,
   StoredTokens,
@@ -1142,8 +1144,8 @@ export async function triggerAgentMessage(
   return null;
 }
 
-export async function getQueuedMessages(sessionId: string): Promise<QueuedMessage[]> {
-  if (!sessionId) return [];
+export async function getQueuedMessages(sessionId: string): Promise<QueuedMessage[] | null> {
+  if (!sessionId) return null;
   try {
     const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/queue`);
     if (res.ok) {
@@ -1153,7 +1155,7 @@ export async function getQueuedMessages(sessionId: string): Promise<QueuedMessag
   } catch (err) {
     console.error("getQueuedMessages error:", err);
   }
-  return [];
+  return null;
 }
 
 export async function enqueueMessage(
@@ -1214,6 +1216,33 @@ export async function deleteQueuedMessage(sessionId: string, messageId: string):
     console.error("deleteQueuedMessage error:", err);
   }
   return false;
+}
+
+export async function sendQueuedMessageNow(
+  sessionId: string,
+  messageId: string,
+): Promise<SendNowResult> {
+  if (!sessionId || !messageId) return { kind: "error" };
+  try {
+    const res = await apiFetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(messageId)}/send-now`,
+      {
+        method: "POST",
+      },
+    );
+    if (res.status === 404) return { kind: "gone" };
+    if (!res.ok) return { kind: "error" };
+    const data = await res.json().catch(() => null);
+    if (data?.injected === true) {
+      return { kind: "injected", queue: Array.isArray(data.queue) ? data.queue : null };
+    }
+    const reason: SendNowReason =
+      data?.reason === "not_running" || data?.reason === "not_supported" ? data.reason : "failed";
+    return { kind: "not_injected", reason };
+  } catch (err) {
+    console.error("sendQueuedMessageNow error:", err);
+  }
+  return { kind: "error" };
 }
 
 export async function getFileTree(sessionId: string, subPath = ""): Promise<FileTreeEntry[]> {

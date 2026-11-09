@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ref, nextTick } from "vue";
-import { useSessionStore } from "./useSessionStore";
+import { useSessionStore, notifySendNowResult } from "./useSessionStore";
+import { useToast } from "./useToast";
 import * as api from "../lib/api";
 import type { ChatSession, AgentInfo, SessionEvent } from "../types";
 
@@ -1534,6 +1535,111 @@ describe("useSessionStore", () => {
 
       resolveStop(true);
       await stopCall;
+    });
+  });
+
+  describe("send now", () => {
+    const q = (id: string) => ({
+      id,
+      chatId: "session-sn",
+      prompt: id,
+      createdAt: "2026-09-03T12:00:00Z",
+      updatedAt: "2026-09-03T12:00:00Z",
+    });
+    const openWithQueue = async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({
+        chatID: "session-sn",
+        title: "t",
+        currentAgent: "agent-1",
+        runDir: "/w",
+        isRunning: true,
+        messages: [],
+        queuedMessages: [q("a"), q("b")],
+      } as ChatSession);
+      const store = useSessionStore();
+      await store.openSession("session-sn");
+      return store;
+    };
+
+    it("tracks sending state, blocks double calls and applies the returned queue", async () => {
+      const store = await openWithQueue();
+      let resolve!: (r: any) => void;
+      const spy = vi
+        .spyOn(api, "sendQueuedMessageNow")
+        .mockReturnValue(new Promise((r) => (resolve = r)));
+      const first = store.sendQueuedMessageNow("a");
+      expect(store.sendingQueuedIds.value).toEqual(["a"]);
+      expect(await store.sendQueuedMessageNow("a")).toBeNull();
+      resolve({ kind: "injected", queue: [q("b")] });
+      expect(await first).toEqual({ kind: "injected", queue: [q("b")] });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith("session-sn", "a");
+      expect(store.sendingQueuedIds.value).toEqual([]);
+      expect(store.queuedMessages.value.map((m) => m.id)).toEqual(["b"]);
+    });
+
+    it("refetches and applies the queue on gone (404)", async () => {
+      const store = await openWithQueue();
+      vi.spyOn(api, "sendQueuedMessageNow").mockResolvedValue({ kind: "gone" });
+      vi.spyOn(api, "getQueuedMessages").mockResolvedValue([q("b")]);
+      expect(await store.sendQueuedMessageNow("a")).toEqual({ kind: "gone" });
+      expect(store.queuedMessages.value.map((m) => m.id)).toEqual(["b"]);
+    });
+
+    it("keeps the queue unchanged when the refetch fails", async () => {
+      for (const res of [{ kind: "error" }, { kind: "not_injected", reason: "failed" }]) {
+        const store = await openWithQueue();
+        vi.spyOn(api, "sendQueuedMessageNow").mockResolvedValue(res as any);
+        vi.spyOn(api, "getQueuedMessages").mockResolvedValue(null);
+        await store.sendQueuedMessageNow("a");
+        expect(store.queuedMessages.value.map((m) => m.id)).toEqual(["a", "b"]);
+        expect(store.sendingQueuedIds.value).toEqual([]);
+      }
+    });
+
+    it("refetches the queue when not injected", async () => {
+      const store = await openWithQueue();
+      vi.spyOn(api, "sendQueuedMessageNow").mockResolvedValue({
+        kind: "not_injected",
+        reason: "not_supported",
+      });
+      const getSpy = vi.spyOn(api, "getQueuedMessages").mockResolvedValue([q("b")]);
+      const res = await store.sendQueuedMessageNow("a");
+      expect(res).toEqual({ kind: "not_injected", reason: "not_supported" });
+      expect(getSpy).toHaveBeenCalledWith("session-sn");
+      expect(store.queuedMessages.value.map((m) => m.id)).toEqual(["b"]);
+      expect(store.sendingQueuedIds.value).toEqual([]);
+    });
+  });
+
+  describe("notifySendNowResult", () => {
+    it("maps each outcome to a toast", () => {
+      const { toasts, clear } = useToast();
+      clear();
+      const cases: [any, string, string][] = [
+        [{ kind: "injected", queue: null }, "success", "Sent to the running agent"],
+        [
+          { kind: "not_injected", reason: "not_supported" },
+          "info",
+          "This agent can't take messages while running; it stays queued and runs after the current task",
+        ],
+        [
+          { kind: "not_injected", reason: "not_running" },
+          "info",
+          "The agent is not running right now; it stays queued",
+        ],
+        [{ kind: "not_injected", reason: "failed" }, "info", "Could not send now; it stays queued"],
+        [{ kind: "gone" }, "info", "This message was already sent or removed"],
+        [{ kind: "error" }, "error", "Failed to send the message now. Please try again."],
+      ];
+      for (const [res, type, msg] of cases) {
+        clear();
+        notifySendNowResult(res);
+        expect(toasts.value[0]).toMatchObject({ type, message: msg });
+      }
+      clear();
+      notifySendNowResult(null);
+      expect(toasts.value).toHaveLength(0);
     });
   });
 });

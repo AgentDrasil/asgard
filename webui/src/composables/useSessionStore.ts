@@ -7,6 +7,7 @@ import type {
   SessionEvent,
   Attachment,
   QueuedMessage,
+  SendNowResult,
   DirLockStatus,
 } from "../types";
 import {
@@ -20,6 +21,8 @@ import {
   enqueueMessage,
   updateQueuedMessage,
   deleteQueuedMessage,
+  sendQueuedMessageNow,
+  getQueuedMessages,
   stopSessionExecution,
   deleteSessionFromLocal,
   RunnerRequestError,
@@ -408,6 +411,33 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     return false;
   };
 
+  // Ids of queued messages with a send-now call in flight (spinner + guard
+  // against a double click firing two calls).
+  const sendingQueuedIds = ref<string[]>([]);
+
+  const sendQueuedMessageNowItem = async (messageId: string): Promise<SendNowResult | null> => {
+    const sessionId = activeSessionId.value;
+    if (!sessionId || !messageId) return null;
+    if (sendingQueuedIds.value.includes(messageId)) return null;
+    sendingQueuedIds.value = [...sendingQueuedIds.value, messageId];
+    try {
+      const res = await sendQueuedMessageNow(sessionId, messageId);
+      if (activeSessionId.value !== sessionId) return res;
+      if (res.kind === "injected") {
+        // The transcript gets the message through the normal SSE event.
+        if (res.queue) queuedMessages.value = res.queue;
+      } else {
+        // The queue SSE event may have flashed the list while the message was
+        // claimed; resync to the final server state.
+        const queue = await getQueuedMessages(sessionId);
+        if (queue && activeSessionId.value === sessionId) queuedMessages.value = queue;
+      }
+      return res;
+    } finally {
+      sendingQueuedIds.value = sendingQueuedIds.value.filter((id) => id !== messageId);
+    }
+  };
+
   // stopExecution aborts the in-flight task of a session (defaults to the
   // active session). The backend broadcasts queue/status/done over SSE; the
   // local state is reset optimistically so the input unlocks immediately.
@@ -750,5 +780,32 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     stopExecution,
     editQueuedMessage,
     deleteQueuedMessage: deleteQueuedMessageItem,
+    sendingQueuedIds,
+    sendQueuedMessageNow: sendQueuedMessageNowItem,
   };
+}
+
+// Turns a send-now outcome into the matching toast.
+export function notifySendNowResult(res: SendNowResult | null) {
+  if (!res) return;
+  const toast = useToast();
+  switch (res.kind) {
+    case "injected":
+      toast.success(t("chat.sendNowInjected"));
+      break;
+    case "not_injected":
+      toast.info(
+        res.reason === "not_supported"
+          ? t("chat.sendNowNotSupported")
+          : res.reason === "not_running"
+            ? t("chat.sendNowNotRunning")
+            : t("chat.sendNowFailed"),
+      );
+      break;
+    case "gone":
+      toast.info(t("chat.sendNowGone"));
+      break;
+    default:
+      toast.error(t("chat.sendNowError"));
+  }
 }

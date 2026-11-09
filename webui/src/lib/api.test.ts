@@ -28,6 +28,8 @@ import {
   getUserProxyKeys,
   saveUserProxyKey,
   deleteUserProxyKey,
+  sendQueuedMessageNow,
+  getQueuedMessages,
 } from "./api";
 
 describe("API Library", () => {
@@ -975,6 +977,73 @@ describe("API Library", () => {
         method: "DELETE",
       });
       vi.unstubAllGlobals();
+    });
+  });
+
+  describe("sendQueuedMessageNow", () => {
+    const mockFetch = (status: number, body?: unknown) =>
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+      } as Response);
+
+    it("posts to the send-now endpoint and maps injected=true", async () => {
+      const queue = [{ id: "q2" }];
+      mockFetch(200, { injected: true, queue });
+      const res = await sendQueuedMessageNow("chat 1", "q/1");
+      expect(res).toEqual({ kind: "injected", queue });
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions/chat%201/queue/q%2F1/send-now", {
+        method: "POST",
+      });
+    });
+
+    it("maps each not-injected reason", async () => {
+      for (const reason of ["not_running", "not_supported", "failed"]) {
+        mockFetch(200, { injected: false, reason });
+        expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "not_injected", reason });
+      }
+      mockFetch(200, { injected: false });
+      expect(await sendQueuedMessageNow("c", "m")).toEqual({
+        kind: "not_injected",
+        reason: "failed",
+      });
+    });
+
+    it("maps 404, 500, other 4xx and network failure", async () => {
+      mockFetch(404);
+      expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "gone" });
+      mockFetch(500);
+      expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "error" });
+      mockFetch(400);
+      expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "error" });
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("down"));
+      expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "error" });
+    });
+  });
+
+  describe("getQueuedMessages", () => {
+    it("returns the list for array and {queue} shapes", async () => {
+      const list = [{ id: "a" }];
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => list,
+      } as Response);
+      expect(await getQueuedMessages("c")).toEqual(list);
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ queue: list }),
+      } as Response);
+      expect(await getQueuedMessages("c")).toEqual(list);
+    });
+
+    it("returns null on non-2xx and network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false, status: 500 } as Response);
+      expect(await getQueuedMessages("c")).toBeNull();
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("down"));
+      expect(await getQueuedMessages("c")).toBeNull();
     });
   });
 });

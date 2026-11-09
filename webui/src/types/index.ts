@@ -58,6 +58,16 @@ export interface QueuedMessage {
   updatedAt: string;
 }
 
+export type SendNowReason = "not_running" | "not_supported" | "failed";
+
+// Outcome of POST /api/sessions/{id}/queue/{messageId}/send-now. Expected
+// outcomes are values, never exceptions.
+export type SendNowResult =
+  | { kind: "injected"; queue: QueuedMessage[] | null }
+  | { kind: "not_injected"; reason: SendNowReason }
+  | { kind: "gone" } // 404: no longer queued
+  | { kind: "error" }; // 500, other 4xx, network
+
 export interface DirLockStatus {
   isLocked?: boolean;
   lockMode?: "exclusive" | "readonly";

@@ -320,6 +320,13 @@ export const zhCN: MessageSchema = {
     queueCardTip: "将在当前任务完成后按顺序执行",
     editQueued: "编辑排队消息",
     deleteQueued: "撤回/删除排队消息",
+    sendNow: "立即发送（注入到正在运行的任务）",
+    sendNowInjected: "已发送给正在运行的 Agent",
+    sendNowNotSupported: "该 Agent 运行时无法接收消息；消息仍在排队，将在当前任务完成后执行",
+    sendNowNotRunning: "Agent 当前未在运行；消息仍在排队",
+    sendNowFailed: "无法立即发送；消息仍在排队",
+    sendNowGone: "该消息已发送或已被移除",
+    sendNowError: "立即发送失败，请重试",
     cancelQueued: "撤回",
     workflow: {
       resuming: "正在恢复工作流并执行下一步...",

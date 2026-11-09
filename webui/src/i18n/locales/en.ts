@@ -321,6 +321,14 @@ export const en = {
     queueCardTip: "Runs after current task completes in order",
     editQueued: "Edit queued message",
     deleteQueued: "Delete queued message",
+    sendNow: "Send now (inject into the running task)",
+    sendNowInjected: "Sent to the running agent",
+    sendNowNotSupported:
+      "This agent can't take messages while running; it stays queued and runs after the current task",
+    sendNowNotRunning: "The agent is not running right now; it stays queued",
+    sendNowFailed: "Could not send now; it stays queued",
+    sendNowGone: "This message was already sent or removed",
+    sendNowError: "Failed to send the message now. Please try again.",
     cancelQueued: "Cancel",
     workflow: {
       resuming: "Resuming workflow and executing next step...",

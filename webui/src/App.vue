@@ -25,7 +25,7 @@ import {
 import { useAgents } from "./composables/useAgents";
 import { useRunners } from "./composables/useRunners";
 import { useSessions } from "./composables/useSessions";
-import { useSessionStore } from "./composables/useSessionStore";
+import { useSessionStore, notifySendNowResult } from "./composables/useSessionStore";
 import { useShortcuts } from "./composables/useShortcuts";
 import { resolveGlobalAction } from "./utils/keybindingUtils";
 
@@ -224,6 +224,8 @@ const {
   updateMessageReply,
   editQueuedMessage,
   deleteQueuedMessage,
+  sendingQueuedIds,
+  sendQueuedMessageNow,
 } = store;
 
 // 3. Sessions Navigation & Operations
@@ -499,6 +501,10 @@ const handleDeleteQueued = (id: string) => {
   void deleteQueuedMessage(id);
 };
 
+const handleSendNowQueued = async (id: string) => {
+  notifySendNowResult(await sendQueuedMessageNow(id));
+};
+
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value;
 };
@@ -712,6 +718,7 @@ const commandList = computed<CommandItem[]>(() => [
           :gitRoot="currentGitRoot"
           :terminalType="terminalType"
           :queuedMessages="queuedMessages"
+          :sendingQueuedIds="sendingQueuedIds"
           :isRunning="isRunning"
           :dirLock="activeSession?.dirLock"
           :isUnlocking="isUnlockingSession"
@@ -746,6 +753,7 @@ const commandList = computed<CommandItem[]>(() => [
           @ask-replied="handleAskReplied"
           @edit-queued="handleEditQueued"
           @delete-queued="handleDeleteQueued"
+          @send-now-queued="handleSendNowQueued"
           @retry="handleRetryLastUserMessage"
         />
       </router-view>
