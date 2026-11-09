@@ -10,7 +10,7 @@ env:
   GOLANGCI_LINT_VERSION: latest
   CFGCTL_VERSION: latest
   NODE_VERSION: 26
-  PNPM_VERSION: 11.3.0
+  PNPM_VERSION: 12.17.0
 
 jobs:
   backend:

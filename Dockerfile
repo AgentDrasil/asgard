@@ -89,7 +89,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     rm -rf /var/lib/apt/lists/*
 
 # Install pnpm (version pinned to match webui/package.json packageManager)
-RUN npm install -g pnpm@11.3.0 && pnpm --version
+RUN npm install -g pnpm@12.17.0 && pnpm --version
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -105,7 +105,7 @@ CMD ["tail", "-f", "/dev/null"]
 # Stage 3: webui-builder
 FROM node:${NODE_VERSION}-alpine AS webui-builder
 
-RUN npm install -g pnpm@11.3.0
+RUN npm install -g pnpm@12.17.0
 
 WORKDIR /webui
 
