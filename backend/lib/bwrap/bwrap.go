@@ -76,6 +76,12 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 			body = ReadOnlyWorkspacePrompt
 		}
 	}
+	if cfg != nil && cfg.WorktreeRun != nil {
+		if body != "" {
+			body += "\n\n"
+		}
+		body += worktreePrompt(cfg.WorktreeRun)
+	}
 	contract := &common.Contract{Body: body}
 	if cfg != nil {
 		contract.AgentID = strings.TrimSpace(cfg.ID)
@@ -870,6 +876,9 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 	if args, err = appendReadonlyBinds(args, readonlyDirs); err != nil {
 		return nil, err
 	}
+	if args, err = appendWorktreeArgs(args, cfg, readonlyDirs); err != nil {
+		return nil, err
+	}
 	keys := make([]string, 0, len(envs))
 	for k := range envs {
 		keys = append(keys, k)
@@ -1480,6 +1489,9 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 
 	// Readonly mounts come after the read-write binds above so they win.
 	if args, err = appendReadonlyBinds(args, mergedReadonlyDirs); err != nil {
+		return nil, err
+	}
+	if args, err = appendWorktreeArgs(args, cfg, mergedReadonlyDirs); err != nil {
 		return nil, err
 	}
 
