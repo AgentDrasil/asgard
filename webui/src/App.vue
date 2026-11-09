@@ -35,6 +35,7 @@ const router = useRouter();
 
 const welcomePrompt = ref("");
 const allowCrossSession = ref(false);
+const worktree = ref(false);
 const activeView = ref<ActiveView>("chat");
 const isFileSearchOpen = ref(false);
 const isCommandPaletteOpen = ref(false);
@@ -308,6 +309,7 @@ watch(
         closeSession();
         welcomePrompt.value = "";
         allowCrossSession.value = false;
+        worktree.value = false;
         chatInputText.value = "";
       }
       prevSessionId = newSessionId;
@@ -454,6 +456,7 @@ const handleStartWelcomeChat = (files?: File[]) => {
       selectedDir: selectedDir.value,
       selectedModel: selectedModel.value,
       allowCrossSession: allowCrossSession.value,
+      worktree: worktree.value,
       runnerId: selectedRunnerId.value || undefined,
       pendingFiles: files,
     });
@@ -730,6 +733,7 @@ const commandList = computed<CommandItem[]>(() => [
           v-model:selectedDir="selectedDir"
           v-model:selectedModel="selectedModel"
           v-model:allowCrossSession="allowCrossSession"
+          v-model:worktree="worktree"
           v-model:prompt="welcomePrompt"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
           v-model:chatInputText="chatInputText"

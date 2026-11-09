@@ -479,6 +479,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       pendingFiles?: File[];
       allowCrossSession?: boolean;
       runnerId?: string;
+      worktree?: boolean;
     },
   ) => {
     let currentThreadId = activeSessionId.value;
@@ -539,11 +540,13 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       let runnerFailure = "";
       try {
         if (opts?.runnerId) {
+          // worktree is only passed when chosen, like the other opt-ins.
           created = await createSession(
             targetAgent,
             targetDir,
             opts.allowCrossSession,
             opts.runnerId,
+            ...(opts.worktree ? [true] : []),
           );
         } else if (opts?.allowCrossSession !== undefined) {
           created = await createSession(targetAgent, targetDir, opts.allowCrossSession);

@@ -7,6 +7,8 @@ export interface AgentInfo {
   run_dirs: string[];
   main_agent?: boolean;
   models?: string[];
+  /** The agent can run a chat in its own git worktree (opt-in per chat). */
+  worktree?: boolean;
 }
 
 export interface MessagePart {
@@ -89,6 +91,8 @@ export interface ChatSession {
   /** Node id of the runner the chat is bound to (absent in legacy mode). */
   runnerId?: string;
   allowCrossSession?: boolean;
+  /** The chat runs in its own git worktree of runDir. */
+  worktree?: boolean;
   isRunning?: boolean;
   isWaitingForUser?: boolean;
   isArchived?: boolean;

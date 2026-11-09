@@ -391,6 +391,23 @@ describe("useSessionStore", () => {
     expect(err?.content).toContain("runner is offline");
   });
 
+  it("asks for a git worktree when the user opted in for a new chat", async () => {
+    const agents = ref<AgentInfo[]>([
+      { id: "agent-1", name: "Coder", description: "", run_dirs: [], worktree: true },
+    ]);
+    const createSpy = vi
+      .spyOn(api, "createSession")
+      .mockRejectedValue(new api.RunnerRequestError(503, "runner offline"));
+    const store = useSessionStore({ agents });
+    await store.sendMessage("hi", {
+      selectedAgentId: "agent-1",
+      selectedDir: "/w",
+      runnerId: "n1",
+      worktree: true,
+    });
+    expect(createSpy).toHaveBeenCalledWith("agent-1", "/w", undefined, "n1", true);
+  });
+
   it("drops a freshly created chat when the trigger finds its runner offline", async () => {
     const agents = ref<AgentInfo[]>([
       { id: "agent-1", name: "Coder", description: "", run_dirs: [] },

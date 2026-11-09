@@ -232,6 +232,9 @@ export const zhCN: MessageSchema = {
     allowCrossSession: "允许跨会话访问",
     allowCrossSessionDesc:
       "允许在沙箱内访问宿主机的 /session-data/tmp、/session-data/sessions 及数据库文件（仅用于跨会话调试）",
+    worktree: "在独立的 git worktree 中工作",
+    worktreeDesc:
+      "让本次对话在私有 worktree 的独立分支上运行，不会阻塞同一仓库里的其他对话；完成后由 agent 把改动合并回主分支。要求目录是 git 仓库。",
     promptLabel: "您想做些什么？",
     attachFiles: "添加附件",
     attachFile: "添加附件",

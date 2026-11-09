@@ -834,6 +834,7 @@ export async function createSession(
   runDir?: string,
   allowCrossSession?: boolean,
   runnerId?: string,
+  worktree?: boolean,
 ): Promise<ChatSession | null> {
   try {
     const res = await apiFetch("/api/sessions", {
@@ -844,6 +845,7 @@ export async function createSession(
         runDir,
         allowCrossSession,
         runnerId: runnerId || undefined,
+        worktree: worktree || undefined,
       }),
     });
     if (res.ok) return await res.json();

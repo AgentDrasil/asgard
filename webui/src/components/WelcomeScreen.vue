@@ -22,6 +22,7 @@ const props = defineProps<{
   selectedDir: string;
   selectedModel?: string;
   allowCrossSession?: boolean;
+  worktree?: boolean;
   prompt: string;
   loading: boolean;
 }>();
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   (e: "update:selectedDir", val: string): void;
   (e: "update:selectedModel", val: string): void;
   (e: "update:allowCrossSession", val: boolean): void;
+  (e: "update:worktree", val: boolean): void;
   (e: "update:prompt", val: string): void;
   (e: "submit", files?: File[]): void;
   (e: "toggle-sidebar"): void;
@@ -152,6 +154,11 @@ const localAgentId = computed({
 const localAllowCrossSession = computed({
   get: () => props.allowCrossSession ?? false,
   set: (val: boolean) => emit("update:allowCrossSession", val),
+});
+
+const localWorktree = computed({
+  get: () => props.worktree ?? false,
+  set: (val: boolean) => emit("update:worktree", val),
 });
 
 const baseDir = ref("");
@@ -620,6 +627,26 @@ const handleSubmit = () => {
             </span>
             <span class="text-xs text-base-content/60 leading-normal whitespace-normal break-words">
               {{ $t("chat.allowCrossSessionDesc") }}
+            </span>
+          </div>
+        </label>
+
+        <!-- Git Worktree Checkbox (only for agents that offer it) -->
+        <label
+          v-if="currentAgent?.worktree"
+          class="flex items-start gap-3 py-1 cursor-pointer select-none"
+        >
+          <input
+            type="checkbox"
+            v-model="localWorktree"
+            class="checkbox checkbox-primary checkbox-sm rounded shrink-0 mt-0.5"
+          />
+          <div class="flex flex-col min-w-0 flex-1">
+            <span class="text-sm font-semibold text-base-content whitespace-normal break-words">
+              {{ $t("chat.worktree") }}
+            </span>
+            <span class="text-xs text-base-content/60 leading-normal whitespace-normal break-words">
+              {{ $t("chat.worktreeDesc") }}
             </span>
           </div>
         </label>

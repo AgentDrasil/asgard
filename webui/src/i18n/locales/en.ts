@@ -232,6 +232,9 @@ export const en = {
     allowCrossSession: "Allow cross-session access",
     allowCrossSessionDesc:
       "Allow access to host /session-data/tmp, /session-data/sessions, and database files in sandbox (only useful for cross-session debugging)",
+    worktree: "Work in a separate git worktree",
+    worktreeDesc:
+      "Run this chat on its own branch in a private worktree, so it does not block other chats in the same repository. The agent merges its work back when it is done. Needs a git repository.",
     promptLabel: "What would you like to do?",
     attachFiles: "Attach files",
     attachFile: "Attach file",
