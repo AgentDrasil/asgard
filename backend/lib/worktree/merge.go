@@ -113,20 +113,17 @@ func (p Plan) Merge(ctx context.Context) (MergeResult, error) {
 
 	// Everything below reads the agent's objects through the alternate.
 	env := p.objectsEnv()
+	if head, _ := p.git(ctx, "rev-parse", "--verify", "refs/heads/"+target); strings.TrimSpace(head) == tip {
+		res.Status = MergeNothing
+		return res, nil
+	}
 	if _, err := gitIn(ctx, p.RepoDir, env, "merge-base", "--is-ancestor", "refs/heads/"+target, tip); err != nil {
+		// Not a descendant: either the branch is unreadable or main moved on.
 		if _, gerr := gitIn(ctx, p.RepoDir, env, "cat-file", "-e", tip+"^{commit}"); gerr != nil {
 			res.Status, res.Detail = MergeInvalidObjects, err.Error()
 			return res, nil
 		}
-		if head, _ := gitIn(ctx, p.RepoDir, env, "rev-parse", "--verify", "refs/heads/"+target); strings.TrimSpace(head) == tip {
-			res.Status = MergeNothing
-			return res, nil
-		}
 		res.Status = MergeMainMoved
-		return res, nil
-	}
-	if head, _ := p.git(ctx, "rev-parse", "--verify", "refs/heads/"+target); strings.TrimSpace(head) == tip {
-		res.Status = MergeNothing
 		return res, nil
 	}
 

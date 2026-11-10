@@ -686,6 +686,8 @@ func (c *callbackService) WorkflowRunSettle(ctx context.Context, req *runnerpb.W
 // runner ends the call, the connection drops or the run finishes. Unlike the
 // other callbacks it is not deduplicated by call_seq: a retry after a lost
 // connection must queue for the lock again, never inherit one that is gone.
+// For the same reason it is outside the in-flight caps; runners are trusted to
+// open at most one per run, and the lock ends with the run.
 func (c *callbackService) HoldMergeLock(req *runnerpb.HoldMergeLockRequest, stream grpc.ServerStreamingServer[runnerpb.HoldMergeLockResponse]) error {
 	ctx := stream.Context()
 	nodeID, ok := c.nodeID(ctx)
@@ -708,12 +710,22 @@ func (c *callbackService) HoldMergeLock(req *runnerpb.HoldMergeLockRequest, stre
 		return status.Error(codes.FailedPrecondition, "directory locks are not enabled")
 	}
 
-	title := ""
-	if c.s.repo != nil {
-		if meta, err := c.s.repo.GetSessionMeta(info.ChatID); err == nil && meta != nil {
-			title = meta.Title
-		}
+	// Only a worktree chat merges, and only into the checkout it was started
+	// on: a runner cannot use this call to hold an arbitrary directory.
+	if c.s.repo == nil {
+		return status.Error(codes.FailedPrecondition, "sessions are not available")
 	}
+	meta, err := c.s.repo.GetSessionMeta(info.ChatID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "get session: %v", err)
+	}
+	if meta == nil || !meta.Worktree {
+		return status.Error(codes.FailedPrecondition, "chat does not use a git worktree")
+	}
+	if want := c.worktreeRepoDir(meta, nodeID, info.AgentID); want == "" || filepath.Clean(want) != repoDir {
+		return status.Errorf(codes.PermissionDenied, "repo_dir %q is not the checkout of this chat", repoDir)
+	}
+	title := meta.Title
 	// Give up when the run ends too: a lock must not outlive the run that asked.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -743,6 +755,25 @@ func (c *callbackService) HoldMergeLock(req *runnerpb.HoldMergeLockRequest, stre
 	}
 	<-ctx.Done()
 	return nil
+}
+
+// worktreeRepoDir is the checkout a worktree chat works on: its run directory,
+// or the agent's first literal run directory when none was chosen (as the
+// executor derives it). "" if neither exists.
+func (c *callbackService) worktreeRepoDir(meta *dbmodels.Session, nodeID, agentID string) string {
+	if meta.RunDir != "" {
+		return meta.RunDir
+	}
+	agent, err := c.s.findAgentFor(nodeID, agentID)
+	if err != nil || agent == nil {
+		return ""
+	}
+	for _, d := range agent.Config.RunDirs {
+		if d != "" && !strings.ContainsAny(d, "*?[") {
+			return d
+		}
+	}
+	return ""
 }
 
 // responseCapture is an in-memory http.ResponseWriter, so the handlers' shared

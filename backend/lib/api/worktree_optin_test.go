@@ -43,12 +43,17 @@ func plainAgent() *agentspec.Agent {
 func TestWorktreeOptInError(t *testing.T) {
 	t.Parallel()
 
-	assert.Empty(t, worktreeOptInError(worktreeAgent()))
-	assert.Contains(t, worktreeOptInError(plainAgent()), "does not offer")
-	assert.Contains(t, worktreeOptInError(nil), "not found")
+	s := &Server{dispatcher: &stubDispatcher{}}
+	assert.Empty(t, s.worktreeOptInError(worktreeAgent()))
+	assert.Contains(t, s.worktreeOptInError(plainAgent()), "does not offer")
+	assert.Contains(t, s.worktreeOptInError(nil), "not found")
 	wf := worktreeAgent()
 	wf.Config.Type = "workflow"
-	assert.Contains(t, worktreeOptInError(wf), "workflow")
+	assert.Contains(t, s.worktreeOptInError(wf), "workflow")
+
+	// Without a runner the dispatcher is the in-process one.
+	local := &Server{dispatcher: dispatch.NewLocal(&config.Config{})}
+	assert.Contains(t, local.worktreeOptInError(worktreeAgent()), "need a runner")
 }
 
 func newWorktreeAPIServer(t *testing.T) (*Server, *dbmodels.SessionRepository) {
@@ -74,6 +79,14 @@ func createSessionRequest(t *testing.T, s *Server, body string) *httptest.Respon
 
 func TestCreateSession_WorktreeOptIn(t *testing.T) {
 	server, repo := newWorktreeAPIServer(t)
+
+	t.Run("in-process dispatch has no worktrees", func(t *testing.T) {
+		local, _ := newWorktreeAPIServer(t)
+		local.dispatcher = dispatch.NewLocal(local.conf)
+		rr := createSessionRequest(t, local, `{"currentAgent":"wta","runDir":"/src/repo","worktree":true}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "need a runner")
+	})
 
 	t.Run("agent that offers worktrees", func(t *testing.T) {
 		rr := createSessionRequest(t, server, `{"currentAgent":"wta","runDir":"/src/repo","worktree":true}`)

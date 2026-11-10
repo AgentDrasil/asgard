@@ -34,7 +34,10 @@ const (
 	// BranchName is the branch the worktree starts on.
 	BranchName = "work"
 
-	gitTimeout = 2 * time.Minute
+	// gitTimeout bounds one git command. Creating a worktree checks the whole
+	// tree out and a merge imports objects, which can take a while on a big
+	// repository or a slow disk.
+	gitTimeout = 10 * time.Minute
 )
 
 var (

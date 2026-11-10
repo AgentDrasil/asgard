@@ -631,9 +631,9 @@ const handleSubmit = () => {
           </div>
         </label>
 
-        <!-- Git Worktree Checkbox (only for agents that offer it) -->
+        <!-- Git Worktree Checkbox (only for agents that offer it, and on a runner) -->
         <label
-          v-if="currentAgent?.worktree"
+          v-if="currentAgent?.worktree && selectedRunnerId"
           class="flex items-start gap-3 py-1 cursor-pointer select-none"
         >
           <input

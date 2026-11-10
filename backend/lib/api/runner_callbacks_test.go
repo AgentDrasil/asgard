@@ -855,12 +855,19 @@ func (h *holdServer) Send(m *runnerpb.HoldMergeLockResponse) error {
 	return nil
 }
 
+// worktreeChat makes the rig's chat a worktree chat on /src/repo.
+func (r *callbackRig) worktreeChat(t *testing.T) {
+	t.Helper()
+	require.NoError(t, r.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/src/repo", Worktree: true}))
+}
+
 func holdRequest(runID, repoDir string) *runnerpb.HoldMergeLockRequest {
 	return &runnerpb.HoldMergeLockRequest{Meta: meta(runID, 1), RepoDir: repoDir}
 }
 
 func TestCallbackHoldMergeLockValidates(t *testing.T) {
 	rig := newCallbackRig(t)
+	rig.worktreeChat(t)
 	rig.server.dirLocks = dirlock.NewManager(nil)
 
 	tests := []struct {
@@ -883,6 +890,18 @@ func TestCallbackHoldMergeLockValidates(t *testing.T) {
 		})
 	}
 
+	t.Run("directory other than the chat's checkout", func(t *testing.T) {
+		err := rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/other"), newHoldServer(rig.ctx()))
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	})
+
+	t.Run("chat without a worktree", func(t *testing.T) {
+		require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/src/repo"}))
+		err := rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), newHoldServer(rig.ctx()))
+		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+		rig.worktreeChat(t)
+	})
+
 	t.Run("locks disabled", func(t *testing.T) {
 		rig.server.dirLocks = nil
 		err := rig.svc.HoldMergeLock(holdRequest(rigRun, "/src/repo"), newHoldServer(rig.ctx()))
@@ -892,6 +911,7 @@ func TestCallbackHoldMergeLockValidates(t *testing.T) {
 
 func TestCallbackHoldMergeLockHoldsUntilCancelled(t *testing.T) {
 	rig := newCallbackRig(t)
+	rig.worktreeChat(t)
 	locks := dirlock.NewManager(nil)
 	rig.server.dirLocks = locks
 
@@ -931,6 +951,7 @@ func TestCallbackHoldMergeLockHoldsUntilCancelled(t *testing.T) {
 
 func TestCallbackHoldMergeLockQueuesBehindMainCheckoutChat(t *testing.T) {
 	rig := newCallbackRig(t)
+	rig.worktreeChat(t)
 	locks := dirlock.NewManager(nil)
 	rig.server.dirLocks = locks
 
@@ -963,6 +984,7 @@ func TestCallbackHoldMergeLockQueuesBehindMainCheckoutChat(t *testing.T) {
 
 func TestCallbackHoldMergeLockEndsWithRun(t *testing.T) {
 	rig := newCallbackRig(t)
+	rig.worktreeChat(t)
 	locks := dirlock.NewManager(nil)
 	rig.server.dirLocks = locks
 

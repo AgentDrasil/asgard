@@ -227,7 +227,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		}
 	}
 	if req.Worktree {
-		if msg := worktreeOptInError(targetAgent); msg != "" {
+		if msg := s.worktreeOptInError(targetAgent); msg != "" {
 			writeJSONError(w, http.StatusBadRequest, msg)
 			return
 		}

@@ -456,7 +456,8 @@ const handleStartWelcomeChat = (files?: File[]) => {
       selectedDir: selectedDir.value,
       selectedModel: selectedModel.value,
       allowCrossSession: allowCrossSession.value,
-      worktree: worktree.value,
+      // Worktrees live on a runner; without one the choice cannot apply.
+      worktree: worktree.value && !!selectedRunnerId.value,
       runnerId: selectedRunnerId.value || undefined,
       pendingFiles: files,
     });
