@@ -59,6 +59,8 @@ func (s *Server) beginExecution(chatID, agentID string, isWorkflow bool) (contex
 		cancel()
 		return nil, nil, true
 	}
+	// A stop's suppression of the finish push ended with the run it stopped.
+	s.clearQuiet(chatID)
 	s.unparkQueue(chatID)
 	return context.WithValue(ctx, executionHandleKey{}, handle), handle, false
 }
@@ -92,6 +94,12 @@ func (s *Server) releaseExecution(chatID string) {
 	delete(s.peerChains, chatID)
 	s.peerMu.Unlock()
 	s.consumeSessionStop(chatID)
+	// Wake the subagent waiters of this chat, clear its waiting mark and tell
+	// the chat that spawned it (if any) that it finished.
+	// It runs off the caller's path like the drain below: releases sit on
+	// latency-sensitive paths.
+	epoch := s.bumpReleaseEpoch(chatID)
+	go s.onExecutionReleasedAt(chatID, epoch)
 	// Whoever releases last drains: messages queued meanwhile, or left behind
 	// by a consumer that gave up on an unavailable runner, run now if possible.
 	// It runs off the caller's path: releases are on latency-sensitive paths
@@ -190,11 +198,17 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 	// or runs after it and is refused because its parent is stopped.
 	s.spawnMu.Lock()
 	defer s.spawnMu.Unlock()
+	// Mark the target even when it is idle: a late finish push of a subagent
+	// must not restart a chat the user stopped.
+	s.markStopped(sessionID)
 	code, msg := s.stopOneExecution(sessionID)
 	stopped := code == http.StatusOK
+	if code == http.StatusConflict {
+		s.dropQueueOfIdleStopTarget(sessionID)
+	}
 	descendants, derr := s.descendantChats(sessionID)
 	for _, id := range descendants {
-		if c, _ := s.stopOneExecution(id); c == http.StatusOK {
+		if c, _ := s.stopDescendant(id); c == http.StatusOK {
 			stopped = true
 		}
 	}
@@ -205,6 +219,33 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 		return http.StatusOK, ""
 	}
 	return code, msg
+}
+
+// dropQueueOfIdleStopTarget clears the queued messages of a stop target that
+// was idle, as a stop of a running chat does. A queued head (a subagent's
+// finish push or reply, or a message the queue consumer is about to run in its
+// drain handshake) would otherwise run on after the stop, whether the queue is
+// parked or not. A subagent target is recorded as killed.
+func (s *Server) dropQueueOfIdleStopTarget(chatID string) {
+	if s.repo == nil {
+		return
+	}
+	head, err := s.repo.PeekNextQueuedMessage(chatID)
+	if err != nil || head == nil {
+		return
+	}
+	if _, err := s.repo.ClearQueuedMessages(chatID); err != nil {
+		log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to clear queued messages of an idle stopped chat")
+	}
+	if sess, err := s.repo.GetSessionMeta(chatID); err == nil && sess != nil && sess.ParentChatID != "" {
+		if err := s.repo.SetSpawnOutcome(chatID, dbmodels.SpawnOutcomeKilled); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to record killed outcome of an idle stopped subagent")
+		}
+	}
+	s.PublishSessionEvent(chatID, SessionEvent{
+		Type:    EventTypeQueue,
+		Payload: map[string]any{"queue": []dbmodels.QueuedMessage{}},
+	})
 }
 
 // stopOneExecution is stopSessionExecution for a single chat, without the
@@ -236,6 +277,7 @@ func (s *Server) stopOneExecution(sessionID string) (int, string) {
 		handle.stopRequested = true
 	}
 	s.cancelledExecutions.Store(sessionID, time.Now())
+	s.markStopped(sessionID)
 
 	if s.repo != nil {
 		if _, err := s.repo.ClearQueuedMessages(sessionID); err != nil {

@@ -136,6 +136,7 @@ func (s *Server) handleSendQueuedNow(w http.ResponseWriter, r *http.Request) {
 		// The run may have ended while we tried: the consumer must pick the
 		// restored message up.
 		s.unparkQueue(id)
+		s.clearStopped(id)
 		s.startQueueConsumerIfIdle(session.ChatID, targetAgent, session.RunDir)
 	}
 	// Safety net for panics; the normal paths restore before responding so a

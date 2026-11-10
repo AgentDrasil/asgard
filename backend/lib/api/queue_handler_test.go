@@ -285,3 +285,22 @@ func TestQueueHandler_OfflineAgent(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Agent not found or offline")
 }
+
+func TestQueueHandler_EnqueueClearsStoppedMark(t *testing.T) {
+	t.Parallel()
+	server, repo, _ := setupQueueTestServer(t)
+
+	chatID := "018f3a5b-0000-7000-8000-000000000002"
+	require.NoError(t, repo.UpdateAgentSession(chatID, "test-agent", "", "", nil))
+	server.activeExecutions.Store(chatID, struct{}{})
+	t.Cleanup(func() { server.activeExecutions.Delete(chatID) })
+	server.markStopped(chatID)
+
+	body := bytes.NewBufferString(`{"prompt":"go on"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+chatID+"/queue", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+	assert.False(t, server.isStopped(chatID))
+}

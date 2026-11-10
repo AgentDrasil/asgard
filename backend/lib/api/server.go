@@ -57,6 +57,8 @@ type Server struct {
 	cancel             context.CancelFunc
 	resumeWG           sync.WaitGroup      // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
 	spawnMu            sync.Mutex          // serialises the child-count check and start of a subagent spawn
+	pushRetryDelays    []time.Duration     // overrides defaultPushRetryDelays (tests)
+	subagentSig        subagentSignals     // subagent wait, waiting marks and finish pushes
 	peerMu             sync.Mutex          // guards peerChains
 	peerChains         map[string][]string // chatID -> agent ids on the active call-peer chain
 	activeExecutions   sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)
@@ -312,6 +314,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	s.dirLocks = dirlock.NewManager(func(chatID string) {
+		s.subagentSig.locksChanged(s)
 		s.BroadcastSessionEvent(SessionEvent{
 			ChatID: chatID,
 			Type:   EventTypeStatus,

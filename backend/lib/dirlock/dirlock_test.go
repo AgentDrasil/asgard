@@ -935,3 +935,57 @@ func TestManager_ReadonlyUnaffectedByAncestorWaiting(t *testing.T) {
 	rel(false)
 	relP(false)
 }
+
+func TestReentrantAcquireWaitsForHoldingDescendants(t *testing.T) {
+	m := dirlock.NewManager(nil)
+	ctx := t.Context()
+	req := func(chat string, anc ...string) dirlock.AcquireRequest {
+		return dirlock.AcquireRequest{ChatID: chat, Dirs: []string{"/repo"}, Mode: dirlock.ModeExclusive, Ancestors: anc}
+	}
+	// The parent holds the lock after its run (uncommitted work) and waits on
+	// its subagents, one of which took the checkout.
+	relParent, err := m.Acquire(ctx, req("parent"))
+	require.NoError(t, err)
+	relParent(true)
+	require.NoError(t, m.SetWaitingOnDescendants("parent", true))
+	relChild, err := m.Acquire(ctx, req("child", "parent"))
+	require.NoError(t, err)
+
+	// A new run of the parent must not re-enter next to the writing child.
+	got := make(chan error, 1)
+	go func() {
+		rel, err := m.Acquire(ctx, req("parent"))
+		if err == nil {
+			rel(false)
+		}
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		t.Fatalf("re-entrant acquire did not wait: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	relChild(false)
+	select {
+	case err := <-got:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("re-entrant acquire never proceeded")
+	}
+}
+
+func TestReentrantAcquireWaitHonoursContext(t *testing.T) {
+	m := dirlock.NewManager(nil)
+	ctx := t.Context()
+	relParent, err := m.Acquire(ctx, dirlock.AcquireRequest{ChatID: "parent", Dirs: []string{"/repo"}})
+	require.NoError(t, err)
+	defer relParent(false)
+	require.NoError(t, m.SetWaitingOnDescendants("parent", true))
+	_, err = m.Acquire(ctx, dirlock.AcquireRequest{ChatID: "child", Dirs: []string{"/repo"}, Ancestors: []string{"parent"}})
+	require.NoError(t, err)
+
+	cctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	_, err = m.Acquire(cctx, dirlock.AcquireRequest{ChatID: "parent", Dirs: []string{"/repo"}})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}

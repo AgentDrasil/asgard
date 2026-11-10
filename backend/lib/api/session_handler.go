@@ -340,6 +340,7 @@ func (s *Server) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.subagentSig.forget(id)
 	if s.dirLocks != nil {
 		s.dirLocks.ForceReleaseChat(id)
 	}
@@ -376,6 +377,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.subagentSig.forget(chatID)
 	if s.dirLocks != nil {
 		s.dirLocks.ForceReleaseChat(chatID)
 	}

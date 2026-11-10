@@ -532,6 +532,46 @@ func (c *callbackService) SendToSubagent(ctx context.Context, req *runnerpb.Send
 	return resp.(*runnerpb.SendToSubagentResponse), nil
 }
 
+// WaitSubagents implements runnerpb.AgentCallbackServiceServer. It blocks, so
+// it ends with the calling run (the callback context).
+func (c *callbackService) WaitSubagents(ctx context.Context, req *runnerpb.WaitSubagentsRequest) (*runnerpb.WaitSubagentsResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "wait_subagents", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		results, err := c.s.WaitSubagents(fctx, info.ChatID, req.GetIds(), req.GetAny(), time.Duration(req.GetTimeoutMs())*time.Millisecond)
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		out := &runnerpb.WaitSubagentsResponse{}
+		for _, r := range results {
+			out.Results = append(out.Results, &runnerpb.SubagentWaitResult{
+				Subagent:     subagentInfoPB(r.Info),
+				StillRunning: r.StillRunning,
+				Notes:        r.Notes,
+			})
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.WaitSubagentsResponse), nil
+}
+
+// ReplyToParent implements runnerpb.AgentCallbackServiceServer. The subagent
+// is the calling run's chat.
+func (c *callbackService) ReplyToParent(ctx context.Context, req *runnerpb.ReplyToParentRequest) (*runnerpb.ReplyToParentResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "reply_to_parent", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		delivery, err := c.s.ReplyToParent(fctx, info.ChatID, req.GetText())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.ReplyToParentResponse{Delivery: delivery}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.ReplyToParentResponse), nil
+}
+
 // RecordMetrics implements runnerpb.AgentCallbackServiceServer.
 func (c *callbackService) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
 	if len(req.GetEvents()) > maxMetricsEvents {

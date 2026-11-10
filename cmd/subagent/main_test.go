@@ -245,3 +245,76 @@ func TestSendUsageErrors(t *testing.T) {
 		assert.Equal(t, 2, code, name)
 	}
 }
+
+func TestWaitSendsRequestAndPrintsResults(t *testing.T) {
+	var got sandboxsock.SubagentWaitRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, sandboxsock.PathSubagentWait, r.URL.Path)
+		got = sandboxsock.SubagentWaitRequest{}
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentWaitResponse{Results: []sandboxsock.SubagentWaitResult{
+			{Subagent: sandboxsock.SubagentInfo{ID: "c1", Label: "review", State: "done", Summary: "line1\nline2"}, Notes: "files in /shared"},
+			{Subagent: sandboxsock.SubagentInfo{ID: "c2", State: "running"}, StillRunning: true},
+		}})
+	}))
+
+	code, stdout, stderr := runCLI("wait", "c1", "--any", "c2", "--timeout", "90s")
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, sandboxsock.SubagentWaitRequest{IDs: []string{"c1", "c2"}, Any: true, TimeoutMs: 90000}, got)
+	assert.Contains(t, stdout, "c1 (review): done\n")
+	assert.Contains(t, stdout, "    line1\n    line2\n")
+	assert.Contains(t, stdout, "note: files in /shared")
+	assert.Contains(t, stdout, "c2 (-): still_running\n")
+
+	// No ids and no timeout: the defaults are the server's.
+	code, _, _ = runCLI("wait", "--all", "--timeout", "5")
+	require.Equal(t, 0, code)
+	assert.Equal(t, sandboxsock.SubagentWaitRequest{TimeoutMs: 5000}, got)
+	code, stdout, _ = runCLI("wait", "--json")
+	require.Equal(t, 0, code)
+	assert.JSONEq(t, `{"results":[{"subagent":{"id":"c1","label":"review","agent":"","state":"done","summary":"line1\nline2","last_activity_ms":0},"notes":"files in /shared"},{"subagent":{"id":"c2","agent":"","state":"running","last_activity_ms":0},"still_running":true}]}`, stdout)
+}
+
+func TestWaitNothingRunning(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentWaitResponse{})
+	}))
+	code, stdout, _ := runCLI("wait")
+	require.Equal(t, 0, code)
+	assert.Equal(t, "no running subagents to wait for\n", stdout)
+}
+
+func TestReplySendsText(t *testing.T) {
+	var got sandboxsock.SubagentReplyRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, sandboxsock.PathSubagentReply, r.URL.Path)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentReplyResponse{Delivery: "queued"})
+	}))
+	code, stdout, stderr := runCLI("reply", "--", "which", "--branch?")
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, "queued\n", stdout)
+	assert.Equal(t, "which --branch?", got.Text)
+}
+
+func TestReplyAndWaitUsageErrors(t *testing.T) {
+	t.Setenv(sandboxsock.EnvURL, "unix:///nonexistent/asgard.sock")
+	tests := map[string][]string{
+		"reply without message":    {"reply"},
+		"reply blank":              {"reply", "--", " "},
+		"reply with positional":    {"reply", "x", "--", "hi"},
+		"wait any and all":         {"wait", "--any", "--all"},
+		"wait bad timeout":         {"wait", "--timeout", "soon"},
+		"wait zero timeout":        {"wait", "--timeout", "0"},
+		"wait with message":        {"wait", "c1", "--", "hi"},
+		"wait timeout without val": {"wait", "--timeout"},
+	}
+	for name, args := range tests {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(args...)
+			assert.Equal(t, exitUsage, code)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Usage: subagent")
+		})
+	}
+}

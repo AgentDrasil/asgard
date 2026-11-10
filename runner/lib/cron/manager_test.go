@@ -95,6 +95,14 @@ func (f *fakeCallbacks) KillSubagent(ctx context.Context, in *runnerpb.KillSubag
 	return &runnerpb.KillSubagentResponse{}, nil
 }
 
+func (f *fakeCallbacks) WaitSubagents(ctx context.Context, in *runnerpb.WaitSubagentsRequest, opts ...grpc.CallOption) (*runnerpb.WaitSubagentsResponse, error) {
+	return &runnerpb.WaitSubagentsResponse{}, nil
+}
+
+func (f *fakeCallbacks) ReplyToParent(ctx context.Context, in *runnerpb.ReplyToParentRequest, opts ...grpc.CallOption) (*runnerpb.ReplyToParentResponse, error) {
+	return &runnerpb.ReplyToParentResponse{}, nil
+}
+
 func (f *fakeCallbacks) SendToSubagent(ctx context.Context, in *runnerpb.SendToSubagentRequest, opts ...grpc.CallOption) (*runnerpb.SendToSubagentResponse, error) {
 	return &runnerpb.SendToSubagentResponse{}, nil
 }

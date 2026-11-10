@@ -20,6 +20,8 @@ func (s *statusServer) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentStatus, s.handleSubagentStatus)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentKill, s.handleSubagentKill)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentSend, s.handleSubagentSend)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentWait, s.handleSubagentWait)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentReply, s.handleSubagentReply)
 }
 
 // failSubagent reports a failed subagent call with an HTTP status that
@@ -205,4 +207,79 @@ func (s *statusServer) handleSubagentSend(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, sandboxsock.SubagentSendResponse{Delivery: resp.GetDelivery()})
+}
+
+// maxWaitIDs bounds the ids of one wait.
+const maxWaitIDs = 64
+
+func (s *statusServer) handleSubagentWait(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentWaitRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	if len(req.IDs) > maxWaitIDs || req.TimeoutMs < 0 {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "too many subagent ids or a negative timeout"})
+		return
+	}
+	ids := make([]string, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		id = strings.TrimSpace(clean(id))
+		if id == "" || len(id) > maxMessageID {
+			writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a valid subagent id is required"})
+			return
+		}
+		ids = append(ids, id)
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.WaitSubagentsResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.WaitSubagents(ctx, &runnerpb.WaitSubagentsRequest{Meta: s.meta(seq), Ids: ids, Any: req.Any, TimeoutMs: req.TimeoutMs})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-wait", err)
+		return
+	}
+	out := sandboxsock.SubagentWaitResponse{Results: []sandboxsock.SubagentWaitResult{}}
+	for _, res := range resp.GetResults() {
+		out.Results = append(out.Results, sandboxsock.SubagentWaitResult{
+			Subagent:     subagentInfoJSON(res.GetSubagent()),
+			StillRunning: res.GetStillRunning(),
+			Notes:        res.GetNotes(),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *statusServer) handleSubagentReply(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentReplyRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	text := clean(req.Text)
+	if strings.TrimSpace(text) == "" {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a message is required"})
+		return
+	}
+	if len(text) > maxCallText {
+		http.Error(w, "message too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.ReplyToParentResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.ReplyToParent(ctx, &runnerpb.ReplyToParentRequest{Meta: s.meta(seq), Text: text})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-reply", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentReplyResponse{Delivery: resp.GetDelivery()})
 }

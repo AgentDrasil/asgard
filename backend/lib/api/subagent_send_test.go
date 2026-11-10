@@ -186,7 +186,7 @@ func TestSendToSubagentDeniedWhenCallerStoppedMidSend(t *testing.T) {
 	assert.False(t, running, "child not restarted")
 	select {
 	case <-started:
-		t.Fatal("child was restarted")
+		t.Fatal("child or parent was started")
 	case <-time.After(100 * time.Millisecond):
 	}
 }

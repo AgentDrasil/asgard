@@ -130,3 +130,42 @@ func TestSubagentRoutesRejectBadRequests(t *testing.T) {
 	assert.Empty(t, fake.stats)
 	assert.Empty(t, fake.kills)
 }
+
+func TestSubagentWaitRelaysRequestAndResults(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentWait, map[string]any{"ids": []string{"c1", "c2"}, "any": true, "timeout_ms": 90000, "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var out sandboxsock.SubagentWaitResponse
+	require.NoError(t, json.Unmarshal(body, &out))
+	require.Len(t, out.Results, 2)
+	assert.Equal(t, "done", out.Results[0].Subagent.State)
+	assert.Equal(t, "see /shared", out.Results[0].Notes)
+	assert.True(t, out.Results[1].StillRunning)
+	require.Len(t, fake.waits, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.waits[0].GetMeta().GetRunId())
+	assert.Equal(t, []string{"c1", "c2"}, fake.waits[0].GetIds())
+	assert.True(t, fake.waits[0].GetAny())
+	assert.EqualValues(t, 90000, fake.waits[0].GetTimeoutMs())
+
+	code, _ = rig.post(t, sandboxsock.PathSubagentWait, sandboxsock.SubagentWaitRequest{IDs: []string{" "}})
+	assert.Equal(t, http.StatusBadRequest, code)
+	code, _ = rig.post(t, sandboxsock.PathSubagentWait, sandboxsock.SubagentWaitRequest{TimeoutMs: -1})
+	assert.Equal(t, http.StatusBadRequest, code)
+}
+
+func TestSubagentReplyRelaysTextWithRunIdentity(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentReply, map[string]any{"text": "question?", "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var out sandboxsock.SubagentReplyResponse
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, "injected", out.Delivery)
+	require.Len(t, fake.replies, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.replies[0].GetMeta().GetRunId())
+	assert.Equal(t, "question?", fake.replies[0].GetText())
+
+	code, _ = rig.post(t, sandboxsock.PathSubagentReply, sandboxsock.SubagentReplyRequest{Text: " "})
+	assert.Equal(t, http.StatusBadRequest, code)
+}

@@ -36,6 +36,8 @@ const (
 	PathSubagentStatus = "/subagent/status"
 	PathSubagentKill   = "/subagent/kill"
 	PathSubagentSend   = "/subagent/send"
+	PathSubagentWait   = "/subagent/wait"
+	PathSubagentReply  = "/subagent/reply"
 	PathMetrics        = "/metrics"
 	PathMerge          = "/merge"
 
@@ -101,6 +103,38 @@ type SubagentSendRequest struct {
 // SubagentSendResponse is the answer of POST /subagent/send. Delivery is
 // injected, queued or started.
 type SubagentSendResponse struct {
+	Delivery string `json:"delivery"`
+}
+
+// SubagentWaitRequest is the body of POST /subagent/wait. No IDs means all
+// running direct children; TimeoutMs 0 is the default (the backend caps it).
+type SubagentWaitRequest struct {
+	IDs       []string `json:"ids,omitempty"`
+	Any       bool     `json:"any,omitempty"`
+	TimeoutMs int64    `json:"timeout_ms,omitempty"`
+}
+
+// SubagentWaitResult is one subagent of a wait. StillRunning is true when it
+// had not finished by the timeout; Notes says where its outputs are.
+type SubagentWaitResult struct {
+	Subagent     SubagentInfo `json:"subagent"`
+	StillRunning bool         `json:"still_running,omitempty"`
+	Notes        string       `json:"notes,omitempty"`
+}
+
+// SubagentWaitResponse is the answer of POST /subagent/wait.
+type SubagentWaitResponse struct {
+	Results []SubagentWaitResult `json:"results"`
+}
+
+// SubagentReplyRequest is the body of POST /subagent/reply.
+type SubagentReplyRequest struct {
+	Text string `json:"text"`
+}
+
+// SubagentReplyResponse is the answer of POST /subagent/reply. Delivery is
+// injected, queued or started.
+type SubagentReplyResponse struct {
 	Delivery string `json:"delivery"`
 }
 

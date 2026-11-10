@@ -160,6 +160,8 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	s.unparkQueue(id)
+	// A user-driven run ends the hold on subagent pushes of a stopped chat.
+	s.clearStopped(id)
 	// Attempt to start consumer if idle. An offline runner is not an error
 	// here: the message stays queued and RunnerOnline resumes it.
 	s.startQueueConsumerIfIdle(session.ChatID, targetAgent, session.RunDir)

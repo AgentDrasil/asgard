@@ -396,6 +396,11 @@ service AgentCallbackService {
   // SendToSubagent delivers a message to a subagent: injected into its running
   // turn when its CLI supports it, otherwise run as its next turn.
   rpc SendToSubagent(SendToSubagentRequest) returns (SendToSubagentResponse);
+  // WaitSubagents blocks until subagents finish (or the timeout, capped by
+  // the backend, passes) and reports each one.
+  rpc WaitSubagents(WaitSubagentsRequest) returns (WaitSubagentsResponse);
+  // ReplyToParent delivers a message from a subagent to the chat that spawned it.
+  rpc ReplyToParent(ReplyToParentRequest) returns (ReplyToParentResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
   // Runner-initiated workflow execution callbacks
@@ -527,6 +532,35 @@ message SendToSubagentRequest {
 message SendToSubagentResponse {
   // delivery is "injected" (into the running turn), "queued" (behind the
   // running turn) or "started" (a new turn of an idle subagent).
+  string delivery = 1;
+}
+
+message WaitSubagentsRequest {
+  CallMeta meta = 1;
+  // ids are the subagents to wait for; empty means all running direct children.
+  repeated string ids = 2;
+  // any returns as soon as one of them finished; otherwise all must finish.
+  bool any = 3;
+  // timeout_ms is the longest wait; 0 means the default. The backend caps it.
+  int64 timeout_ms = 4;
+}
+message SubagentWaitResult {
+  SubagentInfo subagent = 1;
+  // still_running is true for a subagent that did not finish in time.
+  bool still_running = 2;
+  // notes tells where the outputs of a finished subagent are.
+  string notes = 3;
+}
+message WaitSubagentsResponse {
+  repeated SubagentWaitResult results = 1;
+}
+
+message ReplyToParentRequest {
+  CallMeta meta = 1;
+  string text = 2;
+}
+message ReplyToParentResponse {
+  // delivery is "injected", "queued" or "started", like SendToSubagent.
   string delivery = 1;
 }
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -41,6 +42,10 @@ Commands:
         Show the state (queued, running, done, failed, killed) of a subagent and the tail of its last output.
   send <id> [--json] -- <text>
         Message a subagent: "injected" into its running turn (claude/agy), "queued" behind its current turn, or "started" as a new turn of an idle one.
+  wait [<id>...] [--any|--all] [--timeout <dur>] [--json]
+        Block until the subagents finish (all of them by default, or the first with --any; no ids means all your running subagents) or the timeout (default and maximum 300s) passes. Prints each one's state and output tail, or still_running. Finished subagents are also reported to you without waiting.
+  reply [--json] -- <text>
+        Subagents only: message the agent that spawned you; it is injected into its running turn or runs as its next turn.
   kill <id> [--json]
         Stop a subagent and all subagents below it.
 `
@@ -66,6 +71,8 @@ var commands = map[string]command{
 	"list":   cmdList,
 	"status": cmdStatus,
 	"send":   cmdSend,
+	"wait":   cmdWait,
+	"reply":  cmdReply,
 	"kill":   cmdKill,
 }
 
@@ -335,6 +342,103 @@ func cmdSend(ctx context.Context, c *cli, args []string) int {
 	}
 	var out sandboxsock.SubagentSendResponse
 	if !c.call(ctx, sandboxsock.PathSubagentSend, sandboxsock.SubagentSendRequest{ID: p.positional[0], Text: text}, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	_, _ = fmt.Fprintln(c.stdout, out.Delivery)
+	return exitOK
+}
+
+// parseTimeout reads a --timeout value: a Go duration, or plain seconds.
+func parseTimeout(v string) (time.Duration, error) {
+	arg := v
+	if _, err := strconv.Atoi(v); err == nil {
+		v += "s"
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --timeout %q (use e.g. 90s or 5m)", arg)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("--timeout must be positive")
+	}
+	return d, nil
+}
+
+func cmdWait(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
+	anyOf := fs.Bool("any", false, "return when one subagent finished")
+	all := fs.Bool("all", false, "wait for all subagents (default)")
+	timeout := fs.String("timeout", "", "longest wait, e.g. 90s (default and maximum 300s)")
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if p.hasRest {
+		return c.usageError("wait takes subagent ids, not a message")
+	}
+	if *anyOf && *all {
+		return c.usageError("wait takes --any or --all, not both")
+	}
+	req := sandboxsock.SubagentWaitRequest{IDs: p.positional, Any: *anyOf}
+	if *timeout != "" {
+		d, err := parseTimeout(*timeout)
+		if err != nil {
+			return c.usageError("%v", err)
+		}
+		req.TimeoutMs = d.Milliseconds()
+	}
+	var out sandboxsock.SubagentWaitResponse
+	if !c.call(ctx, sandboxsock.PathSubagentWait, req, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	if len(out.Results) == 0 {
+		_, _ = fmt.Fprintln(c.stdout, "no running subagents to wait for")
+		return exitOK
+	}
+	for _, r := range out.Results {
+		s := r.Subagent
+		state := s.State
+		if r.StillRunning {
+			state = "still_running"
+		}
+		_, _ = fmt.Fprintf(c.stdout, "%s (%s): %s\n", s.ID, dash(s.Label), state)
+		if s.Summary != "" {
+			_, _ = fmt.Fprintf(c.stdout, "  last output (tail):\n%s\n", indent(s.Summary))
+		}
+		if r.Notes != "" {
+			_, _ = fmt.Fprintf(c.stdout, "  note: %s\n", r.Notes)
+		}
+	}
+	return exitOK
+}
+
+func indent(s string) string {
+	return "    " + strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "\n    ")
+}
+
+func cmdReply(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("reply", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if !p.hasRest || len(p.positional) != 0 {
+		return c.usageError("reply takes only the message after --")
+	}
+	text := strings.Join(p.rest, " ")
+	if strings.TrimSpace(text) == "" {
+		return c.usageError("reply needs a message after --")
+	}
+	var out sandboxsock.SubagentReplyResponse
+	if !c.call(ctx, sandboxsock.PathSubagentReply, sandboxsock.SubagentReplyRequest{Text: text}, &out) {
 		return exitError
 	}
 	if *asJSON {

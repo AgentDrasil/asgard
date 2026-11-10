@@ -42,12 +42,14 @@ type fakeCallbacks struct {
 	// holdHook, when set, answers HoldMergeLock.
 	holdHook func(ctx context.Context, req *runnerpb.HoldMergeLockRequest) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error)
 	// subErr, when set, fails every subagent call.
-	subErr error
-	spawns []*runnerpb.SpawnSubagentRequest
-	lists  []*runnerpb.ListSubagentsRequest
-	stats  []*runnerpb.SubagentStatusRequest
-	kills  []*runnerpb.KillSubagentRequest
-	sends  []*runnerpb.SendToSubagentRequest
+	subErr  error
+	spawns  []*runnerpb.SpawnSubagentRequest
+	lists   []*runnerpb.ListSubagentsRequest
+	stats   []*runnerpb.SubagentStatusRequest
+	kills   []*runnerpb.KillSubagentRequest
+	sends   []*runnerpb.SendToSubagentRequest
+	waits   []*runnerpb.WaitSubagentsRequest
+	replies []*runnerpb.ReplyToParentRequest
 }
 
 func (f *fakeCallbacks) SpawnSubagent(_ context.Context, req *runnerpb.SpawnSubagentRequest, _ ...grpc.CallOption) (*runnerpb.SpawnSubagentResponse, error) {
@@ -98,6 +100,29 @@ func (f *fakeCallbacks) SendToSubagent(_ context.Context, req *runnerpb.SendToSu
 		return nil, f.subErr
 	}
 	return &runnerpb.SendToSubagentResponse{Delivery: "queued"}, nil
+}
+
+func (f *fakeCallbacks) WaitSubagents(_ context.Context, req *runnerpb.WaitSubagentsRequest, _ ...grpc.CallOption) (*runnerpb.WaitSubagentsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.waits = append(f.waits, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.WaitSubagentsResponse{Results: []*runnerpb.SubagentWaitResult{
+		{Subagent: &runnerpb.SubagentInfo{Id: "c1", State: "done", Summary: "all good"}, Notes: "see /shared"},
+		{Subagent: &runnerpb.SubagentInfo{Id: "c2", State: "running"}, StillRunning: true},
+	}}, nil
+}
+
+func (f *fakeCallbacks) ReplyToParent(_ context.Context, req *runnerpb.ReplyToParentRequest, _ ...grpc.CallOption) (*runnerpb.ReplyToParentResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.replies = append(f.replies, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.ReplyToParentResponse{Delivery: "injected"}, nil
 }
 
 func (f *fakeCallbacks) HoldMergeLock(ctx context.Context, req *runnerpb.HoldMergeLockRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {

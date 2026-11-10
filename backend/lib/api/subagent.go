@@ -282,16 +282,23 @@ func (s *Server) SubagentStatus(callerChat, childID string) (SubagentInfo, error
 		return SubagentInfo{}, err
 	}
 	info := s.subagentInfo(sess)
-	if full, err := s.repo.GetSession(childID); err == nil && full != nil {
-		for i := len(full.Messages) - 1; i >= 0; i-- {
-			m := full.Messages[i]
-			if m.Role == "error" || m.Role == "assistant" {
-				info.Summary = tailText(m.Content, 2000)
-				break
-			}
+	info.Summary = s.lastOutputTail(childID, 2000)
+	return info, nil
+}
+
+// lastOutputTail is the tail of the last assistant or error message of a chat.
+func (s *Server) lastOutputTail(chatID string, n int) string {
+	full, err := s.repo.GetSession(chatID)
+	if err != nil || full == nil {
+		return ""
+	}
+	for i := len(full.Messages) - 1; i >= 0; i-- {
+		m := full.Messages[i]
+		if m.Role == "error" || m.Role == "assistant" {
+			return tailText(m.Content, n)
 		}
 	}
-	return info, nil
+	return ""
 }
 
 // KillSubagent stops a subagent of callerChat (or of its descendants) and all
@@ -305,8 +312,13 @@ func (s *Server) KillSubagent(callerChat, childID string) (int, error) {
 	defer s.spawnMu.Unlock()
 	stopped := 0
 	descendants, derr := s.descendantChats(childID)
-	for _, id := range append([]string{childID}, descendants...) {
-		if c, _ := s.stopOneExecution(id); c == http.StatusOK {
+	// The killer's chat is told synchronously, so none of the stopped chats
+	// (all below the caller) pushes its finish up the chain.
+	if c, _ := s.stopDescendant(childID); c == http.StatusOK {
+		stopped++
+	}
+	for _, id := range descendants {
+		if c, _ := s.stopDescendant(id); c == http.StatusOK {
 			stopped++
 		}
 	}
@@ -368,17 +380,8 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 	prompt := fmt.Sprintf("[message from parent agent %s]\n%s", senderName, text)
 
 	// A running turn that can take input gets the message right away.
-	if s.activeRuns != nil && s.injector != nil {
-		if nodeID, runID, ok := s.activeRuns.Lookup(childID, target.Config.ID); ok {
-			injected, ierr := s.injector.Inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
-			if injected {
-				s.recordInjectedMessage(childID, prompt)
-				return SubagentDeliveryInjected, nil
-			}
-			if ierr != nil && !errors.Is(ierr, runnerhub.ErrUnknownRun) && !errors.Is(ierr, runnerhub.ErrRunnerOffline) {
-				log.Warn().Err(ierr).Str("chat_id", childID).Msg("subagent inject failed, queueing the message instead")
-			}
-		}
+	if s.tryInject(childID, target.Config.ID, prompt) {
+		return SubagentDeliveryInjected, nil
 	}
 
 	// The inject may have waited; a caller stopped meanwhile must not revive
@@ -430,6 +433,28 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 		return SubagentDeliveryQueued, nil
 	}
 	return SubagentDeliveryStarted, nil
+}
+
+// tryInject pushes prompt into the running turn of agentID in chatID when its
+// CLI takes live input, and records it in the transcript. False means nothing
+// was injected and the caller falls back to the normal trigger path.
+func (s *Server) tryInject(chatID, agentID, prompt string) bool {
+	if s.activeRuns == nil || s.injector == nil {
+		return false
+	}
+	nodeID, runID, ok := s.activeRuns.Lookup(chatID, agentID)
+	if !ok {
+		return false
+	}
+	injected, err := s.injector.Inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
+	if injected {
+		s.recordInjectedMessage(chatID, prompt)
+		return true
+	}
+	if err != nil && !errors.Is(err, runnerhub.ErrUnknownRun) && !errors.Is(err, runnerhub.ErrRunnerOffline) {
+		log.Warn().Err(err).Str("chat_id", chatID).Msg("subagent inject failed, queueing the message instead")
+	}
+	return false
 }
 
 // recordInjectedMessage shows an injected message in the child's transcript,

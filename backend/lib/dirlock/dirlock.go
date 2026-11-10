@@ -98,6 +98,9 @@ type Manager struct {
 	waiters  []*waiter
 	// waitingOn is the set of chats marked as waiting on their descendants.
 	waitingOn map[string]bool
+	// changed is closed (and replaced) whenever a holder is removed, for
+	// re-entrant acquires that wait for their descendants to let go.
+	changed chan struct{}
 }
 
 func NewManager(onChange func(chatID string)) *Manager {
@@ -105,7 +108,26 @@ func NewManager(onChange func(chatID string)) *Manager {
 		onChange:  onChange,
 		holders:   make(map[string]*lockHolder),
 		waitingOn: make(map[string]bool),
+		changed:   make(chan struct{}),
 	}
+}
+
+// signalChangeLocked wakes the acquires waiting on a holder to go away.
+func (m *Manager) signalChangeLocked() {
+	if m.changed != nil {
+		close(m.changed)
+	}
+	m.changed = make(chan struct{})
+}
+
+// descendantHoldsLocked reports whether a subagent of chatID holds a lock.
+func (m *Manager) descendantHoldsLocked(chatID string) bool {
+	for id, h := range m.holders {
+		if id != chatID && slices.Contains(h.ancestors, chatID) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsExemptDir returns true if dir == "" or cleaned path is /tmp, /session,
@@ -227,6 +249,20 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 	}
 
 	m.mu.Lock()
+
+	// A chat that still holds a lock must not re-enter it next to a subagent
+	// that holds one: it may have been marked as waiting on its descendants,
+	// which let them bypass its hold. It queues until they let go instead.
+	for m.holders[req.ChatID] != nil && m.descendantHoldsLocked(req.ChatID) {
+		changed := m.changed
+		m.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		m.mu.Lock()
+	}
 
 	// 1. Same ChatID is re-entrant and never conflicts with itself on already-held dirs.
 	// Check if this request expands held directories or upgrades lock mode.
@@ -538,6 +574,7 @@ func (m *Manager) makeReleaseFunc(chatID string) func(keepUncommitted bool) {
 
 			// Release lock completely
 			delete(m.holders, chatID)
+			m.signalChangeLocked()
 			notified = append(notified, chatID)
 			woken := m.processWaitersLocked()
 			notified = append(notified, woken...)
@@ -701,6 +738,7 @@ func (m *Manager) UnlockIdle(chatID string) (bool, error) {
 	}
 
 	delete(m.holders, chatID)
+	m.signalChangeLocked()
 	var notified []string
 	notified = append(notified, chatID)
 	woken := m.processWaitersLocked()
@@ -719,6 +757,7 @@ func (m *Manager) ForceReleaseChat(chatID string) {
 	for _, id := range []string{chatID, MergeHolderID(chatID)} {
 		if _, ok := m.holders[id]; ok {
 			delete(m.holders, id)
+			m.signalChangeLocked()
 			notified = append(notified, chatID)
 		}
 		for i := 0; i < len(m.waiters); {

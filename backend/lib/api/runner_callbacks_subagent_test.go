@@ -154,3 +154,23 @@ func TestCallbackSubagentDegradedMode(t *testing.T) {
 	_, err := rig.svc.ListSubagents(rig.ctx(), &runnerpb.ListSubagentsRequest{Meta: meta(rigRun, 1)})
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }
+
+func TestCallbackWaitAndReplyUseRunIdentity(t *testing.T) {
+	rig, c := reportRig(t)
+	ctx := rig.ctx()
+	child := spawnOne(t, rig, c)
+
+	// Wait: a short timeout leaves the child running.
+	w, err := rig.svc.WaitSubagents(ctx, &runnerpb.WaitSubagentsRequest{Meta: meta(rigRun, 1), Ids: []string{child}, TimeoutMs: 30})
+	require.NoError(t, err)
+	require.Len(t, w.GetResults(), 1)
+	assert.True(t, w.GetResults()[0].GetStillRunning())
+	assert.Equal(t, child, w.GetResults()[0].GetSubagent().GetId())
+
+	_, err = rig.svc.WaitSubagents(ctx, &runnerpb.WaitSubagentsRequest{Meta: meta(rigRun, 2), Ids: []string{"nope"}})
+	assert.Equal(t, codes.NotFound, status.Code(err))
+
+	// Reply: the run's chat has no parent.
+	_, err = rig.svc.ReplyToParent(ctx, &runnerpb.ReplyToParentRequest{Meta: meta(rigRun, 3), Text: "hi"})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}

@@ -261,6 +261,13 @@ func TestKillSubagentCascadesAndStopIdleParent(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond, id)
 	}
 
+	// The killer hears of the kill from the CLI, not from a push: its idle
+	// chat is not restarted.
+	select {
+	case id := <-started:
+		t.Fatalf("%s started after the kill", id)
+	case <-time.After(150 * time.Millisecond):
+	}
 	// Nothing left to stop: the idle parent keeps its 409.
 	code, _ := rig.server.stopSessionExecution(rigChat)
 	assert.Equal(t, 409, code)

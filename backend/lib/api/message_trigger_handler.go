@@ -204,6 +204,12 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 		return
 	}
 
+	// Anything but a subagent's push or reply is a reason to run the chat: it
+	// ends the hold a stop put on subagent messages.
+	if src, _ := req.Metadata["source"].(string); src != "subagent-finished" && src != "subagent-reply" {
+		s.clearStopped(chatID)
+	}
+
 	runnerID, needBind, bindErr := s.resolveRunner(chatID, req.RunnerID)
 	if bindErr == nil && runnerID != "" && authReq != nil {
 		// Applies to bound chats too, so a revoked user is cut off. In-process
