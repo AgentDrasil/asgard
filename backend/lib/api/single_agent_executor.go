@@ -232,6 +232,10 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 			if statusErr := e.repo.UpdateAgentStatus(chatID, e.agent.Config.ID, dbmodels.AgentStatusRunning, agentIconOpt); statusErr != nil {
 				return "", fmt.Errorf("failed to update agent status to running: %w", statusErr)
 			}
+			// A chat that runs again is no longer failed or killed.
+			if outErr := e.repo.SetSpawnOutcome(chatID, ""); outErr != nil {
+				log.Warn().Err(outErr).Str("chat_id", chatID).Msg("failed to clear subagent outcome")
+			}
 			if e.server != nil {
 				e.server.PublishSessionEvent(chatID, SessionEvent{
 					Type:    "status",

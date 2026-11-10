@@ -56,6 +56,7 @@ type Server struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
 	resumeWG           sync.WaitGroup      // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
+	spawnMu            sync.Mutex          // serialises the child-count check and start of a subagent spawn
 	peerMu             sync.Mutex          // guards peerChains
 	peerChains         map[string][]string // chatID -> agent ids on the active call-peer chain
 	activeExecutions   sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)

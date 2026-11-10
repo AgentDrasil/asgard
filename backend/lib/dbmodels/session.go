@@ -137,6 +137,22 @@ type Session struct {
 	// RunDir. It is decided when the chat starts and never changes afterwards.
 	Worktree bool `gorm:"column:worktree;default:false" json:"worktree"`
 
+	// ParentChatID is the chat that spawned this one as a subagent; empty for
+	// a chat started by a user. SpawnedByAgent and SpawnLabel describe the
+	// spawn, SpawnDepth is the nesting depth of the child agent (the agents
+	// above it, call-peer chains included, plus itself) and SpawnReadonly
+	// records that it was spawned read-only.
+	ParentChatID   string `gorm:"column:parent_chat_id;index" json:"parentChatId,omitempty"`
+	SpawnedByAgent string `gorm:"column:spawned_by_agent" json:"spawnedByAgent,omitempty"`
+	SpawnLabel     string `gorm:"column:spawn_label" json:"spawnLabel,omitempty"`
+	SpawnDepth     int    `gorm:"column:spawn_depth;default:0" json:"-"`
+	SpawnReadonly  bool   `gorm:"column:spawn_readonly;default:false" json:"spawnReadonly,omitempty"`
+	// SpawnOutcome is the durable terminal outcome of the last run of a
+	// subagent chat that did not finish normally: SpawnOutcomeFailed or
+	// SpawnOutcomeKilled. It is empty while the chat runs and after a clean
+	// run, and is cleared when the chat starts running again.
+	SpawnOutcome string `gorm:"column:spawn_outcome" json:"-"`
+
 	// QuotaResetIDs is the journal of an in-progress orphaned-quota reset: a
 	// JSON list of the quota ask messages being retired. It is non-empty only
 	// between the steps of the reset (see resetQuotaSuspension).
@@ -468,6 +484,27 @@ func (r *SessionRepository) GetSessionMeta(chatID string) (*Session, error) {
 		return nil, err
 	}
 	return &session, nil
+}
+
+// Terminal outcomes recorded in Session.SpawnOutcome.
+const (
+	SpawnOutcomeFailed = "failed"
+	SpawnOutcomeKilled = "killed"
+)
+
+// SetSpawnOutcome records (or, with "", clears) the terminal outcome of a
+// subagent chat. Chats that are not subagents are left alone.
+func (r *SessionRepository) SetSpawnOutcome(chatID, outcome string) error {
+	return r.db.Model(&Session{}).
+		Where("chat_id = ? AND parent_chat_id <> '' AND spawn_outcome <> ?", chatID, outcome).
+		UpdateColumn("spawn_outcome", outcome).Error
+}
+
+// ChildChatIDs returns the chats spawned directly by parentID.
+func (r *SessionRepository) ChildChatIDs(parentID string) ([]string, error) {
+	var ids []string
+	err := r.db.Model(&Session{}).Where("parent_chat_id = ?", parentID).Order("created_at").Pluck("chat_id", &ids).Error
+	return ids, err
 }
 
 // GetSession retrieves the session for a given chat ID and loads messages from

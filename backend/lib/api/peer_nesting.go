@@ -14,9 +14,30 @@ import (
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
-// maxPeerCallDepth bounds how many agents may wait on each other in one
-// call-peer chain of a chat (the root caller included).
-const maxPeerCallDepth = 4
+// maxAgentNestingDepth bounds how deeply agents nest: one limit shared by the
+// call-peer chain of a chat (the root caller included) and the subagent
+// ancestry of the chat, so mixing the two cannot get around it. A chat's agents
+// sit below the agents of every ancestor chat.
+const maxAgentNestingDepth = 4
+
+// chatBaseDepth is the number of agents above the first agent of chatID: zero
+// for a chat started by a user (or an unknown chat), otherwise the depth
+// recorded when its parent spawned it, less the child itself. A failing lookup
+// is an error, never a silent zero: that would let a deep chat extend its
+// nesting past the limit.
+func (s *Server) chatBaseDepth(chatID string) (int, error) {
+	if s.repo == nil || chatID == "" {
+		return 0, nil
+	}
+	sess, err := s.repo.GetSessionMeta(chatID)
+	if err != nil {
+		return 0, fmt.Errorf("read nesting depth of chat %s: %w", chatID, err)
+	}
+	if sess == nil || sess.SpawnDepth < 1 {
+		return 0, nil
+	}
+	return sess.SpawnDepth - 1, nil
+}
 
 // peerCallKey carries the *peerCall of a call-peer through the context.
 type peerCallKey struct{}
@@ -51,6 +72,10 @@ func peerCallFromContext(ctx context.Context) *peerCall {
 func (s *Server) enterPeerCall(chatID, callerAgentID, targetAgentID string) error {
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
+	base, err := s.chatBaseDepth(chatID)
+	if err != nil {
+		return err
+	}
 	chain := s.peerChains[chatID]
 	if len(chain) == 0 {
 		chain = []string{callerAgentID}
@@ -62,8 +87,8 @@ func (s *Server) enterPeerCall(chatID, callerAgentID, targetAgentID string) erro
 			return fmt.Errorf("call-peer cycle: agent %q is already on the call chain %s", targetAgentID, strings.Join(append(append([]string(nil), chain...), targetAgentID), " -> "))
 		}
 	}
-	if len(chain) >= maxPeerCallDepth {
-		return fmt.Errorf("call-peer nesting too deep: the call chain %s already has %d agents (limit %d)", strings.Join(chain, " -> "), len(chain), maxPeerCallDepth)
+	if base+len(chain) >= maxAgentNestingDepth {
+		return fmt.Errorf("call-peer nesting too deep: the call chain %s already has %d agents below %d spawning agents (limit %d)", strings.Join(chain, " -> "), len(chain), base, maxAgentNestingDepth)
 	}
 	s.peerChains[chatID] = append(chain[:len(chain):len(chain)], targetAgentID)
 	return nil

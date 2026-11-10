@@ -520,7 +520,17 @@ func (s *Server) handleQueuedTaskError(chatID string, targetAgent *agentspec.Age
 		return
 	}
 	var runErr *agentRunError
-	if errors.As(qErr, &runErr) {
+	isRunErr := errors.As(qErr, &runErr)
+	isShutdown := errors.Is(qErr, context.Canceled) || errors.Is(qErr, context.DeadlineExceeded)
+	// A failure that is not the aftermath of a stop is the chat's durable
+	// outcome (a stop has recorded "killed" already), so subagent list and
+	// status report it as failed, also after a restart.
+	if (isRunErr || !isShutdown) && !s.sessionStopInProgress(chatID) {
+		if err := s.repo.SetSpawnOutcome(chatID, dbmodels.SpawnOutcomeFailed); err != nil {
+			log.Warn().Err(err).Str("chat_id", chatID).Msg("failed to record failed outcome")
+		}
+	}
+	if isRunErr {
 		// Core sandbox failure: clear the remaining queue and append an error notice
 		_, _ = s.repo.ClearQueuedMessages(chatID)
 		errMsg := dbmodels.ChatMessage{
@@ -533,7 +543,7 @@ func (s *Server) handleQueuedTaskError(chatID string, targetAgent *agentspec.Age
 		_ = s.repo.AppendMessage(chatID, errMsg)
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &errMsg})
 		s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeQueue, Payload: map[string]any{"queue": []dbmodels.QueuedMessage{}}})
-	} else if !errors.Is(qErr, context.Canceled) && !errors.Is(qErr, context.DeadlineExceeded) {
+	} else if !isShutdown {
 		// Non-sandbox pre-execution failure that is not a graceful shutdown:
 		// append a visible error telling the user the message never ran; keep the queue
 		errMsg := dbmodels.ChatMessage{

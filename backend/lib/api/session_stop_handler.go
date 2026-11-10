@@ -177,7 +177,39 @@ func (s *Server) consumeSessionStop(chatID string) {
 // queued messages, records a user-visible cancellation message and broadcasts
 // the resulting status to the frontend. It returns the HTTP status code to
 // respond with plus an error message when the code is not 200.
+//
+// Stopping a chat also stops every subagent chat spawned below it. The chat
+// itself may be idle while a descendant runs: that is a success as long as
+// something was stopped.
 func (s *Server) stopSessionExecution(sessionID string) (int, string) {
+	if !IsValidChatID(sessionID) {
+		return http.StatusBadRequest, "invalid session id"
+	}
+	// The cascade is one critical section with subagent spawns: a spawn either
+	// started its child (guard taken, so the cascade sees it) before the stop
+	// or runs after it and is refused because its parent is stopped.
+	s.spawnMu.Lock()
+	defer s.spawnMu.Unlock()
+	code, msg := s.stopOneExecution(sessionID)
+	stopped := code == http.StatusOK
+	descendants, derr := s.descendantChats(sessionID)
+	for _, id := range descendants {
+		if c, _ := s.stopOneExecution(id); c == http.StatusOK {
+			stopped = true
+		}
+	}
+	if derr != nil {
+		return http.StatusInternalServerError, fmt.Sprintf("stopped the chat but failed to enumerate its subagents, retry the stop: %v", derr)
+	}
+	if stopped {
+		return http.StatusOK, ""
+	}
+	return code, msg
+}
+
+// stopOneExecution is stopSessionExecution for a single chat, without the
+// cascade to its subagents.
+func (s *Server) stopOneExecution(sessionID string) (int, string) {
 	if !IsValidChatID(sessionID) {
 		return http.StatusBadRequest, "invalid session id"
 	}
@@ -187,6 +219,13 @@ func (s *Server) stopSessionExecution(sessionID string) (int, string) {
 		return http.StatusConflict, "session is not currently running"
 	}
 
+	// Persist the outcome before cancelling, so the run's own failure handling
+	// (which sees the stop marker) never records "failed" over it.
+	if s.repo != nil {
+		if err := s.repo.SetSpawnOutcome(sessionID, dbmodels.SpawnOutcomeKilled); err != nil {
+			log.Warn().Err(err).Str("chat_id", sessionID).Msg("failed to record killed outcome on stop")
+		}
+	}
 	if handle, ok := value.(*executionHandle); ok {
 		if handle.isWorkflow {
 			s.cancelWorkflowSession(sessionID, value)
