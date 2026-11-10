@@ -158,10 +158,13 @@ func (e *SingleAgentExecutor) executeSequential(
 				Sessions:   sessions,
 				RunDir:     runDirOpt,
 				Worktree:   e.useWorktree(session),
-				Model:      mOpt,
-				Scope:      run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
-				Attempt:    attempt,
-				OnEvent:    e.publishRunEvent,
+				// A subagent shares the worktree of the chat that owns it.
+				WorktreeChatID: e.worktreeChat(session),
+				Readonly:       session != nil && session.SpawnReadonly,
+				Model:          mOpt,
+				Scope:          run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
+				Attempt:        attempt,
+				OnEvent:        e.publishRunEvent,
 			})
 			resultCh <- seqRunResult{out: res.Output, target: res.Target, err: err}
 		}(forcedModel, attempt)

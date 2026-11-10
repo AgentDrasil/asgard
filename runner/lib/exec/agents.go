@@ -70,6 +70,11 @@ func lookupAgent(src AgentSource, sr *runnerpb.StartRun) (*agentspec.Agent, stri
 func applyOverlay(agent *agentspec.Agent, sr *runnerpb.StartRun) *agentspec.Agent {
 	out := *agent
 	out.Config.MountDirs = agent.Config.MountDirs.Clone()
+	if sr.GetReadonly() {
+		// A read-only subagent: the same sandbox mode as lock_mode: readonly,
+		// which binds the checkout read-only in the agent and command sandboxes.
+		out.Config.LockMode = agentspec.LockModeReadOnly
+	}
 	if len(sr.GetRunDirs()) > 0 {
 		out.Config.RunDirs = append([]string(nil), sr.GetRunDirs()...)
 	}

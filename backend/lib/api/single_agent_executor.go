@@ -77,7 +77,61 @@ func NewSingleAgentExecutor(agent *agentspec.Agent, conf *config.Config, repo *d
 // chat opted in and this agent offers worktrees (a peer of the chat that does
 // not, runs in the plain directory).
 func (e *SingleAgentExecutor) useWorktree(session *dbmodels.Session) bool {
-	return session != nil && session.Worktree && e.agent.Config.Worktree.Enabled
+	return e.worktreeChat(session) != ""
+}
+
+// worktreeChat is the chat that owns the worktree this run happens in, or ""
+// when the run does not use one. A subagent of a worktree chat shares the
+// worktree of the root chat of its spawn tree (recorded at spawn), so the
+// owner is not necessarily the chat being run.
+func (e *SingleAgentExecutor) worktreeChat(session *dbmodels.Session) string {
+	if session == nil || !e.agent.Config.Worktree.Enabled {
+		return ""
+	}
+	if session.WorktreeChatID != "" {
+		return session.WorktreeChatID
+	}
+	if session.Worktree {
+		return session.ChatID
+	}
+	return ""
+}
+
+// checkSharedWorktree fails closed for a subagent whose recorded worktree this
+// agent cannot honor now: the agent no longer offers worktrees, or its
+// worktree root differs from the one the owner's worktree was created under
+// (the runner derives the path from the agent's own root).
+func (e *SingleAgentExecutor) checkSharedWorktree(session *dbmodels.Session) error {
+	if session == nil || session.WorktreeChatID == "" {
+		return nil
+	}
+	if !e.agent.Config.Worktree.Enabled {
+		return fmt.Errorf("chat %s shares the git worktree of chat %s, but agent %s no longer offers worktrees; refusing to run in the main checkout", session.ChatID, session.WorktreeChatID, e.agent.Config.ID)
+	}
+	if session.WorktreeRoot != e.agent.Config.Worktree.Root {
+		return fmt.Errorf("chat %s shares the git worktree of chat %s under root %q, but agent %s uses worktree root %q", session.ChatID, session.WorktreeChatID, session.WorktreeRoot, e.agent.Config.ID, e.agent.Config.Worktree.Root)
+	}
+	return nil
+}
+
+// subagentAncestors lists the chats above a subagent chat, parent first. A
+// lookup that fails or loops is an error: running without the ancestors would
+// deadlock a writable child against the lock its parent holds, and a silently
+// wrong answer would hide that.
+func (s *Server) subagentAncestors(session *dbmodels.Session) ([]string, error) {
+	var out []string
+	for cur := session; cur != nil && cur.ParentChatID != ""; {
+		if len(out) >= maxAgentNestingDepth+1 {
+			return nil, fmt.Errorf("subagent ancestry of chat %s is deeper than %d", session.ChatID, maxAgentNestingDepth)
+		}
+		out = append(out, cur.ParentChatID)
+		parent, err := s.repo.GetSessionMeta(cur.ParentChatID)
+		if err != nil {
+			return nil, fmt.Errorf("read parent chat %s: %w", cur.ParentChatID, err)
+		}
+		cur = parent
+	}
+	return out, nil
 }
 
 // Execute handles the agent execution.
@@ -99,6 +153,13 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		if metaErr != nil {
 			return "", fmt.Errorf("failed to get session: %w", metaErr)
 		}
+	}
+
+	// A subagent of a worktree chat must work in that worktree. The agent's
+	// config is hot-reloaded, so re-check here instead of falling back to the
+	// main checkout.
+	if err := e.checkSharedWorktree(session); err != nil {
+		return "", err
 	}
 
 	prompt := params.Prompt
@@ -259,17 +320,28 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 		if normalizedRunDir == "" {
 			return "", errors.New("a worktree chat needs a run directory")
 		}
-		wtPath, wtErr := worktree.PathFor(e.agent.Config.Worktree.Root, normalizedRunDir, chatID)
+		wtPath, wtErr := worktree.PathFor(e.agent.Config.Worktree.Root, normalizedRunDir, e.worktreeChat(session))
 		if wtErr != nil {
 			return "", fmt.Errorf("worktree for run directory %q: %w", normalizedRunDir, wtErr)
 		}
 		lockDir = wtPath
 	}
 
+	// A read-only subagent only reads the checkout (it is mounted read-only),
+	// so it takes no lock: many of them run in parallel next to a writer. A
+	// writable subagent locks like any chat, serializing with other writers; the
+	// chats that spawned it do not block it, since they wait for it.
 	var releaseLock func(bool)
-	if e.server != nil && e.server.dirLocks != nil {
+	if e.server != nil && e.server.dirLocks != nil && (session == nil || !session.SpawnReadonly) {
+		var ancestors []string
+		if session != nil && session.ParentChatID != "" && e.server.repo != nil {
+			var ancErr error
+			if ancestors, ancErr = e.server.subagentAncestors(session); ancErr != nil {
+				return "", ancErr
+			}
+		}
 		var lockErr error
-		releaseLock, lockErr = e.server.acquireChatDirLock(ctx, chatID, e.agent, lockDir)
+		releaseLock, lockErr = e.server.acquireChatDirLock(ctx, chatID, e.agent, lockDir, ancestors...)
 		if lockErr != nil {
 			return "", lockErr
 		}
@@ -286,7 +358,10 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 				}
 				// A worktree is private to the chat: nobody else waits on its
 				// uncommitted changes, and the main checkout's are not ours.
-				if hasQueued || (!useWorktree && e.server != nil && e.server.hasUncommittedChanges(chatID, normalizedRunDir)) {
+				// A subagent never parks its lock for uncommitted changes: they
+				// belong to the work of the chat that spawned it.
+				isChild := session != nil && session.ParentChatID != ""
+				if hasQueued || (!useWorktree && !isChild && e.server != nil && e.server.hasUncommittedChanges(chatID, normalizedRunDir)) {
 					keepUncommitted = true
 				}
 			}

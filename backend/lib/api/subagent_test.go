@@ -430,3 +430,84 @@ func TestChatBaseDepthFailsClosed(t *testing.T) {
 	_, err = rig.server.SpawnSubagent(spawnReq("beta"))
 	assert.Error(t, err)
 }
+
+func worktreeTeamAgent(id string) *agentspec.Agent {
+	a := teamAgent(id, "t")
+	a.Config.Worktree = agentspec.WorktreeConfig{Enabled: true, Root: "/wt"}
+	return a
+}
+
+// A subagent of a worktree chat shares the worktree of the chat that opted in,
+// however deep it is nested.
+func TestSpawnSubagentSharesParentWorktree(t *testing.T) {
+	rig := newCallbackRig(t, worktreeTeamAgent("alpha"), worktreeTeamAgent("beta"), worktreeTeamAgent("gamma"), teamAgent("plain", "t"))
+	started, _ := blockingRuns(rig)
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo", Worktree: true}))
+
+	req := spawnReq("beta")
+	req.Readonly = true
+	childID, err := rig.server.SpawnSubagent(req)
+	require.NoError(t, err)
+	waitStarted(t, started)
+	child, err := rig.repo.GetSessionMeta(childID)
+	require.NoError(t, err)
+	assert.Equal(t, rigChat, child.WorktreeChatID)
+	assert.False(t, child.Worktree, "the child does not opt in to a worktree of its own")
+
+	// A grandchild resolves to the root chat, not to its parent.
+	req = spawnReq("gamma")
+	req.CallerChat = childID
+	req.CallerAgent = "beta"
+	grandID, err := rig.server.SpawnSubagent(req)
+	require.NoError(t, err)
+	waitStarted(t, started)
+	grand, err := rig.repo.GetSessionMeta(grandID)
+	require.NoError(t, err)
+	assert.Equal(t, rigChat, grand.WorktreeChatID)
+
+	// An agent that cannot work in a worktree is refused, not run in the main checkout.
+	req = spawnReq("plain")
+	var se *SubagentError
+	_, err = rig.server.SpawnSubagent(req)
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, SubagentInvalid, se.Kind)
+	assert.Contains(t, se.Msg, "worktree")
+}
+
+// A target whose worktree root differs from the owner's would derive another
+// path than the owner's live worktree: refused at spawn. The root is persisted
+// on the child (and on grandchildren) from the owner.
+func TestSpawnSubagentWorktreeRoot(t *testing.T) {
+	other := worktreeTeamAgent("other")
+	other.Config.Worktree.Root = "/wt-b"
+	rig := newCallbackRig(t, worktreeTeamAgent("alpha"), worktreeTeamAgent("beta"), worktreeTeamAgent("gamma"), other)
+	started, _ := blockingRuns(rig)
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo", Worktree: true}))
+
+	var se *SubagentError
+	_, err := rig.server.SpawnSubagent(spawnReq("other"))
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, SubagentInvalid, se.Kind)
+	assert.Contains(t, se.Msg, "/wt-b")
+
+	childID, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	require.NoError(t, err)
+	waitStarted(t, started)
+	child, err := rig.repo.GetSessionMeta(childID)
+	require.NoError(t, err)
+	assert.Equal(t, "/wt", child.WorktreeRoot)
+
+	// The grandchild inherits the persisted root, and a differing agent is refused.
+	req := spawnReq("other")
+	req.CallerChat, req.CallerAgent = childID, "beta"
+	_, err = rig.server.SpawnSubagent(req)
+	require.ErrorAs(t, err, &se)
+	req = spawnReq("gamma")
+	req.CallerChat, req.CallerAgent = childID, "beta"
+	grandID, err := rig.server.SpawnSubagent(req)
+	require.NoError(t, err)
+	waitStarted(t, started)
+	grand, err := rig.repo.GetSessionMeta(grandID)
+	require.NoError(t, err)
+	assert.Equal(t, "/wt", grand.WorktreeRoot)
+}

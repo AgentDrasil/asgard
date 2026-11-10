@@ -170,6 +170,7 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 		RunDir:    dirRefFor(req.ChatID, req.RunDir.TakeOr("")),
 		Attempt:   req.Attempt,
 		Worktree:  req.Worktree,
+		Readonly:  req.Readonly,
 		RunDirs:   append([]string(nil), req.Agent.Config.RunDirs...),
 		StatusScope: &runnerpb.StatusScope{
 			NodeId:            req.Scope.NodeID,
@@ -179,6 +180,9 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 		},
 		MountDirsReadonly:  append([]string(nil), req.Agent.Config.MountDirs.ReadOnly...),
 		MountDirsReadwrite: append([]string(nil), req.Agent.Config.MountDirs.ReadWrite...),
+	}
+	if req.Worktree && req.WorktreeChatID != req.ChatID {
+		sr.WorktreeChatId = req.WorktreeChatID
 	}
 	if req.Agent.NodeID != "" {
 		sr.AgentSource = runnerpb.AgentSource_AGENT_SOURCE_RUNNER

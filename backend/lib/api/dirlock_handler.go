@@ -66,7 +66,10 @@ func (s *Server) hasUncommittedChanges(chatID, runDir string) bool {
 }
 
 // acquireChatDirLock acquires directory locks for chatID and the given agent/runDir.
-func (s *Server) acquireChatDirLock(ctx context.Context, chatID string, agent *agentspec.Agent, runDir string) (func(keepUncommitted bool), error) {
+//
+// ancestors are the chats that spawned chatID as a subagent, if any: their
+// locks do not block it (see dirlock.AcquireRequest.Ancestors).
+func (s *Server) acquireChatDirLock(ctx context.Context, chatID string, agent *agentspec.Agent, runDir string, ancestors ...string) (func(keepUncommitted bool), error) {
 	if s == nil || s.dirLocks == nil {
 		return func(bool) {}, nil
 	}
@@ -96,6 +99,8 @@ func (s *Server) acquireChatDirLock(ctx context.Context, chatID string, agent *a
 		RunnerID: runnerID,
 		Dirs:     dirs,
 		Mode:     mode,
+
+		Ancestors: ancestors,
 	})
 }
 

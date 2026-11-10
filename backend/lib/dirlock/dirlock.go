@@ -60,6 +60,14 @@ type AcquireRequest struct {
 	RunnerID string
 	Dirs     []string
 	Mode     Mode
+	// Ancestors are the chats that spawned the requester as a subagent
+	// (parent first). An ancestor marked waiting on its descendants (see
+	// SetWaitingOnDescendants) does not block the requester, and the requester
+	// does not queue behind chats waiting for it: otherwise a writable subagent
+	// would deadlock against the parent that waits for it. An ancestor that is
+	// not marked is an ordinary holder (it is still writing; the subagent
+	// queues behind it). Everyone else, siblings included, conflicts as usual.
+	Ancestors []string
 }
 
 type lockHolder struct {
@@ -70,6 +78,8 @@ type lockHolder struct {
 	mode       Mode
 	reason     Reason
 	activeRuns int
+	// ancestors are the spawn ancestors the holder was acquired with.
+	ancestors []string
 }
 
 type waiter struct {
@@ -86,12 +96,15 @@ type Manager struct {
 	onChange func(chatID string)
 	holders  map[string]*lockHolder // chatID -> holder
 	waiters  []*waiter
+	// waitingOn is the set of chats marked as waiting on their descendants.
+	waitingOn map[string]bool
 }
 
 func NewManager(onChange func(chatID string)) *Manager {
 	return &Manager{
-		onChange: onChange,
-		holders:  make(map[string]*lockHolder),
+		onChange:  onChange,
+		holders:   make(map[string]*lockHolder),
+		waitingOn: make(map[string]bool),
 	}
 }
 
@@ -254,10 +267,11 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 
 		if needsExpansionOrUpgrade {
 			conflicts, conflictHolder, conflictDir := m.findConflictLocked(AcquireRequest{
-				ChatID:   req.ChatID,
-				RunnerID: req.RunnerID,
-				Dirs:     mergedDirs,
-				Mode:     targetMode,
+				ChatID:    req.ChatID,
+				RunnerID:  req.RunnerID,
+				Ancestors: req.Ancestors,
+				Dirs:      mergedDirs,
+				Mode:      targetMode,
 			})
 			if conflicts {
 				m.mu.Unlock()
@@ -273,6 +287,7 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 
 		h.activeRuns++
 		h.reason = ReasonRunning
+		h.ancestors = req.Ancestors
 		if req.Title != "" {
 			h.title = req.Title
 		}
@@ -293,6 +308,7 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 			mode:       req.Mode,
 			reason:     ReasonRunning,
 			activeRuns: 1,
+			ancestors:  req.Ancestors,
 		}
 		m.mu.Unlock()
 		m.notify([]string{req.ChatID})
@@ -377,7 +393,7 @@ func (m *Manager) AcquireMerge(ctx context.Context, req AcquireRequest) (func(),
 func (m *Manager) findConflictLocked(req AcquireRequest) (bool, *lockHolder, string) {
 	// Check against current holders
 	for _, h := range m.holders {
-		if h.chatID == req.ChatID || h.runnerID != req.RunnerID {
+		if h.chatID == req.ChatID || h.runnerID != req.RunnerID || m.bypassesLocked(req.Ancestors, h.chatID) {
 			continue
 		}
 		for _, d1 := range req.Dirs {
@@ -393,6 +409,11 @@ func (m *Manager) findConflictLocked(req AcquireRequest) (bool, *lockHolder, str
 
 	// Check against earlier FIFO waiters to maintain ordering and prevent writer starvation
 	for _, w := range m.waiters {
+		if m.hasWaitingAncestorLocked(req.Ancestors) {
+			// A waiting ancestor waits for the requester, and so may everyone
+			// queued behind it: the requester must not queue behind them.
+			break
+		}
 		if w.req.ChatID == req.ChatID || w.req.RunnerID != req.RunnerID {
 			continue
 		}
@@ -431,6 +452,56 @@ func (m *Manager) findConflictLocked(req AcquireRequest) (bool, *lockHolder, str
 	}
 
 	return false, nil, ""
+}
+
+// bypassesLocked reports whether a request with the given ancestors ignores
+// the hold of holder: only an ancestor that is waiting on its descendants.
+func (m *Manager) bypassesLocked(ancestors []string, holder string) bool {
+	return m.waitingOn[holder] && slices.Contains(ancestors, holder)
+}
+
+func (m *Manager) hasWaitingAncestorLocked(ancestors []string) bool {
+	for _, a := range ancestors {
+		if m.waitingOn[a] {
+			return true
+		}
+	}
+	return false
+}
+
+// ErrDescendantsActive is returned by SetWaitingOnDescendants(chat, false)
+// while a descendant of chat still holds a lock.
+var ErrDescendantsActive = errors.New("a descendant subagent still holds a directory lock")
+
+// SetWaitingOnDescendants marks chat as waiting (or no longer waiting) on its
+// subagents. While marked, chat's holds do not block its descendants (those
+// acquiring with chat in AcquireRequest.Ancestors) and they skip the queue;
+// descendants already queued behind it are granted at once. Unmarked, chat is
+// an ordinary holder: its writable descendants queue behind its run.
+//
+// Clearing the mark is refused with ErrDescendantsActive while any descendant
+// holds a lock: chat must not resume writing next to a writing subagent, so
+// the caller clears it only after its subagents finished (retrying after the
+// descendants release). A refused clear leaves the mark set. A descendant that
+// started while chat was marked is never treated as conflicting retroactively.
+func (m *Manager) SetWaitingOnDescendants(chatID string, waiting bool) error {
+	m.mu.Lock()
+	if !waiting {
+		for _, h := range m.holders {
+			if slices.Contains(h.ancestors, chatID) {
+				m.mu.Unlock()
+				return ErrDescendantsActive
+			}
+		}
+		delete(m.waitingOn, chatID)
+		m.mu.Unlock()
+		return nil
+	}
+	m.waitingOn[chatID] = true
+	woken := m.processWaitersLocked()
+	m.mu.Unlock()
+	m.notify(woken)
+	return nil
 }
 
 func (m *Manager) makeReleaseFunc(chatID string) func(keepUncommitted bool) {
@@ -491,7 +562,7 @@ func (m *Manager) processWaitersLocked() []string {
 		var conflictDir string
 
 		for _, h := range m.holders {
-			if h.chatID == w.req.ChatID || h.runnerID != w.req.RunnerID {
+			if h.chatID == w.req.ChatID || h.runnerID != w.req.RunnerID || m.bypassesLocked(w.req.Ancestors, h.chatID) {
 				continue
 			}
 			for _, d1 := range w.req.Dirs {
@@ -516,7 +587,7 @@ func (m *Manager) processWaitersLocked() []string {
 
 		// Check against earlier waiters still in m.waiters (indices 0..i-1)
 		conflictsWithEarlierWaiter := false
-		if !conflictsWithHolder {
+		if !conflictsWithHolder && !m.hasWaitingAncestorLocked(w.req.Ancestors) {
 			for j := 0; j < i; j++ {
 				ew := m.waiters[j]
 				if ew.req.RunnerID != w.req.RunnerID {
@@ -566,6 +637,7 @@ func (m *Manager) processWaitersLocked() []string {
 					mode:       w.req.Mode,
 					reason:     ReasonRunning,
 					activeRuns: 1,
+					ancestors:  w.req.Ancestors,
 				}
 			}
 			m.waiters = append(m.waiters[:i], m.waiters[i+1:]...)
@@ -586,7 +658,7 @@ func (m *Manager) processWaitersLocked() []string {
 	// Update blocking references for any remaining waiters
 	for _, w := range m.waiters {
 		for _, h := range m.holders {
-			if h.chatID == w.req.ChatID || h.runnerID != w.req.RunnerID {
+			if h.chatID == w.req.ChatID || h.runnerID != w.req.RunnerID || m.bypassesLocked(w.req.Ancestors, h.chatID) {
 				continue
 			}
 			matched := false
@@ -642,6 +714,7 @@ func (m *Manager) UnlockIdle(chatID string) (bool, error) {
 // merge holder), waking eligible waiters.
 func (m *Manager) ForceReleaseChat(chatID string) {
 	m.mu.Lock()
+	delete(m.waitingOn, chatID)
 	var notified []string
 	for _, id := range []string{chatID, MergeHolderID(chatID)} {
 		if _, ok := m.holders[id]; ok {

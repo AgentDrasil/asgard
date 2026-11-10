@@ -1623,7 +1623,15 @@ type StartRun struct {
 	// worktree asks the runner to run the agent in a per-chat git worktree of
 	// run_dir (the user opted in; the agent must offer it in its config). The
 	// backend locks the worktree directory, not run_dir.
-	Worktree      bool `protobuf:"varint,19,opt,name=worktree,proto3" json:"worktree,omitempty"`
+	Worktree bool `protobuf:"varint,19,opt,name=worktree,proto3" json:"worktree,omitempty"`
+	// worktree_chat_id is the chat that owns the worktree to use when worktree is
+	// set; empty means chat_id. A subagent shares the worktree of the chat it
+	// descends from instead of creating one of its own.
+	WorktreeChatId string `protobuf:"bytes,20,opt,name=worktree_chat_id,json=worktreeChatId,proto3" json:"worktree_chat_id,omitempty"`
+	// readonly mounts the checkout read-only in the agent and command sandboxes
+	// (a read-only subagent): the run behaves like an agent with
+	// lock_mode: readonly.
+	Readonly      bool `protobuf:"varint,21,opt,name=readonly,proto3" json:"readonly,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1787,6 +1795,20 @@ func (x *StartRun) GetUserId() string {
 func (x *StartRun) GetWorktree() bool {
 	if x != nil {
 		return x.Worktree
+	}
+	return false
+}
+
+func (x *StartRun) GetWorktreeChatId() string {
+	if x != nil {
+		return x.WorktreeChatId
+	}
+	return ""
+}
+
+func (x *StartRun) GetReadonly() bool {
+	if x != nil {
+		return x.Readonly
 	}
 	return false
 }
@@ -7539,7 +7561,7 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\trun_token\x18\x02 \x01(\tR\brunToken\x12\x1a\n" +
 	"\bheadless\x18\x03 \x01(\bR\bheadless\x12.\n" +
-	"\x13allow_cross_session\x18\x04 \x01(\bR\x11allowCrossSession\"\xae\x06\n" +
+	"\x13allow_cross_session\x18\x04 \x01(\bR\x11allowCrossSession\"\xf4\x06\n" +
 	"\bStartRun\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x17\n" +
 	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x19\n" +
@@ -7564,7 +7586,9 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\x13mount_dirs_readonly\x18\x10 \x03(\tR\x11mountDirsReadonly\x120\n" +
 	"\x14mount_dirs_readwrite\x18\x11 \x03(\tR\x12mountDirsReadwrite\x12\x17\n" +
 	"\auser_id\x18\x12 \x01(\tR\x06userId\x12\x1a\n" +
-	"\bworktree\x18\x13 \x01(\bR\bworktree\x1a;\n" +
+	"\bworktree\x18\x13 \x01(\bR\bworktree\x12(\n" +
+	"\x10worktree_chat_id\x18\x14 \x01(\tR\x0eworktreeChatId\x12\x1a\n" +
+	"\breadonly\x18\x15 \x01(\bR\breadonly\x1a;\n" +
 	"\rSessionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\"\n" +

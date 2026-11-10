@@ -789,3 +789,149 @@ func TestManager_MergeNotifiesBaseChatAndForceRelease(t *testing.T) {
 		t.Fatal("force release did not drop the merge holder")
 	}
 }
+
+// A writable subagent must not wait for the chat that spawned it (which waits
+// for the subagent), nor queue behind chats waiting for that chat; siblings
+// and strangers still serialize.
+func TestManager_AncestorsDoNotBlockSubagent(t *testing.T) {
+	t.Parallel()
+	mgr := dirlock.NewManager(func(string) {})
+	ctx := t.Context()
+	req := func(chat string, ancestors ...string) dirlock.AcquireRequest {
+		return dirlock.AcquireRequest{ChatID: chat, RunnerID: "r", Dirs: []string{"/repo"}, Mode: dirlock.ModeExclusive, Ancestors: ancestors}
+	}
+	acquireAsync := func(r dirlock.AcquireRequest) chan func(bool) {
+		ch := make(chan func(bool), 1)
+		go func() {
+			if rel, err := mgr.Acquire(ctx, r); err == nil {
+				ch <- rel
+			}
+		}()
+		return ch
+	}
+
+	relP, err := mgr.Acquire(ctx, req("parent"))
+	require.NoError(t, err)
+	require.NoError(t, mgr.SetWaitingOnDescendants("parent", true))
+
+	// A stranger queues behind the parent.
+	stranger := acquireAsync(req("stranger"))
+	require.Eventually(t, func() bool {
+		st := mgr.StatusForChat("stranger")
+		return st != nil && st.IsWaitingForLock
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// The child gets the lock at once, ahead of the stranger and despite the parent.
+	var relC func(bool)
+	select {
+	case relC = <-acquireAsync(req("child", "parent")):
+	case <-time.After(2 * time.Second):
+		t.Fatal("a writable subagent deadlocked against its parent's lock")
+	}
+
+	// A sibling and a grandchild: the sibling waits for the child, the
+	// grandchild (below the child, which waits for it) does not.
+	require.NoError(t, mgr.SetWaitingOnDescendants("child", true))
+	sibling := acquireAsync(req("sibling", "parent"))
+	select {
+	case relG := <-acquireAsync(req("grandchild", "child", "parent")):
+		relG(false)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a nested subagent deadlocked against its ancestors")
+	}
+	select {
+	case <-sibling:
+		t.Fatal("a sibling must wait for the writing subagent")
+	case <-time.After(100 * time.Millisecond):
+	}
+	relC(false)
+	var relS func(bool)
+	select {
+	case relS = <-sibling:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sibling never got the lock")
+	}
+	select {
+	case <-stranger:
+		t.Fatal("a stranger must wait for the parent")
+	case <-time.After(100 * time.Millisecond):
+	}
+	relS(false)
+	relP(false)
+	select {
+	case rel := <-stranger:
+		rel(false)
+	case <-time.After(2 * time.Second):
+		t.Fatal("stranger never got the lock")
+	}
+}
+
+func TestManager_RunningAncestorBlocksWritableSubagent(t *testing.T) {
+	t.Parallel()
+	mgr := dirlock.NewManager(func(string) {})
+	ctx := t.Context()
+	req := func(chat string, mode dirlock.Mode, ancestors ...string) dirlock.AcquireRequest {
+		return dirlock.AcquireRequest{ChatID: chat, RunnerID: "r", Dirs: []string{"/repo"}, Mode: mode, Ancestors: ancestors}
+	}
+	relP, err := mgr.Acquire(ctx, req("parent", dirlock.ModeExclusive))
+	require.NoError(t, err)
+
+	child := make(chan func(bool), 1)
+	go func() {
+		if rel, err := mgr.Acquire(ctx, req("child", dirlock.ModeExclusive, "parent")); err == nil {
+			child <- rel
+		}
+	}()
+	select {
+	case <-child:
+		t.Fatal("a writable subagent must not run next to a writing parent")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// Marking the parent as waiting releases the queued child at once.
+	require.NoError(t, mgr.SetWaitingOnDescendants("parent", true))
+	var relC func(bool)
+	select {
+	case relC = <-child:
+	case <-time.After(2 * time.Second):
+		t.Fatal("child not granted after the parent started waiting")
+	}
+
+	// The parent cannot stop waiting while the child holds the directory.
+	require.ErrorIs(t, mgr.SetWaitingOnDescendants("parent", false), dirlock.ErrDescendantsActive)
+	relC(false)
+	require.NoError(t, mgr.SetWaitingOnDescendants("parent", false))
+
+	// Unmarked again: a new child queues behind the parent.
+	child2 := make(chan func(bool), 1)
+	go func() {
+		if rel, err := mgr.Acquire(ctx, req("child2", dirlock.ModeExclusive, "parent")); err == nil {
+			child2 <- rel
+		}
+	}()
+	select {
+	case <-child2:
+		t.Fatal("child must queue behind a parent that is not waiting")
+	case <-time.After(150 * time.Millisecond):
+	}
+	relP(false)
+	select {
+	case rel := <-child2:
+		rel(false)
+	case <-time.After(2 * time.Second):
+		t.Fatal("child never got the lock after the parent released")
+	}
+}
+
+func TestManager_ReadonlyUnaffectedByAncestorWaiting(t *testing.T) {
+	t.Parallel()
+	mgr := dirlock.NewManager(func(string) {})
+	ctx := t.Context()
+	relP, err := mgr.Acquire(ctx, dirlock.AcquireRequest{ChatID: "p", RunnerID: "r", Dirs: []string{"/repo"}, Mode: dirlock.ModeReadOnly})
+	require.NoError(t, err)
+	// Readonly holders coexist with each other whether or not the ancestor waits.
+	rel, err := mgr.Acquire(ctx, dirlock.AcquireRequest{ChatID: "c", RunnerID: "r", Dirs: []string{"/repo"}, Mode: dirlock.ModeReadOnly, Ancestors: []string{"p"}})
+	require.NoError(t, err)
+	rel(false)
+	relP(false)
+}

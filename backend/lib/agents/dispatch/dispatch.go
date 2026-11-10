@@ -37,6 +37,11 @@ type Request struct {
 	Scope  run.StatusScope
 	// Worktree runs the agent in the chat's own git worktree of RunDir.
 	Worktree bool
+	// WorktreeChatID is the chat that owns the worktree when Worktree is set
+	// and it is not ChatID: a subagent shares its ancestor's worktree.
+	WorktreeChatID string
+	// Readonly mounts the checkout read-only (a read-only subagent).
+	Readonly bool
 	// Attempt is the 1-based attempt counter of the logical run.
 	Attempt uint32
 	// OnEvent receives the RunEvents of the run, in order, before Run

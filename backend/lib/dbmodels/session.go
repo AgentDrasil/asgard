@@ -152,6 +152,14 @@ type Session struct {
 	// SpawnOutcomeKilled. It is empty while the chat runs and after a clean
 	// run, and is cleared when the chat starts running again.
 	SpawnOutcome string `gorm:"column:spawn_outcome" json:"-"`
+	// WorktreeChatID is, for a subagent of a worktree chat, the chat that owns
+	// the worktree it shares (the root chat of its spawn tree). Empty for
+	// every other chat. The child runs in that worktree instead of making one.
+	WorktreeChatID string `gorm:"column:worktree_chat_id" json:"-"`
+	// WorktreeRoot is the worktree root the owner's worktree was created under
+	// (resolved at spawn, set together with WorktreeChatID). A child whose agent
+	// uses another root refuses to run, as it would derive another path.
+	WorktreeRoot string `gorm:"column:worktree_root" json:"-"`
 
 	// QuotaResetIDs is the journal of an in-progress orphaned-quota reset: a
 	// JSON list of the quota ask messages being retired. It is non-empty only

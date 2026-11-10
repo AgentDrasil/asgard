@@ -24,7 +24,12 @@ import (
 // checkout is never mounted writable. repoDir must be one of the agent's run
 // directories; the worktree root comes from the agent's own configuration,
 // never from the request.
-func prepareWorktree(ctx context.Context, agent *agentspec.Agent, chatID, repoDir string) (*agentspec.Agent, worktree.Plan, error) {
+//
+// chatID is the chat that owns the worktree (a subagent passes its ancestor's).
+// A readonly run only looks at the worktree: its sandbox gets the worktree as
+// a plain read-only run directory, without the writable branch, object and
+// index paths of the owner.
+func prepareWorktree(ctx context.Context, agent *agentspec.Agent, chatID, repoDir string, readonly bool) (*agentspec.Agent, worktree.Plan, error) {
 	cfg := agent.Config
 	if !cfg.Worktree.Enabled {
 		return nil, worktree.Plan{}, fmt.Errorf("agent %s does not offer worktrees", cfg.ID)
@@ -60,7 +65,15 @@ func prepareWorktree(ctx context.Context, agent *agentspec.Agent, chatID, repoDi
 	}
 	eff := *agent
 	eff.Config.RunDirs = []string{plan.Path}
-	eff.Config.WorktreeRun = wr
+	if readonly {
+		// The worktree's .git file points into the main repository, so the
+		// sandbox needs to read that. The owner's private object store (its
+		// newest commits) is not mounted, so git history of unmerged commits
+		// is not browsable; the working tree files are all a reader needs.
+		eff.Config.MountDirs.ReadOnly = append(append([]string(nil), eff.Config.MountDirs.ReadOnly...), wr.GitDir)
+	} else {
+		eff.Config.WorktreeRun = wr
+	}
 	return &eff, plan, nil
 }
 

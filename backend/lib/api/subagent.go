@@ -74,7 +74,8 @@ type SpawnSubagentRequest struct {
 	TargetAgent string
 	// Model overrides the target agent's model for the child chat.
 	Model string
-	// Readonly is recorded on the child; it is not enforced yet.
+	// Readonly mounts the checkout read-only for the child and lets it run
+	// without the checkout lock.
 	Readonly bool
 	Label    string
 	Prompt   string
@@ -138,10 +139,29 @@ func (s *Server) SpawnSubagent(req SpawnSubagentRequest) (string, error) {
 	if target.Config.Type == "workflow" {
 		return "", subagentErr(SubagentInvalid, "agent %q is a workflow; only agents can be spawned", req.TargetAgent)
 	}
+	// A child shares the parent's checkout. When that is a worktree, it is the
+	// one of the root chat of the spawn tree (the chat that opted in).
+	wtChat, wtRoot := parent.WorktreeChatID, parent.WorktreeRoot
 	if parent.Worktree {
-		// A child shares the parent's checkout, and a worktree is derived from
-		// its own chat id: sharing it needs support in the runner.
-		return "", subagentErr(SubagentInvalid, "subagents of a chat that uses a git worktree are not supported yet")
+		wtChat = parent.ChatID
+		owner, err := s.findAgentFor(parent.RunnerNodeID, req.CallerAgent)
+		if err != nil {
+			return "", subagentErr(SubagentInternal, "failed to list agents of runner: %v", err)
+		}
+		if owner == nil || !owner.Config.Worktree.Enabled {
+			return "", subagentErr(SubagentInvalid, "the caller agent %q no longer offers git worktrees", req.CallerAgent)
+		}
+		wtRoot = owner.Config.Worktree.Root
+	}
+	if wtChat != "" {
+		if !target.Config.Worktree.Enabled {
+			// It would silently work in the main checkout instead.
+			return "", subagentErr(SubagentInvalid, "agent %q does not offer git worktrees, but the caller chat works in one", req.TargetAgent)
+		}
+		if target.Config.Worktree.Root != wtRoot {
+			// The child would derive a different worktree path than the owner's.
+			return "", subagentErr(SubagentInvalid, "agent %q uses worktree root %q, but the caller chat's worktree is under %q", req.TargetAgent, target.Config.Worktree.Root, wtRoot)
+		}
 	}
 
 	// Depth: the caller's own nesting (ancestor chats plus its call-peer chain)
@@ -186,6 +206,8 @@ func (s *Server) SpawnSubagent(req SpawnSubagentRequest) (string, error) {
 		SpawnLabel:        req.Label,
 		SpawnDepth:        depth,
 		SpawnReadonly:     req.Readonly,
+		WorktreeChatID:    wtChat,
+		WorktreeRoot:      wtRoot,
 	}
 	if err := s.repo.SaveSession(child); err != nil {
 		return "", subagentErr(SubagentInternal, "failed to create child chat: %v", err)

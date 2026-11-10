@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/worktree"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
@@ -63,7 +64,7 @@ func newWTEnv(t *testing.T) wtEnv {
 func TestPrepareWorktree(t *testing.T) {
 	e := newWTEnv(t)
 
-	eff, plan, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo)
+	eff, plan, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo, false)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(e.root, "repo-c1"), plan.Path)
 	assert.Equal(t, []string{plan.Path}, eff.Config.RunDirs, "the main checkout is not a run dir of the worktree run")
@@ -79,38 +80,38 @@ func TestPrepareWorktree_Refusals(t *testing.T) {
 	t.Run("agent does not offer worktrees", func(t *testing.T) {
 		e := newWTEnv(t)
 		e.agent.Config.Worktree = agentspec.WorktreeConfig{}
-		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo, false)
 		require.ErrorContains(t, err, "does not offer worktrees")
 	})
 	t.Run("dir outside the run dirs", func(t *testing.T) {
 		e := newWTEnv(t)
 		other := t.TempDir()
-		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", other)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", other, false)
 		require.ErrorContains(t, err, "not allowed")
 	})
 	t.Run("not a git repo", func(t *testing.T) {
 		e := newWTEnv(t)
 		plain := filepath.Join(filepath.Dir(e.repo), "plain")
 		require.NoError(t, os.MkdirAll(plain, 0o755))
-		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", plain)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", plain, false)
 		require.ErrorIs(t, err, worktree.ErrNotGitRepo)
 	})
 	t.Run("rw mount over the checkout", func(t *testing.T) {
 		e := newWTEnv(t)
 		e.agent.Config.MountDirs.ReadWrite = []string{filepath.Dir(e.repo)}
-		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", e.repo, false)
 		require.ErrorContains(t, err, "expose the main checkout")
 	})
 	t.Run("symlinked run dir", func(t *testing.T) {
 		e := newWTEnv(t)
 		link := filepath.Join(filepath.Dir(e.repo), "link")
 		require.NoError(t, os.Symlink(e.repo, link))
-		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", link)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "c1", link, false)
 		require.ErrorContains(t, err, "real path")
 	})
 	t.Run("bad chat id", func(t *testing.T) {
 		e := newWTEnv(t)
-		_, _, err := prepareWorktree(t.Context(), e.agent, "../x", e.repo)
+		_, _, err := prepareWorktree(t.Context(), e.agent, "../x", e.repo, false)
 		require.ErrorContains(t, err, "invalid chat id")
 	})
 }
@@ -152,7 +153,7 @@ type mergeRig struct {
 func newMergeRig(t *testing.T) *mergeRig {
 	t.Helper()
 	e := newWTEnv(t)
-	_, plan, err := prepareWorktree(t.Context(), e.agent, "chat-1", e.repo)
+	_, plan, err := prepareWorktree(t.Context(), e.agent, "chat-1", e.repo, false)
 	require.NoError(t, err)
 
 	m := &mergeRig{env: e, plan: plan, released: make(chan struct{}, 1)}
@@ -238,4 +239,54 @@ func TestMergeEndpoint_LockNotGranted(t *testing.T) {
 	assert.False(t, resp.OK)
 	assert.Contains(t, resp.Message, "Could not take the lock")
 	assert.NoFileExists(t, filepath.Join(m.env.repo, "b.txt"), "no merge without the lock")
+}
+
+// A subagent shares the worktree of the chat that owns it: the path comes from
+// the owner's chat id, and a read-only run gets it without the owner's
+// writable git paths.
+func TestPrepareWorktree_SharedAndReadonly(t *testing.T) {
+	e := newWTEnv(t)
+	_, ownerPlan, err := prepareWorktree(t.Context(), e.agent, "owner", e.repo, false)
+	require.NoError(t, err)
+
+	t.Run("a writable child reuses the owner's worktree", func(t *testing.T) {
+		eff, plan, err := prepareWorktree(t.Context(), e.agent, "owner", e.repo, false)
+		require.NoError(t, err)
+		assert.Equal(t, ownerPlan.Path, plan.Path)
+		require.NotNil(t, eff.Config.WorktreeRun)
+		assert.Equal(t, []string{ownerPlan.Path}, eff.Config.RunDirs)
+	})
+	t.Run("read-only gets no writable git paths", func(t *testing.T) {
+		eff, plan, err := prepareWorktree(t.Context(), e.agent, "owner", e.repo, true)
+		require.NoError(t, err)
+		assert.Equal(t, ownerPlan.Path, plan.Path)
+		assert.Nil(t, eff.Config.WorktreeRun)
+		assert.Contains(t, eff.Config.MountDirs.ReadOnly, plan.GitDir())
+		assert.Equal(t, []string{ownerPlan.Path}, eff.Config.RunDirs)
+	})
+}
+
+// A read-only StartRun turns the agent into a lock_mode: readonly one, so the
+// worktree or checkout is bound read-only in the command sandbox too.
+func TestApplyOverlay_ReadonlyRun(t *testing.T) {
+	e := newWTEnv(t)
+	got := applyOverlay(e.agent, &runnerpb.StartRun{Readonly: true, MountDirsReadwrite: []string{"/rw"}})
+	assert.True(t, got.Config.IsReadOnly())
+	assert.Empty(t, got.Config.MountDirs.ReadWrite)
+	assert.False(t, e.agent.Config.IsReadOnly(), "the shared agent definition is left alone")
+
+	cmd, err := bwrap.CommandForAgentCommandExec(&got.Config, e.repo, "", "sock", "chat-ro", "", false)
+	require.NoError(t, err)
+	var roBound, rwBound bool
+	for i := 0; i+2 < len(cmd.Args); i++ {
+		if cmd.Args[i+1] == e.repo && cmd.Args[i+2] == e.repo {
+			roBound = roBound || cmd.Args[i] == "--ro-bind"
+			rwBound = rwBound || cmd.Args[i] == "--bind"
+		}
+	}
+	assert.True(t, roBound, "checkout is bound read-only")
+	assert.False(t, rwBound, "checkout is never bound writable")
+
+	rw := applyOverlay(e.agent, &runnerpb.StartRun{})
+	assert.False(t, rw.Config.IsReadOnly())
 }

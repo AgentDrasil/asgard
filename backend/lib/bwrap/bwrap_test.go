@@ -1929,3 +1929,34 @@ func TestBuildSandboxArgs_GlobMountDirs(t *testing.T) {
 	assert.GreaterOrEqual(t, indexOfSeq(cmdRO.Args, "--ro-bind", r1Agents, r1Agents), 0)
 	assert.GreaterOrEqual(t, indexOfSeq(cmdRO.Args, "--ro-bind", r2Agents, r2Agents), 0)
 }
+
+// A read-only subagent runs with lock_mode: readonly forced on the agent: the
+// checkout is bound read-only in both sandboxes, a normal run binds it
+// writable, and the session-private dirs stay writable either way.
+func TestCheckoutBindFollowsReadonlyMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	checkout := t.TempDir()
+	target := agentspec.CLITarget{CLI: "agy", Model: "model"}
+
+	for _, readonly := range []bool{false, true} {
+		cfg := &agentspec.AgentConfig{ID: "a", Name: "A", RunDirs: []string{checkout}}
+		if readonly {
+			cfg.LockMode = agentspec.LockModeReadOnly
+		}
+		chat := fmt.Sprintf("chat-ro-%v", readonly)
+		agentArgs, err := buildSandboxArgs(cfg, "", target, false, "", checkout, "sock", chat, "", "")
+		require.NoError(t, err)
+		cmd, err := CommandForAgentCommandExec(cfg, checkout, "", "sock", chat, "", false)
+		require.NoError(t, err)
+
+		for name, args := range map[string][]string{"agent sandbox": agentArgs, "command sandbox": cmd.Args} {
+			ro := indexOfSeq(args, "--ro-bind", checkout, checkout) >= 0
+			rw := indexOfSeq(args, "--bind", checkout, checkout) >= 0
+			assert.Equal(t, readonly, ro, "%s readonly=%v: ro-bind of the checkout", name, readonly)
+			assert.Equal(t, !readonly, rw, "%s readonly=%v: bind of the checkout", name, readonly)
+		}
+		assert.GreaterOrEqual(t, indexOfSeq(agentArgs, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
+		assert.GreaterOrEqual(t, indexOfSeq(agentArgs, "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
+	}
+}

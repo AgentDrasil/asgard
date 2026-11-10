@@ -312,6 +312,14 @@ message StartRun {
   // run_dir (the user opted in; the agent must offer it in its config). The
   // backend locks the worktree directory, not run_dir.
   bool worktree = 19;
+  // worktree_chat_id is the chat that owns the worktree to use when worktree is
+  // set; empty means chat_id. A subagent shares the worktree of the chat it
+  // descends from instead of creating one of its own.
+  string worktree_chat_id = 20;
+  // readonly mounts the checkout read-only in the agent and command sandboxes
+  // (a read-only subagent): the run behaves like an agent with
+  // lock_mode: readonly.
+  bool readonly = 21;
 }
 
 message CancelRun {

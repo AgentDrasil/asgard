@@ -205,12 +205,21 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 	repoDir := runDir
 	var plan *worktree.Plan
 	if sr.GetWorktree() {
-		wtAgent, p, err := prepareWorktree(ctx, agent, sr.GetChatId(), runDir)
+		// A subagent shares the worktree of the chat that owns it.
+		wtChat := sr.GetWorktreeChatId()
+		if wtChat == "" {
+			wtChat = sr.GetChatId()
+		}
+		wtAgent, p, err := prepareWorktree(ctx, agent, wtChat, runDir, sr.GetReadonly())
 		if err != nil {
 			return outcome{err: err}
 		}
-		agent, plan, repoDir = wtAgent, &p, p.RepoDir
+		agent, repoDir = wtAgent, p.RepoDir
 		runDirOpt = optional.Some(p.Path)
+		if !sr.GetReadonly() {
+			// Only a writer delivers work, so only it may merge.
+			plan = &p
+		}
 	}
 
 	candidates := make([]agentspec.CLITarget, 0, len(sr.GetCandidates()))
