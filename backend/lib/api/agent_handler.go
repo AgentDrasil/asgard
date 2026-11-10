@@ -71,7 +71,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			RunDirs:     s.expandAgentRunDirs(r, agent, rFS),
 			MainAgent:   agent.Config.IsMainAgent(),
 			Models:      models,
-			Worktree:    s.worktreeOptInError(agent) == "",
+			Worktree:    s.worktreeSupportError(agent) == "",
 			RunnerID:    agent.NodeID,
 		})
 	}

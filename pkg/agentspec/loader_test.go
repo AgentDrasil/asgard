@@ -1695,3 +1695,12 @@ func TestAgentConfig_Validate_WorktreeRWMountOverRunDir(t *testing.T) {
 	cfg.Worktree = WorktreeConfig{}
 	require.NoError(t, cfg.ValidateWithCLIs(map[string][]string{"opencode": {"deepseek-chat"}}))
 }
+
+func TestAgentConfig_DefaultRunDir(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "/src/repo", (&AgentConfig{RunDirs: []string{"/data/*", "", "/src/repo", "/other"}}).DefaultRunDir())
+	assert.Equal(t, "/a", (&AgentConfig{RunDirs: []string{"/a"}}).DefaultRunDir())
+	assert.Empty(t, (&AgentConfig{RunDirs: []string{"/data/*", "/x/[ab]", "/y/?"}}).DefaultRunDir())
+	assert.Empty(t, (&AgentConfig{}).DefaultRunDir())
+}

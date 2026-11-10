@@ -114,6 +114,11 @@ func (e *SingleAgentExecutor) Execute(ctx context.Context, params SingleAgentRun
 			rawRunDir = rd
 		}
 	}
+	if rawRunDir == "" && e.useWorktree(session) {
+		// A worktree is made from one concrete directory, derived the same way
+		// the runner and the merge lock derive it.
+		rawRunDir = e.agent.Config.DefaultRunDir()
+	}
 	if rawRunDir == "" && len(e.agent.Config.RunDirs) > 0 && e.agent.Config.RunDirs[0] != "" {
 		rawRunDir = e.agent.Config.RunDirs[0]
 	}

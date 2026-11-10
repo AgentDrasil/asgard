@@ -95,7 +95,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		agentIcon = targetAgent.Config.Icon
 	}
 	if req.Worktree {
-		if msg := s.worktreeOptInError(targetAgent); msg != "" {
+		if msg := s.worktreeOptInError(targetAgent, req.RunDir); msg != "" {
 			writeJSONError(w, http.StatusBadRequest, msg)
 			return
 		}

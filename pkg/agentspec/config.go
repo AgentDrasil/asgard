@@ -433,6 +433,18 @@ func (cfg *AgentConfig) IsReadOnly() bool {
 	return cfg != nil && cfg.EffectiveLockMode() == LockModeReadOnly
 }
 
+// DefaultRunDir is the run directory used when a chat names none and the
+// directory must be a single concrete path (a git worktree is made from it):
+// the first run_dirs entry that is not a glob pattern, or "" if there is none.
+func (cfg *AgentConfig) DefaultRunDir() string {
+	for _, d := range cfg.RunDirs {
+		if d != "" && !strings.ContainsAny(d, "*?[") {
+			return d
+		}
+	}
+	return ""
+}
+
 // IsMainAgent returns true if MainAgent is true or nil (default).
 func (cfg *AgentConfig) IsMainAgent() bool {
 	if cfg.MainAgent == nil {

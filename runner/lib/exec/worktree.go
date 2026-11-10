@@ -30,12 +30,7 @@ func prepareWorktree(ctx context.Context, agent *agentspec.Agent, chatID, repoDi
 		return nil, worktree.Plan{}, fmt.Errorf("agent %s does not offer worktrees", cfg.ID)
 	}
 	if repoDir == "" {
-		for _, d := range cfg.RunDirs {
-			if !strings.ContainsAny(d, "*?[") {
-				repoDir = d
-				break
-			}
-		}
+		repoDir = cfg.DefaultRunDir()
 	}
 	if repoDir == "" || !run.IsAllowedDir(repoDir, cfg.RunDirs) {
 		return nil, worktree.Plan{}, fmt.Errorf("run directory %q is not allowed by agent configuration", repoDir)

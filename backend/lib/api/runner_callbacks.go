@@ -768,12 +768,7 @@ func (c *callbackService) worktreeRepoDir(meta *dbmodels.Session, nodeID, agentI
 	if err != nil || agent == nil {
 		return ""
 	}
-	for _, d := range agent.Config.RunDirs {
-		if d != "" && !strings.ContainsAny(d, "*?[") {
-			return d
-		}
-	}
-	return ""
+	return agent.Config.DefaultRunDir()
 }
 
 // responseCapture is an in-memory http.ResponseWriter, so the handlers' shared

@@ -19,6 +19,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 
 func worktreeAgent() *agentspec.Agent {
@@ -43,17 +44,25 @@ func plainAgent() *agentspec.Agent {
 func TestWorktreeOptInError(t *testing.T) {
 	t.Parallel()
 
-	s := &Server{dispatcher: &stubDispatcher{}}
-	assert.Empty(t, s.worktreeOptInError(worktreeAgent()))
-	assert.Contains(t, s.worktreeOptInError(plainAgent()), "does not offer")
-	assert.Contains(t, s.worktreeOptInError(nil), "not found")
+	s := &Server{runnerClient: func(string) (runnerpb.RunnerServiceClient, error) { return nil, nil }}
+	assert.Empty(t, s.worktreeOptInError(worktreeAgent(), "/src/repo"))
+	assert.Empty(t, s.worktreeOptInError(worktreeAgent(), ""), "the agent's literal default directory is used")
+	assert.Contains(t, s.worktreeOptInError(plainAgent(), "/src/repo"), "does not offer")
+	assert.Contains(t, s.worktreeOptInError(nil, ""), "not found")
 	wf := worktreeAgent()
 	wf.Config.Type = "workflow"
-	assert.Contains(t, s.worktreeOptInError(wf), "workflow")
+	assert.Contains(t, s.worktreeOptInError(wf, "/src/repo"), "workflow")
 
-	// Without a runner the dispatcher is the in-process one.
-	local := &Server{dispatcher: dispatch.NewLocal(&config.Config{})}
-	assert.Contains(t, local.worktreeOptInError(worktreeAgent()), "need a runner")
+	// Only patterns to fall back on: the user has to name a directory.
+	globs := worktreeAgent()
+	globs.Config.RunDirs = []string{"/data/*"}
+	assert.Contains(t, s.worktreeOptInError(globs, ""), "choose a run directory")
+	assert.Empty(t, s.worktreeOptInError(globs, "/data/x"))
+
+	// No runner client: in-process or no dispatch at all.
+	noRunner := &Server{}
+	assert.Contains(t, noRunner.worktreeOptInError(worktreeAgent(), "/src/repo"), "need a runner")
+	assert.Contains(t, noRunner.worktreeSupportError(worktreeAgent()), "need a runner")
 }
 
 func newWorktreeAPIServer(t *testing.T) (*Server, *dbmodels.SessionRepository) {
@@ -63,7 +72,10 @@ func newWorktreeAPIServer(t *testing.T) (*Server, *dbmodels.SessionRepository) {
 	repo := dbmodels.NewSessionRepository(testDB)
 	dir := t.TempDir()
 	repo.SetSessionDirFunc(func(chatID string) string { return filepath.Join(dir, chatID) })
-	server := &Server{conf: &config.Config{Host: "http://localhost:8080"}, repo: repo, agents: []*agentspec.Agent{worktreeAgent(), plainAgent()}}
+	server := &Server{
+		conf: &config.Config{Host: "http://localhost:8080"}, repo: repo, agents: []*agentspec.Agent{worktreeAgent(), plainAgent()},
+		runnerClient: func(string) (runnerpb.RunnerServiceClient, error) { return nil, nil },
+	}
 	server.mux = server.buildMuxLocked()
 	return server, repo
 }
@@ -80,9 +92,9 @@ func createSessionRequest(t *testing.T, s *Server, body string) *httptest.Respon
 func TestCreateSession_WorktreeOptIn(t *testing.T) {
 	server, repo := newWorktreeAPIServer(t)
 
-	t.Run("in-process dispatch has no worktrees", func(t *testing.T) {
+	t.Run("no runner has no worktrees", func(t *testing.T) {
 		local, _ := newWorktreeAPIServer(t)
-		local.dispatcher = dispatch.NewLocal(local.conf)
+		local.runnerClient = nil
 		rr := createSessionRequest(t, local, `{"currentAgent":"wta","runDir":"/src/repo","worktree":true}`)
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 		assert.Contains(t, rr.Body.String(), "need a runner")
@@ -118,6 +130,16 @@ func TestCreateSession_WorktreeOptIn(t *testing.T) {
 		rr := createSessionRequest(t, server, `{"currentAgent":"plain","runDir":"/src/repo","worktree":true}`)
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 		assert.Contains(t, rr.Body.String(), "does not offer")
+	})
+
+	t.Run("only patterns and no directory is refused", func(t *testing.T) {
+		globs, _ := newWorktreeAPIServer(t)
+		a := worktreeAgent()
+		a.Config.ID, a.Config.Name, a.Config.RunDirs = "globby", "Globby", []string{"/data/*"}
+		globs.agents = append(globs.agents, a)
+		rr := createSessionRequest(t, globs, `{"currentAgent":"globby","worktree":true}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "choose a run directory")
 	})
 
 	t.Run("unknown agent is refused", func(t *testing.T) {
@@ -224,4 +246,27 @@ func TestExecute_AgentWithoutWorktreeSupportIgnoresTheFlag(t *testing.T) {
 	req, locked := worktreeRunFixture(t, plainAgent(), true)
 	assert.False(t, req.Worktree)
 	assert.Equal(t, []string{"/src/repo"}, locked)
+}
+
+func TestExecute_WorktreeDerivesTheDefaultDirFromTheFirstLiteralRunDir(t *testing.T) {
+	agent := worktreeAgent()
+	agent.Config.RunDirs = []string{"/data/*", "/src/repo"}
+	t.Setenv("HOME", t.TempDir())
+	repo := newQuotaTestRepo(t)
+	server := newQuotaTestServer(t, repo)
+	server.dirLocks = dirlock.NewManager(nil)
+	require.NoError(t, repo.SaveSession(&dbmodels.Session{ChatID: "chat-wt", CurrentAgent: agent.Config.ID, Worktree: true}))
+
+	var locked []string
+	server.dispatcher = &stubDispatcher{step: func(int, dispatch.Request) (dispatch.Result, error) {
+		locked = server.dirLocks.LockedDirsForChat("chat-wt")
+		return dispatch.Result{Output: []byte(`{"last_content":"ok"}`), Target: agent.Config.CLI[0]}, nil
+	}}
+	exec := NewSingleAgentExecutor(agent, server.conf, repo, server, nil)
+	_, err := exec.Execute(context.Background(), SingleAgentRunParams{ChatID: "chat-wt", Prompt: "p"})
+	require.NoError(t, err)
+
+	req := server.dispatcher.(*stubDispatcher).requests[0]
+	assert.Equal(t, "/src/repo", req.RunDir.Unwrap(), "not the /data/* pattern")
+	assert.Equal(t, []string{"/wt/repo-chat-wt"}, locked)
 }
