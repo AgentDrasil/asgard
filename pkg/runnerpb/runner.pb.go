@@ -530,6 +530,7 @@ type BackendMessage struct {
 	//	*BackendMessage_CancelRun
 	//	*BackendMessage_Ack
 	//	*BackendMessage_InjectMessage
+	//	*BackendMessage_RunControl
 	Payload       isBackendMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -624,6 +625,15 @@ func (x *BackendMessage) GetInjectMessage() *InjectMessage {
 	return nil
 }
 
+func (x *BackendMessage) GetRunControl() *RunControl {
+	if x != nil {
+		if x, ok := x.Payload.(*BackendMessage_RunControl); ok {
+			return x.RunControl
+		}
+	}
+	return nil
+}
+
 type isBackendMessage_Payload interface {
 	isBackendMessage_Payload()
 }
@@ -648,6 +658,10 @@ type BackendMessage_InjectMessage struct {
 	InjectMessage *InjectMessage `protobuf:"bytes,6,opt,name=inject_message,json=injectMessage,proto3,oneof"`
 }
 
+type BackendMessage_RunControl struct {
+	RunControl *RunControl `protobuf:"bytes,7,opt,name=run_control,json=runControl,proto3,oneof"`
+}
+
 func (*BackendMessage_RegisterResult) isBackendMessage_Payload() {}
 
 func (*BackendMessage_StartRun) isBackendMessage_Payload() {}
@@ -657,6 +671,8 @@ func (*BackendMessage_CancelRun) isBackendMessage_Payload() {}
 func (*BackendMessage_Ack) isBackendMessage_Payload() {}
 
 func (*BackendMessage_InjectMessage) isBackendMessage_Payload() {}
+
+func (*BackendMessage_RunControl) isBackendMessage_Payload() {}
 
 // RunRef identifies one attempt.
 type RunRef struct {
@@ -1952,6 +1968,77 @@ func (x *InjectMessage) GetDeadlineUnixMs() int64 {
 	return 0
 }
 
+// RunControl changes how the runner treats the still-running agent CLI of
+// run_id, without delivering a message. It has no reply: it is idempotent
+// (it states the wanted condition, not a change) and ordered with the run's
+// other downstream messages, and a run that is gone or whose CLI cannot take
+// it ignores it. A hold that never reaches the CLI only makes the run end at
+// the end of its turn, which is what happens without subagents.
+//
+// action "hold" keeps the CLI's input open after its turn ends so later
+// messages can be injected as new turns (the run has live subagents); "release"
+// lets it end once it is idle. hold_idle_seconds bounds an idle hold (0: the
+// runner's default), so a hold nobody releases cannot keep the run forever.
+type RunControl struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RunId           string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Action          string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	HoldIdleSeconds int64                  `protobuf:"varint,3,opt,name=hold_idle_seconds,json=holdIdleSeconds,proto3" json:"hold_idle_seconds,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RunControl) Reset() {
+	*x = RunControl{}
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunControl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunControl) ProtoMessage() {}
+
+func (x *RunControl) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunControl.ProtoReflect.Descriptor instead.
+func (*RunControl) Descriptor() ([]byte, []int) {
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *RunControl) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *RunControl) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *RunControl) GetHoldIdleSeconds() int64 {
+	if x != nil {
+		return x.HoldIdleSeconds
+	}
+	return 0
+}
+
 // InjectResult answers one InjectMessage (runner -> backend, seq'd).
 type InjectResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
@@ -1963,14 +2050,19 @@ type InjectResult struct {
 	// caller should queue the message) or "error" (unknown delivery state).
 	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	// error carries the error text for reason "error" (and detail otherwise).
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	// idle_gen is the idle generation of the run's aw right after it accepted
+	// the message (the generation of the turn_active report the message causes;
+	// reports of an earlier generation predate the message). 0: unknown (an aw
+	// that predates the field, or ok is false).
+	IdleGen       uint64 `protobuf:"varint,5,opt,name=idle_gen,json=idleGen,proto3" json:"idle_gen,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InjectResult) Reset() {
 	*x = InjectResult{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[19]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1982,7 +2074,7 @@ func (x *InjectResult) String() string {
 func (*InjectResult) ProtoMessage() {}
 
 func (x *InjectResult) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[19]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1995,7 +2087,7 @@ func (x *InjectResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InjectResult.ProtoReflect.Descriptor instead.
 func (*InjectResult) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{19}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InjectResult) GetInjectId() string {
@@ -2026,6 +2118,13 @@ func (x *InjectResult) GetError() string {
 	return ""
 }
 
+func (x *InjectResult) GetIdleGen() uint64 {
+	if x != nil {
+		return x.IdleGen
+	}
+	return 0
+}
+
 type HoldMergeLockRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Meta  *CallMeta              `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
@@ -2037,7 +2136,7 @@ type HoldMergeLockRequest struct {
 
 func (x *HoldMergeLockRequest) Reset() {
 	*x = HoldMergeLockRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[20]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2049,7 +2148,7 @@ func (x *HoldMergeLockRequest) String() string {
 func (*HoldMergeLockRequest) ProtoMessage() {}
 
 func (x *HoldMergeLockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[20]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2062,7 +2161,7 @@ func (x *HoldMergeLockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HoldMergeLockRequest.ProtoReflect.Descriptor instead.
 func (*HoldMergeLockRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{20}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HoldMergeLockRequest) GetMeta() *CallMeta {
@@ -2088,7 +2187,7 @@ type HoldMergeLockResponse struct {
 
 func (x *HoldMergeLockResponse) Reset() {
 	*x = HoldMergeLockResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[21]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2100,7 +2199,7 @@ func (x *HoldMergeLockResponse) String() string {
 func (*HoldMergeLockResponse) ProtoMessage() {}
 
 func (x *HoldMergeLockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[21]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2113,7 +2212,7 @@ func (x *HoldMergeLockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HoldMergeLockResponse.ProtoReflect.Descriptor instead.
 func (*HoldMergeLockResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{21}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *HoldMergeLockResponse) GetGranted() bool {
@@ -2133,7 +2232,7 @@ type CallMeta struct {
 
 func (x *CallMeta) Reset() {
 	*x = CallMeta{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[22]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2145,7 +2244,7 @@ func (x *CallMeta) String() string {
 func (*CallMeta) ProtoMessage() {}
 
 func (x *CallMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[22]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2158,7 +2257,7 @@ func (x *CallMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallMeta.ProtoReflect.Descriptor instead.
 func (*CallMeta) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{22}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CallMeta) GetRunId() string {
@@ -2191,7 +2290,7 @@ type AskUserRequest struct {
 
 func (x *AskUserRequest) Reset() {
 	*x = AskUserRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[23]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2203,7 +2302,7 @@ func (x *AskUserRequest) String() string {
 func (*AskUserRequest) ProtoMessage() {}
 
 func (x *AskUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[23]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2216,7 +2315,7 @@ func (x *AskUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskUserRequest.ProtoReflect.Descriptor instead.
 func (*AskUserRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{23}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AskUserRequest) GetMeta() *CallMeta {
@@ -2272,7 +2371,7 @@ type AskUserResponse struct {
 
 func (x *AskUserResponse) Reset() {
 	*x = AskUserResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[24]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2284,7 +2383,7 @@ func (x *AskUserResponse) String() string {
 func (*AskUserResponse) ProtoMessage() {}
 
 func (x *AskUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[24]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2297,7 +2396,7 @@ func (x *AskUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskUserResponse.ProtoReflect.Descriptor instead.
 func (*AskUserResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{24}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AskUserResponse) GetReply() string {
@@ -2337,7 +2436,7 @@ type CallPeerRequest struct {
 
 func (x *CallPeerRequest) Reset() {
 	*x = CallPeerRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[25]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2349,7 +2448,7 @@ func (x *CallPeerRequest) String() string {
 func (*CallPeerRequest) ProtoMessage() {}
 
 func (x *CallPeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[25]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2362,7 +2461,7 @@ func (x *CallPeerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallPeerRequest.ProtoReflect.Descriptor instead.
 func (*CallPeerRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{25}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CallPeerRequest) GetMeta() *CallMeta {
@@ -2434,7 +2533,7 @@ type CallPeerResponse struct {
 
 func (x *CallPeerResponse) Reset() {
 	*x = CallPeerResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[26]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2446,7 +2545,7 @@ func (x *CallPeerResponse) String() string {
 func (*CallPeerResponse) ProtoMessage() {}
 
 func (x *CallPeerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[26]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2459,7 +2558,7 @@ func (x *CallPeerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallPeerResponse.ProtoReflect.Descriptor instead.
 func (*CallPeerResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{26}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CallPeerResponse) GetStatus() string {
@@ -2500,7 +2599,7 @@ type FindPeerRequest struct {
 
 func (x *FindPeerRequest) Reset() {
 	*x = FindPeerRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[27]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2512,7 +2611,7 @@ func (x *FindPeerRequest) String() string {
 func (*FindPeerRequest) ProtoMessage() {}
 
 func (x *FindPeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[27]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2525,7 +2624,7 @@ func (x *FindPeerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindPeerRequest.ProtoReflect.Descriptor instead.
 func (*FindPeerRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{27}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *FindPeerRequest) GetMeta() *CallMeta {
@@ -2552,7 +2651,7 @@ type FindPeerResponse struct {
 
 func (x *FindPeerResponse) Reset() {
 	*x = FindPeerResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[28]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2564,7 +2663,7 @@ func (x *FindPeerResponse) String() string {
 func (*FindPeerResponse) ProtoMessage() {}
 
 func (x *FindPeerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[28]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2577,7 +2676,7 @@ func (x *FindPeerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindPeerResponse.ProtoReflect.Descriptor instead.
 func (*FindPeerResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{28}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *FindPeerResponse) GetPeers() []string {
@@ -2602,7 +2701,7 @@ type SpawnSubagentRequest struct {
 
 func (x *SpawnSubagentRequest) Reset() {
 	*x = SpawnSubagentRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[29]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2614,7 +2713,7 @@ func (x *SpawnSubagentRequest) String() string {
 func (*SpawnSubagentRequest) ProtoMessage() {}
 
 func (x *SpawnSubagentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[29]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2627,7 +2726,7 @@ func (x *SpawnSubagentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnSubagentRequest.ProtoReflect.Descriptor instead.
 func (*SpawnSubagentRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{29}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SpawnSubagentRequest) GetMeta() *CallMeta {
@@ -2682,7 +2781,7 @@ type SpawnSubagentResponse struct {
 
 func (x *SpawnSubagentResponse) Reset() {
 	*x = SpawnSubagentResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[30]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2694,7 +2793,7 @@ func (x *SpawnSubagentResponse) String() string {
 func (*SpawnSubagentResponse) ProtoMessage() {}
 
 func (x *SpawnSubagentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[30]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2707,7 +2806,7 @@ func (x *SpawnSubagentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnSubagentResponse.ProtoReflect.Descriptor instead.
 func (*SpawnSubagentResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{30}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SpawnSubagentResponse) GetId() string {
@@ -2737,7 +2836,7 @@ type SubagentInfo struct {
 
 func (x *SubagentInfo) Reset() {
 	*x = SubagentInfo{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[31]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2749,7 +2848,7 @@ func (x *SubagentInfo) String() string {
 func (*SubagentInfo) ProtoMessage() {}
 
 func (x *SubagentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[31]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2762,7 +2861,7 @@ func (x *SubagentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentInfo.ProtoReflect.Descriptor instead.
 func (*SubagentInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{31}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SubagentInfo) GetId() string {
@@ -2844,7 +2943,7 @@ type ListSubagentsRequest struct {
 
 func (x *ListSubagentsRequest) Reset() {
 	*x = ListSubagentsRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[32]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2856,7 +2955,7 @@ func (x *ListSubagentsRequest) String() string {
 func (*ListSubagentsRequest) ProtoMessage() {}
 
 func (x *ListSubagentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[32]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2869,7 +2968,7 @@ func (x *ListSubagentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubagentsRequest.ProtoReflect.Descriptor instead.
 func (*ListSubagentsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{32}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListSubagentsRequest) GetMeta() *CallMeta {
@@ -2888,7 +2987,7 @@ type ListSubagentsResponse struct {
 
 func (x *ListSubagentsResponse) Reset() {
 	*x = ListSubagentsResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[33]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2900,7 +2999,7 @@ func (x *ListSubagentsResponse) String() string {
 func (*ListSubagentsResponse) ProtoMessage() {}
 
 func (x *ListSubagentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[33]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2913,7 +3012,7 @@ func (x *ListSubagentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubagentsResponse.ProtoReflect.Descriptor instead.
 func (*ListSubagentsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{33}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListSubagentsResponse) GetSubagents() []*SubagentInfo {
@@ -2933,7 +3032,7 @@ type SubagentStatusRequest struct {
 
 func (x *SubagentStatusRequest) Reset() {
 	*x = SubagentStatusRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[34]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2945,7 +3044,7 @@ func (x *SubagentStatusRequest) String() string {
 func (*SubagentStatusRequest) ProtoMessage() {}
 
 func (x *SubagentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[34]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2958,7 +3057,7 @@ func (x *SubagentStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentStatusRequest.ProtoReflect.Descriptor instead.
 func (*SubagentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{34}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SubagentStatusRequest) GetMeta() *CallMeta {
@@ -2984,7 +3083,7 @@ type SubagentStatusResponse struct {
 
 func (x *SubagentStatusResponse) Reset() {
 	*x = SubagentStatusResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[35]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2996,7 +3095,7 @@ func (x *SubagentStatusResponse) String() string {
 func (*SubagentStatusResponse) ProtoMessage() {}
 
 func (x *SubagentStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[35]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3009,7 +3108,7 @@ func (x *SubagentStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentStatusResponse.ProtoReflect.Descriptor instead.
 func (*SubagentStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{35}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SubagentStatusResponse) GetSubagent() *SubagentInfo {
@@ -3029,7 +3128,7 @@ type KillSubagentRequest struct {
 
 func (x *KillSubagentRequest) Reset() {
 	*x = KillSubagentRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[36]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3041,7 +3140,7 @@ func (x *KillSubagentRequest) String() string {
 func (*KillSubagentRequest) ProtoMessage() {}
 
 func (x *KillSubagentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[36]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3054,7 +3153,7 @@ func (x *KillSubagentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillSubagentRequest.ProtoReflect.Descriptor instead.
 func (*KillSubagentRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{36}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *KillSubagentRequest) GetMeta() *CallMeta {
@@ -3081,7 +3180,7 @@ type KillSubagentResponse struct {
 
 func (x *KillSubagentResponse) Reset() {
 	*x = KillSubagentResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[37]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3093,7 +3192,7 @@ func (x *KillSubagentResponse) String() string {
 func (*KillSubagentResponse) ProtoMessage() {}
 
 func (x *KillSubagentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[37]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3106,7 +3205,7 @@ func (x *KillSubagentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillSubagentResponse.ProtoReflect.Descriptor instead.
 func (*KillSubagentResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{37}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *KillSubagentResponse) GetStopped() int32 {
@@ -3127,7 +3226,7 @@ type SendToSubagentRequest struct {
 
 func (x *SendToSubagentRequest) Reset() {
 	*x = SendToSubagentRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[38]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3139,7 +3238,7 @@ func (x *SendToSubagentRequest) String() string {
 func (*SendToSubagentRequest) ProtoMessage() {}
 
 func (x *SendToSubagentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[38]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3152,7 +3251,7 @@ func (x *SendToSubagentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendToSubagentRequest.ProtoReflect.Descriptor instead.
 func (*SendToSubagentRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{38}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SendToSubagentRequest) GetMeta() *CallMeta {
@@ -3187,7 +3286,7 @@ type SendToSubagentResponse struct {
 
 func (x *SendToSubagentResponse) Reset() {
 	*x = SendToSubagentResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[39]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3199,7 +3298,7 @@ func (x *SendToSubagentResponse) String() string {
 func (*SendToSubagentResponse) ProtoMessage() {}
 
 func (x *SendToSubagentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[39]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3212,7 +3311,7 @@ func (x *SendToSubagentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendToSubagentResponse.ProtoReflect.Descriptor instead.
 func (*SendToSubagentResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{39}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SendToSubagentResponse) GetDelivery() string {
@@ -3237,7 +3336,7 @@ type WaitSubagentsRequest struct {
 
 func (x *WaitSubagentsRequest) Reset() {
 	*x = WaitSubagentsRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[40]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3249,7 +3348,7 @@ func (x *WaitSubagentsRequest) String() string {
 func (*WaitSubagentsRequest) ProtoMessage() {}
 
 func (x *WaitSubagentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[40]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3262,7 +3361,7 @@ func (x *WaitSubagentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitSubagentsRequest.ProtoReflect.Descriptor instead.
 func (*WaitSubagentsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{40}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *WaitSubagentsRequest) GetMeta() *CallMeta {
@@ -3306,7 +3405,7 @@ type SubagentWaitResult struct {
 
 func (x *SubagentWaitResult) Reset() {
 	*x = SubagentWaitResult{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[41]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3318,7 +3417,7 @@ func (x *SubagentWaitResult) String() string {
 func (*SubagentWaitResult) ProtoMessage() {}
 
 func (x *SubagentWaitResult) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[41]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3331,7 +3430,7 @@ func (x *SubagentWaitResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentWaitResult.ProtoReflect.Descriptor instead.
 func (*SubagentWaitResult) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{41}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SubagentWaitResult) GetSubagent() *SubagentInfo {
@@ -3364,7 +3463,7 @@ type WaitSubagentsResponse struct {
 
 func (x *WaitSubagentsResponse) Reset() {
 	*x = WaitSubagentsResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[42]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3376,7 +3475,7 @@ func (x *WaitSubagentsResponse) String() string {
 func (*WaitSubagentsResponse) ProtoMessage() {}
 
 func (x *WaitSubagentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[42]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3389,7 +3488,7 @@ func (x *WaitSubagentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitSubagentsResponse.ProtoReflect.Descriptor instead.
 func (*WaitSubagentsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{42}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *WaitSubagentsResponse) GetResults() []*SubagentWaitResult {
@@ -3409,7 +3508,7 @@ type ReplyToParentRequest struct {
 
 func (x *ReplyToParentRequest) Reset() {
 	*x = ReplyToParentRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[43]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3421,7 +3520,7 @@ func (x *ReplyToParentRequest) String() string {
 func (*ReplyToParentRequest) ProtoMessage() {}
 
 func (x *ReplyToParentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[43]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3434,7 +3533,7 @@ func (x *ReplyToParentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyToParentRequest.ProtoReflect.Descriptor instead.
 func (*ReplyToParentRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{43}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ReplyToParentRequest) GetMeta() *CallMeta {
@@ -3461,7 +3560,7 @@ type ReplyToParentResponse struct {
 
 func (x *ReplyToParentResponse) Reset() {
 	*x = ReplyToParentResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[44]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3473,7 +3572,7 @@ func (x *ReplyToParentResponse) String() string {
 func (*ReplyToParentResponse) ProtoMessage() {}
 
 func (x *ReplyToParentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[44]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3486,7 +3585,7 @@ func (x *ReplyToParentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyToParentResponse.ProtoReflect.Descriptor instead.
 func (*ReplyToParentResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{44}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ReplyToParentResponse) GetDelivery() string {
@@ -3508,7 +3607,7 @@ type MetricsEvent struct {
 
 func (x *MetricsEvent) Reset() {
 	*x = MetricsEvent{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[45]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3520,7 +3619,7 @@ func (x *MetricsEvent) String() string {
 func (*MetricsEvent) ProtoMessage() {}
 
 func (x *MetricsEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[45]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3533,7 +3632,7 @@ func (x *MetricsEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsEvent.ProtoReflect.Descriptor instead.
 func (*MetricsEvent) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{45}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *MetricsEvent) GetKind() string {
@@ -3567,7 +3666,7 @@ type RecordMetricsRequest struct {
 
 func (x *RecordMetricsRequest) Reset() {
 	*x = RecordMetricsRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[46]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3579,7 +3678,7 @@ func (x *RecordMetricsRequest) String() string {
 func (*RecordMetricsRequest) ProtoMessage() {}
 
 func (x *RecordMetricsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[46]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3592,7 +3691,7 @@ func (x *RecordMetricsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordMetricsRequest.ProtoReflect.Descriptor instead.
 func (*RecordMetricsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{46}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *RecordMetricsRequest) GetMeta() *CallMeta {
@@ -3617,7 +3716,7 @@ type RecordMetricsResponse struct {
 
 func (x *RecordMetricsResponse) Reset() {
 	*x = RecordMetricsResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[47]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3629,7 +3728,7 @@ func (x *RecordMetricsResponse) String() string {
 func (*RecordMetricsResponse) ProtoMessage() {}
 
 func (x *RecordMetricsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[47]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3642,7 +3741,7 @@ func (x *RecordMetricsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordMetricsResponse.ProtoReflect.Descriptor instead.
 func (*RecordMetricsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{47}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{48}
 }
 
 type GetUserProxyKeysRequest struct {
@@ -3655,7 +3754,7 @@ type GetUserProxyKeysRequest struct {
 
 func (x *GetUserProxyKeysRequest) Reset() {
 	*x = GetUserProxyKeysRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[48]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3667,7 +3766,7 @@ func (x *GetUserProxyKeysRequest) String() string {
 func (*GetUserProxyKeysRequest) ProtoMessage() {}
 
 func (x *GetUserProxyKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[48]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3680,7 +3779,7 @@ func (x *GetUserProxyKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserProxyKeysRequest.ProtoReflect.Descriptor instead.
 func (*GetUserProxyKeysRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{48}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GetUserProxyKeysRequest) GetMeta() *CallMeta {
@@ -3706,7 +3805,7 @@ type GetUserProxyKeysResponse struct {
 
 func (x *GetUserProxyKeysResponse) Reset() {
 	*x = GetUserProxyKeysResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[49]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3718,7 +3817,7 @@ func (x *GetUserProxyKeysResponse) String() string {
 func (*GetUserProxyKeysResponse) ProtoMessage() {}
 
 func (x *GetUserProxyKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[49]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3731,7 +3830,7 @@ func (x *GetUserProxyKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserProxyKeysResponse.ProtoReflect.Descriptor instead.
 func (*GetUserProxyKeysResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{49}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *GetUserProxyKeysResponse) GetKeys() map[string]string {
@@ -3753,7 +3852,7 @@ type InitWorkflowSessionRequest struct {
 
 func (x *InitWorkflowSessionRequest) Reset() {
 	*x = InitWorkflowSessionRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[50]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3765,7 +3864,7 @@ func (x *InitWorkflowSessionRequest) String() string {
 func (*InitWorkflowSessionRequest) ProtoMessage() {}
 
 func (x *InitWorkflowSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[50]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3778,7 +3877,7 @@ func (x *InitWorkflowSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitWorkflowSessionRequest.ProtoReflect.Descriptor instead.
 func (*InitWorkflowSessionRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{50}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *InitWorkflowSessionRequest) GetSessionId() string {
@@ -3818,7 +3917,7 @@ type InitWorkflowSessionResponse struct {
 
 func (x *InitWorkflowSessionResponse) Reset() {
 	*x = InitWorkflowSessionResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[51]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3830,7 +3929,7 @@ func (x *InitWorkflowSessionResponse) String() string {
 func (*InitWorkflowSessionResponse) ProtoMessage() {}
 
 func (x *InitWorkflowSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[51]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3843,7 +3942,7 @@ func (x *InitWorkflowSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitWorkflowSessionResponse.ProtoReflect.Descriptor instead.
 func (*InitWorkflowSessionResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{51}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *InitWorkflowSessionResponse) GetOk() bool {
@@ -3880,7 +3979,7 @@ type ReportWorkflowEventRequest struct {
 
 func (x *ReportWorkflowEventRequest) Reset() {
 	*x = ReportWorkflowEventRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[52]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3892,7 +3991,7 @@ func (x *ReportWorkflowEventRequest) String() string {
 func (*ReportWorkflowEventRequest) ProtoMessage() {}
 
 func (x *ReportWorkflowEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[52]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3905,7 +4004,7 @@ func (x *ReportWorkflowEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportWorkflowEventRequest.ProtoReflect.Descriptor instead.
 func (*ReportWorkflowEventRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{52}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ReportWorkflowEventRequest) GetSessionId() string {
@@ -4050,7 +4149,7 @@ type ReportWorkflowEventResponse struct {
 
 func (x *ReportWorkflowEventResponse) Reset() {
 	*x = ReportWorkflowEventResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[53]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4062,7 +4161,7 @@ func (x *ReportWorkflowEventResponse) String() string {
 func (*ReportWorkflowEventResponse) ProtoMessage() {}
 
 func (x *ReportWorkflowEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[53]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4075,7 +4174,7 @@ func (x *ReportWorkflowEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportWorkflowEventResponse.ProtoReflect.Descriptor instead.
 func (*ReportWorkflowEventResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{53}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ReportWorkflowEventResponse) GetOk() bool {
@@ -4101,7 +4200,7 @@ type WorkflowRunStartRequest struct {
 
 func (x *WorkflowRunStartRequest) Reset() {
 	*x = WorkflowRunStartRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[54]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4113,7 +4212,7 @@ func (x *WorkflowRunStartRequest) String() string {
 func (*WorkflowRunStartRequest) ProtoMessage() {}
 
 func (x *WorkflowRunStartRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[54]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4126,7 +4225,7 @@ func (x *WorkflowRunStartRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunStartRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowRunStartRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{54}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *WorkflowRunStartRequest) GetRunId() string {
@@ -4194,7 +4293,7 @@ type WorkflowRunStartResponse struct {
 
 func (x *WorkflowRunStartResponse) Reset() {
 	*x = WorkflowRunStartResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[55]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4206,7 +4305,7 @@ func (x *WorkflowRunStartResponse) String() string {
 func (*WorkflowRunStartResponse) ProtoMessage() {}
 
 func (x *WorkflowRunStartResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[55]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4219,7 +4318,7 @@ func (x *WorkflowRunStartResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunStartResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowRunStartResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{55}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *WorkflowRunStartResponse) GetOk() bool {
@@ -4240,7 +4339,7 @@ type WorkflowRunSettleRequest struct {
 
 func (x *WorkflowRunSettleRequest) Reset() {
 	*x = WorkflowRunSettleRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[56]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4252,7 +4351,7 @@ func (x *WorkflowRunSettleRequest) String() string {
 func (*WorkflowRunSettleRequest) ProtoMessage() {}
 
 func (x *WorkflowRunSettleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[56]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4265,7 +4364,7 @@ func (x *WorkflowRunSettleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunSettleRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowRunSettleRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{56}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *WorkflowRunSettleRequest) GetRunId() string {
@@ -4298,7 +4397,7 @@ type WorkflowRunSettleResponse struct {
 
 func (x *WorkflowRunSettleResponse) Reset() {
 	*x = WorkflowRunSettleResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[57]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4310,7 +4409,7 @@ func (x *WorkflowRunSettleResponse) String() string {
 func (*WorkflowRunSettleResponse) ProtoMessage() {}
 
 func (x *WorkflowRunSettleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[57]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4323,7 +4422,7 @@ func (x *WorkflowRunSettleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunSettleResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowRunSettleResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{57}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *WorkflowRunSettleResponse) GetOk() bool {
@@ -4347,7 +4446,7 @@ type FileTreeEntry struct {
 
 func (x *FileTreeEntry) Reset() {
 	*x = FileTreeEntry{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[58]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4359,7 +4458,7 @@ func (x *FileTreeEntry) String() string {
 func (*FileTreeEntry) ProtoMessage() {}
 
 func (x *FileTreeEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[58]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4372,7 +4471,7 @@ func (x *FileTreeEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileTreeEntry.ProtoReflect.Descriptor instead.
 func (*FileTreeEntry) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{58}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *FileTreeEntry) GetName() string {
@@ -4426,7 +4525,7 @@ type TreeRequest struct {
 
 func (x *TreeRequest) Reset() {
 	*x = TreeRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[59]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4438,7 +4537,7 @@ func (x *TreeRequest) String() string {
 func (*TreeRequest) ProtoMessage() {}
 
 func (x *TreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[59]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4451,7 +4550,7 @@ func (x *TreeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TreeRequest.ProtoReflect.Descriptor instead.
 func (*TreeRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{59}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *TreeRequest) GetSessionId() string {
@@ -4507,7 +4606,7 @@ type TreeResponse struct {
 
 func (x *TreeResponse) Reset() {
 	*x = TreeResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[60]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4519,7 +4618,7 @@ func (x *TreeResponse) String() string {
 func (*TreeResponse) ProtoMessage() {}
 
 func (x *TreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[60]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4532,7 +4631,7 @@ func (x *TreeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TreeResponse.ProtoReflect.Descriptor instead.
 func (*TreeResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{60}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *TreeResponse) GetEntries() []*FileTreeEntry {
@@ -4574,7 +4673,7 @@ type ReadFileRequest struct {
 
 func (x *ReadFileRequest) Reset() {
 	*x = ReadFileRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[61]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4586,7 +4685,7 @@ func (x *ReadFileRequest) String() string {
 func (*ReadFileRequest) ProtoMessage() {}
 
 func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[61]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4599,7 +4698,7 @@ func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
 func (*ReadFileRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{61}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ReadFileRequest) GetSessionId() string {
@@ -4666,7 +4765,7 @@ type DirRef struct {
 
 func (x *DirRef) Reset() {
 	*x = DirRef{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[62]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4678,7 +4777,7 @@ func (x *DirRef) String() string {
 func (*DirRef) ProtoMessage() {}
 
 func (x *DirRef) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[62]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4691,7 +4790,7 @@ func (x *DirRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirRef.ProtoReflect.Descriptor instead.
 func (*DirRef) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{62}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *DirRef) GetScope() FileScope {
@@ -4724,7 +4823,7 @@ type FileInfo struct {
 
 func (x *FileInfo) Reset() {
 	*x = FileInfo{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[63]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4736,7 +4835,7 @@ func (x *FileInfo) String() string {
 func (*FileInfo) ProtoMessage() {}
 
 func (x *FileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[63]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4749,7 +4848,7 @@ func (x *FileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileInfo.ProtoReflect.Descriptor instead.
 func (*FileInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{63}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *FileInfo) GetPath() string {
@@ -4816,7 +4915,7 @@ type ReadFileChunk struct {
 
 func (x *ReadFileChunk) Reset() {
 	*x = ReadFileChunk{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[64]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4828,7 +4927,7 @@ func (x *ReadFileChunk) String() string {
 func (*ReadFileChunk) ProtoMessage() {}
 
 func (x *ReadFileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[64]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4841,7 +4940,7 @@ func (x *ReadFileChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileChunk.ProtoReflect.Descriptor instead.
 func (*ReadFileChunk) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{64}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ReadFileChunk) GetPayload() isReadFileChunk_Payload {
@@ -4898,7 +4997,7 @@ type SearchRequest struct {
 
 func (x *SearchRequest) Reset() {
 	*x = SearchRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[65]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4910,7 +5009,7 @@ func (x *SearchRequest) String() string {
 func (*SearchRequest) ProtoMessage() {}
 
 func (x *SearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[65]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4923,7 +5022,7 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{65}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *SearchRequest) GetSessionId() string {
@@ -4967,7 +5066,7 @@ type FileSearchResult struct {
 
 func (x *FileSearchResult) Reset() {
 	*x = FileSearchResult{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[66]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4979,7 +5078,7 @@ func (x *FileSearchResult) String() string {
 func (*FileSearchResult) ProtoMessage() {}
 
 func (x *FileSearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[66]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4992,7 +5091,7 @@ func (x *FileSearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileSearchResult.ProtoReflect.Descriptor instead.
 func (*FileSearchResult) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{66}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *FileSearchResult) GetPath() string {
@@ -5039,7 +5138,7 @@ type SearchResponse struct {
 
 func (x *SearchResponse) Reset() {
 	*x = SearchResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[67]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5051,7 +5150,7 @@ func (x *SearchResponse) String() string {
 func (*SearchResponse) ProtoMessage() {}
 
 func (x *SearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[67]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5064,7 +5163,7 @@ func (x *SearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
 func (*SearchResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{67}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SearchResponse) GetFiles() []*FileSearchResult {
@@ -5089,7 +5188,7 @@ type AttachmentHeader struct {
 
 func (x *AttachmentHeader) Reset() {
 	*x = AttachmentHeader{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[68]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5101,7 +5200,7 @@ func (x *AttachmentHeader) String() string {
 func (*AttachmentHeader) ProtoMessage() {}
 
 func (x *AttachmentHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[68]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5114,7 +5213,7 @@ func (x *AttachmentHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachmentHeader.ProtoReflect.Descriptor instead.
 func (*AttachmentHeader) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{68}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *AttachmentHeader) GetSessionId() string {
@@ -5158,7 +5257,7 @@ type PutAttachmentChunk struct {
 
 func (x *PutAttachmentChunk) Reset() {
 	*x = PutAttachmentChunk{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[69]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5170,7 +5269,7 @@ func (x *PutAttachmentChunk) String() string {
 func (*PutAttachmentChunk) ProtoMessage() {}
 
 func (x *PutAttachmentChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[69]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5183,7 +5282,7 @@ func (x *PutAttachmentChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutAttachmentChunk.ProtoReflect.Descriptor instead.
 func (*PutAttachmentChunk) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{69}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *PutAttachmentChunk) GetPayload() isPutAttachmentChunk_Payload {
@@ -5239,7 +5338,7 @@ type PutAttachmentResponse struct {
 
 func (x *PutAttachmentResponse) Reset() {
 	*x = PutAttachmentResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[70]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5251,7 +5350,7 @@ func (x *PutAttachmentResponse) String() string {
 func (*PutAttachmentResponse) ProtoMessage() {}
 
 func (x *PutAttachmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[70]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5264,7 +5363,7 @@ func (x *PutAttachmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutAttachmentResponse.ProtoReflect.Descriptor instead.
 func (*PutAttachmentResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{70}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *PutAttachmentResponse) GetPath() string {
@@ -5300,7 +5399,7 @@ type GetAttachmentRequest struct {
 
 func (x *GetAttachmentRequest) Reset() {
 	*x = GetAttachmentRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[71]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5312,7 +5411,7 @@ func (x *GetAttachmentRequest) String() string {
 func (*GetAttachmentRequest) ProtoMessage() {}
 
 func (x *GetAttachmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[71]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5325,7 +5424,7 @@ func (x *GetAttachmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAttachmentRequest.ProtoReflect.Descriptor instead.
 func (*GetAttachmentRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{71}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *GetAttachmentRequest) GetSessionId() string {
@@ -5369,7 +5468,7 @@ type GitDiffRequest struct {
 
 func (x *GitDiffRequest) Reset() {
 	*x = GitDiffRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[72]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5381,7 +5480,7 @@ func (x *GitDiffRequest) String() string {
 func (*GitDiffRequest) ProtoMessage() {}
 
 func (x *GitDiffRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[72]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5394,7 +5493,7 @@ func (x *GitDiffRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitDiffRequest.ProtoReflect.Descriptor instead.
 func (*GitDiffRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{72}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *GitDiffRequest) GetSessionId() string {
@@ -5440,7 +5539,7 @@ type GitDiffFile struct {
 
 func (x *GitDiffFile) Reset() {
 	*x = GitDiffFile{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[73]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5452,7 +5551,7 @@ func (x *GitDiffFile) String() string {
 func (*GitDiffFile) ProtoMessage() {}
 
 func (x *GitDiffFile) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[73]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5465,7 +5564,7 @@ func (x *GitDiffFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitDiffFile.ProtoReflect.Descriptor instead.
 func (*GitDiffFile) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{73}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *GitDiffFile) GetOldPath() string {
@@ -5536,7 +5635,7 @@ type GitLogRequest struct {
 
 func (x *GitLogRequest) Reset() {
 	*x = GitLogRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[74]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5548,7 +5647,7 @@ func (x *GitLogRequest) String() string {
 func (*GitLogRequest) ProtoMessage() {}
 
 func (x *GitLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[74]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5561,7 +5660,7 @@ func (x *GitLogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitLogRequest.ProtoReflect.Descriptor instead.
 func (*GitLogRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{74}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *GitLogRequest) GetSessionId() string {
@@ -5601,7 +5700,7 @@ type GitCommit struct {
 
 func (x *GitCommit) Reset() {
 	*x = GitCommit{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[75]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5613,7 +5712,7 @@ func (x *GitCommit) String() string {
 func (*GitCommit) ProtoMessage() {}
 
 func (x *GitCommit) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[75]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5626,7 +5725,7 @@ func (x *GitCommit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitCommit.ProtoReflect.Descriptor instead.
 func (*GitCommit) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{75}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *GitCommit) GetHash() string {
@@ -5699,7 +5798,7 @@ type GitLogResponse struct {
 
 func (x *GitLogResponse) Reset() {
 	*x = GitLogResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[76]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5711,7 +5810,7 @@ func (x *GitLogResponse) String() string {
 func (*GitLogResponse) ProtoMessage() {}
 
 func (x *GitLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[76]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5724,7 +5823,7 @@ func (x *GitLogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitLogResponse.ProtoReflect.Descriptor instead.
 func (*GitLogResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{76}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *GitLogResponse) GetCommits() []*GitCommit {
@@ -5784,7 +5883,7 @@ type GitSessionRequest struct {
 
 func (x *GitSessionRequest) Reset() {
 	*x = GitSessionRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[77]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5796,7 +5895,7 @@ func (x *GitSessionRequest) String() string {
 func (*GitSessionRequest) ProtoMessage() {}
 
 func (x *GitSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[77]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5809,7 +5908,7 @@ func (x *GitSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitSessionRequest.ProtoReflect.Descriptor instead.
 func (*GitSessionRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{77}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *GitSessionRequest) GetSessionId() string {
@@ -5845,7 +5944,7 @@ type GitOpResponse struct {
 
 func (x *GitOpResponse) Reset() {
 	*x = GitOpResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[78]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5857,7 +5956,7 @@ func (x *GitOpResponse) String() string {
 func (*GitOpResponse) ProtoMessage() {}
 
 func (x *GitOpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[78]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5870,7 +5969,7 @@ func (x *GitOpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitOpResponse.ProtoReflect.Descriptor instead.
 func (*GitOpResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{78}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *GitOpResponse) GetSuccess() bool {
@@ -5913,7 +6012,7 @@ type SubdirsRequest struct {
 
 func (x *SubdirsRequest) Reset() {
 	*x = SubdirsRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[79]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5925,7 +6024,7 @@ func (x *SubdirsRequest) String() string {
 func (*SubdirsRequest) ProtoMessage() {}
 
 func (x *SubdirsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[79]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5938,7 +6037,7 @@ func (x *SubdirsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubdirsRequest.ProtoReflect.Descriptor instead.
 func (*SubdirsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{79}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *SubdirsRequest) GetDir() string {
@@ -5973,7 +6072,7 @@ type SubdirsResponse struct {
 
 func (x *SubdirsResponse) Reset() {
 	*x = SubdirsResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[80]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5985,7 +6084,7 @@ func (x *SubdirsResponse) String() string {
 func (*SubdirsResponse) ProtoMessage() {}
 
 func (x *SubdirsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[80]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5998,7 +6097,7 @@ func (x *SubdirsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubdirsResponse.ProtoReflect.Descriptor instead.
 func (*SubdirsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{80}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *SubdirsResponse) GetSubdirs() []string {
@@ -6032,7 +6131,7 @@ type GlobRequest struct {
 
 func (x *GlobRequest) Reset() {
 	*x = GlobRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[81]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6044,7 +6143,7 @@ func (x *GlobRequest) String() string {
 func (*GlobRequest) ProtoMessage() {}
 
 func (x *GlobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[81]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6057,7 +6156,7 @@ func (x *GlobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GlobRequest.ProtoReflect.Descriptor instead.
 func (*GlobRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{81}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *GlobRequest) GetPattern() string {
@@ -6076,7 +6175,7 @@ type GlobResponse struct {
 
 func (x *GlobResponse) Reset() {
 	*x = GlobResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[82]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6088,7 +6187,7 @@ func (x *GlobResponse) String() string {
 func (*GlobResponse) ProtoMessage() {}
 
 func (x *GlobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[82]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6101,7 +6200,7 @@ func (x *GlobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GlobResponse.ProtoReflect.Descriptor instead.
 func (*GlobResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{82}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *GlobResponse) GetPaths() []string {
@@ -6127,7 +6226,7 @@ type TtydOpen struct {
 
 func (x *TtydOpen) Reset() {
 	*x = TtydOpen{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[83]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6139,7 +6238,7 @@ func (x *TtydOpen) String() string {
 func (*TtydOpen) ProtoMessage() {}
 
 func (x *TtydOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[83]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6152,7 +6251,7 @@ func (x *TtydOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydOpen.ProtoReflect.Descriptor instead.
 func (*TtydOpen) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{83}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *TtydOpen) GetSessionKey() string {
@@ -6200,7 +6299,7 @@ type TtydResize struct {
 
 func (x *TtydResize) Reset() {
 	*x = TtydResize{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[84]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6212,7 +6311,7 @@ func (x *TtydResize) String() string {
 func (*TtydResize) ProtoMessage() {}
 
 func (x *TtydResize) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[84]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6225,7 +6324,7 @@ func (x *TtydResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydResize.ProtoReflect.Descriptor instead.
 func (*TtydResize) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{84}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *TtydResize) GetCols() uint32 {
@@ -6251,7 +6350,7 @@ type TtydExit struct {
 
 func (x *TtydExit) Reset() {
 	*x = TtydExit{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[85]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6263,7 +6362,7 @@ func (x *TtydExit) String() string {
 func (*TtydExit) ProtoMessage() {}
 
 func (x *TtydExit) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[85]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6276,7 +6375,7 @@ func (x *TtydExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydExit.ProtoReflect.Descriptor instead.
 func (*TtydExit) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{85}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *TtydExit) GetCode() int32 {
@@ -6302,7 +6401,7 @@ type TtydFrame struct {
 
 func (x *TtydFrame) Reset() {
 	*x = TtydFrame{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[86]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6314,7 +6413,7 @@ func (x *TtydFrame) String() string {
 func (*TtydFrame) ProtoMessage() {}
 
 func (x *TtydFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[86]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6327,7 +6426,7 @@ func (x *TtydFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TtydFrame.ProtoReflect.Descriptor instead.
 func (*TtydFrame) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{86}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *TtydFrame) GetPayload() isTtydFrame_Payload {
@@ -6430,7 +6529,7 @@ type PathRef struct {
 
 func (x *PathRef) Reset() {
 	*x = PathRef{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[87]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6442,7 +6541,7 @@ func (x *PathRef) String() string {
 func (*PathRef) ProtoMessage() {}
 
 func (x *PathRef) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[87]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6455,7 +6554,7 @@ func (x *PathRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathRef.ProtoReflect.Descriptor instead.
 func (*PathRef) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{87}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *PathRef) GetSessionId() string {
@@ -6495,7 +6594,7 @@ type StatRequest struct {
 
 func (x *StatRequest) Reset() {
 	*x = StatRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[88]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6507,7 +6606,7 @@ func (x *StatRequest) String() string {
 func (*StatRequest) ProtoMessage() {}
 
 func (x *StatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[88]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6520,7 +6619,7 @@ func (x *StatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatRequest.ProtoReflect.Descriptor instead.
 func (*StatRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{88}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *StatRequest) GetRef() *PathRef {
@@ -6542,7 +6641,7 @@ type StatResponse struct {
 
 func (x *StatResponse) Reset() {
 	*x = StatResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[89]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6554,7 +6653,7 @@ func (x *StatResponse) String() string {
 func (*StatResponse) ProtoMessage() {}
 
 func (x *StatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[89]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6567,7 +6666,7 @@ func (x *StatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatResponse.ProtoReflect.Descriptor instead.
 func (*StatResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{89}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *StatResponse) GetExists() bool {
@@ -6623,7 +6722,7 @@ type WriteFileHeader struct {
 
 func (x *WriteFileHeader) Reset() {
 	*x = WriteFileHeader{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[90]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6635,7 +6734,7 @@ func (x *WriteFileHeader) String() string {
 func (*WriteFileHeader) ProtoMessage() {}
 
 func (x *WriteFileHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[90]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6648,7 +6747,7 @@ func (x *WriteFileHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileHeader.ProtoReflect.Descriptor instead.
 func (*WriteFileHeader) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{90}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *WriteFileHeader) GetRef() *PathRef {
@@ -6714,7 +6813,7 @@ type WriteFileChunk struct {
 
 func (x *WriteFileChunk) Reset() {
 	*x = WriteFileChunk{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[91]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6726,7 +6825,7 @@ func (x *WriteFileChunk) String() string {
 func (*WriteFileChunk) ProtoMessage() {}
 
 func (x *WriteFileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[91]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6739,7 +6838,7 @@ func (x *WriteFileChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileChunk.ProtoReflect.Descriptor instead.
 func (*WriteFileChunk) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{91}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *WriteFileChunk) GetPayload() isWriteFileChunk_Payload {
@@ -6792,7 +6891,7 @@ type WriteFileResponse struct {
 
 func (x *WriteFileResponse) Reset() {
 	*x = WriteFileResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[92]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6804,7 +6903,7 @@ func (x *WriteFileResponse) String() string {
 func (*WriteFileResponse) ProtoMessage() {}
 
 func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[92]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6817,7 +6916,7 @@ func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileResponse.ProtoReflect.Descriptor instead.
 func (*WriteFileResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{92}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *WriteFileResponse) GetSize() int64 {
@@ -6846,7 +6945,7 @@ type AppendFileRequest struct {
 
 func (x *AppendFileRequest) Reset() {
 	*x = AppendFileRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[93]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6858,7 +6957,7 @@ func (x *AppendFileRequest) String() string {
 func (*AppendFileRequest) ProtoMessage() {}
 
 func (x *AppendFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[93]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6871,7 +6970,7 @@ func (x *AppendFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendFileRequest.ProtoReflect.Descriptor instead.
 func (*AppendFileRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{93}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *AppendFileRequest) GetRef() *PathRef {
@@ -6917,7 +7016,7 @@ type AppendFileResponse struct {
 
 func (x *AppendFileResponse) Reset() {
 	*x = AppendFileResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[94]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6929,7 +7028,7 @@ func (x *AppendFileResponse) String() string {
 func (*AppendFileResponse) ProtoMessage() {}
 
 func (x *AppendFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[94]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6942,7 +7041,7 @@ func (x *AppendFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendFileResponse.ProtoReflect.Descriptor instead.
 func (*AppendFileResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{94}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{95}
 }
 
 type RemoveRequest struct {
@@ -6959,7 +7058,7 @@ type RemoveRequest struct {
 
 func (x *RemoveRequest) Reset() {
 	*x = RemoveRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[95]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6971,7 +7070,7 @@ func (x *RemoveRequest) String() string {
 func (*RemoveRequest) ProtoMessage() {}
 
 func (x *RemoveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[95]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6984,7 +7083,7 @@ func (x *RemoveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveRequest.ProtoReflect.Descriptor instead.
 func (*RemoveRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{95}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *RemoveRequest) GetRef() *PathRef {
@@ -7016,7 +7115,7 @@ type RemoveResponse struct {
 
 func (x *RemoveResponse) Reset() {
 	*x = RemoveResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[96]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7028,7 +7127,7 @@ func (x *RemoveResponse) String() string {
 func (*RemoveResponse) ProtoMessage() {}
 
 func (x *RemoveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[96]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7041,7 +7140,7 @@ func (x *RemoveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveResponse.ProtoReflect.Descriptor instead.
 func (*RemoveResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{96}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{97}
 }
 
 // MkdirRequest creates ref.path (a directory) beneath its confined root, with
@@ -7059,7 +7158,7 @@ type MkdirRequest struct {
 
 func (x *MkdirRequest) Reset() {
 	*x = MkdirRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[97]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7071,7 +7170,7 @@ func (x *MkdirRequest) String() string {
 func (*MkdirRequest) ProtoMessage() {}
 
 func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[97]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7084,7 +7183,7 @@ func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirRequest.ProtoReflect.Descriptor instead.
 func (*MkdirRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{97}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *MkdirRequest) GetRef() *PathRef {
@@ -7109,7 +7208,7 @@ type MkdirResponse struct {
 
 func (x *MkdirResponse) Reset() {
 	*x = MkdirResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[98]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7121,7 +7220,7 @@ func (x *MkdirResponse) String() string {
 func (*MkdirResponse) ProtoMessage() {}
 
 func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[98]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7134,7 +7233,7 @@ func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirResponse.ProtoReflect.Descriptor instead.
 func (*MkdirResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{98}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{99}
 }
 
 type RunCommandRequest struct {
@@ -7176,7 +7275,7 @@ type RunCommandRequest struct {
 
 func (x *RunCommandRequest) Reset() {
 	*x = RunCommandRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[99]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7188,7 +7287,7 @@ func (x *RunCommandRequest) String() string {
 func (*RunCommandRequest) ProtoMessage() {}
 
 func (x *RunCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[99]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7201,7 +7300,7 @@ func (x *RunCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandRequest.ProtoReflect.Descriptor instead.
 func (*RunCommandRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{99}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *RunCommandRequest) GetChatId() string {
@@ -7313,7 +7412,7 @@ type RunCommandExit struct {
 
 func (x *RunCommandExit) Reset() {
 	*x = RunCommandExit{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[100]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7325,7 +7424,7 @@ func (x *RunCommandExit) String() string {
 func (*RunCommandExit) ProtoMessage() {}
 
 func (x *RunCommandExit) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[100]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7338,7 +7437,7 @@ func (x *RunCommandExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandExit.ProtoReflect.Descriptor instead.
 func (*RunCommandExit) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{100}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *RunCommandExit) GetCode() int32 {
@@ -7367,7 +7466,7 @@ type StreamData struct {
 
 func (x *StreamData) Reset() {
 	*x = StreamData{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[101]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7379,7 +7478,7 @@ func (x *StreamData) String() string {
 func (*StreamData) ProtoMessage() {}
 
 func (x *StreamData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[101]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7392,7 +7491,7 @@ func (x *StreamData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamData.ProtoReflect.Descriptor instead.
 func (*StreamData) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{101}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *StreamData) GetOffset() uint64 {
@@ -7424,7 +7523,7 @@ type RunCommandFrame struct {
 
 func (x *RunCommandFrame) Reset() {
 	*x = RunCommandFrame{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[102]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7436,7 +7535,7 @@ func (x *RunCommandFrame) String() string {
 func (*RunCommandFrame) ProtoMessage() {}
 
 func (x *RunCommandFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[102]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7449,7 +7548,7 @@ func (x *RunCommandFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandFrame.ProtoReflect.Descriptor instead.
 func (*RunCommandFrame) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{102}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *RunCommandFrame) GetPayload() isRunCommandFrame_Payload {
@@ -7530,7 +7629,7 @@ type RunFunctionRequest struct {
 
 func (x *RunFunctionRequest) Reset() {
 	*x = RunFunctionRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[103]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7542,7 +7641,7 @@ func (x *RunFunctionRequest) String() string {
 func (*RunFunctionRequest) ProtoMessage() {}
 
 func (x *RunFunctionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[103]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7555,7 +7654,7 @@ func (x *RunFunctionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunFunctionRequest.ProtoReflect.Descriptor instead.
 func (*RunFunctionRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{103}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *RunFunctionRequest) GetChatId() string {
@@ -7667,7 +7766,7 @@ type RunFunctionResponse struct {
 
 func (x *RunFunctionResponse) Reset() {
 	*x = RunFunctionResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[104]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7679,7 +7778,7 @@ func (x *RunFunctionResponse) String() string {
 func (*RunFunctionResponse) ProtoMessage() {}
 
 func (x *RunFunctionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[104]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7692,7 +7791,7 @@ func (x *RunFunctionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunFunctionResponse.ProtoReflect.Descriptor instead.
 func (*RunFunctionResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{104}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *RunFunctionResponse) GetExitCode() int32 {
@@ -7728,7 +7827,7 @@ type OrphanTmpSweep struct {
 
 func (x *OrphanTmpSweep) Reset() {
 	*x = OrphanTmpSweep{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[105]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7740,7 +7839,7 @@ func (x *OrphanTmpSweep) String() string {
 func (*OrphanTmpSweep) ProtoMessage() {}
 
 func (x *OrphanTmpSweep) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[105]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7753,7 +7852,7 @@ func (x *OrphanTmpSweep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OrphanTmpSweep.ProtoReflect.Descriptor instead.
 func (*OrphanTmpSweep) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{105}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *OrphanTmpSweep) GetDir() *DirRef {
@@ -7791,7 +7890,7 @@ type CleanupRequest struct {
 
 func (x *CleanupRequest) Reset() {
 	*x = CleanupRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[106]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7803,7 +7902,7 @@ func (x *CleanupRequest) String() string {
 func (*CleanupRequest) ProtoMessage() {}
 
 func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[106]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7816,7 +7915,7 @@ func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupRequest.ProtoReflect.Descriptor instead.
 func (*CleanupRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{106}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *CleanupRequest) GetChatIds() []string {
@@ -7865,7 +7964,7 @@ type CleanupFailure struct {
 
 func (x *CleanupFailure) Reset() {
 	*x = CleanupFailure{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[107]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7877,7 +7976,7 @@ func (x *CleanupFailure) String() string {
 func (*CleanupFailure) ProtoMessage() {}
 
 func (x *CleanupFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[107]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7890,7 +7989,7 @@ func (x *CleanupFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupFailure.ProtoReflect.Descriptor instead.
 func (*CleanupFailure) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{107}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *CleanupFailure) GetChatId() string {
@@ -7924,7 +8023,7 @@ type CleanupResponse struct {
 
 func (x *CleanupResponse) Reset() {
 	*x = CleanupResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[108]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7936,7 +8035,7 @@ func (x *CleanupResponse) String() string {
 func (*CleanupResponse) ProtoMessage() {}
 
 func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[108]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7949,7 +8048,7 @@ func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupResponse.ProtoReflect.Descriptor instead.
 func (*CleanupResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{108}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *CleanupResponse) GetRemoved() int32 {
@@ -7976,7 +8075,7 @@ type QueryQuotaRequest struct {
 
 func (x *QueryQuotaRequest) Reset() {
 	*x = QueryQuotaRequest{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[109]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7988,7 +8087,7 @@ func (x *QueryQuotaRequest) String() string {
 func (*QueryQuotaRequest) ProtoMessage() {}
 
 func (x *QueryQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[109]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8001,7 +8100,7 @@ func (x *QueryQuotaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryQuotaRequest.ProtoReflect.Descriptor instead.
 func (*QueryQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{109}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *QueryQuotaRequest) GetTargets() []*Target {
@@ -8023,7 +8122,7 @@ type QuotaLimit struct {
 
 func (x *QuotaLimit) Reset() {
 	*x = QuotaLimit{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[110]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8035,7 +8134,7 @@ func (x *QuotaLimit) String() string {
 func (*QuotaLimit) ProtoMessage() {}
 
 func (x *QuotaLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[110]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8048,7 +8147,7 @@ func (x *QuotaLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuotaLimit.ProtoReflect.Descriptor instead.
 func (*QuotaLimit) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{110}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *QuotaLimit) GetName() string {
@@ -8084,7 +8183,7 @@ type BalanceInfo struct {
 
 func (x *BalanceInfo) Reset() {
 	*x = BalanceInfo{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[111]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8096,7 +8195,7 @@ func (x *BalanceInfo) String() string {
 func (*BalanceInfo) ProtoMessage() {}
 
 func (x *BalanceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[111]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8109,7 +8208,7 @@ func (x *BalanceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BalanceInfo.ProtoReflect.Descriptor instead.
 func (*BalanceInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{111}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *BalanceInfo) GetCurrency() string {
@@ -8150,7 +8249,7 @@ type AccountBalance struct {
 
 func (x *AccountBalance) Reset() {
 	*x = AccountBalance{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[112]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8162,7 +8261,7 @@ func (x *AccountBalance) String() string {
 func (*AccountBalance) ProtoMessage() {}
 
 func (x *AccountBalance) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[112]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8175,7 +8274,7 @@ func (x *AccountBalance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountBalance.ProtoReflect.Descriptor instead.
 func (*AccountBalance) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{112}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *AccountBalance) GetIsAvailable() bool {
@@ -8217,7 +8316,7 @@ type ModelUsage struct {
 
 func (x *ModelUsage) Reset() {
 	*x = ModelUsage{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[113]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8229,7 +8328,7 @@ func (x *ModelUsage) String() string {
 func (*ModelUsage) ProtoMessage() {}
 
 func (x *ModelUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[113]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8242,7 +8341,7 @@ func (x *ModelUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelUsage.ProtoReflect.Descriptor instead.
 func (*ModelUsage) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{113}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *ModelUsage) GetCli() string {
@@ -8324,7 +8423,7 @@ type QueryQuotaResponse struct {
 
 func (x *QueryQuotaResponse) Reset() {
 	*x = QueryQuotaResponse{}
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[114]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8336,7 +8435,7 @@ func (x *QueryQuotaResponse) String() string {
 func (*QueryQuotaResponse) ProtoMessage() {}
 
 func (x *QueryQuotaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_runnerpb_runner_proto_msgTypes[114]
+	mi := &file_pkg_runnerpb_runner_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8349,7 +8448,7 @@ func (x *QueryQuotaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryQuotaResponse.ProtoReflect.Descriptor instead.
 func (*QueryQuotaResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{114}
+	return file_pkg_runnerpb_runner_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *QueryQuotaResponse) GetUsages() []*ModelUsage {
@@ -8390,7 +8489,7 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\n" +
 	"run_output\x18\a \x01(\v2 .asgard.runner.v1.RunOutputChunkH\x00R\trunOutput\x12E\n" +
 	"\rinject_result\x18\b \x01(\v2\x1e.asgard.runner.v1.InjectResultH\x00R\finjectResultB\t\n" +
-	"\apayload\"\xe8\x02\n" +
+	"\apayload\"\xa9\x03\n" +
 	"\x0eBackendMessage\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12K\n" +
 	"\x0fregister_result\x18\x02 \x01(\v2 .asgard.runner.v1.RegisterResultH\x00R\x0eregisterResult\x129\n" +
@@ -8398,7 +8497,9 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\n" +
 	"cancel_run\x18\x04 \x01(\v2\x1b.asgard.runner.v1.CancelRunH\x00R\tcancelRun\x12)\n" +
 	"\x03ack\x18\x05 \x01(\v2\x15.asgard.runner.v1.AckH\x00R\x03ack\x12H\n" +
-	"\x0einject_message\x18\x06 \x01(\v2\x1f.asgard.runner.v1.InjectMessageH\x00R\rinjectMessageB\t\n" +
+	"\x0einject_message\x18\x06 \x01(\v2\x1f.asgard.runner.v1.InjectMessageH\x00R\rinjectMessage\x12?\n" +
+	"\vrun_control\x18\a \x01(\v2\x1c.asgard.runner.v1.RunControlH\x00R\n" +
+	"runControlB\t\n" +
 	"\apayload\"\x99\x01\n" +
 	"\x06RunRef\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x17\n" +
@@ -8519,12 +8620,18 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1b\n" +
 	"\tinject_id\x18\x02 \x01(\tR\binjectId\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x12(\n" +
-	"\x10deadline_unix_ms\x18\x04 \x01(\x03R\x0edeadlineUnixMs\"i\n" +
+	"\x10deadline_unix_ms\x18\x04 \x01(\x03R\x0edeadlineUnixMs\"g\n" +
+	"\n" +
+	"RunControl\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12*\n" +
+	"\x11hold_idle_seconds\x18\x03 \x01(\x03R\x0fholdIdleSeconds\"\x84\x01\n" +
 	"\fInjectResult\x12\x1b\n" +
 	"\tinject_id\x18\x01 \x01(\tR\binjectId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"a\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x19\n" +
+	"\bidle_gen\x18\x05 \x01(\x04R\aidleGen\"a\n" +
 	"\x14HoldMergeLockRequest\x12.\n" +
 	"\x04meta\x18\x01 \x01(\v2\x1a.asgard.runner.v1.CallMetaR\x04meta\x12\x19\n" +
 	"\brepo_dir\x18\x02 \x01(\tR\arepoDir\"1\n" +
@@ -9072,7 +9179,7 @@ func file_pkg_runnerpb_runner_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_runnerpb_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_pkg_runnerpb_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 118)
+var file_pkg_runnerpb_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 119)
 var file_pkg_runnerpb_runner_proto_goTypes = []any{
 	(AgentSource)(0),                    // 0: asgard.runner.v1.AgentSource
 	(FileScope)(0),                      // 1: asgard.runner.v1.FileScope
@@ -9095,105 +9202,106 @@ var file_pkg_runnerpb_runner_proto_goTypes = []any{
 	(*StartRun)(nil),                    // 18: asgard.runner.v1.StartRun
 	(*CancelRun)(nil),                   // 19: asgard.runner.v1.CancelRun
 	(*InjectMessage)(nil),               // 20: asgard.runner.v1.InjectMessage
-	(*InjectResult)(nil),                // 21: asgard.runner.v1.InjectResult
-	(*HoldMergeLockRequest)(nil),        // 22: asgard.runner.v1.HoldMergeLockRequest
-	(*HoldMergeLockResponse)(nil),       // 23: asgard.runner.v1.HoldMergeLockResponse
-	(*CallMeta)(nil),                    // 24: asgard.runner.v1.CallMeta
-	(*AskUserRequest)(nil),              // 25: asgard.runner.v1.AskUserRequest
-	(*AskUserResponse)(nil),             // 26: asgard.runner.v1.AskUserResponse
-	(*CallPeerRequest)(nil),             // 27: asgard.runner.v1.CallPeerRequest
-	(*CallPeerResponse)(nil),            // 28: asgard.runner.v1.CallPeerResponse
-	(*FindPeerRequest)(nil),             // 29: asgard.runner.v1.FindPeerRequest
-	(*FindPeerResponse)(nil),            // 30: asgard.runner.v1.FindPeerResponse
-	(*SpawnSubagentRequest)(nil),        // 31: asgard.runner.v1.SpawnSubagentRequest
-	(*SpawnSubagentResponse)(nil),       // 32: asgard.runner.v1.SpawnSubagentResponse
-	(*SubagentInfo)(nil),                // 33: asgard.runner.v1.SubagentInfo
-	(*ListSubagentsRequest)(nil),        // 34: asgard.runner.v1.ListSubagentsRequest
-	(*ListSubagentsResponse)(nil),       // 35: asgard.runner.v1.ListSubagentsResponse
-	(*SubagentStatusRequest)(nil),       // 36: asgard.runner.v1.SubagentStatusRequest
-	(*SubagentStatusResponse)(nil),      // 37: asgard.runner.v1.SubagentStatusResponse
-	(*KillSubagentRequest)(nil),         // 38: asgard.runner.v1.KillSubagentRequest
-	(*KillSubagentResponse)(nil),        // 39: asgard.runner.v1.KillSubagentResponse
-	(*SendToSubagentRequest)(nil),       // 40: asgard.runner.v1.SendToSubagentRequest
-	(*SendToSubagentResponse)(nil),      // 41: asgard.runner.v1.SendToSubagentResponse
-	(*WaitSubagentsRequest)(nil),        // 42: asgard.runner.v1.WaitSubagentsRequest
-	(*SubagentWaitResult)(nil),          // 43: asgard.runner.v1.SubagentWaitResult
-	(*WaitSubagentsResponse)(nil),       // 44: asgard.runner.v1.WaitSubagentsResponse
-	(*ReplyToParentRequest)(nil),        // 45: asgard.runner.v1.ReplyToParentRequest
-	(*ReplyToParentResponse)(nil),       // 46: asgard.runner.v1.ReplyToParentResponse
-	(*MetricsEvent)(nil),                // 47: asgard.runner.v1.MetricsEvent
-	(*RecordMetricsRequest)(nil),        // 48: asgard.runner.v1.RecordMetricsRequest
-	(*RecordMetricsResponse)(nil),       // 49: asgard.runner.v1.RecordMetricsResponse
-	(*GetUserProxyKeysRequest)(nil),     // 50: asgard.runner.v1.GetUserProxyKeysRequest
-	(*GetUserProxyKeysResponse)(nil),    // 51: asgard.runner.v1.GetUserProxyKeysResponse
-	(*InitWorkflowSessionRequest)(nil),  // 52: asgard.runner.v1.InitWorkflowSessionRequest
-	(*InitWorkflowSessionResponse)(nil), // 53: asgard.runner.v1.InitWorkflowSessionResponse
-	(*ReportWorkflowEventRequest)(nil),  // 54: asgard.runner.v1.ReportWorkflowEventRequest
-	(*ReportWorkflowEventResponse)(nil), // 55: asgard.runner.v1.ReportWorkflowEventResponse
-	(*WorkflowRunStartRequest)(nil),     // 56: asgard.runner.v1.WorkflowRunStartRequest
-	(*WorkflowRunStartResponse)(nil),    // 57: asgard.runner.v1.WorkflowRunStartResponse
-	(*WorkflowRunSettleRequest)(nil),    // 58: asgard.runner.v1.WorkflowRunSettleRequest
-	(*WorkflowRunSettleResponse)(nil),   // 59: asgard.runner.v1.WorkflowRunSettleResponse
-	(*FileTreeEntry)(nil),               // 60: asgard.runner.v1.FileTreeEntry
-	(*TreeRequest)(nil),                 // 61: asgard.runner.v1.TreeRequest
-	(*TreeResponse)(nil),                // 62: asgard.runner.v1.TreeResponse
-	(*ReadFileRequest)(nil),             // 63: asgard.runner.v1.ReadFileRequest
-	(*DirRef)(nil),                      // 64: asgard.runner.v1.DirRef
-	(*FileInfo)(nil),                    // 65: asgard.runner.v1.FileInfo
-	(*ReadFileChunk)(nil),               // 66: asgard.runner.v1.ReadFileChunk
-	(*SearchRequest)(nil),               // 67: asgard.runner.v1.SearchRequest
-	(*FileSearchResult)(nil),            // 68: asgard.runner.v1.FileSearchResult
-	(*SearchResponse)(nil),              // 69: asgard.runner.v1.SearchResponse
-	(*AttachmentHeader)(nil),            // 70: asgard.runner.v1.AttachmentHeader
-	(*PutAttachmentChunk)(nil),          // 71: asgard.runner.v1.PutAttachmentChunk
-	(*PutAttachmentResponse)(nil),       // 72: asgard.runner.v1.PutAttachmentResponse
-	(*GetAttachmentRequest)(nil),        // 73: asgard.runner.v1.GetAttachmentRequest
-	(*GitDiffRequest)(nil),              // 74: asgard.runner.v1.GitDiffRequest
-	(*GitDiffFile)(nil),                 // 75: asgard.runner.v1.GitDiffFile
-	(*GitLogRequest)(nil),               // 76: asgard.runner.v1.GitLogRequest
-	(*GitCommit)(nil),                   // 77: asgard.runner.v1.GitCommit
-	(*GitLogResponse)(nil),              // 78: asgard.runner.v1.GitLogResponse
-	(*GitSessionRequest)(nil),           // 79: asgard.runner.v1.GitSessionRequest
-	(*GitOpResponse)(nil),               // 80: asgard.runner.v1.GitOpResponse
-	(*SubdirsRequest)(nil),              // 81: asgard.runner.v1.SubdirsRequest
-	(*SubdirsResponse)(nil),             // 82: asgard.runner.v1.SubdirsResponse
-	(*GlobRequest)(nil),                 // 83: asgard.runner.v1.GlobRequest
-	(*GlobResponse)(nil),                // 84: asgard.runner.v1.GlobResponse
-	(*TtydOpen)(nil),                    // 85: asgard.runner.v1.TtydOpen
-	(*TtydResize)(nil),                  // 86: asgard.runner.v1.TtydResize
-	(*TtydExit)(nil),                    // 87: asgard.runner.v1.TtydExit
-	(*TtydFrame)(nil),                   // 88: asgard.runner.v1.TtydFrame
-	(*PathRef)(nil),                     // 89: asgard.runner.v1.PathRef
-	(*StatRequest)(nil),                 // 90: asgard.runner.v1.StatRequest
-	(*StatResponse)(nil),                // 91: asgard.runner.v1.StatResponse
-	(*WriteFileHeader)(nil),             // 92: asgard.runner.v1.WriteFileHeader
-	(*WriteFileChunk)(nil),              // 93: asgard.runner.v1.WriteFileChunk
-	(*WriteFileResponse)(nil),           // 94: asgard.runner.v1.WriteFileResponse
-	(*AppendFileRequest)(nil),           // 95: asgard.runner.v1.AppendFileRequest
-	(*AppendFileResponse)(nil),          // 96: asgard.runner.v1.AppendFileResponse
-	(*RemoveRequest)(nil),               // 97: asgard.runner.v1.RemoveRequest
-	(*RemoveResponse)(nil),              // 98: asgard.runner.v1.RemoveResponse
-	(*MkdirRequest)(nil),                // 99: asgard.runner.v1.MkdirRequest
-	(*MkdirResponse)(nil),               // 100: asgard.runner.v1.MkdirResponse
-	(*RunCommandRequest)(nil),           // 101: asgard.runner.v1.RunCommandRequest
-	(*RunCommandExit)(nil),              // 102: asgard.runner.v1.RunCommandExit
-	(*StreamData)(nil),                  // 103: asgard.runner.v1.StreamData
-	(*RunCommandFrame)(nil),             // 104: asgard.runner.v1.RunCommandFrame
-	(*RunFunctionRequest)(nil),          // 105: asgard.runner.v1.RunFunctionRequest
-	(*RunFunctionResponse)(nil),         // 106: asgard.runner.v1.RunFunctionResponse
-	(*OrphanTmpSweep)(nil),              // 107: asgard.runner.v1.OrphanTmpSweep
-	(*CleanupRequest)(nil),              // 108: asgard.runner.v1.CleanupRequest
-	(*CleanupFailure)(nil),              // 109: asgard.runner.v1.CleanupFailure
-	(*CleanupResponse)(nil),             // 110: asgard.runner.v1.CleanupResponse
-	(*QueryQuotaRequest)(nil),           // 111: asgard.runner.v1.QueryQuotaRequest
-	(*QuotaLimit)(nil),                  // 112: asgard.runner.v1.QuotaLimit
-	(*BalanceInfo)(nil),                 // 113: asgard.runner.v1.BalanceInfo
-	(*AccountBalance)(nil),              // 114: asgard.runner.v1.AccountBalance
-	(*ModelUsage)(nil),                  // 115: asgard.runner.v1.ModelUsage
-	(*QueryQuotaResponse)(nil),          // 116: asgard.runner.v1.QueryQuotaResponse
-	nil,                                 // 117: asgard.runner.v1.Register.SupportedClisEntry
-	nil,                                 // 118: asgard.runner.v1.StartRun.SessionsEntry
-	nil,                                 // 119: asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
+	(*RunControl)(nil),                  // 21: asgard.runner.v1.RunControl
+	(*InjectResult)(nil),                // 22: asgard.runner.v1.InjectResult
+	(*HoldMergeLockRequest)(nil),        // 23: asgard.runner.v1.HoldMergeLockRequest
+	(*HoldMergeLockResponse)(nil),       // 24: asgard.runner.v1.HoldMergeLockResponse
+	(*CallMeta)(nil),                    // 25: asgard.runner.v1.CallMeta
+	(*AskUserRequest)(nil),              // 26: asgard.runner.v1.AskUserRequest
+	(*AskUserResponse)(nil),             // 27: asgard.runner.v1.AskUserResponse
+	(*CallPeerRequest)(nil),             // 28: asgard.runner.v1.CallPeerRequest
+	(*CallPeerResponse)(nil),            // 29: asgard.runner.v1.CallPeerResponse
+	(*FindPeerRequest)(nil),             // 30: asgard.runner.v1.FindPeerRequest
+	(*FindPeerResponse)(nil),            // 31: asgard.runner.v1.FindPeerResponse
+	(*SpawnSubagentRequest)(nil),        // 32: asgard.runner.v1.SpawnSubagentRequest
+	(*SpawnSubagentResponse)(nil),       // 33: asgard.runner.v1.SpawnSubagentResponse
+	(*SubagentInfo)(nil),                // 34: asgard.runner.v1.SubagentInfo
+	(*ListSubagentsRequest)(nil),        // 35: asgard.runner.v1.ListSubagentsRequest
+	(*ListSubagentsResponse)(nil),       // 36: asgard.runner.v1.ListSubagentsResponse
+	(*SubagentStatusRequest)(nil),       // 37: asgard.runner.v1.SubagentStatusRequest
+	(*SubagentStatusResponse)(nil),      // 38: asgard.runner.v1.SubagentStatusResponse
+	(*KillSubagentRequest)(nil),         // 39: asgard.runner.v1.KillSubagentRequest
+	(*KillSubagentResponse)(nil),        // 40: asgard.runner.v1.KillSubagentResponse
+	(*SendToSubagentRequest)(nil),       // 41: asgard.runner.v1.SendToSubagentRequest
+	(*SendToSubagentResponse)(nil),      // 42: asgard.runner.v1.SendToSubagentResponse
+	(*WaitSubagentsRequest)(nil),        // 43: asgard.runner.v1.WaitSubagentsRequest
+	(*SubagentWaitResult)(nil),          // 44: asgard.runner.v1.SubagentWaitResult
+	(*WaitSubagentsResponse)(nil),       // 45: asgard.runner.v1.WaitSubagentsResponse
+	(*ReplyToParentRequest)(nil),        // 46: asgard.runner.v1.ReplyToParentRequest
+	(*ReplyToParentResponse)(nil),       // 47: asgard.runner.v1.ReplyToParentResponse
+	(*MetricsEvent)(nil),                // 48: asgard.runner.v1.MetricsEvent
+	(*RecordMetricsRequest)(nil),        // 49: asgard.runner.v1.RecordMetricsRequest
+	(*RecordMetricsResponse)(nil),       // 50: asgard.runner.v1.RecordMetricsResponse
+	(*GetUserProxyKeysRequest)(nil),     // 51: asgard.runner.v1.GetUserProxyKeysRequest
+	(*GetUserProxyKeysResponse)(nil),    // 52: asgard.runner.v1.GetUserProxyKeysResponse
+	(*InitWorkflowSessionRequest)(nil),  // 53: asgard.runner.v1.InitWorkflowSessionRequest
+	(*InitWorkflowSessionResponse)(nil), // 54: asgard.runner.v1.InitWorkflowSessionResponse
+	(*ReportWorkflowEventRequest)(nil),  // 55: asgard.runner.v1.ReportWorkflowEventRequest
+	(*ReportWorkflowEventResponse)(nil), // 56: asgard.runner.v1.ReportWorkflowEventResponse
+	(*WorkflowRunStartRequest)(nil),     // 57: asgard.runner.v1.WorkflowRunStartRequest
+	(*WorkflowRunStartResponse)(nil),    // 58: asgard.runner.v1.WorkflowRunStartResponse
+	(*WorkflowRunSettleRequest)(nil),    // 59: asgard.runner.v1.WorkflowRunSettleRequest
+	(*WorkflowRunSettleResponse)(nil),   // 60: asgard.runner.v1.WorkflowRunSettleResponse
+	(*FileTreeEntry)(nil),               // 61: asgard.runner.v1.FileTreeEntry
+	(*TreeRequest)(nil),                 // 62: asgard.runner.v1.TreeRequest
+	(*TreeResponse)(nil),                // 63: asgard.runner.v1.TreeResponse
+	(*ReadFileRequest)(nil),             // 64: asgard.runner.v1.ReadFileRequest
+	(*DirRef)(nil),                      // 65: asgard.runner.v1.DirRef
+	(*FileInfo)(nil),                    // 66: asgard.runner.v1.FileInfo
+	(*ReadFileChunk)(nil),               // 67: asgard.runner.v1.ReadFileChunk
+	(*SearchRequest)(nil),               // 68: asgard.runner.v1.SearchRequest
+	(*FileSearchResult)(nil),            // 69: asgard.runner.v1.FileSearchResult
+	(*SearchResponse)(nil),              // 70: asgard.runner.v1.SearchResponse
+	(*AttachmentHeader)(nil),            // 71: asgard.runner.v1.AttachmentHeader
+	(*PutAttachmentChunk)(nil),          // 72: asgard.runner.v1.PutAttachmentChunk
+	(*PutAttachmentResponse)(nil),       // 73: asgard.runner.v1.PutAttachmentResponse
+	(*GetAttachmentRequest)(nil),        // 74: asgard.runner.v1.GetAttachmentRequest
+	(*GitDiffRequest)(nil),              // 75: asgard.runner.v1.GitDiffRequest
+	(*GitDiffFile)(nil),                 // 76: asgard.runner.v1.GitDiffFile
+	(*GitLogRequest)(nil),               // 77: asgard.runner.v1.GitLogRequest
+	(*GitCommit)(nil),                   // 78: asgard.runner.v1.GitCommit
+	(*GitLogResponse)(nil),              // 79: asgard.runner.v1.GitLogResponse
+	(*GitSessionRequest)(nil),           // 80: asgard.runner.v1.GitSessionRequest
+	(*GitOpResponse)(nil),               // 81: asgard.runner.v1.GitOpResponse
+	(*SubdirsRequest)(nil),              // 82: asgard.runner.v1.SubdirsRequest
+	(*SubdirsResponse)(nil),             // 83: asgard.runner.v1.SubdirsResponse
+	(*GlobRequest)(nil),                 // 84: asgard.runner.v1.GlobRequest
+	(*GlobResponse)(nil),                // 85: asgard.runner.v1.GlobResponse
+	(*TtydOpen)(nil),                    // 86: asgard.runner.v1.TtydOpen
+	(*TtydResize)(nil),                  // 87: asgard.runner.v1.TtydResize
+	(*TtydExit)(nil),                    // 88: asgard.runner.v1.TtydExit
+	(*TtydFrame)(nil),                   // 89: asgard.runner.v1.TtydFrame
+	(*PathRef)(nil),                     // 90: asgard.runner.v1.PathRef
+	(*StatRequest)(nil),                 // 91: asgard.runner.v1.StatRequest
+	(*StatResponse)(nil),                // 92: asgard.runner.v1.StatResponse
+	(*WriteFileHeader)(nil),             // 93: asgard.runner.v1.WriteFileHeader
+	(*WriteFileChunk)(nil),              // 94: asgard.runner.v1.WriteFileChunk
+	(*WriteFileResponse)(nil),           // 95: asgard.runner.v1.WriteFileResponse
+	(*AppendFileRequest)(nil),           // 96: asgard.runner.v1.AppendFileRequest
+	(*AppendFileResponse)(nil),          // 97: asgard.runner.v1.AppendFileResponse
+	(*RemoveRequest)(nil),               // 98: asgard.runner.v1.RemoveRequest
+	(*RemoveResponse)(nil),              // 99: asgard.runner.v1.RemoveResponse
+	(*MkdirRequest)(nil),                // 100: asgard.runner.v1.MkdirRequest
+	(*MkdirResponse)(nil),               // 101: asgard.runner.v1.MkdirResponse
+	(*RunCommandRequest)(nil),           // 102: asgard.runner.v1.RunCommandRequest
+	(*RunCommandExit)(nil),              // 103: asgard.runner.v1.RunCommandExit
+	(*StreamData)(nil),                  // 104: asgard.runner.v1.StreamData
+	(*RunCommandFrame)(nil),             // 105: asgard.runner.v1.RunCommandFrame
+	(*RunFunctionRequest)(nil),          // 106: asgard.runner.v1.RunFunctionRequest
+	(*RunFunctionResponse)(nil),         // 107: asgard.runner.v1.RunFunctionResponse
+	(*OrphanTmpSweep)(nil),              // 108: asgard.runner.v1.OrphanTmpSweep
+	(*CleanupRequest)(nil),              // 109: asgard.runner.v1.CleanupRequest
+	(*CleanupFailure)(nil),              // 110: asgard.runner.v1.CleanupFailure
+	(*CleanupResponse)(nil),             // 111: asgard.runner.v1.CleanupResponse
+	(*QueryQuotaRequest)(nil),           // 112: asgard.runner.v1.QueryQuotaRequest
+	(*QuotaLimit)(nil),                  // 113: asgard.runner.v1.QuotaLimit
+	(*BalanceInfo)(nil),                 // 114: asgard.runner.v1.BalanceInfo
+	(*AccountBalance)(nil),              // 115: asgard.runner.v1.AccountBalance
+	(*ModelUsage)(nil),                  // 116: asgard.runner.v1.ModelUsage
+	(*QueryQuotaResponse)(nil),          // 117: asgard.runner.v1.QueryQuotaResponse
+	nil,                                 // 118: asgard.runner.v1.Register.SupportedClisEntry
+	nil,                                 // 119: asgard.runner.v1.StartRun.SessionsEntry
+	nil,                                 // 120: asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
 }
 var file_pkg_runnerpb_runner_proto_depIdxs = []int32{
 	3,   // 0: asgard.runner.v1.NoQuota.targets:type_name -> asgard.runner.v1.TargetQuota
@@ -9203,171 +9311,172 @@ var file_pkg_runnerpb_runner_proto_depIdxs = []int32{
 	15,  // 4: asgard.runner.v1.RunnerMessage.run_result:type_name -> asgard.runner.v1.RunResult
 	9,   // 5: asgard.runner.v1.RunnerMessage.ack:type_name -> asgard.runner.v1.Ack
 	8,   // 6: asgard.runner.v1.RunnerMessage.run_output:type_name -> asgard.runner.v1.RunOutputChunk
-	21,  // 7: asgard.runner.v1.RunnerMessage.inject_result:type_name -> asgard.runner.v1.InjectResult
+	22,  // 7: asgard.runner.v1.RunnerMessage.inject_result:type_name -> asgard.runner.v1.InjectResult
 	16,  // 8: asgard.runner.v1.BackendMessage.register_result:type_name -> asgard.runner.v1.RegisterResult
 	18,  // 9: asgard.runner.v1.BackendMessage.start_run:type_name -> asgard.runner.v1.StartRun
 	19,  // 10: asgard.runner.v1.BackendMessage.cancel_run:type_name -> asgard.runner.v1.CancelRun
 	9,   // 11: asgard.runner.v1.BackendMessage.ack:type_name -> asgard.runner.v1.Ack
 	20,  // 12: asgard.runner.v1.BackendMessage.inject_message:type_name -> asgard.runner.v1.InjectMessage
-	117, // 13: asgard.runner.v1.Register.supported_clis:type_name -> asgard.runner.v1.Register.SupportedClisEntry
-	7,   // 14: asgard.runner.v1.Register.active_runs:type_name -> asgard.runner.v1.RunRef
-	7,   // 15: asgard.runner.v1.Register.completed_unacked_runs:type_name -> asgard.runner.v1.RunRef
-	3,   // 16: asgard.runner.v1.Heartbeat.quotas:type_name -> asgard.runner.v1.TargetQuota
-	14,  // 17: asgard.runner.v1.RunEvent.artifacts:type_name -> asgard.runner.v1.Artifact
-	2,   // 18: asgard.runner.v1.RunResult.selected_target:type_name -> asgard.runner.v1.Target
-	4,   // 19: asgard.runner.v1.RunResult.no_quota:type_name -> asgard.runner.v1.NoQuota
-	64,  // 20: asgard.runner.v1.RunResult.run_dir_ref:type_name -> asgard.runner.v1.DirRef
-	0,   // 21: asgard.runner.v1.StartRun.agent_source:type_name -> asgard.runner.v1.AgentSource
-	2,   // 22: asgard.runner.v1.StartRun.candidates:type_name -> asgard.runner.v1.Target
-	118, // 23: asgard.runner.v1.StartRun.sessions:type_name -> asgard.runner.v1.StartRun.SessionsEntry
-	64,  // 24: asgard.runner.v1.StartRun.run_dir:type_name -> asgard.runner.v1.DirRef
-	17,  // 25: asgard.runner.v1.StartRun.status_scope:type_name -> asgard.runner.v1.StatusScope
-	24,  // 26: asgard.runner.v1.HoldMergeLockRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 27: asgard.runner.v1.AskUserRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 28: asgard.runner.v1.CallPeerRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	64,  // 29: asgard.runner.v1.CallPeerRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	24,  // 30: asgard.runner.v1.FindPeerRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 31: asgard.runner.v1.SpawnSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 32: asgard.runner.v1.ListSubagentsRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	33,  // 33: asgard.runner.v1.ListSubagentsResponse.subagents:type_name -> asgard.runner.v1.SubagentInfo
-	24,  // 34: asgard.runner.v1.SubagentStatusRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	33,  // 35: asgard.runner.v1.SubagentStatusResponse.subagent:type_name -> asgard.runner.v1.SubagentInfo
-	24,  // 36: asgard.runner.v1.KillSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 37: asgard.runner.v1.SendToSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 38: asgard.runner.v1.WaitSubagentsRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	33,  // 39: asgard.runner.v1.SubagentWaitResult.subagent:type_name -> asgard.runner.v1.SubagentInfo
-	43,  // 40: asgard.runner.v1.WaitSubagentsResponse.results:type_name -> asgard.runner.v1.SubagentWaitResult
-	24,  // 41: asgard.runner.v1.ReplyToParentRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	24,  // 42: asgard.runner.v1.RecordMetricsRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	47,  // 43: asgard.runner.v1.RecordMetricsRequest.events:type_name -> asgard.runner.v1.MetricsEvent
-	24,  // 44: asgard.runner.v1.GetUserProxyKeysRequest.meta:type_name -> asgard.runner.v1.CallMeta
-	119, // 45: asgard.runner.v1.GetUserProxyKeysResponse.keys:type_name -> asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
-	1,   // 46: asgard.runner.v1.TreeRequest.scope:type_name -> asgard.runner.v1.FileScope
-	64,  // 47: asgard.runner.v1.TreeRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	60,  // 48: asgard.runner.v1.TreeResponse.entries:type_name -> asgard.runner.v1.FileTreeEntry
-	1,   // 49: asgard.runner.v1.ReadFileRequest.scope:type_name -> asgard.runner.v1.FileScope
-	64,  // 50: asgard.runner.v1.ReadFileRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	1,   // 51: asgard.runner.v1.DirRef.scope:type_name -> asgard.runner.v1.FileScope
-	65,  // 52: asgard.runner.v1.ReadFileChunk.info:type_name -> asgard.runner.v1.FileInfo
-	64,  // 53: asgard.runner.v1.SearchRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	1,   // 54: asgard.runner.v1.FileSearchResult.scope:type_name -> asgard.runner.v1.FileScope
-	68,  // 55: asgard.runner.v1.SearchResponse.files:type_name -> asgard.runner.v1.FileSearchResult
-	70,  // 56: asgard.runner.v1.PutAttachmentChunk.header:type_name -> asgard.runner.v1.AttachmentHeader
-	64,  // 57: asgard.runner.v1.GitDiffRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	64,  // 58: asgard.runner.v1.GitLogRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	77,  // 59: asgard.runner.v1.GitLogResponse.commits:type_name -> asgard.runner.v1.GitCommit
-	64,  // 60: asgard.runner.v1.GitSessionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	64,  // 61: asgard.runner.v1.TtydOpen.working_dir:type_name -> asgard.runner.v1.DirRef
-	85,  // 62: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
-	86,  // 63: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
-	87,  // 64: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
-	64,  // 65: asgard.runner.v1.PathRef.run_dir:type_name -> asgard.runner.v1.DirRef
-	1,   // 66: asgard.runner.v1.PathRef.scope:type_name -> asgard.runner.v1.FileScope
-	89,  // 67: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
-	89,  // 68: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
-	92,  // 69: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
-	89,  // 70: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
-	89,  // 71: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
-	89,  // 72: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
-	64,  // 73: asgard.runner.v1.RunCommandRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	64,  // 74: asgard.runner.v1.RunCommandRequest.tmp:type_name -> asgard.runner.v1.DirRef
-	14,  // 75: asgard.runner.v1.RunCommandExit.artifacts:type_name -> asgard.runner.v1.Artifact
-	103, // 76: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
-	103, // 77: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
-	102, // 78: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
-	64,  // 79: asgard.runner.v1.RunFunctionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	64,  // 80: asgard.runner.v1.OrphanTmpSweep.dir:type_name -> asgard.runner.v1.DirRef
-	107, // 81: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
-	109, // 82: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
-	2,   // 83: asgard.runner.v1.QueryQuotaRequest.targets:type_name -> asgard.runner.v1.Target
-	113, // 84: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
-	112, // 85: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
-	114, // 86: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
-	115, // 87: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
-	11,  // 88: asgard.runner.v1.Register.SupportedClisEntry.value:type_name -> asgard.runner.v1.ModelList
-	5,   // 89: asgard.runner.v1.NodeControlService.Connect:input_type -> asgard.runner.v1.RunnerMessage
-	25,  // 90: asgard.runner.v1.AgentCallbackService.AskUser:input_type -> asgard.runner.v1.AskUserRequest
-	27,  // 91: asgard.runner.v1.AgentCallbackService.CallPeer:input_type -> asgard.runner.v1.CallPeerRequest
-	29,  // 92: asgard.runner.v1.AgentCallbackService.FindPeer:input_type -> asgard.runner.v1.FindPeerRequest
-	31,  // 93: asgard.runner.v1.AgentCallbackService.SpawnSubagent:input_type -> asgard.runner.v1.SpawnSubagentRequest
-	34,  // 94: asgard.runner.v1.AgentCallbackService.ListSubagents:input_type -> asgard.runner.v1.ListSubagentsRequest
-	36,  // 95: asgard.runner.v1.AgentCallbackService.SubagentStatus:input_type -> asgard.runner.v1.SubagentStatusRequest
-	38,  // 96: asgard.runner.v1.AgentCallbackService.KillSubagent:input_type -> asgard.runner.v1.KillSubagentRequest
-	40,  // 97: asgard.runner.v1.AgentCallbackService.SendToSubagent:input_type -> asgard.runner.v1.SendToSubagentRequest
-	42,  // 98: asgard.runner.v1.AgentCallbackService.WaitSubagents:input_type -> asgard.runner.v1.WaitSubagentsRequest
-	45,  // 99: asgard.runner.v1.AgentCallbackService.ReplyToParent:input_type -> asgard.runner.v1.ReplyToParentRequest
-	48,  // 100: asgard.runner.v1.AgentCallbackService.RecordMetrics:input_type -> asgard.runner.v1.RecordMetricsRequest
-	50,  // 101: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:input_type -> asgard.runner.v1.GetUserProxyKeysRequest
-	52,  // 102: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:input_type -> asgard.runner.v1.InitWorkflowSessionRequest
-	54,  // 103: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:input_type -> asgard.runner.v1.ReportWorkflowEventRequest
-	56,  // 104: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:input_type -> asgard.runner.v1.WorkflowRunStartRequest
-	58,  // 105: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:input_type -> asgard.runner.v1.WorkflowRunSettleRequest
-	22,  // 106: asgard.runner.v1.AgentCallbackService.HoldMergeLock:input_type -> asgard.runner.v1.HoldMergeLockRequest
-	61,  // 107: asgard.runner.v1.RunnerService.Tree:input_type -> asgard.runner.v1.TreeRequest
-	63,  // 108: asgard.runner.v1.RunnerService.ReadFile:input_type -> asgard.runner.v1.ReadFileRequest
-	67,  // 109: asgard.runner.v1.RunnerService.Search:input_type -> asgard.runner.v1.SearchRequest
-	71,  // 110: asgard.runner.v1.RunnerService.PutAttachment:input_type -> asgard.runner.v1.PutAttachmentChunk
-	73,  // 111: asgard.runner.v1.RunnerService.GetAttachment:input_type -> asgard.runner.v1.GetAttachmentRequest
-	74,  // 112: asgard.runner.v1.RunnerService.GitDiff:input_type -> asgard.runner.v1.GitDiffRequest
-	76,  // 113: asgard.runner.v1.RunnerService.GitLog:input_type -> asgard.runner.v1.GitLogRequest
-	79,  // 114: asgard.runner.v1.RunnerService.GitPush:input_type -> asgard.runner.v1.GitSessionRequest
-	79,  // 115: asgard.runner.v1.RunnerService.GitPull:input_type -> asgard.runner.v1.GitSessionRequest
-	81,  // 116: asgard.runner.v1.RunnerService.Subdirs:input_type -> asgard.runner.v1.SubdirsRequest
-	83,  // 117: asgard.runner.v1.RunnerService.Glob:input_type -> asgard.runner.v1.GlobRequest
-	88,  // 118: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
-	90,  // 119: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
-	93,  // 120: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
-	95,  // 121: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
-	97,  // 122: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
-	99,  // 123: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
-	101, // 124: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
-	105, // 125: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
-	108, // 126: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
-	111, // 127: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
-	6,   // 128: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
-	26,  // 129: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
-	28,  // 130: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
-	30,  // 131: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
-	32,  // 132: asgard.runner.v1.AgentCallbackService.SpawnSubagent:output_type -> asgard.runner.v1.SpawnSubagentResponse
-	35,  // 133: asgard.runner.v1.AgentCallbackService.ListSubagents:output_type -> asgard.runner.v1.ListSubagentsResponse
-	37,  // 134: asgard.runner.v1.AgentCallbackService.SubagentStatus:output_type -> asgard.runner.v1.SubagentStatusResponse
-	39,  // 135: asgard.runner.v1.AgentCallbackService.KillSubagent:output_type -> asgard.runner.v1.KillSubagentResponse
-	41,  // 136: asgard.runner.v1.AgentCallbackService.SendToSubagent:output_type -> asgard.runner.v1.SendToSubagentResponse
-	44,  // 137: asgard.runner.v1.AgentCallbackService.WaitSubagents:output_type -> asgard.runner.v1.WaitSubagentsResponse
-	46,  // 138: asgard.runner.v1.AgentCallbackService.ReplyToParent:output_type -> asgard.runner.v1.ReplyToParentResponse
-	49,  // 139: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
-	51,  // 140: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
-	53,  // 141: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
-	55,  // 142: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
-	57,  // 143: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
-	59,  // 144: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
-	23,  // 145: asgard.runner.v1.AgentCallbackService.HoldMergeLock:output_type -> asgard.runner.v1.HoldMergeLockResponse
-	62,  // 146: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
-	66,  // 147: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
-	69,  // 148: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
-	72,  // 149: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
-	66,  // 150: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
-	75,  // 151: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
-	78,  // 152: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
-	80,  // 153: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
-	80,  // 154: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
-	82,  // 155: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
-	84,  // 156: asgard.runner.v1.RunnerService.Glob:output_type -> asgard.runner.v1.GlobResponse
-	88,  // 157: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
-	91,  // 158: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
-	94,  // 159: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
-	96,  // 160: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
-	98,  // 161: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
-	100, // 162: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
-	104, // 163: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
-	106, // 164: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
-	110, // 165: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
-	116, // 166: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
-	128, // [128:167] is the sub-list for method output_type
-	89,  // [89:128] is the sub-list for method input_type
-	89,  // [89:89] is the sub-list for extension type_name
-	89,  // [89:89] is the sub-list for extension extendee
-	0,   // [0:89] is the sub-list for field type_name
+	21,  // 13: asgard.runner.v1.BackendMessage.run_control:type_name -> asgard.runner.v1.RunControl
+	118, // 14: asgard.runner.v1.Register.supported_clis:type_name -> asgard.runner.v1.Register.SupportedClisEntry
+	7,   // 15: asgard.runner.v1.Register.active_runs:type_name -> asgard.runner.v1.RunRef
+	7,   // 16: asgard.runner.v1.Register.completed_unacked_runs:type_name -> asgard.runner.v1.RunRef
+	3,   // 17: asgard.runner.v1.Heartbeat.quotas:type_name -> asgard.runner.v1.TargetQuota
+	14,  // 18: asgard.runner.v1.RunEvent.artifacts:type_name -> asgard.runner.v1.Artifact
+	2,   // 19: asgard.runner.v1.RunResult.selected_target:type_name -> asgard.runner.v1.Target
+	4,   // 20: asgard.runner.v1.RunResult.no_quota:type_name -> asgard.runner.v1.NoQuota
+	65,  // 21: asgard.runner.v1.RunResult.run_dir_ref:type_name -> asgard.runner.v1.DirRef
+	0,   // 22: asgard.runner.v1.StartRun.agent_source:type_name -> asgard.runner.v1.AgentSource
+	2,   // 23: asgard.runner.v1.StartRun.candidates:type_name -> asgard.runner.v1.Target
+	119, // 24: asgard.runner.v1.StartRun.sessions:type_name -> asgard.runner.v1.StartRun.SessionsEntry
+	65,  // 25: asgard.runner.v1.StartRun.run_dir:type_name -> asgard.runner.v1.DirRef
+	17,  // 26: asgard.runner.v1.StartRun.status_scope:type_name -> asgard.runner.v1.StatusScope
+	25,  // 27: asgard.runner.v1.HoldMergeLockRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 28: asgard.runner.v1.AskUserRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 29: asgard.runner.v1.CallPeerRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	65,  // 30: asgard.runner.v1.CallPeerRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	25,  // 31: asgard.runner.v1.FindPeerRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 32: asgard.runner.v1.SpawnSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 33: asgard.runner.v1.ListSubagentsRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	34,  // 34: asgard.runner.v1.ListSubagentsResponse.subagents:type_name -> asgard.runner.v1.SubagentInfo
+	25,  // 35: asgard.runner.v1.SubagentStatusRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	34,  // 36: asgard.runner.v1.SubagentStatusResponse.subagent:type_name -> asgard.runner.v1.SubagentInfo
+	25,  // 37: asgard.runner.v1.KillSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 38: asgard.runner.v1.SendToSubagentRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 39: asgard.runner.v1.WaitSubagentsRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	34,  // 40: asgard.runner.v1.SubagentWaitResult.subagent:type_name -> asgard.runner.v1.SubagentInfo
+	44,  // 41: asgard.runner.v1.WaitSubagentsResponse.results:type_name -> asgard.runner.v1.SubagentWaitResult
+	25,  // 42: asgard.runner.v1.ReplyToParentRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	25,  // 43: asgard.runner.v1.RecordMetricsRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	48,  // 44: asgard.runner.v1.RecordMetricsRequest.events:type_name -> asgard.runner.v1.MetricsEvent
+	25,  // 45: asgard.runner.v1.GetUserProxyKeysRequest.meta:type_name -> asgard.runner.v1.CallMeta
+	120, // 46: asgard.runner.v1.GetUserProxyKeysResponse.keys:type_name -> asgard.runner.v1.GetUserProxyKeysResponse.KeysEntry
+	1,   // 47: asgard.runner.v1.TreeRequest.scope:type_name -> asgard.runner.v1.FileScope
+	65,  // 48: asgard.runner.v1.TreeRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	61,  // 49: asgard.runner.v1.TreeResponse.entries:type_name -> asgard.runner.v1.FileTreeEntry
+	1,   // 50: asgard.runner.v1.ReadFileRequest.scope:type_name -> asgard.runner.v1.FileScope
+	65,  // 51: asgard.runner.v1.ReadFileRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	1,   // 52: asgard.runner.v1.DirRef.scope:type_name -> asgard.runner.v1.FileScope
+	66,  // 53: asgard.runner.v1.ReadFileChunk.info:type_name -> asgard.runner.v1.FileInfo
+	65,  // 54: asgard.runner.v1.SearchRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	1,   // 55: asgard.runner.v1.FileSearchResult.scope:type_name -> asgard.runner.v1.FileScope
+	69,  // 56: asgard.runner.v1.SearchResponse.files:type_name -> asgard.runner.v1.FileSearchResult
+	71,  // 57: asgard.runner.v1.PutAttachmentChunk.header:type_name -> asgard.runner.v1.AttachmentHeader
+	65,  // 58: asgard.runner.v1.GitDiffRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	65,  // 59: asgard.runner.v1.GitLogRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	78,  // 60: asgard.runner.v1.GitLogResponse.commits:type_name -> asgard.runner.v1.GitCommit
+	65,  // 61: asgard.runner.v1.GitSessionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	65,  // 62: asgard.runner.v1.TtydOpen.working_dir:type_name -> asgard.runner.v1.DirRef
+	86,  // 63: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
+	87,  // 64: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
+	88,  // 65: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
+	65,  // 66: asgard.runner.v1.PathRef.run_dir:type_name -> asgard.runner.v1.DirRef
+	1,   // 67: asgard.runner.v1.PathRef.scope:type_name -> asgard.runner.v1.FileScope
+	90,  // 68: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
+	90,  // 69: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
+	93,  // 70: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
+	90,  // 71: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
+	90,  // 72: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
+	90,  // 73: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
+	65,  // 74: asgard.runner.v1.RunCommandRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	65,  // 75: asgard.runner.v1.RunCommandRequest.tmp:type_name -> asgard.runner.v1.DirRef
+	14,  // 76: asgard.runner.v1.RunCommandExit.artifacts:type_name -> asgard.runner.v1.Artifact
+	104, // 77: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
+	104, // 78: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
+	103, // 79: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
+	65,  // 80: asgard.runner.v1.RunFunctionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	65,  // 81: asgard.runner.v1.OrphanTmpSweep.dir:type_name -> asgard.runner.v1.DirRef
+	108, // 82: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
+	110, // 83: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
+	2,   // 84: asgard.runner.v1.QueryQuotaRequest.targets:type_name -> asgard.runner.v1.Target
+	114, // 85: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
+	113, // 86: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
+	115, // 87: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
+	116, // 88: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
+	11,  // 89: asgard.runner.v1.Register.SupportedClisEntry.value:type_name -> asgard.runner.v1.ModelList
+	5,   // 90: asgard.runner.v1.NodeControlService.Connect:input_type -> asgard.runner.v1.RunnerMessage
+	26,  // 91: asgard.runner.v1.AgentCallbackService.AskUser:input_type -> asgard.runner.v1.AskUserRequest
+	28,  // 92: asgard.runner.v1.AgentCallbackService.CallPeer:input_type -> asgard.runner.v1.CallPeerRequest
+	30,  // 93: asgard.runner.v1.AgentCallbackService.FindPeer:input_type -> asgard.runner.v1.FindPeerRequest
+	32,  // 94: asgard.runner.v1.AgentCallbackService.SpawnSubagent:input_type -> asgard.runner.v1.SpawnSubagentRequest
+	35,  // 95: asgard.runner.v1.AgentCallbackService.ListSubagents:input_type -> asgard.runner.v1.ListSubagentsRequest
+	37,  // 96: asgard.runner.v1.AgentCallbackService.SubagentStatus:input_type -> asgard.runner.v1.SubagentStatusRequest
+	39,  // 97: asgard.runner.v1.AgentCallbackService.KillSubagent:input_type -> asgard.runner.v1.KillSubagentRequest
+	41,  // 98: asgard.runner.v1.AgentCallbackService.SendToSubagent:input_type -> asgard.runner.v1.SendToSubagentRequest
+	43,  // 99: asgard.runner.v1.AgentCallbackService.WaitSubagents:input_type -> asgard.runner.v1.WaitSubagentsRequest
+	46,  // 100: asgard.runner.v1.AgentCallbackService.ReplyToParent:input_type -> asgard.runner.v1.ReplyToParentRequest
+	49,  // 101: asgard.runner.v1.AgentCallbackService.RecordMetrics:input_type -> asgard.runner.v1.RecordMetricsRequest
+	51,  // 102: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:input_type -> asgard.runner.v1.GetUserProxyKeysRequest
+	53,  // 103: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:input_type -> asgard.runner.v1.InitWorkflowSessionRequest
+	55,  // 104: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:input_type -> asgard.runner.v1.ReportWorkflowEventRequest
+	57,  // 105: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:input_type -> asgard.runner.v1.WorkflowRunStartRequest
+	59,  // 106: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:input_type -> asgard.runner.v1.WorkflowRunSettleRequest
+	23,  // 107: asgard.runner.v1.AgentCallbackService.HoldMergeLock:input_type -> asgard.runner.v1.HoldMergeLockRequest
+	62,  // 108: asgard.runner.v1.RunnerService.Tree:input_type -> asgard.runner.v1.TreeRequest
+	64,  // 109: asgard.runner.v1.RunnerService.ReadFile:input_type -> asgard.runner.v1.ReadFileRequest
+	68,  // 110: asgard.runner.v1.RunnerService.Search:input_type -> asgard.runner.v1.SearchRequest
+	72,  // 111: asgard.runner.v1.RunnerService.PutAttachment:input_type -> asgard.runner.v1.PutAttachmentChunk
+	74,  // 112: asgard.runner.v1.RunnerService.GetAttachment:input_type -> asgard.runner.v1.GetAttachmentRequest
+	75,  // 113: asgard.runner.v1.RunnerService.GitDiff:input_type -> asgard.runner.v1.GitDiffRequest
+	77,  // 114: asgard.runner.v1.RunnerService.GitLog:input_type -> asgard.runner.v1.GitLogRequest
+	80,  // 115: asgard.runner.v1.RunnerService.GitPush:input_type -> asgard.runner.v1.GitSessionRequest
+	80,  // 116: asgard.runner.v1.RunnerService.GitPull:input_type -> asgard.runner.v1.GitSessionRequest
+	82,  // 117: asgard.runner.v1.RunnerService.Subdirs:input_type -> asgard.runner.v1.SubdirsRequest
+	84,  // 118: asgard.runner.v1.RunnerService.Glob:input_type -> asgard.runner.v1.GlobRequest
+	89,  // 119: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
+	91,  // 120: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
+	94,  // 121: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
+	96,  // 122: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
+	98,  // 123: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
+	100, // 124: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
+	102, // 125: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
+	106, // 126: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
+	109, // 127: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
+	112, // 128: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
+	6,   // 129: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
+	27,  // 130: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
+	29,  // 131: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
+	31,  // 132: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
+	33,  // 133: asgard.runner.v1.AgentCallbackService.SpawnSubagent:output_type -> asgard.runner.v1.SpawnSubagentResponse
+	36,  // 134: asgard.runner.v1.AgentCallbackService.ListSubagents:output_type -> asgard.runner.v1.ListSubagentsResponse
+	38,  // 135: asgard.runner.v1.AgentCallbackService.SubagentStatus:output_type -> asgard.runner.v1.SubagentStatusResponse
+	40,  // 136: asgard.runner.v1.AgentCallbackService.KillSubagent:output_type -> asgard.runner.v1.KillSubagentResponse
+	42,  // 137: asgard.runner.v1.AgentCallbackService.SendToSubagent:output_type -> asgard.runner.v1.SendToSubagentResponse
+	45,  // 138: asgard.runner.v1.AgentCallbackService.WaitSubagents:output_type -> asgard.runner.v1.WaitSubagentsResponse
+	47,  // 139: asgard.runner.v1.AgentCallbackService.ReplyToParent:output_type -> asgard.runner.v1.ReplyToParentResponse
+	50,  // 140: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
+	52,  // 141: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
+	54,  // 142: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
+	56,  // 143: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
+	58,  // 144: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
+	60,  // 145: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
+	24,  // 146: asgard.runner.v1.AgentCallbackService.HoldMergeLock:output_type -> asgard.runner.v1.HoldMergeLockResponse
+	63,  // 147: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
+	67,  // 148: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
+	70,  // 149: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
+	73,  // 150: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
+	67,  // 151: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
+	76,  // 152: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
+	79,  // 153: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
+	81,  // 154: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
+	81,  // 155: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
+	83,  // 156: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
+	85,  // 157: asgard.runner.v1.RunnerService.Glob:output_type -> asgard.runner.v1.GlobResponse
+	89,  // 158: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
+	92,  // 159: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
+	95,  // 160: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
+	97,  // 161: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
+	99,  // 162: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
+	101, // 163: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
+	105, // 164: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
+	107, // 165: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
+	111, // 166: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
+	117, // 167: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
+	129, // [129:168] is the sub-list for method output_type
+	90,  // [90:129] is the sub-list for method input_type
+	90,  // [90:90] is the sub-list for extension type_name
+	90,  // [90:90] is the sub-list for extension extendee
+	0,   // [0:90] is the sub-list for field type_name
 }
 
 func init() { file_pkg_runnerpb_runner_proto_init() }
@@ -9390,28 +9499,29 @@ func file_pkg_runnerpb_runner_proto_init() {
 		(*BackendMessage_CancelRun)(nil),
 		(*BackendMessage_Ack)(nil),
 		(*BackendMessage_InjectMessage)(nil),
+		(*BackendMessage_RunControl)(nil),
 	}
-	file_pkg_runnerpb_runner_proto_msgTypes[64].OneofWrappers = []any{
+	file_pkg_runnerpb_runner_proto_msgTypes[65].OneofWrappers = []any{
 		(*ReadFileChunk_Info)(nil),
 		(*ReadFileChunk_Data)(nil),
 	}
-	file_pkg_runnerpb_runner_proto_msgTypes[69].OneofWrappers = []any{
+	file_pkg_runnerpb_runner_proto_msgTypes[70].OneofWrappers = []any{
 		(*PutAttachmentChunk_Header)(nil),
 		(*PutAttachmentChunk_Data)(nil),
 	}
-	file_pkg_runnerpb_runner_proto_msgTypes[86].OneofWrappers = []any{
+	file_pkg_runnerpb_runner_proto_msgTypes[87].OneofWrappers = []any{
 		(*TtydFrame_Open)(nil),
 		(*TtydFrame_Input)(nil),
 		(*TtydFrame_Resize)(nil),
 		(*TtydFrame_Output)(nil),
 		(*TtydFrame_Exit)(nil),
 	}
-	file_pkg_runnerpb_runner_proto_msgTypes[91].OneofWrappers = []any{
+	file_pkg_runnerpb_runner_proto_msgTypes[92].OneofWrappers = []any{
 		(*WriteFileChunk_Header)(nil),
 		(*WriteFileChunk_Data)(nil),
 	}
-	file_pkg_runnerpb_runner_proto_msgTypes[99].OneofWrappers = []any{}
-	file_pkg_runnerpb_runner_proto_msgTypes[102].OneofWrappers = []any{
+	file_pkg_runnerpb_runner_proto_msgTypes[100].OneofWrappers = []any{}
+	file_pkg_runnerpb_runner_proto_msgTypes[103].OneofWrappers = []any{
 		(*RunCommandFrame_Stdout)(nil),
 		(*RunCommandFrame_Stderr)(nil),
 		(*RunCommandFrame_Exit)(nil),
@@ -9422,7 +9532,7 @@ func file_pkg_runnerpb_runner_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_runnerpb_runner_proto_rawDesc), len(file_pkg_runnerpb_runner_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   118,
+			NumMessages:   119,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 )
@@ -28,13 +29,35 @@ import (
 // return means the message was accepted by the injector's queue, not that the
 // CLI has read it yet.
 func Send(ctx context.Context, path, prompt string) error {
+	_, err := SendGen(ctx, path, prompt)
+	return err
+}
+
+// SendGen is Send that also returns the idle generation aw reported with its
+// reply (0 when it reports none).
+func SendGen(ctx context.Context, path, prompt string) (uint64, error) {
+	resp, err := roundTrip(ctx, path, request{Prompt: prompt})
+	return resp.IdleGen, err
+}
+
+// SendControl delivers a control (ControlHold / ControlRelease) to the aw
+// process listening on the control socket at path (ControlPath of its
+// injection socket). holdIdle bounds an idle hold (0: aw's default). Errors
+// are those of Send; an aw that predates controls does not listen there, so
+// the result is ErrUnavailable.
+func SendControl(ctx context.Context, path, action string, holdIdle time.Duration) error {
+	_, err := roundTrip(ctx, path, request{Control: action, IdleSeconds: int64(holdIdle / time.Second)})
+	return err
+}
+
+func roundTrip(ctx context.Context, path string, req request) (response, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
-			return fmt.Errorf("%w: %w: %v", types.ErrNotInjectable, ErrUnavailable, err)
+			return response{}, fmt.Errorf("%w: %w: %v", types.ErrNotInjectable, ErrUnavailable, err)
 		}
-		return fmt.Errorf("inject: dial: %w", err)
+		return response{}, fmt.Errorf("inject: dial: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -42,31 +65,31 @@ func Send(ctx context.Context, path, prompt string) error {
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 
-	b, err := json.Marshal(request{Prompt: prompt})
+	b, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("inject: encode: %w", err)
+		return response{}, fmt.Errorf("inject: encode: %w", err)
 	}
 	if _, err := conn.Write(append(b, '\n')); err != nil {
-		return ioErr(ctx, "write", err)
+		return response{}, ioErr(ctx, "write", err)
 	}
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil {
-		return ioErr(ctx, "read reply", err)
+		return response{}, ioErr(ctx, "read reply", err)
 	}
 	var resp response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return fmt.Errorf("inject: invalid reply: %w", err)
+		return response{}, fmt.Errorf("inject: invalid reply: %w", err)
 	}
 	if resp.OK {
-		return nil
+		return resp, nil
 	}
 	switch resp.Reason {
 	case ReasonNotInjectable:
-		return types.ErrNotInjectable
+		return resp, types.ErrNotInjectable
 	case ReasonBadRequest:
-		return fmt.Errorf("%w: %s", ErrBadRequest, resp.Error)
+		return resp, fmt.Errorf("%w: %s", ErrBadRequest, resp.Error)
 	default:
-		return fmt.Errorf("%w: %s", ErrInternal, resp.Error)
+		return resp, fmt.Errorf("%w: %s", ErrInternal, resp.Error)
 	}
 }
 

@@ -220,3 +220,72 @@ func TestSocketPathEnv(t *testing.T) {
 	t.Setenv(EnvSock, "/some/where.sock")
 	assert.Equal(t, "/some/where.sock", SocketPath())
 }
+
+func TestControlRelay(t *testing.T) {
+	s, path := newServer(t)
+	cpath := ControlPath(path)
+	type call struct {
+		hold bool
+		idle time.Duration
+	}
+	var mu sync.Mutex
+	var calls []call
+	s.SetControl(func(hold bool, idle time.Duration) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, call{hold, idle})
+		return nil
+	})
+	s.SetInject(func(string) error { t.Fatal("a control must not inject a prompt"); return nil })
+	require.NoError(t, SendControl(context.Background(), cpath, ControlHold, 90*time.Second))
+	require.NoError(t, SendControl(context.Background(), cpath, ControlRelease, 0))
+	assert.Equal(t, []call{{true, 90 * time.Second}, {false, 0}}, calls)
+	assert.ErrorIs(t, SendControl(context.Background(), cpath, "bogus", 0), ErrBadRequest)
+}
+
+func TestControlNotInjectable(t *testing.T) {
+	s, path := newServer(t)
+	cpath := ControlPath(path)
+	assert.ErrorIs(t, SendControl(context.Background(), cpath, ControlHold, 0), types.ErrNotInjectable, "no control installed")
+	s.SetControl(func(bool, time.Duration) error { return types.ErrNotInjectable })
+	assert.ErrorIs(t, SendControl(context.Background(), cpath, ControlRelease, 0), types.ErrNotInjectable)
+	s.SetControl(func(bool, time.Duration) error { return errors.New("boom") })
+	assert.ErrorIs(t, SendControl(context.Background(), cpath, ControlRelease, 0), ErrInternal)
+}
+
+// A control is never accepted on inject.sock (an old aw would inject it as an
+// empty prompt) and an injection never on control.sock; with no control
+// socket (an old aw) SendControl reports ErrUnavailable.
+func TestControlSeparateSocket(t *testing.T) {
+	s, path := newServer(t)
+	s.SetInject(func(string) error { t.Fatal("nothing may be injected"); return nil })
+	s.SetControl(func(bool, time.Duration) error { t.Fatal("no control may be applied"); return nil })
+	assert.ErrorIs(t, SendControl(context.Background(), path, ControlHold, 0), ErrBadRequest, "control over inject.sock")
+	assert.ErrorIs(t, Send(context.Background(), ControlPath(path), "hi"), ErrBadRequest, "injection over control.sock")
+
+	oldDir := t.TempDir()
+	err := SendControl(context.Background(), filepath.Join(oldDir, ControlSocketName), ControlHold, 0)
+	assert.ErrorIs(t, err, ErrUnavailable)
+	assert.ErrorIs(t, err, types.ErrNotInjectable)
+}
+
+func TestCloseRemovesControlSocket(t *testing.T) {
+	s, path := newServer(t)
+	require.NoError(t, s.Close())
+	_, err := os.Stat(ControlPath(path))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestSendGenReturnsIdleGen(t *testing.T) {
+	s, path := newServer(t)
+	s.SetInjectGen(func(string) (uint64, error) { return 7, nil })
+	gen, err := SendGen(context.Background(), path, "hello")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(7), gen)
+
+	// A plain injection function reports no generation.
+	s.SetInject(func(string) error { return nil })
+	gen, err = SendGen(context.Background(), path, "hello")
+	require.NoError(t, err)
+	assert.Zero(t, gen)
+}

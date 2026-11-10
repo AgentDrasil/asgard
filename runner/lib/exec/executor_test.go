@@ -459,11 +459,11 @@ func TestExecutorInjectMessage(t *testing.T) {
 		srv, err := inject.Listen(filepath.Join(sockDir, inject.SocketName))
 		require.NoError(t, err)
 		defer func() { _ = srv.Close() }()
-		srv.SetInject(func(p string) error {
+		srv.SetInjectGen(func(p string) (uint64, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, p)
-			return nil
+			return 4, nil
 		})
 		close(ready)
 		<-release
@@ -479,7 +479,9 @@ func TestExecutorInjectMessage(t *testing.T) {
 	sink := newRecordingSink()
 	ex.StartRun(context.Background(), baseStartRun(), sink)
 	<-ready
-	require.NoError(t, ex.InjectMessage(context.Background(), "run-1", "i1", "hello", dl()))
+	gen, err := ex.InjectMessageGen(context.Background(), "run-1", "i1", "hello", dl())
+	require.NoError(t, err)
+	assert.Equal(t, uint64(4), gen)
 	mu.Lock()
 	assert.Equal(t, []string{"hello"}, got)
 	mu.Unlock()
@@ -490,4 +492,142 @@ func TestExecutorInjectMessage(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return errors.Is(ex.InjectMessage(context.Background(), "run-1", "i2", "late", dl()), types.ErrNotInjectable)
 	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// ControlRun relays hold / release over the run's inject socket. A hold finds
+// a CLI that never listens (opencode) not controllable.
+func TestExecutorControlRun(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	type call struct {
+		hold bool
+		idle time.Duration
+	}
+	var mu sync.Mutex
+	var got []call
+	fn := func(_ context.Context, _ *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		sockDir := shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		srv, err := inject.Listen(filepath.Join(sockDir, inject.SocketName))
+		require.NoError(t, err)
+		defer func() { _ = srv.Close() }()
+		srv.SetControl(func(hold bool, idle time.Duration) error {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, call{hold, idle})
+			return nil
+		})
+		close(ready)
+		<-release
+		return run.Result{Target: agentspec.CLITarget{CLI: "claude", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	ex := newTestExecutor(t, fn, testAgent("a", "h1", ""))
+
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), types.ErrNotInjectable, "unknown run")
+
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), baseStartRun(), sink)
+	<-ready
+	require.NoError(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 90*time.Second))
+	require.NoError(t, ex.ControlRun(context.Background(), "run-1", inject.ControlRelease, 0))
+	mu.Lock()
+	assert.Equal(t, []call{{true, 90 * time.Second}, {false, 0}}, got)
+	mu.Unlock()
+	close(release)
+	sink.wait(t)
+}
+
+func TestExecutorControlRunWithoutListener(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	fn := func(_ context.Context, _ *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		stop, err := opts.OnSockDir(shortSockDir(t), "/proj")
+		require.NoError(t, err)
+		defer stop()
+		close(ready)
+		<-release
+		return run.Result{Target: agentspec.CLITarget{CLI: "opencode", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	ex := newTestExecutor(t, fn, testAgent("a", "h1", ""))
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), baseStartRun(), sink)
+	<-ready
+	start := time.Now()
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), types.ErrNotInjectable)
+	assert.Greater(t, time.Since(start), controlRetry, "a hold is retried while aw may still be starting")
+	start = time.Now()
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), types.ErrNotInjectable)
+	assert.Greater(t, time.Since(start), controlRetry, "nobody listening is not remembered: aw may just be slow to start")
+	close(release)
+	sink.wait(t)
+}
+
+// A control socket that comes up only after the retry budget (slow sandbox
+// start) must not disable controls for the run.
+func TestExecutorControlRunSlowSocketStart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var holds int
+	var sockDir string
+	fn := func(_ context.Context, _ *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		sockDir = shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		close(ready)
+		<-release
+		return run.Result{Target: agentspec.CLITarget{CLI: "claude", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	ex := newTestExecutor(t, fn, testAgent("a", "h1", ""))
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), baseStartRun(), sink)
+	<-ready
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), inject.ErrUnavailable)
+
+	srv, err := inject.Listen(filepath.Join(sockDir, inject.SocketName))
+	require.NoError(t, err)
+	defer func() { _ = srv.Close() }()
+	srv.SetControl(func(bool, time.Duration) error { mu.Lock(); holds++; mu.Unlock(); return nil })
+	require.NoError(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), "the next sync retries")
+	mu.Lock()
+	assert.Equal(t, 1, holds)
+	mu.Unlock()
+	close(release)
+	sink.wait(t)
+}
+
+// An aw that answers not_injectable (the CLI cannot hold) is remembered.
+func TestExecutorControlRunAnsweredNotInjectableRemembered(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	fn := func(_ context.Context, _ *agentspec.Agent, _ []agentspec.CLITarget, _ string, _ run.SessionMap, _, _ optional.Option[string], _ string, _ run.StatusScope, opts run.Options) (run.Result, error) {
+		sockDir := shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		srv, err := inject.Listen(filepath.Join(sockDir, inject.SocketName))
+		require.NoError(t, err)
+		defer func() { _ = srv.Close() }()
+		srv.SetControl(func(bool, time.Duration) error { return types.ErrNotInjectable })
+		close(ready)
+		<-release
+		return run.Result{Target: agentspec.CLITarget{CLI: "claude", Model: "m1"}, RunDir: "/proj"}, nil
+	}
+	ex := newTestExecutor(t, fn, testAgent("a", "h1", ""))
+	sink := newRecordingSink()
+	ex.StartRun(context.Background(), baseStartRun(), sink)
+	<-ready
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), types.ErrNotInjectable)
+	start := time.Now()
+	require.ErrorIs(t, ex.ControlRun(context.Background(), "run-1", inject.ControlHold, 0), types.ErrNotInjectable)
+	assert.Less(t, time.Since(start), controlRetry, "an answered not_injectable fails at once the next time")
+	close(release)
+	sink.wait(t)
 }

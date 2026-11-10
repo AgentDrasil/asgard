@@ -246,6 +246,9 @@ func (s *Server) dropQueueOfIdleStopTarget(chatID string) {
 		Type:    EventTypeQueue,
 		Payload: map[string]any{"queue": []dbmodels.QueuedMessage{}},
 	})
+	// The child counted as live through its queued head, and no execution
+	// release follows: let the parent's hold notice (spawnMu is held).
+	s.syncParentHold(chatID)
 }
 
 // stopOneExecution is stopSessionExecution for a single chat, without the

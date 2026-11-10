@@ -187,3 +187,174 @@ func TestInjectorBackgroundTasksKeepStdinOpenUntilFinalResult(t *testing.T) {
 	inj.OnResult() // final result
 	assert.ErrorIs(t, inj.Send("c"), types.ErrNotInjectable)
 }
+
+func notClosed(t *testing.T, inj *Injector) {
+	t.Helper()
+	select {
+	case <-inj.Done():
+		t.Fatal("stdin was closed")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestInjectorHoldKeepsStdinOpenPastTurn(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 0))
+	inj.OnResult()
+	notClosed(t, inj)
+
+	// A push is injected as a new turn of the same process.
+	require.NoError(t, inj.Send("push"))
+	inj.OnResult()
+	notClosed(t, inj)
+
+	require.NoError(t, inj.SetHold(false, 0), "release of an idle injector closes stdin")
+	assert.Equal(t, 1, closesOf(t, inj, w))
+	assert.Equal(t, "a\npush\n", w.buf.String())
+	assert.ErrorIs(t, inj.Send("late"), types.ErrNotInjectable)
+	assert.ErrorIs(t, inj.SetHold(true, 0), types.ErrNotInjectable)
+}
+
+func TestInjectorHoldAfterResultStartsIdle(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	var mu sync.Mutex
+	var events []bool
+	inj.SetIdleNotify(func(idle bool, _ uint64) { mu.Lock(); events = append(events, idle); mu.Unlock() })
+	require.NoError(t, inj.Send("a"))
+	inj.OnResult() // not held yet: this closes stdin
+	closesOf(t, inj, w)
+	assert.ErrorIs(t, inj.SetHold(true, 0), types.ErrNotInjectable)
+
+	w2 := &fakeWC{}
+	inj2 := NewInjector(w2, lineFmt, false)
+	inj2.SetIdleNotify(func(idle bool, _ uint64) { mu.Lock(); events = append(events, idle); mu.Unlock() })
+	require.NoError(t, inj2.Send("a"))
+	require.NoError(t, inj2.SetHold(true, 0))
+	inj2.OnResult()
+	require.NoError(t, inj2.Send("b"))
+	inj2.OnResult()
+	require.NoError(t, inj2.SetHold(false, 0))
+	closesOf(t, inj2, w2)
+	assert.Eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(events) == 3 }, 2*time.Second, 5*time.Millisecond)
+	mu.Lock()
+	assert.Equal(t, []bool{true, false, true}, events, "idle, active (message sent), idle; no event for the close")
+	mu.Unlock()
+}
+
+func TestInjectorReleaseMidTurnClosesAtResult(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 0))
+	require.NoError(t, inj.SetHold(false, 0))
+	notClosed(t, inj)
+	inj.OnResult()
+	assert.Equal(t, 1, closesOf(t, inj, w))
+}
+
+func TestInjectorIdleCapClosesHeldStdin(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 50*time.Millisecond))
+	inj.OnResult()
+	assert.Equal(t, 1, closesOf(t, inj, w), "an idle hold must not keep the process forever")
+}
+
+func TestInjectorIdleCapRestartsOnActivity(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 300*time.Millisecond))
+	inj.OnResult()
+	time.Sleep(150 * time.Millisecond)
+	require.NoError(t, inj.Send("b")) // a turn is running: the cap does not apply
+	time.Sleep(300 * time.Millisecond)
+	notClosed(t, inj)
+	inj.OnResult() // idle again: the cap starts over
+	assert.Equal(t, 1, closesOf(t, inj, w))
+}
+
+func TestInjectorBackgroundTasksEndIdle(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 80*time.Millisecond))
+	inj.OnResult()
+	inj.OnBackgroundTasks(1) // woke up for background work: not idle
+	notClosed(t, inj)
+	inj.OnBackgroundTasks(0)
+	inj.OnResult()
+	assert.Equal(t, 1, closesOf(t, inj, w))
+}
+
+// Background tasks that end after the last result re-settle a hold, so the
+// idle cap is armed even if no later result comes.
+func TestInjectorBackgroundTasksEndWithoutResultSettles(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 80*time.Millisecond))
+	inj.OnBackgroundTasks(1)
+	inj.OnResult() // interim result while tasks run: not settled
+	notClosed(t, inj)
+	inj.OnBackgroundTasks(0) // no result follows
+	assert.Equal(t, 1, closesOf(t, inj, w), "the idle cap closes the settled hold")
+}
+
+// The idle notifications carry a generation that grows with every change, and
+// a hold that finds the injector idle already repeats the state (same gen).
+func TestInjectorIdleNotifyGenerations(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	type ev struct {
+		idle bool
+		gen  uint64
+	}
+	var mu sync.Mutex
+	var events []ev
+	inj.SetIdleNotify(func(idle bool, gen uint64) { mu.Lock(); events = append(events, ev{idle, gen}); mu.Unlock() })
+	get := func(n int) []ev {
+		t.Helper()
+		require.Eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(events) >= n }, 2*time.Second, 5*time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]ev(nil), events...)
+	}
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 0))
+	inj.OnResult()
+	require.NoError(t, inj.Send("b"))
+	inj.OnResult()
+	evs := get(3)
+	assert.Equal(t, []bool{true, false, true}, []bool{evs[0].idle, evs[1].idle, evs[2].idle})
+	assert.Less(t, evs[0].gen, evs[1].gen)
+	assert.Less(t, evs[1].gen, evs[2].gen)
+
+	require.NoError(t, inj.SetHold(true, 0)) // already idle: tell again
+	evs = get(4)
+	assert.Equal(t, evs[2], evs[3])
+}
+
+// SendGen returns the generation of the turn_active report its message
+// causes, so reports from before it can be told stale.
+func TestSendGenReturnsGenOfActiveReport(t *testing.T) {
+	w := &fakeWC{}
+	inj := NewInjector(w, lineFmt, false)
+	var mu sync.Mutex
+	gens := map[bool][]uint64{}
+	inj.SetIdleNotify(func(idle bool, gen uint64) { mu.Lock(); gens[idle] = append(gens[idle], gen); mu.Unlock() })
+	require.NoError(t, inj.Send("a"))
+	require.NoError(t, inj.SetHold(true, 0))
+	inj.OnResult() // idle
+	gen, err := inj.SendGen("b")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(gens[false]) == 1 }, 2*time.Second, 5*time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, gens[false][0], gen)
+	assert.Greater(t, gen, gens[true][0])
+}

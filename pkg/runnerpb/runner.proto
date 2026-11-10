@@ -114,6 +114,7 @@ message BackendMessage {
     CancelRun cancel_run = 4;
     Ack ack = 5;
     InjectMessage inject_message = 6;
+    RunControl run_control = 7;
   }
 }
 
@@ -353,6 +354,23 @@ message InjectMessage {
   int64 deadline_unix_ms = 4;
 }
 
+// RunControl changes how the runner treats the still-running agent CLI of
+// run_id, without delivering a message. It has no reply: it is idempotent
+// (it states the wanted condition, not a change) and ordered with the run's
+// other downstream messages, and a run that is gone or whose CLI cannot take
+// it ignores it. A hold that never reaches the CLI only makes the run end at
+// the end of its turn, which is what happens without subagents.
+//
+// action "hold" keeps the CLI's input open after its turn ends so later
+// messages can be injected as new turns (the run has live subagents); "release"
+// lets it end once it is idle. hold_idle_seconds bounds an idle hold (0: the
+// runner's default), so a hold nobody releases cannot keep the run forever.
+message RunControl {
+  string run_id = 1;
+  string action = 2;
+  int64 hold_idle_seconds = 3;
+}
+
 // InjectResult answers one InjectMessage (runner -> backend, seq'd).
 message InjectResult {
   string inject_id = 1;
@@ -364,6 +382,11 @@ message InjectResult {
   string reason = 3;
   // error carries the error text for reason "error" (and detail otherwise).
   string error = 4;
+  // idle_gen is the idle generation of the run's aw right after it accepted
+  // the message (the generation of the turn_active report the message causes;
+  // reports of an earlier generation predate the message). 0: unknown (an aw
+  // that predates the field, or ok is false).
+  uint64 idle_gen = 5;
 }
 
 // ---------------------------------------------------------------------------

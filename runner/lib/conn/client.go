@@ -591,9 +591,36 @@ func (c *Client) handle(msg *runnerpb.BackendMessage) {
 		// messages never reach the CLI swapped.
 		im := p.InjectMessage
 		c.dispatchInject(im.GetRunId(), func() { c.handleInject(ctx, im) })
+	case *runnerpb.BackendMessage_RunControl:
+		// Ordered with the run's injects (same worker): a release sent after
+		// an inject must not overtake it.
+		rc := p.RunControl
+		c.dispatchInject(rc.GetRunId(), func() { c.handleRunControl(ctx, rc) })
 	default:
 		log.Warn().Msgf("ignoring unknown backend message %T", p)
 	}
+}
+
+// handleRunControl applies one RunControl. It has no reply: a failure only
+// means the CLI is not held (or not released, which the idle cap bounds).
+func (c *Client) handleRunControl(ctx context.Context, rc *runnerpb.RunControl) {
+	ctl, ok := c.opts.Executor.(RunController)
+	if !ok {
+		return
+	}
+	idle := time.Duration(rc.GetHoldIdleSeconds()) * time.Second
+	if err := ctl.ControlRun(ctx, rc.GetRunId(), rc.GetAction(), idle); err != nil && !errors.Is(err, types.ErrNotInjectable) {
+		log.Warn().Err(err).Str("run_id", rc.GetRunId()).Str("action", rc.GetAction()).Msg("run control failed")
+	}
+}
+
+// injectMessage injects im through the executor, with the idle generation when
+// the executor reports it.
+func (c *Client) injectMessage(ctx context.Context, im *runnerpb.InjectMessage, deadline time.Time) (uint64, error) {
+	if gi, ok := c.opts.Executor.(GenInjector); ok {
+		return gi.InjectMessageGen(ctx, im.GetRunId(), im.GetInjectId(), im.GetPrompt(), deadline)
+	}
+	return 0, c.opts.Executor.InjectMessage(ctx, im.GetRunId(), im.GetInjectId(), im.GetPrompt(), deadline)
 }
 
 // handleInject applies one InjectMessage and queues its InjectResult.
@@ -629,8 +656,8 @@ func (c *Client) handleInject(ctx context.Context, im *runnerpb.InjectMessage) {
 	deadline := time.UnixMilli(im.GetDeadlineUnixMs())
 	if !time.Now().Before(deadline) {
 		res.Reason, res.Error = InjectNotInjectable, "deadline expired"
-	} else if err := c.opts.Executor.InjectMessage(ctx, im.GetRunId(), id, im.GetPrompt(), deadline); err == nil {
-		res.Ok = true
+	} else if gen, err := c.injectMessage(ctx, im, deadline); err == nil {
+		res.Ok, res.IdleGen = true, gen
 	} else if errors.Is(err, types.ErrNotInjectable) {
 		res.Reason, res.Error = InjectNotInjectable, truncateHealth(err.Error())
 	} else {

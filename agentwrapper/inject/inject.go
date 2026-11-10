@@ -9,16 +9,31 @@
 // replies with one JSON line ({"ok":true} or {"ok":false,"reason":...,
 // "error":...}) once the injection function returned, then closes. The reply
 // is synchronous so the caller knows whether to fall back to queueing.
+//
+// Control requests ({"control":"hold","idle_seconds":1800} or
+// {"control":"release"}) carry no prompt: they keep the CLI's stdin open
+// after its turn while the run has live subagents, or let it close (see
+// common.Injector). They are answered like an injection but travel on a
+// separate socket, control.sock next to inject.sock. An aw that predates
+// controls does not listen there, so a newer runner gets ErrUnavailable and
+// the control is a no-op; had it been sent over inject.sock, that aw would
+// have injected it as an empty user turn. The server in turn rejects a
+// control on inject.sock and an injection on control.sock.
 package inject
 
 import (
 	"errors"
 	"os"
+	"path/filepath"
 )
 
 const (
 	// SocketName is the file name of the socket inside the socket directory.
 	SocketName = "inject.sock"
+
+	// ControlSocketName is the file name of the control socket, which sits
+	// next to the injection socket.
+	ControlSocketName = "control.sock"
 
 	// DefaultSandboxPath is where the socket lives inside the agent sandbox.
 	DefaultSandboxPath = "/fakebash/" + SocketName
@@ -50,14 +65,33 @@ var (
 	ErrUnavailable = errors.New("inject: no listener")
 )
 
+// Control actions of a control request.
+const (
+	ControlHold    = "hold"
+	ControlRelease = "release"
+)
+
+// ControlPath returns the control socket that belongs to the injection socket
+// at injectPath.
+func ControlPath(injectPath string) string {
+	return filepath.Join(filepath.Dir(injectPath), ControlSocketName)
+}
+
 type request struct {
 	Prompt string `json:"prompt"`
+	// Control, when set, makes the request a control (Prompt is ignored).
+	Control string `json:"control,omitempty"`
+	// IdleSeconds bounds an idle hold; 0 means the server's default.
+	IdleSeconds int64 `json:"idle_seconds,omitempty"`
 }
 
 type response struct {
 	OK     bool   `json:"ok"`
 	Reason string `json:"reason,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// IdleGen is the injector's idle generation right after it accepted an
+	// injection (0: unknown, e.g. an aw that predates the field).
+	IdleGen uint64 `json:"idle_gen,omitempty"`
 }
 
 // SocketPath returns the path aw should listen on, or "" when the feature is

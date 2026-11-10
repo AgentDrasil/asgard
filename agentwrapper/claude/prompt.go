@@ -186,6 +186,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if opts.OnInjectable != nil {
 		opts.OnInjectable(func(p string) error { return inj.Send(p) })
 	}
+	if opts.OnInjectableGen != nil {
+		opts.OnInjectableGen(inj.SendGen)
+	}
+	if opts.OnControl != nil {
+		common.WireHold(inj, opts.ReportCallback, opts.OnControl)
+	}
 
 	// A descendant that outlives claude (and keeps stdout open) would leave
 	// consumeStream blocked forever, and WaitDelay cannot help because Wait

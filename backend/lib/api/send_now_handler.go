@@ -22,6 +22,22 @@ type runInjector interface {
 	Inject(ctx context.Context, nodeID, runID, prompt string) (injected bool, err error)
 }
 
+// genInjector is implemented by injectors that also report the idle
+// generation of the run's aw after it accepted a message (runnerhub.Hub).
+type genInjector interface {
+	InjectGen(ctx context.Context, nodeID, runID, prompt string) (injected bool, idleGen uint64, err error)
+}
+
+// inject pushes prompt into the run, with the idle generation when known (0
+// otherwise).
+func (s *Server) inject(ctx context.Context, nodeID, runID, prompt string) (bool, uint64, error) {
+	if gi, ok := s.injector.(genInjector); ok {
+		return gi.InjectGen(ctx, nodeID, runID, prompt)
+	}
+	injected, err := s.injector.Inject(ctx, nodeID, runID, prompt)
+	return injected, 0, err
+}
+
 // activeRunLookup finds the run currently executing for a chat and agent
 // (dispatch.ActiveRuns).
 type activeRunLookup interface {
@@ -33,6 +49,9 @@ const (
 	sendNowNotRunning   = "not_running"
 	sendNowNotSupported = "not_supported"
 	sendNowFailed       = "failed"
+	// sendNowHeldByChild: the chat waits between turns for its subagents and
+	// one of them holds the checkout, so a new turn must not start.
+	sendNowHeldByChild = "descendant_holds_checkout"
 )
 
 // handleSendQueuedNow handles POST /api/sessions/{id}/queue/{messageId}/send-now.
@@ -150,7 +169,22 @@ func (s *Server) handleSendQueuedNow(w http.ResponseWriter, r *http.Request) {
 	// (c) Inject blocks up to ~6s and ignores cancellation, and giving up
 	// early would risk delivering the message twice, so the request context
 	// is detached: the outcome must be recorded even if the client left.
-	injected, ierr := s.injector.Inject(context.WithoutCancel(r.Context()), nodeID, runID, msg.Prompt)
+	//
+	// A chat waiting between turns for its subagents gives up its waiting mark
+	// first; if a writable subagent holds the checkout the message stays
+	// queued (as for every other inject path).
+	ready, done := s.prepareHeldInject(id)
+	if !ready {
+		restoreMsg()
+		if restoreFailed {
+			writeJSONError(w, http.StatusInternalServerError, "the message could not be restored to the queue and was not sent; it was added to the transcript, please resend it")
+			return
+		}
+		writeSendNowResult(w, map[string]any{"injected": false, "reason": sendNowHeldByChild})
+		return
+	}
+	injected, idleGen, ierr := s.inject(context.WithoutCancel(r.Context()), nodeID, runID, msg.Prompt)
+	done(injected, idleGen)
 	if !injected {
 		reason := sendNowNotSupported
 		switch {

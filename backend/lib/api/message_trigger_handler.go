@@ -398,6 +398,22 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			return
 		}
 
+		// A run that sits idle waiting for its subagents takes the message as
+		// its next turn right away instead of queueing it behind a run that
+		// only ends when the subagents are done.
+		if src, _ := req.Metadata["source"].(string); src != "subagent-finished" && src != "subagent-reply" && s.isIdleHeld(chatID) {
+			if s.tryInject(chatID, targetAgent.Config.ID, req.Prompt) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":   "accepted",
+					"chatId":   chatID,
+					"injected": true,
+				})
+				return
+			}
+		}
+
 		if s.repo != nil {
 			existing, err := s.repo.GetQueuedMessages(chatID)
 			if err != nil {

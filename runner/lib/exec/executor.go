@@ -73,9 +73,14 @@ type Executor struct {
 	// directory (where aw listens on inject.sock). It only exists while the
 	// sandboxes of the current target run.
 	sockDirs map[string]string
+	// noControl are runs whose CLI never took a control.
+	noControl map[string]bool
 }
 
-var _ conn.Executor = (*Executor)(nil)
+var (
+	_ conn.Executor      = (*Executor)(nil)
+	_ conn.RunController = (*Executor)(nil)
+)
 
 // New creates an Executor.
 func New(opts Options) *Executor {
@@ -88,7 +93,7 @@ func New(opts Options) *Executor {
 	if opts.run == nil {
 		opts.run = run.RunWithOptions
 	}
-	return &Executor{opts: opts, cancels: make(map[string]context.CancelFunc), sockDirs: make(map[string]string)}
+	return &Executor{opts: opts, cancels: make(map[string]context.CancelFunc), sockDirs: make(map[string]string), noControl: make(map[string]bool)}
 }
 
 // StartRun implements conn.Executor. It returns right away: the run executes
@@ -134,6 +139,7 @@ func (e *Executor) clearSockDir(runID, dir string) {
 	e.mu.Lock()
 	if e.sockDirs[runID] == dir {
 		delete(e.sockDirs, runID)
+		delete(e.noControl, runID)
 	}
 	e.mu.Unlock()
 }
@@ -143,16 +149,24 @@ func (e *Executor) clearSockDir(runID, dir string) {
 // not delivered" (unknown run, no sock dir yet, socket missing or closed) maps
 // to types.ErrNotInjectable so the backend queues the message instead.
 func (e *Executor) InjectMessage(ctx context.Context, runID, injectID, prompt string, deadline time.Time) error {
+	_, err := e.InjectMessageGen(ctx, runID, injectID, prompt, deadline)
+	return err
+}
+
+// InjectMessageGen is InjectMessage that also returns the idle generation aw
+// replied with (0: none, e.g. an aw that predates it).
+func (e *Executor) InjectMessageGen(ctx context.Context, runID, injectID, prompt string, deadline time.Time) (uint64, error) {
 	e.mu.Lock()
 	dir, ok := e.sockDirs[runID]
 	e.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("%w: run %q has no socket dir", types.ErrNotInjectable, runID)
+		return 0, fmt.Errorf("%w: run %q has no socket dir", types.ErrNotInjectable, runID)
 	}
 	// inject.Send requires a deadline: a frozen aw must not hang the call.
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	if err := inject.Send(ctx, filepath.Join(dir, inject.SocketName), prompt); err != nil {
+	gen, err := inject.SendGen(ctx, filepath.Join(dir, inject.SocketName), prompt)
+	if err != nil {
 		if ctx.Err() != nil && !errors.Is(err, types.ErrNotInjectable) {
 			// Timed out mid-exchange: the reply was lost, so the message
 			// may or may not have been delivered. It is reported as an error
@@ -160,10 +174,67 @@ func (e *Executor) InjectMessage(ctx context.Context, runID, injectID, prompt st
 			// backend cannot tell the two apart and queues on any failure.
 			log.Warn().Err(err).Str("run_id", runID).Str("inject_id", injectID).Msg("inject timed out")
 		}
-		return err
+		return 0, err
 	}
-	return nil
+	return gen, nil
 }
+
+// ControlRun implements conn.RunController: it relays a hold / release to the
+// aw process of the run over its control socket (next to inject.sock, so an aw
+// that predates controls is never sent one). A hold that finds nobody
+// listening is retried briefly (aw may still be starting) and then fails
+// without being remembered: the next sync retries. Only a run whose aw
+// answered that it cannot be controlled (stdin closed) is remembered, so later
+// controls fail at once.
+func (e *Executor) ControlRun(ctx context.Context, runID, action string, holdIdle time.Duration) error {
+	e.mu.Lock()
+	dir, ok := e.sockDirs[runID]
+	none := e.noControl[runID]
+	e.mu.Unlock()
+	if !ok || none {
+		return fmt.Errorf("%w: run %q cannot be controlled", types.ErrNotInjectable, runID)
+	}
+	path := filepath.Join(dir, inject.ControlSocketName)
+	start := time.Now()
+	for {
+		cctx, cancel := context.WithTimeout(ctx, controlTimeout)
+		err := inject.SendControl(cctx, path, action, holdIdle)
+		cancel()
+		if err == nil || !errors.Is(err, types.ErrNotInjectable) || action != inject.ControlHold {
+			return err
+		}
+		if ctx.Err() != nil {
+			return err
+		}
+		if time.Since(start) >= controlRetryBudget {
+			if !errors.Is(err, inject.ErrUnavailable) {
+				// aw answered that it cannot take controls (the CLI cannot
+				// hold, or stdin is closed): remember. Nobody listening is
+				// not remembered: aw may just be slow to start.
+				e.mu.Lock()
+				if _, still := e.sockDirs[runID]; still {
+					e.noControl[runID] = true
+				}
+				e.mu.Unlock()
+			}
+			return err
+		}
+		select {
+		case <-time.After(controlRetry):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+const (
+	// controlTimeout bounds one control exchange with aw.
+	controlTimeout = 5 * time.Second
+	// controlRetry is the pause between attempts of a hold; the attempts stop
+	// after controlRetryBudget.
+	controlRetry       = 100 * time.Millisecond
+	controlRetryBudget = 1500 * time.Millisecond
+)
 
 // outcome is what execute learned about a run.
 type outcome struct {

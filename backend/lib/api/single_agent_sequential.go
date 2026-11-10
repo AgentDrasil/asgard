@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
+	"github.com/AgentDrasil/asgard/agentwrapper/common"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
@@ -170,6 +171,7 @@ func (e *SingleAgentExecutor) executeSequential(
 				Scope:          run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
 				Attempt:        attempt,
 				OnEvent:        e.publishRunEvent,
+				OnStarted:      func() { e.runStarted(chatID) },
 			})
 			resultCh <- seqRunResult{out: res.Output, target: res.Target, err: err}
 		}(forcedModel, attempt)
@@ -229,6 +231,27 @@ func (e *SingleAgentExecutor) executeSequential(
 		}
 		suspended = true
 	}
+}
+
+// runStarted keeps a run that starts while its chat has live subagents (a
+// push restarted the parent) alive past its turn too.
+func (e *SingleAgentExecutor) runStarted(chatID string) {
+	if e.server != nil {
+		e.server.syncHold(chatID)
+	}
+}
+
+// recordUpdate stores a status update of the run, except aw's turn reports of
+// a held run, which change the chat's status instead.
+func (e *SingleAgentExecutor) recordUpdate(chatID string, update AgentStatusUpdate, workspaceDir string) {
+	if update.EntryType == common.EntryTypeTurnIdle || update.EntryType == common.EntryTypeTurnActive {
+		if e.server != nil {
+			gen, hasGen := turnReportGen(update.Metadata)
+			e.server.onTurnReport(chatID, update.EntryType, gen, hasGen)
+		}
+		return
+	}
+	recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
 }
 
 // publishRunEvent feeds a runner's RunEvent into the status path POST
@@ -368,7 +391,7 @@ func (e *SingleAgentExecutor) drainUntilResult(
 				statusCh = nil
 				continue
 			}
-			recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
+			e.recordUpdate(chatID, update, workspaceDir)
 
 		case result := <-resultCh:
 			if statusCh != nil {
@@ -377,7 +400,7 @@ func (e *SingleAgentExecutor) drainUntilResult(
 					select {
 					case update, ok := <-statusCh:
 						if ok {
-							recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
+							e.recordUpdate(chatID, update, workspaceDir)
 						} else {
 							draining = false
 						}

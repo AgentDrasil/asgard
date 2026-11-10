@@ -133,6 +133,18 @@ type PromptOptions struct {
 	// that cannot take mid-run messages never call it, which is how callers
 	// learn the capability is missing.
 	OnInjectable func(inject func(prompt string) error)
+
+	// OnInjectableGen is OnInjectable for an inject func that also returns the
+	// idle generation of the CLI's input right after the message was accepted
+	// (see common.Injector.SendGen). A CLI calls both when both are set.
+	OnInjectableGen func(inject func(prompt string) (uint64, error))
+
+	// OnControl, if non-nil, is called exactly once right after the CLI
+	// process started, with a goroutine-safe func that holds the CLI's input
+	// open after its turn (hold true; idle bounds an idle hold, 0 for the
+	// default) or releases it. It returns ErrNotInjectable once stdin is
+	// closed. Only CLIs that call OnInjectable call it.
+	OnControl func(control func(hold bool, idle time.Duration) error)
 }
 
 // ErrNotInjectable is returned by an inject func when the run has finished

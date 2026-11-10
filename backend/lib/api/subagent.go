@@ -252,6 +252,8 @@ func (s *Server) SpawnSubagent(ctx context.Context, req SpawnSubagentRequest) (s
 		}
 		return "", subagentErr(kind, "failed to start subagent: %s", firstNonEmpty(body.Error, fmt.Sprintf("HTTP status %d", rec.code)))
 	}
+	// The parent's process now has a reason to outlive its turn.
+	s.syncHold(req.CallerChat)
 	return childID, nil
 }
 
@@ -446,7 +448,15 @@ func (s *Server) tryInject(chatID, agentID, prompt string) bool {
 	if !ok {
 		return false
 	}
-	injected, err := s.injector.Inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
+	// A parent waiting between turns for its children must give up its
+	// waiting mark before a new turn can write; when it cannot, the message
+	// is queued instead.
+	ready, done := s.prepareHeldInject(chatID)
+	if !ready {
+		return false
+	}
+	injected, idleGen, err := s.inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
+	done(injected, idleGen)
 	if injected {
 		s.recordInjectedMessage(chatID, prompt)
 		return true

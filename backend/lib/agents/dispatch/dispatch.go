@@ -50,6 +50,9 @@ type Request struct {
 	// OnEvent receives the RunEvents of the run, in order, before Run
 	// returns. It may be nil.
 	OnEvent func(*runnerpb.RunEvent)
+	// OnStarted is called once the run is registered as the active run of its
+	// chat and agent (the runner has it). It may be nil.
+	OnStarted func()
 }
 
 // Result is the outcome of a run. Target and RunDir are set as far as the run

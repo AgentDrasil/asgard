@@ -44,6 +44,24 @@ type Executor interface {
 	InjectMessage(ctx context.Context, runID, injectID, prompt string, deadline time.Time) error
 }
 
+// GenInjector is implemented by executors whose InjectMessage can also report
+// the idle generation of the run's agent after it accepted the message; it
+// goes to the backend in InjectResult.idle_gen. Executor.InjectMessage is
+// used otherwise.
+type GenInjector interface {
+	InjectMessageGen(ctx context.Context, runID, injectID, prompt string, deadline time.Time) (idleGen uint64, err error)
+}
+
+// RunController is implemented by executors that can hold a run's agent CLI
+// alive while the run has live subagents (see runnerpb.RunControl). An
+// executor without it ignores run controls.
+type RunController interface {
+	// ControlRun applies action ("hold" or "release") to the run. An error
+	// matching types.ErrNotInjectable means the run is gone or its CLI cannot
+	// take controls.
+	ControlRun(ctx context.Context, runID, action string, holdIdle time.Duration) error
+}
+
 // ErrNotImplemented is the RunResult.error of the placeholder executor.
 const ErrNotImplemented = "execution not implemented"
 

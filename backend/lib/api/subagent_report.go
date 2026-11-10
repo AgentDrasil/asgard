@@ -331,7 +331,18 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 	}
 	g.mu.Unlock()
 
-	if push {
+	// The chat's own run is over: forget its hold. For a child, the parent's
+	// hold is re-evaluated once the finish is pushed (the push is injected
+	// into the still-held process; releasing first would end it).
+	s.forgetHold(chatID)
+	if parentChat != "" {
+		go func() {
+			if push {
+				s.pushSubagentFinished(chatID)
+			}
+			s.syncHold(parentChat)
+		}()
+	} else if push {
 		go s.pushSubagentFinished(chatID)
 	}
 }
@@ -366,9 +377,24 @@ func (s *Server) stopDescendant(chatID string) (int, string) {
 				Payload: map[string]any{"queue": []dbmodels.QueuedMessage{}},
 			})
 			s.markStopped(chatID)
+			// The child counted as live through its queued head and no
+			// execution release follows: re-evaluate its parent's hold.
+			s.syncParentHold(chatID)
 		}
 	}
 	return code, msg
+}
+
+// syncParentHold re-evaluates the hold of the parent of a subagent chat whose
+// liveness changed without a release of its execution (its queued head was
+// dropped). Callers hold spawnMu or nothing; the hold lock is taken inside.
+func (s *Server) syncParentHold(chatID string) {
+	if s.repo == nil {
+		return
+	}
+	if sess, err := s.repo.GetSessionMeta(chatID); err == nil && sess != nil && sess.ParentChatID != "" {
+		s.syncHold(sess.ParentChatID)
+	}
 }
 
 // childFinished reports whether the chat has stopped for good: no execution and

@@ -59,6 +59,8 @@ type Server struct {
 	spawnMu            sync.Mutex          // serialises the child-count check and start of a subagent spawn
 	pushRetryDelays    []time.Duration     // overrides defaultPushRetryDelays (tests)
 	subagentSig        subagentSignals     // subagent wait, waiting marks and finish pushes
+	holds              holdBook            // runs held alive while their chat has live subagents
+	holdIdle           time.Duration       // overrides the idle cap of a hold (tests; 0: default)
 	peerMu             sync.Mutex          // guards peerChains
 	peerChains         map[string][]string // chatID -> agent ids on the active call-peer chain
 	activeExecutions   sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)

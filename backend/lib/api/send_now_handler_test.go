@@ -18,6 +18,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/agents/dispatch"
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
@@ -375,4 +376,48 @@ func TestSendNow_RestoreFailsPermanently(t *testing.T) {
 	}
 	assert.True(t, sawErr)
 	assert.True(t, sawQueue)
+}
+
+// A chat that waits between turns for its subagents must not get a turn
+// injected by send-now while a writable subagent holds the checkout.
+func TestSendNow_IdleHeldChatWithWritableChildStaysQueued(t *testing.T) {
+	s := setupSendNow(t, func(string) (bool, error) { return true, nil })
+	s.startRun()
+	srv := s.server
+	srv.dirLocks = dirlock.NewManager(func(string) { srv.subagentSig.locksChanged(srv) })
+	ctx := t.Context()
+	relParent, err := srv.dirLocks.Acquire(ctx, lockReq(s.chatID))
+	require.NoError(t, err)
+	defer relParent(false)
+
+	st := &holdState{runID: "run-1", agentID: "global-agent", holding: true, idle: true, reg: &waitReg{chat: s.chatID}}
+	srv.holds.mu.Lock()
+	srv.holds.m = map[string]*holdState{s.chatID: st}
+	srv.holds.mu.Unlock()
+	srv.holdWaitMark(s.chatID, st.reg)
+	got := make(chan func(bool), 1)
+	go func() {
+		if rel, aerr := srv.dirLocks.Acquire(ctx, lockReq("child-w", s.chatID)); aerr == nil {
+			got <- rel
+		}
+	}()
+	select {
+	case rel := <-got:
+		defer rel(false)
+	case <-time.After(5 * time.Second):
+		t.Fatal("writable child not granted")
+	}
+
+	msgs := s.enqueue(t, "first")
+	rr := s.sendNow(msgs[0].ID)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	body := decode(t, rr)
+	assert.Equal(t, false, body["injected"])
+	assert.Equal(t, sendNowHeldByChild, body["reason"])
+	assert.Zero(t, s.injector.calls.Load())
+	q := s.queue(t)
+	require.Len(t, q, 1)
+	assert.Equal(t, "first", q[0].Prompt)
+	assert.True(t, srv.chatMarked(s.chatID), "mark unchanged")
+	assert.True(t, srv.isIdleHeld(s.chatID))
 }

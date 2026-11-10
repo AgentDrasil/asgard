@@ -509,6 +509,38 @@ func (h *Hub) Cancel(nodeID, runID string) error {
 	return nil
 }
 
+// Run control actions of HoldRun / runnerpb.RunControl.
+const (
+	RunControlHold    = "hold"
+	RunControlRelease = "release"
+)
+
+// ControlRun tells the runner to hold the agent CLI of a run alive after its
+// turn (action RunControlHold, for at most idle when no message comes) or to
+// let it end when idle (RunControlRelease). It is fire and forget and
+// idempotent: the control is queued even if the node is currently offline and
+// replayed on reconnect in order with the run's other messages, and a run that
+// is gone or a CLI that cannot take it ignores it. The returned error only
+// says the run is unknown here.
+func (h *Hub) ControlRun(nodeID, runID, action string, idle time.Duration) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return ErrHubClosed
+	}
+	n := h.nodes[nodeID]
+	r := h.runs[runID]
+	if n == nil || r == nil || r.nodeID != nodeID || !h.isAllowed(nodeID) {
+		return fmt.Errorf("%w: %s", ErrUnknownRun, shortID(runID))
+	}
+	n.enqueueLocked(&runnerpb.BackendMessage{Payload: &runnerpb.BackendMessage_RunControl{RunControl: &runnerpb.RunControl{
+		RunId:           runID,
+		Action:          action,
+		HoldIdleSeconds: int64(idle / time.Second),
+	}}})
+	return nil
+}
+
 // SetCallbacks installs the AgentCallbackService handler. It takes effect for
 // all connections, also those already established.
 func (h *Hub) SetCallbacks(cb runnerpb.AgentCallbackServiceServer) {

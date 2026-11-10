@@ -319,7 +319,7 @@ func TestInjectResultAlreadyBufferedWins(t *testing.T) {
 		}
 		w := &injectWaiter{ch: make(chan *runnerpb.InjectResult, 1)}
 		w.ch <- &runnerpb.InjectResult{InjectId: "x", Ok: true}
-		ok, err := h.awaitInject(cancelled, w, fired)
+		ok, _, err := h.awaitInject(cancelled, w, fired)
 		require.NoError(t, err)
 		require.True(t, ok, "iteration %d: ctx cancelled", i)
 
@@ -328,7 +328,7 @@ func TestInjectResultAlreadyBufferedWins(t *testing.T) {
 		default:
 		}
 		w.ch <- &runnerpb.InjectResult{InjectId: "x", Ok: true}
-		ok, err = h.awaitInject(context.Background(), w, fired)
+		ok, _, err = h.awaitInject(context.Background(), w, fired)
 		require.NoError(t, err)
 		require.True(t, ok, "iteration %d: timer fired", i)
 	}
@@ -336,7 +336,7 @@ func TestInjectResultAlreadyBufferedWins(t *testing.T) {
 	w := &injectWaiter{ch: make(chan *runnerpb.InjectResult, 1)}
 	w.ch <- &runnerpb.InjectResult{InjectId: "x", Ok: true}
 	h.Stop()
-	ok, err := h.awaitInject(context.Background(), w, nil)
+	ok, _, err := h.awaitInject(context.Background(), w, nil)
 	require.NoError(t, err)
 	assert.True(t, ok, "hub stopped")
 }
@@ -397,4 +397,41 @@ func TestInjectContextCancelDoesNotPreempt(t *testing.T) {
 	env.hub.mu.Lock()
 	assert.Empty(t, env.hub.injects)
 	env.hub.mu.Unlock()
+}
+
+func TestControlRunQueuesHoldAndRelease(t *testing.T) {
+	env, f, _ := injectEnv(t)
+
+	require.NoError(t, env.hub.ControlRun("runner-a", "r1", RunControlHold, 90*time.Second))
+	rc := f.nextBackend().GetRunControl()
+	require.NotNil(t, rc)
+	assert.Equal(t, "r1", rc.GetRunId())
+	assert.Equal(t, "hold", rc.GetAction())
+	assert.EqualValues(t, 90, rc.GetHoldIdleSeconds())
+
+	require.NoError(t, env.hub.ControlRun("runner-a", "r1", RunControlRelease, 0))
+	assert.Equal(t, "release", f.nextBackend().GetRunControl().GetAction())
+
+	assert.ErrorIs(t, env.hub.ControlRun("runner-a", "nope", RunControlHold, 0), ErrUnknownRun)
+}
+
+func TestInjectGenReturnsRunnersIdleGen(t *testing.T) {
+	setInjectTiming(t, 2*time.Second, 200*time.Millisecond)
+	env, f, _ := injectEnv(t)
+	type out struct {
+		ok  bool
+		gen uint64
+		err error
+	}
+	ch := make(chan out, 1)
+	go func() {
+		ok, gen, err := env.hub.InjectGen(context.Background(), "runner-a", "r1", "hello")
+		ch <- out{ok, gen, err}
+	}()
+	im := f.nextInject()
+	f.sendInjectResult(&runnerpb.InjectResult{InjectId: im.GetInjectId(), Ok: true, IdleGen: 9})
+	o := <-ch
+	require.NoError(t, o.err)
+	assert.True(t, o.ok)
+	assert.Equal(t, uint64(9), o.gen)
 }

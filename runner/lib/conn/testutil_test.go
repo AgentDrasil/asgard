@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -295,6 +296,7 @@ type recordingExecutor struct {
 	// injectFn, when set, answers InjectMessage (default: nil = injected).
 	injectFn func(ctx context.Context, runID, injectID, prompt string) error
 	injected []string
+	controls []string
 }
 
 func newRecordingExecutor(hold chan struct{}) *recordingExecutor {
@@ -359,4 +361,28 @@ func (e *recordingExecutor) injectedCalls() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string(nil), e.injected...)
+}
+
+// ControlRun records "<run>:<action>:<idle seconds>".
+func (e *recordingExecutor) ControlRun(_ context.Context, runID, action string, idle time.Duration) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.controls = append(e.controls, fmt.Sprintf("%s:%s:%d", runID, action, int(idle/time.Second)))
+	return nil
+}
+
+func (e *recordingExecutor) controlCalls() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.controls...)
+}
+
+// genExecutor is a recordingExecutor that also reports an idle generation.
+type genExecutor struct {
+	*recordingExecutor
+	gen uint64
+}
+
+func (e *genExecutor) InjectMessageGen(ctx context.Context, runID, injectID, prompt string, dl time.Time) (uint64, error) {
+	return e.gen, e.InjectMessage(ctx, runID, injectID, prompt, dl)
 }

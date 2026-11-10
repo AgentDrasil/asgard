@@ -153,6 +153,12 @@ func Prompt(ctx context.Context, prompt string, opts types.PromptOptions) (*type
 	if opts.OnInjectable != nil {
 		opts.OnInjectable(func(p string) error { return inj.Send(p) })
 	}
+	if opts.OnInjectableGen != nil {
+		opts.OnInjectableGen(inj.SendGen)
+	}
+	if opts.OnControl != nil {
+		common.WireHold(inj, opts.ReportCallback, opts.OnControl)
+	}
 
 	maxTokens := types.GetModelContextWindow(opts.Model)
 	sessionID, lastContent, inputTokens, outMaxTokens, runErr := parseStream(stdout, opts.ReportCallback, maxTokens, inj.OnResult)

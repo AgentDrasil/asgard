@@ -620,3 +620,40 @@ func TestInjectsOfOneRunStayOrdered(t *testing.T) {
 	assert.Equal(t, "second", nextInject(t, results).GetInjectId())
 	assert.Equal(t, []string{"first:a", "second:b"}, exec.injectedCalls())
 }
+
+// A run control is relayed to the executor in order with the run's injects,
+// and needs no reply.
+func TestRunControlRelayedInOrderWithInjects(t *testing.T) {
+	t.Parallel()
+	exec := newRecordingExecutor(nil)
+	exec.injectFn = func(_ context.Context, _, injectID, _ string) error {
+		if injectID == "first" {
+			time.Sleep(200 * time.Millisecond) // the release must not overtake it
+		}
+		return nil
+	}
+	dl := time.Now().Add(time.Minute)
+	ctl := func(seq uint64, action string, idle int64) *runnerpb.BackendMessage {
+		return &runnerpb.BackendMessage{Seq: seq, Payload: &runnerpb.BackendMessage_RunControl{RunControl: &runnerpb.RunControl{RunId: "r1", Action: action, HoldIdleSeconds: idle}}}
+	}
+	fb, results := injectBackend(t,
+		ctl(1, "hold", 90),
+		injectMsg(2, "r1", "first", "a", dl),
+		ctl(3, "release", 0),
+	)
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+	assert.Equal(t, "first", nextInject(t, results).GetInjectId())
+	require.Eventually(t, func() bool { return len(exec.controlCalls()) == 2 }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{"r1:hold:90", "r1:release:0"}, exec.controlCalls())
+}
+
+func TestInjectResultCarriesIdleGen(t *testing.T) {
+	t.Parallel()
+	exec := &genExecutor{recordingExecutor: newRecordingExecutor(nil), gen: 5}
+	fb, results := injectBackend(t, injectMsg(1, "r1", "ok", "hi", time.Now().Add(time.Minute)))
+	startClient(t, fb.pki, fb.ln.Addr().String(), "r1", func(o *Options) { o.Executor = exec })
+
+	r := nextInject(t, results)
+	assert.True(t, r.GetOk())
+	assert.Equal(t, uint64(5), r.GetIdleGen())
+}

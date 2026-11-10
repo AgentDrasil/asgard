@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"time"
+
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/inject"
@@ -21,6 +23,7 @@ func startInjectServer(opts *types.PromptOptions) (closeFn func()) {
 		log.Warn().Err(err).Str("path", path).Msg("aw: mid-run message injection disabled")
 		return func() {}
 	}
-	opts.OnInjectable = func(fn func(string) error) { srv.SetInject(fn) }
+	opts.OnInjectableGen = func(fn func(string) (uint64, error)) { srv.SetInjectGen(fn) }
+	opts.OnControl = func(fn func(bool, time.Duration) error) { srv.SetControl(fn) }
 	return func() { _ = srv.Close() }
 }

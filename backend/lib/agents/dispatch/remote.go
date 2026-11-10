@@ -89,6 +89,9 @@ func (d *Remote) Run(ctx context.Context, req Request) (Result, error) {
 	// Registered only once the runner has the run, and removed on every way
 	// out of Run, so a lookup never names a run that is gone for long.
 	defer d.active.Register(req.ChatID, req.Agent.Config.ID, nodeID, sr.GetRunId())()
+	if req.OnStarted != nil {
+		req.OnStarted()
+	}
 
 	pumpCtx, stopPump := context.WithCancel(context.Background())
 	defer stopPump()

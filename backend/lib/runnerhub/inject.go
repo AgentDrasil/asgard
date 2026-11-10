@@ -67,11 +67,18 @@ type injectWaiter struct {
 // and the result only arrives after we gave up) can deliver the message twice;
 // the queued InjectMessage is removed so it is never replayed.
 func (h *Hub) Inject(ctx context.Context, nodeID, runID, prompt string) (injected bool, err error) {
+	injected, _, err = h.InjectGen(ctx, nodeID, runID, prompt)
+	return injected, err
+}
+
+// InjectGen is Inject that also returns the idle generation the run's aw
+// reported after accepting the message (0: unknown or not injected).
+func (h *Hub) InjectGen(ctx context.Context, nodeID, runID, prompt string) (injected bool, idleGen uint64, err error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, 0, err
 	}
 	if len(prompt) > maxPromptSize {
-		return false, fmt.Errorf("%w: inject for run %s", ErrTooLarge, shortID(runID))
+		return false, 0, fmt.Errorf("%w: inject for run %s", ErrTooLarge, shortID(runID))
 	}
 	injectID := newBootID()
 	deadline := time.Now().Add(InjectTimeout)
@@ -80,17 +87,17 @@ func (h *Hub) Inject(ctx context.Context, nodeID, runID, prompt string) (injecte
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return false, ErrHubClosed
+		return false, 0, ErrHubClosed
 	}
 	n := h.nodes[nodeID]
 	r := h.runs[runID]
 	if n == nil || r == nil || r.nodeID != nodeID || !h.isAllowed(nodeID) {
 		h.mu.Unlock()
-		return false, fmt.Errorf("%w: %s", ErrUnknownRun, shortID(runID))
+		return false, 0, fmt.Errorf("%w: %s", ErrUnknownRun, shortID(runID))
 	}
 	if !n.online {
 		h.mu.Unlock()
-		return false, fmt.Errorf("%w: %s", ErrRunnerOffline, shortID(nodeID))
+		return false, 0, fmt.Errorf("%w: %s", ErrRunnerOffline, shortID(nodeID))
 	}
 	h.injects[injectID] = w
 	n.enqueueLocked(&runnerpb.BackendMessage{Payload: &runnerpb.BackendMessage_InjectMessage{InjectMessage: &runnerpb.InjectMessage{
@@ -120,8 +127,8 @@ func (h *Hub) Inject(ctx context.Context, nodeID, runID, prompt string) (injecte
 // other than a result first drains w.ch: a result that already arrived always
 // wins over giving up (else the caller would queue a message that was in fact
 // injected, delivering it twice).
-func (h *Hub) awaitInject(ctx context.Context, w *injectWaiter, timeout <-chan time.Time) (bool, error) {
-	late := func(fallback bool, fallbackErr error) (bool, error) {
+func (h *Hub) awaitInject(ctx context.Context, w *injectWaiter, timeout <-chan time.Time) (bool, uint64, error) {
+	late := func(fallback bool, fallbackErr error) (bool, uint64, error) {
 		select {
 		case res := <-w.ch:
 			return resultToReturn(res)
@@ -129,7 +136,7 @@ func (h *Hub) awaitInject(ctx context.Context, w *injectWaiter, timeout <-chan t
 			if fallbackErr == nil {
 				fallbackErr = ctx.Err() // informational only: still not injected
 			}
-			return fallback, fallbackErr
+			return fallback, 0, fallbackErr
 		}
 	}
 	select {
@@ -145,14 +152,14 @@ func (h *Hub) awaitInject(ctx context.Context, w *injectWaiter, timeout <-chan t
 }
 
 // resultToReturn maps a runner's InjectResult to Inject's return values.
-func resultToReturn(res *runnerpb.InjectResult) (bool, error) {
+func resultToReturn(res *runnerpb.InjectResult) (bool, uint64, error) {
 	if res.GetOk() {
-		return true, nil
+		return true, res.GetIdleGen(), nil
 	}
 	if res.GetReason() == injectReasonNotInjectable {
-		return false, nil
+		return false, 0, nil
 	}
-	return false, fmt.Errorf("%w: %s", ErrInjectFailed, shortID(res.GetError()))
+	return false, 0, fmt.Errorf("%w: %s", ErrInjectFailed, shortID(res.GetError()))
 }
 
 // dropInject removes the waiter and any still-queued InjectMessage of injectID.
