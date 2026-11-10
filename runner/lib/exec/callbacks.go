@@ -45,6 +45,7 @@ func (s *statusServer) registerCallbacks(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathAskUser, s.handleAskUser)
 	mux.HandleFunc("POST "+sandboxsock.PathCallPeer, s.handleCallPeer)
 	mux.HandleFunc("GET "+sandboxsock.PathFindPeer, s.handleFindPeer)
+	s.registerSubagentRoutes(mux)
 	mux.HandleFunc("POST "+sandboxsock.PathMetrics, s.handleMetrics)
 	mux.HandleFunc("POST "+sandboxsock.PathMerge, s.handleMerge)
 }

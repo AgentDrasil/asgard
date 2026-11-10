@@ -72,6 +72,12 @@ func appendWorktreeArgs(args []string, cfg *agentspec.AgentConfig, readonlyDirs 
 // worktree. It stays short: what to do after a failed merge is told by
 // asgard-merge itself, case by case.
 func worktreePrompt(wr *agentspec.WorktreeRun) string {
+	if wr.Shared {
+		return fmt.Sprintf("IMPORTANT: You work in a git worktree shared with the agent that spawned you, not in the main checkout. Your working directory is the worktree; you may only create and move branches under `%[1]s/`. "+
+			"The main checkout (see `git worktree list`) is not yours: never edit it, and do not run `git checkout` on its branch, `git push`, `git gc` or change git config. "+
+			"Git may print `Unable to create packed-refs.lock: Read-only file system`; it is harmless, ignore it. "+
+			"Do the task you were given and leave the changes in the worktree (commit them only if asked to). Do not merge or deliver the work: the agent that spawned you does that.", wr.RefNamespace)
+	}
 	return fmt.Sprintf("IMPORTANT: You work in your own git worktree, not in the main checkout. Your working directory is the worktree and `git branch --show-current` is your branch; you may only create and move branches under `%[1]s/`. "+
 		"The main checkout (see `git worktree list`) is not yours: never edit it, and do not run `git checkout` on its branch, `git push`, `git gc` or change git config. "+
 		"Git may print `Unable to create packed-refs.lock: Read-only file system`; it is harmless, ignore it.\n\n"+

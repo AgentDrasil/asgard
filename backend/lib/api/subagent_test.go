@@ -12,6 +12,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
@@ -510,4 +511,69 @@ func TestSpawnSubagentWorktreeRoot(t *testing.T) {
 	grand, err := rig.repo.GetSessionMeta(grandID)
 	require.NoError(t, err)
 	assert.Equal(t, "/wt", grand.WorktreeRoot)
+}
+
+func TestSubagentStateQueuedWhileWaitingForCheckoutLock(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	rig.server.dirLocks = dirlock.NewManager(nil)
+	ctx := t.Context()
+
+	release, err := rig.server.dirLocks.Acquire(ctx, dirlock.AcquireRequest{ChatID: rigChat, Dirs: []string{"/work/repo"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err)
+
+	child := &dbmodels.Session{ChatID: "child-w", ParentChatID: rigChat, CurrentAgent: "beta", RunDir: "/work/repo"}
+	ro := &dbmodels.Session{ChatID: "child-r", ParentChatID: rigChat, CurrentAgent: "beta", RunDir: "/work/repo", SpawnReadonly: true}
+	rig.server.activeExecutions.Store(child.ChatID, struct{}{})
+	rig.server.activeExecutions.Store(ro.ChatID, struct{}{})
+	// Guard taken but not asking for the lock yet: running.
+	assert.Equal(t, SubagentStateRunning, rig.server.subagentInfo(child).State)
+
+	got := make(chan func(bool), 1)
+	go func() {
+		rel, err := rig.server.dirLocks.Acquire(ctx, dirlock.AcquireRequest{ChatID: child.ChatID, Dirs: []string{"/work/repo"}, Mode: dirlock.ModeExclusive, Ancestors: []string{rigChat}})
+		if err == nil {
+			got <- rel
+		}
+	}()
+	require.Eventually(t, func() bool {
+		st := rig.server.dirLocks.StatusForChat(child.ChatID)
+		return st != nil && st.IsWaitingForLock
+	}, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, SubagentStateQueued, rig.server.subagentInfo(child).State)
+	assert.Equal(t, SubagentStateRunning, rig.server.subagentInfo(ro).State, "a readonly child takes no lock")
+
+	// The parent run ends: the child gets the lock and runs.
+	release(false)
+	rel := <-got
+	assert.Equal(t, SubagentStateRunning, rig.server.subagentInfo(child).State)
+	rel(false)
+}
+
+func TestSpawnRootAndSharedChat(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	mid := &dbmodels.Session{ChatID: "mid", ParentChatID: "top", CurrentAgent: "beta"}
+	leaf := &dbmodels.Session{ChatID: "leaf", ParentChatID: "mid", CurrentAgent: "beta"}
+	top := &dbmodels.Session{ChatID: "top", CurrentAgent: "alpha"}
+	for _, s := range []*dbmodels.Session{top, mid, leaf} {
+		require.NoError(t, rig.repo.SaveSession(s))
+	}
+	root, err := rig.server.spawnRoot(leaf)
+	require.NoError(t, err)
+	assert.Equal(t, "top", root)
+	root, err = rig.server.spawnRoot(top)
+	require.NoError(t, err)
+	assert.Equal(t, "top", root)
+
+	teamExec := &SingleAgentExecutor{server: rig.server, agent: teamAgent("alpha", "t")}
+	got, err := teamExec.sharedChat(leaf)
+	require.NoError(t, err)
+	assert.Equal(t, "top", got, "a descendant shares the root's directory")
+	got, err = teamExec.sharedChat(top)
+	require.NoError(t, err)
+	assert.Equal(t, "top", got, "a team agent's root chat gets its own")
+
+	soloExec := &SingleAgentExecutor{server: rig.server, agent: teamAgent("solo", "")}
+	got, err = soloExec.sharedChat(top)
+	require.NoError(t, err)
+	assert.Empty(t, got, "a plain chat keeps its sandbox unchanged")
 }

@@ -254,6 +254,12 @@ func TestUnpackCommand(t *testing.T) {
 			wantOk:  true,
 		},
 		{
+			name:    "bash -c with subagent spawn",
+			args:    []string{"-c", "/bin/subagent spawn --agent beta --readonly -- 'review it'"},
+			wantCmd: []string{"/bin/subagent", "spawn", "--agent", "beta", "--readonly", "--", "review it"},
+			wantOk:  true,
+		},
+		{
 			name:    "direct call show-output",
 			args:    []string{"show-output"},
 			wantCmd: []string{"show-output"},

@@ -97,6 +97,23 @@ func (e *SingleAgentExecutor) worktreeChat(session *dbmodels.Session) string {
 	return ""
 }
 
+// sharedChat is the root chat of the spawn tree whose scratch directory
+// (/shared in the sandboxes) the run uses, or "" for none. Subagents always
+// use it; a chat of a team agent (it may spawn) uses its own. Other chats keep
+// their sandbox unchanged.
+func (e *SingleAgentExecutor) sharedChat(session *dbmodels.Session) (string, error) {
+	if session == nil || e.server == nil || e.server.repo == nil {
+		return "", nil
+	}
+	if session.ParentChatID == "" {
+		if strings.TrimSpace(e.agent.Config.Team) == "" {
+			return "", nil
+		}
+		return session.ChatID, nil
+	}
+	return e.server.spawnRoot(session)
+}
+
 // checkSharedWorktree fails closed for a subagent whose recorded worktree this
 // agent cannot honor now: the agent no longer offers worktrees, or its
 // worktree root differs from the one the owner's worktree was created under

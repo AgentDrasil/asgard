@@ -266,6 +266,23 @@ func TestPrepareWorktree_SharedAndReadonly(t *testing.T) {
 	})
 }
 
+// Only the owner of a worktree merges: a subagent, writable or not, gets no
+// merge plan, and a writable one is told its worktree is shared.
+func TestMergePlan(t *testing.T) {
+	e := newWTEnv(t)
+	eff, plan, err := prepareWorktree(t.Context(), e.agent, "owner", e.repo, false)
+	require.NoError(t, err)
+
+	owner := mergePlan(&runnerpb.StartRun{Worktree: true, ChatId: "owner"}, eff, plan)
+	require.NotNil(t, owner)
+	assert.False(t, eff.Config.WorktreeRun.Shared)
+
+	assert.Nil(t, mergePlan(&runnerpb.StartRun{Worktree: true, ChatId: "owner", Readonly: true}, eff, plan))
+
+	assert.Nil(t, mergePlan(&runnerpb.StartRun{Worktree: true, ChatId: "child", WorktreeChatId: "owner"}, eff, plan))
+	assert.True(t, eff.Config.WorktreeRun.Shared)
+}
+
 // A read-only StartRun turns the agent into a lock_mode: readonly one, so the
 // worktree or checkout is bound read-only in the command sandbox too.
 func TestApplyOverlay_ReadonlyRun(t *testing.T) {

@@ -65,6 +65,14 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: gomod
+    directory: /cmd/subagent
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
     directory: /cmd/tester
     schedule:
       interval: weekly

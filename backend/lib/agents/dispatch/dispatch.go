@@ -40,6 +40,9 @@ type Request struct {
 	// WorktreeChatID is the chat that owns the worktree when Worktree is set
 	// and it is not ChatID: a subagent shares its ancestor's worktree.
 	WorktreeChatID string
+	// SharedChatID is the root chat of the spawn tree the chat belongs to; the
+	// runner binds the tree's scratch directory at /shared. Empty: none.
+	SharedChatID string
 	// Readonly mounts the checkout read-only (a read-only subagent).
 	Readonly bool
 	// Attempt is the 1-based attempt counter of the logical run.

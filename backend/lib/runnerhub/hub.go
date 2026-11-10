@@ -536,6 +536,38 @@ func (p callbackProxy) FindPeer(ctx context.Context, req *runnerpb.FindPeerReque
 	return p.h.currentCallbacks().FindPeer(ctx, req)
 }
 
+func (p callbackProxy) SpawnSubagent(ctx context.Context, req *runnerpb.SpawnSubagentRequest) (*runnerpb.SpawnSubagentResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.SpawnSubagent(ctx, req)
+}
+
+func (p callbackProxy) ListSubagents(ctx context.Context, req *runnerpb.ListSubagentsRequest) (*runnerpb.ListSubagentsResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.ListSubagents(ctx, req)
+}
+
+func (p callbackProxy) SubagentStatus(ctx context.Context, req *runnerpb.SubagentStatusRequest) (*runnerpb.SubagentStatusResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.SubagentStatus(ctx, req)
+}
+
+func (p callbackProxy) KillSubagent(ctx context.Context, req *runnerpb.KillSubagentRequest) (*runnerpb.KillSubagentResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.KillSubagent(ctx, req)
+}
+
 func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
 	return p.h.currentCallbacks().RecordMetrics(ctx, req)
 }

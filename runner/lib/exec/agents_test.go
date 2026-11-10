@@ -144,6 +144,12 @@ func TestApplyOverlay(t *testing.T) {
 		assert.Equal(t, []string{"/ro"}, got.Config.MountDirs.ReadOnly)
 		assert.Equal(t, []string{"/rw"}, got.Config.MountDirs.ReadWrite)
 	})
+	t.Run("shared chat id reaches the config", func(t *testing.T) {
+		t.Parallel()
+		got := applyOverlay(base, &runnerpb.StartRun{SharedChatId: "root-1", Readonly: true})
+		assert.Equal(t, "root-1", got.Config.SharedChatID)
+		assert.Empty(t, base.Config.SharedChatID)
+	})
 	t.Run("fields override independently", func(t *testing.T) {
 		t.Parallel()
 		got := applyOverlay(base, &runnerpb.StartRun{RunDirs: []string{"/wf-run"}, MountDirsReadwrite: []string{"/wf-rw"}})

@@ -115,6 +115,7 @@ func (cs *Scheduler) localRoots() runnerfs.CleanupRoots {
 	if cs.tmpBase != "" {
 		r.Tmp = cs.tmpBase
 		r.CA = filepath.Join(cs.tmpBase, runnerpaths.CABundleDirName)
+		r.Shared = "" // never touch the real shared root with a test base
 	}
 	if cs.sessionBase != "" {
 		r.Sessions = cs.sessionBase

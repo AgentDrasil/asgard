@@ -130,6 +130,10 @@ const (
 	AgentCallbackService_AskUser_FullMethodName             = "/asgard.runner.v1.AgentCallbackService/AskUser"
 	AgentCallbackService_CallPeer_FullMethodName            = "/asgard.runner.v1.AgentCallbackService/CallPeer"
 	AgentCallbackService_FindPeer_FullMethodName            = "/asgard.runner.v1.AgentCallbackService/FindPeer"
+	AgentCallbackService_SpawnSubagent_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/SpawnSubagent"
+	AgentCallbackService_ListSubagents_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/ListSubagents"
+	AgentCallbackService_SubagentStatus_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/SubagentStatus"
+	AgentCallbackService_KillSubagent_FullMethodName        = "/asgard.runner.v1.AgentCallbackService/KillSubagent"
 	AgentCallbackService_RecordMetrics_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
 	AgentCallbackService_GetUserProxyKeys_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/GetUserProxyKeys"
 	AgentCallbackService_InitWorkflowSession_FullMethodName = "/asgard.runner.v1.AgentCallbackService/InitWorkflowSession"
@@ -148,6 +152,15 @@ type AgentCallbackServiceClient interface {
 	// CallPeer blocks until the peer run finishes (wait=true semantics).
 	CallPeer(ctx context.Context, in *CallPeerRequest, opts ...grpc.CallOption) (*CallPeerResponse, error)
 	FindPeer(ctx context.Context, in *FindPeerRequest, opts ...grpc.CallOption) (*FindPeerResponse, error)
+	// Subagents: child chats of the calling run's chat. The caller's chat and
+	// agent are the hub's run tracking, never a request field. Failures are gRPC
+	// statuses: InvalidArgument, NotFound, PermissionDenied, ResourceExhausted
+	// (depth or concurrency limit), FailedPrecondition (runner offline, no
+	// database) or Internal.
+	SpawnSubagent(ctx context.Context, in *SpawnSubagentRequest, opts ...grpc.CallOption) (*SpawnSubagentResponse, error)
+	ListSubagents(ctx context.Context, in *ListSubagentsRequest, opts ...grpc.CallOption) (*ListSubagentsResponse, error)
+	SubagentStatus(ctx context.Context, in *SubagentStatusRequest, opts ...grpc.CallOption) (*SubagentStatusResponse, error)
+	KillSubagent(ctx context.Context, in *KillSubagentRequest, opts ...grpc.CallOption) (*KillSubagentResponse, error)
 	RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -193,6 +206,46 @@ func (c *agentCallbackServiceClient) FindPeer(ctx context.Context, in *FindPeerR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FindPeerResponse)
 	err := c.cc.Invoke(ctx, AgentCallbackService_FindPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) SpawnSubagent(ctx context.Context, in *SpawnSubagentRequest, opts ...grpc.CallOption) (*SpawnSubagentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SpawnSubagentResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_SpawnSubagent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) ListSubagents(ctx context.Context, in *ListSubagentsRequest, opts ...grpc.CallOption) (*ListSubagentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSubagentsResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_ListSubagents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) SubagentStatus(ctx context.Context, in *SubagentStatusRequest, opts ...grpc.CallOption) (*SubagentStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubagentStatusResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_SubagentStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) KillSubagent(ctx context.Context, in *KillSubagentRequest, opts ...grpc.CallOption) (*KillSubagentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KillSubagentResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_KillSubagent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +340,15 @@ type AgentCallbackServiceServer interface {
 	// CallPeer blocks until the peer run finishes (wait=true semantics).
 	CallPeer(context.Context, *CallPeerRequest) (*CallPeerResponse, error)
 	FindPeer(context.Context, *FindPeerRequest) (*FindPeerResponse, error)
+	// Subagents: child chats of the calling run's chat. The caller's chat and
+	// agent are the hub's run tracking, never a request field. Failures are gRPC
+	// statuses: InvalidArgument, NotFound, PermissionDenied, ResourceExhausted
+	// (depth or concurrency limit), FailedPrecondition (runner offline, no
+	// database) or Internal.
+	SpawnSubagent(context.Context, *SpawnSubagentRequest) (*SpawnSubagentResponse, error)
+	ListSubagents(context.Context, *ListSubagentsRequest) (*ListSubagentsResponse, error)
+	SubagentStatus(context.Context, *SubagentStatusRequest) (*SubagentStatusResponse, error)
+	KillSubagent(context.Context, *KillSubagentRequest) (*KillSubagentResponse, error)
 	RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -316,6 +378,18 @@ func (UnimplementedAgentCallbackServiceServer) CallPeer(context.Context, *CallPe
 }
 func (UnimplementedAgentCallbackServiceServer) FindPeer(context.Context, *FindPeerRequest) (*FindPeerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FindPeer not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) SpawnSubagent(context.Context, *SpawnSubagentRequest) (*SpawnSubagentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SpawnSubagent not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) ListSubagents(context.Context, *ListSubagentsRequest) (*ListSubagentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSubagents not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) SubagentStatus(context.Context, *SubagentStatusRequest) (*SubagentStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubagentStatus not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) KillSubagent(context.Context, *KillSubagentRequest) (*KillSubagentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KillSubagent not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordMetrics not implemented")
@@ -409,6 +483,78 @@ func _AgentCallbackService_FindPeer_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentCallbackServiceServer).FindPeer(ctx, req.(*FindPeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_SpawnSubagent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SpawnSubagentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).SpawnSubagent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_SpawnSubagent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).SpawnSubagent(ctx, req.(*SpawnSubagentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_ListSubagents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSubagentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).ListSubagents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_ListSubagents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).ListSubagents(ctx, req.(*ListSubagentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_SubagentStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubagentStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).SubagentStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_SubagentStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).SubagentStatus(ctx, req.(*SubagentStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_KillSubagent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KillSubagentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).KillSubagent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_KillSubagent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).KillSubagent(ctx, req.(*KillSubagentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -550,6 +696,22 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindPeer",
 			Handler:    _AgentCallbackService_FindPeer_Handler,
+		},
+		{
+			MethodName: "SpawnSubagent",
+			Handler:    _AgentCallbackService_SpawnSubagent_Handler,
+		},
+		{
+			MethodName: "ListSubagents",
+			Handler:    _AgentCallbackService_ListSubagents_Handler,
+		},
+		{
+			MethodName: "SubagentStatus",
+			Handler:    _AgentCallbackService_SubagentStatus_Handler,
+		},
+		{
+			MethodName: "KillSubagent",
+			Handler:    _AgentCallbackService_KillSubagent_Handler,
 		},
 		{
 			MethodName: "RecordMetrics",

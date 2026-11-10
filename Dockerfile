@@ -145,6 +145,7 @@ COPY cmd/ask-user/go.mod cmd/ask-user/go.sum* ./cmd/ask-user/
 COPY cmd/call-peer/go.mod cmd/call-peer/go.sum* ./cmd/call-peer/
 COPY cmd/find-peer/go.mod cmd/find-peer/go.sum* ./cmd/find-peer/
 COPY cmd/show-output/go.mod cmd/show-output/go.sum* ./cmd/show-output/
+COPY cmd/subagent/go.mod cmd/subagent/go.sum* ./cmd/subagent/
 COPY cmd/tester/go.mod cmd/tester/go.sum* ./cmd/tester/
 COPY simplest/go.mod simplest/go.sum* ./simplest/
 
@@ -172,6 +173,7 @@ RUN (cd backend && go mod download) && \
     (cd cmd/call-peer && go mod download) && \
     (cd cmd/find-peer && go mod download) && \
     (cd cmd/show-output && go mod download) && \
+    (cd cmd/subagent && go mod download) && \
     (cd cmd/tester && go mod download) && \
     (cd simplest && go mod download)
 
@@ -203,7 +205,7 @@ FROM go-builder AS go-build-runner
 ARG ASGARD_VERSION=dev
 
 RUN mkdir -p /app/bin && \
-    for name in ask-user call-peer find-peer show-output asgard-merge; do \
+    for name in ask-user call-peer find-peer subagent show-output asgard-merge; do \
     echo "Building $name..."; \
     go build -v -ldflags "-X github.com/AgentDrasil/asgard/pkg/version.Version=${ASGARD_VERSION}" -o "/app/bin/$name" "./cmd/$name"; \
     done && \

@@ -33,6 +33,10 @@ import (
 // is configured with lock_mode: readonly.
 const ReadOnlyWorkspacePrompt = "IMPORTANT: This agent is running in READ-ONLY mode (`lock_mode: readonly`). The workspace directory and mounted project directories are mounted read-only; you are NOT allowed to modify or write files in the workspace. If you need to create temporary files, scripts, scratchpads, or run experiments that write to disk, use `/tmp` (which is writable and isolated to this session)."
 
+// ReadOnlySharedPrompt is appended after ReadOnlyWorkspacePrompt when the run
+// has a shared spawn-tree dir mounted at /shared.
+const ReadOnlySharedPrompt = "NOTE: `/tmp` is private to this chat and is not visible to other agents. Anything another agent must read (reports, findings, large outputs) must be written under `/shared`, which is writable and shared with the other agents in this spawn tree."
+
 // buildContractBody assembles the CLI-agnostic prompt body for the AW_AGENTS.md
 // contract: the global language rules (if non-empty) followed by the agent's
 // own AGENTS.md content (when the file exists). The CLI-specific protocol
@@ -74,6 +78,9 @@ func writeContractFile(dir string, cfg *agentspec.AgentConfig, agentsMDPath stri
 			body += "\n\n" + ReadOnlyWorkspacePrompt
 		} else {
 			body = ReadOnlyWorkspacePrompt
+		}
+		if cfg.SharedChatID != "" {
+			body += " " + ReadOnlySharedPrompt
 		}
 	}
 	if cfg != nil && cfg.WorktreeRun != nil {
@@ -123,6 +130,29 @@ func setupSessionDir(chatID string) (string, error) {
 		return "", fmt.Errorf("creating session directory %q: %w", sessionDir, err)
 	}
 	return sessionDir, nil
+}
+
+// SharedMountPoint is where the scratch directory of a spawn tree is mounted
+// in the agent and command sandboxes.
+const SharedMountPoint = "/shared"
+
+// appendSharedArgs binds the spawn tree's scratch directory
+// (/session-data/shared/<root chat>) read-write at /shared for a run that
+// belongs to one. It is not the checkout, so it stays writable for a readonly
+// run too; parents and children exchange large outputs through it.
+func appendSharedArgs(args []string, cfg *agentspec.AgentConfig) ([]string, error) {
+	if cfg == nil || cfg.SharedChatID == "" {
+		return args, nil
+	}
+	id := cfg.SharedChatID
+	if id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
+		return nil, fmt.Errorf("invalid shared chat id %q", id)
+	}
+	dir := runnerpaths.SharedChatDir(id)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating shared directory %q: %w", dir, err)
+	}
+	return append(args, "--bind", dir, SharedMountPoint), nil
 }
 
 // appendBaseSandboxArgs appends shared bubblewrap flags, mounts, and env vars (unshare flags, /tmp, PATH/system/lib mounts, proc/dev, HOME, PATH, TZ).
@@ -592,6 +622,9 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 	var args []string
 	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
+		return nil, err
+	}
+	if args, err = appendSharedArgs(args, cfg); err != nil {
 		return nil, err
 	}
 
@@ -1263,6 +1296,9 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 	var args []string
 	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
+		return nil, err
+	}
+	if args, err = appendSharedArgs(args, cfg); err != nil {
 		return nil, err
 	}
 

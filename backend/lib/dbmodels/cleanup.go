@@ -22,6 +22,9 @@ type CleanExpiredSessionsOptions struct {
 	// SessionBase overrides the persistent session root; defaults to runnerpaths.SessionsDir().
 	// It exists only to isolate tests.
 	SessionBase string
+	// SharedBase overrides the spawn-tree scratch root; defaults to
+	// runnerpaths.SharedDir() unless TmpBase or SessionBase is overridden.
+	SharedBase string
 }
 
 // ExpiredIdleSessions returns the sessions last updated before cutoff that are
@@ -99,8 +102,13 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 		sessionDir = runnerpaths.SessionsDir()
 	}
 
-	cleanupBases := make([]string, 0, 2)
-	for _, base := range []string{tmpDir, sessionDir} {
+	sharedDir := opts.SharedBase
+	if sharedDir == "" && opts.TmpBase == "" && opts.SessionBase == "" {
+		sharedDir = runnerpaths.SharedDir()
+	}
+
+	cleanupBases := make([]string, 0, 3)
+	for _, base := range []string{tmpDir, sessionDir, sharedDir} {
 		if base != "" {
 			cleanupBases = append(cleanupBases, base)
 		}
@@ -125,6 +133,9 @@ func (r *SessionRepository) CleanExpiredSessions(opts CleanExpiredSessionsOption
 		// 3. Remove session folders under cleanupBases (e.g. tmpDir/<chatID>)
 		if sess.ChatID != "" {
 			for _, base := range cleanupBases {
+				if base == sharedDir {
+					continue // left to the orphan sweep below; descendants may still use it
+				}
 				sessionPath := filepath.Join(base, sess.ChatID)
 				if err := os.RemoveAll(sessionPath); err != nil {
 					log.Warn().Err(err).Str("path", sessionPath).Msg("Failed to remove session dir")

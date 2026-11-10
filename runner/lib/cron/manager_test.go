@@ -79,6 +79,22 @@ func (f *fakeCallbacks) FindPeer(ctx context.Context, in *runnerpb.FindPeerReque
 	return &runnerpb.FindPeerResponse{}, nil
 }
 
+func (f *fakeCallbacks) SpawnSubagent(ctx context.Context, in *runnerpb.SpawnSubagentRequest, opts ...grpc.CallOption) (*runnerpb.SpawnSubagentResponse, error) {
+	return &runnerpb.SpawnSubagentResponse{}, nil
+}
+
+func (f *fakeCallbacks) ListSubagents(ctx context.Context, in *runnerpb.ListSubagentsRequest, opts ...grpc.CallOption) (*runnerpb.ListSubagentsResponse, error) {
+	return &runnerpb.ListSubagentsResponse{}, nil
+}
+
+func (f *fakeCallbacks) SubagentStatus(ctx context.Context, in *runnerpb.SubagentStatusRequest, opts ...grpc.CallOption) (*runnerpb.SubagentStatusResponse, error) {
+	return &runnerpb.SubagentStatusResponse{}, nil
+}
+
+func (f *fakeCallbacks) KillSubagent(ctx context.Context, in *runnerpb.KillSubagentRequest, opts ...grpc.CallOption) (*runnerpb.KillSubagentResponse, error) {
+	return &runnerpb.KillSubagentResponse{}, nil
+}
+
 func (f *fakeCallbacks) RecordMetrics(ctx context.Context, in *runnerpb.RecordMetricsRequest, opts ...grpc.CallOption) (*runnerpb.RecordMetricsResponse, error) {
 	return &runnerpb.RecordMetricsResponse{}, nil
 }

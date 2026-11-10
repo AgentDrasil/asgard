@@ -1,7 +1,7 @@
 // Package sandboxsock is the sandbox side of the runner's per-run callback
 // socket: HTTP over a unix socket that the runner bind mounts into the
 // sandboxes (/fakebash/asgard.sock). Every sandbox tool that talks to the
-// backend (ask-user, call-peer, find-peer, show-output and fakebash
+// backend (ask-user, call-peer, find-peer, subagent, show-output and fakebash
 // telemetry) goes through it; the runner stamps the identity of the run and
 // forwards the call to the backend.
 package sandboxsock
@@ -30,8 +30,13 @@ const (
 	PathAskUser  = "/ask-user"
 	PathCallPeer = "/call-peer"
 	PathFindPeer = "/find-peer"
-	PathMetrics  = "/metrics"
-	PathMerge    = "/merge"
+	// Subagent routes. Later subcommands (send, wait, reply) add theirs here.
+	PathSubagentSpawn  = "/subagent/spawn"
+	PathSubagentList   = "/subagent/list"
+	PathSubagentStatus = "/subagent/status"
+	PathSubagentKill   = "/subagent/kill"
+	PathMetrics        = "/metrics"
+	PathMerge          = "/merge"
 
 	// host is the placeholder request host; the dialer ignores it.
 	host = "http://asgard"
@@ -65,6 +70,61 @@ type CallPeerResponse struct {
 	Status string `json:"status"`
 	Output string `json:"output,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+// SubagentSpawnRequest is the body of POST /subagent/spawn.
+type SubagentSpawnRequest struct {
+	AgentID  string `json:"agent_id"`
+	Model    string `json:"model,omitempty"`
+	Readonly bool   `json:"readonly,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Prompt   string `json:"prompt"`
+}
+
+// SubagentSpawnResponse is the answer of POST /subagent/spawn.
+type SubagentSpawnResponse struct {
+	ID string `json:"id"`
+}
+
+// SubagentIDRequest is the body of POST /subagent/status and /subagent/kill.
+type SubagentIDRequest struct {
+	ID string `json:"id"`
+}
+
+// SubagentInfo describes one subagent. State is running, done, failed or
+// killed; Summary (status only) is the tail of its last output.
+type SubagentInfo struct {
+	ID             string `json:"id"`
+	Label          string `json:"label,omitempty"`
+	Agent          string `json:"agent"`
+	Model          string `json:"model,omitempty"`
+	Readonly       bool   `json:"readonly,omitempty"`
+	State          string `json:"state"`
+	Summary        string `json:"summary,omitempty"`
+	LastActivityMs int64  `json:"last_activity_ms"`
+}
+
+// SubagentListResponse is the answer of GET /subagent/list.
+type SubagentListResponse struct {
+	Subagents []SubagentInfo `json:"subagents"`
+}
+
+// SubagentStatusResponse is the answer of POST /subagent/status.
+type SubagentStatusResponse struct {
+	Subagent SubagentInfo `json:"subagent"`
+}
+
+// SubagentKillResponse is the answer of POST /subagent/kill: how many runs
+// (the subagent and its descendants) were stopped.
+type SubagentKillResponse struct {
+	Stopped int `json:"stopped"`
+}
+
+// ErrorResponse is the JSON body of a failed subagent call; the HTTP status
+// carries the kind (400 invalid, 403 denied, 404 not found, 429 limit, 503
+// unavailable).
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 
 // MergeResponse is the answer of POST /merge. Status is a worktree merge

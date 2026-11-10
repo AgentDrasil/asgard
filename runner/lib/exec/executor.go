@@ -204,6 +204,7 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 	// in the chat's checkout of it.
 	repoDir := runDir
 	var plan *worktree.Plan
+	worktreeRun := false
 	if sr.GetWorktree() {
 		// A subagent shares the worktree of the chat that owns it.
 		wtChat := sr.GetWorktreeChatId()
@@ -216,10 +217,8 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 		}
 		agent, repoDir = wtAgent, p.RepoDir
 		runDirOpt = optional.Some(p.Path)
-		if !sr.GetReadonly() {
-			// Only a writer delivers work, so only it may merge.
-			plan = &p
-		}
+		worktreeRun = true
+		plan = mergePlan(sr, wtAgent, p)
 	}
 
 	candidates := make([]agentspec.CLITarget, 0, len(sr.GetCandidates()))
@@ -240,7 +239,7 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 
 	opts := e.runOptions(ctx, sr, agent, conf, sink, plan)
 	res, err := e.opts.run(ctx, agent, candidates, sr.GetPrompt(), sessions, runDirOpt, modelOpt, sr.GetChatId(), scope, opts)
-	if plan != nil && res.RunDir != "" {
+	if worktreeRun && res.RunDir != "" {
 		res.RunDir = repoDir
 	}
 	return outcome{output: res.Output, target: res.Target, runDir: res.RunDir, err: err}
@@ -399,4 +398,22 @@ func NoQuotaToProto(e *run.NoQuotaError) *runnerpb.NoQuota {
 		nq.Targets = append(nq.Targets, &runnerpb.TargetQuota{Cli: t.CLI, Model: t.Model, Remaining: t.Remaining, Enabled: t.Enabled, Reason: t.Reason})
 	}
 	return nq
+}
+
+// mergePlan returns the plan /merge works on, or nil when the run may not
+// merge. Only a writer delivers work, so only it may merge, and a subagent
+// (it shares the worktree of the chat that owns it, WorktreeChatId) never
+// does: the owner delivers. A subagent's sandbox learns that too (it is told
+// not to run asgard-merge).
+func mergePlan(sr *runnerpb.StartRun, agent *agentspec.Agent, p worktree.Plan) *worktree.Plan {
+	if sr.GetWorktreeChatId() != "" {
+		if wr := agent.Config.WorktreeRun; wr != nil {
+			wr.Shared = true
+		}
+		return nil
+	}
+	if sr.GetReadonly() {
+		return nil
+	}
+	return &p
 }

@@ -48,6 +48,10 @@ type WorktreeRun struct {
 	// ObjectsDir is the chat's private object directory; the shared object
 	// store stays read-only and is only an alternate.
 	ObjectsDir string
+	// Shared marks the worktree of another chat (a subagent works in the
+	// worktree of the chat that spawned it). Such a run commits but never
+	// merges: the owner delivers the work.
+	Shared bool
 }
 
 type MaskMode string
@@ -415,6 +419,11 @@ type AgentConfig struct {
 	// WorktreeRun is runtime state for a run inside a chat's worktree; the
 	// run directories of such an effective config are the worktree only.
 	WorktreeRun *WorktreeRun `yaml:"-" json:"-"`
+
+	// SharedChatID is runtime state: the root chat of the spawn tree the run
+	// belongs to. The sandboxes bind /session-data/shared/<id> read-write at
+	// /shared (also for a readonly run: it is not the checkout).
+	SharedChatID string `yaml:"-" json:"-"`
 
 	// SessionMode controls whether the CLI session is resumed across calls.
 	// "resume" (default): reuse the previous session ID stored in DB.

@@ -58,6 +58,10 @@ func subagentErr(kind SubagentErrorKind, format string, args ...any) *SubagentEr
 
 // Subagent states reported by SubagentStatus.
 const (
+	// SubagentStateQueued is a child that holds its execution guard but still
+	// waits for the checkout directory lock (a writable child behind its
+	// parent's run, or another writer).
+	SubagentStateQueued  = "queued"
 	SubagentStateRunning = "running"
 	SubagentStateDone    = "done"
 	SubagentStateFailed  = "failed"
@@ -347,6 +351,29 @@ func (s *Server) isDescendantChat(ancestor string, sess *dbmodels.Session) bool 
 	return false
 }
 
+// spawnRoot is the root chat of the spawn tree chatID belongs to: the topmost
+// ancestor, or chatID itself when it has no parent.
+func (s *Server) spawnRoot(sess *dbmodels.Session) (string, error) {
+	cur := sess
+	seen := map[string]bool{}
+	for cur.ParentChatID != "" {
+		if seen[cur.ChatID] || len(seen) >= maxSubagentDescendants {
+			return "", fmt.Errorf("spawn tree of chat %s is too deep or cyclic", sess.ChatID)
+		}
+		seen[cur.ChatID] = true
+		next, err := s.repo.GetSessionMeta(cur.ParentChatID)
+		if err != nil {
+			return "", fmt.Errorf("read parent chat %s: %w", cur.ParentChatID, err)
+		}
+		if next == nil {
+			// The parent was deleted: the child is the topmost chat left.
+			return cur.ChatID, nil
+		}
+		cur = next
+	}
+	return cur.ChatID, nil
+}
+
 // descendantChats lists every chat below chatID, nearest first. A failing
 // lookup is retried once; when it still fails the chats found so far are
 // returned together with the error, so callers can act on them and report the
@@ -414,6 +441,11 @@ func (s *Server) subagentInfo(sess *dbmodels.Session) SubagentInfo {
 	}
 	if _, running := s.activeExecutions.Load(sess.ChatID); running {
 		info.State = SubagentStateRunning
+		if !sess.SpawnReadonly {
+			if st := s.dirLockStatus(sess.ChatID); st != nil && st.IsWaitingForLock && !st.IsLocked {
+				info.State = SubagentStateQueued
+			}
+		}
 	} else {
 		switch sess.SpawnOutcome {
 		case dbmodels.SpawnOutcomeKilled:

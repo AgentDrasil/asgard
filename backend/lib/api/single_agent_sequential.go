@@ -148,6 +148,10 @@ func (e *SingleAgentExecutor) executeSequential(
 		if session != nil {
 			userID = session.UserSubject
 		}
+		sharedChat, shErr := e.sharedChat(session)
+		if shErr != nil {
+			return "", shErr
+		}
 		go func(mOpt optional.Option[string], attempt uint32) {
 			res, err := e.dispatcher.Run(ctx, dispatch.Request{
 				ChatID:     chatID,
@@ -161,6 +165,7 @@ func (e *SingleAgentExecutor) executeSequential(
 				// A subagent shares the worktree of the chat that owns it.
 				WorktreeChatID: e.worktreeChat(session),
 				Readonly:       session != nil && session.SpawnReadonly,
+				SharedChatID:   sharedChat,
 				Model:          mOpt,
 				Scope:          run.StatusScope{RunToken: runToken, AllowCrossSession: allowCrossSession},
 				Attempt:        attempt,

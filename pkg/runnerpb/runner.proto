@@ -320,6 +320,10 @@ message StartRun {
   // (a read-only subagent): the run behaves like an agent with
   // lock_mode: readonly.
   bool readonly = 21;
+  // shared_chat_id is the root chat of the spawn tree this run belongs to
+  // (the chat itself for a root). When set, the sandboxes bind the tree's
+  // scratch directory read-write at /shared. Empty: no shared directory.
+  string shared_chat_id = 22;
 }
 
 message CancelRun {
@@ -380,6 +384,15 @@ service AgentCallbackService {
   // CallPeer blocks until the peer run finishes (wait=true semantics).
   rpc CallPeer(CallPeerRequest) returns (CallPeerResponse);
   rpc FindPeer(FindPeerRequest) returns (FindPeerResponse);
+  // Subagents: child chats of the calling run's chat. The caller's chat and
+  // agent are the hub's run tracking, never a request field. Failures are gRPC
+  // statuses: InvalidArgument, NotFound, PermissionDenied, ResourceExhausted
+  // (depth or concurrency limit), FailedPrecondition (runner offline, no
+  // database) or Internal.
+  rpc SpawnSubagent(SpawnSubagentRequest) returns (SpawnSubagentResponse);
+  rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
+  rpc SubagentStatus(SubagentStatusRequest) returns (SubagentStatusResponse);
+  rpc KillSubagent(KillSubagentRequest) returns (KillSubagentResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
   // Runner-initiated workflow execution callbacks
@@ -448,6 +461,59 @@ message FindPeerRequest {
 message FindPeerResponse {
   // peers are the agent ids on the caller's team.
   repeated string peers = 1;
+}
+
+message SpawnSubagentRequest {
+  CallMeta meta = 1;
+  // agent_id is the teammate to run in the child chat.
+  string agent_id = 2;
+  string model = 3;
+  bool readonly = 4;
+  string label = 5;
+  string prompt = 6;
+}
+message SpawnSubagentResponse {
+  // id is the chat id of the child.
+  string id = 1;
+}
+
+message SubagentInfo {
+  string id = 1;
+  string parent_chat_id = 2;
+  string label = 3;
+  string agent = 4;
+  string spawned_by = 5;
+  string model = 6;
+  bool readonly = 7;
+  // state is queued, running, done, failed or killed.
+  string state = 8;
+  // summary is the tail of the child's last output (status only).
+  string summary = 9;
+  int64 last_activity_unix_ms = 10;
+}
+
+message ListSubagentsRequest {
+  CallMeta meta = 1;
+}
+message ListSubagentsResponse {
+  repeated SubagentInfo subagents = 1;
+}
+
+message SubagentStatusRequest {
+  CallMeta meta = 1;
+  string id = 2;
+}
+message SubagentStatusResponse {
+  SubagentInfo subagent = 1;
+}
+
+message KillSubagentRequest {
+  CallMeta meta = 1;
+  string id = 2;
+}
+message KillSubagentResponse {
+  // stopped is how many runs (the child and its descendants) were stopped.
+  int32 stopped = 1;
 }
 
 // MetricsEvent mirrors pkg/metrics.Event.

@@ -197,3 +197,14 @@ func TestWriteContractFile_Worktree(t *testing.T) {
 	assert.Contains(t, body, "git worktree list")
 	assert.Less(t, strings.Index(body, "# Own instructions"), strings.Index(body, "asgard-merge"))
 }
+
+func TestWorktreePromptSharedHasNoMerge(t *testing.T) {
+	wr := &agentspec.WorktreeRun{RefNamespace: "asgard/owner"}
+	assert.Contains(t, worktreePrompt(wr), "asgard-merge")
+
+	wr.Shared = true
+	prompt := worktreePrompt(wr)
+	assert.NotContains(t, prompt, "asgard-merge")
+	assert.Contains(t, prompt, "Do not merge")
+	assert.Contains(t, prompt, "asgard/owner/")
+}

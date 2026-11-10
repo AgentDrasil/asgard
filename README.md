@@ -146,7 +146,7 @@ quota_profiles:
 
 To prevent untrusted code generated or executed by the AI agents from compromising the system or stealing sensitive authentication tokens (e.g., credentials stored in `~/.gemini`), Asgard employs a dual-sandbox architecture based on [bubblewrap (bwrap)](https://github.com/containers/bubblewrap).
 
-The sandboxes are started by the **runner** (the backend only dispatches runs to it); the bwrap argument construction lives in [bwrap.go](backend/lib/bwrap/bwrap.go). Sandbox callbacks (ask-user, call-peer, find-peer, show-output, asgard-merge, status, metrics) go agent sandbox → runner (`/fakebash/asgard.sock`) → backend over the runner connection.
+The sandboxes are started by the **runner** (the backend only dispatches runs to it); the bwrap argument construction lives in [bwrap.go](backend/lib/bwrap/bwrap.go). Sandbox callbacks (ask-user, call-peer, find-peer, subagent, show-output, asgard-merge, status, metrics) go agent sandbox → runner (`/fakebash/asgard.sock`) → backend over the runner connection.
 
 ```mermaid
 graph TD

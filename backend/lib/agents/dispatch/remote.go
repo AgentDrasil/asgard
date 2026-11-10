@@ -184,6 +184,7 @@ func (d *Remote) StartRun(req Request) (*runnerpb.StartRun, error) {
 	if req.Worktree && req.WorktreeChatID != req.ChatID {
 		sr.WorktreeChatId = req.WorktreeChatID
 	}
+	sr.SharedChatId = req.SharedChatID
 	if req.Agent.NodeID != "" {
 		sr.AgentSource = runnerpb.AgentSource_AGENT_SOURCE_RUNNER
 	}

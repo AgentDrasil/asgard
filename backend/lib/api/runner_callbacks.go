@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -402,6 +403,118 @@ func (c *callbackService) FindPeer(ctx context.Context, req *runnerpb.FindPeerRe
 		return nil, err
 	}
 	return resp.(*runnerpb.FindPeerResponse), nil
+}
+
+// subagentStatusErr maps a *SubagentError to the gRPC status of the call.
+// Unavailable maps to FailedPrecondition: the runner retries codes.Unavailable
+// as a lost connection.
+func subagentStatusErr(err error) error {
+	var se *SubagentError
+	if !errors.As(err, &se) {
+		return status.Error(codes.Internal, err.Error())
+	}
+	code := codes.Internal
+	switch se.Kind {
+	case SubagentInvalid:
+		code = codes.InvalidArgument
+	case SubagentNotFound:
+		code = codes.NotFound
+	case SubagentDenied:
+		code = codes.PermissionDenied
+	case SubagentLimit:
+		code = codes.ResourceExhausted
+	case SubagentUnavailable:
+		code = codes.FailedPrecondition
+	}
+	return status.Error(code, se.Msg)
+}
+
+func subagentInfoPB(i SubagentInfo) *runnerpb.SubagentInfo {
+	return &runnerpb.SubagentInfo{
+		Id:                 i.ID,
+		ParentChatId:       i.ParentChatID,
+		Label:              i.Label,
+		Agent:              i.Agent,
+		SpawnedBy:          i.SpawnedBy,
+		Model:              i.Model,
+		Readonly:           i.Readonly,
+		State:              i.State,
+		Summary:            capText(i.Summary),
+		LastActivityUnixMs: i.LastActivity.UnixMilli(),
+	}
+}
+
+// SpawnSubagent implements runnerpb.AgentCallbackServiceServer. The parent is
+// the calling run's chat and agent, from the hub's run tracking.
+func (c *callbackService) SpawnSubagent(ctx context.Context, req *runnerpb.SpawnSubagentRequest) (*runnerpb.SpawnSubagentResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "spawn_subagent", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		id, err := c.s.SpawnSubagent(SpawnSubagentRequest{
+			CallerChat:  info.ChatID,
+			CallerAgent: info.AgentID,
+			TargetAgent: req.GetAgentId(),
+			Model:       req.GetModel(),
+			Readonly:    req.GetReadonly(),
+			Label:       req.GetLabel(),
+			Prompt:      req.GetPrompt(),
+		})
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.SpawnSubagentResponse{Id: id}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.SpawnSubagentResponse), nil
+}
+
+// ListSubagents implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) ListSubagents(ctx context.Context, req *runnerpb.ListSubagentsRequest) (*runnerpb.ListSubagentsResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "list_subagents", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		list, err := c.s.ListSubagents(info.ChatID)
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		out := &runnerpb.ListSubagentsResponse{}
+		for _, i := range list {
+			out.Subagents = append(out.Subagents, subagentInfoPB(i))
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.ListSubagentsResponse), nil
+}
+
+// SubagentStatus implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) SubagentStatus(ctx context.Context, req *runnerpb.SubagentStatusRequest) (*runnerpb.SubagentStatusResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "subagent_status", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		i, err := c.s.SubagentStatus(info.ChatID, req.GetId())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.SubagentStatusResponse{Subagent: subagentInfoPB(i)}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.SubagentStatusResponse), nil
+}
+
+// KillSubagent implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) KillSubagent(ctx context.Context, req *runnerpb.KillSubagentRequest) (*runnerpb.KillSubagentResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "kill_subagent", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		n, err := c.s.KillSubagent(info.ChatID, req.GetId())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.KillSubagentResponse{Stopped: int32(n)}, nil //nolint:gosec // bounded by the descendant cap
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.KillSubagentResponse), nil
 }
 
 // RecordMetrics implements runnerpb.AgentCallbackServiceServer.

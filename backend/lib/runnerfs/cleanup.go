@@ -20,11 +20,14 @@ import (
 // CA normally lies inside Tmp (runnerpaths.CABundleDirName).
 type CleanupRoots struct {
 	Tmp, Sessions, CA string
+	// Shared holds <Shared>/<root chat> spawn-tree scratch directories; empty
+	// means none.
+	Shared string
 }
 
 // DefaultCleanupRoots are the runner's own data dirs.
 func DefaultCleanupRoots() CleanupRoots {
-	return CleanupRoots{Tmp: runnerpaths.TmpDir(), Sessions: runnerpaths.SessionsDir(), CA: runnerpaths.CABundleBaseDir()}
+	return CleanupRoots{Tmp: runnerpaths.TmpDir(), Sessions: runnerpaths.SessionsDir(), CA: runnerpaths.CABundleBaseDir(), Shared: runnerpaths.SharedDir()}
 }
 
 // CleanupTmpSweep removes dangling atomic-write temp files (`.<base>.*.tmp`)
@@ -78,6 +81,9 @@ func (r CleanupRoots) Cleanup(spec CleanupSpec) CleanupResult {
 			continue
 		}
 		var errs []error
+		// Shared is deliberately excluded: shared/<rootID> is used by every
+		// descendant's sandbox, so only the orphan sweep (row gone and idle
+		// past the cutoff) may remove it.
 		for _, root := range []string{r.Tmp, r.Sessions, r.CA} {
 			n, err := removeChild(root, id)
 			res.Removed += n
@@ -105,7 +111,7 @@ func (r CleanupRoots) Cleanup(spec CleanupSpec) CleanupResult {
 		if filepath.Dir(filepath.Clean(r.CA)) == filepath.Clean(r.Tmp) {
 			skipTmp = filepath.Base(r.CA)
 		}
-		for _, sw := range []struct{ root, skip string }{{r.Tmp, skipTmp}, {r.Sessions, ""}, {r.CA, ""}} {
+		for _, sw := range []struct{ root, skip string }{{r.Tmp, skipTmp}, {r.Sessions, ""}, {r.CA, ""}, {r.Shared, ""}} {
 			n, errs := sweepOrphans(sw.root, sw.skip, keep, spec.Cutoff)
 			res.Removed += n
 			for _, err := range errs {

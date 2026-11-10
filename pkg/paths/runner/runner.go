@@ -88,6 +88,15 @@ func TmpDir() string { return filepath.Join(DataDir(), "tmp") }
 // (/session-data/tmp/<chatID>), bound as /tmp in the sandbox.
 func SessionTmpDir(chatID string) string { return filepath.Join(TmpDir(), chatID) }
 
+// SharedDir is the root of the per-spawn-tree scratch directories
+// (/session-data/shared).
+func SharedDir() string { return filepath.Join(DataDir(), "shared") }
+
+// SharedChatDir is the scratch directory shared by a spawn tree
+// (/session-data/shared/<rootChatID>), bound read-write as /shared in the
+// sandboxes of the root chat and every descendant.
+func SharedChatDir(rootChatID string) string { return filepath.Join(SharedDir(), rootChatID) }
+
 // CABundleDirName is the directory name under TmpDir() holding per-chat CA bundles.
 const CABundleDirName = ".asgard-ca"
 

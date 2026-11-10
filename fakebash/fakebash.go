@@ -28,6 +28,7 @@ var allowlist = map[string]struct{}{
 	"agystatusline": {},
 	"find-peer":     {},
 	"call-peer":     {},
+	"subagent":      {},
 	"ask-user":      {},
 	"ask_user":      {},
 	"show-output":   {},

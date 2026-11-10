@@ -12,6 +12,7 @@ use (
 	./cmd/call-peer
 	./cmd/find-peer
 	./cmd/show-output
+	./cmd/subagent
 	./cmd/tester
 	./fakebash
 	./llms

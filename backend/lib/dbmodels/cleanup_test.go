@@ -224,3 +224,37 @@ func TestCleanExpiredSessions_CleansTranscriptAndWorkflowDirs(t *testing.T) {
 	_, errOrphan := os.Stat(orphanSessDir)
 	assert.True(t, os.IsNotExist(errOrphan), "Orphan session dir should be removed")
 }
+
+func TestCleanExpiredSessions_SharedDirLeftToOrphanSweep(t *testing.T) {
+	t.Parallel()
+
+	dbConn := db.NewDBForTest(t)
+	require.NoError(t, AutoMigrate(dbConn))
+	repo := NewSessionRepository(dbConn)
+
+	tmpBase := t.TempDir()
+	sessionBase := t.TempDir()
+	sharedBase := t.TempDir()
+
+	id := "expired-root"
+	old := time.Now().AddDate(0, -1, -2)
+	require.NoError(t, repo.SaveSession(&Session{ChatID: id, Title: "root", UpdatedAt: old}))
+	require.NoError(t, dbConn.Exec("UPDATE sessions SET updated_at = ? WHERE chat_id = ?", old, id).Error)
+
+	sharedDir := filepath.Join(sharedBase, id)
+	require.NoError(t, os.MkdirAll(sharedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "f"), []byte("x"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpBase, id), 0o755))
+
+	// Fresh shared dir: row is deleted but the dir was used recently, so it stays.
+	opts := CleanExpiredSessionsOptions{Cutoff: time.Now().AddDate(0, -1, 0), TmpBase: tmpBase, SessionBase: sessionBase, SharedBase: sharedBase}
+	require.NoError(t, repo.CleanExpiredSessions(opts))
+	assert.DirExists(t, sharedDir)
+	assert.NoDirExists(t, filepath.Join(tmpBase, id))
+
+	// Once idle past the cutoff, the orphan sweep removes it.
+	require.NoError(t, os.Chtimes(filepath.Join(sharedDir, "f"), old, old))
+	require.NoError(t, os.Chtimes(sharedDir, old, old))
+	require.NoError(t, repo.CleanExpiredSessions(opts))
+	assert.NoDirExists(t, sharedDir)
+}

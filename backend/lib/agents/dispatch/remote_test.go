@@ -133,9 +133,12 @@ func TestStartRun_Construction(t *testing.T) {
 		Model:      optional.Some("m1"),
 		Scope:      run.StatusScope{NodeID: "n", RunToken: "tok", Headless: true, AllowCrossSession: true},
 		Attempt:    3,
+
+		SharedChatID: "root-1",
 	})
 	require.NoError(t, err)
 
+	assert.Equal(t, "root-1", sr.GetSharedChatId())
 	assert.Equal(t, "chat-1", sr.GetChatId())
 	assert.Equal(t, "a", sr.GetAgentId())
 	assert.Equal(t, "hash-1", sr.GetAgentHash())
