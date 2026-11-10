@@ -447,8 +447,8 @@ func subagentInfoPB(i SubagentInfo) *runnerpb.SubagentInfo {
 // SpawnSubagent implements runnerpb.AgentCallbackServiceServer. The parent is
 // the calling run's chat and agent, from the hub's run tracking.
 func (c *callbackService) SpawnSubagent(ctx context.Context, req *runnerpb.SpawnSubagentRequest) (*runnerpb.SpawnSubagentResponse, error) {
-	resp, err := c.run(ctx, req.GetMeta(), "spawn_subagent", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
-		id, err := c.s.SpawnSubagent(SpawnSubagentRequest{
+	resp, err := c.run(ctx, req.GetMeta(), "spawn_subagent", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		id, err := c.s.SpawnSubagent(fctx, SpawnSubagentRequest{
 			CallerChat:  info.ChatID,
 			CallerAgent: info.AgentID,
 			TargetAgent: req.GetAgentId(),
@@ -515,6 +515,21 @@ func (c *callbackService) KillSubagent(ctx context.Context, req *runnerpb.KillSu
 		return nil, err
 	}
 	return resp.(*runnerpb.KillSubagentResponse), nil
+}
+
+// SendToSubagent implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) SendToSubagent(ctx context.Context, req *runnerpb.SendToSubagentRequest) (*runnerpb.SendToSubagentResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "send_to_subagent", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		delivery, err := c.s.SendToSubagent(fctx, info.ChatID, info.AgentID, req.GetId(), req.GetText())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.SendToSubagentResponse{Delivery: delivery}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.SendToSubagentResponse), nil
 }
 
 // RecordMetrics implements runnerpb.AgentCallbackServiceServer.

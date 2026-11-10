@@ -35,6 +35,7 @@ const (
 	PathSubagentList   = "/subagent/list"
 	PathSubagentStatus = "/subagent/status"
 	PathSubagentKill   = "/subagent/kill"
+	PathSubagentSend   = "/subagent/send"
 	PathMetrics        = "/metrics"
 	PathMerge          = "/merge"
 
@@ -89,6 +90,18 @@ type SubagentSpawnResponse struct {
 // SubagentIDRequest is the body of POST /subagent/status and /subagent/kill.
 type SubagentIDRequest struct {
 	ID string `json:"id"`
+}
+
+// SubagentSendRequest is the body of POST /subagent/send.
+type SubagentSendRequest struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// SubagentSendResponse is the answer of POST /subagent/send. Delivery is
+// injected, queued or started.
+type SubagentSendResponse struct {
+	Delivery string `json:"delivery"`
 }
 
 // SubagentInfo describes one subagent. State is running, done, failed or

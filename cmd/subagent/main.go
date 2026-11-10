@@ -39,6 +39,8 @@ Commands:
         List your subagents.
   status <id> [--json]
         Show the state (queued, running, done, failed, killed) of a subagent and the tail of its last output.
+  send <id> [--json] -- <text>
+        Message a subagent: "injected" into its running turn (claude/agy), "queued" behind its current turn, or "started" as a new turn of an idle one.
   kill <id> [--json]
         Stop a subagent and all subagents below it.
 `
@@ -63,6 +65,7 @@ var commands = map[string]command{
 	"spawn":  cmdSpawn,
 	"list":   cmdList,
 	"status": cmdStatus,
+	"send":   cmdSend,
 	"kill":   cmdKill,
 }
 
@@ -313,6 +316,31 @@ func cmdStatus(ctx context.Context, c *cli, args []string) int {
 	if s.Summary != "" {
 		_, _ = fmt.Fprintf(c.stdout, "\nlast output (tail):\n%s\n", s.Summary)
 	}
+	return exitOK
+}
+
+func cmdSend(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("send", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if !p.hasRest || len(p.positional) != 1 {
+		return c.usageError("send needs one subagent id and the message after --")
+	}
+	text := strings.Join(p.rest, " ")
+	if strings.TrimSpace(text) == "" {
+		return c.usageError("send needs a message after --")
+	}
+	var out sandboxsock.SubagentSendResponse
+	if !c.call(ctx, sandboxsock.PathSubagentSend, sandboxsock.SubagentSendRequest{ID: p.positional[0], Text: text}, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	_, _ = fmt.Fprintln(c.stdout, out.Delivery)
 	return exitOK
 }
 

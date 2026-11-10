@@ -131,7 +131,7 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 	if len(existingMsgs) >= dbmodels.MaxQueuedMessagesPerSession {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Queue limit reached (maximum 3 messages)"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": queueLimitMessage})
 		return
 	}
 
@@ -140,7 +140,7 @@ func (s *Server) handleEnqueueMessage(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, dbmodels.ErrQueueFull) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Queue limit reached (maximum 3 messages)"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": queueLimitMessage})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

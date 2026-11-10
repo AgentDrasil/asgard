@@ -47,6 +47,7 @@ type fakeCallbacks struct {
 	lists  []*runnerpb.ListSubagentsRequest
 	stats  []*runnerpb.SubagentStatusRequest
 	kills  []*runnerpb.KillSubagentRequest
+	sends  []*runnerpb.SendToSubagentRequest
 }
 
 func (f *fakeCallbacks) SpawnSubagent(_ context.Context, req *runnerpb.SpawnSubagentRequest, _ ...grpc.CallOption) (*runnerpb.SpawnSubagentResponse, error) {
@@ -87,6 +88,16 @@ func (f *fakeCallbacks) KillSubagent(_ context.Context, req *runnerpb.KillSubage
 		return nil, f.subErr
 	}
 	return &runnerpb.KillSubagentResponse{Stopped: 2}, nil
+}
+
+func (f *fakeCallbacks) SendToSubagent(_ context.Context, req *runnerpb.SendToSubagentRequest, _ ...grpc.CallOption) (*runnerpb.SendToSubagentResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sends = append(f.sends, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.SendToSubagentResponse{Delivery: "queued"}, nil
 }
 
 func (f *fakeCallbacks) HoldMergeLock(ctx context.Context, req *runnerpb.HoldMergeLockRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {

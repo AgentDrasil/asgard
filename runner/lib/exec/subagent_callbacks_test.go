@@ -65,6 +65,23 @@ func TestSubagentRoutesRelayWithRunIdentity(t *testing.T) {
 	assert.Equal(t, "child-1", fake.kills[0].GetId())
 }
 
+func TestSubagentSendRelaysTextWithRunIdentity(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentSend, map[string]any{"id": "child-1", "text": "hello", "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var out sandboxsock.SubagentSendResponse
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, "queued", out.Delivery)
+	require.Len(t, fake.sends, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.sends[0].GetMeta().GetRunId())
+	assert.Equal(t, "child-1", fake.sends[0].GetId())
+	assert.Equal(t, "hello", fake.sends[0].GetText())
+
+	code, _ = rig.post(t, sandboxsock.PathSubagentSend, sandboxsock.SubagentSendRequest{ID: "child-1", Text: " "})
+	assert.Equal(t, http.StatusBadRequest, code)
+}
+
 func TestSubagentRoutesMapBackendCodes(t *testing.T) {
 	tests := []struct {
 		code codes.Code

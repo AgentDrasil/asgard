@@ -403,7 +403,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 			if len(existing) >= dbmodels.MaxQueuedMessagesPerSession {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "Queue limit reached (maximum 3 messages)"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": queueLimitMessage})
 				return
 			}
 
@@ -412,7 +412,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 				if errors.Is(err, dbmodels.ErrQueueFull) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
-					_ = json.NewEncoder(w).Encode(map[string]string{"error": "Queue limit reached (maximum 3 messages)"})
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": queueLimitMessage})
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -723,3 +723,7 @@ func (s *Server) runSingleAgent(ctx context.Context, agent *agentspec.Agent, cha
 	}
 	return "completed", out, nil
 }
+
+// queueLimitMessage is the error body of a full per-chat message queue. It is
+// shared by the writers and by SendToSubagent, which maps it to a limit error.
+const queueLimitMessage = "Queue limit reached (maximum 3 messages)"

@@ -568,6 +568,14 @@ func (p callbackProxy) KillSubagent(ctx context.Context, req *runnerpb.KillSubag
 	return cb.KillSubagent(ctx, req)
 }
 
+func (p callbackProxy) SendToSubagent(ctx context.Context, req *runnerpb.SendToSubagentRequest) (*runnerpb.SendToSubagentResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.SendToSubagent(ctx, req)
+}
+
 func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
 	return p.h.currentCallbacks().RecordMetrics(ctx, req)
 }

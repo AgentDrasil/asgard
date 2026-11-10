@@ -57,7 +57,7 @@ func TestSpawnSubagentCreatesChildChat(t *testing.T) {
 	req := spawnReq("beta")
 	req.Model = "flash"
 	req.Readonly = true
-	id, err := rig.server.SpawnSubagent(req)
+	id, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	assert.Equal(t, id, waitStarted(t, started))
 	m, _ := models.Load(id)
@@ -93,12 +93,12 @@ func TestSpawnSubagentTeamRestriction(t *testing.T) {
 	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"), teamAgent("other", "x"))
 	blockingRuns(rig)
 
-	_, err := rig.server.SpawnSubagent(spawnReq("other"))
+	_, err := rig.server.SpawnSubagent(context.Background(), spawnReq("other"))
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentDenied, se.Kind)
 
-	_, err = rig.server.SpawnSubagent(spawnReq("missing"))
+	_, err = rig.server.SpawnSubagent(context.Background(), spawnReq("missing"))
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentDenied, se.Kind)
 }
@@ -109,12 +109,12 @@ func TestSpawnSubagentConcurrencyCap(t *testing.T) {
 
 	var ids []string
 	for i := 0; i < maxRunningSubagents; i++ {
-		id, err := rig.server.SpawnSubagent(spawnReq("beta"))
+		id, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 		require.NoError(t, err)
 		waitStarted(t, started)
 		ids = append(ids, id)
 	}
-	_, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	_, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentLimit, se.Kind)
@@ -126,7 +126,7 @@ func TestSpawnSubagentConcurrencyCap(t *testing.T) {
 		_, running := rig.server.activeExecutions.Load(ids[0])
 		return !running
 	}, 5*time.Second, 10*time.Millisecond)
-	_, err = rig.server.SpawnSubagent(spawnReq("beta"))
+	_, err = rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 }
 
@@ -141,7 +141,7 @@ func TestSubagentDepthSharedWithCallPeer(t *testing.T) {
 		next := map[string]string{"alpha": "beta", "beta": "gamma", "gamma": "beta"}[cur]
 		req := spawnReq(next)
 		req.CallerChat = parent
-		id, err := rig.server.SpawnSubagent(req)
+		id, err := rig.server.SpawnSubagent(context.Background(), req)
 		require.NoError(t, err, "depth %d", depth)
 		waitStarted(t, started)
 		sess, _ := rig.repo.GetSessionMeta(id)
@@ -150,7 +150,7 @@ func TestSubagentDepthSharedWithCallPeer(t *testing.T) {
 	}
 	req := spawnReq("alpha")
 	req.CallerChat = parent
-	_, err := rig.server.SpawnSubagent(req)
+	_, err := rig.server.SpawnSubagent(context.Background(), req)
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentLimit, se.Kind)
@@ -175,7 +175,7 @@ func TestSubagentDepthCountsPeerChainAtSpawn(t *testing.T) {
 	// Chain of four agents: a child would be the fifth.
 	req := spawnReq("beta")
 	req.CallerAgent = "delta"
-	_, err := rig.server.SpawnSubagent(req)
+	_, err := rig.server.SpawnSubagent(context.Background(), req)
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentLimit, se.Kind)
@@ -185,7 +185,7 @@ func TestSubagentDepthCountsPeerChainAtSpawn(t *testing.T) {
 func TestSubagentOwnership(t *testing.T) {
 	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
 	started, _ := blockingRuns(rig)
-	id, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	id, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 
@@ -219,12 +219,12 @@ func TestStopCascadesToDescendants(t *testing.T) {
 	started, _ := blockingRuns(rig)
 	holdChat(t, rig)
 
-	child, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	child, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 	req := spawnReq("gamma")
 	req.CallerChat = child
-	grand, err := rig.server.SpawnSubagent(req)
+	grand, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	waitStarted(t, started)
 
@@ -242,12 +242,12 @@ func TestKillSubagentCascadesAndStopIdleParent(t *testing.T) {
 	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"), teamAgent("gamma", "t"))
 	started, _ := blockingRuns(rig)
 
-	child, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	child, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 	req := spawnReq("gamma")
 	req.CallerChat = child
-	grand, err := rig.server.SpawnSubagent(req)
+	grand, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	waitStarted(t, started)
 
@@ -269,7 +269,7 @@ func TestKillSubagentCascadesAndStopIdleParent(t *testing.T) {
 func TestStopIdleParentStopsRunningChildren(t *testing.T) {
 	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
 	started, _ := blockingRuns(rig)
-	child, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	child, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 
@@ -284,7 +284,7 @@ func TestStopIdleParentStopsRunningChildren(t *testing.T) {
 func TestKilledOutcomeIsDurableAndClearedOnRerun(t *testing.T) {
 	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
 	started, _ := blockingRuns(rig)
-	id, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	id, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 	_, err = rig.server.KillSubagent(rigChat, id)
@@ -325,7 +325,7 @@ func TestSubagentStatusFailedAndDone(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond)
 	}
 
-	good, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	good, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	settled(good)
 	st, err := rig.server.SubagentStatus(rigChat, good)
@@ -337,7 +337,7 @@ func TestSubagentStatusFailedAndDone(t *testing.T) {
 	rig.server.runSingleAgentFn = func(context.Context, *agentspec.Agent, string, TriggerMessageRequest) (string, string, error) {
 		return "failed", "", &agentRunError{Err: errors.New("sandbox exploded")}
 	}
-	bad, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	bad, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	settled(bad)
 	require.Eventually(t, func() bool {
@@ -366,18 +366,18 @@ func TestSpawnSubagentGuardRejections(t *testing.T) {
 
 	req := spawnReq("beta")
 	req.CallerChat = "chat-unknown"
-	_, err := rig.server.SpawnSubagent(req)
+	_, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentNotFound, se.Kind)
 
-	_, err = rig.server.SpawnSubagent(spawnReq("flow"))
+	_, err = rig.server.SpawnSubagent(context.Background(), spawnReq("flow"))
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentInvalid, se.Kind)
 
 	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: "chat-wt", CurrentAgent: "alpha", Worktree: true}))
 	req = spawnReq("beta")
 	req.CallerChat = "chat-wt"
-	_, err = rig.server.SpawnSubagent(req)
+	_, err = rig.server.SpawnSubagent(context.Background(), req)
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentInvalid, se.Kind)
 	assert.Contains(t, se.Msg, "worktree")
@@ -393,7 +393,7 @@ func TestSpawnSubagentFailureRemovesChildRow(t *testing.T) {
 	rig.server.runners = fakeRunnerRegistry{nodes: []runnerhub.NodeInfo{{NodeID: "runner-off", Online: false}}}
 	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunnerNodeID: "runner-off"}))
 
-	_, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	_, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentUnavailable, se.Kind)
@@ -407,7 +407,7 @@ func TestSpawnRefusedWhileCallerIsBeingStopped(t *testing.T) {
 	blockingRuns(rig)
 	holdChat(t, rig)
 	rig.server.cancelledExecutions.Store(rigChat, time.Now())
-	_, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	_, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	var se *SubagentError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentDenied, se.Kind)
@@ -428,7 +428,7 @@ func TestChatBaseDepthFailsClosed(t *testing.T) {
 	_, err = rig.server.chatBaseDepth("chat-deep")
 	assert.Error(t, err)
 	assert.Error(t, rig.server.enterPeerCall("chat-deep", "alpha", "beta"))
-	_, err = rig.server.SpawnSubagent(spawnReq("beta"))
+	_, err = rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	assert.Error(t, err)
 }
 
@@ -447,7 +447,7 @@ func TestSpawnSubagentSharesParentWorktree(t *testing.T) {
 
 	req := spawnReq("beta")
 	req.Readonly = true
-	childID, err := rig.server.SpawnSubagent(req)
+	childID, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	waitStarted(t, started)
 	child, err := rig.repo.GetSessionMeta(childID)
@@ -459,7 +459,7 @@ func TestSpawnSubagentSharesParentWorktree(t *testing.T) {
 	req = spawnReq("gamma")
 	req.CallerChat = childID
 	req.CallerAgent = "beta"
-	grandID, err := rig.server.SpawnSubagent(req)
+	grandID, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	waitStarted(t, started)
 	grand, err := rig.repo.GetSessionMeta(grandID)
@@ -469,7 +469,7 @@ func TestSpawnSubagentSharesParentWorktree(t *testing.T) {
 	// An agent that cannot work in a worktree is refused, not run in the main checkout.
 	req = spawnReq("plain")
 	var se *SubagentError
-	_, err = rig.server.SpawnSubagent(req)
+	_, err = rig.server.SpawnSubagent(context.Background(), req)
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentInvalid, se.Kind)
 	assert.Contains(t, se.Msg, "worktree")
@@ -486,12 +486,12 @@ func TestSpawnSubagentWorktreeRoot(t *testing.T) {
 	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo", Worktree: true}))
 
 	var se *SubagentError
-	_, err := rig.server.SpawnSubagent(spawnReq("other"))
+	_, err := rig.server.SpawnSubagent(context.Background(), spawnReq("other"))
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, SubagentInvalid, se.Kind)
 	assert.Contains(t, se.Msg, "/wt-b")
 
-	childID, err := rig.server.SpawnSubagent(spawnReq("beta"))
+	childID, err := rig.server.SpawnSubagent(context.Background(), spawnReq("beta"))
 	require.NoError(t, err)
 	waitStarted(t, started)
 	child, err := rig.repo.GetSessionMeta(childID)
@@ -501,11 +501,11 @@ func TestSpawnSubagentWorktreeRoot(t *testing.T) {
 	// The grandchild inherits the persisted root, and a differing agent is refused.
 	req := spawnReq("other")
 	req.CallerChat, req.CallerAgent = childID, "beta"
-	_, err = rig.server.SpawnSubagent(req)
+	_, err = rig.server.SpawnSubagent(context.Background(), req)
 	require.ErrorAs(t, err, &se)
 	req = spawnReq("gamma")
 	req.CallerChat, req.CallerAgent = childID, "beta"
-	grandID, err := rig.server.SpawnSubagent(req)
+	grandID, err := rig.server.SpawnSubagent(context.Background(), req)
 	require.NoError(t, err)
 	waitStarted(t, started)
 	grand, err := rig.repo.GetSessionMeta(grandID)

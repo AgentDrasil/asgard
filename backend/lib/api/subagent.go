@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -13,6 +15,7 @@ import (
 	"uuid"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 )
 
 // Subagents are child chats: an agent running in one chat spawns another agent
@@ -101,8 +104,9 @@ type SubagentInfo struct {
 }
 
 // SpawnSubagent starts targetAgent in a new child chat of CallerChat with
-// Prompt and returns the child's chat id without waiting for it.
-func (s *Server) SpawnSubagent(req SpawnSubagentRequest) (string, error) {
+// Prompt and returns the child's chat id without waiting for it. ctx is the
+// caller's run: once it is done the spawn is denied.
+func (s *Server) SpawnSubagent(ctx context.Context, req SpawnSubagentRequest) (string, error) {
 	if s.repo == nil {
 		return "", subagentErr(SubagentUnavailable, "database unavailable in degraded mode")
 	}
@@ -188,7 +192,7 @@ func (s *Server) SpawnSubagent(req SpawnSubagentRequest) (string, error) {
 	defer s.spawnMu.Unlock()
 	// A stopped caller must not leave a new descendant behind (see
 	// stopSessionExecution, which holds spawnMu across its cascade).
-	if s.sessionStopInProgress(req.CallerChat) {
+	if ctx.Err() != nil || s.sessionStopInProgress(req.CallerChat) {
 		return "", subagentErr(SubagentDenied, "the caller chat is being stopped")
 	}
 	if n := s.runningChildren(req.CallerChat); n >= maxRunningSubagents {
@@ -310,6 +314,138 @@ func (s *Server) KillSubagent(callerChat, childID string) (int, error) {
 		return stopped, subagentErr(SubagentInternal, "stopped %d subagents but failed to enumerate the descendants, retry the kill: %v", stopped, derr)
 	}
 	return stopped, nil
+}
+
+// Deliveries reported by SendToSubagent.
+const (
+	// SubagentDeliveryInjected: pushed into the child's running turn.
+	SubagentDeliveryInjected = "injected"
+	// SubagentDeliveryQueued: waits behind the child's running turn (or its
+	// wait for the checkout lock) and runs as its next turn.
+	SubagentDeliveryQueued = "queued"
+	// SubagentDeliveryStarted: the child was idle and a new turn started.
+	SubagentDeliveryStarted = "started"
+)
+
+// maxSubagentMessageBytes bounds a message to a subagent (Hub.Inject has its
+// own, larger, limit).
+const maxSubagentMessageBytes = 256 << 10
+
+// SendToSubagent delivers text from callerAgent (running in callerChat) to a
+// subagent of callerChat or of its descendants. A child that is running a CLI
+// with live injection (claude, agy) gets it in its current turn; otherwise
+// the message goes through the normal trigger path: queued behind the running
+// turn, or, for an idle, finished, failed or killed child, a new turn that
+// resumes the child's CLI session. Restarting an idle child counts toward the
+// running-children cap of its parent. The text is prefixed with its sender.
+// ctx is the caller's run: once it is done the send is denied, so a stopped
+// caller cannot restart or queue its killed child.
+func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, childID, text string) (string, error) {
+	child, err := s.ownedSubagent(callerChat, childID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", subagentErr(SubagentInvalid, "message is required")
+	}
+	if len(text) > maxSubagentMessageBytes {
+		return "", subagentErr(SubagentInvalid, "message too large (limit %d bytes)", maxSubagentMessageBytes)
+	}
+	if s.sessionStopInProgress(callerChat) || s.sessionStopInProgress(childID) {
+		return "", subagentErr(SubagentDenied, "the subagent or its caller is being stopped")
+	}
+	target, err := s.findAgentFor(child.RunnerNodeID, child.CurrentAgent)
+	if err != nil {
+		return "", subagentErr(SubagentInternal, "failed to list agents of runner: %v", err)
+	}
+	if target == nil || target.Config.Type == "workflow" {
+		return "", subagentErr(SubagentNotFound, "the agent of subagent %q is not available", childID)
+	}
+	senderName := callerAgent
+	if a, _ := s.findAgentFor(child.RunnerNodeID, callerAgent); a != nil {
+		senderName = a.Config.Name
+	}
+	prompt := fmt.Sprintf("[message from parent agent %s]\n%s", senderName, text)
+
+	// A running turn that can take input gets the message right away.
+	if s.activeRuns != nil && s.injector != nil {
+		if nodeID, runID, ok := s.activeRuns.Lookup(childID, target.Config.ID); ok {
+			injected, ierr := s.injector.Inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
+			if injected {
+				s.recordInjectedMessage(childID, prompt)
+				return SubagentDeliveryInjected, nil
+			}
+			if ierr != nil && !errors.Is(ierr, runnerhub.ErrUnknownRun) && !errors.Is(ierr, runnerhub.ErrRunnerOffline) {
+				log.Warn().Err(ierr).Str("chat_id", childID).Msg("subagent inject failed, queueing the message instead")
+			}
+		}
+	}
+
+	// The inject may have waited; a caller stopped meanwhile must not revive
+	// the child.
+	if ctx.Err() != nil {
+		return "", subagentErr(SubagentDenied, "the caller is being stopped")
+	}
+
+	// Otherwise through the normal trigger path. The cap check and the start
+	// of an idle child are one critical section, like in SpawnSubagent.
+	s.spawnMu.Lock()
+	defer s.spawnMu.Unlock()
+	if ctx.Err() != nil || s.sessionStopInProgress(callerChat) || s.sessionStopInProgress(childID) {
+		return "", subagentErr(SubagentDenied, "the subagent or its caller is being stopped")
+	}
+	if _, running := s.activeExecutions.Load(childID); !running && child.ParentChatID != "" {
+		if n := s.runningChildren(child.ParentChatID); n >= maxRunningSubagents {
+			return "", subagentErr(SubagentLimit, "too many running subagents: %d of %d already running", n, maxRunningSubagents)
+		}
+	}
+	rec := newResponseCapture()
+	s.triggerMessage(s.Context(), nil, rec, target.Config.ID, target, TriggerMessageRequest{
+		Prompt:   prompt,
+		ChatID:   childID,
+		RunnerID: child.RunnerNodeID,
+		RunDir:   child.RunDir,
+		Metadata: map[string]any{
+			"source":          "subagent-send",
+			"caller_agent_id": callerAgent,
+			"parent_chat_id":  callerChat,
+		},
+	}, false)
+	var body struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.body.Bytes(), &body)
+	if rec.code != http.StatusAccepted {
+		kind := SubagentInternal
+		switch {
+		case rec.code == http.StatusServiceUnavailable:
+			kind = SubagentUnavailable
+		case body.Error == queueLimitMessage:
+			kind = SubagentLimit
+		}
+		return "", subagentErr(kind, "failed to send to subagent: %s", firstNonEmpty(body.Error, fmt.Sprintf("HTTP status %d", rec.code)))
+	}
+	if body.Status == "queued" {
+		return SubagentDeliveryQueued, nil
+	}
+	return SubagentDeliveryStarted, nil
+}
+
+// recordInjectedMessage shows an injected message in the child's transcript,
+// as a run's incoming prompt.
+func (s *Server) recordInjectedMessage(chatID, prompt string) {
+	msg := dbmodels.ChatMessage{
+		ID:        fmt.Sprintf("msg-%s", uuid.NewV7().String()),
+		Role:      "user",
+		Content:   prompt,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	if err := s.repo.AppendMessage(chatID, msg); err != nil {
+		log.Error().Err(err).Str("chat_id", chatID).Msg("failed to append injected message to repo")
+		return
+	}
+	s.PublishSessionEvent(chatID, SessionEvent{Type: EventTypeMessage, Message: &msg})
 }
 
 // ownedSubagent loads childID, which must be a descendant of callerChat.

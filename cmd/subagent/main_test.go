@@ -213,3 +213,35 @@ func TestQueuedStateIsExplained(t *testing.T) {
 	assert.Regexp(t, `c1\s+-\s+coder\s+-\s+writable\s+queued`, stdout)
 	assert.Contains(t, stdout, "queued: waiting for the workspace")
 }
+
+func TestSendPostsTextAndPrintsDelivery(t *testing.T) {
+	var got sandboxsock.SubagentSendRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, sandboxsock.PathSubagentSend, r.URL.Path)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentSendResponse{Delivery: "injected"})
+	}))
+
+	code, stdout, stderr := runCLI("send", "c1", "--", "also", "--json check")
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, "injected\n", stdout)
+	assert.Equal(t, sandboxsock.SubagentSendRequest{ID: "c1", Text: "also --json check"}, got)
+
+	code, stdout, _ = runCLI("send", "--json", "c1", "--", "x")
+	require.Equal(t, 0, code)
+	assert.JSONEq(t, `{"delivery":"injected"}`, stdout)
+}
+
+func TestSendUsageErrors(t *testing.T) {
+	t.Setenv(sandboxsock.EnvURL, "unix:///nonexistent/asgard.sock")
+	for name, args := range map[string][]string{
+		"no id":      {"send", "--", "hi"},
+		"no message": {"send", "c1"},
+		"blank":      {"send", "c1", "--", " "},
+		"two ids":    {"send", "c1", "c2", "--", "hi"},
+	} {
+		code, _, _ := runCLI(args...)
+		assert.Equal(t, 2, code, name)
+	}
+}

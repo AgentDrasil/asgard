@@ -19,6 +19,7 @@ func (s *statusServer) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+sandboxsock.PathSubagentList, s.handleSubagentList)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentStatus, s.handleSubagentStatus)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentKill, s.handleSubagentKill)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentSend, s.handleSubagentSend)
 }
 
 // failSubagent reports a failed subagent call with an HTTP status that
@@ -174,4 +175,34 @@ func (s *statusServer) handleSubagentKill(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, sandboxsock.SubagentKillResponse{Stopped: int(resp.GetStopped())})
+}
+
+func (s *statusServer) handleSubagentSend(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentSendRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	id, text := clean(req.ID), clean(req.Text)
+	if id == "" || len(id) > maxMessageID || strings.TrimSpace(text) == "" {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a valid subagent id and a message are required"})
+		return
+	}
+	if len(text) > maxCallText {
+		http.Error(w, "message too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.SendToSubagentResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.SendToSubagent(ctx, &runnerpb.SendToSubagentRequest{Meta: s.meta(seq), Id: id, Text: text})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-send", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentSendResponse{Delivery: resp.GetDelivery()})
 }

@@ -134,6 +134,7 @@ const (
 	AgentCallbackService_ListSubagents_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/ListSubagents"
 	AgentCallbackService_SubagentStatus_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/SubagentStatus"
 	AgentCallbackService_KillSubagent_FullMethodName        = "/asgard.runner.v1.AgentCallbackService/KillSubagent"
+	AgentCallbackService_SendToSubagent_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/SendToSubagent"
 	AgentCallbackService_RecordMetrics_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
 	AgentCallbackService_GetUserProxyKeys_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/GetUserProxyKeys"
 	AgentCallbackService_InitWorkflowSession_FullMethodName = "/asgard.runner.v1.AgentCallbackService/InitWorkflowSession"
@@ -161,6 +162,9 @@ type AgentCallbackServiceClient interface {
 	ListSubagents(ctx context.Context, in *ListSubagentsRequest, opts ...grpc.CallOption) (*ListSubagentsResponse, error)
 	SubagentStatus(ctx context.Context, in *SubagentStatusRequest, opts ...grpc.CallOption) (*SubagentStatusResponse, error)
 	KillSubagent(ctx context.Context, in *KillSubagentRequest, opts ...grpc.CallOption) (*KillSubagentResponse, error)
+	// SendToSubagent delivers a message to a subagent: injected into its running
+	// turn when its CLI supports it, otherwise run as its next turn.
+	SendToSubagent(ctx context.Context, in *SendToSubagentRequest, opts ...grpc.CallOption) (*SendToSubagentResponse, error)
 	RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -246,6 +250,16 @@ func (c *agentCallbackServiceClient) KillSubagent(ctx context.Context, in *KillS
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillSubagentResponse)
 	err := c.cc.Invoke(ctx, AgentCallbackService_KillSubagent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) SendToSubagent(ctx context.Context, in *SendToSubagentRequest, opts ...grpc.CallOption) (*SendToSubagentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SendToSubagentResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_SendToSubagent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +363,9 @@ type AgentCallbackServiceServer interface {
 	ListSubagents(context.Context, *ListSubagentsRequest) (*ListSubagentsResponse, error)
 	SubagentStatus(context.Context, *SubagentStatusRequest) (*SubagentStatusResponse, error)
 	KillSubagent(context.Context, *KillSubagentRequest) (*KillSubagentResponse, error)
+	// SendToSubagent delivers a message to a subagent: injected into its running
+	// turn when its CLI supports it, otherwise run as its next turn.
+	SendToSubagent(context.Context, *SendToSubagentRequest) (*SendToSubagentResponse, error)
 	RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -390,6 +407,9 @@ func (UnimplementedAgentCallbackServiceServer) SubagentStatus(context.Context, *
 }
 func (UnimplementedAgentCallbackServiceServer) KillSubagent(context.Context, *KillSubagentRequest) (*KillSubagentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillSubagent not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) SendToSubagent(context.Context, *SendToSubagentRequest) (*SendToSubagentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendToSubagent not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordMetrics not implemented")
@@ -559,6 +579,24 @@ func _AgentCallbackService_KillSubagent_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentCallbackService_SendToSubagent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendToSubagentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).SendToSubagent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_SendToSubagent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).SendToSubagent(ctx, req.(*SendToSubagentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AgentCallbackService_RecordMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecordMetricsRequest)
 	if err := dec(in); err != nil {
@@ -712,6 +750,10 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "KillSubagent",
 			Handler:    _AgentCallbackService_KillSubagent_Handler,
+		},
+		{
+			MethodName: "SendToSubagent",
+			Handler:    _AgentCallbackService_SendToSubagent_Handler,
 		},
 		{
 			MethodName: "RecordMetrics",

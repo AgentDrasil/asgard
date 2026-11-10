@@ -95,6 +95,10 @@ func (f *fakeCallbacks) KillSubagent(ctx context.Context, in *runnerpb.KillSubag
 	return &runnerpb.KillSubagentResponse{}, nil
 }
 
+func (f *fakeCallbacks) SendToSubagent(ctx context.Context, in *runnerpb.SendToSubagentRequest, opts ...grpc.CallOption) (*runnerpb.SendToSubagentResponse, error) {
+	return &runnerpb.SendToSubagentResponse{}, nil
+}
+
 func (f *fakeCallbacks) RecordMetrics(ctx context.Context, in *runnerpb.RecordMetricsRequest, opts ...grpc.CallOption) (*runnerpb.RecordMetricsResponse, error) {
 	return &runnerpb.RecordMetricsResponse{}, nil
 }

@@ -393,6 +393,9 @@ service AgentCallbackService {
   rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
   rpc SubagentStatus(SubagentStatusRequest) returns (SubagentStatusResponse);
   rpc KillSubagent(KillSubagentRequest) returns (KillSubagentResponse);
+  // SendToSubagent delivers a message to a subagent: injected into its running
+  // turn when its CLI supports it, otherwise run as its next turn.
+  rpc SendToSubagent(SendToSubagentRequest) returns (SendToSubagentResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
   // Runner-initiated workflow execution callbacks
@@ -514,6 +517,17 @@ message KillSubagentRequest {
 message KillSubagentResponse {
   // stopped is how many runs (the child and its descendants) were stopped.
   int32 stopped = 1;
+}
+
+message SendToSubagentRequest {
+  CallMeta meta = 1;
+  string id = 2;
+  string text = 3;
+}
+message SendToSubagentResponse {
+  // delivery is "injected" (into the running turn), "queued" (behind the
+  // running turn) or "started" (a new turn of an idle subagent).
+  string delivery = 1;
 }
 
 // MetricsEvent mirrors pkg/metrics.Event.
