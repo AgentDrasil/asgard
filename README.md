@@ -349,6 +349,63 @@ Builds are stamped with a version `YYYY-MM-DD-HH-MM-SS:abc123ed` (UTC build time
 - Confined file access resolves paths beneath the root with `openat2`, but bwrap binds directories by path, so a TOCTOU window exists between resolution and bind.
 - A `/tmp` absolute path is ambiguous between the sandbox's `/tmp` (the chat's tmp directory) and the runner host's `/tmp`.
 
+## Subagents
+
+An agent can start other agents as **subagents** to do work in parallel (research, review, a self-contained edit) and collect their results. This differs from `call-peer`, which is a synchronous call of one agent into another's chat: a subagent is its own **child chat** (new chat id, same runner as the parent, linked by `parentChatId`) with its own transcript, SSE stream and sandboxes, runs asynchronously, and the parent decides when to look at it. The only interface is the `/bin/subagent` CLI in the sandbox (no MCP); it follows the same path as the other sandbox callbacks (agent sandbox → runner → backend `AgentCallbackService`). The runner stamps the caller's chat and agent identity on every call, so an agent can only act on its own children and their descendants.
+
+### Limits
+
+*   **Team restriction.** `--agent` must be an agent on the caller's current team, the same rule as `call-peer`/`find-peer`. A target agent whose worktree root differs from the spawn tree's is refused. `--model` may override the model per spawn (e.g. a cheaper one).
+*   **Nesting.** Subagents may spawn subagents. The depth limit of 4 is one counter shared with `call-peer` chains, so mixing the two cannot get around it.
+*   **Fan-out.** At most 4 children of one parent run at the same time (a spawn beyond that is refused with a limit error; restarting an idle child with `subagent send` counts toward the same cap).
+
+### The `subagent` CLI
+
+```bash
+subagent spawn --agent <name> [--model <m>] [--readonly] [--label <l>] -- <prompt>   # prints the child id, returns at once
+subagent list                          # direct children: id, label, agent, model, state, last activity
+subagent status <id>                   # state, tail (last ~2000 bytes) of the last output
+subagent send <id> -- <text>           # injected into the running turn (claude/agy), else queued / started as a turn
+subagent wait [<id>...] [--any|--all] [--timeout 300s]   # block until done; the timeout is capped at 300s server side
+subagent kill <id>                     # stop the child and all of its descendants
+subagent reply -- <text>               # child only: message the parent mid-run
+```
+
+`--json` works on every command; exit codes are 0 (ok), 1 (error), 2 (usage). States are `running`, `queued` (a writable child waiting for the checkout lock), `done`, `failed`, `killed`. `wait` without ids waits for all live (running or queued) children, `--all` is the default, and a child that is still running at the timeout is reported as `still_running`. Outputs come back as a bounded tail (status ~2000 bytes, wait ~1500); the wait result's note points the agent at `/shared` for files the child wrote and at `subagent status <id>` for the tail. The HTTP routes inside the sandbox are `/subagent/{spawn,list,status,kill,send,wait,reply}` on `/fakebash/asgard.sock`; the backend side is `AgentCallbackService.{SpawnSubagent,ListSubagents,SubagentStatus,KillSubagent,SendToSubagent,WaitSubagents,ReplyToParent}`. Error kinds map to gRPC codes (invalid → `InvalidArgument`, not found → `NotFound`, denied → `PermissionDenied`, limit → `ResourceExhausted`, unavailable → `FailedPrecondition`, which the runner does not retry). Calls are idempotent per `(run_id, call_seq)`.
+
+### Workspace
+
+*   **Shared checkout.** A subagent works in its parent's checkout: the same run directory, or the same [git worktree](#3-git-worktree-isolation-opt-in-per-chat) if the root chat opted into one. The worktree is owned by the root chat of the spawn tree (`StartRun.worktree_chat_id`); children get no per-subagent worktree, no merge plan, and must not merge. Only the owner merges with `asgard-merge`.
+*   **`--readonly`.** The checkout is mounted read-only in both sandboxes (agent and `fakebashd`) and the run takes no directory lock, so any number of read-only children run in parallel.
+*   **Writable children** (the default) take the normal checkout directory lock, so they serialize and show as `queued` while they wait. A child may take the lock held by its ancestor only while that ancestor is waiting for its children (inside `subagent wait`, or idle-held, see below); at any other time the ancestor keeps the lock and the child waits. While a descendant holds the checkout the ancestor cannot start a new turn.
+*   **`/shared`.** One scratch directory per spawn tree (`/session-data/shared/<root-chat-id>` on the runner, `StartRun.shared_chat_id`) is mounted read-write at `/shared` in both sandboxes of every run in the tree, including read-only ones. `/tmp` is private per chat, so anything another agent must read goes under `/shared`. It is only reclaimed by the orphan sweep.
+
+### Reporting back
+
+*   **Push.** When a child finishes, the backend injects ``[subagent <id> (<label>) finished: <state>] <summary>; full output: see `subagent status <id>` or /shared`` into the parent's running turn, or, if the parent is not running, starts a turn with it. The label is omitted when the child has none, and the summary is a tail of at most 300 bytes (omitted when there is no output). Several finishes are coalesced. Messages sent by `subagent send` and `subagent reply` appear as user messages prefixed `[message from parent agent <name>]` and `[message from subagent <id> (<label>)]`.
+*   **Pull.** `subagent wait` blocks (event driven, at most 300s per call) until the named children finish. A child the parent is waiting on is reported through `wait` instead of also being pushed.
+*   **Suppression.** Nothing is reported for a kill issued by the parent itself or by a cascade. A chat the user stopped stays stopped: a notice that would have been pushed is recorded as a `SUBAGENT_NOTICE` activity in the transcript instead, until the next user message. Stopping an idle chat also clears its message queue. Stopping a chat, or killing a child, cascades to all descendants.
+
+### Keeping the parent alive
+
+A claude or agy CLI normally exits when its turn ends. While a parent has live children, the backend sends `RunControl{hold}` over the run stream; the runner relays it to `aw` on a separate `control.sock` (next to `inject.sock`) and `aw` keeps the CLI's input open, so a finish or reply can arrive as a new turn of the same run. `release` lets it end once children are done. An idle hold is bounded by `ASGARD_SUBAGENT_HOLD_IDLE` (Go duration, default `30m`). While idle-held the chat's agent status in the database stays `completed`; the SSE `status` event carries `{"isRunning":false,"waitingSubagents":true}`, and a message to the chat is injected (`202 {"status":"accepted","injected":true}`). A hold that never reaches the CLI only means the run ends at the end of its turn. opencode and the simplest wrapper cannot take injections: their parent run ends normally and each notice starts a queued turn. `InjectResult.idle_gen` lets the backend tell whether a turn-active/idle report from `aw` predates an injected message.
+
+### Web UI
+
+Subagent chats are nested (collapsibly) under their parent in the sidebar with label, agent, read-only/writable and state badges; a subagent chat has a breadcrumb back to its parent. A parent chat has a Subagents panel (open / kill) fed by the `subagent` SSE event, and shows "waiting for subagents" while idle-held, with its composer still usable. Messages between parent and child get a from-parent / from-subagent badge, and `SUBAGENT_NOTICE` activities render as a subtle notice.
+
+### API surface
+
+Session JSON (`GET /api/sessions`, single get) adds `parentChatId`, `spawnedByAgent`, `spawnLabel`, `spawnReadonly`, `subagentState`, and (single get only) `waitingSubagents`. The parent's SSE stream carries a `subagent` event `{id, state, label, agent, readonly, seq}` whenever a child's state may have changed. Send Now can answer `{"injected":false,"reason":"descendant_holds_checkout"}`: the chat is waiting between turns for its subagents and one of them holds the checkout, so the queued message stays queued.
+
+### Known limitations
+
+*   The session list and search return children as flat entries (only the sidebar nests them by `parentChatId`).
+*   A label containing `]` breaks parsing of the `[subagent <id> (<label>) ...]` prefix the web UI strips from inter-agent messages.
+*   A read-only child in a worktree run cannot browse the owner's unmerged commits through git (their objects are in the owner's private object directory).
+*   `aw` and the runner must come from the same image: holds use `control.sock` and `InjectResult.idle_gen`, which an `aw` from an older image does not provide.
+*   `/shared` is not removed when the spawn tree ends, only by the orphan sweep.
+
 ## Workflow Orchestration Engine
 
 Asgard includes a DAG-based workflow engine (backend/lib/workflow) that orchestrates multi-step AI development pipelines combining autonomous coding agents, raw LLM calls, shell commands, and human-in-the-loop approvals.
@@ -438,7 +495,7 @@ Asgard serves an HTTP REST & SSE API for agent orchestration, real-time events, 
 *   **Trigger Execution** (`POST /api/agents/{agent_id}/message`): Triggers single agent or workflow execution. Returns `202 Accepted` asynchronously by default; supports `?wait=true` synchronous mode for CLI consumers (e.g., `call-peer`). With a `runner` section configured, every run executes on the runner the chat is bound to: the body must carry `runnerId` for a chat that has no runner yet (400 otherwise, 400 for an unknown runner), the binding is immutable (a different `runnerId` is `409`), and an offline runner answers `503` (queued messages stay queued and resume when the runner reconnects). `POST /api/sessions` accepts `runnerId` the same way.
 *   **Queue** (`GET|POST|DELETE /api/sessions/{id}/queue`, `PATCH|DELETE /api/sessions/{id}/queue/{messageId}`): messages sent while the agent runs wait in a per-session queue (at most 3) and run in order afterwards.
 *   **Send Now** (`POST /api/sessions/{id}/queue/{messageId}/send-now`): tries to inject a *queued* message into the turn the session's current agent is running (mid-run injection via `Hub.Inject`; supported by the claude and agy CLIs). The message is claimed from the queue atomically first, so the queue consumer cannot also run it. `200 {"injected":true,"queue":[...]}` means the CLI accepted it: it is now a normal user message in the transcript and no longer queued. `200 {"injected":false,"reason":"not_running"|"not_supported"|"failed"}` is not an error: the message stays queued at its original position (restored with its original id and `createdAt`; a restore is exempt from the 3-message limit so a message is never lost, and is retried a few times on database errors) and the consumer is restarted. `not_running` with no active run leaves the queue untouched. If the restore itself still fails, the response is `500` (not `200`), the message text is added to the transcript as an `error` message so the user can resend it, and the queue event shows the true queue. `404` if the message is no longer queued; `400` for workflow agents. The call can take up to about 6 seconds. In the web UI this is the "Send now" button on each queued message card (hidden for workflow agents); the default for a message sent while an agent runs stays "enqueue".
-*   **Real-Time Events Stream** (`GET /api/sessions/{session_id}/events`): Server-Sent Events (SSE) stream for real-time `SessionEvent` delivery (messages, activities, artifacts, status, done) with `Last-Event-ID` reconnection catch-up.
+*   **Real-Time Events Stream** (`GET /api/sessions/{session_id}/events`): Server-Sent Events (SSE) stream for real-time `SessionEvent` delivery (messages, activities, artifacts, status, done, and `subagent` for child state changes, see [Subagents](#subagents)) with `Last-Event-ID` reconnection catch-up.
 *   **Workflow command nodes** run on the chat's runner (`RunnerService.RunCommand`), in the same bubblewrap + `fakebashd` sandbox as agent commands; the backend never executes them for a runner-bound chat. The runner resolves the working directory beneath its allowed roots (symlinks and `..` that leave them are refused), streams stdout/stderr with byte offsets (the backend transparently resumes a reset stream by `request_id` and offsets, without re-running the command), enforces `timeout`, kills the whole process group when the node is cancelled, and reports `output_file` as an artifact. The sandbox is the default and fails closed: if the runner's sandbox setup is not ready the node fails. A node with `sandbox: false` runs only if the runner's operator started it with `-allow-unsandboxed-commands` (or `ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS=1`); this is insecure and meant for development, and a request can never enable it. In sandboxed commands `${tmp_dir}`/`${session_dir}` of the chat's default directories expand to `/tmp` and `/session`; in unsandboxed ones to `${ASGARD_TMP_DIR}`/`${ASGARD_SESSION_DIR}` (the runner's own paths).
 *   **List Agents** (`GET /api/agents`): Returns metadata and supported models of all loaded agents. `?runner=<id>` lists what that runner can run (global agents plus the runner's own).
 
