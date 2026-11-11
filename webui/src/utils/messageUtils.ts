@@ -94,3 +94,30 @@ function mergeFiles(target: ChatMessage, source: ChatMessage) {
 export function getMessageArtifactFiles(msg: ChatMessage): string[] {
   return msg.artifactFiles || [];
 }
+
+export type InterAgentKind = "parent" | "subagent" | "finished";
+
+export interface InterAgentMessage {
+  kind: InterAgentKind;
+  /** Who sent it: the parent agent's name, or the subagent's "id (label)". */
+  from: string;
+  /** For "finished": the child's final state (done, failed, killed). */
+  state?: string;
+  /** The message without its bracketed prefix. */
+  body: string;
+}
+
+// parseInterAgentMessage recognises the user messages the backend injects
+// between a parent chat and its subagents and strips their prefix:
+//   [message from parent agent X]\n<text>
+//   [message from subagent <id> (<label>)]\n<text>
+//   [subagent <id> (<label>) finished: <state>] <summary>
+export function parseInterAgentMessage(content: string): InterAgentMessage | null {
+  let m = /^\[message from parent agent ([^\]\n]+)\]\s*/.exec(content);
+  if (m) return { kind: "parent", from: m[1], body: content.slice(m[0].length) };
+  m = /^\[message from subagent ([^\]\n]+)\]\s*/.exec(content);
+  if (m) return { kind: "subagent", from: m[1], body: content.slice(m[0].length) };
+  m = /^\[subagent ([^\]\n]+?) finished: (\w+)\]\s*/.exec(content);
+  if (m) return { kind: "finished", from: m[1], state: m[2], body: content.slice(m[0].length) };
+  return null;
+}

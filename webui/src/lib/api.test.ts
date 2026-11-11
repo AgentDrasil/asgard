@@ -999,7 +999,12 @@ describe("API Library", () => {
     });
 
     it("maps each not-injected reason", async () => {
-      for (const reason of ["not_running", "not_supported", "failed"]) {
+      for (const reason of [
+        "not_running",
+        "not_supported",
+        "failed",
+        "descendant_holds_checkout",
+      ]) {
         mockFetch(200, { injected: false, reason });
         expect(await sendQueuedMessageNow("c", "m")).toEqual({ kind: "not_injected", reason });
       }

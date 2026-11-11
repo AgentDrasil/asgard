@@ -3,14 +3,19 @@ import { computed, onMounted, ref } from "vue";
 import { Icon } from "@iconify/vue";
 import type { ChatMessage } from "../../types";
 import { formatTimestamp, formatFileSize } from "../../lib/format";
+import { parseInterAgentMessage } from "../../utils/messageUtils";
 import { getFileIcon } from "../../utils/fileUtils";
 import { getAttachmentUrl, appendAccessToken } from "../../lib/api";
 import { useUserProfile } from "../../composables/useUserProfile";
 
-defineProps<{
+const props = defineProps<{
   message: ChatMessage;
   sessionId?: string | null;
 }>();
+
+// Messages the backend injects between a parent chat and its subagents.
+const interAgent = computed(() => parseInterAgentMessage(props.message.content || ""));
+const bodyText = computed(() => (interAgent.value ? interAgent.value.body : props.message.content));
 
 const { profile, load } = useUserProfile();
 onMounted(load);
@@ -39,10 +44,21 @@ const initials = computed(() => {
       <span v-if="message.timestamp" class="font-normal font-mono">
         {{ formatTimestamp(message.timestamp) }}
       </span>
-      <span class="text-xs font-bold text-base-content/70 truncate" data-testid="user-name">
+      <span
+        v-if="interAgent"
+        class="badge badge-sm badge-outline gap-1 max-w-[260px] min-w-0"
+        :title="interAgent.from"
+        data-testid="inter-agent-badge"
+      >
+        <Icon icon="lucide:git-fork" class="h-3 w-3 shrink-0" />
+        <span class="truncate">{{ $t(`subagents.from.${interAgent.kind}`) }}</span>
+        <span v-if="interAgent.kind === 'finished'" class="font-mono">{{ interAgent.state }}</span>
+        <span v-else class="font-mono truncate">{{ interAgent.from }}</span>
+      </span>
+      <span v-else class="text-xs font-bold text-base-content/70 truncate" data-testid="user-name">
         {{ displayName || $t("chat.you") }}
       </span>
-      <template v-if="displayName">
+      <template v-if="displayName && !interAgent">
         <img
           v-if="avatarSrc && !avatarFailed"
           :src="avatarSrc"
@@ -62,15 +78,16 @@ const initials = computed(() => {
       </template>
     </div>
     <div
-      class="chat-bubble chat-bubble-primary before:hidden !rounded-xl text-primary-content text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
+      :class="interAgent ? 'chat-bubble-neutral' : 'chat-bubble-primary text-primary-content'"
+      class="chat-bubble before:hidden !rounded-xl text-sm leading-relaxed max-w-3xl shadow-sm font-sans whitespace-pre-wrap break-words [word-break:break-word] min-w-0"
     >
-      <div v-if="message.content">{{ message.content }}</div>
+      <div v-if="bodyText">{{ bodyText }}</div>
 
       <!-- Attached Files Section -->
       <div
         v-if="message.attachments && message.attachments.length > 0"
         class="flex flex-col gap-1.5"
-        :class="{ 'mt-2.5 pt-2 border-t border-primary-content/20': message.content }"
+        :class="{ 'mt-2.5 pt-2 border-t border-primary-content/20': bodyText }"
       >
         <div
           v-for="att in message.attachments"

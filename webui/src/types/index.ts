@@ -60,7 +60,14 @@ export interface QueuedMessage {
   updatedAt: string;
 }
 
-export type SendNowReason = "not_running" | "not_supported" | "failed";
+export type SendNowReason =
+  | "not_running"
+  | "not_supported"
+  | "failed"
+  // A subagent holds the workspace checkout: the message stays queued.
+  | "descendant_holds_checkout";
+
+export type SubagentState = "queued" | "running" | "done" | "failed" | "killed";
 
 // Outcome of POST /api/sessions/{id}/queue/{messageId}/send-now. Expected
 // outcomes are values, never exceptions.
@@ -102,6 +109,14 @@ export interface ChatSession {
   artifacts?: string[];
   queuedMessages?: QueuedMessage[];
   dirLock?: DirLockStatus;
+  /** Subagent chats only: the chat that spawned this one. */
+  parentChatId?: string;
+  spawnLabel?: string;
+  spawnedByAgent?: string;
+  spawnReadonly?: boolean;
+  subagentState?: SubagentState;
+  /** The chat is between turns, held open while its subagents run. */
+  waitingSubagents?: boolean;
 }
 
 export interface WorkflowRunSummary {
@@ -202,13 +217,14 @@ export interface SessionStatusPayload {
   agent_name?: string;
   title?: string;
   dirLock?: DirLockStatus;
+  waitingSubagents?: boolean;
   [key: string]: any;
 }
 
 export interface SessionEvent {
   eventId: number;
   chatId: string;
-  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "queue";
+  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "queue" | "subagent";
   message?: ChatMessage;
   payload?: SessionStatusPayload | Record<string, any>;
   timestamp: number;

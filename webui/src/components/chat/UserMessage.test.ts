@@ -145,4 +145,53 @@ describe("UserMessage.vue", () => {
       app.unmount();
     });
   });
+  it("shows a badge and strips the prefix of a message from a subagent", () => {
+    const message: ChatMessage = {
+      id: "msg-2",
+      role: "user",
+      content: "[message from subagent c-1 (review)]\nfound 2 issues",
+    };
+    const app = createApp({ render: () => h(UserMessage, { message, sessionId: "s" }) });
+    app.use(i18n);
+    app.mount(root);
+    const badge = root.querySelector('[data-testid="inter-agent-badge"]');
+    expect(badge?.textContent).toContain("from subagent");
+    expect(badge?.textContent).toContain("c-1 (review)");
+    expect(root.textContent).toContain("found 2 issues");
+    expect(root.textContent).not.toContain("[message from subagent");
+    expect(root.querySelector('[data-testid="user-name"]')).toBeNull();
+    app.unmount();
+  });
+
+  it("badges a message from the parent agent and a finish notice", () => {
+    const render = (content: string) => {
+      const app = createApp({
+        render: () => h(UserMessage, { message: { id: "m", role: "user", content } }),
+      });
+      app.use(i18n);
+      app.mount(root);
+      const text = root.textContent || "";
+      const badge = root.querySelector('[data-testid="inter-agent-badge"]')?.textContent || "";
+      app.unmount();
+      return { text, badge };
+    };
+    const parent = render("[message from parent agent lead]\nstop now");
+    expect(parent.badge).toContain("from parent");
+    expect(parent.text).toContain("stop now");
+    expect(parent.text).not.toContain("[message from parent agent");
+
+    const done = render("[subagent c-1 (review) finished: done] all good");
+    expect(done.badge).toContain("subagent finished");
+    expect(done.badge).toContain("done");
+    expect(done.text).toContain("all good");
+  });
+
+  it("does not badge an ordinary user message", () => {
+    const message: ChatMessage = { id: "m3", role: "user", content: "plain" };
+    const app = createApp({ render: () => h(UserMessage, { message }) });
+    app.use(i18n);
+    app.mount(root);
+    expect(root.querySelector('[data-testid="inter-agent-badge"]')).toBeNull();
+    app.unmount();
+  });
 });

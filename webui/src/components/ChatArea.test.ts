@@ -640,4 +640,122 @@ describe("ChatArea.vue", () => {
 
     app.unmount();
   });
+  it("shows the parent breadcrumb with label and mode for a subagent chat", async () => {
+    const onOpen = vi.fn<(id: string) => void>();
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "child-1",
+          session: {
+            chatID: "child-1",
+            title: "",
+            currentAgent: "agent-1",
+            runDir: "/home/user/project",
+            parentChatId: "parent-1",
+            spawnLabel: "review",
+            spawnReadonly: true,
+            subagentState: "running",
+          },
+          parentSession: {
+            chatID: "parent-1",
+            title: "Main task",
+            currentAgent: "lead",
+            runDir: "/home/user/project",
+          },
+          onOpenSession: onOpen,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const crumb = root.querySelector('[data-testid="subagent-breadcrumb"]');
+    expect(crumb?.textContent).toContain("Main task");
+    expect(root.querySelector('[data-testid="subagent-breadcrumb-label"]')?.textContent).toBe(
+      "review",
+    );
+    expect(root.querySelector('[data-testid="subagent-breadcrumb-mode"]')?.textContent).toBe(
+      "read-only",
+    );
+    (root.querySelector('[data-testid="subagent-back"]') as HTMLElement).click();
+    expect(onOpen).toHaveBeenCalledWith("parent-1");
+    app.unmount();
+  });
+
+  it("shows the subagents panel and relays open/kill from a parent chat", async () => {
+    const onOpen = vi.fn<(id: string) => void>();
+    const onKill = vi.fn<(id: string) => void>();
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "parent-1",
+          subagents: [
+            {
+              chatID: "c1",
+              title: "",
+              currentAgent: "reviewer",
+              runDir: "/x",
+              parentChatId: "parent-1",
+              spawnLabel: "review",
+              subagentState: "running",
+            },
+          ],
+          onOpenSession: onOpen,
+          onKillSubagent: onKill,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    expect(root.querySelector('[data-testid="subagent-breadcrumb"]')).toBeNull();
+    (root.querySelector('[data-testid="subagent-open"]') as HTMLElement).click();
+    (root.querySelector('[data-testid="subagent-kill"]') as HTMLElement).click();
+    expect(onOpen).toHaveBeenCalledWith("c1");
+    expect(onKill).toHaveBeenCalledWith("c1");
+    app.unmount();
+  });
+
+  it("shows 'waiting for subagents' instead of the working spinner when idle-held", async () => {
+    const mountWith = (props: Record<string, any>) => {
+      const app = createApp({
+        render() {
+          return h(ChatArea, {
+            messages: dummyMessages,
+            loading: false,
+            activeAgent: dummyAgent,
+            runDir: "/home/user/project",
+            sessionId: "parent-1",
+            ...props,
+          });
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      return app;
+    };
+
+    let app = mountWith({ loading: false, isRunning: false, waitingSubagents: true });
+    await nextTick();
+    expect(root.querySelector('[data-testid="waiting-subagents"]')?.textContent).toContain(
+      "Waiting for subagents",
+    );
+    expect(root.querySelector(".loading-ring")).toBeNull();
+    app.unmount();
+
+    app = mountWith({ loading: true, isRunning: true, waitingSubagents: true });
+    await nextTick();
+    expect(root.querySelector('[data-testid="waiting-subagents"]')).toBeNull();
+    app.unmount();
+  });
 });

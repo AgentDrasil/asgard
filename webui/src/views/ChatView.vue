@@ -13,6 +13,7 @@ import type {
   Attachment,
   QueuedMessage,
   DirLockStatus,
+  ChatSession,
 } from "../types";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
@@ -36,12 +37,22 @@ const props = withDefaults(
     isRunning?: boolean;
     dirLock?: DirLockStatus;
     isUnlocking?: boolean;
+    session?: ChatSession | null;
+    subagents?: ChatSession[];
+    parentSession?: ChatSession | null;
+    waitingSubagents?: boolean;
+    killingIds?: string[];
   }>(),
   {
     queuedMessages: () => [],
     sendingQueuedIds: () => [],
     isRunning: false,
     isUnlocking: false,
+    session: null,
+    subagents: () => [],
+    parentSession: null,
+    waitingSubagents: false,
+    killingIds: () => [],
   },
 );
 
@@ -73,6 +84,8 @@ const emit = defineEmits<{
   (e: "stop"): void;
   (e: "retry"): void;
   (e: "unlock"): void;
+  (e: "open-session", id: string): void;
+  (e: "kill-subagent", id: string): void;
 }>();
 
 // Helper to collect all artifact files from props.artifacts and props.messages
@@ -234,6 +247,11 @@ function navigateToVcs(gitRoot?: string) {
         :isRunning="isRunning"
         :dirLock="dirLock"
         :isUnlocking="isUnlocking"
+        :session="session"
+        :subagents="subagents"
+        :parentSession="parentSession"
+        :waitingSubagents="waitingSubagents"
+        :killingIds="killingIds"
         v-model:isDetailsOpen="isDetailsOpen"
         @open-diff="navigateToVcs"
         @open-file-view="navigateToFiles"
@@ -248,6 +266,8 @@ function navigateToVcs(gitRoot?: string) {
         @send-now-queued="(id) => emit('send-now-queued', id)"
         @retry="emit('retry')"
         @unlock="emit('unlock')"
+        @open-session="(id) => emit('open-session', id)"
+        @kill-subagent="(id) => emit('kill-subagent', id)"
       />
     </div>
 

@@ -315,16 +315,7 @@ func New(conf *config.Config, dbConn *gorm.DB, opts ...ServerOption) (*Server, e
 		voiceAuthURL:    DefaultGoogleAuthURL,
 		voiceHTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
-	s.dirLocks = dirlock.NewManager(func(chatID string) {
-		s.subagentSig.locksChanged(s)
-		s.BroadcastSessionEvent(SessionEvent{
-			ChatID: chatID,
-			Type:   EventTypeStatus,
-			Payload: map[string]any{
-				"dirLock": s.dirLocks.StatusForChat(chatID),
-			},
-		})
-	})
+	s.dirLocks = dirlock.NewManager(s.onDirLockChanged)
 	s.runSingleAgentFn = s.runSingleAgent
 
 	for _, opt := range opts {
@@ -925,4 +916,18 @@ func (s *Server) retryPendingQuotaResets() {
 			}
 		}
 	}
+}
+
+// onDirLockChanged is the dir lock's change hook.
+func (s *Server) onDirLockChanged(chatID string) {
+	s.subagentSig.locksChanged(s)
+	// A writable subagent waiting for or taking the checkout changes state.
+	go s.publishSubagentState(chatID)
+	s.BroadcastSessionEvent(SessionEvent{
+		ChatID: chatID,
+		Type:   EventTypeStatus,
+		Payload: map[string]any{
+			"dirLock": s.dirLocks.StatusForChat(chatID),
+		},
+	})
 }

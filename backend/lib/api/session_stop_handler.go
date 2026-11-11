@@ -62,6 +62,10 @@ func (s *Server) beginExecution(chatID, agentID string, isWorkflow bool) (contex
 	// A stop's suppression of the finish push ended with the run it stopped.
 	s.clearQuiet(chatID)
 	s.unparkQueue(chatID)
+	if s.repo != nil && s.eventHub != nil {
+		// A subagent chat that runs again: tell its parent.
+		go s.publishSubagentState(chatID)
+	}
 	return context.WithValue(ctx, executionHandleKey{}, handle), handle, false
 }
 

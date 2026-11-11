@@ -19,13 +19,16 @@ const (
 	EventTypeDone     = "done"
 	EventTypeResync   = "resync"
 	EventTypeQueue    = "queue"
+	// EventTypeSubagent is published on a parent chat's stream when the state
+	// of one of its subagent chats changes.
+	EventTypeSubagent = "subagent"
 )
 
 // SessionEvent is the unified event structure broadcasted via EventHub and SSE.
 type SessionEvent struct {
 	EventID   int64                 `json:"eventId"`
 	ChatID    string                `json:"chatId"`
-	Type      string                `json:"type"` // message | status | title | artifact | done | resync | queue
+	Type      string                `json:"type"` // message | status | title | artifact | done | resync | queue | subagent
 	Message   *dbmodels.ChatMessage `json:"message,omitempty"`
 	Payload   map[string]any        `json:"payload,omitempty"`
 	Timestamp int64                 `json:"timestamp"`

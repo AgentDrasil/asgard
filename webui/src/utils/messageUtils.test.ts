@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mergeToolMessages, TOOL_ITEM_DELIMITER, isToolMessage } from "./messageUtils";
+import {
+  mergeToolMessages,
+  TOOL_ITEM_DELIMITER,
+  isToolMessage,
+  parseInterAgentMessage,
+} from "./messageUtils";
 import type { ChatMessage } from "../types";
 
 describe("messageUtils", () => {
@@ -112,5 +117,39 @@ describe("messageUtils", () => {
       expect(merged[1].role).toBe("activity");
       expect(merged[2].role).toBe("assistant");
     });
+  });
+});
+
+describe("parseInterAgentMessage", () => {
+  it("strips the parent prefix", () => {
+    expect(parseInterAgentMessage("[message from parent agent lead]\nplease stop")).toEqual({
+      kind: "parent",
+      from: "lead",
+      body: "please stop",
+    });
+  });
+
+  it("strips the subagent prefix and keeps the label", () => {
+    expect(parseInterAgentMessage("[message from subagent c-1 (review)]\nfound 2 issues")).toEqual({
+      kind: "subagent",
+      from: "c-1 (review)",
+      body: "found 2 issues",
+    });
+  });
+
+  it("parses a finish notice with its state", () => {
+    expect(
+      parseInterAgentMessage("[subagent c-1 (review) finished: failed] boom; full output: x"),
+    ).toEqual({
+      kind: "finished",
+      from: "c-1 (review)",
+      state: "failed",
+      body: "boom; full output: x",
+    });
+  });
+
+  it("leaves ordinary text alone", () => {
+    expect(parseInterAgentMessage("hello [message from parent agent x]")).toBeNull();
+    expect(parseInterAgentMessage("")).toBeNull();
   });
 });

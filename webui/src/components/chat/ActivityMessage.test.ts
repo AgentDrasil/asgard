@@ -82,4 +82,22 @@ describe("ActivityMessage.vue", () => {
 
     app.unmount();
   });
+  it("renders a SUBAGENT_NOTICE activity as a subtle notice", () => {
+    const message: ChatMessage = {
+      id: "n1",
+      role: "activity",
+      activityType: "SUBAGENT_NOTICE",
+      content: "subagent c-1 finished while you were stopping",
+    };
+    const app = createApp({
+      render: () => h(ActivityMessage, { message, activeAgent: null }),
+    });
+    app.use(i18n);
+    app.mount(root);
+    const notice = root.querySelector('[data-testid="subagent-notice"]');
+    expect(notice?.textContent).toContain("subagent c-1 finished while you were stopping");
+    // Not the collapsible tool/activity box.
+    expect(root.querySelector(".collapse")).toBeNull();
+    app.unmount();
+  });
 });

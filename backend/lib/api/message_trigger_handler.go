@@ -673,6 +673,7 @@ func (s *Server) runQueueConsumerLoop(ctx context.Context, targetAgent *agentspe
 				// that goroutine — zero message loss
 			}
 			// Guard re-acquired: the destructive Pop is now safe
+			s.publishSubagentState(chatID)
 			nextMsg, _ = s.repo.PopNextQueuedMessage(chatID)
 			if nextMsg == nil {
 				// The queue head was just withdrawn by the user. This goroutine still

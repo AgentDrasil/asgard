@@ -239,7 +239,13 @@ func (s *Server) parkQueue(chatID string) { s.queueParks.Store(chatID, queuePark
 func (s *Server) parkQueueUntilReconnect(chatID string, gen uint64) {
 	s.queueParks.Store(chatID, queuePark{gen: gen})
 }
-func (s *Server) unparkQueue(chatID string) { s.queueParks.Delete(chatID) }
+func (s *Server) unparkQueue(chatID string) {
+	if _, was := s.queueParks.LoadAndDelete(chatID); was && s.repo != nil && s.eventHub != nil {
+		// A parked queue counted as finished; restarting it makes the chat
+		// live again.
+		go s.publishSubagentState(chatID)
+	}
+}
 
 // queueParkedNow reports whether the chat's queue must not be restarted now.
 func (s *Server) queueParkedNow(chatID string) bool {

@@ -213,6 +213,7 @@ const {
   artifacts,
   queuedMessages,
   isRunning,
+  waitingSubagents,
   workingAgentLabel,
   isInputBusy,
   openSession,
@@ -417,6 +418,27 @@ onMounted(async () => {
     ]);
   }
 });
+
+// Subagent chats of the open chat, and the parent when it is a subagent itself.
+const activeSubagents = computed(() =>
+  activeSessionId.value
+    ? sessions.value.filter((s) => s.parentChatId === activeSessionId.value)
+    : [],
+);
+const activeParentSession = computed(() => {
+  const parentId = activeSession.value?.parentChatId;
+  return parentId ? sessions.value.find((s) => s.chatID === parentId) || null : null;
+});
+const killingSubagentIds = ref<string[]>([]);
+const handleKillSubagent = async (id: string) => {
+  if (killingSubagentIds.value.includes(id)) return;
+  killingSubagentIds.value = [...killingSubagentIds.value, id];
+  try {
+    await stopExecution(id);
+  } finally {
+    killingSubagentIds.value = killingSubagentIds.value.filter((x) => x !== id);
+  }
+};
 
 // Only list sessions bound to the selected runner (unbound legacy ones stay visible).
 const visibleSessions = computed(() =>
@@ -726,6 +748,11 @@ const commandList = computed<CommandItem[]>(() => [
           :isRunning="isRunning"
           :dirLock="activeSession?.dirLock"
           :isUnlocking="isUnlockingSession"
+          :session="activeSession"
+          :subagents="activeSubagents"
+          :parentSession="activeParentSession"
+          :waitingSubagents="waitingSubagents"
+          :killingIds="killingSubagentIds"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
           v-model:selectedCommit="selectedCommit"
@@ -760,6 +787,8 @@ const commandList = computed<CommandItem[]>(() => [
           @delete-queued="handleDeleteQueued"
           @send-now-queued="handleSendNowQueued"
           @retry="handleRetryLastUserMessage"
+          @open-session="(id: string) => handleSelectSession(id, closeSidebarOnMobile)"
+          @kill-subagent="handleKillSubagent"
         />
       </router-view>
       <!-- Hosted here (not in ChatView) so the sidebar terminal works on every page. -->

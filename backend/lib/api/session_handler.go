@@ -35,6 +35,28 @@ type ChatSession struct {
 	Artifacts         dbmodels.Artifacts       `json:"artifacts,omitempty"`
 	QueuedMessages    []dbmodels.QueuedMessage `json:"queuedMessages,omitempty"`
 	DirLock           *dirlock.Status          `json:"dirLock,omitempty"`
+	// Subagent chats only: the chat that spawned this one and how.
+	ParentChatID   string `json:"parentChatId,omitempty"`
+	SpawnLabel     string `json:"spawnLabel,omitempty"`
+	SpawnedByAgent string `json:"spawnedByAgent,omitempty"`
+	SpawnReadonly  bool   `json:"spawnReadonly,omitempty"`
+	// SubagentState is running|queued|done|failed|killed.
+	SubagentState string `json:"subagentState,omitempty"`
+	// WaitingSubagents: the chat is between turns, held open for its subagents.
+	WaitingSubagents bool `json:"waitingSubagents,omitempty"`
+}
+
+// withSubagentFields fills the subagent fields of cs from sess.
+func (s *Server) withSubagentFields(cs ChatSession, sess *dbmodels.Session) ChatSession {
+	if sess.ParentChatID == "" {
+		return cs
+	}
+	cs.ParentChatID = sess.ParentChatID
+	cs.SpawnLabel = sess.SpawnLabel
+	cs.SpawnedByAgent = sess.SpawnedByAgent
+	cs.SpawnReadonly = sess.SpawnReadonly
+	cs.SubagentState = s.subagentInfo(sess).State
+	return cs
 }
 
 type CreateSessionRequest struct {
@@ -213,6 +235,8 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	chatSession = s.withSubagentFields(chatSession, sess)
+	chatSession.WaitingSubagents = s.isIdleHeld(sess.ChatID)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(chatSession)
 }
@@ -285,7 +309,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			updatedAtPtr = &updatedAtCopy
 		}
 
-		sessions = append(sessions, ChatSession{
+		sessions = append(sessions, s.withSubagentFields(ChatSession{
 			ChatID:            sess.ChatID,
 			Title:             sess.Title,
 			CurrentAgent:      sess.CurrentAgent,
@@ -301,7 +325,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:         updatedAtPtr,
 			Artifacts:         sess.Artifacts,
 			DirLock:           s.dirLockStatus(sess.ChatID),
-		})
+		}, &sessCopy))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -90,8 +90,11 @@ func (r *waitReg) close() {
 // the dir lock, and which finishes must not be pushed. The zero value is ready
 // to use.
 type subagentSignals struct {
-	mu    sync.Mutex
-	waits map[*waitReg]struct{}
+	mu sync.Mutex
+	// pubMu orders subagent state snapshots; pubSeq is the last seq per chat.
+	pubMu  sync.Mutex
+	pubSeq map[string]int64
+	waits  map[*waitReg]struct{}
 	// marked are the chats this service marked in the dir lock; holders lists
 	// what keeps the mark (blocked waits, in-flight run state for later
 	// users). A marked chat without holders waits for its mark to be cleared.
@@ -149,6 +152,9 @@ func (g *subagentSignals) forget(chatID string) {
 	delete(g.queuedPush, chatID)
 	delete(g.quiet, chatID)
 	delete(g.stopped, chatID)
+	g.pubMu.Lock()
+	delete(g.pubSeq, chatID)
+	g.pubMu.Unlock()
 }
 
 func (g *subagentSignals) initLocked() {
@@ -330,6 +336,9 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 		g.lastPushed[chatID] = epoch
 	}
 	g.mu.Unlock()
+	if parentChat != "" && !stale {
+		s.publishSubagentState(chatID)
+	}
 
 	// The chat's own run is over: forget its hold. For a child, the parent's
 	// hold is re-evaluated once the finish is pushed (the push is injected

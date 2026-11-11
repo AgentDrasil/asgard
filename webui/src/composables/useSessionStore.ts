@@ -9,6 +9,7 @@ import type {
   QueuedMessage,
   SendNowResult,
   DirLockStatus,
+  SubagentState,
 } from "../types";
 import {
   getSession,
@@ -54,6 +55,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   const canEnqueue = computed<boolean>(() => queuedMessages.value.length < MAX_QUEUED_MESSAGES);
 
   const isRunning = ref(false);
+  // The active chat is between turns, held open while its subagents run.
+  const waitingSubagents = ref(false);
   const loading = ref(false);
   const workingAgentLabel = ref<string | null>(null);
 
@@ -149,6 +152,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
 
     if (ev.payload?.isRunning !== undefined) {
+      waitingSubagents.value = !ev.payload.isRunning && ev.payload.waitingSubagents === true;
       const hasUnrepliedAskUser = rawMessages.value.some(
         (m) => m.role === "ask_user" && !m.replied,
       );
@@ -203,6 +207,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   const handleSessionDoneEvent = (ev: SessionEvent) => {
     if (ev.chatId === activeSessionId.value) {
       isRunning.value = false;
+      waitingSubagents.value = false;
       loading.value = false;
       workingAgentLabel.value = null;
       if (activeSession.value) {
@@ -242,12 +247,55 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
         );
         const running = !hasUnrepliedAskUser && !!session.isRunning;
         isRunning.value = running;
+        waitingSubagents.value = !running && !!session.waitingSubagents;
         loading.value = running;
         if (!running) {
           workingAgentLabel.value = null;
         }
       }
     }
+  };
+
+  const subagentSeqs = new Map<string, number>();
+
+  // handleSessionSubagentEvent applies a child's state change, published on
+  // its parent's stream, to the session list. A child not known yet is fetched.
+  const handleSessionSubagentEvent = (ev: SessionEvent) => {
+    const p = ev.payload;
+    const id = typeof p?.id === "string" ? p.id : "";
+    if (!id || !ev.chatId) return;
+    // Events are versioned per child: one that is not newer than the last
+    // applied is stale (delivered out of order) and ignored.
+    if (typeof p?.seq === "number") {
+      const last = subagentSeqs.get(id);
+      if (last !== undefined && p.seq <= last) return;
+      subagentSeqs.set(id, p.seq);
+    }
+    const patch: Partial<ChatSession> = {
+      parentChatId: ev.chatId,
+      subagentState: p?.state as SubagentState,
+      spawnLabel: typeof p?.label === "string" ? p.label : undefined,
+      spawnReadonly: !!p?.readonly,
+      isRunning: p?.state === "running" || p?.state === "queued",
+    };
+    const idx = sessions.value.findIndex((s) => s.chatID === id);
+    if (idx > -1) {
+      sessions.value[idx] = { ...sessions.value[idx], ...patch };
+      return;
+    }
+    const placeholder: ChatSession = {
+      chatID: id,
+      title: "",
+      currentAgent: typeof p?.agent === "string" ? p.agent : "",
+      runDir: activeSession.value?.runDir || "",
+      ...patch,
+    };
+    sessions.value = [placeholder, ...sessions.value];
+    void getSession(id).then((full) => {
+      if (!full) return;
+      const i = sessions.value.findIndex((s) => s.chatID === id);
+      if (i > -1) sessions.value[i] = { ...sessions.value[i], ...full, messages: undefined };
+    });
   };
 
   const events = useSessionEvents({
@@ -258,6 +306,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     onDone: handleSessionDoneEvent,
     onResync: handleSessionResyncEvent,
     onQueue: handleSessionQueueEvent,
+    onSubagent: handleSessionSubagentEvent,
   });
 
   const openSession = async (id: string) => {
@@ -272,6 +321,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       artifacts.value = [];
       queuedMessages.value = [];
       isRunning.value = false;
+      waitingSubagents.value = false;
       loading.value = false;
       workingAgentLabel.value = null;
     }
@@ -312,6 +362,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       );
       const running = !hasUnrepliedAskUser && (isRunning.value || !!session.isRunning);
       isRunning.value = running;
+      waitingSubagents.value = !running && (waitingSubagents.value || !!session.waitingSubagents);
       loading.value = running;
       if (!running) {
         workingAgentLabel.value = null;
@@ -352,6 +403,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     artifacts.value = [];
     queuedMessages.value = [];
     isRunning.value = false;
+    waitingSubagents.value = false;
     loading.value = false;
     workingAgentLabel.value = null;
     events.disconnect();
@@ -441,20 +493,28 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   // stopExecution aborts the in-flight task of a session (defaults to the
   // active session). The backend broadcasts queue/status/done over SSE; the
   // local state is reset optimistically so the input unlocks immediately.
-  const isStoppingSession = ref(false);
+  // In-flight stop targets: the guard is per chat so killing one subagent
+  // never blocks (or fails) a stop of another chat.
+  const stoppingTargets = ref<Set<string>>(new Set());
+  const isStoppingSession = computed(
+    () => !!activeSessionId.value && stoppingTargets.value.has(activeSessionId.value),
+  );
   const stopExecution = async (sessionId?: string): Promise<boolean> => {
     const targetId = sessionId || activeSessionId.value;
-    if (!targetId || isStoppingSession.value) return false;
-    isStoppingSession.value = true;
+    if (!targetId || stoppingTargets.value.has(targetId)) return false;
+    stoppingTargets.value = new Set(stoppingTargets.value).add(targetId);
     try {
       const ok = await stopSessionExecution(targetId);
       if (ok) {
-        queuedMessages.value = [];
-        isRunning.value = false;
-        loading.value = false;
-        workingAgentLabel.value = null;
-        if (activeSession.value) {
-          activeSession.value.isRunning = false;
+        // Stopping another chat (a subagent) leaves the open chat alone.
+        if (targetId === activeSessionId.value) {
+          queuedMessages.value = [];
+          isRunning.value = false;
+          loading.value = false;
+          workingAgentLabel.value = null;
+          if (activeSession.value) {
+            activeSession.value.isRunning = false;
+          }
         }
         const idx = sessions.value.findIndex((s) => s.chatID === targetId);
         if (idx > -1) {
@@ -465,7 +525,9 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       }
       return ok;
     } finally {
-      isStoppingSession.value = false;
+      const next = new Set(stoppingTargets.value);
+      next.delete(targetId);
+      stoppingTargets.value = next;
     }
   };
 
@@ -520,6 +582,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
     loading.value = true;
     isRunning.value = true;
+    waitingSubagents.value = false;
     workingAgentLabel.value = null;
 
     const userMsgId = `user-${crypto.randomUUID()}`;
@@ -667,6 +730,13 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
       resetBusy();
       pushErrorIfActive(t("chat.sessionAlreadyRunning"));
+    } else if (res?.injected) {
+      // The message went into the live turn of a chat held open for its
+      // subagents. It is neither queued nor a new run: the backend records it
+      // in the transcript (the `message` event replaces the optimistic bubble)
+      // and a status event follows when the turn starts. Keep the busy state
+      // until then so the composer does not flicker.
+      rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);
     } else if (res?.queued) {
       // Server queued the message (local running state was stale): drop the
       // optimistic bubble. The SSE queue snapshot owns queue display, and the
@@ -769,6 +839,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     queuedMessages,
     canEnqueue,
     isRunning,
+    waitingSubagents,
     loading,
     workingAgentLabel,
     isInputBusy,
@@ -802,7 +873,9 @@ export function notifySendNowResult(res: SendNowResult | null) {
           ? t("chat.sendNowNotSupported")
           : res.reason === "not_running"
             ? t("chat.sendNowNotRunning")
-            : t("chat.sendNowFailed"),
+            : res.reason === "descendant_holds_checkout"
+              ? t("chat.sendNowHeldByChild")
+              : t("chat.sendNowFailed"),
       );
       break;
     case "gone":

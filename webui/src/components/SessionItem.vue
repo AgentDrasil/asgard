@@ -7,10 +7,40 @@ import { formatLockTooltip } from "../utils/dirLockUtils";
 
 const { t } = useI18n();
 
-const props = defineProps<{
-  session: ChatSession;
-  isActive: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    session: ChatSession;
+    isActive: boolean;
+    /** Nesting level under a parent chat (0 for a top-level chat). */
+    depth?: number;
+    /** Number of subagent chats nested directly under this one. */
+    childCount?: number;
+    /** The subagents of this chat are folded away. */
+    collapsed?: boolean;
+  }>(),
+  { depth: 0, childCount: 0, collapsed: false },
+);
+
+const isSubagent = computed(() => !!props.session.parentChatId);
+const displayTitle = computed(() =>
+  isSubagent.value
+    ? props.session.spawnLabel || props.session.title || t("subagents.untitled")
+    : props.session.title || t("sidebar.untitledChat"),
+);
+const stateBadgeClass = computed(() => {
+  switch (props.session.subagentState) {
+    case "running":
+      return "badge-info";
+    case "queued":
+      return "badge-warning";
+    case "failed":
+      return "badge-error";
+    case "killed":
+      return "badge-neutral";
+    default:
+      return "badge-success";
+  }
+});
 
 const lockTooltip = computed(() => {
   return formatLockTooltip(props.session.dirLock, t);
@@ -20,6 +50,7 @@ const emit = defineEmits<{
   (e: "select-session", id: string): void;
   (e: "delete-session", id: string): void;
   (e: "archive-session", id: string): void;
+  (e: "toggle-children", id: string): void;
 }>();
 
 const swipeOffset = ref(0);
@@ -116,6 +147,8 @@ const handleArchive = () => {
       'relative overflow-hidden rounded-lg w-full',
       isActive ? 'shadow-md shadow-primary/10' : '',
     ]"
+    :style="depth > 0 ? { paddingLeft: `${Math.min(depth, 4) * 12}px` } : undefined"
+    :data-depth="depth"
   >
     <!-- Action / Delete Background Layer -->
     <div
@@ -172,9 +205,49 @@ const handleArchive = () => {
           t("dirlock.uncommittedBadge")
         }}</span>
       </span>
-      <span class="truncate min-w-0 select-none flex-1">{{
-        session.title || t("sidebar.untitledChat")
+      <button
+        v-if="childCount > 0"
+        type="button"
+        class="shrink-0 flex items-center justify-center h-5 w-5 rounded hover:bg-black/10"
+        :title="collapsed ? t('subagents.expand') : t('subagents.collapse')"
+        :aria-label="collapsed ? t('subagents.expand') : t('subagents.collapse')"
+        :aria-expanded="!collapsed"
+        data-testid="session-toggle-children"
+        @click.stop="emit('toggle-children', session.chatID)"
+      >
+        <Icon
+          icon="mynaui:chevron-down"
+          :class="['h-3.5 w-3.5 fill-current transition-transform', collapsed ? '-rotate-90' : '']"
+        />
+        <span class="text-[10px] ml-0.5">{{ childCount }}</span>
+      </button>
+      <Icon
+        v-if="isSubagent"
+        icon="lucide:git-fork"
+        class="h-3.5 w-3.5 shrink-0 opacity-70"
+        aria-hidden="true"
+      />
+      <span class="truncate min-w-0 select-none flex-1" data-testid="session-title">{{
+        displayTitle
       }}</span>
+
+      <!-- Subagent details: agent, access mode and state -->
+      <div v-if="isSubagent" class="flex items-center gap-1 shrink-0" data-testid="subagent-badges">
+        <span
+          class="badge badge-ghost badge-xs max-w-[72px] truncate hidden sm:inline-flex"
+          :title="session.currentAgent"
+          >{{ session.currentAgent }}</span
+        >
+        <span class="badge badge-outline badge-xs" data-testid="subagent-mode">{{
+          session.spawnReadonly ? t("subagents.readonly") : t("subagents.writable")
+        }}</span>
+        <span
+          v-if="session.subagentState"
+          :class="['badge badge-xs', stateBadgeClass]"
+          data-testid="subagent-state"
+          >{{ t(`subagents.state.${session.subagentState}`) }}</span
+        >
+      </div>
 
       <div class="flex items-center gap-1 shrink-0">
         <!-- Desktop Mouse Hover Archive Button -->

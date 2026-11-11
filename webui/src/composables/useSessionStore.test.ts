@@ -1526,6 +1526,26 @@ describe("useSessionStore", () => {
       expect(store.isStoppingSession.value).toBe(false);
     });
 
+    it("allows concurrent stops of different targets without a failure toast", async () => {
+      const resolvers: Array<(v: boolean) => void> = [];
+      const stopSpy = vi
+        .spyOn(api, "stopSessionExecution")
+        .mockImplementation(() => new Promise<boolean>((resolve) => resolvers.push(resolve)));
+      const store = useSessionStore();
+      store.activeSessionId.value = "parent-chat";
+
+      const pA = store.stopExecution("child-a");
+      const pB = store.stopExecution("child-b");
+      const pA2 = store.stopExecution("child-a");
+      expect(await pA2).toBe(false);
+      expect(stopSpy).toHaveBeenCalledTimes(2);
+      expect(store.isStoppingSession.value).toBe(false);
+
+      resolvers.forEach((r) => r(true));
+      expect(await pA).toBe(true);
+      expect(await pB).toBe(true);
+    });
+
     it("prevents sending new messages while stopExecution is in progress", async () => {
       let resolveStop: (val: boolean) => void = () => {};
       const stopPromise = new Promise<boolean>((resolve) => {
@@ -1646,6 +1666,11 @@ describe("useSessionStore", () => {
           "The agent is not running right now; it stays queued",
         ],
         [{ kind: "not_injected", reason: "failed" }, "info", "Could not send now; it stays queued"],
+        [
+          { kind: "not_injected", reason: "descendant_holds_checkout" },
+          "info",
+          "A subagent is using the workspace; the message stays queued",
+        ],
         [{ kind: "gone" }, "info", "This message was already sent or removed"],
         [{ kind: "error" }, "error", "Failed to send the message now. Please try again."],
       ];
@@ -1657,6 +1682,173 @@ describe("useSessionStore", () => {
       clear();
       notifySendNowResult(null);
       expect(toasts.value).toHaveLength(0);
+    });
+  });
+  describe("subagents", () => {
+    const parent: ChatSession = {
+      chatID: "parent",
+      title: "Parent",
+      currentAgent: "agent-1",
+      runDir: "/ws",
+      messages: [],
+    };
+    const emitOn = (event: string, data: Partial<SessionEvent>) =>
+      MockEventSource.instances[0].emit(event, { eventId: 1, timestamp: 1, ...data });
+
+    it("shows waitingSubagents on an idle-held status and clears it when a turn starts", async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({ ...parent });
+      const store = useSessionStore();
+      await store.openSession("parent");
+
+      emitOn("status", {
+        chatId: "parent",
+        type: "status",
+        payload: { agent: "agent-1", isRunning: false, waitingSubagents: true },
+      });
+      expect(store.waitingSubagents.value).toBe(true);
+      expect(store.isRunning.value).toBe(false);
+      expect(store.loading.value).toBe(false);
+
+      emitOn("status", {
+        chatId: "parent",
+        type: "status",
+        payload: { agent: "agent-1", isRunning: true },
+      });
+      expect(store.waitingSubagents.value).toBe(false);
+      expect(store.isRunning.value).toBe(true);
+
+      emitOn("status", {
+        chatId: "parent",
+        type: "status",
+        payload: { agent: "agent-1", isRunning: false, waitingSubagents: true },
+      });
+      emitOn("done", { chatId: "parent", type: "done" });
+      expect(store.waitingSubagents.value).toBe(false);
+    });
+
+    it("restores waitingSubagents from the session snapshot", async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({ ...parent, waitingSubagents: true });
+      const store = useSessionStore();
+      await store.openSession("parent");
+      expect(store.waitingSubagents.value).toBe(true);
+    });
+
+    it("updates a known child and adds an unknown one on a subagent event", async () => {
+      const getSession = vi.spyOn(api, "getSession").mockImplementation(async (id: string) =>
+        id === "parent"
+          ? { ...parent }
+          : {
+              chatID: id,
+              title: "Child title",
+              currentAgent: "reviewer",
+              runDir: "/ws",
+              parentChatId: "parent",
+              messages: [{ id: "m", role: "user", content: "x" }],
+            },
+      );
+      const store = useSessionStore();
+      await store.openSession("parent");
+      store.sessions.value = [
+        {
+          chatID: "c1",
+          title: "",
+          currentAgent: "reviewer",
+          runDir: "/ws",
+          parentChatId: "parent",
+          subagentState: "running",
+        },
+      ];
+
+      emitOn("subagent", {
+        chatId: "parent",
+        type: "subagent",
+        payload: { id: "c1", state: "done", label: "review", agent: "reviewer", readonly: true },
+      });
+      expect(store.sessions.value[0]).toMatchObject({
+        subagentState: "done",
+        spawnLabel: "review",
+        spawnReadonly: true,
+        isRunning: false,
+      });
+
+      emitOn("subagent", {
+        chatId: "parent",
+        type: "subagent",
+        payload: { id: "c2", state: "queued", label: "edit", agent: "coder", readonly: false },
+      });
+      const added = store.sessions.value.find((s) => s.chatID === "c2");
+      expect(added).toMatchObject({ parentChatId: "parent", subagentState: "queued" });
+      await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith("c2"));
+      await vi.waitFor(() =>
+        expect(store.sessions.value.find((s) => s.chatID === "c2")?.title).toBe("Child title"),
+      );
+      expect(store.sessions.value.find((s) => s.chatID === "c2")?.messages).toBeUndefined();
+    });
+
+    it("ignores a subagent event that is not newer than the last applied", async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({ ...parent });
+      const store = useSessionStore();
+      await store.openSession("parent");
+      store.sessions.value = [
+        {
+          chatID: "c1",
+          title: "",
+          currentAgent: "reviewer",
+          runDir: "/ws",
+          parentChatId: "parent",
+        },
+      ];
+      const send = (state: string, seq: number) =>
+        emitOn("subagent", {
+          chatId: "parent",
+          type: "subagent",
+          payload: { id: "c1", state, label: "review", agent: "reviewer", readonly: true, seq },
+        });
+
+      send("done", 20);
+      send("running", 10); // delivered late: stale
+      expect(store.sessions.value[0]).toMatchObject({ subagentState: "done", isRunning: false });
+      send("running", 20); // not newer either
+      expect(store.sessions.value[0].subagentState).toBe("done");
+      send("queued", 21);
+      expect(store.sessions.value[0].subagentState).toBe("queued");
+    });
+
+    it("stopping a subagent leaves the open chat's running state alone", async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({ ...parent, isRunning: true });
+      const stop = vi.spyOn(api, "stopSessionExecution").mockResolvedValue(true);
+      const store = useSessionStore();
+      await store.openSession("parent");
+      store.sessions.value = [
+        { chatID: "c1", title: "", currentAgent: "a", runDir: "/ws", isRunning: true },
+      ];
+
+      expect(await store.stopExecution("c1")).toBe(true);
+      expect(stop).toHaveBeenCalledWith("c1");
+      expect(store.isRunning.value).toBe(true);
+      expect(store.sessions.value[0].isRunning).toBe(false);
+    });
+
+    it("treats an injected trigger response as neither queued nor a new bubble", async () => {
+      vi.spyOn(api, "getSession").mockResolvedValue({ ...parent, waitingSubagents: true });
+      vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+        status: "accepted",
+        chatId: "parent",
+        injected: true,
+      });
+      const enqueue = vi.spyOn(api, "enqueueMessage");
+      const store = useSessionStore();
+      await store.openSession("parent");
+      expect(store.waitingSubagents.value).toBe(true);
+
+      await store.sendMessage("keep going");
+
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(store.queuedMessages.value).toEqual([]);
+      expect(store.waitingSubagents.value).toBe(false);
+      // The backend records the injected message; no optimistic duplicate.
+      expect(store.messages.value.some((m) => m.content === "keep going")).toBe(false);
+      expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
     });
   });
 });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
-import type { ChatMessage, AgentInfo, QueuedMessage, DirLockStatus } from "../types";
+import type { ChatMessage, AgentInfo, QueuedMessage, DirLockStatus, ChatSession } from "../types";
 import { formatPath } from "../utils/agentUtils";
 import { getDirInfo } from "../lib/api";
 import { useShortcuts } from "../composables/useShortcuts";
@@ -13,6 +13,8 @@ import AssistantMessage from "./chat/AssistantMessage.vue";
 import ActivityMessage from "./chat/ActivityMessage.vue";
 import AskUserCard from "./chat/AskUserCard.vue";
 import QueuedMessageCard from "./chat/QueuedMessageCard.vue";
+import SubagentsPanel from "./chat/SubagentsPanel.vue";
+import { subagentLabel } from "../utils/sessionTree";
 import ArtifactViewer from "./ArtifactViewer.vue";
 import { t } from "../i18n";
 import { formatLockTooltip, formatWaitingBannerText } from "../utils/dirLockUtils";
@@ -49,6 +51,15 @@ const props = withDefaults(
     isRunning?: boolean;
     dirLock?: DirLockStatus;
     isUnlocking?: boolean;
+    /** The open chat itself (to tell a subagent chat from a regular one). */
+    session?: ChatSession | null;
+    /** Direct subagent chats of the open chat. */
+    subagents?: ChatSession[];
+    /** The chat that spawned the open chat, when it is a subagent. */
+    parentSession?: ChatSession | null;
+    /** The chat is between turns, held open while its subagents run. */
+    waitingSubagents?: boolean;
+    killingIds?: string[];
   }>(),
   {
     isDetailsOpen: true,
@@ -61,6 +72,11 @@ const props = withDefaults(
     sendingQueuedIds: () => [],
     isRunning: false,
     isUnlocking: false,
+    session: null,
+    subagents: () => [],
+    parentSession: null,
+    waitingSubagents: false,
+    killingIds: () => [],
   },
 );
 
@@ -79,7 +95,18 @@ const emit = defineEmits<{
   (e: "send-now-queued", id: string): void;
   (e: "retry"): void;
   (e: "unlock"): void;
+  (e: "open-session", id: string): void;
+  (e: "kill-subagent", id: string): void;
 }>();
+
+const isSubagentChat = computed(() => !!props.session?.parentChatId);
+const parentTitle = computed(
+  () =>
+    props.parentSession?.title || props.parentSession?.currentAgent || t("sidebar.untitledChat"),
+);
+const showWaitingSubagents = computed(
+  () => props.waitingSubagents && !props.isRunning && !props.loading,
+);
 
 const lockTooltip = computed(() => formatLockTooltip(props.dirLock, t));
 const waitingBannerText = computed(() => formatWaitingBannerText(props.dirLock, t));
@@ -470,6 +497,44 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <!-- Subagent chat: breadcrumb back to the parent chat -->
+    <div
+      v-if="isSubagentChat && session"
+      class="px-3 sm:px-6 py-1.5 bg-base-200/60 border-b border-base-300 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs shrink-0 min-w-0"
+      data-testid="subagent-breadcrumb"
+    >
+      <button
+        type="button"
+        class="flex items-center gap-1 text-primary hover:underline min-w-0 disabled:opacity-60 disabled:no-underline"
+        :disabled="!session.parentChatId"
+        :title="t('subagents.backToParent')"
+        data-testid="subagent-back"
+        @click="emit('open-session', session.parentChatId!)"
+      >
+        <Icon icon="lucide:arrow-left" class="h-3.5 w-3.5 shrink-0" />
+        <span class="truncate">{{ parentTitle }}</span>
+      </button>
+      <span class="text-base-content/40">/</span>
+      <Icon icon="lucide:git-fork" class="h-3.5 w-3.5 shrink-0 text-base-content/60" />
+      <span class="font-semibold truncate" data-testid="subagent-breadcrumb-label">{{
+        subagentLabel(session, t("subagents.untitled"))
+      }}</span>
+      <span class="badge badge-outline badge-xs" data-testid="subagent-breadcrumb-mode">{{
+        session.spawnReadonly ? t("subagents.readonly") : t("subagents.writable")
+      }}</span>
+      <span v-if="session.subagentState" class="badge badge-ghost badge-xs">{{
+        t(`subagents.state.${session.subagentState}`)
+      }}</span>
+    </div>
+
+    <!-- Parent chat: its subagents with live state -->
+    <SubagentsPanel
+      :subagents="subagents"
+      :killing-ids="killingIds"
+      @open="(id) => emit('open-session', id)"
+      @kill="(id) => emit('kill-subagent', id)"
+    />
+
     <!-- Main Content Area Under Header (Split into Message List on left & ArtifactViewer on right) -->
     <div class="flex-1 flex h-full overflow-hidden relative min-h-0">
       <!-- Left: Chat Messages Area -->
@@ -589,6 +654,17 @@ onUnmounted(() => {
                   })
                 }}
               </span>
+            </div>
+
+            <!-- Waiting for subagents (idle between turns; the composer stays enabled) -->
+            <div
+              v-if="showWaitingSubagents"
+              class="flex items-center gap-2 text-xs text-base-content/50 font-mono pl-2 py-2"
+              role="status"
+              data-testid="waiting-subagents"
+            >
+              <Icon icon="lucide:git-fork" class="h-3.5 w-3.5 animate-pulse shrink-0" />
+              <span>{{ $t("chat.waitingSubagents") }}</span>
             </div>
 
             <!-- Queued Messages List -->

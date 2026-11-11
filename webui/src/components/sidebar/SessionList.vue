@@ -5,6 +5,7 @@ import { Icon } from "@iconify/vue";
 import type { ChatSession, AgentInfo } from "../../types";
 import { getAgentIcon } from "../../utils/agentUtils";
 import SessionItem from "../SessionItem.vue";
+import { flattenSessions, rootOf, type SessionRow } from "../../utils/sessionTree";
 
 const { t } = useI18n();
 
@@ -34,6 +35,15 @@ const toggleWorkspaceCollapse = (key: string) => {
   collapsedWorkspaces.value[key] = !collapsedWorkspaces.value[key];
 };
 
+// Subagent chats nest under their parent; folded parents hide their children.
+const collapsedChildren = ref<Record<string, boolean>>({});
+const toggleChildren = (id: string) => {
+  collapsedChildren.value[id] = !collapsedChildren.value[id];
+};
+const sessionRows = computed<SessionRow[]>(() =>
+  flattenSessions(props.sessions, collapsedChildren.value),
+);
+
 // Helper for display path of runDir / workspace
 const formatWorkspaceName = (runDir?: string): string => {
   if (!runDir) return t("sidebar.defaultWorkspace");
@@ -46,7 +56,8 @@ const formatWorkspaceName = (runDir?: string): string => {
 interface WorkspaceGroup {
   runDir: string;
   displayName: string;
-  sessions: ChatSession[];
+  rows: SessionRow[];
+  sessionCount: number;
 }
 
 interface AgentNestedGroup {
@@ -57,10 +68,13 @@ interface AgentNestedGroup {
 
 const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
   const agentMap: Record<string, Record<string, ChatSession[]>> = {};
+  const byId = new Map(props.sessions.map((s) => [s.chatID, s]));
 
   for (const session of props.sessions) {
-    const agentKey = session.currentAgent || t("sidebar.unknownAgent");
-    const dirKey = session.runDir || t("sidebar.defaultWorkspace");
+    // A subagent chat is grouped with the chat it descends from.
+    const root = rootOf(session, byId);
+    const agentKey = root.currentAgent || t("sidebar.unknownAgent");
+    const dirKey = root.runDir || t("sidebar.defaultWorkspace");
 
     if (!agentMap[agentKey]) {
       agentMap[agentKey] = {};
@@ -78,7 +92,8 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
       return {
         runDir,
         displayName: formatWorkspaceName(runDir),
-        sessions,
+        rows: flattenSessions(sessions, collapsedChildren.value),
+        sessionCount: sessions.length,
       };
     });
 
@@ -100,10 +115,14 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
   <template v-else-if="viewMode === 'list'">
     <div class="w-full space-y-1 rounded-lg overflow-hidden">
       <SessionItem
-        v-for="session in sessions"
-        :key="session.chatID"
-        :session="session"
-        :is-active="activeSessionId === session.chatID"
+        v-for="row in sessionRows"
+        :key="row.session.chatID"
+        :session="row.session"
+        :depth="row.depth"
+        :child-count="row.childCount"
+        :collapsed="row.collapsed"
+        :is-active="activeSessionId === row.session.chatID"
+        @toggle-children="toggleChildren"
         @select-session="emit('select-session', $event)"
         @delete-session="emit('delete-session', $event)"
         @archive-session="emit('archive-session', $event)"
@@ -178,7 +197,7 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
               >
                 <Icon icon="mynaui:plus" class="h-4 w-4 fill-current stroke-[2.5]" />
               </button>
-              <span class="text-xs text-base-content/40">({{ wsGroup.sessions.length }})</span>
+              <span class="text-xs text-base-content/40">({{ wsGroup.sessionCount }})</span>
             </div>
           </div>
 
@@ -186,10 +205,14 @@ const nestedGroupedSessions = computed<AgentNestedGroup[]>(() => {
           <template v-if="!collapsedWorkspaces[`${agentGroup.agentName}:${wsGroup.runDir}`]">
             <div class="pl-2 space-y-0.5">
               <SessionItem
-                v-for="session in wsGroup.sessions"
-                :key="session.chatID"
-                :session="session"
-                :is-active="activeSessionId === session.chatID"
+                v-for="row in wsGroup.rows"
+                :key="row.session.chatID"
+                :session="row.session"
+                :depth="row.depth"
+                :child-count="row.childCount"
+                :collapsed="row.collapsed"
+                :is-active="activeSessionId === row.session.chatID"
+                @toggle-children="toggleChildren"
                 @select-session="emit('select-session', $event)"
                 @delete-session="emit('delete-session', $event)"
                 @archive-session="emit('archive-session', $event)"

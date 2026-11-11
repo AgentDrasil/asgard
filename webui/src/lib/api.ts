@@ -1106,6 +1106,8 @@ export async function triggerAgentMessage(
   runnerOffline?: boolean;
   queued?: boolean;
   messageId?: string;
+  /** The message went into the live turn of a chat held open for its subagents. */
+  injected?: boolean;
 } | null> {
   try {
     const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/message`, {
@@ -1239,7 +1241,11 @@ export async function sendQueuedMessageNow(
       return { kind: "injected", queue: Array.isArray(data.queue) ? data.queue : null };
     }
     const reason: SendNowReason =
-      data?.reason === "not_running" || data?.reason === "not_supported" ? data.reason : "failed";
+      data?.reason === "not_running" ||
+      data?.reason === "not_supported" ||
+      data?.reason === "descendant_holds_checkout"
+        ? data.reason
+        : "failed";
     return { kind: "not_injected", reason };
   } catch (err) {
     console.error("sendQueuedMessageNow error:", err);

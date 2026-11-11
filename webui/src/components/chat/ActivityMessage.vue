@@ -80,6 +80,21 @@ const emit = defineEmits<{
     </div>
   </div>
 
+  <!-- Subagent notice (a finish held back or dropped): a subtle one-liner -->
+  <div
+    v-else-if="message.activityType === 'SUBAGENT_NOTICE'"
+    class="w-full pl-2 pr-2 my-1 min-w-0"
+    data-testid="subagent-notice"
+  >
+    <div class="flex items-center gap-2 text-[11px] text-base-content/50 min-w-0">
+      <Icon icon="lucide:git-fork" class="h-3 w-3 shrink-0" />
+      <span class="truncate min-w-0" :title="message.content">{{ message.content }}</span>
+      <span v-if="message.timestamp" class="font-mono text-base-content/40 ml-auto shrink-0">
+        {{ formatTimestamp(message.timestamp) }}
+      </span>
+    </div>
+  </div>
+
   <!-- Cancellation Card -->
   <div v-else-if="message.activityType === 'CANCELLED'" class="w-full pl-2 pr-2 my-2 min-w-0">
     <div

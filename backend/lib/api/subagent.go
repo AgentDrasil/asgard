@@ -610,7 +610,12 @@ func (s *Server) subagentInfo(sess *dbmodels.Session) SubagentInfo {
 			info.Model = a.Model
 		}
 	}
-	if _, running := s.activeExecutions.Load(sess.ChatID); running {
+	_, running := s.activeExecutions.Load(sess.ChatID)
+	if !running && s.repo != nil && !s.childFinished(sess.ChatID) {
+		// Between runs with queued work about to run: same liveness as the
+		// waiter's, so it is not reported as finished.
+		info.State = SubagentStateQueued
+	} else if running {
 		info.State = SubagentStateRunning
 		if !sess.SpawnReadonly {
 			if st := s.dirLockStatus(sess.ChatID); st != nil && st.IsWaitingForLock && !st.IsLocked {
@@ -638,4 +643,54 @@ func tailText(s string, n int) string {
 		cut++
 	}
 	return "..." + s[cut:]
+}
+
+// subagentEventSnapshot is one versioned observation of a subagent chat.
+type subagentEventSnapshot struct {
+	parent  string
+	payload map[string]any
+}
+
+// snapshotSubagentState observes chatID's state and stamps it with a sequence
+// number. Observation and stamping happen under one lock, so a later
+// observation always carries a higher seq: consumers drop an event older than
+// one they applied, whatever order the events are delivered in. The seq starts
+// from the clock so it keeps growing across a server restart. ok is false for
+// a chat that is no subagent.
+func (s *Server) snapshotSubagentState(chatID string) (subagentEventSnapshot, bool) {
+	g := &s.subagentSig
+	g.pubMu.Lock()
+	defer g.pubMu.Unlock()
+	sess, err := s.repo.GetSessionMeta(chatID)
+	if err != nil || sess == nil || sess.ParentChatID == "" {
+		return subagentEventSnapshot{}, false
+	}
+	info := s.subagentInfo(sess)
+	if g.pubSeq == nil {
+		g.pubSeq = map[string]int64{}
+	}
+	seq := max(g.pubSeq[chatID]+1, time.Now().UnixMicro())
+	g.pubSeq[chatID] = seq
+	return subagentEventSnapshot{parent: sess.ParentChatID, payload: map[string]any{
+		"id":       info.ID,
+		"state":    info.State,
+		"label":    info.Label,
+		"agent":    info.Agent,
+		"readonly": info.Readonly,
+		"seq":      seq,
+	}}, true
+}
+
+// publishSubagentState tells the stream of a subagent chat's parent that the
+// chat's state may have changed: a "subagent" event with {id, state, label,
+// agent, readonly, seq}. It does nothing for a chat that is no subagent.
+func (s *Server) publishSubagentState(chatID string) {
+	if s.repo == nil || s.eventHub == nil {
+		return
+	}
+	snap, ok := s.snapshotSubagentState(chatID)
+	if !ok {
+		return
+	}
+	s.PublishSessionEvent(snap.parent, SessionEvent{Type: EventTypeSubagent, Payload: snap.payload})
 }

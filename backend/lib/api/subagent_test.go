@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -583,4 +586,174 @@ func TestSpawnRootAndSharedChat(t *testing.T) {
 	got, err = soloExec.sharedChat(top)
 	require.NoError(t, err)
 	assert.Empty(t, got, "a plain chat keeps its sandbox unchanged")
+}
+
+func TestSubagentStateEventsAndSessionList(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	started, _ := blockingRuns(rig)
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo"}))
+	events, _, cancel := rig.server.EventHub().Subscribe(rigChat, 0)
+	defer cancel()
+
+	req := spawnReq("beta")
+	req.Readonly = true
+	id, err := rig.server.SpawnSubagent(context.Background(), req)
+	require.NoError(t, err)
+	waitStarted(t, started)
+
+	next := func(state string) SessionEvent {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case ev := <-events:
+				if ev.Type == EventTypeSubagent && ev.Payload["state"] == state {
+					return ev
+				}
+			case <-deadline:
+				t.Fatalf("no subagent event with state %q", state)
+			}
+		}
+	}
+	ev := next(SubagentStateRunning)
+	assert.Equal(t, id, ev.Payload["id"])
+	assert.Equal(t, "work", ev.Payload["label"])
+	assert.Equal(t, true, ev.Payload["readonly"])
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	rec := httptest.NewRecorder()
+	rig.server.handleGetSessions(rec, req2)
+	var list []ChatSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	var child *ChatSession
+	for i := range list {
+		if list[i].ChatID == id {
+			child = &list[i]
+		}
+	}
+	require.NotNil(t, child)
+	assert.Equal(t, rigChat, child.ParentChatID)
+	assert.Equal(t, "work", child.SpawnLabel)
+	assert.True(t, child.SpawnReadonly)
+	assert.Equal(t, SubagentStateRunning, child.SubagentState)
+
+	_, err = rig.server.KillSubagent(rigChat, id)
+	require.NoError(t, err)
+	next(SubagentStateKilled)
+}
+
+func subagentSeq(t *testing.T, p map[string]any) int64 {
+	t.Helper()
+	seq, ok := p["seq"].(int64)
+	require.True(t, ok, "subagent event carries an int64 seq")
+	return seq
+}
+
+func TestSubagentSnapshotsAreVersionedInOrder(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo"}))
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: "kid", ParentChatID: rigChat, CurrentAgent: "beta", RunDir: "/work/repo"}))
+
+	// The run's begin observes "running", then the run ends and the release
+	// observes "done"; the begin's event is delivered last.
+	rig.server.activeExecutions.Store("kid", struct{}{})
+	early, ok := rig.server.snapshotSubagentState("kid")
+	require.True(t, ok)
+	rig.server.activeExecutions.Delete("kid")
+	late, ok := rig.server.snapshotSubagentState("kid")
+	require.True(t, ok)
+	assert.Equal(t, SubagentStateRunning, early.payload["state"])
+	assert.Equal(t, SubagentStateDone, late.payload["state"])
+	assert.Greater(t, subagentSeq(t, late.payload), subagentSeq(t, early.payload), "a later observation has the higher seq")
+
+	_, ok = rig.server.snapshotSubagentState(rigChat)
+	assert.False(t, ok, "a root chat is no subagent")
+}
+
+func TestSubagentStateQueuedWorkIsNotDone(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo"}))
+	child := &dbmodels.Session{ChatID: "kid", ParentChatID: rigChat, CurrentAgent: "beta", RunDir: "/work/repo"}
+	require.NoError(t, rig.repo.SaveSession(child))
+	events, _, cancel := rig.server.EventHub().Subscribe(rigChat, 0)
+	defer cancel()
+
+	// Drain boundary: the guard is released while a follow-up is queued.
+	_, err := rig.repo.EnqueueMessage("kid", "follow up", "")
+	require.NoError(t, err)
+	assert.Equal(t, SubagentStateQueued, rig.server.subagentInfo(child).State)
+	rig.server.onExecutionReleasedAt("kid", 1)
+	select {
+	case ev := <-events:
+		assert.Equal(t, EventTypeSubagent, ev.Type)
+		assert.Equal(t, SubagentStateQueued, ev.Payload["state"], "a release with runnable queued work is not terminal")
+	case <-time.After(5 * time.Second):
+		t.Fatal("no subagent event")
+	}
+
+	// The list API reports the same liveness.
+	rec := httptest.NewRecorder()
+	rig.server.handleGetSessions(rec, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+	var list []ChatSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	for _, cs := range list {
+		if cs.ChatID == "kid" {
+			assert.Equal(t, SubagentStateQueued, cs.SubagentState)
+		}
+	}
+
+	// A parked queue is finished work; unparking it makes the chat live again.
+	rig.server.parkQueue("kid")
+	assert.Equal(t, SubagentStateDone, rig.server.subagentInfo(child).State)
+	rig.server.unparkQueue("kid")
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type == EventTypeSubagent && ev.Payload["state"] == SubagentStateQueued {
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no queued event after the queue was unparked")
+		}
+	}
+}
+
+func TestSubagentStatePublishedOnCheckoutLockTransitions(t *testing.T) {
+	rig := newCallbackRig(t, teamAgent("alpha", "t"), teamAgent("beta", "t"))
+	rig.server.dirLocks = dirlock.NewManager(rig.server.onDirLockChanged)
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: rigChat, CurrentAgent: "alpha", RunDir: "/work/repo"}))
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: "kid", ParentChatID: rigChat, CurrentAgent: "beta", RunDir: "/work/repo"}))
+	events, _, cancel := rig.server.EventHub().Subscribe(rigChat, 0)
+	defer cancel()
+	ctx := t.Context()
+
+	release, err := rig.server.dirLocks.Acquire(ctx, dirlock.AcquireRequest{ChatID: rigChat, Dirs: []string{"/work/repo"}, Mode: dirlock.ModeExclusive})
+	require.NoError(t, err)
+	rig.server.activeExecutions.Store("kid", struct{}{})
+	got := make(chan func(bool), 1)
+	go func() {
+		rel, err := rig.server.dirLocks.Acquire(ctx, dirlock.AcquireRequest{ChatID: "kid", Dirs: []string{"/work/repo"}, Mode: dirlock.ModeExclusive, Ancestors: []string{rigChat}})
+		if err == nil {
+			got <- rel
+		}
+	}()
+	next := func(state string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case ev := <-events:
+				if ev.Type == EventTypeSubagent && ev.Payload["state"] == state {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no subagent event with state %q", state)
+			}
+		}
+	}
+	next(SubagentStateQueued)
+	release(false)
+	rel := <-got
+	next(SubagentStateRunning)
+	rel(false)
 }

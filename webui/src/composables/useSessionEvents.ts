@@ -15,6 +15,7 @@ export interface SessionEventsCallbacks {
   onDone?: (ev: SessionEvent) => void;
   onResync?: (ev: SessionEvent) => void;
   onQueue?: (ev: SessionEvent) => void;
+  onSubagent?: (ev: SessionEvent) => void;
   onError?: (err: Event) => void;
   onOpen?: () => void;
 }
@@ -96,6 +97,7 @@ export function useSessionEvents(callbacks: SessionEventsCallbacks = {}) {
     es.addEventListener("done", parseAndDispatch(callbacks.onDone));
     es.addEventListener("resync", parseAndDispatch(callbacks.onResync));
     es.addEventListener("queue", parseAndDispatch(callbacks.onQueue));
+    es.addEventListener("subagent", parseAndDispatch(callbacks.onSubagent));
 
     es.onerror = (err) => {
       callbacks.onError?.(err);
