@@ -519,6 +519,44 @@ describe("DashboardView.vue", () => {
       expect(getSessionsSpy).not.toHaveBeenCalled();
     });
 
+    it("pauses polling while the document is hidden and refreshes when visible again", async () => {
+      const getSessionsSpy = vi
+        .spyOn(api, "getSessions")
+        .mockResolvedValue([...mockActiveSessions]);
+      vi.spyOn(api, "getAgents").mockResolvedValue([...mockAgents]);
+      let hidden = false;
+      const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+
+      const app = createApp({
+        render() {
+          return h(DashboardView);
+        },
+      });
+      app.use(i18n);
+      app.mount(root);
+      await vi.advanceTimersByTimeAsync(0);
+      getSessionsSpy.mockClear();
+
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(getSessionsSpy).not.toHaveBeenCalled();
+
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getSessionsSpy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(getSessionsSpy).toHaveBeenCalledTimes(2);
+
+      app.unmount();
+      getSessionsSpy.mockClear();
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(getSessionsSpy).not.toHaveBeenCalled();
+      hiddenSpy.mockRestore();
+    });
+
     it("filters sessions by runner and switches active runner on card click", async () => {
       resetRunnersForTest();
       vi.useRealTimers();

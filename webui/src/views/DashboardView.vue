@@ -76,14 +76,37 @@ const pollSessions = async () => {
   }
 };
 
-onMounted(() => {
-  void fetchAllSessions();
+const startPolling = () => {
+  if (pollInterval) return;
   pollInterval = setInterval(() => {
     void pollSessions();
   }, 5000);
+};
+
+const stopPolling = () => {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+};
+
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopPolling();
+  } else {
+    void pollSessions();
+    startPolling();
+  }
+};
+
+onMounted(() => {
+  void fetchAllSessions();
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  if (!document.hidden) startPolling();
 });
 
 onUnmounted(() => {
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   if (pollInterval) {
     clearInterval(pollInterval);
     pollInterval = null;

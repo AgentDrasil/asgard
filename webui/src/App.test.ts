@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, defineComponent, h, nextTick, watchEffect } from "vue";
 import { createRouter, createMemoryHistory } from "vue-router";
 import App from "./App.vue";
+import { isMac } from "./composables/useShortcuts";
 import { i18n, setLocale } from "./i18n";
 import * as api from "./lib/api";
 import { resetRunnersForTest } from "./composables/useRunners";
@@ -188,6 +189,66 @@ describe("App new chat from an active session", () => {
     expect(router.currentRoute.value.path).toBe("/newchat");
     expect(captured.agent).toBe("agent-a");
     expect(captured.dir).toBe("/ws/a2");
+
+    app.unmount();
+  });
+
+  it("ignores non-modal global shortcuts while a modal dialog is open", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/dashboard", component: BlankStub }],
+    });
+    await router.push("/dashboard");
+    const app = createApp(App);
+    app.use(i18n);
+    app.use(router);
+    app.mount(root);
+    await router.isReady();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 0));
+    await nextTick();
+
+    const backdrop = () => root.querySelector("div.fixed.inset-0.bg-black\\/50");
+    const press = (init: KeyboardEventInit = {}) => {
+      const ev = new KeyboardEvent("keydown", {
+        key: "b",
+        code: "KeyB",
+        ctrlKey: !isMac,
+        metaKey: isMac,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      window.dispatchEvent(ev);
+      return ev;
+    };
+
+    expect(backdrop()).not.toBeNull();
+
+    // Dialog open: shortcut ignored.
+    const dlg = document.createElement("dialog");
+    dlg.setAttribute("open", "");
+    document.body.appendChild(dlg);
+    press();
+    await nextTick();
+    expect(backdrop()).not.toBeNull();
+    dlg.remove();
+
+    // Shortcut works once the dialog is gone.
+    press();
+    await nextTick();
+    expect(backdrop()).toBeNull();
+
+    // Modal-opening shortcuts still work over an open dialog.
+    const dlg2 = document.createElement("dialog");
+    dlg2.setAttribute("open", "");
+    document.body.appendChild(dlg2);
+    expect(document.querySelector('[role="combobox"]')).toBeNull();
+    press({ key: "F1", code: "F1", ctrlKey: false, metaKey: false });
+    await nextTick();
+    await nextTick();
+    expect(document.querySelector('[role="combobox"]')).not.toBeNull();
+    dlg2.remove();
 
     app.unmount();
   });

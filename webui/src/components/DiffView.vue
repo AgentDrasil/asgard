@@ -295,12 +295,16 @@ const syncTheme = () => {
   theme.value = getDiffTheme(docTheme);
 };
 
-const observer = new MutationObserver(syncTheme);
+let observer: MutationObserver | null = null;
 onMounted(() => {
   syncTheme();
+  observer = new MutationObserver(syncTheme);
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 });
-onUnmounted(() => observer.disconnect());
+onUnmounted(() => {
+  observer?.disconnect();
+  observer = null;
+});
 
 // ── Line comments (in-memory) ────────────────────────────────────────────────
 const comments = ref<Map<string, CommentEntry>>(new Map());

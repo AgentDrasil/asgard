@@ -91,6 +91,16 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 
   if (!action) return;
 
+  // A modal <dialog> owns the keyboard (Esc is handled natively via cancel);
+  // only the shortcuts that open/switch modals stay active over it.
+  if (
+    action !== "search_files" &&
+    action !== "command_palette" &&
+    document.querySelector("dialog[open]")
+  ) {
+    return;
+  }
+
   switch (action) {
     case "search_files": {
       const currentSessionId = activeSessionId.value || (route.params.id as string);
