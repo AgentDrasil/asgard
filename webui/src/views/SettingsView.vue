@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import ThemeSelector from "../components/sidebar/ThemeSelector.vue";
@@ -86,8 +86,6 @@ const totalErrors = computed(
 const totalWarnings = computed(
   () => (isAdmin.value ? backendWarnCount.value : 0) + toastWarnCount.value,
 );
-
-const go = (path: string) => router.push(path);
 
 const navigateBack = () => {
   if (window.history.state?.back) {
@@ -179,12 +177,9 @@ const navigateBack = () => {
               <span>{{ t("settings.signOut") }}</span>
             </button>
           </div>
-          <div
-            role="button"
-            tabindex="0"
-            @click="go('/settings/keys')"
-            @keydown.enter.space.prevent="go('/settings/keys')"
-            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+          <RouterLink
+            to="/settings/keys"
+            class="group flex items-center justify-between gap-4 p-4 hover:bg-base-200 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
             data-testid="nav-proxy-keys"
           >
             <div class="min-w-0">
@@ -200,7 +195,7 @@ const navigateBack = () => {
               icon="material-symbols:chevron-right"
               class="w-6 h-6 text-base-content/40 shrink-0"
             />
-          </div>
+          </RouterLink>
           <div class="flex items-center justify-between gap-4 p-4">
             <div class="min-w-0">
               <div class="font-medium flex items-center gap-2">
@@ -242,12 +237,9 @@ const navigateBack = () => {
             </div>
             <div class="w-56 shrink-0"><ThemeSelector /></div>
           </div>
-          <div
-            role="button"
-            tabindex="0"
-            @click="go('/settings/keybindings')"
-            @keydown.enter.space.prevent="go('/settings/keybindings')"
-            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-b-xl"
+          <RouterLink
+            to="/settings/keybindings"
+            class="group flex items-center justify-between gap-4 p-4 hover:bg-base-200 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 rounded-b-xl"
           >
             <div class="min-w-0">
               <div
@@ -264,7 +256,7 @@ const navigateBack = () => {
               icon="material-symbols:chevron-right"
               class="w-6 h-6 text-base-content/40 shrink-0"
             />
-          </div>
+          </RouterLink>
         </div>
       </section>
 
@@ -274,12 +266,9 @@ const navigateBack = () => {
           {{ t("settings.systemActions") }}
         </h2>
         <div class="rounded-xl border border-base-300 bg-base-200/50 divide-y divide-base-300">
-          <div
-            role="button"
-            tabindex="0"
-            @click="go('/settings/runners')"
-            @keydown.enter.space.prevent="go('/settings/runners')"
-            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-t-xl"
+          <RouterLink
+            to="/settings/runners"
+            class="group flex items-center justify-between gap-4 p-4 hover:bg-base-200 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 rounded-t-xl"
             data-testid="nav-runners"
           >
             <div class="min-w-0">
@@ -295,14 +284,11 @@ const navigateBack = () => {
               icon="material-symbols:chevron-right"
               class="w-6 h-6 text-base-content/40 shrink-0"
             />
-          </div>
-          <div
+          </RouterLink>
+          <RouterLink
             v-if="isAdmin"
-            role="button"
-            tabindex="0"
-            @click="go('/settings/logs')"
-            @keydown.enter.space.prevent="go('/settings/logs')"
-            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50"
+            to="/settings/logs"
+            class="group flex items-center justify-between gap-4 p-4 hover:bg-base-200 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <div class="min-w-0">
               <div
@@ -325,13 +311,10 @@ const navigateBack = () => {
               icon="material-symbols:chevron-right"
               class="w-6 h-6 text-base-content/40 shrink-0"
             />
-          </div>
-          <div
-            role="button"
-            tabindex="0"
-            @click="go('/settings/compression')"
-            @keydown.enter.space.prevent="go('/settings/compression')"
-            class="group flex items-center justify-between gap-4 p-4 cursor-pointer hover:bg-base-200 transition-colors focus:outline-hidden focus:ring-2 focus:ring-primary/50 rounded-b-xl"
+          </RouterLink>
+          <RouterLink
+            to="/settings/compression"
+            class="group flex items-center justify-between gap-4 p-4 hover:bg-base-200 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 rounded-b-xl"
           >
             <div class="min-w-0">
               <div
@@ -348,7 +331,7 @@ const navigateBack = () => {
               icon="material-symbols:chevron-right"
               class="w-6 h-6 text-base-content/40 shrink-0"
             />
-          </div>
+          </RouterLink>
         </div>
       </section>
     </div>

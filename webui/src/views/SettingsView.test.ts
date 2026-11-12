@@ -23,6 +23,11 @@ vi.mock("vue-router", () => ({
     push: mockPush,
     back: mockBack,
   }),
+  RouterLink: {
+    name: "RouterLink",
+    props: ["to"],
+    template: `<a :href="to"><slot /></a>`,
+  },
 }));
 
 describe("SettingsView.vue", () => {
@@ -194,7 +199,7 @@ describe("SettingsView.vue", () => {
     app.unmount();
   });
 
-  it("navigates to /settings/keys when Personal API Keys card is clicked", async () => {
+  it("links to /settings/keys from the Personal API Keys card", async () => {
     const app = createApp({
       render() {
         return h(SettingsView);
@@ -206,13 +211,12 @@ describe("SettingsView.vue", () => {
 
     const keysCard = root.querySelector<HTMLElement>('[data-testid="nav-proxy-keys"]');
     expect(keysCard).not.toBeNull();
-    keysCard!.click();
-
-    expect(mockPush).toHaveBeenCalledWith("/settings/keys");
+    expect(keysCard!.tagName).toBe("A");
+    expect(keysCard!.getAttribute("href")).toBe("/settings/keys");
     app.unmount();
   });
 
-  it("navigates to /settings/runners when Runners card is clicked", async () => {
+  it("links to /settings/runners from the Runners card", async () => {
     const app = createApp({
       render() {
         return h(SettingsView);
@@ -224,9 +228,8 @@ describe("SettingsView.vue", () => {
 
     const runnersCard = root.querySelector<HTMLElement>('[data-testid="nav-runners"]');
     expect(runnersCard).not.toBeNull();
-    runnersCard!.click();
-
-    expect(mockPush).toHaveBeenCalledWith("/settings/runners");
+    expect(runnersCard!.tagName).toBe("A");
+    expect(runnersCard!.getAttribute("href")).toBe("/settings/runners");
     app.unmount();
   });
 
