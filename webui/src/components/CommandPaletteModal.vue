@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from "vue";
+import { ref, watch, nextTick, computed, useId } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import AppModal from "./common/AppModal.vue";
@@ -19,6 +19,9 @@ const emit = defineEmits<{
 }>();
 
 const inputRef = ref<HTMLInputElement | null>(null);
+const uid = useId();
+const listboxId = `${uid}-listbox`;
+const optionId = (index: number) => `${uid}-option-${index}`;
 const commandsRef = computed(() => props.commands);
 
 const {
@@ -46,6 +49,12 @@ watch(
   { immediate: true },
 );
 
+watch(selectedIndex, async (i) => {
+  await nextTick();
+  const el = document.getElementById(optionId(i));
+  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+});
+
 function handleSelect(command: CommandItem) {
   if (!command) return;
   Promise.resolve(command.action()).catch((err) => {
@@ -66,6 +75,17 @@ function handleClear() {
   query.value = "";
   inputRef.value?.focus();
 }
+
+const hasResults = computed(() => filteredCommands.value.length > 0);
+const activeDescendant = computed(() =>
+  hasResults.value ? optionId(selectedIndex.value) : undefined,
+);
+const announcement = computed(() => {
+  if (hasResults.value)
+    return t("commands.palette.resultsAnnounce", { count: filteredCommands.value.length });
+  if (query.value.trim()) return t("commands.palette.noResultsAnnounce");
+  return "";
+});
 </script>
 
 <template>
@@ -86,6 +106,12 @@ function handleClear() {
           autofocus
           v-model="query"
           type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="hasResults"
+          :aria-controls="listboxId"
+          :aria-activedescendant="activeDescendant"
+          :aria-label="t('commands.palette.title')"
           :placeholder="t('commands.palette.placeholder')"
           class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
           @keydown.down.prevent="navigateNext"
@@ -114,10 +140,19 @@ function handleClear() {
         </div>
 
         <!-- Commands List -->
-        <div v-else class="space-y-0.5">
+        <div
+          v-else
+          :id="listboxId"
+          role="listbox"
+          class="space-y-0.5"
+          :aria-label="t('commands.palette.title')"
+        >
           <div
             v-for="(cmd, index) in filteredCommands"
             :key="cmd.id"
+            :id="optionId(index)"
+            role="option"
+            :aria-selected="index === selectedIndex"
             @click="handleSelect(cmd)"
             @mouseenter="selectedIndex = index"
             :class="[
@@ -178,6 +213,9 @@ function handleClear() {
           {{ t("commands.palette.commandsCount", { count: filteredCommands.length }) }}
         </div>
       </div>
+    </div>
+    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ announcement }}
     </div>
   </AppModal>
 </template>

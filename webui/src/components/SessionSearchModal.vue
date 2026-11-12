@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { ref, watch, nextTick, computed, useId } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import AppModal from "./common/AppModal.vue";
@@ -18,6 +18,9 @@ const emit = defineEmits<{
 }>();
 
 const inputRef = ref<HTMLInputElement | null>(null);
+const uid = useId();
+const listboxId = `${uid}-listbox`;
+const optionId = (index: number) => `${uid}-option-${index}`;
 
 const {
   query,
@@ -46,6 +49,12 @@ watch(
   { immediate: true },
 );
 
+watch(selectedIndex, async (i) => {
+  await nextTick();
+  const el = document.getElementById(optionId(i));
+  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+});
+
 function handleSelect(session: ChatSession) {
   emit("select-session", session);
   emit("close");
@@ -72,6 +81,16 @@ function getDisplayTitle(session: ChatSession): string {
 function getDirName(path?: string): string {
   return path?.trim() || "";
 }
+
+const hasResults = computed(() => results.value.length > 0);
+const activeDescendant = computed(() =>
+  hasResults.value ? optionId(selectedIndex.value) : undefined,
+);
+const announcement = computed(() => {
+  if (hasResults.value) return t("sessionSearch.resultsAnnounce", { count: results.value.length });
+  if (query.value.trim() && !isLoading.value) return t("sessionSearch.noResultsAnnounce");
+  return "";
+});
 </script>
 
 <template>
@@ -92,6 +111,12 @@ function getDirName(path?: string): string {
           autofocus
           v-model="query"
           type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="hasResults"
+          :aria-controls="listboxId"
+          :aria-activedescendant="activeDescendant"
+          :aria-label="t('sessionSearch.title')"
           :placeholder="t('sessionSearch.placeholder')"
           class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
           @keydown.down.prevent="navigateNext"
@@ -140,10 +165,19 @@ function getDirName(path?: string): string {
         </div>
 
         <!-- Results List -->
-        <div v-else class="space-y-0.5">
+        <div
+          v-else
+          :id="listboxId"
+          role="listbox"
+          class="space-y-0.5"
+          :aria-label="t('sessionSearch.title')"
+        >
           <div
             v-for="(session, index) in results"
             :key="session.chatID"
+            :id="optionId(index)"
+            role="option"
+            :aria-selected="index === selectedIndex"
             @click="handleSelect(session)"
             @mouseenter="selectedIndex = index"
             :class="[
@@ -221,6 +255,9 @@ function getDirName(path?: string): string {
           {{ t("sessionSearch.sessionsCount", { count: results.length }) }}
         </div>
       </div>
+    </div>
+    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ announcement }}
     </div>
   </AppModal>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from "vue";
+import { ref, watch, nextTick, computed, useId } from "vue";
 import { Icon } from "@iconify/vue";
 import AppModal from "../common/AppModal.vue";
 import { useFileSearchState } from "../../composables/useFileSearchState";
@@ -21,6 +21,9 @@ const emit = defineEmits<{
 }>();
 
 const inputRef = ref<HTMLInputElement | null>(null);
+const uid = useId();
+const listboxId = `${uid}-listbox`;
+const optionId = (index: number) => `${uid}-option-${index}`;
 const sessionIdRef = computed(() => props.sessionId);
 
 const {
@@ -49,6 +52,12 @@ watch(
   },
   { immediate: true },
 );
+
+watch(selectedIndex, async (i) => {
+  await nextTick();
+  const el = document.getElementById(optionId(i));
+  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+});
 
 function handleSelect(path: string, scope?: FileScope) {
   if (!path) return;
@@ -99,6 +108,17 @@ function getDirName(path: string): string {
   if (lastSlash <= 0) return "";
   return path.substring(0, lastSlash);
 }
+
+const hasResults = computed(() => results.value.length > 0);
+const activeDescendant = computed(() =>
+  hasResults.value ? optionId(selectedIndex.value) : undefined,
+);
+const announcement = computed(() => {
+  if (hasResults.value)
+    return t("files.searchModal.resultsAnnounce", { count: results.value.length });
+  if (query.value.trim() && !isLoading.value) return t("files.searchModal.noResultsAnnounce");
+  return "";
+});
 </script>
 
 <template>
@@ -119,6 +139,12 @@ function getDirName(path: string): string {
           autofocus
           v-model="query"
           type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="hasResults"
+          :aria-controls="listboxId"
+          :aria-activedescendant="activeDescendant"
+          :aria-label="t('files.searchModal.title')"
           :placeholder="t('files.searchModal.placeholder')"
           class="input input-ghost w-full focus:outline-none focus:bg-transparent text-sm sm:text-base text-base-content placeholder:text-base-content/40 px-0 h-9"
           @keydown.down.prevent="navigateNext"
@@ -167,10 +193,19 @@ function getDirName(path: string): string {
         </div>
 
         <!-- Results List -->
-        <div v-else class="space-y-0.5">
+        <div
+          v-else
+          :id="listboxId"
+          role="listbox"
+          class="space-y-0.5"
+          :aria-label="t('files.searchModal.title')"
+        >
           <div
             v-for="(file, index) in results"
             :key="file.path"
+            :id="optionId(index)"
+            role="option"
+            :aria-selected="index === selectedIndex"
             @click="handleSelect(file.path, file.scope)"
             @mouseenter="selectedIndex = index"
             :class="[
@@ -258,6 +293,9 @@ function getDirName(path: string): string {
           {{ t("files.searchModal.resultsCount", { count: results.length }) }}
         </div>
       </div>
+    </div>
+    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ announcement }}
     </div>
   </AppModal>
 </template>

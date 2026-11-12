@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import { useI18n } from "vue-i18n";
 import TerminalView from "./TerminalView.vue";
@@ -52,12 +52,54 @@ const terminalKey = computed(() =>
     : `${props.terminalType}-${props.sessionId}`,
 );
 
+// Mobile overlay is a modal dialog: move focus in on open and restore it to
+// the opener when hidden. The overlay stays mounted (v-show) so xterm and its
+// WebSocket survive hide/show.
+const mobileOverlayRef = ref<HTMLElement | null>(null);
+const desktopRegionRef = ref<HTMLElement | null>(null);
+let opener: HTMLElement | null = null;
+
+function focusMobileOverlay() {
+  if (isDesktop.value || !props.isOpen) return;
+  const active = document.activeElement;
+  if (
+    active instanceof HTMLElement &&
+    !mobileOverlayRef.value?.contains(active) &&
+    !desktopRegionRef.value?.contains(active)
+  ) {
+    opener = active;
+  }
+  nextTick(() => {
+    const el = mobileOverlayRef.value;
+    if (el && !el.contains(document.activeElement)) el.focus();
+  });
+}
+
+function restoreOpenerFocus() {
+  const el = opener;
+  opener = null;
+  if (el && el.isConnected) el.focus();
+}
+
 watch(
   () => props.isOpen,
   (v) => {
-    if (v) hasBeenOpened.value = true;
+    if (v) {
+      hasBeenOpened.value = true;
+      focusMobileOverlay();
+    } else {
+      restoreOpenerFocus();
+    }
   },
 );
+
+// Esc hides the overlay, except while typing in the terminal where Esc belongs
+// to the running program (vim, etc.); the back button remains available there.
+function onMobileEsc(e: KeyboardEvent) {
+  if ((e.target as HTMLElement | null)?.closest?.(".xterm")) return;
+  e.stopPropagation();
+  emit("hide");
+}
 
 // Render only the panel matching the real viewport so a single terminal/WS
 // connection is created (ttyd runs with --once = single client).
@@ -68,7 +110,16 @@ const isDesktop = ref(
 );
 let mql: MediaQueryList | null = null;
 const onMqlChange = (e: MediaQueryListEvent) => {
+  const wasDesktop = isDesktop.value;
   isDesktop.value = e.matches;
+  if (!props.isOpen || wasDesktop === e.matches) return;
+  if (!e.matches) {
+    focusMobileOverlay();
+  } else {
+    // Overlay (and any focus inside it) is going away while the panel stays
+    // open: keep focus in the panel (the opener is restored when it closes).
+    nextTick(() => desktopRegionRef.value?.focus());
+  }
 };
 
 onMounted(() => {
@@ -152,6 +203,13 @@ onUnmounted(() => {
   <div
     v-if="hasBeenOpened && isDesktop"
     v-show="isOpen"
+    ref="desktopRegionRef"
+    tabindex="-1"
+    class="focus:outline-none"
+    role="region"
+    :aria-label="
+      terminalType === 'sidebar' ? t('terminal.globalTerminal') : t('terminal.sessionTerminal')
+    "
     :class="[
       isMaximized
         ? 'absolute inset-0 z-40 bg-base-100 flex flex-col w-full h-full overflow-hidden'
@@ -245,7 +303,13 @@ onUnmounted(() => {
   <div
     v-if="hasBeenOpened && !isDesktop"
     v-show="isOpen"
-    class="fixed inset-0 z-50 bg-base-100 flex flex-col w-full h-[100dvh] overflow-hidden"
+    ref="mobileOverlayRef"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="t('terminal.terminal')"
+    tabindex="-1"
+    @keydown.esc="onMobileEsc"
+    class="fixed inset-0 z-50 bg-base-100 flex flex-col w-full h-[100dvh] overflow-hidden focus:outline-none"
   >
     <header
       class="px-3 py-2.5 bg-base-200 border-b border-base-300 flex items-center justify-between shrink-0"

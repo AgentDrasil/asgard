@@ -295,4 +295,111 @@ describe("SessionSearchModal.vue", () => {
 
     app.unmount();
   });
+
+  it("exposes combobox/listbox ARIA with active descendant and live count", async () => {
+    vi.spyOn(api, "searchSessions").mockResolvedValue(mockSessions);
+    const app = createApp({
+      render() {
+        return h(SessionSearchModal, { isOpen: true });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+    const input = root.querySelector("input") as HTMLInputElement;
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    input.value = "fix";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    const listbox = root.querySelector('[role="listbox"]') as HTMLElement;
+    expect(listbox.id).toBe(input.getAttribute("aria-controls"));
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    const options = root.querySelectorAll('[role="option"]');
+    expect(options.length).toBe(2);
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    await nextTick();
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(options[0].getAttribute("aria-selected")).toBe("false");
+    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      "2 sessions available",
+    );
+    app.unmount();
+  });
+
+  const mountSession = (target: HTMLElement) => {
+    const app = createApp({
+      render() {
+        return h(SessionSearchModal, { isOpen: true });
+      },
+    });
+    app.use(i18n);
+    app.mount(target);
+    return app;
+  };
+
+  it("announces no results and drops activedescendant when empty", async () => {
+    const spy = vi.spyOn(api, "searchSessions");
+    spy.mockResolvedValueOnce(mockSessions);
+    const app = mountSession(root);
+    await nextTick();
+    const input = root.querySelector("input") as HTMLInputElement;
+    input.value = "fix";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    expect(root.querySelectorAll('[role="option"]').length).toBe(2);
+    expect(input.hasAttribute("aria-activedescendant")).toBe(true);
+
+    spy.mockResolvedValueOnce([]);
+    input.value = "zzz";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    expect(root.querySelectorAll('[role="option"]').length).toBe(0);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain("No sessions found");
+    app.unmount();
+  });
+
+  it("uses non-colliding ids across two mounted instances", async () => {
+    vi.spyOn(api, "searchSessions").mockResolvedValue(mockSessions);
+    // Two instances inside one app share useId's counter, as in production.
+    const app = createApp({
+      render() {
+        return h("div", [
+          h("div", { id: "a" }, [h(SessionSearchModal, { isOpen: true })]),
+          h("div", { id: "b" }, [h(SessionSearchModal, { isOpen: true })]),
+        ]);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+    const inputs = [...root.querySelectorAll("input")] as HTMLInputElement[];
+    expect(inputs.length).toBe(2);
+    for (const input of inputs) {
+      input.value = "fix";
+      input.dispatchEvent(new Event("input"));
+    }
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    const ids = [...root.querySelectorAll("[id]")]
+      .map((e) => e.id)
+      .filter((id) => id.includes("-option-") || id.includes("-listbox"));
+    expect(ids.length).toBe(6);
+    expect(new Set(ids).size).toBe(6);
+    expect(inputs[0].getAttribute("aria-controls")).not.toBe(
+      inputs[1].getAttribute("aria-controls"),
+    );
+    app.unmount();
+  });
 });

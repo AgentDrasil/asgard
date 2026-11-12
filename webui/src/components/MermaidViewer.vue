@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import { useI18n } from "vue-i18n";
+import AppModal from "./common/AppModal.vue";
 import { useMermaid } from "../composables/useMermaid";
 
 const { t } = useI18n();
@@ -222,11 +223,10 @@ function handleToggleFullscreen(): void {
   handleResetZoom();
 }
 
-function handleKeyDown(e: KeyboardEvent): void {
-  if (e.key === "Escape" && isFullscreen.value) {
-    isFullscreen.value = false;
-    handleResetZoom();
-  }
+// AppModal (native <dialog>) handles Esc; it emits close when dismissed.
+function handleFullscreenClose(): void {
+  isFullscreen.value = false;
+  handleResetZoom();
 }
 
 async function handleCopy(): Promise<void> {
@@ -260,13 +260,10 @@ watch(activeMermaidTheme, () => {
 
 watch(isFullscreen, async (val) => {
   if (val) {
-    window.addEventListener("keydown", handleKeyDown);
     await nextTick();
     if (latestBindFunctions && fullscreenCanvasRef.value) {
       latestBindFunctions(fullscreenCanvasRef.value);
     }
-  } else {
-    window.removeEventListener("keydown", handleKeyDown);
   }
 });
 
@@ -278,7 +275,6 @@ onUnmounted(() => {
   window.removeEventListener("pointermove", handlePointerMove);
   window.removeEventListener("pointerup", handlePointerEnd);
   window.removeEventListener("pointercancel", handlePointerEnd);
-  window.removeEventListener("keydown", handleKeyDown);
   if (copyTimeout) clearTimeout(copyTimeout);
   if (debounceTimer) clearTimeout(debounceTimer);
 });
@@ -434,11 +430,13 @@ onUnmounted(() => {
   </div>
 
   <!-- Fullscreen Modal Overlay -->
-  <Teleport to="body">
-    <div
-      v-if="isFullscreen"
-      class="fixed inset-0 z-50 flex flex-col bg-base-100/95 backdrop-blur-md animate-fade-in"
-    >
+  <AppModal
+    :open="isFullscreen"
+    :aria-label="displayTitle"
+    dialog-class="p-0"
+    @close="handleFullscreenClose"
+  >
+    <div class="fixed inset-0 z-50 flex flex-col bg-base-100/95 backdrop-blur-md animate-fade-in">
       <!-- Fullscreen Header -->
       <div
         class="flex items-center justify-between border-b border-base-300 bg-base-200/80 px-4 py-2.5 shadow-sm"
@@ -551,7 +549,7 @@ onUnmounted(() => {
         />
       </div>
     </div>
-  </Teleport>
+  </AppModal>
 </template>
 
 <style scoped>

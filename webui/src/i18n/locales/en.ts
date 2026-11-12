@@ -169,6 +169,8 @@ export const en = {
       execute: "execute",
       close: "close",
       commandsCount: "{count} command | {count} commands",
+      resultsAnnounce: "{count} command available | {count} commands available",
+      noResultsAnnounce: "No commands found",
     },
   },
   sessionSearch: {
@@ -182,6 +184,8 @@ export const en = {
     select: "select",
     close: "close",
     sessionsCount: "{count} session | {count} sessions",
+    resultsAnnounce: "{count} session available | {count} sessions available",
+    noResultsAnnounce: "No sessions found",
   },
   app: {
     systemDegraded: "System Degraded",
@@ -766,6 +770,8 @@ export const en = {
       select: "select",
       close: "close",
       resultsCount: "{count} result | {count} results",
+      resultsAnnounce: "{count} file available | {count} files available",
+      noResultsAnnounce: "No files found",
     },
     codeViewer: {
       dashboard: "Dashboard",

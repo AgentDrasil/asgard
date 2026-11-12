@@ -186,4 +186,118 @@ describe("FileSearchModal.vue", () => {
 
     app.unmount();
   });
+
+  it("exposes combobox/listbox ARIA with active descendant and live count", async () => {
+    vi.spyOn(api, "searchFiles").mockResolvedValue([
+      { path: "src/a.ts", name: "a.ts", ext: "ts", size: 1, scope: "workspace" },
+      { path: "src/b.ts", name: "b.ts", ext: "ts", size: 2, scope: "workspace" },
+    ]);
+    const app = mountWithI18n({ isOpen: true, sessionId: "sess-test" });
+    await nextTick();
+    const input = root.querySelector("input") as HTMLInputElement;
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-autocomplete")).toBe("list");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    input.value = "ts";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    const listbox = root.querySelector('[role="listbox"]') as HTMLElement;
+    expect(listbox.id).toBe(input.getAttribute("aria-controls"));
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    const options = root.querySelectorAll('[role="option"]');
+    expect(options.length).toBe(2);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    await nextTick();
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(new Set([...options].map((o) => o.id)).size).toBe(2);
+    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain("2 files available");
+    app.unmount();
+  });
+
+  const mountFileAt = (target: HTMLElement) => {
+    const app = createApp({
+      render() {
+        return h(FileSearchModal as any, { isOpen: true, sessionId: "sess-test" });
+      },
+    });
+    app.use(i18n);
+    app.mount(target);
+    return app;
+  };
+
+  it("announces no results and drops activedescendant when empty", async () => {
+    const spy = vi.spyOn(api, "searchFiles");
+    spy.mockResolvedValueOnce([
+      { path: "src/a.ts", name: "a.ts", ext: "ts", size: 1, scope: "workspace" },
+      { path: "src/b.ts", name: "b.ts", ext: "ts", size: 2, scope: "workspace" },
+    ]);
+    const app = mountFileAt(root);
+    await nextTick();
+    const input = root.querySelector("input") as HTMLInputElement;
+    input.value = "ts";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    expect(root.querySelectorAll('[role="option"]').length).toBe(2);
+    expect(input.hasAttribute("aria-activedescendant")).toBe(true);
+
+    spy.mockResolvedValueOnce([]);
+    input.value = "zzz";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    expect(root.querySelectorAll('[role="option"]').length).toBe(0);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain("No files found");
+    app.unmount();
+  });
+
+  it("uses non-colliding ids across two mounted instances", async () => {
+    vi.spyOn(api, "searchFiles").mockResolvedValue([
+      { path: "src/a.ts", name: "a.ts", ext: "ts", size: 1, scope: "workspace" },
+      { path: "src/b.ts", name: "b.ts", ext: "ts", size: 2, scope: "workspace" },
+    ]);
+    // Two instances inside one app share useId's counter, as in production.
+    const app = createApp({
+      render() {
+        return h("div", [
+          h("div", { id: "a" }, [
+            h(FileSearchModal as any, { isOpen: true, sessionId: "sess-test" }),
+          ]),
+          h("div", { id: "b" }, [
+            h(FileSearchModal as any, { isOpen: true, sessionId: "sess-test" }),
+          ]),
+        ]);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+    const inputs = [...root.querySelectorAll("input")] as HTMLInputElement[];
+    expect(inputs.length).toBe(2);
+    for (const input of inputs) {
+      input.value = "ts";
+      input.dispatchEvent(new Event("input"));
+    }
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(250);
+    await nextTick();
+    const ids = [...root.querySelectorAll("[id]")]
+      .map((e) => e.id)
+      .filter((id) => id.includes("-option-") || id.includes("-listbox"));
+    expect(ids.length).toBe(6);
+    expect(new Set(ids).size).toBe(6);
+    expect(inputs[0].getAttribute("aria-controls")).not.toBe(
+      inputs[1].getAttribute("aria-controls"),
+    );
+    app.unmount();
+  });
 });

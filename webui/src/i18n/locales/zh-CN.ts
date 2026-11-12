@@ -170,6 +170,8 @@ export const zhCN: MessageSchema = {
       execute: "执行",
       close: "关闭",
       commandsCount: "{count} 条命令",
+      resultsAnnounce: "共 {count} 条可用命令",
+      noResultsAnnounce: "未找到命令",
     },
   },
   sessionSearch: {
@@ -183,6 +185,8 @@ export const zhCN: MessageSchema = {
     select: "选择",
     close: "关闭",
     sessionsCount: "{count} 个会话",
+    resultsAnnounce: "共 {count} 个可用会话",
+    noResultsAnnounce: "未找到会话",
   },
   app: {
     systemDegraded: "系统降级运行",
@@ -753,6 +757,8 @@ export const zhCN: MessageSchema = {
       select: "选择",
       close: "关闭",
       resultsCount: "{count} 个结果",
+      resultsAnnounce: "共 {count} 个可用文件",
+      noResultsAnnounce: "未找到文件",
     },
     codeViewer: {
       dashboard: "看板",
