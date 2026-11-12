@@ -81,6 +81,8 @@ export const en = {
     assignedUsers: "Assigned Users",
     addUser: "Add User",
     searchUsersPlaceholder: "Search users by name, email, or ID...",
+    availableUsers: "Available users",
+    clearSearch: "Clear search",
     noMatchingUsers: "No matching users found",
     allUsersAssigned: "All users are assigned to this runner",
     removeUser: "Remove user",

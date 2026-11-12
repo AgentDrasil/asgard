@@ -94,7 +94,9 @@ describe("RunnerAdminPanel", () => {
     app.mount(root);
     await flush();
 
-    // Focus input or type to open search
+    // Open the popover, then type to filter
+    const popover = root.querySelector<HTMLElement>('[data-testid="user-search-dropdown"]')!;
+    popover.showPopover();
     const input = root.querySelector<HTMLInputElement>('[data-testid="search-users-input"]');
     expect(input).not.toBeNull();
     input!.focus();
@@ -105,6 +107,8 @@ describe("RunnerAdminPanel", () => {
     // Dropdown should be visible and only show Bob
     const dropdown = root.querySelector('[data-testid="user-search-dropdown"]');
     expect(dropdown).not.toBeNull();
+    expect(dropdown!.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(dropdown!.querySelector('[role="option"]')).not.toBeNull();
     expect(dropdown!.textContent).toContain("Bob Jones");
     expect(dropdown!.textContent).not.toContain("Alice Smith");
 
@@ -142,37 +146,37 @@ describe("RunnerAdminPanel", () => {
     expect(setUsersSpy).toHaveBeenCalledWith("node-1", ["user-bob"]);
   });
 
-  it("closes the search dropdown on Escape or clicking outside", async () => {
+  it("wires the trigger to a native popover and closes it after selecting", async () => {
     vi.spyOn(api, "getManageRunners").mockResolvedValue({
-      runners: [{ node_id: "node-1", online: true, users: [] }],
+      runners: [
+        { node_id: "node-1", online: true, users: [] },
+        { node_id: "node-2", online: true, users: [] },
+      ],
       users: [{ subject: "user-alice", name: "Alice", email: "alice@example.com" }],
     });
+    vi.spyOn(api, "setRunnerUsers").mockResolvedValue(null);
 
     app = createApp({ render: () => h(RunnerAdminPanel) });
     app.use(i18n);
     app.mount(root);
     await flush();
 
-    const input = root.querySelector<HTMLInputElement>('[data-testid="search-users-input"]');
-    input!.focus();
-    await flush();
+    const triggers = root.querySelectorAll<HTMLElement>('[data-testid="add-user-btn"]');
+    const popovers = root.querySelectorAll<HTMLElement>('[data-testid="user-search-dropdown"]');
+    expect(popovers.length).toBe(2);
+    expect(popovers[0].getAttribute("popover")).toBe("auto");
+    expect(popovers[0].id).not.toBe(popovers[1].id);
+    expect(triggers[0].getAttribute("popovertarget")).toBe(popovers[0].id);
+    expect(triggers[1].getAttribute("popovertarget")).toBe(popovers[1].id);
 
-    expect(root.querySelector('[data-testid="user-search-dropdown"]')).not.toBeNull();
-
-    // Escape closes dropdown
-    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    triggers[0].click();
     await flush();
-    expect(root.querySelector('[data-testid="user-search-dropdown"]')).toBeNull();
+    expect(popovers[0].hasAttribute("data-popover-open")).toBe(true);
+    expect(popovers[0].querySelector('[role="listbox"]')).not.toBeNull();
 
-    // Reopen and test outside click
-    input!.blur();
-    input!.dispatchEvent(new Event("focus"));
+    popovers[0].querySelector<HTMLButtonElement>('[data-testid="user-option"]')!.click();
     await flush();
-    expect(root.querySelector('[data-testid="user-search-dropdown"]')).not.toBeNull();
-
-    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    await flush();
-    expect(root.querySelector('[data-testid="user-search-dropdown"]')).toBeNull();
+    expect(popovers[0].hasAttribute("data-popover-open")).toBe(false);
   });
 
   it("renders user avatar image using appendAccessToken when avatarUrl is present", async () => {

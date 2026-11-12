@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from "vue";
+import { onMounted, onUnmounted, ref, computed, useId, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import { getManageRunners, setRunnerUsers, appendAccessToken } from "../lib/api";
@@ -16,7 +16,7 @@ const users = ref<ManageUser[]>([]);
 const loading = ref(false);
 const saving = ref("");
 const searchQueries = ref<Record<string, string>>({});
-const isSearchOpen = ref<Record<string, boolean>>({});
+const baseId = useId();
 const failedAvatars = ref<Record<string, boolean>>({});
 
 const usersMap = computed(() => new Map(users.value.map((u) => [u.subject, u])));
@@ -79,7 +79,7 @@ async function addUser(r: ManageRunner, subject: string) {
   } else {
     r.users = next;
     searchQueries.value[r.node_id] = "";
-    isSearchOpen.value[r.node_id] = false;
+    closePopover(r.node_id);
     toast.success(t("runnerAdmin.userAssignedSuccess"));
     void refreshRunners();
   }
@@ -99,20 +99,71 @@ async function removeUser(r: ManageRunner, subject: string) {
   }
 }
 
-function handleDocumentClick(e: MouseEvent) {
-  const target = e.target as Node | null;
-  if (!(target instanceof Element) || !target.closest("[data-runner-search]")) {
-    isSearchOpen.value = {};
+function popoverId(i: number): string {
+  return `${baseId}-users-${i}`;
+}
+
+const popoverEls = new Map<string, HTMLElement>();
+
+function setPopoverEl(nodeId: string, el: unknown) {
+  if (el instanceof HTMLElement) popoverEls.set(nodeId, el);
+  else popoverEls.delete(nodeId);
+}
+
+function closePopover(nodeId: string) {
+  const el = popoverEls.get(nodeId);
+  if (el?.matches(":popover-open")) el.hidePopover();
+}
+
+// Popovers render in the top layer, so position them against the trigger.
+function placePopoverEl(el: HTMLElement) {
+  const trigger = el.parentElement?.querySelector<HTMLElement>("[popovertarget]");
+  if (!trigger) return;
+  const margin = 8;
+  const rect = trigger.getBoundingClientRect();
+  const width = Math.min(448, window.innerWidth - margin * 2);
+  el.style.width = `${width}px`;
+  const height = el.offsetHeight;
+  let top = rect.bottom + 4;
+  if (height > 0 && top + height > window.innerHeight - margin) {
+    const above = rect.top - 4 - height;
+    top = above >= margin ? above : Math.max(margin, window.innerHeight - margin - height);
+  }
+  el.style.top = `${top}px`;
+  el.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`;
+}
+
+function placePopover(e: Event) {
+  const ev = e as ToggleEvent;
+  if (ev.newState !== "open") return;
+  placePopoverEl(ev.currentTarget as HTMLElement);
+}
+
+function repositionOpenPopovers() {
+  for (const el of popoverEls.values()) {
+    if (el.matches(":popover-open")) placePopoverEl(el);
+  }
+}
+
+function onPopoverToggle(e: Event) {
+  const ev = e as ToggleEvent;
+  const el = ev.currentTarget as HTMLElement;
+  if (ev.newState === "open") {
+    // Now rendered: height is known, so flip/clamp precisely.
+    placePopoverEl(el);
+    void nextTick(() => el.querySelector<HTMLInputElement>("input")?.focus());
   }
 }
 
 onMounted(() => {
   void load();
-  document.addEventListener("click", handleDocumentClick);
+  window.addEventListener("resize", repositionOpenPopovers);
+  document.addEventListener("scroll", repositionOpenPopovers, true);
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", handleDocumentClick);
+  window.removeEventListener("resize", repositionOpenPopovers);
+  document.removeEventListener("scroll", repositionOpenPopovers, true);
 });
 </script>
 
@@ -150,7 +201,7 @@ onUnmounted(() => {
 
       <div v-else class="space-y-4 divide-y divide-base-300">
         <div
-          v-for="r in runners"
+          v-for="(r, ri) in runners"
           :key="r.node_id"
           class="pt-3 first:pt-0 space-y-3"
           data-testid="runner-admin-row"
@@ -233,10 +284,30 @@ onUnmounted(() => {
           </div>
 
           <!-- Add User Search Box -->
-          <div class="relative w-full max-w-md pt-1" data-runner-search>
-            <div class="flex items-center gap-2">
+          <div class="relative w-full max-w-md pt-1">
+            <button
+              type="button"
+              class="btn btn-outline btn-sm gap-1 text-xs"
+              :popovertarget="popoverId(ri)"
+              aria-haspopup="listbox"
+              data-testid="add-user-btn"
+            >
+              <Icon icon="mynaui:plus" class="w-3.5 h-3.5" />
+              <span>{{ t("runnerAdmin.addUser") }}</span>
+            </button>
+
+            <!-- Search Dropdown Results (native popover: light dismiss, Esc) -->
+            <div
+              :id="popoverId(ri)"
+              popover="auto"
+              :ref="(el) => setPopoverEl(r.node_id, el)"
+              class="m-0 inset-auto fixed max-h-72 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-1 text-base-content shadow-xl"
+              data-testid="user-search-dropdown"
+              @beforetoggle="placePopover"
+              @toggle="onPopoverToggle"
+            >
               <div
-                class="flex items-center gap-2 input input-sm input-bordered bg-base-100 rounded-lg flex-1 shadow-xs"
+                class="flex items-center gap-2 input input-sm input-bordered bg-base-100 rounded-lg w-full shadow-xs"
               >
                 <Icon icon="mynaui:search" class="w-4 h-4 text-base-content/40 shrink-0" />
                 <input
@@ -244,46 +315,24 @@ onUnmounted(() => {
                   type="text"
                   class="w-full bg-transparent focus:outline-hidden text-xs"
                   :placeholder="t('runnerAdmin.searchUsersPlaceholder')"
+                  :aria-label="t('runnerAdmin.searchUsersPlaceholder')"
+                  :aria-controls="
+                    availableUsers(r).length > 0 && filteredUsers(r).length > 0
+                      ? `${popoverId(ri)}-list`
+                      : undefined
+                  "
                   data-testid="search-users-input"
-                  @focus="isSearchOpen[r.node_id] = true"
-                  @keydown.esc="isSearchOpen[r.node_id] = false"
                 />
                 <button
                   v-if="searchQueries[r.node_id]"
                   type="button"
                   class="btn btn-ghost btn-xs btn-circle text-base-content/50"
+                  :aria-label="t('runnerAdmin.clearSearch')"
                   @click="searchQueries[r.node_id] = ''"
                 >
                   <Icon icon="mynaui:x" class="w-3.5 h-3.5" />
                 </button>
               </div>
-
-              <button
-                v-if="!isSearchOpen[r.node_id]"
-                type="button"
-                class="btn btn-outline btn-sm gap-1 text-xs shrink-0"
-                @click="isSearchOpen[r.node_id] = true"
-              >
-                <Icon icon="mynaui:plus" class="w-3.5 h-3.5" />
-                <span>{{ t("runnerAdmin.addUser") }}</span>
-              </button>
-
-              <button
-                v-else
-                type="button"
-                class="btn btn-ghost btn-sm text-xs shrink-0"
-                @click="isSearchOpen[r.node_id] = false"
-              >
-                {{ t("common.cancel") }}
-              </button>
-            </div>
-
-            <!-- Search Dropdown Results -->
-            <div
-              v-if="isSearchOpen[r.node_id]"
-              class="absolute left-0 right-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-1 shadow-xl"
-              data-testid="user-search-dropdown"
-            >
               <div
                 v-if="availableUsers(r).length === 0"
                 class="py-3 px-3 text-center text-xs text-base-content/50"
@@ -296,10 +345,18 @@ onUnmounted(() => {
               >
                 {{ t("runnerAdmin.noMatchingUsers") }}
               </div>
-              <ul v-else class="menu menu-xs p-0">
-                <li v-for="u in filteredUsers(r)" :key="u.subject">
+              <ul
+                v-else
+                :id="`${popoverId(ri)}-list`"
+                role="listbox"
+                :aria-label="t('runnerAdmin.availableUsers')"
+                class="menu menu-xs mt-1 p-0 w-full"
+              >
+                <li v-for="u in filteredUsers(r)" :key="u.subject" role="presentation">
                   <button
                     type="button"
+                    role="option"
+                    :aria-selected="false"
                     class="flex items-center justify-between gap-3 py-2 px-2.5 rounded-lg hover:bg-base-200"
                     :disabled="saving === r.node_id"
                     data-testid="user-option"

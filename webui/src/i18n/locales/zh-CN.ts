@@ -83,6 +83,8 @@ export const zhCN: MessageSchema = {
     assignedUsers: "已分配用户",
     addUser: "添加用户",
     searchUsersPlaceholder: "按姓名、邮箱或 ID 搜索用户...",
+    availableUsers: "可选用户",
+    clearSearch: "清除搜索",
     noMatchingUsers: "未找到匹配的用户",
     allUsersAssigned: "所有用户均已分配给该 Runner",
     removeUser: "移除用户",

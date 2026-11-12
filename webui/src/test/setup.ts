@@ -35,3 +35,46 @@ if (typeof HTMLDialogElement !== "undefined") {
     this.dispatchEvent(new Event("close"));
   };
 }
+
+// jsdom does not implement the Popover API. Provide minimal versions that track
+// open state via a data attribute and fire beforetoggle/toggle, and make
+// `:popover-open` matching work by patching `matches`.
+if (typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.showPopover !== "function") {
+  const fire = (el: HTMLElement, type: string, oldState: string, newState: string) => {
+    const ev = new Event(type) as Event & { oldState: string; newState: string };
+    ev.oldState = oldState;
+    ev.newState = newState;
+    el.dispatchEvent(ev);
+  };
+  HTMLElement.prototype.showPopover = function (this: HTMLElement) {
+    if (this.hasAttribute("data-popover-open")) return;
+    fire(this, "beforetoggle", "closed", "open");
+    this.setAttribute("data-popover-open", "");
+    fire(this, "toggle", "closed", "open");
+  };
+  HTMLElement.prototype.hidePopover = function (this: HTMLElement) {
+    if (!this.hasAttribute("data-popover-open")) return;
+    fire(this, "beforetoggle", "open", "closed");
+    this.removeAttribute("data-popover-open");
+    fire(this, "toggle", "open", "closed");
+  };
+  HTMLElement.prototype.togglePopover = function (this: HTMLElement) {
+    if (this.hasAttribute("data-popover-open")) this.hidePopover();
+    else this.showPopover();
+    return this.hasAttribute("data-popover-open");
+  };
+  // Invoker behavior: clicking a [popovertarget] button toggles its target.
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const invoker = t.closest("[popovertarget]");
+    if (!invoker) return;
+    const target = document.getElementById(invoker.getAttribute("popovertarget") ?? "");
+    if (target) target.togglePopover();
+  });
+  const origMatches = Element.prototype.matches;
+  Element.prototype.matches = function (this: Element, selector: string) {
+    if (selector === ":popover-open") return this.hasAttribute("data-popover-open");
+    return origMatches.call(this, selector);
+  } as typeof Element.prototype.matches;
+}
