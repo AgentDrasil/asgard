@@ -7,6 +7,7 @@ import "@git-diff-view/vue/styles/diff-view.css";
 import { Icon } from "@iconify/vue";
 import { getGitDiff, getGitLog } from "../lib/api";
 import VCSSidebar from "./vcs/VCSSidebar.vue";
+import { useResizeHandle } from "../composables/useResizeHandle";
 import { useShortcuts } from "../composables/useShortcuts";
 import type { GitDiffFile, GitCommit, CommentEntry } from "../types";
 import { useI18n } from "vue-i18n";
@@ -107,7 +108,6 @@ const MIN_VCS_WIDTH = 260;
 const MAX_VCS_WIDTH = 800;
 
 const vcsSidebarWidth = ref(DEFAULT_VCS_WIDTH);
-const isResizingSidebar = ref(false);
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 const mobileActiveTab = ref<"files" | "diff">("diff");
 
@@ -115,31 +115,16 @@ const updateWindowWidth = () => {
   isDesktop.value = window.innerWidth >= 768;
 };
 
-const startSidebarResize = (e: MouseEvent) => {
-  e.preventDefault();
-  isResizingSidebar.value = true;
-  document.addEventListener("mousemove", handleSidebarMouseMove);
-  document.addEventListener("mouseup", stopSidebarResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
-};
-
-const handleSidebarMouseMove = (e: MouseEvent) => {
-  if (!isResizingSidebar.value) return;
-  const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, MIN_VCS_WIDTH), MAX_VCS_WIDTH);
-  vcsSidebarWidth.value = newWidth;
-};
-
-const stopSidebarResize = () => {
-  if (isResizingSidebar.value) {
-    isResizingSidebar.value = false;
-    localStorage.setItem("asgard_vcs_sidebar_width", vcsSidebarWidth.value.toString());
-    document.removeEventListener("mousemove", handleSidebarMouseMove);
-    document.removeEventListener("mouseup", stopSidebarResize);
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  }
-};
+const { isResizing: isResizingSidebar, handleProps: resizeHandleProps } = useResizeHandle({
+  size: vcsSidebarWidth,
+  min: () => MIN_VCS_WIDTH,
+  max: () => MAX_VCS_WIDTH,
+  axis: "x",
+  direction: -1,
+  label: () => t("vcs.resizeSidebarLabel"),
+  disabled: () => !isDesktop.value,
+  onCommit: (w) => localStorage.setItem("asgard_vcs_sidebar_width", w.toString()),
+});
 
 async function loadGitData() {
   if (!props.sessionId) return;
@@ -797,7 +782,7 @@ const commentedFileList = computed(() => {
         <!-- Resizer Handle on Left Edge of VCS Sidebar (Desktop only) -->
         <div
           v-if="isDesktop"
-          @mousedown="startSidebarResize"
+          v-bind="resizeHandleProps"
           class="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
           :title="t('vcs.dragToResizeSidebar')"
         ></div>

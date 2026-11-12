@@ -78,3 +78,20 @@ if (typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.showPopov
     return origMatches.call(this, selector);
   } as typeof Element.prototype.matches;
 }
+
+// jsdom does not implement pointer capture. Provide minimal versions that track
+// the captured pointer ids per element.
+if (typeof Element !== "undefined" && typeof Element.prototype.setPointerCapture !== "function") {
+  const captured = new WeakMap<Element, Set<number>>();
+  Element.prototype.setPointerCapture = function (this: Element, id: number) {
+    const set = captured.get(this) ?? new Set<number>();
+    set.add(id);
+    captured.set(this, set);
+  };
+  Element.prototype.releasePointerCapture = function (this: Element, id: number) {
+    captured.get(this)?.delete(id);
+  };
+  Element.prototype.hasPointerCapture = function (this: Element, id: number) {
+    return captured.get(this)?.has(id) ?? false;
+  };
+}

@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import type { ChatMessage, AgentInfo, QueuedMessage, DirLockStatus, ChatSession } from "../types";
 import { formatPath } from "../utils/agentUtils";
 import { getDirInfo } from "../lib/api";
+import { useResizeHandle } from "../composables/useResizeHandle";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useChatScroll } from "../composables/useChatScroll";
 import { useInPageFind } from "../composables/useInPageFind";
@@ -122,7 +123,6 @@ const MIN_ARTIFACT_WIDTH = 300;
 const MAX_ARTIFACT_WIDTH = 900;
 
 const artifactWidth = ref(DEFAULT_ARTIFACT_WIDTH);
-const isResizingArtifact = ref(false);
 const isArtifactExpanded = ref(false);
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 
@@ -134,35 +134,16 @@ const toggleArtifactExpand = () => {
   isArtifactExpanded.value = !isArtifactExpanded.value;
 };
 
-const startArtifactResize = (e: MouseEvent) => {
-  if (isArtifactExpanded.value) return;
-  e.preventDefault();
-  isResizingArtifact.value = true;
-  document.addEventListener("mousemove", handleArtifactMouseMove);
-  document.addEventListener("mouseup", stopArtifactResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
-};
-
-const handleArtifactMouseMove = (e: MouseEvent) => {
-  if (!isResizingArtifact.value || isArtifactExpanded.value) return;
-  const newWidth = Math.min(
-    Math.max(window.innerWidth - e.clientX, MIN_ARTIFACT_WIDTH),
-    MAX_ARTIFACT_WIDTH,
-  );
-  artifactWidth.value = newWidth;
-};
-
-const stopArtifactResize = () => {
-  if (isResizingArtifact.value) {
-    isResizingArtifact.value = false;
-    localStorage.setItem("asgard_artifact_width", artifactWidth.value.toString());
-    document.removeEventListener("mousemove", handleArtifactMouseMove);
-    document.removeEventListener("mouseup", stopArtifactResize);
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  }
-};
+const { isResizing: isResizingArtifact, handleProps: resizeHandleProps } = useResizeHandle({
+  size: artifactWidth,
+  min: () => MIN_ARTIFACT_WIDTH,
+  max: () => MAX_ARTIFACT_WIDTH,
+  axis: "x",
+  direction: -1,
+  label: () => t("chat.resizePanelLabel"),
+  disabled: () => isArtifactExpanded.value,
+  onCommit: (w) => localStorage.setItem("asgard_artifact_width", w.toString()),
+});
 
 const gitRoot = ref("");
 
@@ -766,7 +747,7 @@ onUnmounted(() => {
         <!-- Resizer Handle on Left Edge of Artifact Panel -->
         <div
           v-if="!isArtifactExpanded"
-          @mousedown="startArtifactResize"
+          v-bind="resizeHandleProps"
           class="hidden md:block absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
           :title="$t('chat.dragToResizePanel')"
         ></div>

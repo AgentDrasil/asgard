@@ -5,6 +5,7 @@ import FileTreeNode from "./FileTreeNode.vue";
 import { getFileTree } from "../../lib/api";
 import { useI18n } from "vue-i18n";
 import { formatPath } from "../../utils/agentUtils";
+import { useResizeHandle } from "../../composables/useResizeHandle";
 import { isSessionTmpDir, isTmpScopePath, isSessionScopePath } from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
 
@@ -110,47 +111,30 @@ const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 600;
 
 const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH);
-const isResizing = ref(false);
 const isDesktop = ref(typeof window !== "undefined" && window.innerWidth >= 768);
 
 const updateWindowWidth = () => {
   isDesktop.value = window.innerWidth >= 768;
 };
 
-const startResize = (e: MouseEvent) => {
-  e.preventDefault();
-  isResizing.value = true;
-  document.addEventListener("mousemove", handleMouseMove);
-  document.addEventListener("mouseup", stopResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
-};
-
-const handleMouseMove = (e: MouseEvent) => {
-  if (!isResizing.value) return;
-  const newWidth = Math.min(
-    Math.max(window.innerWidth - e.clientX, MIN_SIDEBAR_WIDTH),
-    MAX_SIDEBAR_WIDTH,
-  );
-  sidebarWidth.value = newWidth;
-};
-
-const stopResize = () => {
-  if (isResizing.value) {
-    isResizing.value = false;
+const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
+  size: sidebarWidth,
+  min: () => MIN_SIDEBAR_WIDTH,
+  max: () => MAX_SIDEBAR_WIDTH,
+  axis: "x",
+  direction: -1,
+  label: () => t("files.resizeSidebarLabel"),
+  disabled: () => !isDesktop.value,
+  onCommit: (w) => {
     try {
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem("asgard_filetree_sidebar_width", sidebarWidth.value.toString());
+        localStorage.setItem("asgard_filetree_sidebar_width", w.toString());
       }
     } catch {
       // ignore
     }
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", stopResize);
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  }
-};
+  },
+});
 
 onMounted(() => {
   window.addEventListener("resize", updateWindowWidth);
@@ -171,10 +155,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("resize", updateWindowWidth);
-  document.removeEventListener("mousemove", handleMouseMove);
-  document.removeEventListener("mouseup", stopResize);
-  document.body.style.userSelect = "";
-  document.body.style.cursor = "";
 });
 </script>
 
@@ -191,7 +171,7 @@ onUnmounted(() => {
     <!-- Resizer Handle on Left Edge (Desktop only) -->
     <div
       v-if="isDesktop"
-      @mousedown="startResize"
+      v-bind="resizeHandleProps"
       class="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-30"
       :title="t('files.dragToResizeSidebar')"
     ></div>

@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
 import { Icon } from "@iconify/vue";
 import { useI18n } from "vue-i18n";
 import TerminalView from "./TerminalView.vue";
+import { useResizeHandle } from "../composables/useResizeHandle";
 import { useTerminalTheme } from "../composables/useTerminalTheme";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useRunners } from "../composables/useRunners";
@@ -34,12 +35,18 @@ const DEFAULT_HEIGHT = 320;
 const MIN_HEIGHT = 150;
 const MAX_HEIGHT_RATIO = 0.75;
 
+const viewportH = ref(typeof window !== "undefined" ? window.innerHeight : 1000);
+const maxHeight = computed(() =>
+  Math.max(MIN_HEIGHT, Math.floor(viewportH.value * MAX_HEIGHT_RATIO)),
+);
 const panelHeight = ref(DEFAULT_HEIGHT);
-const isResizing = ref(false);
+const onWindowResize = () => {
+  viewportH.value = window.innerHeight;
+};
+watch(maxHeight, (m) => {
+  if (panelHeight.value > m) panelHeight.value = m;
+});
 const isMaximized = ref(false);
-
-let startY = 0;
-let startHeight = 0;
 
 // Keep the terminal mounted after its first open so toggling show/hide reuses
 // the same ttyd session instead of spawning a new shell each time.
@@ -127,9 +134,11 @@ onMounted(() => {
   if (savedHeight) {
     const parsed = parseInt(savedHeight, 10);
     if (!isNaN(parsed) && parsed >= MIN_HEIGHT) {
-      panelHeight.value = parsed;
+      panelHeight.value = Math.min(parsed, maxHeight.value);
     }
   }
+  viewportH.value = window.innerHeight;
+  window.addEventListener("resize", onWindowResize);
 
   if (typeof window.matchMedia === "function") {
     mql = window.matchMedia("(min-width: 640px)");
@@ -150,51 +159,26 @@ const closeTerminal = () => {
   emit("close");
 };
 
-const startResize = (e: MouseEvent | TouchEvent) => {
-  if (isMaximized.value) return;
-  isResizing.value = true;
-  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-  startY = clientY;
-  startHeight = panelHeight.value;
-
-  window.addEventListener("mousemove", handleResize);
-  window.addEventListener("mouseup", stopResize);
-  window.addEventListener("touchmove", handleResize);
-  window.addEventListener("touchend", stopResize);
-};
-
-const handleResize = (e: MouseEvent | TouchEvent) => {
-  if (!isResizing.value) return;
-  const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-  const deltaY = startY - clientY; // Dragging up increases height
-  const maxHeight = Math.floor(window.innerHeight * MAX_HEIGHT_RATIO);
-  let newHeight = startHeight + deltaY;
-
-  if (newHeight < MIN_HEIGHT) newHeight = MIN_HEIGHT;
-  if (newHeight > maxHeight) newHeight = maxHeight;
-
-  panelHeight.value = newHeight;
-};
-
-const stopResize = () => {
-  if (isResizing.value) {
-    isResizing.value = false;
-    localStorage.setItem(STORAGE_KEY, panelHeight.value.toString());
-    window.removeEventListener("mousemove", handleResize);
-    window.removeEventListener("mouseup", stopResize);
-    window.removeEventListener("touchmove", handleResize);
-    window.removeEventListener("touchend", stopResize);
-  }
-};
+const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
+  size: panelHeight,
+  min: () => MIN_HEIGHT,
+  max: () => maxHeight.value,
+  axis: "y",
+  direction: -1,
+  label: () => t("terminal.resizeLabel"),
+  disabled: () => isMaximized.value,
+  onCommit: (h) => localStorage.setItem(STORAGE_KEY, h.toString()),
+});
 
 const resetHeight = () => {
-  panelHeight.value = DEFAULT_HEIGHT;
-  localStorage.setItem(STORAGE_KEY, DEFAULT_HEIGHT.toString());
+  const h = Math.min(DEFAULT_HEIGHT, maxHeight.value);
+  panelHeight.value = h;
+  localStorage.setItem(STORAGE_KEY, h.toString());
 };
 
 onUnmounted(() => {
-  stopResize();
   mql?.removeEventListener("change", onMqlChange);
+  window.removeEventListener("resize", onWindowResize);
 });
 </script>
 
@@ -224,8 +208,7 @@ onUnmounted(() => {
       <!-- Resize Handle (only shown when not maximized) -->
       <div
         v-if="!isMaximized"
-        @mousedown="startResize"
-        @touchstart.passive="startResize"
+        v-bind="resizeHandleProps"
         @dblclick="resetHeight"
         class="h-2 w-full bg-base-300 hover:bg-primary/50 cursor-row-resize flex items-center justify-center group transition-colors shrink-0 z-10"
         :title="t('terminal.dragToResize')"

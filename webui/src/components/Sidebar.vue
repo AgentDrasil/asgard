@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import type { ChatSession, AgentInfo } from "../types";
 import { Icon } from "@iconify/vue";
 import SessionList from "./sidebar/SessionList.vue";
+import { useResizeHandle } from "../composables/useResizeHandle";
 import { useShortcuts } from "../composables/useShortcuts";
 import { useRunners } from "../composables/useRunners";
 
@@ -92,35 +93,20 @@ const MIN_WIDTH = 200;
 const MAX_WIDTH = 500;
 
 const sidebarWidth = ref(DEFAULT_WIDTH);
-const isResizing = ref(false);
-
-const startResize = (e: MouseEvent) => {
-  e.preventDefault();
-  isResizing.value = true;
-  document.addEventListener("mousemove", handleMouseMove);
-  document.addEventListener("mouseup", stopResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
-};
-
-const handleMouseMove = (e: MouseEvent) => {
-  if (!isResizing.value) return;
-  const newWidth = Math.min(Math.max(e.clientX, MIN_WIDTH), MAX_WIDTH);
-  sidebarWidth.value = newWidth;
-};
-
-const stopResize = () => {
-  if (isResizing.value) {
-    isResizing.value = false;
+const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
+  size: sidebarWidth,
+  min: () => MIN_WIDTH,
+  max: () => MAX_WIDTH,
+  axis: "x",
+  direction: 1,
+  label: () => t("sidebar.resizeLabel"),
+  disabled: () => !props.isOpen,
+  onCommit: (w) => {
     if (typeof localStorage !== "undefined" && localStorage) {
-      localStorage.setItem("asgard_sidebar_width", sidebarWidth.value.toString());
+      localStorage.setItem("asgard_sidebar_width", w.toString());
     }
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", stopResize);
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  }
-};
+  },
+});
 
 const navigateToSettings = () => {
   router.push("/settings");
@@ -150,8 +136,6 @@ onUnmounted(() => {
   stopPolling();
   document.removeEventListener("mousedown", onDocPointerDown);
   document.removeEventListener("keydown", onDocKeydown);
-  document.removeEventListener("mousemove", handleMouseMove);
-  document.removeEventListener("mouseup", stopResize);
 });
 </script>
 
@@ -170,7 +154,7 @@ onUnmounted(() => {
     <!-- Resize Handle (Visible only when sidebar is open on desktop) -->
     <div
       v-if="isOpen"
-      @mousedown="startResize"
+      v-bind="resizeHandleProps"
       class="hidden md:block absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/40 active:bg-primary z-30 transition-colors"
       :title="t('sidebar.dragToResize')"
     />
