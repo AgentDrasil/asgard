@@ -162,6 +162,7 @@ export const zhCN: MessageSchema = {
     newChatSameCurrent: "新建相同配置会话",
     showQuota: "查看用量配额",
     palette: {
+      title: "命令面板",
       placeholder: "输入命令或搜索...",
       clearSearch: "清空搜索",
       noCommandsFound: '未找到匹配 "{query}" 的命令',
@@ -172,6 +173,7 @@ export const zhCN: MessageSchema = {
     },
   },
   sessionSearch: {
+    title: "搜索会话",
     placeholder: "按标题、Agent 或工作区搜索会话...",
     clearSearch: "清空搜索",
     typeToSearch: "输入关键词搜索会话",
@@ -742,6 +744,7 @@ export const zhCN: MessageSchema = {
     emptyDir: "(空目录)",
     containsComments: "包含批注",
     searchModal: {
+      title: "搜索文件",
       placeholder: "按名称或路径搜索文件...",
       clearSearch: "清空搜索",
       typeToSearch: "在工作区全域快速搜索文件",

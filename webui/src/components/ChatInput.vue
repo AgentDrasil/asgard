@@ -9,6 +9,7 @@ import type { Attachment, VoiceErrorCode } from "../types";
 import { uploadAttachment } from "../lib/api";
 import AttachmentChips from "./chat/AttachmentChips.vue";
 import VoiceInputButton from "./chat/VoiceInputButton.vue";
+import AppModal from "./common/AppModal.vue";
 import VoiceInputModal from "./chat/VoiceInputModal.vue";
 import SlashCommandMenu from "./chat/SlashCommandMenu.vue";
 import { t } from "../i18n";
@@ -497,12 +498,14 @@ const handleDrop = (e: DragEvent) => {
     </div>
 
     <!-- Expanded Popup Modal -->
-    <dialog class="modal" :class="{ 'modal-open': isModalOpen }">
+    <AppModal v-model:open="isModalOpen" labelledby="chat-input-modal-title" @close="closeModal">
       <div class="modal-box max-w-3xl w-11/12 flex flex-col max-h-[85vh] p-4 sm:p-6">
         <div class="flex items-center justify-between border-b border-base-300 pb-3 mb-4">
           <div class="flex items-center gap-2">
             <Icon icon="material-symbols:edit-note-rounded" class="h-5 w-5 text-primary" />
-            <h3 class="font-bold text-lg">{{ $t("chat.editChatInput") }}</h3>
+            <h3 id="chat-input-modal-title" class="font-bold text-lg">
+              {{ $t("chat.editChatInput") }}
+            </h3>
             <span v-if="lineCount > 1" class="badge badge-sm badge-neutral">
               {{ $t("chat.linesCount", { count: lineCount }) }}
             </span>
@@ -528,6 +531,7 @@ const handleDrop = (e: DragEvent) => {
         <div class="flex-1 min-h-[250px] flex flex-col mb-4">
           <textarea
             ref="modalTextareaRef"
+            autofocus
             v-model="text"
             @keydown="handleKeyDown"
             @paste="handlePaste"
@@ -591,10 +595,7 @@ const handleDrop = (e: DragEvent) => {
           </div>
         </div>
       </div>
-      <form method="dialog" class="modal-backdrop">
-        <button @click="closeModal">close</button>
-      </form>
-    </dialog>
+    </AppModal>
 
     <!-- Voice Input Live Transcription Popup Modal -->
     <VoiceInputModal

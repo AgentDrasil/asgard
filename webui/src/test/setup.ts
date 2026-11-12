@@ -19,3 +19,19 @@ if (typeof HTMLCanvasElement !== "undefined") {
     );
   } as unknown as typeof HTMLCanvasElement.prototype.getContext;
 }
+
+// jsdom does not implement HTMLDialogElement.showModal()/close(). Provide
+// minimal versions that toggle `open` and fire `close`, like the real element.
+if (typeof HTMLDialogElement !== "undefined") {
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.show = function (this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+    if (!this.hasAttribute("open")) return;
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  };
+}

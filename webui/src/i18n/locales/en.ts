@@ -161,6 +161,7 @@ export const en = {
     newChatSameCurrent: "New Chat (Same with Current)",
     showQuota: "Show Quota (Usage)",
     palette: {
+      title: "Command Palette",
       placeholder: "Type a command or search...",
       clearSearch: "Clear search",
       noCommandsFound: 'No commands found matching "{query}"',
@@ -171,6 +172,7 @@ export const en = {
     },
   },
   sessionSearch: {
+    title: "Search Sessions",
     placeholder: "Search sessions by title, agent or workspace...",
     clearSearch: "Clear search",
     typeToSearch: "Type to search sessions",
@@ -755,6 +757,7 @@ export const en = {
     emptyDir: "(empty)",
     containsComments: "Contains comments",
     searchModal: {
+      title: "Search Files",
       placeholder: "Search files by name or path...",
       clearSearch: "Clear search",
       typeToSearch: "Type to search files across the workspace",

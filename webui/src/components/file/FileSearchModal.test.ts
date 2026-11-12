@@ -177,8 +177,9 @@ describe("FileSearchModal.vue", () => {
     });
     await nextTick();
 
-    const input = root.querySelector("input") as HTMLInputElement;
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    const dialog = root.querySelector("dialog") as HTMLDialogElement;
+    dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    dialog.close();
     await nextTick();
 
     expect(closed).toBe(true);

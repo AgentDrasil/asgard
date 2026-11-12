@@ -46,9 +46,9 @@ describe("VoiceInputModal.vue", () => {
 
     const dialog = root.querySelector("dialog");
     expect(dialog).not.toBeNull();
-    expect(dialog?.getAttribute("role")).toBe("dialog");
-    expect(dialog?.getAttribute("aria-modal")).toBe("true");
-    expect(dialog?.classList.contains("modal-open")).toBe(true);
+    expect(dialog?.hasAttribute("open")).toBe(true);
+    expect(dialog?.getAttribute("aria-label")).toBeTruthy();
+    expect(dialog?.hasAttribute("aria-modal")).toBe(false);
     expect(root.querySelector('[data-testid="voice-modal-pending-text"]')?.textContent).toContain(
       "Testing voice",
     );
@@ -77,7 +77,9 @@ describe("VoiceInputModal.vue", () => {
     app.mount(root);
     await nextTick();
 
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    const dialog = root.querySelector("dialog") as HTMLDialogElement;
+    dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    dialog.close();
     expect(cancelCalled).toBe(true);
 
     app.unmount();

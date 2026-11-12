@@ -551,9 +551,16 @@ describe("ChatInput.vue", () => {
       app.use(i18n);
       app.mount(root);
 
-      // Standard input voice button (first one)
-      const voiceBtns = root.querySelectorAll('button[title^="Start voice recording"]');
-      expect(voiceBtns.length).toBe(2); // One in standard bar, one in dialog
+      // Standard input voice button only; the dialog content renders once opened
+      expect(root.querySelectorAll('button[title^="Start voice recording"]').length).toBe(1);
+
+      const expandBtn = root.querySelector(
+        'button[title^="Expand input editor"]',
+      ) as HTMLButtonElement;
+      expandBtn.click();
+      await nextTick();
+
+      expect(root.querySelectorAll('button[title^="Start voice recording"]').length).toBe(2);
 
       app.unmount();
     });

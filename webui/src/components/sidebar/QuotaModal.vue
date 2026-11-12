@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
+import AppModal from "../common/AppModal.vue";
 import { apiFetch, withRunner } from "../../lib/api";
 import { useRunners } from "../../composables/useRunners";
 import { formatQuotaResetRelative } from "../../i18n/timeUtils";
@@ -181,264 +182,258 @@ defineExpose({
 </script>
 
 <template>
-  <Transition name="fade">
+  <AppModal
+    :open="modelValue"
+    dialog-class="p-4"
+    labelledby="quota-modal-title"
+    @close="closeModal"
+  >
     <div
-      v-if="modelValue"
-      class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-      @click.self="closeModal"
+      class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden transition-all transform scale-100"
     >
+      <!-- Header -->
       <div
-        class="bg-base-200 border border-base-100 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden transition-all transform scale-100"
+        class="px-6 py-4 border-b border-base-100 flex items-center justify-between bg-base-300/50"
       >
-        <!-- Header -->
-        <div
-          class="px-6 py-4 border-b border-base-100 flex items-center justify-between bg-base-300/50"
+        <div class="flex items-center gap-2">
+          <Icon icon="mynaui:chart-bar-one" class="h-6 w-6 text-primary" />
+          <h2 id="quota-modal-title" class="text-lg font-bold text-base-content">
+            {{ t("quota.title") }}
+          </h2>
+        </div>
+        <button
+          @click="closeModal"
+          class="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-base-content hover:bg-base-100/50"
         >
-          <div class="flex items-center gap-2">
-            <Icon icon="mynaui:chart-bar-one" class="h-6 w-6 text-primary" />
-            <h2 class="text-lg font-bold text-base-content">{{ t("quota.title") }}</h2>
-          </div>
-          <button
-            @click="closeModal"
-            class="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-base-content hover:bg-base-100/50"
-          >
-            <Icon icon="mynaui:x" class="h-5 w-5 fill-current" />
-          </button>
+          <Icon icon="mynaui:x" class="h-5 w-5 fill-current" />
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-6 overflow-y-auto flex-1 space-y-6">
+        <div v-if="quotaLoading" class="flex flex-col items-center justify-center py-12 space-y-3">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <span class="text-sm text-base-content/70">{{ t("quota.fetching") }}</span>
         </div>
 
-        <!-- Body -->
-        <div class="p-6 overflow-y-auto flex-1 space-y-6">
+        <div v-else-if="quotaError" class="alert alert-error flex items-start gap-3">
+          <Icon icon="mynaui:danger" class="h-6 w-6 shrink-0" />
+          <div>
+            <h3 class="font-bold">{{ t("quota.errorTitle") }}</h3>
+            <div class="text-xs">{{ quotaError }}</div>
+          </div>
+        </div>
+
+        <div v-else class="space-y-6">
           <div
-            v-if="quotaLoading"
-            class="flex flex-col items-center justify-center py-12 space-y-3"
+            v-if="Object.keys(runnerErrors).length > 0"
+            class="alert alert-warning flex items-start gap-3"
+            data-testid="quota-runner-errors"
           >
-            <span class="loading loading-spinner loading-lg text-primary"></span>
-            <span class="text-sm text-base-content/70">{{ t("quota.fetching") }}</span>
-          </div>
-
-          <div v-else-if="quotaError" class="alert alert-error flex items-start gap-3">
-            <Icon icon="mynaui:danger" class="h-6 w-6 shrink-0" />
+            <Icon icon="mynaui:warning" class="h-6 w-6 shrink-0" />
             <div>
-              <h3 class="font-bold">{{ t("quota.errorTitle") }}</h3>
-              <div class="text-xs">{{ quotaError }}</div>
-            </div>
-          </div>
-
-          <div v-else class="space-y-6">
-            <div
-              v-if="Object.keys(runnerErrors).length > 0"
-              class="alert alert-warning flex items-start gap-3"
-              data-testid="quota-runner-errors"
-            >
-              <Icon icon="mynaui:warning" class="h-6 w-6 shrink-0" />
-              <div>
-                <h3 class="font-bold">{{ t("quota.runnerErrors") }}</h3>
-                <div v-for="(msg, node) in runnerErrors" :key="node" class="text-xs">
-                  {{ node }}: {{ msg }}
-                </div>
+              <h3 class="font-bold">{{ t("quota.runnerErrors") }}</h3>
+              <div v-for="(msg, node) in runnerErrors" :key="node" class="text-xs">
+                {{ node }}: {{ msg }}
               </div>
             </div>
-            <div v-for="section in sections" :key="section.id" class="space-y-6">
-              <h3
-                v-if="section.id"
-                class="text-sm font-bold text-base-content flex items-center gap-2"
-                data-testid="quota-runner-section"
-              >
-                <Icon icon="mynaui:server" class="h-4 w-4 text-primary" />
-                {{ t("quota.runnerSection", { id: section.id }) }}
-              </h3>
-              <div v-for="(models, cliName) in section.clis" :key="cliName" class="space-y-3">
-                <div class="flex items-center gap-2 border-b border-base-100/60 pb-1.5">
-                  <span class="text-xs font-bold uppercase tracking-wider text-primary/80">{{
-                    t("quota.cli")
-                  }}</span>
-                  <span
-                    class="text-sm font-semibold capitalize bg-primary/10 text-primary px-2.5 py-0.5 rounded-full"
-                    >{{ cliName }}</span
-                  >
-                </div>
+          </div>
+          <div v-for="section in sections" :key="section.id" class="space-y-6">
+            <h3
+              v-if="section.id"
+              class="text-sm font-bold text-base-content flex items-center gap-2"
+              data-testid="quota-runner-section"
+            >
+              <Icon icon="mynaui:server" class="h-4 w-4 text-primary" />
+              {{ t("quota.runnerSection", { id: section.id }) }}
+            </h3>
+            <div v-for="(models, cliName) in section.clis" :key="cliName" class="space-y-3">
+              <div class="flex items-center gap-2 border-b border-base-100/60 pb-1.5">
+                <span class="text-xs font-bold uppercase tracking-wider text-primary/80">{{
+                  t("quota.cli")
+                }}</span>
+                <span
+                  class="text-sm font-semibold capitalize bg-primary/10 text-primary px-2.5 py-0.5 rounded-full"
+                  >{{ cliName }}</span
+                >
+              </div>
 
-                <div class="space-y-4">
-                  <div
-                    v-for="(s, i) in statusesOf(models)"
-                    :key="`status-${s.account ?? ''}-${i}`"
-                    class="alert text-xs flex items-start gap-2"
-                    :class="s.status === 'no_credentials' ? 'alert-warning' : 'alert-error'"
-                    :data-testid="`quota-status-${s.status}`"
-                  >
-                    <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0 mt-0.5" />
-                    <div class="space-y-1 min-w-0">
-                      <div class="font-semibold">
-                        {{ statusText(String(cliName), sectionRunner(section.id), s) }}
-                      </div>
-                      <div v-if="s.status === 'no_credentials'">
-                        {{ t("quota.loginHint", { cli: String(cliName) }) }}
-                      </div>
-                      <div v-if="s.message" class="font-mono break-words opacity-80">
-                        {{ s.message }}
-                      </div>
+              <div class="space-y-4">
+                <div
+                  v-for="(s, i) in statusesOf(models)"
+                  :key="`status-${s.account ?? ''}-${i}`"
+                  class="alert text-xs flex items-start gap-2"
+                  :class="s.status === 'no_credentials' ? 'alert-warning' : 'alert-error'"
+                  :data-testid="`quota-status-${s.status}`"
+                >
+                  <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0 mt-0.5" />
+                  <div class="space-y-1 min-w-0">
+                    <div class="font-semibold">
+                      {{ statusText(String(cliName), sectionRunner(section.id), s) }}
+                    </div>
+                    <div v-if="s.status === 'no_credentials'">
+                      {{ t("quota.loginHint", { cli: String(cliName) }) }}
+                    </div>
+                    <div v-if="s.message" class="font-mono break-words opacity-80">
+                      {{ s.message }}
                     </div>
                   </div>
-                  <div
-                    v-for="m in modelsOf(models)"
-                    :key="`${m.account ?? ''}/${m.model}`"
-                    class="bg-base-300/40 border border-base-100/30 rounded-xl p-4 space-y-3"
-                  >
-                    <div class="flex justify-between items-start">
-                      <h4 class="font-medium text-sm text-base-content">
-                        {{ m.account ? `${m.model} · ${m.account}` : m.model }}
-                      </h4>
-                      <span
-                        class="text-xs font-semibold px-2 py-0.5 rounded-md"
-                        :class="[
-                          m.remaining === 0 ||
-                          (m.balance && (!m.balance.is_available || isBalanceZero(m.balance))) ||
-                          m.remaining <= 0.2
-                            ? 'bg-error/10 text-error'
-                            : m.remaining <= 0.5
-                              ? 'bg-warning/10 text-warning'
-                              : 'bg-success/10 text-success',
-                        ]"
-                      >
-                        <template v-if="m.balance">
-                          {{
-                            !m.balance.is_available || isBalanceZero(m.balance)
-                              ? t("quota.noBalance")
-                              : m.remaining <= 0.2
-                                ? t("quota.balanceLow", { pct: Math.round(m.remaining * 100) })
-                                : t("quota.balanceAvailable")
-                          }}
-                        </template>
-                        <template v-else>
-                          {{ t("quota.remaining", { pct: Math.round(m.remaining * 100) }) }}
-                        </template>
-                      </span>
-                    </div>
+                </div>
+                <div
+                  v-for="m in modelsOf(models)"
+                  :key="`${m.account ?? ''}/${m.model}`"
+                  class="bg-base-300/40 border border-base-100/30 rounded-xl p-4 space-y-3"
+                >
+                  <div class="flex justify-between items-start">
+                    <h4 class="font-medium text-sm text-base-content">
+                      {{ m.account ? `${m.model} · ${m.account}` : m.model }}
+                    </h4>
+                    <span
+                      class="text-xs font-semibold px-2 py-0.5 rounded-md"
+                      :class="[
+                        m.remaining === 0 ||
+                        (m.balance && (!m.balance.is_available || isBalanceZero(m.balance))) ||
+                        m.remaining <= 0.2
+                          ? 'bg-error/10 text-error'
+                          : m.remaining <= 0.5
+                            ? 'bg-warning/10 text-warning'
+                            : 'bg-success/10 text-success',
+                      ]"
+                    >
+                      <template v-if="m.balance">
+                        {{
+                          !m.balance.is_available || isBalanceZero(m.balance)
+                            ? t("quota.noBalance")
+                            : m.remaining <= 0.2
+                              ? t("quota.balanceLow", { pct: Math.round(m.remaining * 100) })
+                              : t("quota.balanceAvailable")
+                        }}
+                      </template>
+                      <template v-else>
+                        {{ t("quota.remaining", { pct: Math.round(m.remaining * 100) }) }}
+                      </template>
+                    </span>
+                  </div>
 
-                    <!-- Prepaid account balance (e.g. DeepSeek) replaces the progress bar -->
-                    <div v-if="m.balance" class="space-y-2">
-                      <h5
-                        class="text-[11px] font-bold uppercase tracking-wider text-base-content/40"
+                  <!-- Prepaid account balance (e.g. DeepSeek) replaces the progress bar -->
+                  <div v-if="m.balance" class="space-y-2">
+                    <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
+                      {{ t("quota.balance") }}
+                    </h5>
+                    <div v-if="nonZeroBalances(m.balance).length > 0" class="space-y-2">
+                      <div
+                        v-for="b in nonZeroBalances(m.balance)"
+                        :key="b.currency"
+                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 space-y-1.5"
                       >
-                        {{ t("quota.balance") }}
-                      </h5>
-                      <div v-if="nonZeroBalances(m.balance).length > 0" class="space-y-2">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="text-xs font-bold text-base-content/80">{{
+                            b.currency
+                          }}</span>
+                          <span class="text-sm font-semibold text-base-content">{{
+                            b.total_balance
+                          }}</span>
+                        </div>
                         <div
-                          v-for="b in nonZeroBalances(m.balance)"
-                          :key="b.currency"
-                          class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 space-y-1.5"
+                          class="flex items-center justify-between gap-2 text-[11px] text-base-content/50"
                         >
-                          <div class="flex items-center justify-between gap-2">
-                            <span class="text-xs font-bold text-base-content/80">{{
-                              b.currency
-                            }}</span>
-                            <span class="text-sm font-semibold text-base-content">{{
-                              b.total_balance
-                            }}</span>
-                          </div>
-                          <div
-                            class="flex items-center justify-between gap-2 text-[11px] text-base-content/50"
-                          >
-                            <span>
-                              {{ t("quota.balanceGranted") }}:
-                              <b class="font-semibold text-base-content/80">{{
-                                b.granted_balance
-                              }}</b>
-                            </span>
-                            <span>
-                              {{ t("quota.balanceToppedUp") }}:
-                              <b class="font-semibold text-base-content/80">{{
-                                b.topped_up_balance
-                              }}</b>
-                            </span>
-                          </div>
+                          <span>
+                            {{ t("quota.balanceGranted") }}:
+                            <b class="font-semibold text-base-content/80">{{
+                              b.granted_balance
+                            }}</b>
+                          </span>
+                          <span>
+                            {{ t("quota.balanceToppedUp") }}:
+                            <b class="font-semibold text-base-content/80">{{
+                              b.topped_up_balance
+                            }}</b>
+                          </span>
                         </div>
                       </div>
-                      <div
-                        v-else
-                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 text-xs text-base-content/60 font-medium"
-                        data-testid="quota-no-balance"
-                      >
-                        {{ t("quota.noBalance") }}
-                      </div>
-                      <div
-                        v-if="!m.balance.is_available || isBalanceZero(m.balance)"
-                        class="alert alert-error text-xs py-1.5 px-2.5 flex items-center gap-1.5"
-                      >
-                        <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0" />
-                        <span>{{ t("quota.balanceUnavailableHint") }}</span>
-                      </div>
-                      <div
-                        v-else-if="m.remaining <= 0.2"
-                        class="alert alert-warning text-xs py-1.5 px-2.5 flex items-center gap-1.5"
-                      >
-                        <Icon icon="mynaui:warning" class="h-4 w-4 shrink-0" />
-                        <span>{{ t("quota.balanceLowHint") }}</span>
-                      </div>
                     </div>
+                    <div
+                      v-else
+                      class="bg-base-200/50 border border-base-100/20 rounded-lg p-3 text-xs text-base-content/60 font-medium"
+                      data-testid="quota-no-balance"
+                    >
+                      {{ t("quota.noBalance") }}
+                    </div>
+                    <div
+                      v-if="!m.balance.is_available || isBalanceZero(m.balance)"
+                      class="alert alert-error text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+                    >
+                      <Icon icon="mynaui:danger" class="h-4 w-4 shrink-0" />
+                      <span>{{ t("quota.balanceUnavailableHint") }}</span>
+                    </div>
+                    <div
+                      v-else-if="m.remaining <= 0.2"
+                      class="alert alert-warning text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+                    >
+                      <Icon icon="mynaui:warning" class="h-4 w-4 shrink-0" />
+                      <span>{{ t("quota.balanceLowHint") }}</span>
+                    </div>
+                  </div>
 
-                    <!-- Single Progress Bar (when no multi-tier breakdown limits exist) -->
-                    <div v-else-if="!m.limits || m.limits.length === 0" class="space-y-1">
-                      <progress
-                        class="progress w-full"
-                        :class="getProgressClass(m.remaining)"
-                        :value="m.remaining * 100"
-                        max="100"
-                      ></progress>
-                      <div class="flex justify-between text-[11px] text-base-content/50">
-                        <span>0%</span>
-                        <span v-if="m.refresh_date" class="italic text-right truncate max-w-[80%]">
+                  <!-- Single Progress Bar (when no multi-tier breakdown limits exist) -->
+                  <div v-else-if="!m.limits || m.limits.length === 0" class="space-y-1">
+                    <progress
+                      class="progress w-full"
+                      :class="getProgressClass(m.remaining)"
+                      :value="m.remaining * 100"
+                      max="100"
+                    ></progress>
+                    <div class="flex justify-between text-[11px] text-base-content/50">
+                      <span>0%</span>
+                      <span v-if="m.refresh_date" class="italic text-right truncate max-w-[80%]">
+                        {{
+                          t("quota.resetsAt", {
+                            date: formatRefreshDate(m.refresh_date),
+                            relative: formatQuotaResetRelative(m.refresh_date, t),
+                          })
+                        }}
+                      </span>
+                      <span>100%</span>
+                    </div>
+                  </div>
+
+                  <!-- Specific Detailed Limits (if any) -->
+                  <div v-else class="space-y-2">
+                    <h5 class="text-[11px] font-bold uppercase tracking-wider text-base-content/40">
+                      {{ t("quota.limitsBreakdown") }}
+                    </h5>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div
+                        v-for="lim in m.limits"
+                        :key="lim.name"
+                        class="bg-base-200/50 border border-base-100/20 rounded-lg p-2.5 space-y-1.5"
+                      >
+                        <div class="flex justify-between items-center">
+                          <span class="text-xs font-semibold text-base-content/80 capitalize">{{
+                            formatLimitName(lim.name)
+                          }}</span>
+                          <span
+                            class="text-[11px] font-medium"
+                            :class="getTextColorClass(lim.remaining)"
+                          >
+                            {{ Math.round(lim.remaining * 100) }}%
+                          </span>
+                        </div>
+                        <progress
+                          class="progress progress-xs w-full"
+                          :class="getProgressClass(lim.remaining)"
+                          :value="lim.remaining * 100"
+                          max="100"
+                        ></progress>
+                        <div
+                          v-if="lim.refresh_date"
+                          class="text-[9px] text-base-content/40 truncate"
+                        >
                           {{
-                            t("quota.resetsAt", {
-                              date: formatRefreshDate(m.refresh_date),
-                              relative: formatQuotaResetRelative(m.refresh_date, t),
+                            t("quota.resetPrefix", {
+                              date: formatRefreshDate(lim.refresh_date),
                             })
                           }}
-                        </span>
-                        <span>100%</span>
-                      </div>
-                    </div>
-
-                    <!-- Specific Detailed Limits (if any) -->
-                    <div v-else class="space-y-2">
-                      <h5
-                        class="text-[11px] font-bold uppercase tracking-wider text-base-content/40"
-                      >
-                        {{ t("quota.limitsBreakdown") }}
-                      </h5>
-                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div
-                          v-for="lim in m.limits"
-                          :key="lim.name"
-                          class="bg-base-200/50 border border-base-100/20 rounded-lg p-2.5 space-y-1.5"
-                        >
-                          <div class="flex justify-between items-center">
-                            <span class="text-xs font-semibold text-base-content/80 capitalize">{{
-                              formatLimitName(lim.name)
-                            }}</span>
-                            <span
-                              class="text-[11px] font-medium"
-                              :class="getTextColorClass(lim.remaining)"
-                            >
-                              {{ Math.round(lim.remaining * 100) }}%
-                            </span>
-                          </div>
-                          <progress
-                            class="progress progress-xs w-full"
-                            :class="getProgressClass(lim.remaining)"
-                            :value="lim.remaining * 100"
-                            max="100"
-                          ></progress>
-                          <div
-                            v-if="lim.refresh_date"
-                            class="text-[9px] text-base-content/40 truncate"
-                          >
-                            {{
-                              t("quota.resetPrefix", {
-                                date: formatRefreshDate(lim.refresh_date),
-                              })
-                            }}
-                          </div>
                         </div>
                       </div>
                     </div>
@@ -446,29 +441,25 @@ defineExpose({
                 </div>
               </div>
             </div>
+          </div>
 
-            <div v-if="!hasQuotaData" class="text-center py-8 text-base-content/50 text-sm">
-              {{ t("quota.noQuotaInfo") }}
-            </div>
+          <div v-if="!hasQuotaData" class="text-center py-8 text-base-content/50 text-sm">
+            {{ t("quota.noQuotaInfo") }}
           </div>
         </div>
+      </div>
 
-        <!-- Footer -->
-        <div class="px-6 py-4 border-t border-base-100 flex justify-between bg-base-300/30">
-          <button
-            @click="fetchQuotas"
-            class="btn btn-outline btn-sm gap-2"
-            :disabled="quotaLoading"
-          >
-            <Icon
-              icon="mynaui:refresh"
-              :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading }]"
-            />
-            {{ t("quota.refresh") }}
-          </button>
-          <button @click="closeModal" class="btn btn-primary btn-sm">{{ t("quota.close") }}</button>
-        </div>
+      <!-- Footer -->
+      <div class="px-6 py-4 border-t border-base-100 flex justify-between bg-base-300/30">
+        <button @click="fetchQuotas" class="btn btn-outline btn-sm gap-2" :disabled="quotaLoading">
+          <Icon
+            icon="mynaui:refresh"
+            :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading }]"
+          />
+          {{ t("quota.refresh") }}
+        </button>
+        <button @click="closeModal" class="btn btn-primary btn-sm">{{ t("quota.close") }}</button>
       </div>
     </div>
-  </Transition>
+  </AppModal>
 </template>

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
+import AppModal from "./common/AppModal.vue";
 import {
   getUserProxyKeys,
   saveUserProxyKey,
@@ -233,18 +234,21 @@ const handleDelete = async () => {
     </div>
 
     <!-- Add/Edit Key Modal -->
-    <div
-      v-if="isModalOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
-      data-testid="proxy-key-modal"
+    <AppModal
+      :open="isModalOpen"
+      persistent
+      dialog-class="p-4"
+      labelledby="proxy-key-modal-title"
+      @close="closeModal"
     >
       <div
         class="bg-base-100 rounded-2xl border border-base-300 shadow-xl max-w-md w-full p-6 space-y-4"
+        data-testid="proxy-key-modal"
       >
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 font-semibold text-base">
             <Icon icon="mynaui:key" class="w-5 h-5 text-primary" />
-            <span>{{
+            <span id="proxy-key-modal-title">{{
               isEditing ? t("settings.proxySecretsEditKey") : t("settings.proxySecretsAddKey")
             }}</span>
           </div>
@@ -261,6 +265,7 @@ const handleDelete = async () => {
             <div class="relative">
               <input
                 v-model="formKeyName"
+                :autofocus="!isEditing"
                 type="text"
                 list="proxy-envs-datalist"
                 :readonly="isEditing"
@@ -312,6 +317,7 @@ const handleDelete = async () => {
             <div class="relative">
               <input
                 v-model="formKeyValue"
+                :autofocus="isEditing"
                 :type="showSecret ? 'text' : 'password'"
                 :placeholder="t('settings.proxySecretsKeyValuePlaceholder')"
                 class="input input-sm input-bordered w-full font-mono text-sm pr-9"
@@ -355,20 +361,22 @@ const handleDelete = async () => {
           </div>
         </form>
       </div>
-    </div>
+    </AppModal>
 
     <!-- Delete Confirmation Modal -->
-    <div
-      v-if="deleteTargetKey"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
-      data-testid="proxy-key-delete-modal"
+    <AppModal
+      :open="!!deleteTargetKey"
+      dialog-class="p-4"
+      labelledby="proxy-key-delete-title"
+      @close="cancelDelete"
     >
       <div
         class="bg-base-100 rounded-2xl border border-base-300 shadow-xl max-w-sm w-full p-5 space-y-4"
+        data-testid="proxy-key-delete-modal"
       >
         <div class="flex items-center gap-2 text-error font-semibold text-base">
           <Icon icon="mynaui:danger" class="w-5 h-5" />
-          <span>{{ t("settings.proxySecretsDelete") }}</span>
+          <span id="proxy-key-delete-title">{{ t("settings.proxySecretsDelete") }}</span>
         </div>
         <p class="text-sm text-base-content/80">
           {{ t("settings.proxySecretsDeleteConfirm", { key: deleteTargetKey }) }}
@@ -394,6 +402,6 @@ const handleDelete = async () => {
           </button>
         </div>
       </div>
-    </div>
+    </AppModal>
   </section>
 </template>
