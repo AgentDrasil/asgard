@@ -29,6 +29,7 @@ RUN echo "deb http://deb.debian.org/debian sid main" >> /etc/apt/sources.list &&
     openssh-client \
     python3 \
     sqlite3 \
+    tini \
     less && \
     rm -rf /var/lib/apt/lists/*
 
@@ -249,7 +250,11 @@ WORKDIR /home/user
 ENV CLAUDE_CONFIG_DIR=/home/user/.claude
 ENV DISABLE_AUTOUPDATER=1
 
-ENTRYPOINT ["asgard-runner"]
+# tini as PID 1 reaps orphans: bwrap (--die-with-parent, --unshare-pid) leaves
+# intermediate processes reparented to PID 1 when their parent exits, and
+# asgard-runner only waits on its own exec.Cmd children, so without an init
+# they pile up as zombies.
+ENTRYPOINT ["tini", "--", "asgard-runner"]
 CMD []
 
 # Stage 6: backend (last, so a plain `docker build` produces the backend image)
