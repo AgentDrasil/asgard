@@ -236,17 +236,24 @@ func filterQuota(res map[string][]types.ModelUsage) map[string][]types.ModelUsag
 	}
 
 	for agentName, usages := range res {
-		filtered := make([]types.ModelUsage, 0, len(usages))
-		for _, u := range usages {
-			if u.IsStatusOnly() || cfg.IsModelAllowed(agentName, u.Model) {
-				filtered = append(filtered, u)
-			}
-		}
-		res[agentName] = filtered
+		res[agentName] = FilterAllowedUsages(cfg, agentName, usages)
 	}
 
 	applyQuotaPolicy(cfg, res)
 	return res
+}
+
+// FilterAllowedUsages returns the usages of cli whose model the aw config
+// allows. Status-only entries are kept: they report a failed query, not a
+// model. A nil cfg allows everything.
+func FilterAllowedUsages(cfg *config.Config, cli string, usages []types.ModelUsage) []types.ModelUsage {
+	filtered := make([]types.ModelUsage, 0, len(usages))
+	for _, u := range usages {
+		if u.IsStatusOnly() || cfg.IsModelAllowed(cli, u.Model) {
+			filtered = append(filtered, u)
+		}
+	}
+	return filtered
 }
 
 // applyQuotaPolicy attaches the quota policy verdict to every usage. The

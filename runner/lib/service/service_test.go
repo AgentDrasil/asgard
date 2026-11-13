@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
@@ -35,6 +36,10 @@ func startService(t *testing.T, opts Options) (runnerpb.RunnerServiceClient, str
 	t.Helper()
 	h := t.TempDir()
 	t.Setenv("HOME", h)
+	if os.Getenv(awconfig.EnvPath) == "" {
+		// Keep the developer's real aw config out of the quota filter.
+		t.Setenv(awconfig.EnvPath, filepath.Join(h, "aw-config.yaml"))
+	}
 	t.Setenv(runnerpaths.EnvDataDir, filepath.Join(h, "session-data"))
 	ws := filepath.Join(t.TempDir(), "ws")
 	require.NoError(t, os.MkdirAll(ws, 0o755))

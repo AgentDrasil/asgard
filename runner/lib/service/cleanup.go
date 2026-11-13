@@ -12,6 +12,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
+	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
@@ -112,6 +113,12 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 	if fetch == nil {
 		fetch = bwrap.QueryAccountQuota
 	}
+	// `aw usage --cli` skips the allow-list (CheckTarget needs every model),
+	// so the per-account usages are filtered here like the plain query is.
+	cfg, err := awconfig.LoadConfig()
+	if err != nil {
+		log.Warn().Err(err).Msg("loading aw config for quota filtering failed")
+	}
 	ctx, cancel := context.WithTimeout(ctx, accountQuotaTimeout)
 	defer cancel()
 	for _, cli := range accountQuotaCLIs {
@@ -141,6 +148,7 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 					failed[i] = &st
 					return
 				}
+				usages = agentwrapper.FilterAllowedUsages(cfg, cli, usages)
 				for j := range usages {
 					usages[j].Account = alias
 				}

@@ -353,6 +353,31 @@ func TestQueryQuotaPerAccountFanOut(t *testing.T) {
 	assert.ElementsMatch(t, []string{"agy/solo", "claude/broken", "claude/home", "claude/work"}, asked)
 }
 
+func TestQueryQuotaPerAccountFilteredByAwConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "claude", "work"), 0o700))
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("agents:\n  - claude: [\"opus.*\"]\n"), 0o600))
+	t.Setenv("AW_CONFIG", cfgPath)
+	cl, _ := startService(t, Options{
+		Quota: func(context.Context) (map[string][]llms.ModelUsage, error) {
+			return map[string][]llms.ModelUsage{}, nil
+		},
+		AccountQuota: func(context.Context, string, string) ([]llms.ModelUsage, error) {
+			return []llms.ModelUsage{{Model: "opus-5", Remaining: 0.5}, {Model: "haiku-5", Remaining: 0.5}}, nil
+		},
+	})
+
+	resp, err := cl.QueryQuota(context.Background(), &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	var models []string
+	for _, u := range resp.GetUsages() {
+		models = append(models, u.GetModel())
+	}
+	assert.Equal(t, []string{"opus-5"}, models)
+}
+
 func TestQueryQuotaAllAccountsFailKeepsLegacy(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
