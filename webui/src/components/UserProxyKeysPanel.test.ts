@@ -111,7 +111,56 @@ describe("UserProxyKeysPanel.vue", () => {
     saveBtn.click();
     await flush();
 
-    expect(saveSpy).toHaveBeenCalledWith("ANTHROPIC_API_KEY", "sk-ant-test");
+    expect(saveSpy).toHaveBeenCalledWith("ANTHROPIC_API_KEY", "sk-ant-test", {
+      host: "",
+      path_prefix: "",
+      header_key: "",
+    });
+
+    app.unmount();
+  });
+
+  it("saves the host, path prefix and header the key is swapped in at", async () => {
+    vi.spyOn(api, "getUserProxyKeys").mockResolvedValue([]);
+    const saveSpy = vi.spyOn(api, "saveUserProxyKey").mockResolvedValue(undefined);
+
+    const app = createApp({
+      render() {
+        return h(UserProxyKeysPanel);
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await flush();
+
+    (root.querySelector('[data-testid="add-proxy-key-btn"]') as HTMLButtonElement).click();
+    await flush();
+    const modal = document.body.querySelector('[data-testid="proxy-key-modal"]')!;
+    const fill = async (testid: string, value: string) => {
+      const el = modal.querySelector(`[data-testid="${testid}"]`) as HTMLInputElement;
+      el.value = value;
+      el.dispatchEvent(new Event("input"));
+      await flush();
+    };
+    await fill("proxy-key-name-input", "GEMINI_API_KEY");
+    await fill("proxy-key-value-input", "real-key");
+    await fill("proxy-key-path-input", "/v1beta");
+    // A path or header without a host is rejected.
+    expect(modal.querySelector('[data-testid="proxy-key-rule-error"]')).not.toBeNull();
+    (modal.querySelector('[data-testid="proxy-key-save-btn"]') as HTMLButtonElement).click();
+    await flush();
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    await fill("proxy-key-host-input", "generativelanguage.googleapis.com");
+    await fill("proxy-key-header-input", "x-goog-api-key");
+    expect(modal.querySelector('[data-testid="proxy-key-rule-error"]')).toBeNull();
+    (modal.querySelector('[data-testid="proxy-key-save-btn"]') as HTMLButtonElement).click();
+    await flush();
+    expect(saveSpy).toHaveBeenCalledWith("GEMINI_API_KEY", "real-key", {
+      host: "generativelanguage.googleapis.com",
+      path_prefix: "/v1beta",
+      header_key: "x-goog-api-key",
+    });
 
     app.unmount();
   });
@@ -187,7 +236,11 @@ describe("UserProxyKeysPanel.vue", () => {
     saveBtn.click();
     await flush();
 
-    expect(saveSpy).toHaveBeenCalledWith("VALID_SECRET_KEY", "  secret-with-leading-spaces  ");
+    expect(saveSpy).toHaveBeenCalledWith("VALID_SECRET_KEY", "  secret-with-leading-spaces  ", {
+      host: "",
+      path_prefix: "",
+      header_key: "",
+    });
 
     app.unmount();
   });

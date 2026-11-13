@@ -622,15 +622,19 @@ func (c *callbackService) GetUserProxyKeys(ctx context.Context, req *runnerpb.Ge
 	if c.s == nil || c.s.userProxyKeyRepo == nil {
 		return &runnerpb.GetUserProxyKeysResponse{Keys: map[string]string{}}, nil
 	}
-	keys, err := c.s.userProxyKeyRepo.GetAllDecryptedKeys(ctx, userID)
+	entries, err := c.s.userProxyKeyRepo.GetAllDecryptedEntries(ctx, userID)
 	if err != nil {
 		log.Warn().Err(err).Str("user_id", userID).Msg("failed to load decrypted proxy keys for user")
 		return nil, status.Errorf(codes.Internal, "failed to load proxy keys: %v", err)
 	}
-	if keys == nil {
-		keys = make(map[string]string)
+	resp := &runnerpb.GetUserProxyKeysResponse{Keys: make(map[string]string, len(entries))}
+	for _, e := range entries {
+		resp.Keys[e.KeyName] = e.Value
+		resp.Entries = append(resp.Entries, &runnerpb.UserProxyKeyEntry{
+			Name: e.KeyName, Value: e.Value, Host: e.Host, PathPrefix: e.PathPrefix, HeaderKey: e.HeaderKey,
+		})
 	}
-	return &runnerpb.GetUserProxyKeysResponse{Keys: keys}, nil
+	return resp, nil
 }
 
 func (c *callbackService) validateSessionOwnership(sessionID, nodeID string) (*dbmodels.Session, error) {

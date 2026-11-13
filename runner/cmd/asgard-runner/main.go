@@ -84,6 +84,8 @@ func run() error {
 		Conf:      sb.Conf,
 		Ready:     sb.Ready,
 		Callbacks: callbacks,
+
+		UserSecrets: sb.RegisterUserSecrets,
 	})
 	svc := service.New(service.Options{
 		Agents: remote.Agents, GitExec: sb.GitExec,

@@ -914,3 +914,102 @@ func TestProxyManager_StartBackgroundReportsBindSynchronously(t *testing.T) {
 	assert.NoError(t, <-exited)
 	assert.False(t, pm.Running())
 }
+
+func TestProxyManager_UserSecretSubstitution(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	cfg := &Config{
+		Enable: true,
+		Server: ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(tmpDir, "ca.crt"), CAKey: filepath.Join(tmpDir, "ca.key")},
+		Rules: []Rule{
+			{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "shared-real", DummySecret: "shared-dummy", Env: "MY_KEY"},
+			{Host: "other.example.com", HeaderKey: "x-api-key", RealSecret: "other-real", DummySecret: "other-dummy", Env: "OTHER_KEY"},
+		},
+	}
+	pm, err := NewManager(cfg, "")
+	require.NoError(t, err)
+
+	dummies, release, err := pm.RegisterUserSecrets([]UserSecret{{Env: "MY_KEY", Real: "user-real"}})
+	require.NoError(t, err)
+	dummy := dummies["MY_KEY"]
+	require.NotEmpty(t, dummy)
+	assert.NotContains(t, dummy, "user-real")
+
+	do := func(host, header, val string) string {
+		req, err := http.NewRequest(http.MethodPost, "https://"+host+"/x", nil)
+		require.NoError(t, err)
+		req.Host = host
+		req.Header.Set(header, val)
+		_, err = pm.Interceptor(context.Background(), req, &fakeInvoker{})
+		require.NoError(t, err)
+		return req.Header.Get(header)
+	}
+
+	assert.Equal(t, "Bearer user-real", do("api.example.com", "Authorization", "Bearer "+dummy))
+	// A dummy never works for a rule bound to another env name.
+	assert.Equal(t, "x-api-key-untouched", do("other.example.com", "x-api-key", "x-api-key-untouched"))
+	assert.Equal(t, dummy, do("other.example.com", "x-api-key", dummy))
+	// The rule's own dummy still maps to the shared real secret.
+	assert.Equal(t, "Bearer shared-real", do("api.example.com", "Authorization", "Bearer shared-dummy"))
+
+	release()
+	assert.Equal(t, "Bearer "+dummy, do("api.example.com", "Authorization", "Bearer "+dummy))
+
+	// The SDK may send the dummy in a header other than the rule's header_key.
+	assert.Equal(t, "user-real", func() string {
+		d2, rel2, err := pm.RegisterUserSecrets([]UserSecret{{Env: "MY_KEY", Real: "user-real"}})
+		require.NoError(t, err)
+		defer rel2()
+		req, err := http.NewRequest(http.MethodPost, "https://api.example.com/x?alt=sse", nil)
+		require.NoError(t, err)
+		req.Host = "api.example.com"
+		req.Header.Set("x-goog-api-key", d2["MY_KEY"])
+		_, err = pm.Interceptor(context.Background(), req, &fakeInvoker{})
+		require.NoError(t, err)
+		return req.Header.Get("x-goog-api-key")
+	}())
+}
+
+func TestProxyManager_HostBoundUserSecret(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	cfg := &Config{
+		Enable: true,
+		Server: ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(tmpDir, "ca.crt"), CAKey: filepath.Join(tmpDir, "ca.key")},
+		Rules:  []Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "shared-real"}},
+	}
+	pm, err := NewManager(cfg, "")
+	require.NoError(t, err)
+
+	dummies, release, err := pm.RegisterUserSecrets([]UserSecret{
+		{Env: "GEMINI_API_KEY", Real: "gem-real", Host: "Generativelanguage.googleapis.com", PathPrefix: "/v1beta", HeaderKey: "x-goog-api-key"},
+		{Env: "BEARER_KEY", Real: "bear-real", Host: "bearer.example.com"},
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"api.example.com", "generativelanguage.googleapis.com", "bearer.example.com"}, pm.allHosts(*pm.rulesPtr.Load()))
+
+	do := func(host, path, header, val string) string {
+		req, err := http.NewRequest(http.MethodPost, "https://"+host+path, nil)
+		require.NoError(t, err)
+		req.Host = host
+		req.Header.Set(header, val)
+		_, err = pm.Interceptor(context.Background(), req, &fakeInvoker{})
+		require.NoError(t, err)
+		return req.Header.Get(header)
+	}
+
+	g := dummies["GEMINI_API_KEY"]
+	assert.Equal(t, "gem-real", do("generativelanguage.googleapis.com", "/v1beta/models/x", "x-goog-api-key", g))
+	// Wrong path prefix, wrong header, wrong host: the dummy is left alone.
+	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v2/x", "x-goog-api-key", g))
+	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v1beta/x", "Authorization", g))
+	assert.Equal(t, g, do("other.example.com", "/v1beta/x", "x-goog-api-key", g))
+	// Header defaults to Authorization and keeps the Bearer scheme.
+	assert.Equal(t, "Bearer bear-real", do("bearer.example.com", "/x", "Authorization", "Bearer "+dummies["BEARER_KEY"]))
+
+	release()
+	assert.ElementsMatch(t, []string{"api.example.com"}, pm.allHosts(*pm.rulesPtr.Load()))
+	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v1beta/x", "x-goog-api-key", g))
+}

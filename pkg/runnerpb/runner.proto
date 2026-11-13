@@ -605,7 +605,20 @@ message GetUserProxyKeysRequest {
 }
 
 message GetUserProxyKeysResponse {
+  // keys is the name -> real value view, kept for older runners.
   map<string, string> keys = 1;
+  repeated UserProxyKeyEntry entries = 2;
+}
+
+// UserProxyKeyEntry is one decrypted user key plus where the proxy should
+// swap it in. An empty host means the key is only usable through a proxy rule
+// with the same env name.
+message UserProxyKeyEntry {
+  string name = 1;
+  string value = 2;
+  string host = 3;
+  string path_prefix = 4;
+  string header_key = 5;
 }
 
 message InitWorkflowSessionRequest {

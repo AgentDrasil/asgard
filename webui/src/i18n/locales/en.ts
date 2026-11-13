@@ -423,6 +423,18 @@ export const en = {
     proxySecretsAvailableEnvs: "Configured proxy environments:",
     proxySecretsEnvNotice:
       "This environment variable will be injected into the sandbox to override proxy settings.",
+    proxySecretsHost: "Host",
+    proxySecretsHostPlaceholder: "api.example.com",
+    proxySecretsPath: "Path prefix",
+    proxySecretsPathPlaceholder: "/v1 (optional)",
+    proxySecretsHeader: "Header",
+    proxySecretsHeaderPlaceholder: "Authorization (default)",
+    proxySecretsRuleNotice:
+      "Where the proxy swaps this key in: requests to this host carry a placeholder in the header, and the proxy replaces it with your real key. Leave empty to rely on an admin proxy rule with the same name.",
+    proxySecretsHostRequired: "Host is required when a path prefix or header is set",
+    proxySecretsHostInvalid: "Enter a bare hostname such as api.example.com",
+    proxySecretsPathInvalid: "Path prefix must start with /",
+    proxySecretsHeaderInvalid: "Not a valid HTTP header name",
     proxySecretsKeyValue: "Secret Value",
     proxySecretsKeyValuePlaceholder: "Enter secret value...",
     proxySecretsEmpty: "No personal API keys configured yet.",

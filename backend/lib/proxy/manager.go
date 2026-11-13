@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -28,6 +30,192 @@ type ProxyManager struct {
 	excludeMu    sync.Mutex
 	excludeHosts []string
 	mu           sync.Mutex
+
+	userMu      sync.RWMutex
+	userSecrets map[string]userSecret // keyed by dummy value
+}
+
+// UserSecret is a user's real key and where the proxy swaps it in. With an
+// empty Host the key is only usable through an admin rule with the same Env.
+type UserSecret struct {
+	Env        string
+	Real       string
+	Host       string
+	PathPrefix string
+	HeaderKey  string
+}
+
+// userSecret is a registered per-run dummy for a UserSecret.
+type userSecret struct {
+	UserSecret
+}
+
+// RegisterUserSecrets gives every secret a fresh random dummy (returned by env
+// name, for the sandbox). A request that carries the dummy where the secret's
+// rule says (or, without a host, matches the admin rule with the same Env)
+// gets the real secret substituted. Hosts of the secrets are added to the
+// MITM set until release is called.
+func (pm *ProxyManager) RegisterUserSecrets(secrets []UserSecret) (dummyByEnv map[string]string, release func(), err error) {
+	dummyByEnv = make(map[string]string, len(secrets))
+	added := make([]string, 0, len(secrets))
+	pm.userMu.Lock()
+	if pm.userSecrets == nil {
+		pm.userSecrets = make(map[string]userSecret)
+	}
+	forgetLocked := func() {
+		for _, d := range added {
+			delete(pm.userSecrets, d)
+		}
+	}
+	for _, sec := range secrets {
+		buf := make([]byte, 24)
+		if _, rerr := rand.Read(buf); rerr != nil {
+			forgetLocked()
+			pm.userMu.Unlock()
+			return nil, nil, fmt.Errorf("generating dummy secret: %w", rerr)
+		}
+		dummy := "asgard-dummy-" + hex.EncodeToString(buf)
+		sec.Host = strings.ToLower(strings.TrimSpace(sec.Host))
+		pm.userSecrets[dummy] = userSecret{sec}
+		added = append(added, dummy)
+		dummyByEnv[sec.Env] = dummy
+	}
+	pm.userMu.Unlock()
+	pm.refreshHostFilters()
+	return dummyByEnv, func() {
+		pm.userMu.Lock()
+		forgetLocked()
+		pm.userMu.Unlock()
+		pm.refreshHostFilters()
+	}, nil
+}
+
+// userHosts returns the hosts of registered user secrets.
+func (pm *ProxyManager) userHosts() []string {
+	pm.userMu.RLock()
+	defer pm.userMu.RUnlock()
+	var rules []Rule
+	for _, us := range pm.userSecrets {
+		if us.Host != "" {
+			rules = append(rules, Rule{Host: us.Host})
+		}
+	}
+	return extractHosts(rules)
+}
+
+// allHosts is the MITM host set: admin rule hosts plus user secret hosts.
+func (pm *ProxyManager) allHosts(rules []Rule) []string {
+	return extractHosts(append(append([]Rule(nil), rules...), hostRules(pm.userHosts())...))
+}
+
+func hostRules(hosts []string) []Rule {
+	rules := make([]Rule, 0, len(hosts))
+	for _, h := range hosts {
+		rules = append(rules, Rule{Host: h})
+	}
+	return rules
+}
+
+// refreshHostFilters re-applies the MITM host filters to the current rules.
+func (pm *ProxyManager) refreshHostFilters() {
+	if pm.handler == nil {
+		return
+	}
+	var rules []Rule
+	if r := pm.rulesPtr.Load(); r != nil {
+		rules = *r
+	}
+	pm.handler.SetHostFilters(pm.allHosts(rules), pm.getExcludeHosts())
+}
+
+// swapHostBoundSecret replaces a per-run dummy sitting in the header named by
+// the secret's own rule (host and path prefix must match).
+func (pm *ProxyManager) swapHostBoundSecret(req *http.Request, hostOnly, reqPath string) bool {
+	pm.userMu.RLock()
+	defer pm.userMu.RUnlock()
+	swapped := false
+	for dummy, us := range pm.userSecrets {
+		if us.Host == "" || !strings.EqualFold(hostOnly, stripPort(us.Host)) || !pathPrefixMatches(reqPath, us.PathPrefix) {
+			continue
+		}
+		hk := us.HeaderKey
+		if hk == "" {
+			hk = "Authorization"
+		}
+		prev := req.Header.Get(hk)
+		if prev == "" || stripBearerPrefix(prev) != dummy {
+			continue
+		}
+		real := us.Real
+		if hasBearerPrefix(prev) && !hasBearerPrefix(real) {
+			real = "Bearer " + strings.TrimSpace(real)
+		}
+		req.Header.Set(hk, real)
+		swapped = true
+	}
+	return swapped
+}
+
+func stripPort(h string) string {
+	if hostPart, _, err := net.SplitHostPort(h); err == nil {
+		return hostPart
+	}
+	return h
+}
+
+// swapUserSecret replaces a per-run dummy of env found in any request header
+// (Authorization, x-api-key, x-goog-api-key, ...) or query parameter with the
+// user's real secret, whatever the SDK chose to send it in. It reports whether
+// anything was replaced.
+func (pm *ProxyManager) swapUserSecret(req *http.Request, env string) bool {
+	swapped := false
+	for name, vals := range req.Header {
+		for i, v := range vals {
+			if real, ok := pm.userSecretFor(env, v); ok {
+				if hasBearerPrefix(v) && !hasBearerPrefix(real) {
+					real = "Bearer " + strings.TrimSpace(real)
+				}
+				vals[i] = real
+				swapped = true
+			}
+		}
+		req.Header[name] = vals
+	}
+	if req.URL != nil && req.URL.RawQuery != "" {
+		q := req.URL.Query()
+		changed := false
+		for k, vals := range q {
+			for i, v := range vals {
+				if real, ok := pm.userSecretFor(env, v); ok {
+					vals[i] = real
+					changed = true
+				}
+			}
+			q[k] = vals
+		}
+		if changed {
+			req.URL.RawQuery = q.Encode()
+			swapped = true
+		}
+	}
+	return swapped
+}
+
+// userSecretFor returns the real secret behind a dummy header value for env.
+func (pm *ProxyManager) userSecretFor(env, headerVal string) (string, bool) {
+	if env == "" {
+		return "", false
+	}
+	pm.userMu.RLock()
+	defer pm.userMu.RUnlock()
+	if len(pm.userSecrets) == 0 {
+		return "", false
+	}
+	us, ok := pm.userSecrets[stripBearerPrefix(headerVal)]
+	if !ok || us.Env != env || us.Host != "" {
+		return "", false
+	}
+	return us.Real, true
 }
 
 // Addr returns the actually bound listening address of the proxy server.
@@ -305,10 +493,10 @@ func (pm *ProxyManager) Reload(newCfg *Config) error {
 		return fmt.Errorf("invalid proxy config: %w", err)
 	}
 
-	hosts := extractHosts(newCfg.Rules)
-	if len(hosts) == 0 {
+	if len(extractHosts(newCfg.Rules)) == 0 {
 		return fmt.Errorf("cannot reload proxy: rules list or host targets must not be empty")
 	}
+	hosts := pm.allHosts(newCfg.Rules)
 
 	rulesCopy := make([]Rule, len(newCfg.Rules))
 	copy(rulesCopy, newCfg.Rules)
@@ -403,11 +591,21 @@ func (pm *ProxyManager) Interceptor(ctx context.Context, req *http.Request, invo
 		}
 	}
 
+	// A user key bound to this host by its own rule wins over admin rules.
+	userSwapped := pm.swapHostBoundSecret(req, hostOnly, reqPath)
+
+	if userSwapped {
+		matchedRule = nil
+	}
+
 	if matchedRule != nil {
 		prevVal := req.Header.Get(matchedRule.HeaderKey)
 		shouldReplace := false
 
-		if matchedRule.DummySecret == "" {
+		if pm.swapUserSecret(req, strings.TrimSpace(matchedRule.Env)) {
+			// A user's per-run dummy was replaced by their real key; the rule's
+			// shared secret must not overwrite it.
+		} else if matchedRule.DummySecret == "" {
 			shouldReplace = true
 		} else if prevVal == matchedRule.DummySecret {
 			shouldReplace = true

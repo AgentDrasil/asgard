@@ -20,6 +20,7 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
+	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/worktree"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
@@ -59,6 +60,10 @@ type Options struct {
 	// Ready, when set, is consulted before every run; a non-nil error fails
 	// the run (sandbox masking/proxy not healthy).
 	Ready func() error
+	// UserSecrets swaps a user's real secrets (by env name) for per-run
+	// dummies the proxy translates back; release forgets them. Nil, or nil
+	// dummies, means the secrets cannot be proxied and are not exposed.
+	UserSecrets func(secrets []proxy.UserSecret) (dummyByEnv map[string]string, release func(), err error)
 
 	run runFunc
 }
@@ -308,7 +313,8 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 		AllowCrossSession: sr.GetStatusScope().GetAllowCrossSession(),
 	}
 
-	opts := e.runOptions(ctx, sr, agent, conf, sink, plan)
+	opts, release := e.runOptions(ctx, sr, agent, conf, sink, plan)
+	defer release()
 	res, err := e.opts.run(ctx, agent, candidates, sr.GetPrompt(), sessions, runDirOpt, modelOpt, sr.GetChatId(), scope, opts)
 	if worktreeRun && res.RunDir != "" {
 		res.RunDir = repoDir
@@ -319,7 +325,7 @@ func (e *Executor) execute(ctx context.Context, sr *runnerpb.StartRun, sink conn
 // runOptions builds the sandbox inputs of a run. The runner's socket is served
 // from the run's sock dir: status updates and every other sandbox call
 // (ask-user, call-peer, find-peer, metrics) go through it.
-func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, conf *config.Config, sink conn.Sink, plan *worktree.Plan) run.Options {
+func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, conf *config.Config, sink conn.Sink, plan *worktree.Plan) (run.Options, func()) {
 	opts := run.Options{
 		LangRules:  sr.GetLangRules(),
 		ConfigPath: conf.GetConfigPath(),
@@ -347,6 +353,7 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 			}, nil
 		},
 	}
+	release := func() {}
 	if sr.GetUserId() != "" && e.opts.Callbacks != nil {
 		if cbClient, err := e.opts.Callbacks(); err != nil {
 			log.Warn().Err(err).Str("user_id", sr.GetUserId()).Msg("failed to get callbacks client for proxy keys")
@@ -357,16 +364,8 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("user_id", sr.GetUserId()).Msg("failed to query user proxy keys")
-			} else if resp != nil && len(resp.GetKeys()) > 0 {
-				if opts.Proxy.EnvVars == nil {
-					opts.Proxy.EnvVars = make(map[string]string)
-				}
-				for k, v := range resp.GetKeys() {
-					opts.Proxy.EnvVars[k] = v
-					if k == "GEMINI_API_KEY" {
-						opts.Proxy.GeminiAPIKey = v
-					}
-				}
+			} else if entries := userKeyEntries(resp); len(entries) > 0 {
+				release = e.exposeUserKeys(&opts, conf, sr.GetUserId(), entries)
 			}
 		}
 	}
@@ -377,7 +376,69 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 		}
 		opts.IsProviderEnabled = func(cli string) bool { return set[cli] }
 	}
-	return opts
+	return opts, release
+}
+
+// userKeyEntries is the response's entries, or its plain name -> value map
+// (rule-less entries) when talking to a backend that predates entries.
+func userKeyEntries(resp *runnerpb.GetUserProxyKeysResponse) []*runnerpb.UserProxyKeyEntry {
+	if resp == nil {
+		return nil
+	}
+	if len(resp.GetEntries()) > 0 {
+		return resp.GetEntries()
+	}
+	var out []*runnerpb.UserProxyKeyEntry
+	for k, v := range resp.GetKeys() {
+		out = append(out, &runnerpb.UserProxyKeyEntry{Name: k, Value: v})
+	}
+	return out
+}
+
+// exposeUserKeys puts the user's keys into the sandbox env as per-run dummies;
+// the proxy swaps them for the real values where the key's own rule (host,
+// path prefix, header) says, or, for a key without a host, on admin rules with
+// the same env name. Keys the proxy cannot serve, or with no running proxy,
+// are not exposed at all: the sandbox must never see a real secret.
+func (e *Executor) exposeUserKeys(opts *run.Options, conf *config.Config, userID string, entries []*runnerpb.UserProxyKeyEntry) func() {
+	noop := func() {}
+	proxied := make(map[string]struct{})
+	for _, n := range conf.ProxyEnvNames() {
+		proxied[n] = struct{}{}
+	}
+	var real []proxy.UserSecret
+	for _, en := range entries {
+		_, ruleBacked := proxied[en.GetName()]
+		if en.GetHost() == "" && !ruleBacked {
+			log.Warn().Str("user_id", userID).Str("key_name", en.GetName()).Msg("user proxy key has no host and no proxy rule with this env name; not exposed to the sandbox")
+			continue
+		}
+		real = append(real, proxy.UserSecret{
+			Env: en.GetName(), Real: en.GetValue(), Host: en.GetHost(),
+			PathPrefix: en.GetPathPrefix(), HeaderKey: en.GetHeaderKey(),
+		})
+	}
+	if len(real) == 0 || e.opts.UserSecrets == nil {
+		return noop
+	}
+	dummies, release, err := e.opts.UserSecrets(real)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", userID).Msg("failed to register user proxy keys")
+		return noop
+	}
+	if release == nil {
+		release = noop
+	}
+	if len(dummies) == 0 {
+		return release
+	}
+	if opts.Proxy.EnvVars == nil {
+		opts.Proxy.EnvVars = make(map[string]string)
+	}
+	for k, d := range dummies {
+		opts.Proxy.EnvVars[k] = d
+	}
+	return release
 }
 
 // report streams the output and finalizes the run.

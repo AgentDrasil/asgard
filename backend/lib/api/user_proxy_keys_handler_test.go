@@ -164,3 +164,52 @@ func TestUserProxyKeys_API_TableDriven(t *testing.T) {
 		assert.Equal(t, "ALICE_KEY", aliceMetas[0].KeyName)
 	})
 }
+
+func TestHandleConfig_IncludesUserProxyKeyNames(t *testing.T) {
+	t.Parallel()
+	srv, mux := newTestServerForProxyKeys(t)
+	require.NoError(t, srv.userProxyKeyRepo.SaveKey(context.Background(), "default", "MY_PERSONAL_KEY", "real-value"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp ConfigResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Contains(t, resp.ProxyEnvs, "MY_PERSONAL_KEY")
+	assert.NotContains(t, rec.Body.String(), "real-value")
+}
+
+func TestUserProxyKeys_API_Rule(t *testing.T) {
+	t.Parallel()
+	srv, mux := newTestServerForProxyKeys(t)
+
+	post := func(body map[string]string) int {
+		b, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/user/proxy-keys", bytes.NewReader(b)))
+		return rec.Code
+	}
+
+	assert.Equal(t, http.StatusBadRequest, post(map[string]string{"key_name": "K", "value": "v", "host": "https://x.com"}))
+	assert.Equal(t, http.StatusBadRequest, post(map[string]string{"key_name": "K", "value": "v", "host": "x.com", "path_prefix": "v1"}))
+	assert.Equal(t, http.StatusBadRequest, post(map[string]string{"key_name": "K", "value": "v", "host": "x.com", "header_key": "bad header"}))
+	assert.Equal(t, http.StatusBadRequest, post(map[string]string{"key_name": "K", "value": "v", "header_key": "x-api-key"}))
+	require.Equal(t, http.StatusOK, post(map[string]string{"key_name": "GEMINI_API_KEY", "value": "real", "host": " Generativelanguage.googleapis.com ", "header_key": "x-goog-api-key"}))
+	require.Equal(t, http.StatusOK, post(map[string]string{"key_name": "BEARER_KEY", "value": "real2", "host": "api.example.com", "path_prefix": "/v1"}))
+
+	entries, err := srv.UserProxyKeyRepo().GetAllDecryptedEntries(context.Background(), "default")
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.Equal(t, "BEARER_KEY", entries[0].KeyName)
+	assert.Equal(t, "Authorization", entries[0].HeaderKey, "header defaults to Authorization")
+	assert.Equal(t, "/v1", entries[0].PathPrefix)
+	assert.Equal(t, "generativelanguage.googleapis.com", entries[1].Host)
+	assert.Equal(t, "x-goog-api-key", entries[1].HeaderKey)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/user/proxy-keys", nil))
+	assert.Contains(t, rec.Body.String(), `"header_key":"x-goog-api-key"`)
+	assert.NotContains(t, rec.Body.String(), "real")
+}

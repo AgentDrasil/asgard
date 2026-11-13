@@ -45,6 +45,7 @@ func (s *Server) handleGetUserProxyKeys(w http.ResponseWriter, r *http.Request) 
 type saveUserProxyKeyRequest struct {
 	KeyName string `json:"key_name"`
 	Value   string `json:"value"`
+	dbmodels.UserProxyKeyRule
 }
 
 // handleSaveUserProxyKey handles POST /api/user/proxy-keys.
@@ -75,7 +76,12 @@ func (s *Server) handleSaveUserProxyKey(w http.ResponseWriter, r *http.Request) 
 	}
 
 	sub := s.userSubject(r)
-	if err := s.userProxyKeyRepo.SaveKey(r.Context(), sub, req.KeyName, req.Value); err != nil {
+	rule := req.Normalize()
+	if err := rule.Validate(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.userProxyKeyRepo.SaveKeyWithRule(r.Context(), sub, req.KeyName, req.Value, rule); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to save proxy key: "+err.Error())
 		return
 	}

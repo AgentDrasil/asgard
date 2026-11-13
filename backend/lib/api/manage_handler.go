@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -345,6 +346,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		FirebaseWebpushWeb: s.conf.FirebaseWebpushWeb,
 		DefaultUILang:      s.conf.GetUILang(),
 		ProxyEnvs:          s.conf.ProxyEnvNames(),
+	}
+	if s.userProxyKeyRepo != nil {
+		if metas, err := s.userProxyKeyRepo.ListKeyMetadata(r.Context(), s.userSubject(r)); err == nil {
+			seen := make(map[string]struct{}, len(resp.ProxyEnvs)+len(metas))
+			for _, n := range resp.ProxyEnvs {
+				seen[n] = struct{}{}
+			}
+			for _, m := range metas {
+				if _, ok := seen[m.KeyName]; !ok {
+					resp.ProxyEnvs = append(resp.ProxyEnvs, m.KeyName)
+				}
+			}
+			sort.Strings(resp.ProxyEnvs)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

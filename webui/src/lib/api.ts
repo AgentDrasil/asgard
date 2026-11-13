@@ -668,7 +668,13 @@ export async function getAgents(runner?: string): Promise<AgentInfo[]> {
   }
 }
 
-export interface UserProxyKeyMeta {
+export interface UserProxyKeyRule {
+  host: string;
+  path_prefix: string;
+  header_key: string;
+}
+
+export interface UserProxyKeyMeta extends Partial<UserProxyKeyRule> {
   key_name: string;
   updated_at: string;
 }
@@ -682,11 +688,15 @@ export async function getUserProxyKeys(): Promise<UserProxyKeyMeta[]> {
   return res.json();
 }
 
-export async function saveUserProxyKey(key_name: string, value: string): Promise<void> {
+export async function saveUserProxyKey(
+  key_name: string,
+  value: string,
+  rule?: Partial<UserProxyKeyRule>,
+): Promise<void> {
   const res = await apiFetch("/api/user/proxy-keys", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key_name, value }),
+    body: JSON.stringify({ key_name, value, ...rule }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

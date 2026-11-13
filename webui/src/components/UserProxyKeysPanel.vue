@@ -44,6 +44,9 @@ const isEditing = ref(false);
 const isSubmitting = ref(false);
 const formKeyName = ref("");
 const formKeyValue = ref("");
+const formHost = ref("");
+const formPathPrefix = ref("");
+const formHeaderKey = ref("");
 const showSecret = ref(false);
 const deleteTargetKey = ref<string | null>(null);
 
@@ -59,6 +62,22 @@ const keyNameError = computed(() => {
   if (PROTECTED_KEYS.has(name.toUpperCase())) {
     return t("settings.proxySecretsKeyNameReserved");
   }
+  return "";
+});
+
+const HOST_REGEX = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$/;
+const HEADER_REGEX = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const ruleError = computed(() => {
+  const host = formHost.value.trim();
+  const path = formPathPrefix.value.trim();
+  const header = formHeaderKey.value.trim();
+  if (!host) {
+    return path || header ? t("settings.proxySecretsHostRequired") : "";
+  }
+  if (!HOST_REGEX.test(host)) return t("settings.proxySecretsHostInvalid");
+  if (path && !path.startsWith("/")) return t("settings.proxySecretsPathInvalid");
+  if (header && !HEADER_REGEX.test(header)) return t("settings.proxySecretsHeaderInvalid");
   return "";
 });
 
@@ -82,6 +101,9 @@ const openAddModal = () => {
   isEditing.value = false;
   formKeyName.value = "";
   formKeyValue.value = "";
+  formHost.value = "";
+  formPathPrefix.value = "";
+  formHeaderKey.value = "";
   showSecret.value = false;
   isModalOpen.value = true;
   void loadProxyEnvs();
@@ -89,8 +111,12 @@ const openAddModal = () => {
 
 const openEditModal = (keyName: string) => {
   isEditing.value = true;
+  const meta = keys.value.find((k) => k.key_name === keyName);
   formKeyName.value = keyName;
   formKeyValue.value = "";
+  formHost.value = meta?.host ?? "";
+  formPathPrefix.value = meta?.path_prefix ?? "";
+  formHeaderKey.value = meta?.header_key ?? "";
   showSecret.value = false;
   isModalOpen.value = true;
 };
@@ -99,17 +125,24 @@ const closeModal = () => {
   isModalOpen.value = false;
   formKeyName.value = "";
   formKeyValue.value = "";
+  formHost.value = "";
+  formPathPrefix.value = "";
+  formHeaderKey.value = "";
   showSecret.value = false;
 };
 
 const handleSave = async () => {
   const keyName = formKeyName.value.trim();
   const val = formKeyValue.value.replace(/[\r\n]+$/, "");
-  if (!keyName || !val || keyNameError.value) return;
+  if (!keyName || !val || keyNameError.value || ruleError.value) return;
 
   isSubmitting.value = true;
   try {
-    await saveUserProxyKey(keyName, val);
+    await saveUserProxyKey(keyName, val, {
+      host: formHost.value.trim(),
+      path_prefix: formPathPrefix.value.trim(),
+      header_key: formHeaderKey.value.trim(),
+    });
     toast.success(t("settings.proxySecretsSaveSuccess"));
     closeModal();
     await fetchKeys();
@@ -199,6 +232,13 @@ const handleDelete = async () => {
             <div class="min-w-0">
               <span class="font-mono text-sm font-medium text-base-content truncate block">
                 {{ k.key_name }}
+              </span>
+              <span
+                v-if="k.host"
+                class="font-mono text-[11px] text-base-content/60 truncate block"
+                data-testid="proxy-key-rule"
+              >
+                {{ k.host }}{{ k.path_prefix || "" }} · {{ k.header_key || "Authorization" }}
               </span>
               <span class="text-xs text-base-content/60">
                 {{ t("settings.proxySecretsLastUpdated") }}:
@@ -310,6 +350,44 @@ const handleDelete = async () => {
             </p>
           </div>
 
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-base-content/80">
+              {{ t("settings.proxySecretsHost") }}
+            </label>
+            <input
+              v-model="formHost"
+              type="text"
+              :placeholder="t('settings.proxySecretsHostPlaceholder')"
+              class="input input-sm input-bordered w-full font-mono text-sm"
+              :class="{ 'input-error': !!ruleError }"
+              data-testid="proxy-key-host-input"
+            />
+            <div class="grid grid-cols-2 gap-2">
+              <input
+                v-model="formPathPrefix"
+                type="text"
+                :placeholder="t('settings.proxySecretsPathPlaceholder')"
+                :aria-label="t('settings.proxySecretsPath')"
+                class="input input-sm input-bordered w-full font-mono text-sm"
+                data-testid="proxy-key-path-input"
+              />
+              <input
+                v-model="formHeaderKey"
+                type="text"
+                :placeholder="t('settings.proxySecretsHeaderPlaceholder')"
+                :aria-label="t('settings.proxySecretsHeader')"
+                class="input input-sm input-bordered w-full font-mono text-sm"
+                data-testid="proxy-key-header-input"
+              />
+            </div>
+            <p v-if="ruleError" class="text-xs text-error" data-testid="proxy-key-rule-error">
+              {{ ruleError }}
+            </p>
+            <p v-else class="text-[11px] text-base-content/50">
+              {{ t("settings.proxySecretsRuleNotice") }}
+            </p>
+          </div>
+
           <div class="space-y-1">
             <label class="text-xs font-medium text-base-content/80">
               {{ t("settings.proxySecretsKeyValue") }}
@@ -351,7 +429,8 @@ const handleDelete = async () => {
                 isSubmitting ||
                 !formKeyName.trim() ||
                 !formKeyValue.replace(/[\r\n]+$/, '') ||
-                !!keyNameError
+                !!keyNameError ||
+                !!ruleError
               "
               data-testid="proxy-key-save-btn"
             >

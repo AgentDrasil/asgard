@@ -37,6 +37,7 @@ type fakeCallbacks struct {
 	findResp         *runnerpb.FindPeerResponse
 	findErr          error
 	proxyKeys        map[string]string
+	proxyEntries     []*runnerpb.UserProxyKeyEntry
 	proxyErr         error
 	lastProxyKeysReq *runnerpb.GetUserProxyKeysRequest
 	// holdHook, when set, answers HoldMergeLock.
@@ -172,7 +173,7 @@ func (f *fakeCallbacks) GetUserProxyKeys(_ context.Context, req *runnerpb.GetUse
 	if f.proxyErr != nil {
 		return nil, f.proxyErr
 	}
-	return &runnerpb.GetUserProxyKeysResponse{Keys: f.proxyKeys}, nil
+	return &runnerpb.GetUserProxyKeysResponse{Keys: f.proxyKeys, Entries: f.proxyEntries}, nil
 }
 
 func (f *fakeCallbacks) InitWorkflowSession(_ context.Context, _ *runnerpb.InitWorkflowSessionRequest, _ ...grpc.CallOption) (*runnerpb.InitWorkflowSessionResponse, error) {

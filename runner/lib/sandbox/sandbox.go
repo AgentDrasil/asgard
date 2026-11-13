@@ -259,6 +259,20 @@ func (s *Sandbox) Conf() *config.Config {
 	return s.conf
 }
 
+// RegisterUserSecrets hands out per-run dummy values for the given real
+// secrets (by env name) and teaches the running proxy to swap them back. It
+// returns nil dummies when no proxy is running, so callers never expose the
+// real secrets to a sandbox.
+func (s *Sandbox) RegisterUserSecrets(secrets []proxy.UserSecret) (map[string]string, func(), error) {
+	s.mu.Lock()
+	pm := s.pm
+	s.mu.Unlock()
+	if pm == nil {
+		return nil, func() {}, nil
+	}
+	return pm.RegisterUserSecrets(secrets)
+}
+
 // Ready reports why runs must be refused, or nil when the sandbox setup is
 // healthy: configuration applied and, if a proxy is configured, listening.
 func (s *Sandbox) Ready() error {
