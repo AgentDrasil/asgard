@@ -12,9 +12,21 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 )
 
+// skipInAsgardSandbox skips tests that spawn a real bash: inside an Asgard
+// sandbox bash is replaced by fakebash.
+func skipInAsgardSandbox(t *testing.T) {
+	t.Helper()
+	if os.Getenv(bwrap.SandboxedEnv) == "1" {
+		t.Skipf("%s=1: bash is fakebash inside an Asgard sandbox", bwrap.SandboxedEnv)
+	}
+}
+
 func TestRunDirectOutputExitCodeAndEnv(t *testing.T) {
+	skipInAsgardSandbox(t)
 	dir := t.TempDir()
 	var out, errb bytes.Buffer
 	code, err := RunDirect(t.Context(), `echo "$FOO"; pwd; echo bad >&2; exit 3`, dir, []string{"FOO=bar", "PATH=" + os.Getenv("PATH")}, &out, &errb)
@@ -26,6 +38,7 @@ func TestRunDirectOutputExitCodeAndEnv(t *testing.T) {
 }
 
 func TestRunDirectCancelKillsTheProcessGroup(t *testing.T) {
+	skipInAsgardSandbox(t)
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
 	ctx, cancel := context.WithCancel(t.Context())

@@ -31,6 +31,7 @@ import (
 // sandbox runner).
 func startCmdService(t *testing.T, opts Options, tweak func(*Service)) (runnerpb.RunnerServiceClient, string) {
 	t.Helper()
+	skipInAsgardSandbox(t)
 	t.Setenv("HOME", t.TempDir())
 	ws := filepath.Join(t.TempDir(), "ws")
 	require.NoError(t, os.MkdirAll(ws, 0o755))

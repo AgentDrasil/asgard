@@ -297,6 +297,11 @@ func appendConfigMaskArgs(args []string, configPath string) []string {
 	return args
 }
 
+// SandboxedEnv is set to "1" inside every Asgard bwrap sandbox. There bash and
+// dash are replaced by fakebash, so code (and tests) that need a real shell
+// can detect the situation and skip.
+const SandboxedEnv = "ASGARD_SANDBOXED"
+
 // ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.
 type ProxySandboxConfig struct {
 	Enabled        bool
@@ -811,6 +816,7 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 	// Change working directory to runDir in the sandbox
 	args = append(args, "--chdir", runDir)
 
+	args = append(args, "--setenv", SandboxedEnv, "1")
 	if chatID != "" {
 		args = append(args, "--setenv", "ASGARD_CHAT_ID", chatID)
 	}
@@ -1569,6 +1575,7 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 		args = append(args, "--bind", sockDir, "/fakebash")
 	}
 
+	args = append(args, "--setenv", SandboxedEnv, "1")
 	args = append(args, "--")
 	args = append(args, "/bin/fakebashd")
 

@@ -1947,3 +1947,20 @@ func TestCheckoutBindFollowsReadonlyMode(t *testing.T) {
 		assert.GreaterOrEqual(t, indexOfSeq(agentArgs, "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
 	}
 }
+
+func TestSandboxesAreMarked(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	for _, subDir := range []string{".gemini", ".cache", ".config", ".local", ".ssh"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, subDir), 0755))
+	}
+	want := "--setenv " + SandboxedEnv + " 1"
+
+	agentCmd, err := CommandForAgent(&agentspec.AgentConfig{}, "", agentspec.CLITarget{CLI: "agy", Model: "m"}, "prompt", optional.None[string](), tmpDir, "sock", "chat-1", "", "")
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(agentCmd.Args, " "), want, "agent sandbox")
+
+	cmdCmd, err := CommandForCommandExec(tmpDir, "sock", "chat-1", "", false)
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(cmdCmd.Args, " "), want, "command sandbox")
+}

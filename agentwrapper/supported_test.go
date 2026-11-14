@@ -424,3 +424,28 @@ func TestCheckTargetSkipsPlainQueryWhenBudgetIsSpent(t *testing.T) {
 		t.Fatalf("CheckTarget = %+v, want the zero value", got)
 	}
 }
+
+func TestSetDefaultClients(t *testing.T) {
+	// Not parallel: it swaps process-wide defaults.
+	t.Cleanup(func() { SetClients(nil) })
+	origDefaults := registeredClients()
+	t.Cleanup(func() { SetDefaultClients(origDefaults) })
+
+	has := func(name string) bool { _, ok := registeredClients()[name]; return ok }
+
+	SetDefaultClients(map[string]types.CLIClient{"agy": NewFakeClient()})
+	if !has("agy") || len(registeredClients()) != 1 {
+		t.Fatalf("defaults apply while nothing is overridden: %v", registeredClients())
+	}
+
+	SetClients(map[string]types.CLIClient{"claude": NewFakeClient()})
+	SetDefaultClients(map[string]types.CLIClient{"opencode": NewFakeClient()})
+	if !has("claude") || has("opencode") {
+		t.Fatalf("an active override must not be replaced: %v", registeredClients())
+	}
+
+	SetClients(nil)
+	if !has("opencode") || has("agy") || has("claude") {
+		t.Fatalf("SetClients(nil) must restore the new defaults: %v", registeredClients())
+	}
+}

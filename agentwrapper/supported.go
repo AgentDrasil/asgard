@@ -28,11 +28,13 @@ var defaultClients = map[string]types.CLIClient{
 	"simplest": &simplest.Client{},
 }
 
-// clientsMu guards clients. The map itself is never mutated in place, overrides
-// replace it wholesale, but parallel tests override it concurrently.
+// clientsMu guards clients and defaultClients. The maps themselves are never
+// mutated in place, overrides replace them wholesale, but parallel tests
+// override them concurrently.
 var (
-	clientsMu sync.RWMutex
-	clients   = defaultClients
+	clientsMu  sync.RWMutex
+	clients    = defaultClients
+	overridden bool
 )
 
 // SetClients overrides the CLI clients. Passing nil restores the defaults.
@@ -42,8 +44,23 @@ func SetClients(c map[string]types.CLIClient) {
 
 	if c == nil {
 		clients = defaultClients
+		overridden = false
 	} else {
 		clients = c
+		overridden = true
+	}
+}
+
+// SetDefaultClients replaces the clients SetClients(nil) restores, and the ones
+// in effect while no override is active. A test binary calls it from TestMain
+// (with fakes) so no test ever reaches a real, possibly installed, CLI.
+func SetDefaultClients(c map[string]types.CLIClient) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
+	defaultClients = c
+	if !overridden {
+		clients = defaultClients
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
@@ -32,8 +33,19 @@ const chat = "chat1"
 
 // startService serves a Service on a loopback port with HOME pointing at a
 // temp dir and returns a client plus the workspace dir.
+// skipInAsgardSandbox skips tests that spawn real shells: inside an Asgard
+// sandbox bash and dash are replaced by fakebash, which cannot run them (the
+// tests would fail or hang until the go test timeout).
+func skipInAsgardSandbox(t *testing.T) {
+	t.Helper()
+	if os.Getenv(bwrap.SandboxedEnv) == "1" {
+		t.Skipf("%s=1: bash/sh are fakebash inside an Asgard sandbox", bwrap.SandboxedEnv)
+	}
+}
+
 func startService(t *testing.T, opts Options) (runnerpb.RunnerServiceClient, string) {
 	t.Helper()
+	skipInAsgardSandbox(t)
 	h := t.TempDir()
 	t.Setenv("HOME", h)
 	if os.Getenv(awconfig.EnvPath) == "" {
