@@ -41,27 +41,6 @@ runner:
   allowed_nodes:
     - runner-1
 
-# Credential Injection Proxy configuration (optional).
-# The standalone proxy config (~/asgard/config/proxy.yaml), CA cert
-# (~/asgard/config/ca/ca.crt) and key (~/asgard/config/ca/ca.key) are fixed
-# and need not be set. An inline proxy configuration is also supported:
-# proxy:
-#   enable: false
-#   server:
-#     addr: "127.0.0.1:8082"
-#   debug:
-#     enable: false
-#     dump_headers: false
-#     dump_body: false
-#     max_body_bytes: 4096
-#   rules:
-#     - host: "api.openai.com"
-#       path_prefix: "/v1"
-#       header_key: "Authorization"
-#       real_secret: "Bearer sk-real-key"
-#       dummy_secret: "Bearer dummy-token"
-#       env: "OPENAI_API_KEY"
-
 # OAuth / OIDC authentication (optional).
 #
 # Omit this whole section to keep the API unauthenticated — the default, and the

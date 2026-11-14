@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
@@ -600,167 +599,27 @@ func TestConfig_IsProviderEnabled_And_GetProviders(t *testing.T) {
 	})
 }
 
-func TestConfig_Proxy(t *testing.T) {
+func TestSandboxProxyOptions_Endpoint(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil config and defaults", func(t *testing.T) {
-		t.Parallel()
-		var cfg *Config
-		assert.Nil(t, cfg.GetProxy())
-		assert.False(t, cfg.IsProxyEnabled())
-		assert.Equal(t, "http://127.0.0.1:8082", cfg.ProxyHost())
-		assert.Equal(t, "127.0.0.1:8082", cfg.ProxyAddr())
-		assert.Equal(t, "", cfg.ProxyCACertPath())
-		assert.Equal(t, "", cfg.ProxyCAKeyPath())
-		assert.Equal(t, "", cfg.ResolvedProxyConfigPath())
-	})
+	cfg := &Config{GeminiAPIKey: "gem"}
+	opts := cfg.SandboxProxyOptions()
+	assert.False(t, opts.Enabled, "no proxy endpoint recorded (backend)")
+	assert.Equal(t, "gem", opts.GeminiAPIKey)
 
-	t.Run("parse valid proxy with rules", func(t *testing.T) {
-		t.Parallel()
-		tmpDir := t.TempDir()
-		agentDir := filepath.Join(tmpDir, "agents")
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
+	cfg.SetSandboxProxy(&SandboxProxyEndpoint{Addr: "http://127.0.0.1:4000", CACert: "/ca.crt", CAKey: "/ca.key"})
+	opts = cfg.SandboxProxyOptions()
+	assert.True(t, opts.Enabled)
+	assert.Equal(t, "http://127.0.0.1:4000", opts.ProxyAddr)
+	assert.Equal(t, "/ca.crt", opts.CACert)
+	assert.Equal(t, "/ca.key", opts.CAKey)
 
-		yamlContent := fmt.Sprintf(`
-host: "127.0.0.1"
-db: "sqlite"
-dsn: "test.db"
-agent_dir: %q
-gemini_api_key: "test-key"
-gemini_model_for_chat_title: "gemini-3.1-flash-lite"
-proxy_config: "proxy.yaml"
-proxy:
-  enable: true
-  rules:
-    - host: "api.openai.com"
-      path_prefix: "/v1"
-      header_key: "Authorization"
-      real_secret: "real-secret-123"
-      dummy_secret: "fake-secret-xyz"
-      env: "OPENAI_API_KEY"
-`, agentDir)
+	cfg.SetSandboxProxy(nil)
+	assert.False(t, cfg.SandboxProxyOptions().Enabled)
 
-		cfg, err := ParseAndValidate([]byte(yamlContent))
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		assert.True(t, cfg.IsProxyEnabled())
-		assert.Equal(t, "http://127.0.0.1:8082", cfg.ProxyHost())
-		assert.Equal(t, "127.0.0.1:8082", cfg.ProxyAddr())
-		assert.NotEmpty(t, cfg.ProxyCACertPath())
-		assert.NotEmpty(t, cfg.ProxyCAKeyPath())
-		assert.Equal(t, map[string]string{"OPENAI_API_KEY": "fake-secret-xyz"}, cfg.SandboxProxyOptions().EnvVars)
-
-		cfg.ConfigPath = filepath.Join(tmpDir, "config.yaml")
-		assert.Equal(t, paths.ProxyConfigFile(), cfg.ResolvedProxyConfigPath())
-	})
-
-	t.Run("proxy enabled with empty rules fails validation", func(t *testing.T) {
-		t.Parallel()
-		tmpDir := t.TempDir()
-		agentDir := filepath.Join(tmpDir, "agents")
-		require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "agents"), 0755))
-
-		yamlContent := fmt.Sprintf(`
-host: "127.0.0.1"
-db: "sqlite"
-dsn: "test.db"
-agent_dir: %q
-gemini_api_key: "test-key"
-gemini_model_for_chat_title: "gemini-3.1-flash-lite"
-proxy:
-  enable: true
-  rules: []
-`, agentDir)
-
-		_, err := ParseAndValidate([]byte(yamlContent))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "proxy is enabled but rules list is empty")
-	})
-
-}
-
-func TestLoadConfig_AutoLoadsProxyFromFixedPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	proxyYAML := `
-enable: true
-server:
-  addr: "127.0.0.1:8082"
-rules:
-  - host: "api.x.ai"
-    header_key: "Authorization"
-    real_secret: "xai-real-key"
-`
-	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
-	require.NoError(t, os.WriteFile(paths.ProxyConfigFile(), []byte(proxyYAML), 0600))
-
-	configYAML := `
-host: "127.0.0.1"
-db: "sqlite"
-gemini_api_key: "test-key"
-gemini_model_for_chat_title: "gemini-3.1-flash-lite"
-`
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0644))
-
-	cfg, err := LoadConfig(configPath)
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
-	assert.True(t, cfg.IsProxyEnabled())
-	require.NotNil(t, cfg.Proxy)
-	assert.True(t, cfg.Proxy.Enable)
-	require.Len(t, cfg.Proxy.Rules, 1)
-	assert.Equal(t, "api.x.ai", cfg.Proxy.Rules[0].Host)
-	assert.Equal(t, "xai-real-key", cfg.Proxy.Rules[0].RealSecret)
-}
-
-func TestSandboxProxyOptions_DynamicRefresh(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{}
-	// Initially proxy is nil / disabled
-	optsInitial := cfg.SandboxProxyOptions()
-	assert.False(t, optsInitial.Enabled)
-	assert.Empty(t, optsInitial.EnvVars)
-
-	// Update proxy via SetProxy
-	proxyCfg1 := &proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{Addr: "127.0.0.1:9090"},
-		Rules: []proxy.Rule{
-			{Host: "api.openai.com", HeaderKey: "Authorization", RealSecret: "real-1", DummySecret: "dummy-1", Env: "KEY_ONE"},
-		},
-	}
-	cfg.SetProxy(proxyCfg1)
-
-	opts1 := cfg.SandboxProxyOptions()
-	assert.True(t, opts1.Enabled)
-	assert.Equal(t, "http://127.0.0.1:9090", opts1.ProxyAddr)
-	assert.Equal(t, map[string]string{"KEY_ONE": "dummy-1"}, opts1.EnvVars)
-
-	// Dynamically update proxy to a new config
-	proxyCfg2 := &proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{Addr: "127.0.0.1:9091"},
-		Rules: []proxy.Rule{
-			{Host: "api.anthropic.com", HeaderKey: "x-api-key", RealSecret: "real-2", DummySecret: "dummy-2", Env: "KEY_TWO"},
-		},
-	}
-	cfg.SetProxy(proxyCfg2)
-
-	opts2 := cfg.SandboxProxyOptions()
-	assert.True(t, opts2.Enabled)
-	assert.Equal(t, "http://127.0.0.1:9091", opts2.ProxyAddr)
-	assert.Equal(t, map[string]string{"KEY_TWO": "dummy-2"}, opts2.EnvVars)
-	assert.NotContains(t, opts2.EnvVars, "KEY_ONE")
-
-	// Disable proxy
-	proxyCfg2.Enable = false
-	cfg.SetProxy(proxyCfg2)
-	optsDisabled := cfg.SandboxProxyOptions()
-	assert.False(t, optsDisabled.Enabled)
-	assert.Empty(t, optsDisabled.EnvVars)
+	var nilCfg *Config
+	nilCfg.SetSandboxProxy(&SandboxProxyEndpoint{})
+	assert.False(t, nilCfg.SandboxProxyOptions().Enabled)
 }
 
 func TestConfig_CommandResultCompassFields(t *testing.T) {

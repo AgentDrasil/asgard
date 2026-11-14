@@ -105,6 +105,11 @@ describe("UserProxyKeysPanel.vue", () => {
     nameInput.dispatchEvent(new Event("input"));
     valInput.value = "sk-ant-test";
     valInput.dispatchEvent(new Event("input"));
+    const hostInput = modal?.querySelector(
+      '[data-testid="proxy-key-host-input"]',
+    ) as HTMLInputElement;
+    hostInput.value = "api.anthropic.com";
+    hostInput.dispatchEvent(new Event("input"));
     await flush();
 
     const saveBtn = modal?.querySelector('[data-testid="proxy-key-save-btn"]') as HTMLButtonElement;
@@ -112,7 +117,7 @@ describe("UserProxyKeysPanel.vue", () => {
     await flush();
 
     expect(saveSpy).toHaveBeenCalledWith("ANTHROPIC_API_KEY", "sk-ant-test", {
-      host: "",
+      host: "api.anthropic.com",
       path_prefix: "",
       header_key: "",
     });
@@ -230,14 +235,20 @@ describe("UserProxyKeysPanel.vue", () => {
     valInput.dispatchEvent(new Event("input"));
     await flush();
 
+    // A host is required before the key can be saved.
     expect(modal?.querySelector('[data-testid="proxy-key-name-error"]')).toBeNull();
+    expect(saveBtn.disabled).toBe(true);
+    const hostEl = modal?.querySelector('[data-testid="proxy-key-host-input"]') as HTMLInputElement;
+    hostEl.value = "api.example.com";
+    hostEl.dispatchEvent(new Event("input"));
+    await flush();
     expect(saveBtn.disabled).toBe(false);
 
     saveBtn.click();
     await flush();
 
     expect(saveSpy).toHaveBeenCalledWith("VALID_SECRET_KEY", "  secret-with-leading-spaces  ", {
-      host: "",
+      host: "api.example.com",
       path_prefix: "",
       header_key: "",
     });

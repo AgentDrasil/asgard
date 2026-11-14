@@ -14,7 +14,6 @@ func TestPaths_RootOverride(t *testing.T) {
 	assert.Equal(t, root, Root())
 	assert.Equal(t, filepath.Join(root, "config"), ConfigDir())
 	assert.Equal(t, filepath.Join(root, "config", "config.yaml"), ConfigFile())
-	assert.Equal(t, filepath.Join(root, "config", "proxy.yaml"), ProxyConfigFile())
 	assert.Equal(t, filepath.Join(root, "config", "keys.yaml"), KeysFile())
 	assert.Equal(t, filepath.Join(root, "config", "ca", "ca.crt"), CACertFile())
 	assert.Equal(t, filepath.Join(root, "config", "ca", "ca.key"), CAKeyFile())

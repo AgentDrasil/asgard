@@ -24,7 +24,6 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/kms"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/trigger"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
@@ -79,7 +78,6 @@ type Server struct {
 	voiceAuthURL        string
 	voiceHTTPClient     *http.Client
 	runSingleAgentFn    singleAgentRunner
-	proxyManager        *proxy.ProxyManager
 	auth                *auth.Service
 	runners             RunnerRegistry
 	// access stores users and runner assignments; users tracks login upserts.
@@ -224,21 +222,6 @@ func WithVoiceHTTPClient(client *http.Client) ServerOption {
 	return func(s *Server) {
 		s.voiceHTTPClient = client
 	}
-}
-
-// WithProxyManager injects a ProxyManager instance into the Server.
-func WithProxyManager(pm *proxy.ProxyManager) ServerOption {
-	return func(s *Server) {
-		s.proxyManager = pm
-	}
-}
-
-// ProxyManager returns the Server's ProxyManager instance, if any.
-func (s *Server) ProxyManager() *proxy.ProxyManager {
-	if s == nil {
-		return nil
-	}
-	return s.proxyManager
 }
 
 // WithAuthService injects the authentication service. A nil service (the
@@ -600,9 +583,6 @@ func (s *Server) buildMuxLocked() *http.ServeMux {
 	mux.HandleFunc("GET /api/system/logs", s.handleSystemLogs)
 	mux.HandleFunc("DELETE /api/system/logs", s.handleClearSystemLogs)
 	mux.HandleFunc("GET "+metrics.EndpointPath, s.handleGetCompressionMetrics)
-	mux.HandleFunc("GET /api/manage/proxy", s.handleGetManageProxy)
-	mux.HandleFunc("PUT /api/manage/proxy", s.handleSaveManageProxy)
-	mux.HandleFunc("POST /api/manage/proxy/reload", s.handleReloadManageProxy)
 	mux.HandleFunc("GET /api/user/proxy-keys", s.handleGetUserProxyKeys)
 	mux.HandleFunc("POST /api/user/proxy-keys", s.handleSaveUserProxyKey)
 	mux.HandleFunc("DELETE /api/user/proxy-keys/{key_name}", s.handleDeleteUserProxyKey)

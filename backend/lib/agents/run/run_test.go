@@ -14,7 +14,6 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
@@ -448,33 +447,13 @@ func TestRun_ProxyOptions(t *testing.T) {
 
 	caCertPath := filepath.Join(tmpDir, "ca.crt")
 	caKeyPath := filepath.Join(tmpDir, "ca.key")
-	proxyConfigPath := paths.ProxyConfigFile()
 	require.NoError(t, os.MkdirAll(paths.ConfigDir(), 0755))
 	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
 	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
-	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
 
-	t.Run("with proxy enabled", func(t *testing.T) {
-		conf := &config.Config{
-			Providers: []string{"agy"},
-			Proxy: &proxy.Config{
-				Enable: true,
-				Server: proxy.ServerConfig{
-					Addr:   "127.0.0.1:8082",
-					CACert: caCertPath,
-					CAKey:  caKeyPath,
-				},
-				Rules: []proxy.Rule{
-					{
-						Host:        "api.openai.com",
-						PathPrefix:  "/v1",
-						HeaderKey:   "Authorization",
-						RealSecret:  "secret-123",
-						DummySecret: "fake-xyz",
-					},
-				},
-			},
-		}
+	t.Run("with a runner proxy endpoint", func(t *testing.T) {
+		conf := &config.Config{Providers: []string{"agy"}}
+		conf.SetSandboxProxy(&config.SandboxProxyEndpoint{Addr: "http://127.0.0.1:8082", CACert: caCertPath, CAKey: caKeyPath})
 
 		out, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "chat-proxy-enabled", StatusScope{}, conf)
 		require.NoError(t, err)
@@ -485,21 +464,14 @@ func TestRun_ProxyOptions(t *testing.T) {
 		assert.Contains(t, string(out), "--ro-bind")
 		assert.Contains(t, string(out), "/dev/null")
 		assert.Contains(t, string(out), "\n"+caKeyPath+"\n")
-		assert.Contains(t, string(out), "\n"+proxyConfigPath+"\n")
 	})
 
-	t.Run("with proxy disabled", func(t *testing.T) {
-		conf := &config.Config{
-			Providers: []string{"agy"},
-			Proxy: &proxy.Config{
-				Enable: false,
-			},
-		}
+	t.Run("without a proxy endpoint (backend)", func(t *testing.T) {
+		conf := &config.Config{Providers: []string{"agy"}}
 
 		out, _, err := Run(context.Background(), agent, "hello", nil, optional.None[string](), optional.None[string](), "chat-proxy-disabled", StatusScope{}, conf)
 		require.NoError(t, err)
 		assert.Contains(t, string(out), "mock bwrap execution succeeded")
-		assert.NotContains(t, string(out), "\n"+proxyConfigPath+"\n")
 		assert.NotContains(t, string(out), "HTTPS_PROXY")
 		assert.NotContains(t, string(out), "http://127.0.0.1:8082")
 	})

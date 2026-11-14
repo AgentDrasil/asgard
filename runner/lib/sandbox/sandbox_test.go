@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,25 +43,36 @@ func (f *fakeSource) Tree() *config.AsgardTreeConfig {
 	return f.tree
 }
 
-func proxyConf(enabled bool) *config.Config {
-	c := &config.Config{ConfigPath: "/cfg/config.yaml"}
-	if enabled {
-		c.SetProxy(&proxy.Config{Enable: true})
-	}
-	return c
+func plainConf() *config.Config {
+	return &config.Config{ConfigPath: "/cfg/config.yaml"}
 }
 
-func TestSetupProxyDisabled(t *testing.T) {
+// testProxy creates the credential proxy in a temp dir, so tests never touch
+// the real CA under ~/asgard.
+func testProxy(t *testing.T) func() (*proxy.ProxyManager, error) {
+	t.Helper()
+	dir := t.TempDir()
+	return func() (*proxy.ProxyManager, error) {
+		return proxy.NewManager(filepath.Join(dir, "ca.crt"), filepath.Join(dir, "ca.key"))
+	}
+}
+
+func TestSetupProxyAlwaysOn(t *testing.T) {
 	t.Parallel()
 
 	sshCalls := 0
-	sb := Setup(&fakeSource{conf: proxyConf(false)}, Options{SetupSSH: func() error { sshCalls++; return nil }})
+	sb := Setup(&fakeSource{conf: plainConf()}, Options{SetupSSH: func() error { sshCalls++; return nil }, NewProxy: testProxy(t)})
 	t.Cleanup(sb.Close)
 
 	require.NoError(t, sb.Ready())
 	assert.Equal(t, 1, sshCalls)
 	assert.Equal(t, "/cfg/config.yaml", sb.Conf().GetConfigPath())
-	assert.False(t, sb.Conf().SandboxProxyOptions().Enabled)
+	opts := sb.Conf().SandboxProxyOptions()
+	assert.True(t, opts.Enabled, "the runner proxy needs no configuration")
+	assert.Regexp(t, `^http://127\.0\.0\.1:[0-9]+$`, opts.ProxyAddr)
+	assert.Equal(t, sb.pm.URL(), opts.ProxyAddr)
+	assert.NotEmpty(t, opts.CACert)
+	assert.NotEmpty(t, opts.CAKey)
 }
 
 func TestSetupRefusesRunsWhenSetupBroken(t *testing.T) {
@@ -71,11 +81,11 @@ func TestSetupRefusesRunsWhenSetupBroken(t *testing.T) {
 	tests := []struct {
 		name    string
 		src     *fakeSource
-		newPx   func(*proxy.Config, string) (*proxy.ProxyManager, error)
+		newPx   func() (*proxy.ProxyManager, error)
 		wantErr string
 	}{
-		{"config missing", &fakeSource{err: errors.New("not loaded")}, nil, "sandbox configuration unavailable"},
-		{"proxy init fails", &fakeSource{conf: proxyConf(true)}, func(*proxy.Config, string) (*proxy.ProxyManager, error) { return nil, errors.New("no CA") }, "proxy unavailable"},
+		{"config missing", &fakeSource{err: errors.New("not loaded")}, testProxy(t), "sandbox configuration unavailable"},
+		{"proxy init fails", &fakeSource{conf: plainConf()}, func() (*proxy.ProxyManager, error) { return nil, errors.New("no CA") }, "proxy unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,29 +102,18 @@ func TestSetupRefusesRunsWhenSetupBroken(t *testing.T) {
 func TestSetupSSHFailureIsNotFatal(t *testing.T) {
 	t.Parallel()
 
-	sb := Setup(&fakeSource{conf: proxyConf(false)}, Options{SetupSSH: func() error { return errors.New("no ssh-agent") }})
+	sb := Setup(&fakeSource{conf: plainConf()}, Options{SetupSSH: func() error { return errors.New("no ssh-agent") }, NewProxy: testProxy(t)})
 	t.Cleanup(sb.Close)
 	assert.NoError(t, sb.Ready())
 }
 
-func validTree(px proxy.Config) *config.AsgardTreeConfig {
+func validTree() *config.AsgardTreeConfig {
 	tree := &config.AsgardTreeConfig{}
 	tree.Asgard.Config.Host = "127.0.0.1"
 	tree.Asgard.Config.DB = "sqlite"
 	tree.Asgard.Config.GeminiAPIKey = "k"
 	tree.Asgard.Config.GeminiModelForChatTitle = "m"
-	tree.Asgard.Proxy = px
 	return tree
-}
-
-// fireRaw notifies the handlers without changing the source's config.
-func (f *fakeSource) fireRaw() {
-	f.mu.Lock()
-	fns := slices.Clone(f.fns)
-	f.mu.Unlock()
-	for _, fn := range fns {
-		fn(nil)
-	}
 }
 
 func (f *fakeSource) fire(tree *config.AsgardTreeConfig) {
@@ -130,41 +129,11 @@ func (f *fakeSource) fire(tree *config.AsgardTreeConfig) {
 	}
 }
 
-func TestProxyStartFailureSurvivesReloadAndRestarts(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	dir := t.TempDir()
-
-	busy, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = busy.Close() })
-	px := proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{Addr: busy.Addr().String(), CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
-		Rules:  []proxy.Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "real-secret-123456", DummySecret: "dummy"}},
-	}
-	initial, err := runnerconfig.SandboxConfigFromTree(validTree(px))
-	require.NoError(t, err)
-	src := &fakeSource{conf: initial}
-
-	sb := Setup(src, Options{SkipSSH: true})
-	t.Cleanup(sb.Close)
-	require.Error(t, sb.Ready(), "address in use: proxy cannot listen")
-
-	// A successful config reload must not clear the start failure.
-	src.fire(validTree(px))
-	assert.ErrorContains(t, sb.Ready(), "proxy server stopped")
-
-	// Once the port is free, the next tree change restarts the proxy.
-	require.NoError(t, busy.Close())
-	src.fire(validTree(px))
-	require.Eventually(t, func() bool { return sb.Ready() == nil }, 5*time.Second, 20*time.Millisecond)
-}
-
 func TestSetupRegistersChangeHandlerBeforeReading(t *testing.T) {
 	t.Parallel()
 
-	src := &fakeSource{conf: proxyConf(false)}
-	sb := Setup(src, Options{SkipSSH: true})
+	src := &fakeSource{conf: plainConf()}
+	sb := Setup(src, Options{SkipSSH: true, NewProxy: testProxy(t)})
 	t.Cleanup(sb.Close)
 
 	src.mu.Lock()
@@ -173,71 +142,54 @@ func TestSetupRegistersChangeHandlerBeforeReading(t *testing.T) {
 	assert.Equal(t, 1, src.reads[0], "the handler is registered before the initial snapshot is read")
 }
 
-func TestProxyEnableDisableEnable(t *testing.T) {
+func TestProxyEndpointSurvivesConfigReload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dir := t.TempDir()
-	px := proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
-		Rules:  []proxy.Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "real-secret-123456", DummySecret: "dummy"}},
-	}
-	initial, err := runnerconfig.SandboxConfigFromTree(validTree(px))
+	initial, err := runnerconfig.SandboxConfigFromTree(validTree())
 	require.NoError(t, err)
 	src := &fakeSource{conf: initial}
-	sb := Setup(src, Options{SkipSSH: true})
+	sb := Setup(src, Options{SkipSSH: true, NewProxy: testProxy(t)})
 	t.Cleanup(sb.Close)
 	require.NoError(t, sb.Ready())
-	first := sb.pm
-	require.NotNil(t, first)
-	require.True(t, first.Running())
+	pm := sb.pm
+	addr := sb.Conf().SandboxProxyOptions().ProxyAddr
 
-	// Disable: the proxy stops and no-proxy is a healthy state.
-	src.fire(validTree(proxy.Config{}))
+	// Every reload builds a fresh Config; it must point at the same proxy.
+	src.fire(validTree())
 	require.NoError(t, sb.Ready())
-	assert.False(t, first.Running())
-	assert.Nil(t, sb.pm)
-	assert.False(t, sb.Conf().SandboxProxyOptions().Enabled)
-
-	// Re-enable: a fresh manager is created and started.
-	src.fire(validTree(px))
-	require.NoError(t, sb.Ready())
-	require.NotNil(t, sb.pm)
-	assert.NotSame(t, first, sb.pm)
-	assert.True(t, sb.pm.Running())
+	assert.Same(t, pm, sb.pm, "a reload never restarts the proxy")
+	assert.True(t, pm.Running())
+	assert.Equal(t, addr, sb.Conf().SandboxProxyOptions().ProxyAddr)
 }
 
-func TestProxyInitFailureClearedByDisable(t *testing.T) {
+func TestRegisterUserSecrets(t *testing.T) {
 	t.Parallel()
 
-	src := &fakeSource{conf: proxyConf(true)}
-	sb := Setup(src, Options{SkipSSH: true, NewProxy: func(*proxy.Config, string) (*proxy.ProxyManager, error) {
-		return nil, errors.New("no CA")
-	}})
+	sb := Setup(&fakeSource{conf: plainConf()}, Options{SkipSSH: true, NewProxy: testProxy(t)})
 	t.Cleanup(sb.Close)
-	require.Error(t, sb.Ready())
 
-	src.mu.Lock()
-	src.conf = proxyConf(false)
-	src.mu.Unlock()
-	src.fireRaw()
-	assert.NoError(t, sb.Ready(), "a disabled proxy forgets the earlier init failure")
+	dummies, release, err := sb.RegisterUserSecrets([]proxy.UserSecret{{Env: "K", Real: "real-key-123", Host: "api.example.com"}})
+	require.NoError(t, err)
+	require.Contains(t, dummies, "K")
+	assert.NotContains(t, dummies["K"], "real-key-123")
+	release()
+
+	sb.Close()
+	dummies, release, err = sb.RegisterUserSecrets([]proxy.UserSecret{{Env: "K", Real: "real-key-123", Host: "api.example.com"}})
+	require.NoError(t, err)
+	assert.Empty(t, dummies, "no proxy, nothing to expose")
+	release()
 }
 
 func TestCloseIsIdempotentAndIgnoresLateChanges(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dir := t.TempDir()
-	px := proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
-		Rules:  []proxy.Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "real-secret-123456", DummySecret: "dummy"}},
-	}
-	initial, err := runnerconfig.SandboxConfigFromTree(validTree(px))
+	initial, err := runnerconfig.SandboxConfigFromTree(validTree())
 	require.NoError(t, err)
 	src := &fakeSource{conf: initial}
 	created := 0
-	sb := Setup(src, Options{SkipSSH: true, NewProxy: func(cfg *proxy.Config, path string) (*proxy.ProxyManager, error) {
+	newPx := testProxy(t)
+	sb := Setup(src, Options{SkipSSH: true, NewProxy: func() (*proxy.ProxyManager, error) {
 		created++
-		return proxy.NewManager(cfg, path)
+		return newPx()
 	}})
 	pm := sb.pm
 	require.NotNil(t, pm)
@@ -249,7 +201,7 @@ func TestCloseIsIdempotentAndIgnoresLateChanges(t *testing.T) {
 	assert.Nil(t, sb.pm)
 
 	// A late tree change neither starts nor reloads anything.
-	src.fire(validTree(px))
+	src.fire(validTree())
 	assert.Nil(t, sb.pm)
 	assert.Equal(t, 1, created)
 }
@@ -431,7 +383,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 
 	tempHome := t.TempDir()
 
-	tree := validTree(proxy.Config{})
+	tree := validTree()
 	tree.Credentials.SSH = sshScopeOf(map[string]string{"key": "-----BEGIN X-----\ninitial-ssh-key", "key.pub": "initial-ssh-pub", "config": "initial-ssh-config"})
 
 	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
@@ -443,8 +395,9 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	var clearSSHCount int
 	var mu sync.Mutex
 	sb := Setup(src, Options{
-		SkipSSH: false,
-		HomeDir: tempHome,
+		NewProxy: testProxy(t),
+		SkipSSH:  false,
+		HomeDir:  tempHome,
 		SetupSSH: func() error {
 			mu.Lock()
 			setupSSHCount++
@@ -503,7 +456,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	mu.Unlock()
 
 	// Unrelated tree change: SSH credentials did not change -> SetupSSH must NOT be called again
-	unrelatedTree := validTree(proxy.Config{})
+	unrelatedTree := validTree()
 	unrelatedTree.Credentials.SSH = tree.Credentials.SSH
 	src.fire(unrelatedTree)
 	mu.Lock()
@@ -512,7 +465,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	mu.Unlock()
 
 	// Update credentials
-	updatedTree := validTree(proxy.Config{})
+	updatedTree := validTree()
 	updatedTree.Credentials.SSH = sshScopeOf(map[string]string{"key": "-----BEGIN X-----\nupdated-ssh-key", "key.pub": "updated-ssh-pub", "config": "updated-ssh-config"})
 
 	src.fire(updatedTree)
@@ -535,7 +488,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	mu.Unlock()
 
 	// Clear/revoke credentials
-	clearedTree := validTree(proxy.Config{})
+	clearedTree := validTree()
 	clearedTree.Credentials.SSH = config.SSHScope{}
 
 	src.fire(clearedTree)
@@ -555,7 +508,7 @@ func TestSyncSSHCredentials_OnTreeChange(t *testing.T) {
 	mu.Unlock()
 
 	// Subsequent tree change while empty: ClearSSH must NOT be called again
-	anotherClearedTree := validTree(proxy.Config{})
+	anotherClearedTree := validTree()
 	anotherClearedTree.Credentials.SSH = config.SSHScope{}
 	src.fire(anotherClearedTree)
 
@@ -570,7 +523,7 @@ func TestSyncSSHCredentials_StartupWithEmptySSHDoesNotEvict(t *testing.T) {
 
 	tempHome := t.TempDir()
 
-	tree := validTree(proxy.Config{})
+	tree := validTree()
 	tree.Credentials.SSH = config.SSHScope{} // No SSH credentials
 
 	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
@@ -581,8 +534,9 @@ func TestSyncSSHCredentials_StartupWithEmptySSHDoesNotEvict(t *testing.T) {
 	var clearSSHCount int
 	var mu sync.Mutex
 	sb := Setup(src, Options{
-		SkipSSH: false,
-		HomeDir: tempHome,
+		NewProxy: testProxy(t),
+		SkipSSH:  false,
+		HomeDir:  tempHome,
 		ClearSSH: func() error {
 			mu.Lock()
 			clearSSHCount++
@@ -757,7 +711,7 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 
 	tempHome := t.TempDir()
 
-	tree := validTree(proxy.Config{})
+	tree := validTree()
 	tree.Credentials.SSH = sshScopeOf(map[string]string{"id_ed25519": "-----BEGIN X-----\ninitial-ed25519-priv", "id_ed25519.pub": "initial-ed25519-pub"})
 
 	initialConf, err := runnerconfig.SandboxConfigFromTree(tree)
@@ -769,8 +723,9 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 	var clearSSHCount int
 	var mu sync.Mutex
 	sb := Setup(src, Options{
-		SkipSSH: false,
-		HomeDir: tempHome,
+		NewProxy: testProxy(t),
+		SkipSSH:  false,
+		HomeDir:  tempHome,
 		SetupSSH: func() error {
 			mu.Lock()
 			setupSSHCount++
@@ -794,7 +749,7 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 	mu.Unlock()
 
 	// Add an RSA key alongside ed25519
-	updatedTree := validTree(proxy.Config{})
+	updatedTree := validTree()
 	updatedTree.Credentials.SSH = sshScopeOf(map[string]string{
 		"id_ed25519": "-----BEGIN X-----\ninitial-ed25519-priv", "id_ed25519.pub": "initial-ed25519-pub",
 		"id_rsa": "-----BEGIN X-----\nadded-rsa-priv", "id_rsa.pub": "added-rsa-pub",
@@ -815,7 +770,7 @@ func TestSyncSSHCredentials_MultiKeyOnTreeChange(t *testing.T) {
 	require.NoError(t, err)
 
 	// Revoke all private keys
-	revokedTree := validTree(proxy.Config{})
+	revokedTree := validTree()
 	revokedTree.Credentials.SSH = config.SSHScope{}
 
 	src.fire(revokedTree)
@@ -929,7 +884,7 @@ func TestSyncSSHCredentials_PerKeyRemovalRevokesFromAgent(t *testing.T) {
 	t.Parallel()
 	tempHome := t.TempDir()
 	pem := "-----BEGIN X-----\n"
-	tree := validTree(proxy.Config{})
+	tree := validTree()
 	tree.Credentials.SSH = sshScopeOf(map[string]string{"a": pem + "a", "a.pub": "pa", "b": pem + "b"})
 	conf, err := runnerconfig.SandboxConfigFromTree(tree)
 	require.NoError(t, err)
@@ -938,6 +893,7 @@ func TestSyncSSHCredentials_PerKeyRemovalRevokesFromAgent(t *testing.T) {
 	var mu sync.Mutex
 	var removed []string
 	sb := Setup(src, Options{
+		NewProxy: testProxy(t),
 		HomeDir:  tempHome,
 		SetupSSH: func() error { return nil },
 		ClearSSH: func() error { return nil },
@@ -951,7 +907,7 @@ func TestSyncSSHCredentials_PerKeyRemovalRevokesFromAgent(t *testing.T) {
 	t.Cleanup(sb.Close)
 	require.NoError(t, sb.Ready())
 
-	next := validTree(proxy.Config{})
+	next := validTree()
 	next.Credentials.SSH = sshScopeOf(map[string]string{"b": pem + "b"})
 	src.fire(next)
 

@@ -430,8 +430,9 @@ export const en = {
     proxySecretsHeader: "Header",
     proxySecretsHeaderPlaceholder: "Authorization (default)",
     proxySecretsRuleNotice:
-      "Where the proxy swaps this key in: requests to this host carry a placeholder in the header, and the proxy replaces it with your real key. Leave empty to rely on an admin proxy rule with the same name.",
-    proxySecretsHostRequired: "Host is required when a path prefix or header is set",
+      "Where the proxy swaps this key in: inside the sandbox this variable holds a placeholder; requests to this host that carry it in this header get your real key. The path prefix is optional and the header defaults to Authorization.",
+    proxySecretsNoHost: "No host set: this key is not available to agents. Edit it to add one.",
+    proxySecretsHostRequired: "Host is required",
     proxySecretsHostInvalid: "Enter a bare hostname such as api.example.com",
     proxySecretsPathInvalid: "Path prefix must start with /",
     proxySecretsHeaderInvalid: "Not a valid HTTP header name",

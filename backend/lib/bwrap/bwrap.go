@@ -299,21 +299,20 @@ func appendConfigMaskArgs(args []string, configPath string) []string {
 
 // ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.
 type ProxySandboxConfig struct {
-	Enabled         bool
-	ProxyAddr       string            // e.g. "http://127.0.0.1:8082"
-	CACert          string            // Host Asgard CA cert path (absolute)
-	CAKey           string            // Host Asgard CA private key path (absolute)
-	ProxyConfigPath string            // Host standalone proxy config path (absolute, if any)
-	EnvVars         map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
-	TypesafeAPIKey  string            // TypeSafe API key for Jev System One evaluation
-	GeminiAPIKey    string            // Gemini API key for Level 2 GenAI summarizer
-	CompassModel    string            // Gemini model for command result compass
+	Enabled        bool
+	ProxyAddr      string            // e.g. "http://127.0.0.1:8082"
+	CACert         string            // Host Asgard CA cert path (absolute)
+	CAKey          string            // Host Asgard CA private key path (absolute)
+	EnvVars        map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
+	TypesafeAPIKey string            // TypeSafe API key for Jev System One evaluation
+	GeminiAPIKey   string            // Gemini API key for Level 2 GenAI summarizer
+	CompassModel   string            // Gemini model for command result compass
 }
 
 // appendProxySensitiveMaskArgs masks the Asgard config directory (which holds
-// config.yaml, proxy.yaml and the CA private key) to prevent code inside the
+// config.yaml and the CA private key) to prevent code inside the
 // sandbox from reading sensitive credentials.
-func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) []string {
+func appendProxySensitiveMaskArgs(args []string, caKey string) []string {
 	configDir := paths.ConfigDir()
 	if fi, err := os.Stat(configDir); err == nil && fi.IsDir() {
 		args = append(args, "--tmpfs", configDir)
@@ -328,12 +327,6 @@ func appendProxySensitiveMaskArgs(args []string, caKey, proxyConfigPath string) 
 		defaultKey := paths.CAKeyFile()
 		if fi, err := os.Stat(defaultKey); err == nil && !fi.IsDir() {
 			args = append(args, "--ro-bind", "/dev/null", defaultKey)
-		}
-	}
-
-	if proxyConfigPath != "" {
-		if fi, err := os.Stat(proxyConfigPath); err == nil && !fi.IsDir() {
-			args = append(args, "--ro-bind", "/dev/null", proxyConfigPath)
 		}
 	}
 
@@ -965,12 +958,11 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 	// Append config file and proxy sensitive file masking after all directory mounts
 	// to prevent subsequent binds from shadowing /dev/null masking (D1/R1/N2)
 	args = appendConfigMaskArgs(args, configPath)
-	var caKey, proxyConfigPath string
+	var caKey string
 	if len(proxyOpts) > 0 {
 		caKey = proxyOpts[0].CAKey
-		proxyConfigPath = proxyOpts[0].ProxyConfigPath
 	}
-	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
+	args = appendProxySensitiveMaskArgs(args, caKey)
 
 	// Inject proxy environment variables into agent sandbox
 	if len(proxyOpts) > 0 && len(proxyOpts[0].EnvVars) > 0 {
@@ -1558,12 +1550,11 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 	// Authoritative late masking of config file and proxy sensitive files
 	// (ca.key and proxy config) after all directory binds (D1/R1/N2)
 	args = appendConfigMaskArgs(args, configPath)
-	var caKey, proxyConfigPath string
+	var caKey string
 	if len(proxyOpts) > 0 {
 		caKey = proxyOpts[0].CAKey
-		proxyConfigPath = proxyOpts[0].ProxyConfigPath
 	}
-	args = appendProxySensitiveMaskArgs(args, caKey, proxyConfigPath)
+	args = appendProxySensitiveMaskArgs(args, caKey)
 
 	// If proxy is enabled for this sandbox, mount merged CA bundle and inject proxy env vars
 	if len(proxyOpts) > 0 && proxyOpts[0].Enabled {
@@ -1645,7 +1636,7 @@ func GitSandboxArgs(spec GitSandboxSpec) ([]string, error) {
 	args = append(args, bind, spec.WorkTreeSrc, GitRepoMount, "--chdir", GitRepoMount)
 
 	args = appendConfigMaskArgs(args, spec.ConfigPath)
-	args = appendProxySensitiveMaskArgs(args, spec.Proxy.CAKey, spec.Proxy.ProxyConfigPath)
+	args = appendProxySensitiveMaskArgs(args, spec.Proxy.CAKey)
 	if spec.Network && spec.Proxy.Enabled {
 		args, err = appendProxyArgs(args, spec.ChatID, spec.Proxy)
 		if err != nil {

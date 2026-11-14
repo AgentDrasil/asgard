@@ -386,13 +386,11 @@ func TestExecutorArtifactsUseOverlaidAgentConfig(t *testing.T) {
 func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeCallbacks{
-		proxyKeys: map[string]string{
-			"PROXY_SECRET":   "secret-proxy-123",
-			"GEMINI_API_KEY": "ai-studio-key-789",
-			"NO_RULE":        "no-rule-456",
-		},
-	}
+	fake := &fakeCallbacks{proxyEntries: []*runnerpb.UserProxyKeyEntry{
+		{Name: "GEMINI_API_KEY", Value: "ai-studio-key-789", Host: "generativelanguage.googleapis.com", PathPrefix: "/v1beta", HeaderKey: "x-goog-api-key"},
+		{Name: "OPENAI_API_KEY", Value: "sk-openai-456", Host: "api.openai.com"},
+		{Name: "NO_HOST", Value: "no-host-123"},
+	}}
 	cbFunc := func() (runnerpb.AgentCallbackServiceClient, error) {
 		return fake, nil
 	}
@@ -406,46 +404,37 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 		}
 		return d, func() { released++ }, nil
 	}
-
 	conf := &config.Config{}
-	conf.SetProxy(&proxy.Config{Enable: true, Rules: []proxy.Rule{
-		{Host: "a.example.com", HeaderKey: "Authorization", RealSecret: "x", Env: "PROXY_SECRET"},
-		{Host: "b.example.com", HeaderKey: "x-goog-api-key", RealSecret: "y", Env: "GEMINI_API_KEY"},
-	}})
 
-	t.Run("sandbox only sees dummies for rule-backed keys", func(t *testing.T) {
+	t.Run("sandbox only sees dummies, bound to the key's own rule", func(t *testing.T) {
 		ex := New(Options{Callbacks: cbFunc, UserSecrets: userSecrets})
 		sr := &runnerpb.StartRun{RunId: "run-test-123", ChatId: "chat-1", UserId: "user-test"}
 		opts, release := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
-		assert.Equal(t, "dummy-PROXY_SECRET", opts.Proxy.EnvVars["PROXY_SECRET"])
 		assert.Equal(t, "dummy-GEMINI_API_KEY", opts.Proxy.EnvVars["GEMINI_API_KEY"])
-		assert.NotContains(t, opts.Proxy.EnvVars, "NO_RULE")
+		assert.Equal(t, "dummy-OPENAI_API_KEY", opts.Proxy.EnvVars["OPENAI_API_KEY"])
+		assert.NotContains(t, opts.Proxy.EnvVars, "NO_HOST", "a key without a host cannot be served")
 		assert.NotEqual(t, "ai-studio-key-789", opts.Proxy.GeminiAPIKey)
 		for _, v := range opts.Proxy.EnvVars {
-			assert.NotContains(t, v, "secret-proxy-123")
 			assert.NotContains(t, v, "ai-studio-key-789")
+			assert.NotContains(t, v, "sk-openai-456")
 		}
+		require.Len(t, registered, 2)
+		assert.Equal(t, proxy.UserSecret{Env: "GEMINI_API_KEY", Real: "ai-studio-key-789", Host: "generativelanguage.googleapis.com", PathPrefix: "/v1beta", HeaderKey: "x-goog-api-key"}, registered[0])
 		require.NotNil(t, fake.lastProxyKeysReq)
 		assert.Equal(t, "run-test-123", fake.lastProxyKeysReq.GetMeta().GetRunId())
 		assert.Equal(t, "user-test", fake.lastProxyKeysReq.GetUserId())
 		before := released
 		release()
-		assert.Equal(t, before+1, released)
+		assert.Equal(t, before+1, released, "the run's dummies are forgotten")
 	})
 
-	t.Run("host-bound keys need no admin rule and carry their rule", func(t *testing.T) {
-		hostFake := &fakeCallbacks{proxyEntries: []*runnerpb.UserProxyKeyEntry{
-			{Name: "BOUND_KEY", Value: "bound-real", Host: "api.example.org", PathPrefix: "/v1", HeaderKey: "x-api-key"},
-			{Name: "LOOSE_KEY", Value: "loose-real"},
-		}}
-		ex := New(Options{Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) { return hostFake, nil }, UserSecrets: userSecrets})
-		sr := &runnerpb.StartRun{ChatId: "chat-1", UserId: "user-host"}
+	t.Run("older backend sends only the key map: nothing is exposed", func(t *testing.T) {
+		oldFake := &fakeCallbacks{proxyKeys: map[string]string{"OLD_KEY": "old-real"}}
+		ex := New(Options{Callbacks: func() (runnerpb.AgentCallbackServiceClient, error) { return oldFake, nil }, UserSecrets: userSecrets})
+		sr := &runnerpb.StartRun{ChatId: "chat-1", UserId: "user-old"}
 		opts, release := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		defer release()
-		assert.Equal(t, "dummy-BOUND_KEY", opts.Proxy.EnvVars["BOUND_KEY"])
-		assert.NotContains(t, opts.Proxy.EnvVars, "LOOSE_KEY")
-		require.Len(t, registered, 1)
-		assert.Equal(t, proxy.UserSecret{Env: "BOUND_KEY", Real: "bound-real", Host: "api.example.org", PathPrefix: "/v1", HeaderKey: "x-api-key"}, registered[0])
+		assert.NotContains(t, opts.Proxy.EnvVars, "OLD_KEY")
 	})
 
 	t.Run("without a proxy hook no real key is exposed", func(t *testing.T) {
@@ -453,17 +442,18 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 		sr := &runnerpb.StartRun{ChatId: "chat-1", UserId: "user-test-2"}
 		opts, release := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		defer release()
-		assert.Empty(t, opts.Proxy.EnvVars["PROXY_SECRET"])
-		assert.Empty(t, opts.Proxy.EnvVars["GEMINI_API_KEY"])
+		assert.NotContains(t, opts.Proxy.EnvVars, "GEMINI_API_KEY")
+		assert.NotContains(t, opts.Proxy.EnvVars, "OPENAI_API_KEY")
 	})
 
 	t.Run("with empty user_id does not query keys", func(t *testing.T) {
+		before := fake.lastProxyKeysReq
 		ex := New(Options{Callbacks: cbFunc, UserSecrets: userSecrets})
 		sr := &runnerpb.StartRun{ChatId: "chat-1", UserId: ""}
 		opts, release := ex.runOptions(context.Background(), sr, &agentspec.Agent{}, conf, newRecordingSink(), nil)
 		defer release()
-		assert.NotContains(t, opts.Proxy.EnvVars["PROXY_SECRET"], "dummy-")
-		assert.NotContains(t, opts.Proxy.EnvVars["GEMINI_API_KEY"], "dummy-")
+		assert.NotContains(t, opts.Proxy.EnvVars, "GEMINI_API_KEY")
+		assert.Same(t, before, fake.lastProxyKeysReq)
 	})
 }
 

@@ -9,18 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -345,239 +341,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	resp := ConfigResponse{
 		FirebaseWebpushWeb: s.conf.FirebaseWebpushWeb,
 		DefaultUILang:      s.conf.GetUILang(),
-		ProxyEnvs:          s.conf.ProxyEnvNames(),
 	}
+	// The user's own keys; only those with a host rule can be served.
 	if s.userProxyKeyRepo != nil {
 		if metas, err := s.userProxyKeyRepo.ListKeyMetadata(r.Context(), s.userSubject(r)); err == nil {
-			seen := make(map[string]struct{}, len(resp.ProxyEnvs)+len(metas))
-			for _, n := range resp.ProxyEnvs {
-				seen[n] = struct{}{}
-			}
 			for _, m := range metas {
-				if _, ok := seen[m.KeyName]; !ok {
+				if m.Host != "" {
 					resp.ProxyEnvs = append(resp.ProxyEnvs, m.KeyName)
 				}
 			}
-			sort.Strings(resp.ProxyEnvs)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// ManageProxyResponse represents the response body for GET /api/manage/proxy.
-type ManageProxyResponse struct {
-	Enabled     bool         `json:"enabled"`
-	Addr        string       `json:"addr,omitempty"`
-	CACert      string       `json:"ca_cert,omitempty"`
-	ProxyConfig string       `json:"proxy_config,omitempty"`
-	Exists      bool         `json:"exists"`
-	RawContent  string       `json:"raw_content,omitempty"`
-	Rules       []proxy.Rule `json:"rules,omitempty"`
-}
-
-// SaveManageProxyRequest represents the request body for PUT /api/manage/proxy.
-type SaveManageProxyRequest struct {
-	Content string `json:"content"`
-}
-
-// handleGetManageProxy handles GET /api/manage/proxy.
-func (s *Server) handleGetManageProxy(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	if s.proxyManager == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(ManageProxyResponse{
-			Enabled: false,
-			Exists:  false,
-		})
-		return
-	}
-
-	resp := ManageProxyResponse{
-		Enabled:     true,
-		Addr:        s.proxyManager.Addr(),
-		CACert:      s.proxyManager.CACertPath(),
-		ProxyConfig: s.proxyManager.ConfigPath(),
-		Rules:       s.proxyManager.GetMaskedRules(),
-	}
-
-	if resp.ProxyConfig != "" {
-		data, err := os.ReadFile(resp.ProxyConfig)
-		if err == nil {
-			resp.Exists = true
-			resp.RawContent = string(data)
-		} else {
-			resp.Exists = false
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// handleSaveManageProxy handles PUT /api/manage/proxy.
-func (s *Server) handleSaveManageProxy(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	if s.proxyManager == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "proxy service is not enabled"})
-		return
-	}
-
-	if s.conf == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no configuration loaded"})
-		return
-	}
-
-	targetPath := s.conf.ResolvedProxyConfigPath()
-	if targetPath == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot resolve proxy_config path"})
-		return
-	}
-
-	// Limit request body size to 1MB
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	var req SaveManageProxyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
-		return
-	}
-
-	// Validate YAML syntax and proxy configuration
-	newCfg, err := proxy.ParseConfig([]byte(req.Content))
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("invalid proxy configuration: %v", err)})
-		return
-	}
-
-	dir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Error().Err(err).Str("dir", dir).Msg("failed to create proxy config directory")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	// Atomic write via temp file with fallback
-	tmpFile, err := os.CreateTemp(dir, "proxy-*.tmp")
-	if err == nil {
-		tmpPath := tmpFile.Name()
-		_, writeErr := tmpFile.Write([]byte(req.Content))
-		syncErr := tmpFile.Sync()
-		closeErr := tmpFile.Close()
-
-		if writeErr == nil && syncErr == nil && closeErr == nil {
-			renameErr := osRename(tmpPath, targetPath)
-			if renameErr == nil {
-				s.finishProxySave(w, newCfg)
-				return
-			}
-
-			if errors.Is(renameErr, syscall.EBUSY) || errors.Is(renameErr, syscall.EXDEV) {
-				_ = os.Remove(tmpPath)
-				if writeErr := writeConfigDirect(targetPath, req.Content, 0600); writeErr != nil {
-					log.Error().Err(writeErr).Str("path", targetPath).Msg("failed to write proxy config via direct fallback")
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
-					return
-				}
-				s.finishProxySave(w, newCfg)
-				return
-			}
-
-			_ = os.Remove(tmpPath)
-			log.Error().Err(renameErr).Str("path", targetPath).Msg("failed to atomic rename proxy config file")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": renameErr.Error()})
-			return
-		}
-
-		_ = os.Remove(tmpPath)
-	}
-
-	if writeErr := writeConfigDirect(targetPath, req.Content, 0600); writeErr != nil {
-		log.Error().Err(writeErr).Str("path", targetPath).Msg("failed to write proxy config directly")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": writeErr.Error()})
-		return
-	}
-
-	s.finishProxySave(w, newCfg)
-}
-
-// finishProxySave hot-reloads the proxy rules after a successful config save
-// and writes the success response.
-func (s *Server) finishProxySave(w http.ResponseWriter, newCfg *proxy.Config) {
-	if err := s.proxyManager.Reload(newCfg); err != nil {
-		log.Warn().Err(err).Msg("failed to reload proxy rules after saving")
-	}
-	s.conf.SetProxy(newCfg)
-	writeStatusOK(w, "proxy config saved and reloaded")
-}
-
-// handleReloadManageProxy handles POST /api/manage/proxy/reload.
-func (s *Server) handleReloadManageProxy(w http.ResponseWriter, r *http.Request) {
-	if err := checkManageOrigin(r); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	if s.proxyManager == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "proxy service is not enabled"})
-		return
-	}
-
-	if s.conf == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no configuration loaded"})
-		return
-	}
-
-	newCfg, err := s.proxyManager.ReloadFromFile()
-	if err != nil {
-		log.Error().Err(err).Msg("failed to reload proxy rules from file")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("failed to reload proxy rules: %v", err)})
-		return
-	}
-	s.conf.SetProxy(newCfg)
-
-	writeStatusOK(w, "proxy config reloaded")
 }
 
 // cronAgents returns the agents eligible for backend cron scheduling (global

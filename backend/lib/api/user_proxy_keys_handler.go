@@ -77,6 +77,10 @@ func (s *Server) handleSaveUserProxyKey(w http.ResponseWriter, r *http.Request) 
 
 	sub := s.userSubject(r)
 	rule := req.Normalize()
+	if rule.Host == "" {
+		writeJSONError(w, http.StatusBadRequest, "host is required")
+		return
+	}
 	if err := rule.Validate(); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return

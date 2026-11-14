@@ -29,6 +29,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
+	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
 // Source is the etcd view the sandbox setup is derived from (config.Remote).
@@ -48,8 +49,9 @@ type Options struct {
 	RemoveSSHKey func(keyPath string) error
 	// SkipSSH disables ssh-agent setup (tests).
 	SkipSSH bool
-	// NewProxy creates the proxy manager (default proxy.NewManager).
-	NewProxy func(cfg *proxy.Config, configPath string) (*proxy.ProxyManager, error)
+	// NewProxy creates the credential proxy manager (default proxy.NewManager
+	// with the standard CA paths).
+	NewProxy func() (*proxy.ProxyManager, error)
 	// HomeDir overrides the user home directory for credential syncing (tests).
 	HomeDir string
 }
@@ -96,11 +98,14 @@ func Setup(src Source, opts Options) *Sandbox {
 		opts.ClearSSH = sshagent.ClearKeys
 	}
 	if opts.NewProxy == nil {
-		opts.NewProxy = func(cfg *proxy.Config, path string) (*proxy.ProxyManager, error) {
-			return proxy.NewManager(cfg, path)
+		opts.NewProxy = func() (*proxy.ProxyManager, error) {
+			return proxy.NewManager(paths.CACertFile(), paths.CAKeyFile())
 		}
 	}
 	s := &Sandbox{opts: opts, src: src}
+	// The credential proxy is always on: it needs no configuration (it listens
+	// on an ephemeral loopback port) and swaps in a user's keys per run.
+	s.startProxy()
 	if !opts.SkipSSH {
 		if err := opts.SetupSSH(); err != nil {
 			log.Warn().Err(err).Msg("failed to setup SSH agent")
@@ -191,39 +196,28 @@ func (s *Sandbox) apply(conf *config.Config, tree *config.AsgardTreeConfig, err 
 	}
 	s.conf = conf
 	s.cfgErr = nil
-	switch {
-	case !conf.IsProxyEnabled() && (s.pm != nil || s.proxyErr != nil):
-		// Disabled by configuration: stop a running proxy and forget any
-		// earlier start failure. Bumping the generation makes its exit callback
-		// a no-op; with no proxy configured Ready is OK, as on the backend
-		// where the sandbox proxy options are then empty.
-		s.gen++
-		if s.pm != nil {
-			s.shutdownProxy(s.pm)
-			s.pm = nil
-		}
-		s.proxyErr = nil
-		log.Info().Msg("proxy disabled by configuration")
-	case s.pm != nil:
-		if err := s.pm.Reload(conf.GetProxy()); err != nil {
-			s.cfgErr = fmt.Errorf("proxy reload failed: %w", err)
-			log.Error().Err(err).Msg("failed to live-reload proxy configuration from etcd")
-		} else {
-			log.Info().Msg("proxy configuration live-reloaded successfully from etcd")
-		}
-		if s.proxyErr != nil && !s.pm.Running() {
-			s.startProxyLocked() // retry a failed or exited server
-		}
-	case conf.IsProxyEnabled():
-		pm, err := s.opts.NewProxy(conf.GetProxy(), conf.ResolvedProxyConfigPath())
-		if err != nil {
-			s.proxyErr = fmt.Errorf("proxy unavailable: %w", err)
-			log.Error().Err(err).Msg("failed to initialize proxy manager; runs are refused")
-			return
-		}
-		s.pm = pm
-		s.startProxyLocked()
+	if s.pm != nil && s.pm.Running() {
+		conf.SetSandboxProxy(&config.SandboxProxyEndpoint{
+			Addr:   s.pm.URL(),
+			CACert: s.pm.CACertPath(),
+			CAKey:  s.pm.CAKeyPath(),
+		})
 	}
+}
+
+// startProxy creates and starts the credential proxy. A failure is reported by
+// Ready, which refuses runs.
+func (s *Sandbox) startProxy() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pm, err := s.opts.NewProxy()
+	if err != nil {
+		s.proxyErr = fmt.Errorf("proxy unavailable: %w", err)
+		log.Error().Err(err).Msg("failed to initialize proxy manager; runs are refused")
+		return
+	}
+	s.pm = pm
+	s.startProxyLocked()
 }
 
 // startProxyLocked binds the proxy listener (synchronously) and serves in the
@@ -285,7 +279,7 @@ func (s *Sandbox) Ready() error {
 		return s.proxyErr
 	case s.conf == nil:
 		return errors.New("sandbox configuration not loaded")
-	case s.pm != nil && !s.pm.Running():
+	case s.pm == nil || !s.pm.Running():
 		return errors.New("proxy is not listening")
 	}
 	return nil

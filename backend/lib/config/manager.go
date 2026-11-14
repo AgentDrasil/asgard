@@ -155,13 +155,6 @@ func (c *Config) ApplyDefaultsAndValidate() error {
 		c.Providers = deduped
 	}
 
-	if c.Proxy != nil {
-		c.Proxy.ApplyDefaults()
-		if err := c.Proxy.Validate(); err != nil {
-			return fmt.Errorf("proxy config error: %w", err)
-		}
-	}
-
 	if c.Runner != nil {
 		if err := c.Runner.ApplyDefaultsAndValidate(); err != nil {
 			return fmt.Errorf("runner config error: %w", err)
@@ -176,9 +169,6 @@ func (c *Config) Clone() *Config {
 	if c == nil {
 		return nil
 	}
-	c.proxyMu.RLock()
-	defer c.proxyMu.RUnlock()
-
 	cp := &Config{
 		Debug:                              c.Debug,
 		DB:                                 c.DB,
@@ -198,7 +188,6 @@ func (c *Config) Clone() *Config {
 		CommentLang:                        c.CommentLang,
 		UILang:                             c.UILang,
 		Providers:                          append([]string(nil), c.Providers...),
-		Proxy:                              c.Proxy,
 		Auth:                               c.Auth,
 		Runner:                             c.GetRunner(),
 		ConfigPath:                         c.ConfigPath,

@@ -19,7 +19,7 @@ import (
 // Remote is the runner's live view of the shared etcd configuration: the
 // agent definitions effective for this node (agents/ plus
 // runners/<node>/agents/, materialized into the runner's data dir) and the aw/,
-// simplest/, credentials/ and asgard/proxy.yaml trees.
+// simplest/ and credentials/ trees.
 //
 // A configuration that cannot be loaded (etcd unreachable, a SOPS signature or
 // decode failure) never makes the runner exit: the Remote keeps retrying in the
@@ -227,8 +227,7 @@ func (r *Remote) notLoaded() error {
 }
 
 // SandboxConfig builds the backend-style config the sandboxes are set up
-// from: the shared asgard/config.yaml values, the proxy configuration (as the
-// backend applies it at startup) and the local config path to mask.
+// from: the shared asgard/config.yaml values and the local config path to mask.
 func (r *Remote) SandboxConfig() (*config.Config, error) {
 	tree := r.Tree()
 	if tree == nil {
@@ -240,10 +239,6 @@ func (r *Remote) SandboxConfig() (*config.Config, error) {
 // SandboxConfigFromTree derives the sandbox config from tree.
 func SandboxConfigFromTree(tree *config.AsgardTreeConfig) (*config.Config, error) {
 	conf := tree.Asgard.Config.Clone()
-	if tree.Asgard.Proxy.Enable || len(tree.Asgard.Proxy.Rules) > 0 {
-		proxyCfg := tree.Asgard.Proxy
-		conf.SetProxy(&proxyCfg)
-	}
 	if err := conf.ApplyDefaultsAndValidate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration from etcd: %w", err)
 	}

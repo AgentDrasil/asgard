@@ -40,7 +40,7 @@ All Asgard-owned paths are rooted at `~/asgard` and are **not configurable**
 
 ```
 /asgard/                    # Shared root (backend & runner)
-├── config/                 # config.yaml, proxy.yaml, keys.yaml, ca/{ca.crt,ca.key}
+├── config/                 # config.yaml, keys.yaml, ca/{ca.crt,ca.key}
 ├── agents/                 # agent definitions
 ├── teams.yaml              # agent team definitions
 ├── agents-cache/           # agent definitions materialized from etcd
@@ -178,6 +178,12 @@ graph TD
     AW <-->|asgard.sock callbacks| RunGo
 ```
 
+### Personal API keys (credential proxy)
+
+Users add their own API keys in the WebUI (Settings → proxy secrets), each with the **host**, optional **path prefix** and **header** the key is used with. There is no server-side proxy configuration: the runner always runs a credential proxy on an ephemeral loopback port.
+
+For every run the runner gives the sandbox a random per-run dummy value under the key's env name (usable as `/env:NAME` in the chat box) and registers the real key with the proxy. When a request to the key's host (and path prefix) carries the dummy in the key's header, the proxy swaps in the real key, so the real value never enters a sandbox. The key's host is only decrypted (MITM) while a run that uses it is active. Keys without a host are not exposed.
+
 ### 1. The Dual-Sandbox Concept
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
@@ -299,7 +305,7 @@ The runner reads TLS certificates from fixed paths inside `/certs`:
 - Client key: `/certs/tls.key`
 - CA certificate: `/certs/ca.crt`
 
-The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions, proxy and credential config), and the agent CLIs of the user it runs as, with agy/claude logged in via `aw <cli> login <alias>` (see Runner Accounts). Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
+The runner also needs the same `ETCD_ENDPOINTS` / `ETCD_PREFIX` as the backend (agent definitions and credential config), and the agent CLIs of the user it runs as, with agy/claude logged in via `aw <cli> login <alias>` (see Runner Accounts). Workflow command nodes run in the bubblewrap sandbox by default and fail closed: if the runner's sandbox setup is not ready the node fails; `sandbox: false` is refused unless the operator enabled the flag above (a request can never enable it).
 
 Constraints to know before deploying:
 - **Runner root directories must be real paths.** The directories agents and workflows may use (their `run_dirs` and mount dirs) and the runner's data roots are opened without following symlinks. A root that is, or lies under, a symlink is refused (fail closed); mount or configure the resolved path instead.

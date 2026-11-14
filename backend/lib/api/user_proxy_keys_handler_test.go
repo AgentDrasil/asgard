@@ -51,7 +51,8 @@ func TestUserProxyKeys_API_TableDriven(t *testing.T) {
 			{"invalid format starts with digit", map[string]string{"key_name": "1KEY", "value": "val"}, http.StatusBadRequest},
 			{"reserved key PATH", map[string]string{"key_name": "PATH", "value": "val"}, http.StatusBadRequest},
 			{"reserved key HTTP_PROXY", map[string]string{"key_name": "HTTP_PROXY", "value": "val"}, http.StatusBadRequest},
-			{"valid key", map[string]string{"key_name": "GEMINI_API_KEY", "value": "test-key-123"}, http.StatusOK},
+			{"missing host", map[string]string{"key_name": "GEMINI_API_KEY", "value": "test-key-123"}, http.StatusBadRequest},
+			{"valid key", map[string]string{"key_name": "GEMINI_API_KEY", "value": "test-key-123", "host": "api.example.com"}, http.StatusOK},
 		}
 
 		for _, tt := range tests {
@@ -85,6 +86,7 @@ func TestUserProxyKeys_API_TableDriven(t *testing.T) {
 		createBody, _ := json.Marshal(map[string]string{
 			"key_name": "gemini_key",
 			"value":    "  secret-gemini-val  \r\n",
+			"host":     "generativelanguage.googleapis.com",
 		})
 		reqPost := httptest.NewRequest(http.MethodPost, "/api/user/proxy-keys", bytes.NewReader(createBody))
 		recPost := httptest.NewRecorder()
@@ -136,6 +138,7 @@ func TestUserProxyKeys_API_TableDriven(t *testing.T) {
 		bAlice, _ := json.Marshal(map[string]string{
 			"key_name": "ALICE_KEY",
 			"value":    "alice-secret",
+			"host":     "api.example.com",
 		})
 		reqAlice := httptest.NewRequest(http.MethodPost, "/api/user/proxy-keys", bytes.NewReader(bAlice)).WithContext(user1Ctx)
 		recAlice := httptest.NewRecorder()
@@ -168,7 +171,9 @@ func TestUserProxyKeys_API_TableDriven(t *testing.T) {
 func TestHandleConfig_IncludesUserProxyKeyNames(t *testing.T) {
 	t.Parallel()
 	srv, mux := newTestServerForProxyKeys(t)
-	require.NoError(t, srv.userProxyKeyRepo.SaveKey(context.Background(), "default", "MY_PERSONAL_KEY", "real-value"))
+	require.NoError(t, srv.userProxyKeyRepo.SaveKeyWithRule(context.Background(), "default", "MY_PERSONAL_KEY", "real-value", dbmodels.UserProxyKeyRule{Host: "api.example.com"}))
+	// A legacy key without a host cannot be served, so it is not suggested.
+	require.NoError(t, srv.userProxyKeyRepo.SaveKey(context.Background(), "default", "LEGACY_KEY", "legacy-value"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	rec := httptest.NewRecorder()
@@ -177,7 +182,7 @@ func TestHandleConfig_IncludesUserProxyKeyNames(t *testing.T) {
 
 	var resp ConfigResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Contains(t, resp.ProxyEnvs, "MY_PERSONAL_KEY")
+	assert.Equal(t, []string{"MY_PERSONAL_KEY"}, resp.ProxyEnvs)
 	assert.NotContains(t, rec.Body.String(), "real-value")
 }
 

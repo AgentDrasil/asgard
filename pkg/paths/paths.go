@@ -77,10 +77,6 @@ func ConfigDir() string { return filepath.Join(Root(), "config") }
 // ConfigFile is the main configuration file (/asgard/config/config.yaml).
 func ConfigFile() string { return filepath.Join(ConfigDir(), "config.yaml") }
 
-// ProxyConfigFile is the standalone proxy configuration file
-// (/asgard/config/proxy.yaml).
-func ProxyConfigFile() string { return filepath.Join(ConfigDir(), "proxy.yaml") }
-
 // KeysFile is the WebUI keybindings override file (/asgard/config/keys.yaml).
 func KeysFile() string { return filepath.Join(ConfigDir(), "keys.yaml") }
 

@@ -73,7 +73,7 @@ const ruleError = computed(() => {
   const path = formPathPrefix.value.trim();
   const header = formHeaderKey.value.trim();
   if (!host) {
-    return path || header ? t("settings.proxySecretsHostRequired") : "";
+    return formKeyName.value.trim() ? t("settings.proxySecretsHostRequired") : "";
   }
   if (!HOST_REGEX.test(host)) return t("settings.proxySecretsHostInvalid");
   if (path && !path.startsWith("/")) return t("settings.proxySecretsPathInvalid");
@@ -134,7 +134,7 @@ const closeModal = () => {
 const handleSave = async () => {
   const keyName = formKeyName.value.trim();
   const val = formKeyValue.value.replace(/[\r\n]+$/, "");
-  if (!keyName || !val || keyNameError.value || ruleError.value) return;
+  if (!keyName || !val || !formHost.value.trim() || keyNameError.value || ruleError.value) return;
 
   isSubmitting.value = true;
   try {
@@ -239,6 +239,9 @@ const handleDelete = async () => {
                 data-testid="proxy-key-rule"
               >
                 {{ k.host }}{{ k.path_prefix || "" }} · {{ k.header_key || "Authorization" }}
+              </span>
+              <span v-else class="text-[11px] text-warning block" data-testid="proxy-key-no-host">
+                {{ t("settings.proxySecretsNoHost") }}
               </span>
               <span class="text-xs text-base-content/60">
                 {{ t("settings.proxySecretsLastUpdated") }}:
@@ -360,6 +363,7 @@ const handleDelete = async () => {
               :placeholder="t('settings.proxySecretsHostPlaceholder')"
               class="input input-sm input-bordered w-full font-mono text-sm"
               :class="{ 'input-error': !!ruleError }"
+              required
               data-testid="proxy-key-host-input"
             />
             <div class="grid grid-cols-2 gap-2">
@@ -430,6 +434,7 @@ const handleDelete = async () => {
                 !formKeyName.trim() ||
                 !formKeyValue.replace(/[\r\n]+$/, '') ||
                 !!keyNameError ||
+                !formHost.trim() ||
                 !!ruleError
               "
               data-testid="proxy-key-save-btn"

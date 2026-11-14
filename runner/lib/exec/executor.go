@@ -365,7 +365,7 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 			if err != nil {
 				log.Warn().Err(err).Str("user_id", sr.GetUserId()).Msg("failed to query user proxy keys")
 			} else if entries := userKeyEntries(resp); len(entries) > 0 {
-				release = e.exposeUserKeys(&opts, conf, sr.GetUserId(), entries)
+				release = e.exposeUserKeys(&opts, sr.GetUserId(), entries)
 			}
 		}
 	}
@@ -396,21 +396,16 @@ func userKeyEntries(resp *runnerpb.GetUserProxyKeysResponse) []*runnerpb.UserPro
 }
 
 // exposeUserKeys puts the user's keys into the sandbox env as per-run dummies;
-// the proxy swaps them for the real values where the key's own rule (host,
-// path prefix, header) says, or, for a key without a host, on admin rules with
-// the same env name. Keys the proxy cannot serve, or with no running proxy,
-// are not exposed at all: the sandbox must never see a real secret.
-func (e *Executor) exposeUserKeys(opts *run.Options, conf *config.Config, userID string, entries []*runnerpb.UserProxyKeyEntry) func() {
+// the proxy swaps them for the real values on requests to the key's own host
+// (and path prefix) that carry the dummy in the key's header. Keys without a
+// host cannot be served and are not exposed at all: the sandbox must never see
+// a real secret.
+func (e *Executor) exposeUserKeys(opts *run.Options, userID string, entries []*runnerpb.UserProxyKeyEntry) func() {
 	noop := func() {}
-	proxied := make(map[string]struct{})
-	for _, n := range conf.ProxyEnvNames() {
-		proxied[n] = struct{}{}
-	}
 	var real []proxy.UserSecret
 	for _, en := range entries {
-		_, ruleBacked := proxied[en.GetName()]
-		if en.GetHost() == "" && !ruleBacked {
-			log.Warn().Str("user_id", userID).Str("key_name", en.GetName()).Msg("user proxy key has no host and no proxy rule with this env name; not exposed to the sandbox")
+		if en.GetHost() == "" {
+			log.Warn().Str("user_id", userID).Str("key_name", en.GetName()).Msg("user proxy key has no host; not exposed to the sandbox (edit it in the WebUI and set a host)")
 			continue
 		}
 		real = append(real, proxy.UserSecret{
@@ -430,6 +425,7 @@ func (e *Executor) exposeUserKeys(opts *run.Options, conf *config.Config, userID
 		release = noop
 	}
 	if len(dummies) == 0 {
+		log.Warn().Str("user_id", userID).Int("keys", len(real)).Msg("user proxy keys not exposed: the runner proxy is not running")
 		return release
 	}
 	if opts.Proxy.EnvVars == nil {

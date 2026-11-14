@@ -18,94 +18,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/josexy/mitmproxy-go"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestProxyManager_NewManager_EmptyRulesReject(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-
-	tests := []struct {
-		name        string
-		cfg         *Config
-		errContains string
-	}{
-		{
-			name:        "nil config",
-			cfg:         nil,
-			errContains: "config cannot be nil",
-		},
-		{
-			name: "empty rules",
-			cfg: &Config{
-				Enable: true,
-				Server: ServerConfig{
-					Addr:   "127.0.0.1:0",
-					CACert: certPath,
-					CAKey:  keyPath,
-				},
-				Rules: []Rule{},
-			},
-			errContains: "cannot initialize proxy manager: rules list or host targets must not be empty",
-		},
-		{
-			name: "rules with empty host",
-			cfg: &Config{
-				Enable: true,
-				Server: ServerConfig{
-					Addr:   "127.0.0.1:0",
-					CACert: certPath,
-					CAKey:  keyPath,
-				},
-				Rules: []Rule{
-					{Host: "   ", HeaderKey: "Authorization", RealSecret: "secret"},
-				},
-			},
-			errContains: "cannot initialize proxy manager: rules list or host targets must not be empty",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			pm, err := NewManager(tt.cfg, "")
-			require.Error(t, err)
-			assert.Nil(t, pm)
-			assert.Contains(t, err.Error(), tt.errContains)
-		})
-	}
-}
-
-type countingReader struct {
-	data       []byte
-	pos        int
-	readCounts atomic.Int32
-}
-
-func (c *countingReader) Read(p []byte) (n int, err error) {
-	c.readCounts.Add(1)
-	if c.pos >= len(c.data) {
-		return 0, io.EOF
-	}
-	n = copy(p, c.data[c.pos:])
-	c.pos += n
-	return n, nil
-}
-
-func (c *countingReader) Close() error {
-	return nil
-}
 
 type fakeInvoker struct {
 	invokedReq *http.Request
@@ -117,389 +36,6 @@ func (f *fakeInvoker) Invoke(req *http.Request) (*http.Response, error) {
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(bytes.NewBufferString("ok")),
 	}, nil
-}
-
-func TestProxyManager_InterceptorSecretReplacement(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.openai.com",
-				PathPrefix:  "/v1/chat",
-				HeaderKey:   "Authorization",
-				RealSecret:  "Bearer sk-real-12345678",
-				DummySecret: "Bearer fake-token",
-			},
-			{
-				Host:        "api.anthropic.com",
-				PathPrefix:  "",
-				HeaderKey:   "x-api-key",
-				RealSecret:  "real-anthropic-key-12345",
-				DummySecret: "", // empty dummy secret means always replace
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pm.Shutdown(context.Background())
-	})
-
-	tests := []struct {
-		name          string
-		reqHost       string
-		reqPath       string
-		headerKey     string
-		headerVal     string
-		wantHeaderVal string
-	}{
-		{
-			name:          "rule match and dummy secret match -> replaced",
-			reqHost:       "api.openai.com",
-			reqPath:       "/v1/chat/completions",
-			headerKey:     "Authorization",
-			headerVal:     "Bearer fake-token",
-			wantHeaderVal: "Bearer sk-real-12345678",
-		},
-		{
-			name:          "rule match with host:port -> replaced",
-			reqHost:       "api.openai.com:443",
-			reqPath:       "/v1/chat/models",
-			headerKey:     "Authorization",
-			headerVal:     "Bearer fake-token",
-			wantHeaderVal: "Bearer sk-real-12345678",
-		},
-		{
-			name:          "empty dummy secret -> always replaced",
-			reqHost:       "api.anthropic.com",
-			reqPath:       "/v1/messages",
-			headerKey:     "x-api-key",
-			headerVal:     "any-client-token",
-			wantHeaderVal: "real-anthropic-key-12345",
-		},
-		{
-			name:          "dummy secret does not match -> keep original",
-			reqHost:       "api.openai.com",
-			reqPath:       "/v1/chat/completions",
-			headerKey:     "Authorization",
-			headerVal:     "Bearer some-other-secret",
-			wantHeaderVal: "Bearer some-other-secret",
-		},
-		{
-			name:          "path prefix does not match -> keep original",
-			reqHost:       "api.openai.com",
-			reqPath:       "/v1/embeddings",
-			headerKey:     "Authorization",
-			headerVal:     "Bearer fake-token",
-			wantHeaderVal: "Bearer fake-token",
-		},
-		{
-			name:          "host does not match -> keep original",
-			reqHost:       "api.gemini.google.com",
-			reqPath:       "/v1/chat",
-			headerKey:     "Authorization",
-			headerVal:     "Bearer fake-token",
-			wantHeaderVal: "Bearer fake-token",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req, err := http.NewRequest(http.MethodPost, "https://"+tt.reqHost+tt.reqPath, nil)
-			require.NoError(t, err)
-			req.Host = tt.reqHost
-			if tt.headerKey != "" {
-				req.Header.Set(tt.headerKey, tt.headerVal)
-			}
-
-			invoker := &fakeInvoker{}
-			resp, err := pm.Interceptor(context.Background(), req, invoker)
-			require.NoError(t, err)
-			require.NotNil(t, resp)
-			assert.Equal(t, tt.wantHeaderVal, req.Header.Get(tt.headerKey))
-		})
-	}
-}
-
-func TestProxyManager_InterceptorDumpHeadersRedaction(t *testing.T) {
-	// Not marked t.Parallel() because it swaps global zerolog.DefaultContextLogger / log.Logger
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-
-	realSecret := "sk-real-super-secret-12345678"
-	dummySecret := "dummy-placeholder"
-
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Debug: DebugConfig{
-			Enable:      true,
-			DumpHeaders: true,
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.openai.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  realSecret,
-				DummySecret: dummySecret,
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pm.Shutdown(context.Background())
-	})
-
-	var buf bytes.Buffer
-	origLogger := log.Logger
-	log.Logger = zerolog.New(&buf).Level(zerolog.DebugLevel)
-	t.Cleanup(func() {
-		log.Logger = origLogger
-	})
-
-	req, err := http.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
-	require.NoError(t, err)
-	req.Host = "api.openai.com"
-	req.Header.Set("Authorization", dummySecret)
-
-	invoker := &fakeInvoker{}
-	_, err = pm.Interceptor(context.Background(), req, invoker)
-	require.NoError(t, err)
-
-	logOutput := buf.String()
-	// Real secret MUST NOT appear in plaintext in log output
-	assert.False(t, strings.Contains(logOutput, realSecret), "plain real secret must not appear in logs: %s", logOutput)
-	// Masked real secret should appear in substitution log and header dump
-	maskedSecret := MaskSecret(realSecret)
-	assert.True(t, strings.Contains(logOutput, maskedSecret), "masked secret should appear in logs: %s", logOutput)
-	assert.True(t, strings.Contains(logOutput, "proxy dumped request headers"), "dump headers message should be logged")
-}
-
-func TestProxyManager_InterceptorBodyUntouchedWhenDumpBodyFalse(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Debug: DebugConfig{
-			Enable:   true,
-			DumpBody: false, // Body must NOT be touched
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.openai.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  "Bearer real-secret",
-				DummySecret: "Bearer fake-token",
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pm.Shutdown(context.Background())
-	})
-
-	// 1. When DumpBody is false, req.Body.Read should not be called by interceptor
-	reader1 := &countingReader{data: []byte("test body payload 1")}
-	req1, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/test", reader1)
-	require.NoError(t, err)
-
-	invoker1 := &fakeInvoker{}
-	_, err = pm.Interceptor(context.Background(), req1, invoker1)
-	require.NoError(t, err)
-	assert.Equal(t, int32(0), reader1.readCounts.Load(), "req.Body must remain untouched when DumpBody=false")
-
-	// 2. Enable DumpBody, req.Body is read and restored, downstream can read full content
-	cfg.Debug.DumpBody = true
-	err = pm.Reload(cfg)
-	require.NoError(t, err)
-
-	bodyPayload := "test body payload 2"
-	reader2 := &countingReader{data: []byte(bodyPayload)}
-	req2, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/test", reader2)
-	require.NoError(t, err)
-
-	invoker2 := &fakeInvoker{}
-	_, err = pm.Interceptor(context.Background(), req2, invoker2)
-	require.NoError(t, err)
-	assert.Greater(t, reader2.readCounts.Load(), int32(0), "req.Body should have been read for dump")
-
-	// Downstream read must get complete payload
-	readAfter, err := io.ReadAll(req2.Body)
-	require.NoError(t, err)
-	assert.Equal(t, bodyPayload, string(readAfter))
-}
-
-func TestProxyManager_GetMaskedRules(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.openai.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  "Bearer sk-proj-1234567890abcdef",
-				DummySecret: "Bearer fake-token-12345",
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pm.Shutdown(context.Background())
-	})
-
-	masked := pm.GetMaskedRules()
-	require.Len(t, masked, 1)
-	assert.Equal(t, "api.openai.com", masked[0].Host)
-	assert.Equal(t, "Bearer sk-p****cdef", masked[0].RealSecret)
-	assert.Equal(t, "Bearer fake****2345", masked[0].DummySecret)
-
-	// Verify original rules were not modified
-	original := *pm.rulesPtr.Load()
-	assert.Equal(t, "Bearer sk-proj-1234567890abcdef", original[0].RealSecret)
-	assert.Equal(t, "Bearer fake-token-12345", original[0].DummySecret)
-}
-
-func TestProxyManager_AtomicReload(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	certPath := filepath.Join(tmpDir, "ca.crt")
-	keyPath := filepath.Join(tmpDir, "ca.key")
-	configPath := filepath.Join(tmpDir, "proxy.yaml")
-
-	cfg1 := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.initial.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  "initial-real",
-				DummySecret: "dummy",
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg1, configPath)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pm.Shutdown(context.Background())
-	})
-
-	// Rule 1 matches
-	req1, _ := http.NewRequest(http.MethodGet, "https://api.initial.com/v1", nil)
-	req1.Header.Set("Authorization", "dummy")
-	_, err = pm.Interceptor(context.Background(), req1, &fakeInvoker{})
-	require.NoError(t, err)
-	assert.Equal(t, "initial-real", req1.Header.Get("Authorization"))
-
-	// Reload with Rule 2
-	cfg2 := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        "api.updated.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  "updated-real",
-				DummySecret: "dummy",
-			},
-		},
-	}
-	err = pm.Reload(cfg2)
-	require.NoError(t, err)
-
-	// Old host no longer matches
-	reqOld, _ := http.NewRequest(http.MethodGet, "https://api.initial.com/v1", nil)
-	reqOld.Header.Set("Authorization", "dummy")
-	_, err = pm.Interceptor(context.Background(), reqOld, &fakeInvoker{})
-	require.NoError(t, err)
-	assert.Equal(t, "dummy", reqOld.Header.Get("Authorization"))
-
-	// New host matches
-	reqNew, _ := http.NewRequest(http.MethodGet, "https://api.updated.com/v1", nil)
-	reqNew.Header.Set("Authorization", "dummy")
-	_, err = pm.Interceptor(context.Background(), reqNew, &fakeInvoker{})
-	require.NoError(t, err)
-	assert.Equal(t, "updated-real", reqNew.Header.Get("Authorization"))
-
-	// Test ReloadFromFile
-	configContent := `
-enable: true
-server:
-  addr: 127.0.0.1:0
-  ca_cert: ` + certPath + `
-  ca_key: ` + keyPath + `
-rules:
-  - host: api.fromfile.com
-    header_key: Authorization
-    real_secret: fromfile-real
-    dummy_secret: dummy
-`
-	err = os.WriteFile(configPath, []byte(configContent), 0644)
-	require.NoError(t, err)
-
-	reloadedCfg, err := pm.ReloadFromFile()
-	require.NoError(t, err)
-	assert.Equal(t, "api.fromfile.com", reloadedCfg.Rules[0].Host)
-
-	reqFile, _ := http.NewRequest(http.MethodGet, "https://api.fromfile.com/v1", nil)
-	reqFile.Header.Set("Authorization", "dummy")
-	_, err = pm.Interceptor(context.Background(), reqFile, &fakeInvoker{})
-	require.NoError(t, err)
-	assert.Equal(t, "fromfile-real", reqFile.Header.Get("Authorization"))
 }
 
 func TestProxyManager_EndToEndHTTPSTraffic(t *testing.T) {
@@ -571,32 +107,19 @@ func TestProxyManager_EndToEndHTTPSTraffic(t *testing.T) {
 	upstreamHost, _, err := net.SplitHostPort(upstreamURL.Host)
 	require.NoError(t, err)
 
-	// 2. Configure and start ProxyManager on a free port
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        upstreamHost,
-				HeaderKey:   "Authorization",
-				RealSecret:  "real-secret-12345",
-				DummySecret: "dummy-secret-client",
-			},
-		},
-	}
-
+	// 2. Start ProxyManager; the upstream host gets a user key bound to it
 	upstreamCertPath := filepath.Join(tmpDir, "upstream_ca.crt")
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstreamCADER})
 	require.NoError(t, os.WriteFile(upstreamCertPath, caPEM, 0644))
 
-	pm, err := NewManager(cfg, "", mitmproxy.WithRootCAs(upstreamCertPath), mitmproxy.WithErrorHandler(func(ec mitmproxy.ErrorContext) {
+	pm, err := NewManager(certPath, keyPath, mitmproxy.WithRootCAs(upstreamCertPath), mitmproxy.WithErrorHandler(func(ec mitmproxy.ErrorContext) {
 		t.Logf("mitmproxy error: %v, hostport: %s, remote: %s", ec.Error, ec.Hostport, ec.RemoteAddr)
 	}))
 	require.NoError(t, err)
+
+	dummies, release, err := pm.RegisterUserSecrets([]UserSecret{{Env: "UP_KEY", Real: "real-secret-12345", Host: upstreamHost}})
+	require.NoError(t, err)
+	t.Cleanup(release)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -629,10 +152,10 @@ func TestProxyManager_EndToEndHTTPSTraffic(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	// 4. Send request carrying dummy-secret-client through proxy
+	// 4. Send request carrying the per-run dummy through proxy
 	req, err := http.NewRequest(http.MethodGet, upstreamServer.URL+"/test", nil)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", "dummy-secret-client")
+	req.Header.Set("Authorization", dummies["UP_KEY"])
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -660,26 +183,12 @@ func TestProxyManager_NonRuleHostPassthrough(t *testing.T) {
 	}))
 	t.Cleanup(upstreamServer.Close)
 
-	// 2. Configure ProxyManager with rules for an unrelated host only
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{
-			Addr:   "127.0.0.1:0",
-			CACert: certPath,
-			CAKey:  keyPath,
-		},
-		Rules: []Rule{
-			{
-				Host:        "some.other.domain.com",
-				HeaderKey:   "Authorization",
-				RealSecret:  "real-secret",
-				DummySecret: "dummy",
-			},
-		},
-	}
-
-	pm, err := NewManager(cfg, "")
+	// 2. A key is registered for an unrelated host only
+	pm, err := NewManager(certPath, keyPath)
 	require.NoError(t, err)
+	_, release, err := pm.RegisterUserSecrets([]UserSecret{{Env: "K", Real: "real-secret", Host: "some.other.domain.com"}})
+	require.NoError(t, err)
+	t.Cleanup(release)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -693,7 +202,7 @@ func TestProxyManager_NonRuleHostPassthrough(t *testing.T) {
 	})
 
 	// Client only trusts the upstream certificate (does NOT trust Asgard CA)
-	// Because host is not in proxy rules, mitmproxy should transparently CONNECT tunnel it.
+	// Because no registered key names this host, mitmproxy should transparently CONNECT tunnel it.
 	// If it attempted TLS interception, client handshake would fail because client does not trust Asgard CA!
 	certPool := x509.NewCertPool()
 	certPool.AddCert(upstreamServer.Certificate())
@@ -716,7 +225,7 @@ func TestProxyManager_NonRuleHostPassthrough(t *testing.T) {
 	req.Header.Set("Authorization", "client-original-header")
 
 	resp, err := client.Do(req)
-	require.NoError(t, err, "non-rule host should pass through transparent CONNECT tunnel without TLS interception")
+	require.NoError(t, err, "host without a registered key should pass through transparent CONNECT tunnel without TLS interception")
 	t.Cleanup(func() {
 		_ = resp.Body.Close()
 	})
@@ -727,268 +236,51 @@ func TestProxyManager_NonRuleHostPassthrough(t *testing.T) {
 	assert.Equal(t, "passthrough ok: client-original-header", string(respBytes))
 }
 
-func TestProxyManager_Interceptor_BearerBidirectionalCompatibility(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name          string
-		rule          Rule
-		reqHeaderKey  string
-		reqHeaderVal  string
-		wantHeaderVal string
-	}{
-		{
-			name: "Case 1: both have Bearer -> keep as-is",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "Bearer dummy-token",
-				RealSecret:  "Bearer real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "Bearer dummy-token",
-			wantHeaderVal: "Bearer real-token",
-		},
-		{
-			name: "Case 2: only dummy has Bearer, real has no prefix -> auto prefix Bearer",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "Bearer dummy-token",
-				RealSecret:  "real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "Bearer dummy-token",
-			wantHeaderVal: "Bearer real-token",
-		},
-		{
-			name: "Case 3: SDK scenario, rule has no prefix, client sends Bearer -> auto prefix Bearer",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "dummy-token",
-				RealSecret:  "real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "Bearer dummy-token",
-			wantHeaderVal: "Bearer real-token",
-		},
-		{
-			name: "Case 4: curl scenario, client omits Bearer, real has Bearer -> keep real-token prefix as-is",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "Bearer dummy-token",
-				RealSecret:  "Bearer real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "dummy-token",
-			wantHeaderVal: "Bearer real-token",
-		},
-		{
-			name: "Case 5: custom non-Authorization header -> exact match and raw replace",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "X-API-Key",
-				DummySecret: "dummy-token",
-				RealSecret:  "real-token",
-			},
-			reqHeaderKey:  "X-API-Key",
-			reqHeaderVal:  "dummy-token",
-			wantHeaderVal: "real-token",
-		},
-		{
-			name: "Case 6: client has no Bearer, dummy has Bearer, real has no Bearer -> replace without Bearer",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "Bearer d-token",
-				RealSecret:  "r-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "d-token",
-			wantHeaderVal: "r-token",
-		},
-		{
-			name: "Case 7: Fail-Closed regression, wrong dummy token -> no replacement",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "Bearer valid-dummy",
-				RealSecret:  "valid-real",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "Bearer wrong-token",
-			wantHeaderVal: "Bearer wrong-token",
-		},
-		{
-			name: "Case 8: DummySecret empty regression -> replace with Bearer prefix",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "",
-				RealSecret:  "real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "Bearer any-token",
-			wantHeaderVal: "Bearer real-token",
-		},
-		{
-			name: "Case 8b: DummySecret empty regression (bare client token) -> replace without Bearer prefix",
-			rule: Rule{
-				Host:        "api.example.com",
-				HeaderKey:   "Authorization",
-				DummySecret: "",
-				RealSecret:  "real-token",
-			},
-			reqHeaderKey:  "Authorization",
-			reqHeaderVal:  "any-token",
-			wantHeaderVal: "real-token",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			tmpDir := t.TempDir()
-			certPath := filepath.Join(tmpDir, "ca.crt")
-			keyPath := filepath.Join(tmpDir, "ca.key")
-
-			cfg := &Config{
-				Enable: true,
-				Server: ServerConfig{
-					Addr:   "127.0.0.1:0",
-					CACert: certPath,
-					CAKey:  keyPath,
-				},
-				Rules: []Rule{tt.rule},
-			}
-
-			pm, err := NewManager(cfg, "")
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				_ = pm.Shutdown(context.Background())
-			})
-
-			req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/test", nil)
-			require.NoError(t, err)
-			req.Host = "api.example.com"
-			req.Header.Set(tt.reqHeaderKey, tt.reqHeaderVal)
-
-			invoker := &fakeInvoker{}
-			resp, err := pm.Interceptor(context.Background(), req, invoker)
-			require.NoError(t, err)
-			require.NotNil(t, resp)
-			assert.Equal(t, tt.wantHeaderVal, req.Header.Get(tt.reqHeaderKey))
-		})
-	}
+func newTestManager(t *testing.T) *ProxyManager {
+	t.Helper()
+	dir := t.TempDir()
+	pm, err := NewManager(filepath.Join(dir, "ca.crt"), filepath.Join(dir, "ca.key"))
+	require.NoError(t, err)
+	return pm
 }
 
 func TestProxyManager_StartBackgroundReportsBindSynchronously(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	newMgr := func(addr string) *ProxyManager {
-		pm, err := NewManager(&Config{
-			Enable: true,
-			Server: ServerConfig{Addr: addr, CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
-			Rules:  []Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "real-secret-123456", DummySecret: "dummy"}},
-		}, "")
-		require.NoError(t, err)
-		return pm
-	}
-
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = busy.Close() })
-	failing := newMgr(busy.Addr().String())
+	failing := newTestManager(t)
+	failing.server.Addr = busy.Addr().String()
 	require.Error(t, failing.StartBackground(nil))
 	assert.False(t, failing.Running(), "a failed bind is never running")
 
-	pm := newMgr("127.0.0.1:0")
+	pm := newTestManager(t)
+	assert.Empty(t, pm.URL(), "no URL before listening")
 	exited := make(chan error, 1)
 	require.NoError(t, pm.StartBackground(func(err error) { exited <- err }))
 	assert.True(t, pm.Running(), "running as soon as StartBackground returns")
+	assert.True(t, strings.HasPrefix(pm.URL(), "http://127.0.0.1:"), pm.URL())
+	assert.NotEqual(t, "127.0.0.1:0", pm.Addr(), "an ephemeral port is bound")
 	require.NoError(t, pm.Shutdown(context.Background()))
 	assert.NoError(t, <-exited)
 	assert.False(t, pm.Running())
 }
 
-func TestProxyManager_UserSecretSubstitution(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(tmpDir, "ca.crt"), CAKey: filepath.Join(tmpDir, "ca.key")},
-		Rules: []Rule{
-			{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "shared-real", DummySecret: "shared-dummy", Env: "MY_KEY"},
-			{Host: "other.example.com", HeaderKey: "x-api-key", RealSecret: "other-real", DummySecret: "other-dummy", Env: "OTHER_KEY"},
-		},
-	}
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
-
-	dummies, release, err := pm.RegisterUserSecrets([]UserSecret{{Env: "MY_KEY", Real: "user-real"}})
-	require.NoError(t, err)
-	dummy := dummies["MY_KEY"]
-	require.NotEmpty(t, dummy)
-	assert.NotContains(t, dummy, "user-real")
-
-	do := func(host, header, val string) string {
-		req, err := http.NewRequest(http.MethodPost, "https://"+host+"/x", nil)
-		require.NoError(t, err)
-		req.Host = host
-		req.Header.Set(header, val)
-		_, err = pm.Interceptor(context.Background(), req, &fakeInvoker{})
-		require.NoError(t, err)
-		return req.Header.Get(header)
-	}
-
-	assert.Equal(t, "Bearer user-real", do("api.example.com", "Authorization", "Bearer "+dummy))
-	// A dummy never works for a rule bound to another env name.
-	assert.Equal(t, "x-api-key-untouched", do("other.example.com", "x-api-key", "x-api-key-untouched"))
-	assert.Equal(t, dummy, do("other.example.com", "x-api-key", dummy))
-	// The rule's own dummy still maps to the shared real secret.
-	assert.Equal(t, "Bearer shared-real", do("api.example.com", "Authorization", "Bearer shared-dummy"))
-
-	release()
-	assert.Equal(t, "Bearer "+dummy, do("api.example.com", "Authorization", "Bearer "+dummy))
-
-	// The SDK may send the dummy in a header other than the rule's header_key.
-	assert.Equal(t, "user-real", func() string {
-		d2, rel2, err := pm.RegisterUserSecrets([]UserSecret{{Env: "MY_KEY", Real: "user-real"}})
-		require.NoError(t, err)
-		defer rel2()
-		req, err := http.NewRequest(http.MethodPost, "https://api.example.com/x?alt=sse", nil)
-		require.NoError(t, err)
-		req.Host = "api.example.com"
-		req.Header.Set("x-goog-api-key", d2["MY_KEY"])
-		_, err = pm.Interceptor(context.Background(), req, &fakeInvoker{})
-		require.NoError(t, err)
-		return req.Header.Get("x-goog-api-key")
-	}())
-}
-
 func TestProxyManager_HostBoundUserSecret(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-	cfg := &Config{
-		Enable: true,
-		Server: ServerConfig{Addr: "127.0.0.1:0", CACert: filepath.Join(tmpDir, "ca.crt"), CAKey: filepath.Join(tmpDir, "ca.key")},
-		Rules:  []Rule{{Host: "api.example.com", HeaderKey: "Authorization", RealSecret: "shared-real"}},
-	}
-	pm, err := NewManager(cfg, "")
-	require.NoError(t, err)
+	pm := newTestManager(t)
+	assert.Equal(t, []string{noHostsSentinel}, pm.mitmHosts(), "no key, no MITM")
 
 	dummies, release, err := pm.RegisterUserSecrets([]UserSecret{
 		{Env: "GEMINI_API_KEY", Real: "gem-real", Host: "Generativelanguage.googleapis.com", PathPrefix: "/v1beta", HeaderKey: "x-goog-api-key"},
-		{Env: "BEARER_KEY", Real: "bear-real", Host: "bearer.example.com"},
+		{Env: "BEARER_KEY", Real: "bear-real", Host: "bearer.example.com:443"},
+		{Env: "NO_HOST", Real: "ignored"},
 	})
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"api.example.com", "generativelanguage.googleapis.com", "bearer.example.com"}, pm.allHosts(*pm.rulesPtr.Load()))
+	assert.NotContains(t, dummies, "NO_HOST", "a key without a host is never served")
+	assert.ElementsMatch(t, []string{"generativelanguage.googleapis.com", "bearer.example.com"}, pm.mitmHosts())
 
 	do := func(host, path, header, val string) string {
 		req, err := http.NewRequest(http.MethodPost, "https://"+host+path, nil)
@@ -1001,6 +293,7 @@ func TestProxyManager_HostBoundUserSecret(t *testing.T) {
 	}
 
 	g := dummies["GEMINI_API_KEY"]
+	assert.NotContains(t, g, "gem-real")
 	assert.Equal(t, "gem-real", do("generativelanguage.googleapis.com", "/v1beta/models/x", "x-goog-api-key", g))
 	// Wrong path prefix, wrong header, wrong host: the dummy is left alone.
 	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v2/x", "x-goog-api-key", g))
@@ -1008,8 +301,10 @@ func TestProxyManager_HostBoundUserSecret(t *testing.T) {
 	assert.Equal(t, g, do("other.example.com", "/v1beta/x", "x-goog-api-key", g))
 	// Header defaults to Authorization and keeps the Bearer scheme.
 	assert.Equal(t, "Bearer bear-real", do("bearer.example.com", "/x", "Authorization", "Bearer "+dummies["BEARER_KEY"]))
+	// A value that is not a registered dummy is never touched.
+	assert.Equal(t, "Bearer user-own", do("bearer.example.com", "/x", "Authorization", "Bearer user-own"))
 
 	release()
-	assert.ElementsMatch(t, []string{"api.example.com"}, pm.allHosts(*pm.rulesPtr.Load()))
-	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v1beta/x", "x-goog-api-key", g))
+	assert.Equal(t, []string{noHostsSentinel}, pm.mitmHosts())
+	assert.Equal(t, g, do("generativelanguage.googleapis.com", "/v1beta/x", "x-goog-api-key", g), "released dummies stop working")
 }

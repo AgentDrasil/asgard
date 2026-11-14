@@ -60,8 +60,8 @@ func ValidateKeyName(keyName string) error {
 }
 
 // UserProxyKeyRule tells the proxy where a user's key is swapped in: requests
-// to Host (optionally under PathPrefix) carry the key in HeaderKey. An empty
-// Host means the key relies on an admin proxy rule with the same env name.
+// to Host (optionally under PathPrefix) carry the key in HeaderKey. A key
+// without a Host is legacy data: the runner cannot serve it.
 type UserProxyKeyRule struct {
 	Host       string `json:"host"`
 	PathPrefix string `json:"path_prefix"`

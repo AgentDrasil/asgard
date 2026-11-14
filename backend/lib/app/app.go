@@ -25,7 +25,6 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
@@ -148,7 +147,6 @@ type App struct {
 	db           *gorm.DB
 	server       *api.Server
 	scheduler    *cleanup.Scheduler
-	proxyManager *proxy.ProxyManager
 	runnerHub    *runnerhub.Hub
 	stopWatchers []context.CancelFunc
 	stopOnce     sync.Once
@@ -206,7 +204,6 @@ func New(opts ...Option) (*App, error) {
 	var agentStore *config.AgentStore
 	// stopTree and stopAgents stop the etcd watchers started below.
 	var stopTree, stopAgents context.CancelFunc
-	var proxyHolder atomic.Pointer[proxy.ProxyManager]
 	var hubHolder atomic.Pointer[runnerhub.Hub]
 	var serverHolder atomic.Pointer[api.Server]
 	var resolvedConfigPath string
@@ -241,24 +238,9 @@ func New(opts ...Option) (*App, error) {
 				if newTree == nil {
 					return
 				}
-				log.Info().Msg("etcd configuration update detected, reloading proxy and main config")
+				log.Info().Msg("etcd configuration update detected, reloading main config")
 				syncGCPSAKey(&newTree.Credentials)
-				newProxy := newTree.Asgard.Proxy
-				conf.SetProxy(&newProxy)
 				reloadRunnerConfig(conf, newTree.Asgard.Config.Runner, diagnostics, hubHolder.Load())
-				if pm := proxyHolder.Load(); pm != nil {
-					if err := pm.Reload(&newProxy); err != nil {
-						log.Error().Err(err).Msg("failed to live-reload proxy configuration from etcd")
-						if diagnostics != nil {
-							diagnostics.AddError("proxy", err.Error())
-						}
-					} else {
-						log.Info().Msg("proxy configuration live-reloaded successfully from etcd")
-						if diagnostics != nil {
-							diagnostics.ResetSource("proxy")
-						}
-					}
-				}
 			})
 			var startErr error
 			stopTree, startErr = config.StartBounded(context.Background(), configLoadTimeout, treeMgr.Start)
@@ -283,10 +265,6 @@ func New(opts ...Option) (*App, error) {
 		syncGCPSAKey(&treeCfg.Credentials)
 		mainCfg := treeCfg.Asgard.Config.Clone()
 		conf = mainCfg
-		if treeCfg.Asgard.Proxy.Enable || len(treeCfg.Asgard.Proxy.Rules) > 0 {
-			proxyCfg := treeCfg.Asgard.Proxy
-			conf.SetProxy(&proxyCfg)
-		}
 		if err := conf.ApplyDefaultsAndValidate(); err != nil {
 			if stopTree != nil {
 				stopTree()
@@ -386,22 +364,6 @@ func New(opts ...Option) (*App, error) {
 		}
 	}
 
-	// 7. Initialize Proxy Manager if enabled (R7 degrade philosophy)
-	var proxyMgr *proxy.ProxyManager
-	if conf != nil && conf.IsProxyEnabled() {
-		resolvedProxyConfigPath := conf.ResolvedProxyConfigPath()
-		var pErr error
-		proxyMgr, pErr = proxy.NewManager(conf.GetProxy(), resolvedProxyConfigPath)
-		if pErr != nil {
-			log.Warn().Err(pErr).Msg("failed to initialize proxy manager, entering degraded mode")
-			diagnostics.AddError("proxy", pErr.Error())
-			proxyMgr = nil
-		}
-	}
-	if proxyMgr != nil {
-		proxyHolder.Store(proxyMgr)
-	}
-
 	// 7b. Start the runner hub when the runner section is configured.
 	var hub *runnerhub.Hub
 	if rc := conf.GetRunner(); rc != nil {
@@ -459,7 +421,6 @@ func New(opts ...Option) (*App, error) {
 	apiOpts := []api.ServerOption{
 		api.WithDiagnostics(diagnostics),
 		api.WithConfigPath(resolvedConfigPath),
-		api.WithProxyManager(proxyMgr),
 	}
 	if hub != nil {
 		apiOpts = append(apiOpts, api.WithRunnerHub(hub))
@@ -496,9 +457,6 @@ func New(opts ...Option) (*App, error) {
 		}
 		if agentStore != nil {
 			agentStore.Close()
-		}
-		if proxyMgr != nil {
-			_ = proxyMgr.Shutdown(context.Background())
 		}
 		if scheduler != nil {
 			_ = scheduler.Shutdown()
@@ -552,7 +510,6 @@ func New(opts ...Option) (*App, error) {
 		db:           database,
 		server:       srv,
 		scheduler:    scheduler,
-		proxyManager: proxyMgr,
 		runnerHub:    hub,
 	}, nil
 }
@@ -628,46 +585,22 @@ func (a *App) Server() *api.Server {
 	return a.server
 }
 
-// ProxyManager returns the underlying proxy manager of the App.
-func (a *App) ProxyManager() *proxy.ProxyManager {
-	if a == nil {
-		return nil
-	}
-	return a.proxyManager
-}
-
-// Start starts the underlying HTTP server and proxy server, and blocks until exit.
+// Start starts the underlying HTTP server and blocks until exit.
 func (a *App) Start() error {
 	if a == nil || a.server == nil {
 		return errors.New("app server is not initialized")
 	}
 
-	if a.proxyManager != nil {
-		go func() {
-			if err := a.proxyManager.Start(); err != nil {
-				log.Warn().Err(err).Msg("proxy manager server failed to start, entering degraded mode")
-				if a.server != nil && a.server.Diagnostics() != nil {
-					a.server.Diagnostics().AddError("proxy", err.Error())
-				}
-			}
-		}()
-	}
-
 	return a.server.Start()
 }
 
-// Stop performs idempotent graceful shutdown in strict order: proxyManager -> server -> scheduler.
+// Stop performs idempotent graceful shutdown in strict order: server -> scheduler.
 func (a *App) Stop(ctx context.Context) error {
 	if a == nil {
 		return nil
 	}
 	a.stopOnce.Do(func() {
 		var errs []error
-		if a.proxyManager != nil {
-			if err := a.proxyManager.Shutdown(ctx); err != nil {
-				errs = append(errs, fmt.Errorf("proxy manager shutdown failed: %w", err))
-			}
-		}
 		if a.runnerHub != nil {
 			a.runnerHub.Stop()
 		}

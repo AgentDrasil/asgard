@@ -94,11 +94,6 @@ providers:
 	assert.Equal(t, "https://asgard.example.com", cfg.Asgard.Config.Host)
 	assert.Equal(t, "test-gemini-key", cfg.Asgard.Config.GeminiAPIKey)
 
-	// Validate Proxy
-	assert.True(t, cfg.Asgard.Proxy.Enable)
-	assert.Equal(t, "127.0.0.1:8082", cfg.Asgard.Proxy.Server.Addr)
-	assert.Len(t, cfg.Asgard.Proxy.Rules, 1)
-
 	// Validate AW
 	assert.True(t, cfg.AW.IsModelAllowed("agy", "gemini-1.5-pro"))
 

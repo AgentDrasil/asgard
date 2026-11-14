@@ -1,18 +1,15 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"sync"
 
 	"github.com/goccy/go-yaml"
-	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
@@ -102,16 +99,16 @@ type Config struct {
 	CommentLang                        string                    `yaml:"comment_lang"`
 	UILang                             string                    `yaml:"ui_lang"`
 	Providers                          []string                  `yaml:"providers" json:"providers,omitempty"`
-	Proxy                              *proxy.Config             `yaml:"proxy" json:"proxy,omitempty"`
 	KMSKeyName                         string                    `yaml:"kms_key_name" json:"kms_key_name,omitempty"`
 	// Runner enables the runner listener. A nil value leaves it disabled.
 	Runner *RunnerConfig `yaml:"runner" json:"-"`
 	// Auth enables optional OIDC/OAuth authentication. A nil value leaves every
 	// API route unauthenticated.
-	Auth       *auth.Config `yaml:"auth" json:"auth,omitempty"`
-	ConfigPath string       `yaml:"-" json:"-"`
-	proxyMu    sync.RWMutex `yaml:"-" json:"-"`
-	runnerMu   sync.RWMutex `yaml:"-" json:"-"`
+	Auth           *auth.Config          `yaml:"auth" json:"auth,omitempty"`
+	ConfigPath     string                `yaml:"-" json:"-"`
+	runnerMu       sync.RWMutex          `yaml:"-" json:"-"`
+	sandboxProxyMu sync.RWMutex          `yaml:"-" json:"-"`
+	sandboxProxy   *SandboxProxyEndpoint `yaml:"-" json:"-"`
 }
 
 // GetRunner returns a copy of the runner section (nil when not configured).
@@ -259,124 +256,46 @@ func (c *Config) LanguageRules() string {
 - Code Comments and Docstrings: %s`, c.GetChatLang(), c.GetDocLang(), c.GetCommentLang())
 }
 
-func (c *Config) GetProxy() *proxy.Config {
-	if c == nil {
-		return nil
-	}
-	c.proxyMu.RLock()
-	defer c.proxyMu.RUnlock()
-	return c.Proxy
+// SandboxProxyEndpoint is where sandboxes reach the runner's credential proxy.
+type SandboxProxyEndpoint struct {
+	Addr   string // proxy URL, e.g. http://127.0.0.1:41234
+	CACert string
+	CAKey  string
 }
 
-func (c *Config) SetProxy(cfg *proxy.Config) {
+// SetSandboxProxy records the runner's credential proxy endpoint; a nil
+// endpoint (the backend, where no proxy runs) leaves sandboxes proxy-less.
+func (c *Config) SetSandboxProxy(ep *SandboxProxyEndpoint) {
 	if c == nil {
 		return
 	}
-	c.proxyMu.Lock()
-	c.Proxy = cfg
-	c.proxyMu.Unlock()
+	c.sandboxProxyMu.Lock()
+	c.sandboxProxy = ep
+	c.sandboxProxyMu.Unlock()
 }
 
-func (c *Config) IsProxyEnabled() bool {
-	if c == nil {
-		return false
-	}
-	p := c.GetProxy()
-	return p != nil && p.Enable
-}
-
-// ProxyEnvNames returns a sorted, deduplicated slice of environment variable names
-// configured in proxy rules if proxy is enabled.
-func (c *Config) ProxyEnvNames() []string {
-	if c == nil {
-		return nil
-	}
-	p := c.GetProxy()
-	if p == nil || !p.Enable {
-		return nil
-	}
-	return p.EnvNames()
-}
-
-// SandboxProxyOptions builds the bwrap proxy sandbox options for this config.
-// It returns a disabled config when the proxy is not enabled.
+// SandboxProxyOptions builds the bwrap sandbox options derived from this
+// config. The credential proxy runs on the runner only (runner/lib/sandbox
+// records its endpoint); on the backend the proxy stays off.
 func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
-	var typesafeKey string
-	var geminiKey string
-	var compassModel string
-	if c != nil {
-		typesafeKey = c.GetTypesafeAPIKey()
-		geminiKey = c.GetGeminiAPIKey()
-		compassModel = c.GetGeminiModelForCommandResultCompass()
-	}
-
-	p := c.GetProxy()
-	if p == nil || !p.Enable {
-		log.Debug().Msg("sandbox proxy options: proxy is disabled or nil")
-		return bwrap.ProxySandboxConfig{
-			TypesafeAPIKey: typesafeKey,
-			GeminiAPIKey:   geminiKey,
-			CompassModel:   compassModel,
-		}
+	if c == nil {
+		return bwrap.ProxySandboxConfig{}
 	}
 	opts := bwrap.ProxySandboxConfig{
-		Enabled:         true,
-		ProxyAddr:       p.ProxyHost(),
-		CACert:          p.ResolvedCACertPath(),
-		CAKey:           p.ResolvedCAKeyPath(),
-		ProxyConfigPath: c.ResolvedProxyConfigPath(),
-		EnvVars:         p.EnvVars(),
-		TypesafeAPIKey:  typesafeKey,
-		GeminiAPIKey:    geminiKey,
-		CompassModel:    compassModel,
+		TypesafeAPIKey: c.GetTypesafeAPIKey(),
+		GeminiAPIKey:   c.GetGeminiAPIKey(),
+		CompassModel:   c.GetGeminiModelForCommandResultCompass(),
 	}
-	log.Debug().
-		Bool("enabled", opts.Enabled).
-		Str("proxy_addr", opts.ProxyAddr).
-		Strs("env_names", p.EnvNames()).
-		Msg("sandbox proxy options built")
+	c.sandboxProxyMu.RLock()
+	ep := c.sandboxProxy
+	c.sandboxProxyMu.RUnlock()
+	if ep != nil {
+		opts.Enabled = true
+		opts.ProxyAddr = ep.Addr
+		opts.CACert = ep.CACert
+		opts.CAKey = ep.CAKey
+	}
 	return opts
-}
-
-func (c *Config) ProxyHost() string {
-	p := c.GetProxy()
-	if c == nil || p == nil {
-		return "http://127.0.0.1:8082"
-	}
-	return p.ProxyHost()
-}
-
-func (c *Config) ProxyAddr() string {
-	p := c.GetProxy()
-	if c == nil || p == nil || p.Server.Addr == "" {
-		return "127.0.0.1:8082"
-	}
-	return p.Server.Addr
-}
-
-func (c *Config) ProxyCACertPath() string {
-	p := c.GetProxy()
-	if c == nil || p == nil {
-		return ""
-	}
-	return p.ResolvedCACertPath()
-}
-
-func (c *Config) ProxyCAKeyPath() string {
-	p := c.GetProxy()
-	if c == nil || p == nil {
-		return ""
-	}
-	return p.ResolvedCAKeyPath()
-}
-
-// ResolvedProxyConfigPath returns the fixed standalone proxy config path
-// (~/asgard/config/proxy.yaml).
-func (c *Config) ResolvedProxyConfigPath() string {
-	if c == nil {
-		return ""
-	}
-	return paths.ProxyConfigFile()
 }
 
 func (c *Config) validate() error {
@@ -449,27 +368,6 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.ConfigPath = path
-
-	if cfg.Proxy == nil {
-		resolvedProxyPath := paths.ProxyConfigFile()
-		if _, statErr := os.Stat(resolvedProxyPath); statErr == nil {
-			proxyCfg, pErr := proxy.LoadConfigFile(resolvedProxyPath)
-			if pErr != nil {
-				if os.IsPermission(pErr) || errors.Is(pErr, os.ErrPermission) {
-					log.Warn().Err(pErr).Str("path", resolvedProxyPath).Msg("proxy config exists but is not accessible due to permission error; proxy disabled")
-				} else {
-					return nil, fmt.Errorf("failed to load proxy config from %s: %w", resolvedProxyPath, pErr)
-				}
-			} else if proxyCfg != nil {
-				cfg.Proxy = proxyCfg
-				log.Info().
-					Str("path", resolvedProxyPath).
-					Bool("enable", proxyCfg.Enable).
-					Int("rules_count", len(proxyCfg.Rules)).
-					Msg("loaded proxy config")
-			}
-		}
-	}
 
 	return cfg, nil
 }

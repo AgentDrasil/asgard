@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/db"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
@@ -392,177 +390,6 @@ func TestApp_New_SelectiveValidation_DisabledProviderSkipped(t *testing.T) {
 	})
 }
 
-func TestApp_ProxyLifecycle_StartAndStop(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	conf := createTestConfig(t, tempDir)
-	testDB := db.NewDBForTest(t)
-
-	proxyPort := getFreePort(t)
-	caCertPath := filepath.Join(tempDir, "ca.crt")
-	caKeyPath := filepath.Join(tempDir, "ca.key")
-
-	conf.Proxy = &proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{
-			Addr:   fmt.Sprintf("127.0.0.1:%d", proxyPort),
-			CACert: caCertPath,
-			CAKey:  caKeyPath,
-		},
-		Rules: []proxy.Rule{
-			{
-				Host:       "api.openai.com",
-				HeaderKey:  "Authorization",
-				RealSecret: "sk-real-test-12345",
-			},
-		},
-	}
-
-	appInstance, err := New(
-		WithConfig(conf),
-		WithDB(testDB),
-		WithSkipAgentValidation(true),
-		WithSkipSSHSetup(true),
-	)
-	require.NoError(t, err)
-	require.NotNil(t, appInstance)
-	require.NotNil(t, appInstance.ProxyManager())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- Run(
-			ctx,
-			WithConfig(conf),
-			WithDB(testDB),
-			WithSkipAgentValidation(true),
-			WithSkipSSHSetup(true),
-		)
-	}()
-
-	// Wait for proxy port to be bound
-	require.Eventually(t, func() bool {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", proxyPort), 50*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return true
-		}
-		return false
-	}, 5*time.Second, 20*time.Millisecond, "proxy port did not bind in time")
-
-	// Verify server port is also bound
-	require.Eventually(t, func() bool {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(conf.Host, fmt.Sprintf("%d", conf.Port)), 50*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return true
-		}
-		return false
-	}, 5*time.Second, 20*time.Millisecond, "server port did not bind in time")
-
-	cancel()
-
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not exit within timeout after context cancellation")
-	}
-
-	// Clean up appInstance
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stopCancel()
-	_ = appInstance.Stop(stopCtx)
-}
-
-func TestApp_ProxyPortCollision_Degraded(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	conf := createTestConfig(t, tempDir)
-	testDB := db.NewDBForTest(t)
-
-	// Occupy proxy port to simulate collision
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = listener.Close()
-	})
-	occupiedPort := listener.Addr().(*net.TCPAddr).Port
-
-	caCertPath := filepath.Join(tempDir, "ca.crt")
-	caKeyPath := filepath.Join(tempDir, "ca.key")
-
-	conf.Proxy = &proxy.Config{
-		Enable: true,
-		Server: proxy.ServerConfig{
-			Addr:   fmt.Sprintf("127.0.0.1:%d", occupiedPort),
-			CACert: caCertPath,
-			CAKey:  caKeyPath,
-		},
-		Rules: []proxy.Rule{
-			{
-				Host:       "api.openai.com",
-				HeaderKey:  "Authorization",
-				RealSecret: "sk-real-test-12345",
-			},
-		},
-	}
-
-	appInstance, err := New(
-		WithConfig(conf),
-		WithDB(testDB),
-		WithSkipAgentValidation(true),
-		WithSkipSSHSetup(true),
-	)
-	require.NoError(t, err)
-	require.NotNil(t, appInstance)
-	require.NotNil(t, appInstance.ProxyManager())
-
-	// Use App.Start() so the diagnostics of this very App instance are
-	// observable (Run creates its own inner App).
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- appInstance.Start()
-	}()
-
-	// Wait for server to be reachable even though proxy port had collision (degraded mode)
-	require.Eventually(t, func() bool {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(conf.Host, fmt.Sprintf("%d", conf.Port)), 50*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return true
-		}
-		return false
-	}, 5*time.Second, 20*time.Millisecond, "server did not bind port in time during degraded mode")
-
-	// The proxy listen failure must be recorded in diagnostics (app.go:353-355)
-	require.Eventually(t, func() bool {
-		snap := appInstance.Server().Diagnostics().Snapshot()
-		if snap.Status != "degraded" {
-			return false
-		}
-		for _, e := range snap.Errors {
-			if strings.Contains(e, "proxy server listen error") {
-				return true
-			}
-		}
-		return false
-	}, 5*time.Second, 50*time.Millisecond, "proxy diagnostics entry was not recorded in degraded mode")
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stopCancel()
-	_ = appInstance.Stop(stopCtx)
-
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Start did not exit within timeout after Stop")
-	}
-}
-
 func TestApp_New_FailFastWithoutEtcd(t *testing.T) {
 	t.Setenv("ETCD_ENDPOINTS", "")
 
@@ -585,16 +412,6 @@ internal_port: 8081
 db: sqlite
 gemini_api_key: test-gemini-key
 gemini_model_for_chat_title: gemini-3.1-flash-lite
-`),
-		"asgard/proxy.yaml": []byte(`
-enable: true
-server:
-  addr: 127.0.0.1:8082
-rules:
-  - host: api.x.ai
-    header_key: Authorization
-    dummy_secret: Bearer dummy
-    real_secret: Bearer real
 `),
 		"aw/config.yaml":                          []byte("agents: []\n"),
 		"credentials/simplest/key.yaml":           []byte("providers: {}\n"),
@@ -620,86 +437,7 @@ rules:
 	require.NoError(t, err)
 	require.NotNil(t, appInstance)
 	assert.Equal(t, 8080, appInstance.Config().Port)
-	assert.True(t, appInstance.Config().IsProxyEnabled())
 	assert.Equal(t, []byte("{}"), mgr.Get().Credentials.Auth)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = appInstance.Stop(ctx)
-}
-
-func TestApp_LiveReloadProxyFromEtcdSource(t *testing.T) {
-	kvs := configlib.FlattenKVs{
-		"asgard/config.yaml": []byte(`
-debug: true
-host: https://asgard.example.com
-internal_port: 8081
-db: sqlite
-gemini_api_key: test-gemini-key
-gemini_model_for_chat_title: gemini-3.1-flash-lite
-`),
-		"asgard/proxy.yaml": []byte(`
-enable: true
-server:
-  addr: 127.0.0.1:0
-rules:
-  - host: api.x.ai
-    header_key: Authorization
-    dummy_secret: Bearer dummy
-    real_secret: Bearer initial-secret
-`),
-		"aw/config.yaml":                          []byte("agents: []\n"),
-		"credentials/simplest/key.yaml":           []byte("providers: {}\n"),
-		"simplest/models.yaml":                    []byte("models: []\n"),
-		"simplest/providers.yaml":                 []byte("providers: {}\n"),
-		"credentials/auth.json":                   []byte("{}"),
-		"credentials/agy/antigravity-oauth-token": []byte("tok"),
-		"credentials/gemini-api-key":              []byte("key"),
-		"credentials/xai-api-key":                 []byte("xkey"),
-		"credentials/ssh/key":                     []byte("ssh-key"),
-		"credentials/ssh/key.pub":                 []byte("ssh-pub"),
-		"credentials/ssh/config":                  []byte("ssh-config"),
-	}
-
-	src := configlib.NewMemSource(kvs)
-	mgr := configlib.NewManager[config.AsgardTreeConfig](src)
-
-	appInstance, err := New(
-		WithTreeManager(mgr),
-		WithSkipAgentValidation(true),
-		WithSkipSSHSetup(true),
-	)
-	require.NoError(t, err)
-	require.NotNil(t, appInstance)
-	require.NotNil(t, appInstance.ProxyManager())
-
-	// Verify initial proxy rules
-	rules := appInstance.ProxyManager().GetMaskedRules()
-	require.Len(t, rules, 1)
-	assert.Equal(t, "api.x.ai", rules[0].Host)
-
-	// Now update source with new proxy rule
-	updatedKVs := make(configlib.FlattenKVs)
-	for k, v := range kvs {
-		updatedKVs[k] = v
-	}
-	updatedKVs["asgard/proxy.yaml"] = []byte(`
-enable: true
-server:
-  addr: 127.0.0.1:0
-rules:
-  - host: api.openai.com
-    header_key: Authorization
-    dummy_secret: Bearer dummy-openai
-    real_secret: Bearer updated-secret
-`)
-	src.Set(updatedKVs)
-
-	// Wait up to 2 seconds for OnChange callback to fire and reload ProxyManager
-	assert.Eventually(t, func() bool {
-		r := appInstance.ProxyManager().GetMaskedRules()
-		return len(r) == 1 && r[0].Host == "api.openai.com"
-	}, 2*time.Second, 20*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -423,8 +423,9 @@ export const zhCN: MessageSchema = {
     proxySecretsHeader: "请求头",
     proxySecretsHeaderPlaceholder: "Authorization（默认）",
     proxySecretsRuleNotice:
-      "代理在何处替换此密钥：访问该域名的请求会在指定请求头里带占位符，代理将其换成你的真实密钥。留空则依赖管理员配置的同名代理规则。",
-    proxySecretsHostRequired: "设置路径前缀或请求头时必须填写域名",
+      "代理在何处替换此密钥：沙箱内该变量是占位符，访问此域名且在该请求头里带着占位符的请求，会被换成你的真实密钥。路径前缀可选，请求头默认为 Authorization。",
+    proxySecretsNoHost: "未设置域名：此密钥暂不可用，请编辑并填写域名。",
+    proxySecretsHostRequired: "必须填写域名",
     proxySecretsHostInvalid: "请输入纯域名，例如 api.example.com",
     proxySecretsPathInvalid: "路径前缀必须以 / 开头",
     proxySecretsHeaderInvalid: "不是有效的 HTTP 请求头名称",

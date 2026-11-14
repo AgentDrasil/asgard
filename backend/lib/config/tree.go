@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 )
 
 // SimplestRawScope maps the simplest/ sub-namespace raw configuration bytes.
@@ -121,8 +120,7 @@ func (s *SSHScope) Fingerprint() []byte {
 
 // AsgardScope maps the asgard/ sub-namespace.
 type AsgardScope struct {
-	Config Config       `key:"config.yaml"`
-	Proxy  proxy.Config `key:"proxy.yaml"`
+	Config Config `key:"config.yaml"`
 }
 
 // AsgardTreeConfig is the root configuration struct mapping the etcd prefix tree.

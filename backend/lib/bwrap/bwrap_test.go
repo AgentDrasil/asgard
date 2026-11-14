@@ -504,18 +504,15 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 
 	caCertPath := filepath.Join(tmpDir, "ca.crt")
 	caKeyPath := filepath.Join(tmpDir, "ca.key")
-	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
 
 	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
 	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
-	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
 
 	proxyOpt := ProxySandboxConfig{
-		Enabled:         true,
-		ProxyAddr:       "http://127.0.0.1:8082",
-		CACert:          caCertPath,
-		CAKey:           caKeyPath,
-		ProxyConfigPath: proxyConfigPath,
+		Enabled:   true,
+		ProxyAddr: "http://127.0.0.1:8082",
+		CACert:    caCertPath,
+		CAKey:     caKeyPath,
 		EnvVars: map[string]string{
 			"OPENAI_API_KEY": "dummy-openai-key",
 		},
@@ -526,9 +523,8 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	// 1. Verify masking of ca.key and proxy.yaml with /dev/null
+	// 1. Verify masking of ca.key with /dev/null
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
-	assert.Contains(t, argStr, "--ro-bind /dev/null "+proxyConfigPath)
 
 	// 2. Verify CA bundle path is in isolated host path and mounted to sandbox CA bundle path
 	expectedIsolatedBundle := filepath.Join(runnerpaths.CABundleDir("chat-123"), "merged-ca-certificates.crt")
@@ -562,28 +558,20 @@ func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
 	}
 
 	caCertPath := filepath.Join(tmpDir, "ca.crt")
-	caKeyPath := filepath.Join(tmpDir, "ca.key")
-	proxyConfigPath := filepath.Join(tmpDir, "proxy.yaml")
-
 	require.NoError(t, os.WriteFile(caCertPath, []byte("dummy-cert"), 0644))
-	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
-	require.NoError(t, os.WriteFile(proxyConfigPath, []byte("dummy-proxy-conf"), 0644))
 
-	proxyOpt := ProxySandboxConfig{
-		Enabled:         true,
-		ProxyAddr:       "http://127.0.0.1:8082",
-		CACert:          caCertPath,
-		CAKey:           caKeyPath,
-		ProxyConfigPath: proxyConfigPath,
-	}
-
-	// Test with AgentConfig containing ancestor directory of proxyConfigPath
+	// The CA key lives under a directory the agent config mounts read-write.
 	ancestorDir := filepath.Join(tmpDir, "ancestor_dir")
 	require.NoError(t, os.MkdirAll(ancestorDir, 0755))
-	nestedProxyConfigPath := filepath.Join(ancestorDir, "nested_proxy.yaml")
-	require.NoError(t, os.WriteFile(nestedProxyConfigPath, []byte("nested"), 0644))
+	caKeyPath := filepath.Join(ancestorDir, "ca.key")
+	require.NoError(t, os.WriteFile(caKeyPath, []byte("dummy-key"), 0600))
 
-	proxyOpt.ProxyConfigPath = nestedProxyConfigPath
+	proxyOpt := ProxySandboxConfig{
+		Enabled:   true,
+		ProxyAddr: "http://127.0.0.1:8082",
+		CACert:    caCertPath,
+		CAKey:     caKeyPath,
+	}
 
 	agentCfg := &agentspec.AgentConfig{
 		MountDirs: agentspec.MountConfig{
@@ -597,24 +585,23 @@ func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
 
 	argStr := strings.Join(cmd.Args, " ")
 
-	// 1. Verify masking of ca.key and proxy.yaml with /dev/null
+	// 1. Verify masking of ca.key with /dev/null
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
-	assert.Contains(t, argStr, "--ro-bind /dev/null "+nestedProxyConfigPath)
 
-	// Verify that the mask for nestedProxyConfigPath appears AFTER the ancestorDir bind
+	// Verify that the mask for the CA key appears AFTER the ancestorDir bind
 	ancestorBindIdx := -1
 	proxyMaskIdx := -1
 	for i := 0; i < len(cmd.Args)-2; i++ {
 		if cmd.Args[i] == "--bind" && cmd.Args[i+1] == ancestorDir {
 			ancestorBindIdx = i
 		}
-		if cmd.Args[i] == "--ro-bind" && cmd.Args[i+1] == "/dev/null" && cmd.Args[i+2] == nestedProxyConfigPath {
+		if cmd.Args[i] == "--ro-bind" && cmd.Args[i+1] == "/dev/null" && cmd.Args[i+2] == caKeyPath {
 			proxyMaskIdx = i
 		}
 	}
 	assert.Greater(t, ancestorBindIdx, -1, "expected ancestorDir --bind in args")
-	assert.Greater(t, proxyMaskIdx, -1, "expected nestedProxyConfigPath --ro-bind in args")
-	assert.Greater(t, proxyMaskIdx, ancestorBindIdx, "proxy masking must come AFTER ancestor bind to avoid being shadowed")
+	assert.Greater(t, proxyMaskIdx, -1, "expected ca.key --ro-bind in args")
+	assert.Greater(t, proxyMaskIdx, ancestorBindIdx, "ca.key masking must come AFTER ancestor bind to avoid being shadowed")
 
 	// 2. Strict constraint: Agent sandbox MUST NOT have proxy env or CA overrides
 	assert.NotContains(t, argStr, "HTTP_PROXY")
