@@ -263,9 +263,9 @@ onUnmounted(() => {
   <div class="flex-1 flex flex-col h-full overflow-hidden bg-base-100 min-w-0 relative">
     <!-- Header (Full width across top) -->
     <header
-      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex items-start justify-between shadow-sm shrink-0 min-w-0 transition-all duration-200"
+      class="px-3 py-2 sm:px-6 sm:py-3 bg-base-200 border-b border-base-300 flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-2 shadow-sm shrink-0 min-w-0 transition-all duration-200"
     >
-      <div class="flex items-start gap-2 min-w-0 pr-2">
+      <div class="flex items-start gap-2 min-w-0 flex-1 sm:pr-2">
         <button
           @click="emit('toggle-sidebar')"
           class="md:hidden btn btn-ghost btn-xs btn-square text-base-content/80 shrink-0 mt-0.5"
@@ -274,14 +274,16 @@ onUnmounted(() => {
           <Icon icon="mynaui:sidebar" class="h-5 w-5" />
         </button>
 
-        <div class="space-y-1 min-w-0">
+        <div class="space-y-1 min-w-0 flex-1">
           <button
             @click="emit('update:isDetailsOpen', !isDetailsOpen)"
-            class="flex items-center gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left truncate h-7 sm:h-8"
+            class="flex items-center gap-1.5 sm:gap-2 text-sm sm:text-md font-bold text-base-content hover:text-primary transition-colors cursor-pointer select-none text-left max-w-full min-w-0 h-7 sm:h-8"
             :title="$t('chat.toggleWorkspaceInfo')"
           >
             <Icon :icon="activeAgent?.icon || 'fluent-color:bot-24'" class="h-5 w-5 shrink-0" />
-            <span class="font-bold truncate">{{ activeAgent?.name || $t("chat.agent") }}</span>
+            <span class="font-bold truncate min-w-0">{{
+              activeAgent?.name || $t("chat.agent")
+            }}</span>
             <!-- Directory Lock Status Badge in Agent Header -->
             <span
               v-if="dirLock?.isWaitingForLock"
@@ -313,7 +315,7 @@ onUnmounted(() => {
           </button>
 
           <div v-if="isDetailsOpen" class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5">
-            <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate">
+            <p class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate max-w-full">
               {{ $t("chat.workspace") }}
               <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
                 formatPath(runDir)
@@ -321,7 +323,7 @@ onUnmounted(() => {
             </p>
             <p
               v-if="gitRoot"
-              class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate"
+              class="text-[11px] sm:text-xs text-base-content/60 font-mono truncate max-w-full"
             >
               {{ $t("chat.gitRoot") }}
               <span class="bg-base-300 px-1.5 py-0.5 rounded text-base-content truncate">{{
@@ -331,7 +333,7 @@ onUnmounted(() => {
             <!-- Lock details badge -->
             <div
               v-if="dirLock?.isLocked || dirLock?.isWaitingForLock"
-              class="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono truncate"
+              class="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] sm:text-xs font-mono truncate max-w-full"
               :class="
                 dirLock.isWaitingForLock
                   ? 'bg-warning/15 text-warning border border-warning/30'
@@ -363,7 +365,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 h-7 sm:h-8">
+      <div
+        class="flex items-center justify-end gap-1.5 sm:gap-2 shrink-0 min-w-0 flex-wrap sm:flex-nowrap min-h-7 sm:h-8"
+      >
         <!-- Unlock Session Button -->
         <button
           v-if="dirLock?.canUnlock"
@@ -372,7 +376,7 @@ onUnmounted(() => {
           :disabled="isUnlocking"
           :aria-busy="isUnlocking"
           :aria-label="t('dirlock.unlockTooltip')"
-          class="btn btn-xs btn-accent gap-1 text-[11px] h-7 sm:h-8"
+          class="btn btn-xs btn-accent gap-1 text-[11px] h-7 sm:h-8 mr-auto sm:mr-0"
           :title="t('dirlock.unlockTooltip')"
           data-testid="chat-header-unlock-button"
         >
