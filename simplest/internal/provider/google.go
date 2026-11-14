@@ -362,9 +362,6 @@ func (p *Gemini) Stream(ctx context.Context, model *types.Model, cx *types.Conte
 			HTTPClient:  p.client(),
 			HTTPOptions: genai.HTTPOptions{Headers: genaiHeaders(model.Headers)},
 		}
-		if model.BaseURL != "" {
-			cc.HTTPOptions.BaseURL = model.BaseURL
-		}
 		var policy *types.RetryPolicy
 		if opts != nil {
 			policy = opts.RetryPolicy

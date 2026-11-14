@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +77,28 @@ func gModel(url string) *types.Model {
 		Cost:  types.ModelCost{ModelCostRates: types.ModelCostRates{Input: 0.3, Output: 2.5}},
 		Input: []string{"text", "image"},
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func newTestGemini(apiKey string, srv *httptest.Server) *Gemini {
+	p := NewGemini(apiKey)
+	target, _ := url.Parse(srv.URL)
+	base := srv.Client().Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	p.Client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			cloned := req.Clone(req.Context())
+			cloned.URL.Scheme = target.Scheme
+			cloned.URL.Host = target.Host
+			return base.RoundTrip(cloned)
+		}),
+	}
+	return p
 }
 
 func simpleContext() *types.Context {
@@ -625,7 +648,7 @@ func TestProvidersStampTimestampAtStreamStart(t *testing.T) {
 		}, ":streamGenerateContent")
 		defer release()
 
-		ch := NewGemini("g-key").Stream(context.Background(), gModel(srv.URL), simpleContext(), nil)
+		ch := newTestGemini("g-key", srv).Stream(context.Background(), gModel(srv.URL), simpleContext(), nil)
 		var start int64
 		var done *types.DoneEvent
 		var errEv *types.StreamErrorEvent
@@ -666,7 +689,7 @@ func TestGeminiStreamHappyPath(t *testing.T) {
 	srv := sseServer(t, chunks, &captured, &hdr, ":streamGenerateContent")
 	defer srv.Close()
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	evs, done, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv != nil {
 		t.Fatalf("unexpected error: %+v", errEv.Message.ErrorMessage)
@@ -726,7 +749,7 @@ func TestGeminiMaxTokensLength(t *testing.T) {
 		`{"candidates":[{"content":{"parts":[{"text":"x"}]},"finishReason":"MAX_TOKENS"}]}`,
 	}, nil, nil, "")
 	defer srv.Close()
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	evs, done, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv != nil {
 		t.Fatal(errEv.Message.ErrorMessage)
@@ -742,7 +765,7 @@ func TestGeminiNoFinishReasonFails(t *testing.T) {
 		`{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`,
 	}, nil, nil, "")
 	defer srv.Close()
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, _, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv == nil || !strings.Contains(errEv.Message.ErrorMessage, "without a finish reason") {
 		t.Fatalf("expected no-finish-reason error, got %+v", errEv)
@@ -757,7 +780,7 @@ func TestGeminiSafetyFinishIsError(t *testing.T) {
 		`{"candidates":[{"finishReason":"SAFETY"}]}`,
 	}, nil, nil, "")
 	defer srv.Close()
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, _, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv == nil || !strings.Contains(errEv.Message.ErrorMessage, "SAFETY") {
 		t.Fatalf("expected SAFETY error, got %+v", errEv)
@@ -1773,7 +1796,7 @@ func TestGoogleGemini_MetadataExtraction(t *testing.T) {
 			srv := sseServer(t, tt.chunks, nil, nil, ":streamGenerateContent")
 			t.Cleanup(srv.Close)
 
-			p := NewGemini("test-api-key")
+			p := newTestGemini("test-api-key", srv)
 			evs, done, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 			require.Nil(t, errEv)
 			require.NotNil(t, done)
@@ -2295,7 +2318,7 @@ func TestGeminiSamplingParamsMapping(t *testing.T) {
 		"unknown_key":       "ignored",
 	}
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), &types.StreamOptions{}))
 	require.Nil(t, errEv)
 
@@ -2342,7 +2365,7 @@ func TestGeminiSamplingParamsPrecedence(t *testing.T) {
 		},
 	}
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
 	require.Nil(t, errEv)
 

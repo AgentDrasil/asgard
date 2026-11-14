@@ -243,7 +243,7 @@ func TestGeminiSendsWireModel(t *testing.T) {
 				Content: json.RawMessage(`[{"type":"text","text":"data"}]`)},
 		},
 	}
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 	m.ID = "my-gemini-alias"
 	m.Model = "gemini-3-flash"
@@ -286,7 +286,7 @@ func TestGeminiThinkingLevelInRequest(t *testing.T) {
 	}, &captured, nil, "")
 	defer srv.Close()
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 	opts := &types.StreamOptions{ThinkingLevel: types.ThinkingMedium}
 	_, _, errEv := drain(p.Stream(context.Background(), m, simpleContext(), opts))
@@ -326,7 +326,7 @@ func TestGeminiToolCallIDEchoedInRequest(t *testing.T) {
 				Content: json.RawMessage(`[{"type":"text","text":"data"}]`)},
 		},
 	}
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, _, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), cx, nil))
 	if errEv != nil {
 		t.Fatal(errEv.Message.ErrorMessage)
@@ -354,7 +354,7 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	srv := sseServer(t, chunks, &captured, nil, "")
 	defer srv.Close()
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	_, done, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), simpleContext(), nil))
 	if errEv != nil {
 		t.Fatal(errEv.Message.ErrorMessage)
@@ -482,7 +482,7 @@ func TestGeminiRetryOn503(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 	opts := &types.StreamOptions{
 		RetryPolicy: &types.RetryPolicy{
@@ -522,7 +522,7 @@ func TestGemini_BeforeProviderRequest_NoOp(t *testing.T) {
 	var hookCalled bool
 	var streamEvents []string
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 	opts := &types.StreamOptions{
 		BeforeProviderRequest: func(req *http.Request, body []byte) ([]byte, error) {
@@ -606,7 +606,7 @@ func TestGemini4StreamSendsThinkingLevel(t *testing.T) {
 	}, &captured, nil, "")
 	defer srv.Close()
 
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 	m.ID = "gemini-4-argon"
 	opts := &types.StreamOptions{ThinkingLevel: types.ThinkingMedium}

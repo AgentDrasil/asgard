@@ -156,7 +156,7 @@ func TestGeminiUserAgentDefaultAndOverride(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		p := NewGemini("g-key")
+		p := newTestGemini("g-key", srv)
 		_, _, errEv := drain(p.Stream(context.Background(), gModel(srv.URL), cx, nil))
 		require.Nil(t, errEv)
 		assert.Equal(t, defaultUserAgent(), hdr.Get("User-Agent"))
@@ -174,7 +174,7 @@ func TestGeminiUserAgentDefaultAndOverride(t *testing.T) {
 
 		m := gModel(srv.URL)
 		m.Headers = map[string]string{"user-agent": "gem-override/1.0"}
-		p := NewGemini("g-key")
+		p := newTestGemini("g-key", srv)
 		_, _, errEv := drain(p.Stream(context.Background(), m, cx, nil))
 		require.Nil(t, errEv)
 		assert.Equal(t, "gem-override/1.0", hdr.Get("User-Agent"))

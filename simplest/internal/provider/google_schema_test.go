@@ -235,7 +235,7 @@ func TestGeminiRewritesConstAsEnumInRequest(t *testing.T) {
 			}`),
 		},
 	}
-	p := NewGemini("g-key")
+	p := newTestGemini("g-key", srv)
 	m := gModel(srv.URL)
 
 	_, done, errEv := drain(p.Stream(context.Background(), m, cx, nil))
