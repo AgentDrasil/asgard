@@ -41,7 +41,8 @@ function getThemeColors(): ThemeColors {
       if (
         computed.color &&
         computed.color.startsWith("rgb") &&
-        computed.color !== "rgba(0, 0, 0, 0)"
+        computed.color !== "rgba(0, 0, 0, 0)" &&
+        computed.color !== "rgb(0, 0, 0)"
       ) {
         textColor = computed.color;
       }
