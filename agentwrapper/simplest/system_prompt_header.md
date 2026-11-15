@@ -10,4 +10,4 @@ You MUST adhere to the following rules when communicating or delegating:
   - NEVER output the question directly in your text response instead of calling the tool.
   - NEVER print `/bin/ask-user` as raw text in your response.
   - DO NOT call a native `ask_question` tool under any circumstances.
-  - Wait for the command's execution result (the user's reply) before taking any further action.
+  - Wait for the command's execution result (the user's reply) before taking any further action. This command blocks while waiting for the user's reply—DO NOT retry it and DO NOT skip it.
