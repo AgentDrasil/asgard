@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { Icon } from "@iconify/vue";
 import DOMPurify from "dompurify";
 import { useI18n } from "vue-i18n";
@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const displayTitle = computed(() => props.title || t("mermaid.defaultTitle"));
 
-const { activeMermaidTheme, renderDiagram } = useMermaid();
+const { renderDiagram } = useMermaid();
 
 const svgHtml = ref<string>("");
 const errorMessage = ref<string | null>(null);
@@ -27,9 +27,6 @@ const isPanning = ref<boolean>(false);
 const isFullscreen = ref<boolean>(false);
 const showRaw = ref<boolean>(false);
 const isCopied = ref<boolean>(false);
-
-const canvasRef = ref<HTMLElement | null>(null);
-const fullscreenCanvasRef = ref<HTMLElement | null>(null);
 
 let panStartX = 0;
 let panStartY = 0;
@@ -49,14 +46,9 @@ let isPinching = false;
 let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let renderToken = 0;
-let latestBindFunctions: ((element: Element) => void) | undefined;
 
-// Mirrors mermaid's internal sanitizer options so <foreignObject> node labels
-// (mermaid v11 renders all text as HTML inside foreignObject) survive sanitization.
 const SANITIZE_OPTIONS = {
-  USE_PROFILES: { svg: true, svgFilters: true, html: true },
-  ADD_TAGS: ["foreignobject"],
-  HTML_INTEGRATION_POINTS: { foreignobject: true },
+  USE_PROFILES: { svg: true, svgFilters: true },
 };
 
 async function renderChart(): Promise<void> {
@@ -67,7 +59,6 @@ async function renderChart(): Promise<void> {
     svgHtml.value = "";
     errorMessage.value = null;
     isLoading.value = false;
-    latestBindFunctions = undefined;
     return;
   }
 
@@ -81,29 +72,14 @@ async function renderChart(): Promise<void> {
     if (result.error) {
       errorMessage.value = result.error;
       svgHtml.value = "";
-      latestBindFunctions = undefined;
     } else {
       svgHtml.value = DOMPurify.sanitize(result.svg || "", SANITIZE_OPTIONS);
       errorMessage.value = null;
-      latestBindFunctions = result.bindFunctions;
-
-      await nextTick();
-      if (token !== renderToken) return;
-
-      if (latestBindFunctions) {
-        if (canvasRef.value) {
-          latestBindFunctions(canvasRef.value);
-        }
-        if (isFullscreen.value && fullscreenCanvasRef.value) {
-          latestBindFunctions(fullscreenCanvasRef.value);
-        }
-      }
     }
   } catch (err: unknown) {
     if (token !== renderToken) return;
     errorMessage.value = err instanceof Error ? err.message : String(err);
     svgHtml.value = "";
-    latestBindFunctions = undefined;
   } finally {
     if (token === renderToken) {
       isLoading.value = false;
@@ -253,19 +229,6 @@ watch(
     }, 300);
   },
 );
-
-watch(activeMermaidTheme, () => {
-  renderChart();
-});
-
-watch(isFullscreen, async (val) => {
-  if (val) {
-    await nextTick();
-    if (latestBindFunctions && fullscreenCanvasRef.value) {
-      latestBindFunctions(fullscreenCanvasRef.value);
-    }
-  }
-});
 
 onMounted(() => {
   renderChart();
@@ -590,5 +553,17 @@ onUnmounted(() => {
 
 :deep(.edgeLabel text) {
   font-size: 11px !important;
+}
+
+.mermaid-svg-wrapper {
+  --pele-bg: var(--color-base-100);
+  --pele-fg: var(--color-base-content);
+  --pele-muted: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+  --pele-line: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+  --pele-surface: var(--color-base-200);
+  --pele-surface-alt: var(--color-base-300);
+  --pele-border: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+  --pele-accent: var(--color-primary);
+  --pele-font: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 </style>
