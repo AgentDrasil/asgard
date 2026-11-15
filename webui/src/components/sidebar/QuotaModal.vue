@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Icon } from "@iconify/vue";
 import AppModal from "../common/AppModal.vue";
@@ -48,7 +48,10 @@ const emit = defineEmits<{
 }>();
 
 const quotaLoading = ref(false);
+const quotaRefreshing = ref(false);
 const quotaError = ref("");
+const lastFetchedRunner = ref<string | undefined>(undefined);
+let staleRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 type CliQuotas = Record<string, ModelUsage[]>;
 const quotas = ref<CliQuotas>({});
 // Aggregate shape (several online runners, none selected): per-runner quotas
@@ -103,33 +106,67 @@ const applyQuotaResponse = (data: any) => {
   }
 };
 
-const fetchQuotas = async () => {
-  quotaLoading.value = true;
+const clearStaleTimer = () => {
+  if (staleRefreshTimer !== undefined) {
+    clearTimeout(staleRefreshTimer);
+    staleRefreshTimer = undefined;
+  }
+};
+
+const fetchQuotas = async (forceRefresh = false) => {
+  clearStaleTimer();
+  const runnerChanged = lastFetchedRunner.value !== selectedRunnerId.value;
+  const showSpinner = !hasQuotaData.value || runnerChanged;
+  if (showSpinner) {
+    quotaLoading.value = true;
+  } else {
+    quotaRefreshing.value = true;
+  }
   quotaError.value = "";
   try {
-    const res = await apiFetch(withRunner("/api/quota", selectedRunnerId.value));
+    let url = withRunner("/api/quota", selectedRunnerId.value);
+    if (forceRefresh) {
+      url += (url.includes("?") ? "&" : "?") + "refresh=1";
+    }
+    const res = await apiFetch(url);
     if (!res.ok) {
       throw new Error(t("quota.statusError", { status: res.status }));
     }
     const data = await res.json();
     applyQuotaResponse(data);
+    lastFetchedRunner.value = selectedRunnerId.value;
+    if (res.headers?.get?.("X-Quota-Cache") === "stale" && props.modelValue) {
+      staleRefreshTimer = setTimeout(() => {
+        if (props.modelValue) {
+          void fetchQuotas(false);
+        }
+      }, 2000);
+    }
   } catch (err: any) {
     console.error("Failed to fetch quotas:", err);
-    quotaError.value = err.message || t("quota.failedToFetch");
+    if (showSpinner) {
+      quotaError.value = err.message || t("quota.failedToFetch");
+    }
   } finally {
     quotaLoading.value = false;
+    quotaRefreshing.value = false;
   }
 };
 
 const closeModal = () => {
+  clearStaleTimer();
   emit("update:modelValue", false);
 };
+
+onUnmounted(clearStaleTimer);
 
 watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      fetchQuotas();
+      void fetchQuotas(false);
+    } else {
+      clearStaleTimer();
     }
   },
   { immediate: true },
@@ -451,10 +488,14 @@ defineExpose({
 
       <!-- Footer -->
       <div class="px-6 py-4 border-t border-base-100 flex justify-between bg-base-300/30">
-        <button @click="fetchQuotas" class="btn btn-outline btn-sm gap-2" :disabled="quotaLoading">
+        <button
+          @click="fetchQuotas(true)"
+          class="btn btn-outline btn-sm gap-2"
+          :disabled="quotaLoading || quotaRefreshing"
+        >
           <Icon
             icon="mynaui:refresh"
-            :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading }]"
+            :class="['h-4 w-4 fill-current', { 'animate-spin': quotaLoading || quotaRefreshing }]"
           />
           {{ t("quota.refresh") }}
         </button>

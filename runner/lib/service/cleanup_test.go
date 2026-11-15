@@ -447,3 +447,48 @@ func TestQueryQuotaAnsweredEmptyDropsLegacy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetUsages())
 }
+
+func TestQueryQuotaRunsBaseAndAccountsConcurrently(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ASGARD_ACCOUNTS_DIR", root)
+	for _, d := range []string{"agy/a1", "claude/c1"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o700))
+	}
+
+	// All 3 queries (base Quota + agy/a1 + claude/c1) must be in flight at the
+	// same time to release the barrier; sequential execution would time out.
+	var arrived sync.WaitGroup
+	arrived.Add(3)
+	release := make(chan struct{})
+	go func() {
+		arrived.Wait()
+		close(release)
+	}()
+
+	cl, _ := startService(t, Options{
+		Quota: func(ctx context.Context) (map[string][]llms.ModelUsage, error) {
+			arrived.Done()
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return map[string][]llms.ModelUsage{"opencode": {{Model: "oc", Remaining: 1}}}, nil
+		},
+		AccountQuota: func(ctx context.Context, cli, alias string) ([]llms.ModelUsage, error) {
+			arrived.Done()
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return []llms.ModelUsage{{Model: "m-" + alias, Remaining: 0.8}}, nil
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := cl.QueryQuota(ctx, &runnerpb.QueryQuotaRequest{})
+	require.NoError(t, err)
+	assert.Len(t, resp.GetUsages(), 3)
+}

@@ -73,12 +73,38 @@ func (s *Service) QueryQuota(ctx context.Context, req *runnerpb.QueryQuotaReques
 	if query == nil {
 		query = agentwrapper.GetQuota
 	}
-	res, err := query(ctx)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+
+	var wantedCLIs map[string]bool
+	if targets := req.GetTargets(); len(targets) > 0 {
+		wantedCLIs = make(map[string]bool, len(targets))
+		for _, t := range targets {
+			wantedCLIs[t.GetCli()] = true
+		}
+	}
+
+	var (
+		res       map[string][]llms.ModelUsage
+		queryErr  error
+		accQuotas map[string]*accountQuotaBatch
+		wg        sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		res, queryErr = query(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		accQuotas = s.fetchAccountQuotas(ctx, wantedCLIs)
+	}()
+	wg.Wait()
+
+	if queryErr != nil {
+		return nil, status.Error(codes.Internal, queryErr.Error())
 	}
 	if res != nil {
-		s.applyAccountQuotas(ctx, res)
+		mergeAccountQuotas(res, accQuotas)
 	}
 	usages := runnerfs.QuotaToProto(res)
 	if targets := req.GetTargets(); len(targets) > 0 {
@@ -102,13 +128,16 @@ var accountQuotaCLIs = []string{"agy", "claude"}
 // accountQuotaTimeout bounds the whole per-account quota fan-out.
 const accountQuotaTimeout = 40 * time.Second
 
-// applyAccountQuotas replaces res[cli] of each account-aware CLI that has
-// accounts with one usage set per account (Account = alias, alias order). The
-// accounts are queried concurrently; a failing account
-// contributes a status-only entry (no_credentials / error) with its message.
-// When no account answers, the legacy models of the CLI are kept next to those
-// status entries.
-func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.ModelUsage) {
+type accountQuotaBatch struct {
+	cli        string
+	perAccount [][]llms.ModelUsage
+	answered   []bool
+	failed     []*llms.ModelUsage
+}
+
+// fetchAccountQuotas concurrently queries all configured accounts across all
+// account-aware CLIs (optionally filtered by wantedCLIs).
+func (s *Service) fetchAccountQuotas(ctx context.Context, wantedCLIs map[string]bool) map[string]*accountQuotaBatch {
 	fetch := s.accountQuota
 	if fetch == nil {
 		fetch = bwrap.QueryAccountQuota
@@ -121,54 +150,69 @@ func (s *Service) applyAccountQuotas(ctx context.Context, res map[string][]llms.
 	}
 	ctx, cancel := context.WithTimeout(ctx, accountQuotaTimeout)
 	defer cancel()
+
+	batches := make(map[string]*accountQuotaBatch)
+	var wg sync.WaitGroup
 	for _, cli := range accountQuotaCLIs {
+		if wantedCLIs != nil && !wantedCLIs[cli] {
+			continue
+		}
 		aliases, err := accounts.List(cli)
 		if err != nil {
 			log.Warn().Err(err).Str("cli", cli).Msg("listing accounts for quota failed")
 			continue
 		}
 		if len(aliases) == 0 {
-			// No accounts: the legacy per-HOME login answered, or its
-			// status-only entry (no credentials / error) stays.
 			continue
 		}
-		perAccount := make([][]llms.ModelUsage, len(aliases))
-		answeredAcc := make([]bool, len(aliases))
-		failed := make([]*llms.ModelUsage, len(aliases))
-		var wg sync.WaitGroup
+		batch := &accountQuotaBatch{
+			cli:        cli,
+			perAccount: make([][]llms.ModelUsage, len(aliases)),
+			answered:   make([]bool, len(aliases)),
+			failed:     make([]*llms.ModelUsage, len(aliases)),
+		}
+		batches[cli] = batch
 		for i, alias := range aliases {
 			wg.Add(1)
-			go func() {
+			go func(b *accountQuotaBatch, idx int, c, a string) {
 				defer wg.Done()
-				usages, err := fetch(ctx, cli, alias)
+				usages, err := fetch(ctx, c, a)
 				if err != nil {
-					log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota query failed")
+					log.Warn().Err(err).Str("cli", c).Str("account", a).Msg("account quota query failed")
 					st := llms.StatusUsage(err)
-					st.Account = alias
-					failed[i] = &st
+					st.Account = a
+					b.failed[idx] = &st
 					return
 				}
-				usages = agentwrapper.FilterAllowedUsages(cfg, cli, usages)
+				usages = agentwrapper.FilterAllowedUsages(cfg, c, usages)
 				for j := range usages {
-					usages[j].Account = alias
+					usages[j].Account = a
 				}
-				perAccount[i] = usages
-				answeredAcc[i] = true
-			}()
+				b.perAccount[idx] = usages
+				b.answered[idx] = true
+			}(batch, i, cli, alias)
 		}
-		wg.Wait()
+	}
+	wg.Wait()
+	return batches
+}
+
+// mergeAccountQuotas replaces res[cli] of each account-aware CLI that has
+// accounts with one usage set per account (Account = alias, alias order).
+// A failing account contributes a status-only entry; when no account answers,
+// the legacy models of the CLI are kept next to those status entries.
+func mergeAccountQuotas(res map[string][]llms.ModelUsage, batches map[string]*accountQuotaBatch) {
+	for cli, batch := range batches {
 		var merged []llms.ModelUsage
 		answered := false
-		for i, u := range perAccount {
-			answered = answered || answeredAcc[i]
+		for i, u := range batch.perAccount {
+			answered = answered || batch.answered[i]
 			merged = append(merged, u...)
-			if failed[i] != nil {
-				merged = append(merged, *failed[i])
+			if batch.failed[i] != nil {
+				merged = append(merged, *batch.failed[i])
 			}
 		}
 		if !answered {
-			// Keep the legacy models (if any) and report why each account
-			// failed.
 			var legacy []llms.ModelUsage
 			for _, u := range res[cli] {
 				if !u.IsStatusOnly() {

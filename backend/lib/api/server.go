@@ -100,6 +100,7 @@ type Server struct {
 	dirLocks         *dirlock.Manager
 	cipher           kms.Cipher
 	userProxyKeyRepo *dbmodels.UserProxyKeyRepository
+	quotaCache       quotaCache
 }
 
 // singleAgentRunner abstracts the execution of a single CLI agent, allowing mock injection in tests.

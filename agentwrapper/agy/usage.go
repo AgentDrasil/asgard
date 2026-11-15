@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
@@ -215,27 +216,48 @@ func parseResetTime(s string) int64 {
 }
 
 // Usage retrieves available models and queries their current quota levels
-// by executing agy with --print "/usage".
+// by executing agy models and agy --print "/usage" concurrently.
 func Usage(ctx context.Context, opts types.UsageOptions) ([]types.ModelUsage, error) {
-	models, err := Models(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("fetching available models: %w", err)
-	}
+	var (
+		models    []string
+		modelsErr error
+		output    []byte
+		usageErr  error
+		wg        sync.WaitGroup
+	)
 
-	argv := []string{"agy", "--output-format", "json", "--print", "/usage"}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	if opts.Dir != "" {
-		cmd.Dir = opts.Dir
-	}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		models, modelsErr = Models(ctx, opts)
+	}()
+	go func() {
+		defer wg.Done()
+		argv := []string{"agy", "--output-format", "json", "--print", "/usage"}
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		if opts.Dir != "" {
+			cmd.Dir = opts.Dir
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			usageErr = fmt.Errorf("running agy for usage: %w%s", err, stderrSuffix(err))
+			return
+		}
+		// An unauthenticated agy answers "Authentication required" instead of
+		// quota buckets; reporting that as full quota would be wrong.
+		if llms.IsNoCredentialsText(string(out)) {
+			usageErr = fmt.Errorf("agy /usage: %s", strings.TrimSpace(string(out)))
+			return
+		}
+		output = out
+	}()
+	wg.Wait()
 
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("running agy for usage: %w%s", err, stderrSuffix(err))
+	if usageErr != nil {
+		return nil, usageErr
 	}
-	// An unauthenticated agy answers "Authentication required" instead of
-	// quota buckets; reporting that as full quota would be wrong.
-	if llms.IsNoCredentialsText(string(output)) {
-		return nil, fmt.Errorf("agy /usage: %s", strings.TrimSpace(string(output)))
+	if modelsErr != nil {
+		return nil, fmt.Errorf("fetching available models: %w", modelsErr)
 	}
 
 	quota := make(map[string]QuotaEntry)

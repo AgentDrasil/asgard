@@ -221,7 +221,10 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if node := r.URL.Query().Get("runner"); node != "" {
+	q := r.URL.Query()
+	forceRefresh := q.Get("refresh") == "1" || q.Get("refresh") == "true"
+
+	if node := q.Get("runner"); node != "" {
 		known := s.runners == nil // without a registry the client lookup decides
 		if s.runners != nil {
 			for _, n := range s.runners.Nodes() {
@@ -235,7 +238,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("unknown runner %q", node))
 			return
 		}
-		res, err := s.runnerQuota(r.Context(), node)
+		res, state, err := s.runnerQuota(r.Context(), node, forceRefresh)
 		if err != nil {
 			status, msg := fsErrorStatus(err)
 			if status != http.StatusServiceUnavailable {
@@ -244,6 +247,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, status, msg)
 			return
 		}
+		w.Header().Set("X-Quota-Cache", state.headerValue())
 		writeJSON(w, http.StatusOK, res)
 		return
 	}
@@ -251,7 +255,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	if s.runners == nil {
 		// No registry to enumerate (WithRunnerClient only): ask the
 		// configured client, which resolves the default runner.
-		res, err := s.runnerQuota(r.Context(), "")
+		res, state, err := s.runnerQuota(r.Context(), "", forceRefresh)
 		if err != nil {
 			status, msg := fsErrorStatus(err)
 			if status != http.StatusServiceUnavailable {
@@ -260,6 +264,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, status, msg)
 			return
 		}
+		w.Header().Set("X-Quota-Cache", state.headerValue())
 		writeJSON(w, http.StatusOK, res)
 		return
 	}
@@ -276,8 +281,9 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type result struct {
-		res map[string][]llms.ModelUsage
-		err error
+		res   map[string][]llms.ModelUsage
+		state quotaCacheState
+		err   error
 	}
 	results := make([]result, len(online))
 	var wg sync.WaitGroup
@@ -285,19 +291,27 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i].res, results[i].err = s.runnerQuota(r.Context(), node)
+			results[i].res, results[i].state, results[i].err = s.runnerQuota(r.Context(), node, forceRefresh)
 		}()
 	}
 	wg.Wait()
 	all := QuotaAllResponse{Runners: map[string]map[string][]llms.ModelUsage{}, Errors: map[string]string{}}
+	aggState := quotaCacheHit
 	for i, node := range online {
 		if results[i].err != nil {
 			log.Warn().Err(results[i].err).Str("runner", node).Msg("Failed to fetch runner quota")
 			all.Errors[node] = results[i].err.Error()
+			aggState = quotaCacheMiss
 			continue
+		}
+		if results[i].state == quotaCacheStale {
+			aggState = quotaCacheStale
+		} else if results[i].state == quotaCacheMiss && aggState != quotaCacheStale {
+			aggState = quotaCacheMiss
 		}
 		all.Runners[node] = results[i].res
 	}
+	w.Header().Set("X-Quota-Cache", aggState.headerValue())
 	if len(online) == 1 && len(all.Errors) == 0 {
 		writeJSON(w, http.StatusOK, all.Runners[online[0]])
 		return
@@ -308,25 +322,25 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, all)
 }
 
-// runnerQuota queries one runner's quota.
-func (s *Server) runnerQuota(ctx context.Context, node string) (map[string][]llms.ModelUsage, error) {
-	client, err := s.nodeClient(node)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
-	defer cancel()
-	res, err := runnerfs.QueryQuotaWithStatus(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	// The runner reports every CLI it knows; only configured providers count.
-	for cli := range res {
-		if !s.conf.IsProviderEnabled(cli) {
-			delete(res, cli)
+// runnerQuota queries one runner's quota, backed by the server's TTL/SWR cache.
+func (s *Server) runnerQuota(ctx context.Context, node string, forceRefresh bool) (map[string][]llms.ModelUsage, quotaCacheState, error) {
+	return s.quotaCache.get(ctx, node, forceRefresh, func(fetchCtx context.Context) (map[string][]llms.ModelUsage, error) {
+		client, err := s.nodeClient(node)
+		if err != nil {
+			return nil, err
 		}
-	}
-	return res, nil
+		res, err := runnerfs.QueryQuotaWithStatus(fetchCtx, client)
+		if err != nil {
+			return nil, err
+		}
+		// The runner reports every CLI it knows; only configured providers count.
+		for cli := range res {
+			if !s.conf.IsProviderEnabled(cli) {
+				delete(res, cli)
+			}
+		}
+		return res, nil
+	})
 }
 
 // ConfigResponse represents the public configuration sent to web clients.

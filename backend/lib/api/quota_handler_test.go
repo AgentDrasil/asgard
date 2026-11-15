@@ -7,7 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,4 +198,157 @@ func TestQuotaKeepsStatusOnlyEntries(t *testing.T) {
 	assert.Equal(t, "Authentication required", got["agy"][0]["message"])
 	assert.Equal(t, "work", got["claude"][0]["account"])
 	assert.NotContains(t, got["opencode"][0], "status")
+}
+
+type countingQuotaClient struct {
+	runnerpb.RunnerServiceClient
+	calls  atomic.Int32
+	usages []*runnerpb.ModelUsage
+	delay  time.Duration
+	gate   chan struct{}
+}
+
+func (c *countingQuotaClient) QueryQuota(ctx context.Context, _ *runnerpb.QueryQuotaRequest, _ ...grpc.CallOption) (*runnerpb.QueryQuotaResponse, error) {
+	c.calls.Add(1)
+	if c.gate != nil {
+		select {
+		case <-c.gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if c.delay > 0 {
+		select {
+		case <-time.After(c.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return &runnerpb.QueryQuotaResponse{Usages: c.usages}, nil
+}
+
+func TestQuotaCacheHitAndForceRefresh(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	c := &countingQuotaClient{usages: usageA}
+	s := &Server{
+		runners: quotaRegistry{nodes: []runnerhub.NodeInfo{{NodeID: "a", Online: true}}},
+		runnerClient: func(id string) (runnerpb.RunnerServiceClient, error) {
+			return c, nil
+		},
+		quotaCache: quotaCache{now: func() time.Time { return now }},
+	}
+
+	rr1 := httptest.NewRecorder()
+	s.handleQuota(rr1, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+	require.Equal(t, http.StatusOK, rr1.Code)
+	assert.Equal(t, "miss", rr1.Header().Get("X-Quota-Cache"))
+	assert.EqualValues(t, 1, c.calls.Load())
+
+	// Second request within TTL hits cache without calling runner again.
+	now = now.Add(30 * time.Second)
+	rr2 := httptest.NewRecorder()
+	s.handleQuota(rr2, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+	require.Equal(t, http.StatusOK, rr2.Code)
+	assert.Equal(t, "hit", rr2.Header().Get("X-Quota-Cache"))
+	assert.EqualValues(t, 1, c.calls.Load())
+
+	// ?refresh=1 bypasses cache.
+	rr3 := httptest.NewRecorder()
+	s.handleQuota(rr3, httptest.NewRequest(http.MethodGet, "/api/quota?refresh=1", nil))
+	require.Equal(t, http.StatusOK, rr3.Code)
+	assert.Equal(t, "miss", rr3.Header().Get("X-Quota-Cache"))
+	assert.EqualValues(t, 2, c.calls.Load())
+}
+
+func TestQuotaCacheStaleWhileRevalidate(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	refreshed := make(chan struct{}, 1)
+	var calls atomic.Int32
+	c := &countingQuotaClient{usages: usageA}
+	s := &Server{
+		runners: quotaRegistry{nodes: []runnerhub.NodeInfo{{NodeID: "a", Online: true}}},
+		runnerClient: func(id string) (runnerpb.RunnerServiceClient, error) {
+			if calls.Add(1) == 2 {
+				select {
+				case refreshed <- struct{}{}:
+				default:
+				}
+				return &countingQuotaClient{usages: usageB}, nil
+			}
+			return c, nil
+		},
+		quotaCache: quotaCache{now: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return now
+		}},
+	}
+
+	rr1 := httptest.NewRecorder()
+	s.handleQuota(rr1, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+	require.Equal(t, http.StatusOK, rr1.Code)
+	assert.Contains(t, rr1.Body.String(), "opencode")
+
+	// Advance past fresh TTL (60s) but within stale TTL (5m).
+	mu.Lock()
+	now = now.Add(90 * time.Second)
+	mu.Unlock()
+
+	rr2 := httptest.NewRecorder()
+	s.handleQuota(rr2, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+	require.Equal(t, http.StatusOK, rr2.Code)
+	assert.Equal(t, "stale", rr2.Header().Get("X-Quota-Cache"))
+	assert.Contains(t, rr2.Body.String(), "opencode")
+
+	// Wait for background revalidation to finish, then next call sees fresh data.
+	select {
+	case <-refreshed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background revalidation")
+	}
+	// Give runFetch a moment to store the updated entry.
+	require.Eventually(t, func() bool {
+		rr := httptest.NewRecorder()
+		s.handleQuota(rr, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+		return rr.Header().Get("X-Quota-Cache") == "hit" && strings.Contains(rr.Body.String(), "simplest")
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestQuotaCacheSingleflight(t *testing.T) {
+	t.Parallel()
+	gate := make(chan struct{})
+	c := &countingQuotaClient{usages: usageA, gate: gate}
+	s := &Server{
+		runners: quotaRegistry{nodes: []runnerhub.NodeInfo{{NodeID: "a", Online: true}}},
+		runnerClient: func(id string) (runnerpb.RunnerServiceClient, error) {
+			return c, nil
+		},
+	}
+
+	const n = 5
+	var wg sync.WaitGroup
+	wg.Add(n)
+	codes := make([]int, n)
+	for i := range n {
+		go func(idx int) {
+			defer wg.Done()
+			rr := httptest.NewRecorder()
+			s.handleQuota(rr, httptest.NewRequest(http.MethodGet, "/api/quota", nil))
+			codes[idx] = rr.Code
+		}(i)
+	}
+
+	require.Eventually(t, func() bool {
+		return c.calls.Load() == 1
+	}, 2*time.Second, 5*time.Millisecond)
+	close(gate)
+	wg.Wait()
+
+	for i := range n {
+		assert.Equal(t, http.StatusOK, codes[i])
+	}
+	assert.EqualValues(t, 1, c.calls.Load())
 }
