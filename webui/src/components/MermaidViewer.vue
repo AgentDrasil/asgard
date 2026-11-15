@@ -555,7 +555,7 @@ onUnmounted(() => {
   font-size: 11px !important;
 }
 
-.mermaid-svg-wrapper {
+.mermaid-canvas {
   --pele-bg: var(--color-base-100);
   --pele-fg: var(--color-base-content);
   --pele-muted: color-mix(in oklab, var(--color-base-content) 60%, transparent);
