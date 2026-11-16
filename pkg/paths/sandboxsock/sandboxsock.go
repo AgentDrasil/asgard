@@ -43,6 +43,10 @@ const (
 	PathSubagentAsk       = "/subagent/ask"
 	PathSubagentAnswer    = "/subagent/answer"
 	PathSubagentQuestions = "/subagent/questions"
+	// The routing table (topic -> chat id) of the caller's chat.
+	PathSubagentRouteAdd  = "/subagent/route/add"
+	PathSubagentRouteRm   = "/subagent/route/rm"
+	PathSubagentRouteList = "/subagent/route/list"
 	PathMetrics           = "/metrics"
 	PathMerge             = "/merge"
 
@@ -151,10 +155,12 @@ type SubagentReplyResponse struct {
 }
 
 // SubagentAskRequest is the body of POST /subagent/ask. To names the chat to
-// ask; with ResumeQID it is empty and the call keeps waiting for the earlier
+// ask, or Topic names a topic of the routing table (exactly one of them); with
+// ResumeQID both are empty and the call keeps waiting for the earlier
 // question. TimeoutMs 0 is the default (the backend caps it).
 type SubagentAskRequest struct {
 	To        string `json:"to,omitempty"`
+	Topic     string `json:"topic,omitempty"`
 	Text      string `json:"text,omitempty"`
 	ResumeQID string `json:"resume_qid,omitempty"`
 	TimeoutMs int64  `json:"timeout_ms,omitempty"`
@@ -172,6 +178,56 @@ type SubagentAskResponse struct {
 	QID    string `json:"qid"`
 	State  string `json:"state"`
 	Answer string `json:"answer,omitempty"`
+	// Topic and the Target fields name the chat a topic ask resolved to.
+	Topic       string `json:"topic,omitempty"`
+	TargetID    string `json:"target,omitempty"`
+	TargetAgent string `json:"target_agent,omitempty"`
+	TargetLabel string `json:"target_label,omitempty"`
+}
+
+// SubagentRouteAddRequest is the body of POST /subagent/route/add.
+type SubagentRouteAddRequest struct {
+	Topic string `json:"topic"`
+	To    string `json:"to"`
+	Note  string `json:"note,omitempty"`
+}
+
+// SubagentRouteAddResponse is the answer of POST /subagent/route/add; Replaced
+// is true when the topic already had an entry on the caller's chat.
+type SubagentRouteAddResponse struct {
+	Replaced bool `json:"replaced"`
+}
+
+// SubagentRouteRmRequest is the body of POST /subagent/route/rm.
+type SubagentRouteRmRequest struct {
+	Topic string `json:"topic"`
+}
+
+// SubagentRouteRmResponse is the answer of POST /subagent/route/rm.
+type SubagentRouteRmResponse struct {
+	Removed bool `json:"removed"`
+}
+
+// RouteDefaultOrigin is the DefinedAt of an implicit entry (the default `user`).
+const RouteDefaultOrigin = "(default)"
+
+// SubagentRouteInfo is one entry of the caller's effective routing table.
+// DefinedAt is the chat that defines it, or RouteDefaultOrigin.
+type SubagentRouteInfo struct {
+	Topic     string `json:"topic"`
+	To        string `json:"to"`
+	Agent     string `json:"agent,omitempty"`
+	Label     string `json:"label,omitempty"`
+	State     string `json:"state"`
+	DefinedAt string `json:"defined_at"`
+	Note      string `json:"note,omitempty"`
+	// Self is true when the entry resolves to the caller's own chat.
+	Self bool `json:"self,omitempty"`
+}
+
+// SubagentRouteListResponse is the answer of GET /subagent/route/list.
+type SubagentRouteListResponse struct {
+	Routes []SubagentRouteInfo `json:"routes"`
 }
 
 // SubagentAnswerRequest is the body of POST /subagent/answer.

@@ -55,12 +55,20 @@ Commands:
         Stop a subagent and all subagents below it.
   ask --to <chat-id> [--timeout <dur>] [--json] -- <question>
         Ask another chat of your spawn tree (find ids with "tree") and block until it answers: the answer is printed and the exit code is 0. At the timeout (default 90s, maximum 300s) it prints "pending <qid>" and exits with 3; the question stays open. Your tool/command timeout must be longer than --timeout, or the call is killed while blocked.
+  ask --topic <t> [--timeout <dur>] [--json] -- <question>
+        Like --to, but the chat is the one your routing table names for the topic (see "route list"; "user" is the root chat unless overridden). An unknown topic lists the available ones; a topic that points at you is an error (decide yourself).
   ask --resume <qid> [--timeout <dur>] [--json]
         Keep waiting for a question you asked earlier; returns at once when the answer arrived meanwhile.
   answer <qid> [--json] -- <text>
         Answer a question addressed to you (see "questions"; the question message names its id). Only once.
   questions [--json]
         List the open questions addressed to you and the questions you asked that are still pending.
+  route add --topic <t> --to <chat-id> [--note <text>] [--json]
+        Route a topic to a chat of your spawn tree (yourself allowed) on YOUR chat, replacing your entry for the topic. Topics are [a-z0-9][a-z0-9._:-]{0,63}; at most 32 entries per chat, notes up to 200 bytes. Descendants you spawn see your entries.
+  route rm --topic <t> [--json]
+        Remove your own entry for the topic (entries of ancestors stay).
+  route list [--json]
+        Show your effective routing table: your entries and those of your ancestors (the nearest definition of a topic wins) plus the default "user" entry (the root chat). The table can change after you were spawned: this is the source of truth.
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 still waiting (ask timed out; resume it).
 `
@@ -94,6 +102,7 @@ var commands = map[string]command{
 	"ask":       cmdAsk,
 	"answer":    cmdAnswer,
 	"questions": cmdQuestions,
+	"route":     cmdRoute,
 }
 
 // run executes subagent (args includes the program name) and returns the exit
@@ -581,6 +590,7 @@ func (c *cli) ago(ms int64) string {
 func cmdAsk(ctx context.Context, c *cli, args []string) int {
 	fs := flag.NewFlagSet("ask", flag.ContinueOnError)
 	to := fs.String("to", "", "chat id to ask")
+	topic := fs.String("topic", "", "routing topic to ask (see route list)")
 	resume := fs.String("resume", "", "question id to keep waiting for")
 	timeout := fs.String("timeout", "", "longest wait, e.g. 60s (default 90s, maximum 300s)")
 	asJSON := fs.Bool("json", false, "print JSON")
@@ -594,16 +604,19 @@ func cmdAsk(ctx context.Context, c *cli, args []string) int {
 	req := sandboxsock.SubagentAskRequest{}
 	switch {
 	case *resume != "":
-		if *to != "" || p.hasRest {
-			return c.usageError("ask --resume takes a question id only, no --to or question")
+		if *to != "" || *topic != "" || p.hasRest {
+			return c.usageError("ask --resume takes a question id only, no --to, --topic or question")
 		}
 		req.ResumeQID = *resume
 	default:
 		text := strings.Join(p.rest, " ")
-		if *to == "" || !p.hasRest || strings.TrimSpace(text) == "" {
-			return c.usageError("ask needs --to <chat-id> and the question after --, or --resume <qid>")
+		if (*to == "") == (*topic == "") {
+			return c.usageError("ask needs exactly one of --to <chat-id> and --topic <t>, and the question after --; or --resume <qid>")
 		}
-		req.To, req.Text = *to, text
+		if !p.hasRest || strings.TrimSpace(text) == "" {
+			return c.usageError("ask needs the question after --")
+		}
+		req.To, req.Topic, req.Text = *to, *topic, text
 	}
 	if *timeout != "" {
 		d, err := parseTimeout(*timeout)
@@ -612,9 +625,17 @@ func cmdAsk(ctx context.Context, c *cli, args []string) int {
 		}
 		req.TimeoutMs = d.Milliseconds()
 	}
+	// Say whom a topic ask goes to before blocking on the answer.
+	announced := ""
+	if req.Topic != "" {
+		announced = c.announceTopic(ctx, req.Topic)
+	}
 	var out sandboxsock.SubagentAskResponse
 	if !c.call(ctx, sandboxsock.PathSubagentAsk, req, &out) {
 		return exitError
+	}
+	if out.TargetID != "" && out.TargetID != announced {
+		c.announce(out.TargetID, out.TargetAgent, out.TargetLabel, out.Topic)
 	}
 	pending := out.State != sandboxsock.QuestionAnswered
 	if *asJSON {
@@ -631,6 +652,36 @@ func cmdAsk(ctx context.Context, c *cli, args []string) int {
 		return exitPending
 	}
 	return exitOK
+}
+
+func (c *cli) announce(id, agent, label, topic string) {
+	who := agent
+	if label != "" {
+		who += "/" + label
+	}
+	_, _ = fmt.Fprintf(c.stderr, "asking %s (%s) for topic %s\n", id, who, topic)
+}
+
+// announceTopic prints whom topic resolves to right now, before the ask
+// blocks, and returns that chat id ("" when it cannot tell: the ask itself then
+// reports the problem, and prints the target when it learns it).
+func (c *cli) announceTopic(ctx context.Context, topic string) string {
+	resp, err := c.client.Get(ctx, sandboxsock.PathSubagentRouteList)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var list sandboxsock.SubagentRouteListResponse
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&list) != nil {
+		return ""
+	}
+	for _, r := range list.Routes {
+		if r.Topic == topic && !r.Self {
+			c.announce(r.To, r.Agent, r.Label, topic)
+			return r.To
+		}
+	}
+	return ""
 }
 
 func cmdAnswer(ctx context.Context, c *cli, args []string) int {
@@ -704,5 +755,107 @@ func cmdQuestions(ctx context.Context, c *cli, args []string) int {
 		}
 		_ = tw.Flush()
 	}
+	return exitOK
+}
+
+func cmdRoute(ctx context.Context, c *cli, args []string) int {
+	if len(args) == 0 {
+		return c.usageError("route needs add, rm or list")
+	}
+	switch args[0] {
+	case "add":
+		return cmdRouteAdd(ctx, c, args[1:])
+	case "rm":
+		return cmdRouteRm(ctx, c, args[1:])
+	case "list":
+		return cmdRouteList(ctx, c, args[1:])
+	}
+	return c.usageError("unknown route command %q (use add, rm or list)", args[0])
+}
+
+func cmdRouteAdd(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("route add", flag.ContinueOnError)
+	topic := fs.String("topic", "", "topic to route")
+	to := fs.String("to", "", "chat id that answers the topic")
+	note := fs.String("note", "", "short note shown in the table")
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 || p.hasRest {
+		return c.usageError("route add takes only --topic, --to and --note")
+	}
+	if *topic == "" || *to == "" {
+		return c.usageError("route add needs --topic <t> and --to <chat-id>")
+	}
+	var out sandboxsock.SubagentRouteAddResponse
+	if !c.call(ctx, sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: *topic, To: *to, Note: *note}, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	verb := "added"
+	if out.Replaced {
+		verb = "replaced"
+	}
+	_, _ = fmt.Fprintf(c.stdout, "%s route %s -> %s\n", verb, *topic, *to)
+	return exitOK
+}
+
+func cmdRouteRm(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("route rm", flag.ContinueOnError)
+	topic := fs.String("topic", "", "topic to remove")
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 || p.hasRest {
+		return c.usageError("route rm takes only --topic")
+	}
+	if *topic == "" {
+		return c.usageError("route rm needs --topic <t>")
+	}
+	var out sandboxsock.SubagentRouteRmResponse
+	if !c.call(ctx, sandboxsock.PathSubagentRouteRm, sandboxsock.SubagentRouteRmRequest{Topic: *topic}, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	_, _ = fmt.Fprintf(c.stdout, "removed route %s\n", *topic)
+	return exitOK
+}
+
+func cmdRouteList(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("route list", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 || p.hasRest {
+		return c.usageError("route list takes no arguments")
+	}
+	var out sandboxsock.SubagentRouteListResponse
+	if !c.call(ctx, sandboxsock.PathSubagentRouteList, nil, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	tw := tabwriter.NewWriter(c.stdout, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "TOPIC\tTO\tAGENT\tLABEL\tSTATE\tDEFINED AT\tNOTE")
+	for _, r := range out.Routes {
+		to := r.To
+		if r.Self {
+			to += " (you)"
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Topic, to, dash(r.Agent), dash(r.Label), r.State, r.DefinedAt, dash(r.Note))
+	}
+	_ = tw.Flush()
+	_, _ = fmt.Fprintln(c.stdout, "\nask a topic with: subagent ask --topic <t> -- <question>")
 	return exitOK
 }

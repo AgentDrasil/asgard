@@ -296,6 +296,9 @@ func (s *Server) AskSubagent(ctx context.Context, callerChat, callerAgent, to, t
 	if err != nil {
 		return AskOutcome{}, err
 	}
+	if target.IsArchived {
+		return AskOutcome{}, subagentErr(SubagentUnavailable, "target %s is archived; ask another chat (see `subagent route list`, `subagent tree`)", to)
+	}
 	root, _ := s.repo.SpawnRootID(callerChat)
 	if ctx.Err() != nil || s.sessionStopInProgress(callerChat) || s.sessionStopInProgress(to) {
 		return AskOutcome{}, subagentErr(SubagentDenied, "the target or the caller is being stopped")
@@ -346,7 +349,7 @@ func (s *Server) AskSubagent(ctx context.Context, callerChat, callerAgent, to, t
 	if err != nil {
 		return AskOutcome{}, err
 	}
-	onCallEnd(ctx, s.endWaiterHook(q, w))
+	onCallEnd(ctx, s.endWaiterHook(ctx, q, w))
 	drop := func() {
 		s.questions.mu.Lock()
 		delete(s.questions.m, q.qid)
@@ -440,7 +443,7 @@ func (s *Server) ResumeQuestion(ctx context.Context, callerChat, qid string, tim
 	}
 	w := q.attachLocked()
 	b.mu.Unlock()
-	onCallEnd(ctx, s.endWaiterHook(q, w))
+	onCallEnd(ctx, s.endWaiterHook(ctx, q, w))
 	return s.awaitQuestion(ctx, q, w, timeout)
 }
 
@@ -448,13 +451,39 @@ func (s *Server) ResumeQuestion(ctx context.Context, callerChat, qid string, tim
 // answer, the cached response of the call becomes the pending form, so a runner
 // retry that attaches later does not get the answer a second time (it is
 // delivered as a message).
-func (s *Server) endWaiterHook(q *question, w *askWaiter) func(bool) proto.Message {
+func (s *Server) endWaiterHook(ctx context.Context, q *question, w *askWaiter) func(bool) proto.Message {
+	pending := takeBackFrom(ctx)
 	return func(delivered bool) proto.Message {
 		if s.endWaiter(q, w, delivered) {
-			return &runnerpb.AskSubagentResponse{Qid: q.qid, State: QuestionStatePending}
+			return pending(q.qid)
 		}
 		return nil
 	}
+}
+
+type takeBackKey struct{}
+
+// withTakeBack sets the constructor of the response that replaces the cached
+// result of a call whose answer was taken back. The default is the pending
+// AskSubagentResponse of `subagent ask`; a call of another kind (an escalated
+// ask-user) must replace its result with a response of its own type.
+func withTakeBack(ctx context.Context, f func(qid string) proto.Message) context.Context {
+	return context.WithValue(ctx, takeBackKey{}, f)
+}
+
+func takeBackFrom(ctx context.Context) func(qid string) proto.Message {
+	if f, ok := ctx.Value(takeBackKey{}).(func(string) proto.Message); ok {
+		return f
+	}
+	return func(qid string) proto.Message {
+		return &runnerpb.AskSubagentResponse{Qid: qid, State: QuestionStatePending}
+	}
+}
+
+// askUserTakenBack is the cached result of an escalated ask-user whose answer
+// reached nobody: the answer was delivered to the asking chat as a message.
+func askUserTakenBack(qid string) proto.Message {
+	return &runnerpb.AskUserResponse{Error: "the answer was delivered to you as a message ([answer " + qid + " ...]); qid " + qid}
 }
 
 // endWaiter runs when the callback call of waiter w ends. delivered tells

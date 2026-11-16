@@ -1715,11 +1715,13 @@ func TestAgentConfig_EffectiveAskUser(t *testing.T) {
 		want       AskUserPolicy
 	}{
 		{"nil root", nil, false, AskUserAllow},
-		{"nil subagent", nil, true, AskUserDeny},
+		{"nil subagent", nil, true, AskUserEscalate},
 		{"empty root allows", &AgentConfig{}, false, AskUserAllow},
-		{"empty subagent denies", &AgentConfig{}, true, AskUserDeny},
+		{"empty subagent escalates", &AgentConfig{}, true, AskUserEscalate},
 		{"explicit allow on subagent", &AgentConfig{AskUser: AskUserAllow}, true, AskUserAllow},
 		{"explicit deny on root", &AgentConfig{AskUser: AskUserDeny}, false, AskUserDeny},
+		{"explicit deny on subagent", &AgentConfig{AskUser: AskUserDeny}, true, AskUserDeny},
+		{"explicit escalate on root", &AgentConfig{AskUser: AskUserEscalate}, false, AskUserEscalate},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1733,7 +1735,7 @@ func TestAgentConfig_Validate_AskUser(t *testing.T) {
 	t.Parallel()
 
 	supportedCLIs := map[string][]string{"opencode": {"deepseek-chat"}}
-	for _, v := range []AskUserPolicy{"", AskUserAllow, AskUserDeny, "escalate", "Allow"} {
+	for _, v := range []AskUserPolicy{"", AskUserAllow, AskUserDeny, AskUserEscalate, "Allow", "escalated"} {
 		cfg := AgentConfig{
 			ID:          "test-agent",
 			Name:        "test-agent",
@@ -1743,7 +1745,7 @@ func TestAgentConfig_Validate_AskUser(t *testing.T) {
 			AskUser:     v,
 		}
 		err := cfg.ValidateWithCLIs(supportedCLIs)
-		if v == "" || v == AskUserAllow || v == AskUserDeny {
+		if v == "" || v == AskUserAllow || v == AskUserDeny || v == AskUserEscalate {
 			assert.NoError(t, err, "value %q", v)
 		} else {
 			assert.ErrorContains(t, err, "invalid ask_user", "value %q", v)

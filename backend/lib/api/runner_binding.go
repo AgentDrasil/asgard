@@ -24,7 +24,9 @@ func WithRunnerHub(hub *runnerhub.Hub) ServerOption {
 		s.activeRuns = remote.ActiveRuns()
 		s.injector = hub
 		// The sandbox calls the runners forward (ask-user, call-peer, ...).
-		hub.SetCallbacks(newCallbackService(s, hub))
+		svc := newCallbackService(s, hub)
+		s.callbackSvc = svc
+		hub.SetCallbacks(svc)
 	}
 }
 

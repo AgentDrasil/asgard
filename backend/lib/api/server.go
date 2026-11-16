@@ -37,33 +37,35 @@ var ErrServerShutdownBeforeStart = errors.New("server shut down before start com
 
 // Server manages the HTTP server hosting agents.
 type Server struct {
-	conf               *config.Config
-	configPath         string
-	mu                 sync.RWMutex
-	agents             []*agentspec.Agent
-	agentSource        agentspec.Lister
-	reloadMu           sync.Mutex // serializes reload() so a stale list never overwrites a newer one
-	mux                *http.ServeMux
-	repo               *dbmodels.SessionRepository
-	workflowRunRepo    *dbmodels.WorkflowRunRepository
-	statusListeners    map[string][]*statusListener
-	workflowEngine     *workflow.Engine
-	cronManager        *trigger.WorkflowCronManager
-	eventHub           *SessionEventHub
-	diagnostics        *SystemDiagnostics
-	compressionMetrics *CompressionMetricsStore
-	ctx                context.Context
-	cancel             context.CancelFunc
-	resumeWG           sync.WaitGroup      // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
-	spawnMu            sync.Mutex          // serialises the child-count check and start of a subagent spawn
-	pushRetryDelays    []time.Duration     // overrides defaultPushRetryDelays (tests)
-	subagentSig        subagentSignals     // subagent wait, waiting marks and finish pushes
-	questions          questionBook        // open and answered subagent questions (in memory only)
-	holds              holdBook            // runs held alive while their chat has live subagents
-	holdIdle           time.Duration       // overrides the idle cap of a hold (tests; 0: default)
-	peerMu             sync.Mutex          // guards peerChains
-	peerChains         map[string][]string // chatID -> agent ids on the active call-peer chain
-	activeExecutions   sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)
+	conf                *config.Config
+	configPath          string
+	mu                  sync.RWMutex
+	agents              []*agentspec.Agent
+	agentSource         agentspec.Lister
+	reloadMu            sync.Mutex // serializes reload() so a stale list never overwrites a newer one
+	mux                 *http.ServeMux
+	repo                *dbmodels.SessionRepository
+	workflowRunRepo     *dbmodels.WorkflowRunRepository
+	statusListeners     map[string][]*statusListener
+	workflowEngine      *workflow.Engine
+	cronManager         *trigger.WorkflowCronManager
+	eventHub            *SessionEventHub
+	diagnostics         *SystemDiagnostics
+	compressionMetrics  *CompressionMetricsStore
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	resumeWG            sync.WaitGroup      // in-flight tryResumeWorkflow goroutines (tests wait on it before removing temp dirs)
+	spawnMu             sync.Mutex          // serialises the child-count check and start of a subagent spawn
+	pushRetryDelays     []time.Duration     // overrides defaultPushRetryDelays (tests)
+	subagentSig         subagentSignals     // subagent wait, waiting marks and finish pushes
+	questions           questionBook        // open and answered subagent questions (in memory only)
+	holds               holdBook            // runs held alive while their chat has live subagents
+	callbackSvc         *callbackService    // the runner callback service (nil without a runner hub)
+	askUserEscalateWait time.Duration       // overrides the wait of an escalated ask-user (tests; 0: maxSubagentWait)
+	holdIdle            time.Duration       // overrides the idle cap of a hold (tests; 0: default)
+	peerMu              sync.Mutex          // guards peerChains
+	peerChains          map[string][]string // chatID -> agent ids on the active call-peer chain
+	activeExecutions    sync.Map            // chatID -> *executionHandle (or legacy struct{} placeholder)
 	// cancelledExecutions records chatIDs whose execution was aborted via the
 	// stop API (chatID -> cancel time). It lets event handlers distinguish
 	// cancellation-induced node failures from genuine errors.

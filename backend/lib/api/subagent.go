@@ -227,9 +227,10 @@ func (s *Server) SpawnSubagent(ctx context.Context, req SpawnSubagentRequest) (s
 
 	// Dispatch through the async path of a normal trigger. The guard is taken
 	// before triggerMessage returns, so the child counts as running at once.
+	// The prompt ends with the child's ids and the routing table it starts with.
 	rec := newResponseCapture()
 	tr := TriggerMessageRequest{
-		Prompt:   req.Prompt,
+		Prompt:   req.Prompt + s.routingPromptBlock(childID, req.CallerChat),
 		ChatID:   childID,
 		RunnerID: parent.RunnerNodeID,
 		RunDir:   parent.RunDir,

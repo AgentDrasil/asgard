@@ -43,18 +43,21 @@ type fakeCallbacks struct {
 	// holdHook, when set, answers HoldMergeLock.
 	holdHook func(ctx context.Context, req *runnerpb.HoldMergeLockRequest) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error)
 	// subErr, when set, fails every subagent call.
-	subErr  error
-	spawns  []*runnerpb.SpawnSubagentRequest
-	lists   []*runnerpb.ListSubagentsRequest
-	trees   []*runnerpb.SubagentTreeRequest
-	stats   []*runnerpb.SubagentStatusRequest
-	kills   []*runnerpb.KillSubagentRequest
-	sends   []*runnerpb.SendToSubagentRequest
-	waits   []*runnerpb.WaitSubagentsRequest
-	replies []*runnerpb.ReplyToParentRequest
-	asksSub []*runnerpb.AskSubagentRequest
-	answers []*runnerpb.AnswerSubagentRequest
-	qs      []*runnerpb.SubagentQuestionsRequest
+	subErr     error
+	spawns     []*runnerpb.SpawnSubagentRequest
+	lists      []*runnerpb.ListSubagentsRequest
+	trees      []*runnerpb.SubagentTreeRequest
+	stats      []*runnerpb.SubagentStatusRequest
+	kills      []*runnerpb.KillSubagentRequest
+	sends      []*runnerpb.SendToSubagentRequest
+	waits      []*runnerpb.WaitSubagentsRequest
+	replies    []*runnerpb.ReplyToParentRequest
+	asksSub    []*runnerpb.AskSubagentRequest
+	answers    []*runnerpb.AnswerSubagentRequest
+	qs         []*runnerpb.SubagentQuestionsRequest
+	routeAdds  []*runnerpb.AddSubagentRouteRequest
+	routeRms   []*runnerpb.RemoveSubagentRouteRequest
+	routeLists []*runnerpb.ListSubagentRoutesRequest
 }
 
 func (f *fakeCallbacks) SpawnSubagent(_ context.Context, req *runnerpb.SpawnSubagentRequest, _ ...grpc.CallOption) (*runnerpb.SpawnSubagentResponse, error) {
@@ -153,6 +156,9 @@ func (f *fakeCallbacks) AskSubagent(_ context.Context, req *runnerpb.AskSubagent
 	if req.GetResumeQid() != "" {
 		return &runnerpb.AskSubagentResponse{Qid: req.GetResumeQid(), State: "answered", Answer: "resumed"}, nil
 	}
+	if req.GetTopic() != "" {
+		return &runnerpb.AskSubagentResponse{Qid: "q-3", State: "answered", Answer: "use main", Topic: req.GetTopic(), TargetChatId: "c-9", TargetAgent: "architect", TargetLabel: "arch"}, nil
+	}
 	return &runnerpb.AskSubagentResponse{Qid: "q-1", State: "pending"}, nil
 }
 
@@ -177,6 +183,39 @@ func (f *fakeCallbacks) SubagentQuestions(_ context.Context, req *runnerpb.Subag
 		Incoming: []*runnerpb.SubagentQuestion{{Qid: "q-1", FromChatId: "c-1", FromAgent: "Lead", FromLabel: "l", CreatedUnixMs: 42, FirstLine: "which branch?"}},
 		Outgoing: []*runnerpb.SubagentQuestion{{Qid: "q-2", ToChatId: "c-2", State: "pending"}},
 	}, nil
+}
+
+func (f *fakeCallbacks) AddSubagentRoute(_ context.Context, req *runnerpb.AddSubagentRouteRequest, _ ...grpc.CallOption) (*runnerpb.AddSubagentRouteResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routeAdds = append(f.routeAdds, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.AddSubagentRouteResponse{Replaced: req.GetTopic() == "again"}, nil
+}
+
+func (f *fakeCallbacks) RemoveSubagentRoute(_ context.Context, req *runnerpb.RemoveSubagentRouteRequest, _ ...grpc.CallOption) (*runnerpb.RemoveSubagentRouteResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routeRms = append(f.routeRms, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.RemoveSubagentRouteResponse{}, nil
+}
+
+func (f *fakeCallbacks) ListSubagentRoutes(_ context.Context, req *runnerpb.ListSubagentRoutesRequest, _ ...grpc.CallOption) (*runnerpb.ListSubagentRoutesResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routeLists = append(f.routeLists, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.ListSubagentRoutesResponse{Routes: []*runnerpb.SubagentRoute{
+		{Topic: "design", ToChatId: "c-9", Agent: "architect", Label: "arch", State: "running", DefinedAt: "c-1", Note: "layout"},
+		{Topic: "user", ToChatId: "c-1", Agent: "lead", State: "idle", DefinedAt: "(default)", Self: true},
+	}}, nil
 }
 
 func (f *fakeCallbacks) HoldMergeLock(ctx context.Context, req *runnerpb.HoldMergeLockRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {

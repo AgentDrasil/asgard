@@ -436,6 +436,13 @@ service AgentCallbackService {
   rpc AskSubagent(AskSubagentRequest) returns (AskSubagentResponse);
   rpc AnswerSubagent(AnswerSubagentRequest) returns (AnswerSubagentResponse);
   rpc SubagentQuestions(SubagentQuestionsRequest) returns (SubagentQuestionsResponse);
+  // The routing table: per-chat topic -> chat id entries that tell agents whom
+  // to ask about what (`subagent route add|rm|list`). They only touch the
+  // caller's own chat; the list is the effective table (the caller up to the
+  // root, nearest definition wins, plus the implicit `user` entry).
+  rpc AddSubagentRoute(AddSubagentRouteRequest) returns (AddSubagentRouteResponse);
+  rpc RemoveSubagentRoute(RemoveSubagentRouteRequest) returns (RemoveSubagentRouteResponse);
+  rpc ListSubagentRoutes(ListSubagentRoutesRequest) returns (ListSubagentRoutesResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
   // Runner-initiated workflow execution callbacks
@@ -636,12 +643,21 @@ message AskSubagentRequest {
   int64 timeout_ms = 4;
   // resume_qid keeps waiting for a question the caller asked earlier.
   string resume_qid = 5;
+  // topic addresses the question through the caller's effective routing table
+  // instead of to; the two are exclusive.
+  string topic = 6;
 }
 message AskSubagentResponse {
   string qid = 1;
   // state is "answered" (answer is set) or "pending" (the timeout passed).
   string state = 2;
   string answer = 3;
+  // topic and target_* describe the chat a topic ask resolved to (empty for an
+  // ask by chat id or a resume).
+  string topic = 4;
+  string target_chat_id = 5;
+  string target_agent = 6;
+  string target_label = 7;
 }
 
 message AnswerSubagentRequest {
@@ -676,6 +692,44 @@ message SubagentQuestion {
 message SubagentQuestionsResponse {
   repeated SubagentQuestion incoming = 1;
   repeated SubagentQuestion outgoing = 2;
+}
+
+message AddSubagentRouteRequest {
+  CallMeta meta = 1;
+  string topic = 2;
+  // to is a chat of the caller's spawn tree (the caller itself is allowed).
+  string to = 3;
+  string note = 4;
+}
+message AddSubagentRouteResponse {
+  // replaced is true when the topic already had an entry on the caller's chat.
+  bool replaced = 1;
+}
+
+message RemoveSubagentRouteRequest {
+  CallMeta meta = 1;
+  string topic = 2;
+}
+message RemoveSubagentRouteResponse {}
+
+message ListSubagentRoutesRequest {
+  CallMeta meta = 1;
+}
+// SubagentRoute is one entry of the effective routing table.
+message SubagentRoute {
+  string topic = 1;
+  string to_chat_id = 2;
+  string agent = 3;
+  string label = 4;
+  string state = 5;
+  // defined_at is the chat that defines the entry, or "(default)".
+  string defined_at = 6;
+  string note = 7;
+  // self is true when the entry resolves to the caller's own chat.
+  bool self = 8;
+}
+message ListSubagentRoutesResponse {
+  repeated SubagentRoute routes = 1;
 }
 
 // MetricsEvent mirrors pkg/metrics.Event.

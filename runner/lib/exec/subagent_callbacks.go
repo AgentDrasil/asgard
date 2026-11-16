@@ -26,6 +26,9 @@ func (s *statusServer) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentAsk, s.handleSubagentAsk)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentAnswer, s.handleSubagentAnswer)
 	mux.HandleFunc("GET "+sandboxsock.PathSubagentQuestions, s.handleSubagentQuestions)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentRouteAdd, s.handleSubagentRouteAdd)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentRouteRm, s.handleSubagentRouteRm)
+	mux.HandleFunc("GET "+sandboxsock.PathSubagentRouteList, s.handleSubagentRouteList)
 }
 
 // failSubagent reports a failed subagent call with an HTTP status that
@@ -329,17 +332,20 @@ func (s *statusServer) handleSubagentAsk(w http.ResponseWriter, r *http.Request)
 	if !decodeCall(w, r, &req) {
 		return
 	}
-	to, resume, text := clean(req.To), clean(req.ResumeQID), clean(req.Text)
-	if len(to) > maxMessageID || len(resume) > maxMessageID || req.TimeoutMs < 0 {
-		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "invalid chat id, question id or timeout"})
+	to, topic, resume, text := clean(req.To), clean(req.Topic), clean(req.ResumeQID), clean(req.Text)
+	if len(to) > maxMessageID || len(topic) > maxTopic || len(resume) > maxMessageID || req.TimeoutMs < 0 {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "invalid chat id, topic, question id or timeout"})
 		return
 	}
 	switch {
-	case resume != "" && (to != "" || text != ""):
+	case resume != "" && (to != "" || topic != "" || text != ""):
 		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "resume takes a question id only"})
 		return
-	case resume == "" && (to == "" || strings.TrimSpace(text) == ""):
-		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a chat id and a question are required"})
+	case resume == "" && to != "" && topic != "":
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a chat id and a topic are exclusive"})
+		return
+	case resume == "" && ((to == "" && topic == "") || strings.TrimSpace(text) == ""):
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a chat id or a topic, and a question are required"})
 		return
 	}
 	if len(text) > maxCallText {
@@ -352,14 +358,17 @@ func (s *statusServer) handleSubagentAsk(w http.ResponseWriter, r *http.Request)
 
 	var resp *runnerpb.AskSubagentResponse
 	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
-		resp, err = cb.AskSubagent(ctx, &runnerpb.AskSubagentRequest{Meta: s.meta(seq), To: to, Text: text, TimeoutMs: req.TimeoutMs, ResumeQid: resume})
+		resp, err = cb.AskSubagent(ctx, &runnerpb.AskSubagentRequest{Meta: s.meta(seq), To: to, Topic: topic, Text: text, TimeoutMs: req.TimeoutMs, ResumeQid: resume})
 		return err
 	})
 	if err != nil {
 		s.failSubagent(w, ctx, "subagent-ask", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sandboxsock.SubagentAskResponse{QID: resp.GetQid(), State: resp.GetState(), Answer: resp.GetAnswer()})
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentAskResponse{
+		QID: resp.GetQid(), State: resp.GetState(), Answer: resp.GetAnswer(),
+		Topic: resp.GetTopic(), TargetID: resp.GetTargetChatId(), TargetAgent: resp.GetTargetAgent(), TargetLabel: resp.GetTargetLabel(),
+	})
 }
 
 func (s *statusServer) handleSubagentAnswer(w http.ResponseWriter, r *http.Request) {
@@ -425,6 +434,91 @@ func (s *statusServer) handleSubagentQuestions(w http.ResponseWriter, r *http.Re
 	}
 	for _, q := range resp.GetOutgoing() {
 		out.Outgoing = append(out.Outgoing, questionInfoJSON(q))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// maxTopic bounds a routing topic (the backend enforces its syntax).
+const maxTopic = 64
+
+// maxRouteNote bounds a routing note (the backend enforces the same limit).
+const maxRouteNote = 200
+
+func (s *statusServer) handleSubagentRouteAdd(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentRouteAddRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	topic, to, note := clean(req.Topic), clean(req.To), clean(req.Note)
+	if topic == "" || to == "" {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a topic and a chat id are required"})
+		return
+	}
+	if len(topic) > maxTopic || len(to) > maxMessageID || len(note) > maxRouteNote {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "topic, chat id or note too long"})
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.AddSubagentRouteResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.AddSubagentRoute(ctx, &runnerpb.AddSubagentRouteRequest{Meta: s.meta(seq), Topic: topic, To: to, Note: note})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-route-add", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentRouteAddResponse{Replaced: resp.GetReplaced()})
+}
+
+func (s *statusServer) handleSubagentRouteRm(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentRouteRmRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	topic := clean(req.Topic)
+	if topic == "" || len(topic) > maxTopic {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a valid topic is required"})
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) error {
+		_, err := cb.RemoveSubagentRoute(ctx, &runnerpb.RemoveSubagentRouteRequest{Meta: s.meta(seq), Topic: topic})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-route-rm", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentRouteRmResponse{Removed: true})
+}
+
+func (s *statusServer) handleSubagentRouteList(w http.ResponseWriter, r *http.Request) {
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.ListSubagentRoutesResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.ListSubagentRoutes(ctx, &runnerpb.ListSubagentRoutesRequest{Meta: s.meta(seq)})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-route-list", err)
+		return
+	}
+	out := sandboxsock.SubagentRouteListResponse{Routes: []sandboxsock.SubagentRouteInfo{}}
+	for _, e := range resp.GetRoutes() {
+		out.Routes = append(out.Routes, sandboxsock.SubagentRouteInfo{
+			Topic: e.GetTopic(), To: e.GetToChatId(), Agent: e.GetAgent(), Label: e.GetLabel(), State: e.GetState(),
+			DefinedAt: e.GetDefinedAt(), Note: e.GetNote(), Self: e.GetSelf(),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

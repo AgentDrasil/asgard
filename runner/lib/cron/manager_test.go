@@ -115,6 +115,18 @@ func (f *fakeCallbacks) AnswerSubagent(ctx context.Context, in *runnerpb.AnswerS
 	return &runnerpb.AnswerSubagentResponse{}, nil
 }
 
+func (f *fakeCallbacks) AddSubagentRoute(ctx context.Context, in *runnerpb.AddSubagentRouteRequest, opts ...grpc.CallOption) (*runnerpb.AddSubagentRouteResponse, error) {
+	return &runnerpb.AddSubagentRouteResponse{}, nil
+}
+
+func (f *fakeCallbacks) RemoveSubagentRoute(ctx context.Context, in *runnerpb.RemoveSubagentRouteRequest, opts ...grpc.CallOption) (*runnerpb.RemoveSubagentRouteResponse, error) {
+	return &runnerpb.RemoveSubagentRouteResponse{}, nil
+}
+
+func (f *fakeCallbacks) ListSubagentRoutes(ctx context.Context, in *runnerpb.ListSubagentRoutesRequest, opts ...grpc.CallOption) (*runnerpb.ListSubagentRoutesResponse, error) {
+	return &runnerpb.ListSubagentRoutesResponse{}, nil
+}
+
 func (f *fakeCallbacks) SubagentQuestions(ctx context.Context, in *runnerpb.SubagentQuestionsRequest, opts ...grpc.CallOption) (*runnerpb.SubagentQuestionsResponse, error) {
 	return &runnerpb.SubagentQuestionsResponse{}, nil
 }

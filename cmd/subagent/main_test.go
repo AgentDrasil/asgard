@@ -455,6 +455,16 @@ func TestAskAndAnswerUsageErrors(t *testing.T) {
 		"ask resume with question": {"ask", "--resume", "q", "--", "x"},
 		"ask bad timeout":          {"ask", "--to", "c", "--timeout", "soon", "--", "x"},
 		"ask nothing":              {"ask"},
+		"ask to and topic":         {"ask", "--to", "c", "--topic", "t", "--", "x"},
+		"ask topic no question":    {"ask", "--topic", "t"},
+		"ask resume with topic":    {"ask", "--resume", "q", "--topic", "t"},
+		"route nothing":            {"route"},
+		"route unknown":            {"route", "bogus"},
+		"route add no topic":       {"route", "add", "--to", "c"},
+		"route add no target":      {"route", "add", "--topic", "t"},
+		"route add positional":     {"route", "add", "--topic", "t", "--to", "c", "x"},
+		"route rm no topic":        {"route", "rm"},
+		"route list args":          {"route", "list", "x"},
 		"answer without text":      {"answer", "q"},
 		"answer without id":        {"answer", "--", "x"},
 		"answer blank":             {"answer", "q", "--", " "},
@@ -515,4 +525,114 @@ func TestQuestionsEmpty(t *testing.T) {
 	code, stdout, _ := runCLI("questions")
 	require.Equal(t, exitOK, code)
 	assert.Equal(t, "no open questions\n", stdout)
+}
+
+func TestAskByTopicSendsTopicAndNamesTheTarget(t *testing.T) {
+	var got sandboxsock.SubagentAskRequest
+	var stderr bytes.Buffer
+	var announcedBeforeAsk string
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case sandboxsock.PathSubagentRouteList:
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentRouteListResponse{Routes: []sandboxsock.SubagentRouteInfo{
+				{Topic: "design", To: "c-9", Agent: "architect", Label: "arch", State: "running", DefinedAt: "c-1"},
+			}})
+		case sandboxsock.PathSubagentAsk:
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+			announcedBeforeAsk = stderr.String()
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAskResponse{
+				QID: "q-1", State: sandboxsock.QuestionAnswered, Answer: "use main",
+				Topic: "design", TargetID: "c-9", TargetAgent: "architect", TargetLabel: "arch",
+			})
+		}
+	}))
+	var stdout bytes.Buffer
+	code := run([]string{"subagent", "ask", "--topic", "design", "--", "which", "layout?"}, &stdout, &stderr)
+	require.Equal(t, exitOK, code, stderr.String())
+	assert.Equal(t, "use main\n", stdout.String())
+	assert.Equal(t, "asking c-9 (architect/arch) for topic design\n", stderr.String(), "announced once")
+	assert.Equal(t, "asking c-9 (architect/arch) for topic design\n", announcedBeforeAsk, "announced before the ask blocks")
+	assert.Equal(t, sandboxsock.SubagentAskRequest{Topic: "design", Text: "which layout?"}, got)
+}
+
+func TestAskByTopicAnnouncesAfterwardsWhenTheListCannotSay(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == sandboxsock.PathSubagentRouteList {
+			http.Error(w, "boom", http.StatusBadGateway)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAskResponse{
+			QID: "q-1", State: sandboxsock.QuestionAnswered, Answer: "ok",
+			Topic: "design", TargetID: "c-9", TargetAgent: "architect",
+		})
+	}))
+	code, _, stderr := runCLI("ask", "--topic", "design", "--", "q")
+	require.Equal(t, exitOK, code)
+	assert.Equal(t, "asking c-9 (architect) for topic design\n", stderr)
+}
+
+func TestRouteAddRmListCommands(t *testing.T) {
+	var add sandboxsock.SubagentRouteAddRequest
+	var rm sandboxsock.SubagentRouteRmRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case sandboxsock.PathSubagentRouteAdd:
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&add))
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentRouteAddResponse{Replaced: add.Topic == "again"})
+		case sandboxsock.PathSubagentRouteRm:
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&rm))
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentRouteRmResponse{Removed: true})
+		case sandboxsock.PathSubagentRouteList:
+			assert.Equal(t, http.MethodGet, r.Method)
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentRouteListResponse{Routes: []sandboxsock.SubagentRouteInfo{
+				{Topic: "design", To: "c-9", Agent: "architect", Label: "arch", State: "running", DefinedAt: "c-1", Note: "layout"},
+				{Topic: "user", To: "c-1", Agent: "lead", State: "idle", DefinedAt: "(default)", Self: true},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+
+	code, stdout, stderr := runCLI("route", "add", "--topic", "design", "--to", "c-9", "--note", "layout questions")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Equal(t, "added route design -> c-9\n", stdout)
+	assert.Equal(t, sandboxsock.SubagentRouteAddRequest{Topic: "design", To: "c-9", Note: "layout questions"}, add)
+
+	code, stdout, _ = runCLI("route", "add", "--topic", "again", "--to", "c-9")
+	require.Equal(t, exitOK, code)
+	assert.Equal(t, "replaced route again -> c-9\n", stdout)
+
+	code, stdout, stderr = runCLI("route", "rm", "--topic", "design")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Equal(t, "removed route design\n", stdout)
+	assert.Equal(t, "design", rm.Topic)
+
+	code, stdout, stderr = runCLI("route", "list")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Contains(t, stdout, "TOPIC")
+	assert.Contains(t, stdout, "design")
+	assert.Contains(t, stdout, "c-9")
+	assert.Contains(t, stdout, "architect")
+	assert.Contains(t, stdout, "c-1")
+	assert.Contains(t, stdout, "(default)")
+	assert.Contains(t, stdout, "c-1 (you)")
+	assert.Contains(t, stdout, "layout")
+
+	code, stdout, _ = runCLI("route", "list", "--json")
+	require.Equal(t, exitOK, code)
+	var list sandboxsock.SubagentRouteListResponse
+	require.NoError(t, json.Unmarshal([]byte(stdout), &list))
+	require.Len(t, list.Routes, 2)
+	assert.True(t, list.Routes[1].Self)
+}
+
+func TestRouteAddReportsBackendRefusal(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(sandboxsock.ErrorResponse{Error: "chat \"x\" is not in your spawn tree"})
+	}))
+	code, stdout, stderr := runCLI("route", "add", "--topic", "t", "--to", "x")
+	assert.Equal(t, exitError, code)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "not found: chat \"x\" is not in your spawn tree")
 }

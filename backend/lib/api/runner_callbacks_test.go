@@ -1053,6 +1053,9 @@ func TestCallbackAskUserPolicy(t *testing.T) {
 			if tt.child {
 				chat = childChat
 				require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: childChat, CurrentAgent: "alpha", ParentChatID: rigChat}))
+				// Nowhere to escalate: the child's own user route points at itself.
+				_, rerr := rig.server.AddRoute(childChat, "user", childChat, "")
+				require.NoError(t, rerr)
 				rig.runs.add(runnerhub.RunInfo{RunID: "run-child", NodeID: rigNode, ChatID: childChat, AgentID: runAgent, Done: make(chan struct{})})
 			}
 			runID := map[bool]string{false: rigRun, true: "run-child"}[tt.child]
@@ -1112,14 +1115,17 @@ func TestCallbackAskUserFailsClosedOnSessionReadError(t *testing.T) {
 		assert.Contains(t, resp.GetError(), "could not determine chat")
 	})
 	t.Run("explicit allow proceeds", func(t *testing.T) {
-		assert.Empty(t, (&Server{repo: dbmodels.NewSessionRepository(db.NewDBForTest(t))}).
-			askUserRefusal("c", &agentspec.AgentConfig{AskUser: agentspec.AskUserAllow}))
+		dec := (&Server{repo: dbmodels.NewSessionRepository(db.NewDBForTest(t))}).
+			askUserDecide("c", &agentspec.AgentConfig{AskUser: agentspec.AskUserAllow})
+		assert.Equal(t, askUserAllow, dec.action)
 	})
 }
 
 func TestHandleAskUserRefusesInChildChat(t *testing.T) {
 	rig := newCallbackRig(t)
 	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: "chat-kid", CurrentAgent: "alpha", ParentChatID: rigChat}))
+	_, rerr := rig.server.AddRoute("chat-kid", "user", "chat-kid", "")
+	require.NoError(t, rerr)
 	sub, _, cancel := rig.events.Subscribe("chat-kid", 0)
 	t.Cleanup(cancel)
 

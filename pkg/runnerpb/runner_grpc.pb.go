@@ -141,6 +141,9 @@ const (
 	AgentCallbackService_AskSubagent_FullMethodName         = "/asgard.runner.v1.AgentCallbackService/AskSubagent"
 	AgentCallbackService_AnswerSubagent_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/AnswerSubagent"
 	AgentCallbackService_SubagentQuestions_FullMethodName   = "/asgard.runner.v1.AgentCallbackService/SubagentQuestions"
+	AgentCallbackService_AddSubagentRoute_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/AddSubagentRoute"
+	AgentCallbackService_RemoveSubagentRoute_FullMethodName = "/asgard.runner.v1.AgentCallbackService/RemoveSubagentRoute"
+	AgentCallbackService_ListSubagentRoutes_FullMethodName  = "/asgard.runner.v1.AgentCallbackService/ListSubagentRoutes"
 	AgentCallbackService_RecordMetrics_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
 	AgentCallbackService_GetUserProxyKeys_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/GetUserProxyKeys"
 	AgentCallbackService_InitWorkflowSession_FullMethodName = "/asgard.runner.v1.AgentCallbackService/InitWorkflowSession"
@@ -188,6 +191,13 @@ type AgentCallbackServiceClient interface {
 	AskSubagent(ctx context.Context, in *AskSubagentRequest, opts ...grpc.CallOption) (*AskSubagentResponse, error)
 	AnswerSubagent(ctx context.Context, in *AnswerSubagentRequest, opts ...grpc.CallOption) (*AnswerSubagentResponse, error)
 	SubagentQuestions(ctx context.Context, in *SubagentQuestionsRequest, opts ...grpc.CallOption) (*SubagentQuestionsResponse, error)
+	// The routing table: per-chat topic -> chat id entries that tell agents whom
+	// to ask about what (`subagent route add|rm|list`). They only touch the
+	// caller's own chat; the list is the effective table (the caller up to the
+	// root, nearest definition wins, plus the implicit `user` entry).
+	AddSubagentRoute(ctx context.Context, in *AddSubagentRouteRequest, opts ...grpc.CallOption) (*AddSubagentRouteResponse, error)
+	RemoveSubagentRoute(ctx context.Context, in *RemoveSubagentRouteRequest, opts ...grpc.CallOption) (*RemoveSubagentRouteResponse, error)
+	ListSubagentRoutes(ctx context.Context, in *ListSubagentRoutesRequest, opts ...grpc.CallOption) (*ListSubagentRoutesResponse, error)
 	RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -349,6 +359,36 @@ func (c *agentCallbackServiceClient) SubagentQuestions(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *agentCallbackServiceClient) AddSubagentRoute(ctx context.Context, in *AddSubagentRouteRequest, opts ...grpc.CallOption) (*AddSubagentRouteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddSubagentRouteResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_AddSubagentRoute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) RemoveSubagentRoute(ctx context.Context, in *RemoveSubagentRouteRequest, opts ...grpc.CallOption) (*RemoveSubagentRouteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveSubagentRouteResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_RemoveSubagentRoute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) ListSubagentRoutes(ctx context.Context, in *ListSubagentRoutesRequest, opts ...grpc.CallOption) (*ListSubagentRoutesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSubagentRoutesResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_ListSubagentRoutes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentCallbackServiceClient) RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RecordMetricsResponse)
@@ -466,6 +506,13 @@ type AgentCallbackServiceServer interface {
 	AskSubagent(context.Context, *AskSubagentRequest) (*AskSubagentResponse, error)
 	AnswerSubagent(context.Context, *AnswerSubagentRequest) (*AnswerSubagentResponse, error)
 	SubagentQuestions(context.Context, *SubagentQuestionsRequest) (*SubagentQuestionsResponse, error)
+	// The routing table: per-chat topic -> chat id entries that tell agents whom
+	// to ask about what (`subagent route add|rm|list`). They only touch the
+	// caller's own chat; the list is the effective table (the caller up to the
+	// root, nearest definition wins, plus the implicit `user` entry).
+	AddSubagentRoute(context.Context, *AddSubagentRouteRequest) (*AddSubagentRouteResponse, error)
+	RemoveSubagentRoute(context.Context, *RemoveSubagentRouteRequest) (*RemoveSubagentRouteResponse, error)
+	ListSubagentRoutes(context.Context, *ListSubagentRoutesRequest) (*ListSubagentRoutesResponse, error)
 	RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -528,6 +575,15 @@ func (UnimplementedAgentCallbackServiceServer) AnswerSubagent(context.Context, *
 }
 func (UnimplementedAgentCallbackServiceServer) SubagentQuestions(context.Context, *SubagentQuestionsRequest) (*SubagentQuestionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubagentQuestions not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) AddSubagentRoute(context.Context, *AddSubagentRouteRequest) (*AddSubagentRouteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddSubagentRoute not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) RemoveSubagentRoute(context.Context, *RemoveSubagentRouteRequest) (*RemoveSubagentRouteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveSubagentRoute not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) ListSubagentRoutes(context.Context, *ListSubagentRoutesRequest) (*ListSubagentRoutesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSubagentRoutes not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordMetrics not implemented")
@@ -823,6 +879,60 @@ func _AgentCallbackService_SubagentQuestions_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentCallbackService_AddSubagentRoute_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddSubagentRouteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).AddSubagentRoute(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_AddSubagentRoute_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).AddSubagentRoute(ctx, req.(*AddSubagentRouteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_RemoveSubagentRoute_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveSubagentRouteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).RemoveSubagentRoute(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_RemoveSubagentRoute_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).RemoveSubagentRoute(ctx, req.(*RemoveSubagentRouteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_ListSubagentRoutes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSubagentRoutesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).ListSubagentRoutes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_ListSubagentRoutes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).ListSubagentRoutes(ctx, req.(*ListSubagentRoutesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AgentCallbackService_RecordMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecordMetricsRequest)
 	if err := dec(in); err != nil {
@@ -1004,6 +1114,18 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubagentQuestions",
 			Handler:    _AgentCallbackService_SubagentQuestions_Handler,
+		},
+		{
+			MethodName: "AddSubagentRoute",
+			Handler:    _AgentCallbackService_AddSubagentRoute_Handler,
+		},
+		{
+			MethodName: "RemoveSubagentRoute",
+			Handler:    _AgentCallbackService_RemoveSubagentRoute_Handler,
+		},
+		{
+			MethodName: "ListSubagentRoutes",
+			Handler:    _AgentCallbackService_ListSubagentRoutes_Handler,
 		},
 		{
 			MethodName: "RecordMetrics",

@@ -656,6 +656,30 @@ func (p callbackProxy) SubagentQuestions(ctx context.Context, req *runnerpb.Suba
 	return cb.SubagentQuestions(ctx, req)
 }
 
+func (p callbackProxy) AddSubagentRoute(ctx context.Context, req *runnerpb.AddSubagentRouteRequest) (*runnerpb.AddSubagentRouteResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.AddSubagentRoute(ctx, req)
+}
+
+func (p callbackProxy) RemoveSubagentRoute(ctx context.Context, req *runnerpb.RemoveSubagentRouteRequest) (*runnerpb.RemoveSubagentRouteResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.RemoveSubagentRoute(ctx, req)
+}
+
+func (p callbackProxy) ListSubagentRoutes(ctx context.Context, req *runnerpb.ListSubagentRoutesRequest) (*runnerpb.ListSubagentRoutesResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.ListSubagentRoutes(ctx, req)
+}
+
 func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
 	return p.h.currentCallbacks().RecordMetrics(ctx, req)
 }

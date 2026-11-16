@@ -471,9 +471,15 @@ func TestSubagentQuestionsCallback(t *testing.T) {
 
 func TestAskUserDenyTextPointsAtAsk(t *testing.T) {
 	r := newAskRig(t)
-	msg := r.server.askUserRefusal(r.child, nil)
-	assert.Contains(t, msg, "subagent ask --to <chat-id>")
-	assert.Contains(t, msg, "subagent tree")
+	// A child whose user route points at itself is denied.
+	_, err := r.server.AddRoute(r.child, "user", r.child, "")
+	require.NoError(t, err)
+	dec := r.server.askUserDecide(r.child, nil)
+	require.Equal(t, askUserDeny, dec.action)
+	assert.Contains(t, dec.msg, "subagent ask --to <chat-id>")
+	assert.Contains(t, dec.msg, "subagent ask --topic <t>")
+	assert.Contains(t, dec.msg, "subagent route list")
+	assert.Contains(t, dec.msg, "subagent tree")
 }
 
 // ---- deadlock analysis -----------------------------------------------------

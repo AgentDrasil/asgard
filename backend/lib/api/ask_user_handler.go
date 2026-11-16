@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
@@ -82,10 +83,11 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg *agentspec.AgentConfig
-	name, runnerID := req.AgentName, ""
+	name, runnerID, currentAgent := req.AgentName, "", ""
 	if s.repo != nil {
 		if sess, _ := s.repo.GetSessionMeta(req.ChatID); sess != nil {
 			runnerID = sess.RunnerNodeID
+			currentAgent = sess.CurrentAgent
 			if name == "" {
 				name = sess.CurrentAgent
 			}
@@ -96,8 +98,39 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 			cfg = &a.Config
 		}
 	}
-	if msg := s.askUserRefusal(req.ChatID, cfg); msg != "" {
-		writeJSONError(w, http.StatusForbidden, msg)
+	dec := s.askUserDecide(req.ChatID, cfg)
+	switch dec.action {
+	case askUserDeny:
+		writeJSONError(w, http.StatusForbidden, dec.msg)
+		return
+	case askUserEscalate:
+		// The asker identity is the resolved config or the chat's current
+		// agent, never a name the request made up.
+		agentID := currentAgent
+		if cfg != nil {
+			agentID = cfg.ID
+		}
+		ctx := r.Context()
+		if s.callbackSvc != nil {
+			// The same blocking caps as the sandbox callback.
+			root, rerr := s.repo.SpawnRootID(req.ChatID)
+			if rerr != nil || root == "" {
+				root = req.ChatID
+			}
+			release, cerr := s.callbackSvc.acquireBlocking(root)
+			if cerr != nil {
+				writeJSONError(w, http.StatusTooManyRequests, status.Convert(cerr).Message())
+				return
+			}
+			defer release()
+		}
+		answer, err := s.escalateAskUser(withTakeBack(ctx, askUserTakenBack), req.ChatID, agentID, dec.target, req.Question)
+		resp := AskUserResponse{Reply: answer}
+		if err != nil {
+			resp = AskUserResponse{Error: err.Error()}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
 

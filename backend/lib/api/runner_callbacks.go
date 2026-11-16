@@ -254,6 +254,45 @@ func (c *callbackService) runWith(ctx context.Context, meta *runnerpb.CallMeta, 
 	}
 }
 
+// castResp is a checked type assertion of a (possibly cached) call result: a
+// result of another type is an internal error, not a panic.
+func castResp[T proto.Message](resp proto.Message) (T, error) {
+	r, ok := resp.(T)
+	if !ok {
+		var zero T
+		return zero, status.Error(codes.Internal, "unexpected cached result type for this call")
+	}
+	return r, nil
+}
+
+// acquireBlocking counts one blocking call of the spawn tree rooted at root
+// against the same caps as blocking callbacks, for blocking work that does not
+// come through the callback service (POST /api/ask-user escalation). The
+// returned function releases the slot.
+func (c *callbackService) acquireBlocking(root string) (func(), error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.blocking >= c.blockingCap() {
+		return nil, status.Error(codes.ResourceExhausted, "too many blocked ask/wait calls on this backend; retry in a few seconds")
+	}
+	if c.treeBlock[root] >= c.treeCap() {
+		return nil, status.Error(codes.ResourceExhausted, "too many blocked ask/wait calls in this spawn tree; end some waits or retry in a few seconds")
+	}
+	c.blocking++
+	if c.treeBlock == nil {
+		c.treeBlock = map[string]int{}
+	}
+	c.treeBlock[root]++
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.blocking--
+		if c.treeBlock[root]--; c.treeBlock[root] <= 0 {
+			delete(c.treeBlock, root)
+		}
+	}, nil
+}
+
 func (c *callbackService) blockingCap() int {
 	if c.maxBlocking > 0 {
 		return c.maxBlocking
@@ -388,20 +427,46 @@ func (c *callbackService) dropLocked(k callKey, e *callEntry) {
 	delete(c.calls, k)
 }
 
-// AskUser implements runnerpb.AgentCallbackServiceServer.
+// AskUser implements runnerpb.AgentCallbackServiceServer. Depending on the
+// agent's ask_user policy the call asks the user (allow), fails at once (deny)
+// or is escalated to the chat the `user` route resolves to (escalate), which
+// blocks like `subagent ask` and so counts against the blocking-call caps.
 func (c *callbackService) AskUser(ctx context.Context, req *runnerpb.AskUserRequest) (*runnerpb.AskUserResponse, error) {
-	resp, err := c.run(ctx, req.GetMeta(), "ask_user", func(ctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+	var dec askUserDecision
+	var decided bool
+	decide := func(info runnerhub.RunInfo) askUserDecision {
+		if !decided {
+			dec, decided = c.askUserDecision(info), true
+		}
+		return dec
+	}
+	opts := callOpts{}
+	if req.GetQuestion() != "" {
+		// Peek at the run to size the call: only an escalation blocks.
+		if info, ok := c.peekRun(ctx, req.GetMeta()); ok && decide(info).action == askUserEscalate {
+			opts.blocking = true
+		}
+	}
+	resp, err := c.runWith(ctx, req.GetMeta(), "ask_user", opts, func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
 		if req.GetQuestion() == "" {
 			return askUserError("question is required"), nil
 		}
-		if msg := c.askUserDenied(info); msg != "" {
-			return askUserError(msg), nil
+		d := decide(info)
+		switch d.action {
+		case askUserDeny:
+			return askUserError(d.msg), nil
+		case askUserEscalate:
+			answer, err := c.s.escalateAskUser(withTakeBack(fctx, askUserTakenBack), info.ChatID, info.AgentID, d.target, req.GetQuestion())
+			if err != nil {
+				return askUserError(err.Error()), nil
+			}
+			return &runnerpb.AskUserResponse{Reply: capText(answer)}, nil
 		}
 		msgID := req.GetMessageId()
 		if msgID == "" || len(msgID) > maxMessageIDSize {
 			msgID = fmt.Sprintf("ask-%s-%d", info.RunID, req.GetMeta().GetCallSeq())
 		}
-		reply, err := c.s.askUser(ctx, AskUserRequest{
+		reply, err := c.s.askUser(fctx, AskUserRequest{
 			ChatID:    info.ChatID,
 			AgentName: req.GetAgentName(),
 			Question:  req.GetQuestion(),
@@ -416,50 +481,29 @@ func (c *callbackService) AskUser(ctx context.Context, req *runnerpb.AskUserRequ
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.AskUserResponse), nil
+	return castResp[*runnerpb.AskUserResponse](resp)
 }
 
-// askUserDenied resolves the calling agent of a sandbox ask-user callback and
-// returns the refusal message, or "" when the call may proceed.
-func (c *callbackService) askUserDenied(info runnerhub.RunInfo) string {
+// peekRun looks up the active run of a call without registering it.
+func (c *callbackService) peekRun(ctx context.Context, meta *runnerpb.CallMeta) (runnerhub.RunInfo, bool) {
+	if meta.GetRunId() == "" || meta.GetCallSeq() == 0 {
+		return runnerhub.RunInfo{}, false
+	}
+	nodeID, ok := c.nodeID(ctx)
+	if !ok {
+		return runnerhub.RunInfo{}, false
+	}
+	return c.runs.ActiveRun(meta.GetRunId(), nodeID)
+}
+
+// askUserDecision resolves the calling agent of a sandbox ask-user callback
+// and decides what the call does.
+func (c *callbackService) askUserDecision(info runnerhub.RunInfo) askUserDecision {
 	var cfg *agentspec.AgentConfig
 	if a, err := c.s.findAgentFor(info.NodeID, info.AgentID); err == nil && a != nil {
 		cfg = &a.Config
 	}
-	return c.s.askUserRefusal(info.ChatID, cfg)
-}
-
-// askUserRefusal is the one ask_user policy check, shared by the sandbox
-// callback and POST /api/ask-user. It returns the refusal message when the
-// effective policy for chatID and the agent config cfg (nil when unknown) is
-// deny, else "". If the chat cannot be read it fails closed, unless the config
-// explicitly allows. A chat that does not exist counts as a root chat. Workflow
-// human nodes and quota suspension write ask_user messages without this check.
-func (s *Server) askUserRefusal(chatID string, cfg *agentspec.AgentConfig) string {
-	isSub := false
-	if s.repo != nil {
-		sess, err := s.repo.GetSessionMeta(chatID)
-		if err != nil {
-			log.Error().Err(err).Str("chat_id", chatID).Msg("ask-user: cannot read chat to resolve ask_user policy")
-			if cfg != nil && cfg.AskUser == agentspec.AskUserAllow {
-				return ""
-			}
-			return "could not determine chat; ask-user refused"
-		}
-		isSub = sess != nil && sess.ParentChatID != ""
-	}
-	if cfg.EffectiveAskUser(isSub) != agentspec.AskUserDeny {
-		return ""
-	}
-	const base = "ask-user is disabled for this agent (ask_user: deny"
-	if !isSub {
-		return base + "). Do not wait for the user; proceed with your best judgment or state the open question in your final answer."
-	}
-	reason := base + "). "
-	if cfg == nil || cfg.AskUser == "" {
-		reason = base + "; subagents default to deny). "
-	}
-	return reason + "Do not wait for the user. If you need an answer from your parent, end your turn with the question as your final output (your parent reads it via `subagent wait`/`status`), or send a non-blocking `subagent reply`. To get an answer from a specific agent of your spawn tree and wait for it, use `subagent ask --to <chat-id> -- <question>` (find chat ids with `subagent tree`)."
+	return c.s.askUserDecide(info.ChatID, cfg)
 }
 
 func askUserError(msg string) *runnerpb.AskUserResponse {
@@ -475,7 +519,7 @@ func (c *callbackService) CallPeer(ctx context.Context, req *runnerpb.CallPeerRe
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.CallPeerResponse), nil
+	return castResp[*runnerpb.CallPeerResponse](resp)
 }
 
 // callPeer triggers the peer agent through the same code as POST
@@ -585,7 +629,7 @@ func (c *callbackService) FindPeer(ctx context.Context, req *runnerpb.FindPeerRe
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.FindPeerResponse), nil
+	return castResp[*runnerpb.FindPeerResponse](resp)
 }
 
 // subagentStatusErr maps a *SubagentError to the gRPC status of the call.
@@ -648,7 +692,7 @@ func (c *callbackService) SpawnSubagent(ctx context.Context, req *runnerpb.Spawn
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.SpawnSubagentResponse), nil
+	return castResp[*runnerpb.SpawnSubagentResponse](resp)
 }
 
 // ListSubagents implements runnerpb.AgentCallbackServiceServer.
@@ -667,7 +711,7 @@ func (c *callbackService) ListSubagents(ctx context.Context, req *runnerpb.ListS
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.ListSubagentsResponse), nil
+	return castResp[*runnerpb.ListSubagentsResponse](resp)
 }
 
 // SubagentTree implements runnerpb.AgentCallbackServiceServer. The tree is
@@ -687,7 +731,7 @@ func (c *callbackService) SubagentTree(ctx context.Context, req *runnerpb.Subage
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.SubagentTreeResponse), nil
+	return castResp[*runnerpb.SubagentTreeResponse](resp)
 }
 
 // SubagentStatus implements runnerpb.AgentCallbackServiceServer.
@@ -702,7 +746,7 @@ func (c *callbackService) SubagentStatus(ctx context.Context, req *runnerpb.Suba
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.SubagentStatusResponse), nil
+	return castResp[*runnerpb.SubagentStatusResponse](resp)
 }
 
 // KillSubagent implements runnerpb.AgentCallbackServiceServer.
@@ -717,7 +761,7 @@ func (c *callbackService) KillSubagent(ctx context.Context, req *runnerpb.KillSu
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.KillSubagentResponse), nil
+	return castResp[*runnerpb.KillSubagentResponse](resp)
 }
 
 // SendToSubagent implements runnerpb.AgentCallbackServiceServer.
@@ -732,7 +776,7 @@ func (c *callbackService) SendToSubagent(ctx context.Context, req *runnerpb.Send
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.SendToSubagentResponse), nil
+	return castResp[*runnerpb.SendToSubagentResponse](resp)
 }
 
 // WaitSubagents implements runnerpb.AgentCallbackServiceServer. It blocks, so
@@ -756,7 +800,7 @@ func (c *callbackService) WaitSubagents(ctx context.Context, req *runnerpb.WaitS
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.WaitSubagentsResponse), nil
+	return castResp[*runnerpb.WaitSubagentsResponse](resp)
 }
 
 // ReplyToParent implements runnerpb.AgentCallbackServiceServer. The subagent
@@ -772,7 +816,7 @@ func (c *callbackService) ReplyToParent(ctx context.Context, req *runnerpb.Reply
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.ReplyToParentResponse), nil
+	return castResp[*runnerpb.ReplyToParentResponse](resp)
 }
 
 // AskSubagent implements runnerpb.AgentCallbackServiceServer. The asker is the
@@ -782,10 +826,17 @@ func (c *callbackService) AskSubagent(ctx context.Context, req *runnerpb.AskSuba
 	resp, err := c.runWith(ctx, req.GetMeta(), "ask_subagent", callOpts{blocking: true}, func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
 		timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
 		var out AskOutcome
+		var target RouteEntry
 		var err error
-		if req.GetResumeQid() != "" {
+		switch {
+		case req.GetResumeQid() != "":
 			out, err = c.s.ResumeQuestion(fctx, info.ChatID, req.GetResumeQid(), timeout)
-		} else {
+		case req.GetTopic() != "":
+			if req.GetTo() != "" {
+				return nil, status.Error(codes.InvalidArgument, "ask takes a topic or a chat id, not both")
+			}
+			out, target, err = c.s.AskTopic(fctx, info.ChatID, info.AgentID, req.GetTopic(), req.GetText(), timeout)
+		default:
 			out, err = c.s.AskSubagent(fctx, info.ChatID, info.AgentID, req.GetTo(), req.GetText(), timeout)
 		}
 		if err != nil {
@@ -795,12 +846,16 @@ func (c *callbackService) AskSubagent(ctx context.Context, req *runnerpb.AskSuba
 		if out.Answered {
 			state = QuestionStateAnswered
 		}
-		return &runnerpb.AskSubagentResponse{Qid: out.QID, State: state, Answer: capText(out.Answer)}, nil
+		resp := &runnerpb.AskSubagentResponse{Qid: out.QID, State: state, Answer: capText(out.Answer)}
+		if target.To != "" {
+			resp.Topic, resp.TargetChatId, resp.TargetAgent, resp.TargetLabel = target.Topic, target.To, target.Agent, target.Label
+		}
+		return resp, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.AskSubagentResponse), nil
+	return castResp[*runnerpb.AskSubagentResponse](resp)
 }
 
 // AnswerSubagent implements runnerpb.AgentCallbackServiceServer. The answerer
@@ -816,7 +871,7 @@ func (c *callbackService) AnswerSubagent(ctx context.Context, req *runnerpb.Answ
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.AnswerSubagentResponse), nil
+	return castResp[*runnerpb.AnswerSubagentResponse](resp)
 }
 
 // SubagentQuestions implements runnerpb.AgentCallbackServiceServer.
@@ -835,7 +890,60 @@ func (c *callbackService) SubagentQuestions(ctx context.Context, req *runnerpb.S
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.SubagentQuestionsResponse), nil
+	return castResp[*runnerpb.SubagentQuestionsResponse](resp)
+}
+
+// AddSubagentRoute implements runnerpb.AgentCallbackServiceServer. The entry
+// is stored on the calling run's chat.
+func (c *callbackService) AddSubagentRoute(ctx context.Context, req *runnerpb.AddSubagentRouteRequest) (*runnerpb.AddSubagentRouteResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "add_subagent_route", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		replaced, err := c.s.AddRoute(info.ChatID, req.GetTopic(), req.GetTo(), req.GetNote())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.AddSubagentRouteResponse{Replaced: replaced}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return castResp[*runnerpb.AddSubagentRouteResponse](resp)
+}
+
+// RemoveSubagentRoute implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) RemoveSubagentRoute(ctx context.Context, req *runnerpb.RemoveSubagentRouteRequest) (*runnerpb.RemoveSubagentRouteResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "remove_subagent_route", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		if err := c.s.RemoveRoute(info.ChatID, req.GetTopic()); err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.RemoveSubagentRouteResponse{}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return castResp[*runnerpb.RemoveSubagentRouteResponse](resp)
+}
+
+// ListSubagentRoutes implements runnerpb.AgentCallbackServiceServer. The table
+// is derived from the calling run's chat, never from the request.
+func (c *callbackService) ListSubagentRoutes(ctx context.Context, req *runnerpb.ListSubagentRoutesRequest) (*runnerpb.ListSubagentRoutesResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "list_subagent_routes", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		table, err := c.s.EffectiveRoutes(info.ChatID)
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		out := &runnerpb.ListSubagentRoutesResponse{}
+		for _, e := range table {
+			out.Routes = append(out.Routes, &runnerpb.SubagentRoute{
+				Topic: e.Topic, ToChatId: e.To, Agent: e.Agent, Label: e.Label, State: e.State,
+				DefinedAt: e.DefinedAt, Note: e.Note, Self: e.Self,
+			})
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return castResp[*runnerpb.ListSubagentRoutesResponse](resp)
 }
 
 func questionInfoPB(q QuestionInfo) *runnerpb.SubagentQuestion {
@@ -867,7 +975,7 @@ func (c *callbackService) RecordMetrics(ctx context.Context, req *runnerpb.Recor
 	if err != nil {
 		return nil, err
 	}
-	return resp.(*runnerpb.RecordMetricsResponse), nil
+	return castResp[*runnerpb.RecordMetricsResponse](resp)
 }
 
 // GetUserProxyKeys implements runnerpb.AgentCallbackServiceServer. Decrypts the user's proxy keys from DB and returns them.

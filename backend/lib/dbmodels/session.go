@@ -461,6 +461,14 @@ func (r *SessionRepository) deleteSession(chatID string, removeLocal bool) error
 		}
 	}
 
+	// The chat's routing-table entries, and the entries of other chats that
+	// point at it (they could only dangle).
+	if r.db.Migrator().HasTable(&ChatRoute{}) {
+		if err := r.db.Delete(&ChatRoute{}, "chat_id = ? OR target_chat_id = ?", chatID, chatID).Error; err != nil {
+			return err
+		}
+	}
+
 	// Clean the physical session directory (messages.jsonl, workflows, etc.)
 	// and the per-chat merged CA bundle directory (~/tmp/.asgard-ca/<chatID>).
 	// With a runner resolver those live on the runner and the backend touches

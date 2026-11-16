@@ -226,6 +226,10 @@ func TestSubagentAskRejectsBadRequests(t *testing.T) {
 		"resume with text":   {Text: "x", ResumeQID: "q"},
 		"negative timeout":   {To: "c", Text: "x", TimeoutMs: -1},
 		"oversized id":       {To: string(make([]byte, 500)), Text: "x"},
+		"to and topic":       {To: "c", Topic: "design", Text: "x"},
+		"topic and resume":   {Topic: "design", ResumeQID: "q"},
+		"blank topic ask":    {Topic: "design", Text: " "},
+		"oversized topic":    {Topic: string(make([]byte, 100)), Text: "x"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, _ := rig.post(t, sandboxsock.PathSubagentAsk, req)
@@ -273,4 +277,93 @@ func TestSubagentAskMapsBackendCodes(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &e))
 	assert.Equal(t, "target c-2 was killed", e.Error)
 	assert.Len(t, fake.asksSub, 1, "a permanent backend answer is not retried")
+}
+
+func TestSubagentAskByTopicRelaysTarget(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentAsk, map[string]any{"topic": "design", "text": "which layout?", "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var out sandboxsock.SubagentAskResponse
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, sandboxsock.SubagentAskResponse{
+		QID: "q-3", State: sandboxsock.QuestionAnswered, Answer: "use main",
+		Topic: "design", TargetID: "c-9", TargetAgent: "architect", TargetLabel: "arch",
+	}, out)
+	require.Len(t, fake.asksSub, 1)
+	assert.Equal(t, "design", fake.asksSub[0].GetTopic())
+	assert.Empty(t, fake.asksSub[0].GetTo())
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.asksSub[0].GetMeta().GetRunId())
+}
+
+func TestSubagentRouteRelay(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+
+	code, body := rig.post(t, sandboxsock.PathSubagentRouteAdd, map[string]any{"topic": "design", "to": "c-9", "note": "layout", "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var add sandboxsock.SubagentRouteAddResponse
+	require.NoError(t, json.Unmarshal(body, &add))
+	assert.False(t, add.Replaced)
+	code, body = rig.post(t, sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: "again", To: "c-9"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	require.NoError(t, json.Unmarshal(body, &add))
+	assert.True(t, add.Replaced)
+	require.Len(t, fake.routeAdds, 2)
+	got := fake.routeAdds[0]
+	assert.Equal(t, rig.srv.sr.GetRunId(), got.GetMeta().GetRunId())
+	assert.NotZero(t, got.GetMeta().GetCallSeq())
+	assert.Equal(t, "design", got.GetTopic())
+	assert.Equal(t, "c-9", got.GetTo())
+	assert.Equal(t, "layout", got.GetNote())
+
+	code, body = rig.post(t, sandboxsock.PathSubagentRouteRm, sandboxsock.SubagentRouteRmRequest{Topic: "design"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	require.Len(t, fake.routeRms, 1)
+	assert.Equal(t, "design", fake.routeRms[0].GetTopic())
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.routeRms[0].GetMeta().GetRunId())
+
+	resp, err := rig.client.Get("http://asgard" + sandboxsock.PathSubagentRouteList + "?chat_id=evil")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list sandboxsock.SubagentRouteListResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&list))
+	assert.Equal(t, []sandboxsock.SubagentRouteInfo{
+		{Topic: "design", To: "c-9", Agent: "architect", Label: "arch", State: "running", DefinedAt: "c-1", Note: "layout"},
+		{Topic: "user", To: "c-1", Agent: "lead", State: "idle", DefinedAt: "(default)", Self: true},
+	}, list.Routes)
+	require.Len(t, fake.routeLists, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.routeLists[0].GetMeta().GetRunId())
+}
+
+func TestSubagentRouteRejectsBadRequestsAndMapsCodes(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	for name, tt := range map[string]struct {
+		path string
+		body any
+	}{
+		"add without topic":   {sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{To: "c"}},
+		"add without target":  {sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: "t"}},
+		"add oversized topic": {sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: string(make([]byte, 100)), To: "c"}},
+		"add oversized note":  {sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: "t", To: "c", Note: string(make([]byte, 300))}},
+		"rm without topic":    {sandboxsock.PathSubagentRouteRm, sandboxsock.SubagentRouteRmRequest{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, _ := rig.post(t, tt.path, tt.body)
+			assert.Equal(t, http.StatusBadRequest, code)
+		})
+	}
+	assert.Empty(t, fake.routeAdds)
+	assert.Empty(t, fake.routeRms)
+
+	fake = &fakeCallbacks{subErr: status.Error(codes.NotFound, "chat is not in your spawn tree")}
+	rig = newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentRouteAdd, sandboxsock.SubagentRouteAddRequest{Topic: "t", To: "c"})
+	assert.Equal(t, http.StatusNotFound, code)
+	var e sandboxsock.ErrorResponse
+	require.NoError(t, json.Unmarshal(body, &e))
+	assert.Equal(t, "chat is not in your spawn tree", e.Error)
+	assert.Len(t, fake.routeAdds, 1, "a permanent backend answer is not retried")
 }

@@ -20,6 +20,9 @@ const (
 	AskUserAllow AskUserPolicy = "allow"
 	// AskUserDeny refuses ask-user calls at once.
 	AskUserDeny AskUserPolicy = "deny"
+	// AskUserEscalate forwards the question to the chat the `user` topic of
+	// the routing table resolves to, and returns that chat's answer.
+	AskUserEscalate AskUserPolicy = "escalate"
 )
 
 type LockMode string
@@ -423,9 +426,10 @@ type AgentConfig struct {
 	// LockMode controls file locking mode: "exclusive" (default) or "readonly".
 	LockMode LockMode `yaml:"lock_mode,omitempty" json:"lock_mode,omitempty"`
 
-	// AskUser sets whether the agent may block on the sandbox ask-user
-	// command: "allow" or "deny". Empty means the default, which depends on
-	// the chat (see EffectiveAskUser).
+	// AskUser sets what the sandbox ask-user command does: "allow" (ask the
+	// user and block), "deny" (refuse) or "escalate" (ask the chat the `user`
+	// route resolves to). Empty means the default, which depends on the chat
+	// (see EffectiveAskUser).
 	AskUser AskUserPolicy `yaml:"ask_user,omitempty" json:"ask_user,omitempty"`
 
 	// Worktree optionally offers per-chat git worktree isolation.
@@ -448,13 +452,14 @@ type AgentConfig struct {
 
 // EffectiveAskUser resolves the ask-user policy for a chat. An explicit
 // setting wins; otherwise a root chat allows and a subagent chat (isSubagent)
-// denies, as nobody watches a child chat. A nil cfg uses the default.
+// escalates (the caller turns that into deny when the `user` route resolves to
+// the chat itself), as nobody watches a child chat. A nil cfg uses the default.
 func (cfg *AgentConfig) EffectiveAskUser(isSubagent bool) AskUserPolicy {
 	if cfg != nil && cfg.AskUser != "" {
 		return cfg.AskUser
 	}
 	if isSubagent {
-		return AskUserDeny
+		return AskUserEscalate
 	}
 	return AskUserAllow
 }
@@ -570,10 +575,10 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 	}
 
 	switch cfg.AskUser {
-	case "", AskUserAllow, AskUserDeny:
+	case "", AskUserAllow, AskUserDeny, AskUserEscalate:
 		// valid
 	default:
-		return fmt.Errorf("invalid ask_user: %q, must be %q or %q", cfg.AskUser, AskUserAllow, AskUserDeny)
+		return fmt.Errorf("invalid ask_user: %q, must be %q, %q or %q", cfg.AskUser, AskUserAllow, AskUserDeny, AskUserEscalate)
 	}
 
 	switch cfg.LockMode {
