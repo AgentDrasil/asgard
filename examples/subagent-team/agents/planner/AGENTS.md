@@ -19,7 +19,7 @@ End your turn when the plan is ready, with a one-line summary.
 
 ## Asking the human (`ask-user`)
 
-`ask-user` blocks up to 90s. If the orchestrator has not relayed the answer yet it ERRORS with `no answer yet from <orch>; qid <q>; continue with: subagent ask --resume <q>` (not exit 3). On that error loop `subagent ask --resume <q>` until exit 0 prints the answer. Other errors:
+`ask-user` blocks up to 90s. If the orchestrator has not relayed the answer yet it ERRORS with `no answer yet from <orch>; qid <q>; continue with: subagent ask --resume <q>` (not exit 3). On that error loop `subagent ask --resume <q>` until exit 0 prints the answer, at most 10 times (about 15 minutes); after that decide with best judgment and record an `ASSUMPTION` in decisions.md, as in the `leads back to you` row. Other errors:
 
 | Error contains | Do |
 |---|---|

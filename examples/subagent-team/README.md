@@ -123,4 +123,4 @@ This example does not support worktree chats as-is. A read-only child in a workt
 
 ## Validation
 
-`pkg/agentspec/examples_test.go` parses every agent with `agentspec.ParseFilesWithCLIs(..., NoCLIValidation())` and checks team consistency, that every `ask --topic` is registered by an ancestor's `route add` (or is `user`), and that no snippet uses a `--timeout` above 90s. Model names are not checked against a live runner.
+`pkg/agentspec/examples_test.go` parses every agent with `agentspec.ParseFilesWithCLIs(..., NoCLIValidation())` and checks team consistency, that every `ask --topic` is registered by an ancestor's `route add` (or is `user`), that no snippet uses a `--timeout` above 90s, that every spawn of a `lock_mode: readonly` agent passes `--readonly`, that `ask_user` is unset for every subagent (so the default escalate applies), that every registered route is asked by some agent, and that orchestrator never has more than 3 `subagent spawn` lines between `subagent wait` lines. Model names are not checked against a live runner.

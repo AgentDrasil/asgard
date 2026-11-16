@@ -70,7 +70,7 @@ func TestSubagentTeamExample(t *testing.T) {
 			continue
 		}
 		assert.Empty(t, string(def.Config.AskUser), "%s: ask_user must be unset so the subagent default (escalate) applies", id)
-		assert.NotEqual(t, AskUserDeny, def.Config.EffectiveAskUser(false), id)
+		assert.Equal(t, AskUserEscalate, def.Config.EffectiveAskUser(true), id)
 	}
 
 	agentRe := regexp.MustCompile(`--agent (\S+)`)
