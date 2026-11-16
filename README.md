@@ -362,7 +362,7 @@ An agent can start other agents as **subagents** to do work in parallel (researc
 ### Limits
 
 *   **Team restriction.** `--agent` must be an agent on the caller's current team, the same rule as `call-peer`/`find-peer`. A target agent whose worktree root differs from the spawn tree's is refused. `--model` may override the model per spawn (e.g. a cheaper one).
-*   **Nesting.** Subagents may spawn subagents. The depth limit of 4 is one counter shared with `call-peer` chains, so mixing the two cannot get around it.
+*   **Nesting.** Subagents may spawn subagents. The depth limit of 4 (the root agent counts as 1) is one counter shared with `call-peer` chains, so mixing the two cannot get around it.
 *   **Fan-out.** At most 4 children of one parent run at the same time (a spawn beyond that is refused with a limit error; restarting an idle child with `subagent send` counts toward the same cap).
 
 ### The `subagent` CLI
@@ -388,8 +388,8 @@ subagent reply -- <text>               # child only: message the parent mid-run
 
 ### Reporting back
 
-*   **Push.** When a child finishes, the backend injects ``[subagent <id> (<label>) finished: <state>] <summary>; full output: see `subagent status <id>` or /shared`` into the parent's running turn, or, if the parent is not running, starts a turn with it. The label is omitted when the child has none, and the summary is a tail of at most 300 bytes (omitted when there is no output). Several finishes are coalesced. Messages sent by `subagent send` and `subagent reply` appear as user messages prefixed `[message from parent agent <name>]` and `[message from subagent <id> (<label>)]`.
-*   **Pull.** `subagent wait` blocks (event driven, at most 300s per call) until the named children finish. A child the parent is waiting on is reported through `wait` instead of also being pushed.
+*   **Push.** When a child finishes, the backend injects ``[subagent <id> (<label>) finished: <state>] <summary>; full output: see `subagent status <id>` or /shared`` into the parent's running turn, or, if the parent is not running, starts a turn with it. The label is omitted when the child has none, and the summary is a tail of at most 300 bytes (omitted when there is no output). Several finishes are coalesced. A `send` to a finished child whose `session_mode` is `fresh` starts it without prior context. Messages sent by `subagent send` and `subagent reply` appear as user messages prefixed `[message from parent agent <name>]` and `[message from subagent <id> (<label>)]`.
+*   **Pull.** `subagent wait` blocks (event driven, at most 300s per call) until the named children finish. A child the parent is waiting on is reported through `wait` instead of also being pushed. `wait` returns only when children finish or the timeout hits; a `subagent reply` that arrives meanwhile is injected into the turn but is seen only after `wait` returns, so use short timeouts when replies matter.
 *   **Suppression.** Nothing is reported for a kill issued by the parent itself or by a cascade. A chat the user stopped stays stopped: a notice that would have been pushed is recorded as a `SUBAGENT_NOTICE` activity in the transcript instead, until the next user message. Stopping an idle chat also clears its message queue. Stopping a chat, or killing a child, cascades to all descendants.
 
 ### Keeping the parent alive
