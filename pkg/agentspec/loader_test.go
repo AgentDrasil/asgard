@@ -1704,3 +1704,49 @@ func TestAgentConfig_DefaultRunDir(t *testing.T) {
 	assert.Empty(t, (&AgentConfig{RunDirs: []string{"/data/*", "/x/[ab]", "/y/?"}}).DefaultRunDir())
 	assert.Empty(t, (&AgentConfig{}).DefaultRunDir())
 }
+
+func TestAgentConfig_EffectiveAskUser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		cfg        *AgentConfig
+		isSubagent bool
+		want       AskUserPolicy
+	}{
+		{"nil root", nil, false, AskUserAllow},
+		{"nil subagent", nil, true, AskUserDeny},
+		{"empty root allows", &AgentConfig{}, false, AskUserAllow},
+		{"empty subagent denies", &AgentConfig{}, true, AskUserDeny},
+		{"explicit allow on subagent", &AgentConfig{AskUser: AskUserAllow}, true, AskUserAllow},
+		{"explicit deny on root", &AgentConfig{AskUser: AskUserDeny}, false, AskUserDeny},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.cfg.EffectiveAskUser(tt.isSubagent))
+		})
+	}
+}
+
+func TestAgentConfig_Validate_AskUser(t *testing.T) {
+	t.Parallel()
+
+	supportedCLIs := map[string][]string{"opencode": {"deepseek-chat"}}
+	for _, v := range []AskUserPolicy{"", AskUserAllow, AskUserDeny, "escalate", "Allow"} {
+		cfg := AgentConfig{
+			ID:          "test-agent",
+			Name:        "test-agent",
+			Description: "Test agent description",
+			CLI:         []CLITarget{{CLI: "opencode", Model: "deepseek-chat"}},
+			RunDirs:     []string{"/tmp/run"},
+			AskUser:     v,
+		}
+		err := cfg.ValidateWithCLIs(supportedCLIs)
+		if v == "" || v == AskUserAllow || v == AskUserDeny {
+			assert.NoError(t, err, "value %q", v)
+		} else {
+			assert.ErrorContains(t, err, "invalid ask_user", "value %q", v)
+		}
+	}
+}

@@ -42,16 +42,20 @@ func TestAskUserExitCodes(t *testing.T) {
 		args     []string
 		handler  http.HandlerFunc
 		wantCode int
+		wantErr  string
 	}{
-		{"no args", nil, nil, 1},
-		{"unknown flag", []string{"--bogus"}, nil, 2},
-		{"help", []string{"--help"}, nil, 0},
+		{"no args", nil, nil, 1, "Usage"},
+		{"unknown flag", []string{"--bogus"}, nil, 2, "Usage"},
+		{"help", []string{"--help"}, nil, 0, ""},
 		{"runner error in body", []string{"q"}, func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(sandboxsock.AskUserResponse{Error: "boom"})
-		}, 1},
+		}, 1, "ask-user: boom"},
+		{"invalid json", []string{"q"}, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("not json"))
+		}, 1, "ask-user: invalid response"},
 		{"non-200", []string{"q"}, func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "nope", http.StatusBadGateway)
-		}, 1},
+		}, 1, "HTTP 502: nope"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,6 +64,19 @@ func TestAskUserExitCodes(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			assert.Equal(t, tt.wantCode, run(tt.args, &stdout, &stderr))
+			if tt.wantCode != 0 {
+				assert.Empty(t, stdout.String())
+			}
+			assert.Contains(t, stderr.String(), tt.wantErr)
 		})
 	}
+}
+
+func TestAskUserUnreachableRunnerPrintsStderr(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(sandboxsock.EnvURL, "unix:///nonexistent-dir/asgard.sock")
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 1, run([]string{"q"}, &stdout, &stderr))
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "ask-user: cannot")
 }

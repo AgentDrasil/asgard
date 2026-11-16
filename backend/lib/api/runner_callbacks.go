@@ -23,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/dirlock"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerhub"
 	"github.com/AgentDrasil/asgard/backend/lib/workflow"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/metrics"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
@@ -257,6 +258,9 @@ func (c *callbackService) AskUser(ctx context.Context, req *runnerpb.AskUserRequ
 		if req.GetQuestion() == "" {
 			return askUserError("question is required"), nil
 		}
+		if msg := c.askUserDenied(info); msg != "" {
+			return askUserError(msg), nil
+		}
 		msgID := req.GetMessageId()
 		if msgID == "" || len(msgID) > maxMessageIDSize {
 			msgID = fmt.Sprintf("ask-%s-%d", info.RunID, req.GetMeta().GetCallSeq())
@@ -277,6 +281,49 @@ func (c *callbackService) AskUser(ctx context.Context, req *runnerpb.AskUserRequ
 		return nil, err
 	}
 	return resp.(*runnerpb.AskUserResponse), nil
+}
+
+// askUserDenied resolves the calling agent of a sandbox ask-user callback and
+// returns the refusal message, or "" when the call may proceed.
+func (c *callbackService) askUserDenied(info runnerhub.RunInfo) string {
+	var cfg *agentspec.AgentConfig
+	if a, err := c.s.findAgentFor(info.NodeID, info.AgentID); err == nil && a != nil {
+		cfg = &a.Config
+	}
+	return c.s.askUserRefusal(info.ChatID, cfg)
+}
+
+// askUserRefusal is the one ask_user policy check, shared by the sandbox
+// callback and POST /api/ask-user. It returns the refusal message when the
+// effective policy for chatID and the agent config cfg (nil when unknown) is
+// deny, else "". If the chat cannot be read it fails closed, unless the config
+// explicitly allows. A chat that does not exist counts as a root chat. Workflow
+// human nodes and quota suspension write ask_user messages without this check.
+func (s *Server) askUserRefusal(chatID string, cfg *agentspec.AgentConfig) string {
+	isSub := false
+	if s.repo != nil {
+		sess, err := s.repo.GetSessionMeta(chatID)
+		if err != nil {
+			log.Error().Err(err).Str("chat_id", chatID).Msg("ask-user: cannot read chat to resolve ask_user policy")
+			if cfg != nil && cfg.AskUser == agentspec.AskUserAllow {
+				return ""
+			}
+			return "could not determine chat; ask-user refused"
+		}
+		isSub = sess != nil && sess.ParentChatID != ""
+	}
+	if cfg.EffectiveAskUser(isSub) != agentspec.AskUserDeny {
+		return ""
+	}
+	const base = "ask-user is disabled for this agent (ask_user: deny"
+	if !isSub {
+		return base + "). Do not wait for the user; proceed with your best judgment or state the open question in your final answer."
+	}
+	reason := base + "). "
+	if cfg == nil || cfg.AskUser == "" {
+		reason = base + "; subagents default to deny). "
+	}
+	return reason + "Do not wait for the user. If you need an answer from your parent, end your turn with the question as your final output (your parent reads it via `subagent wait`/`status`), or send a non-blocking `subagent reply`."
 }
 
 func askUserError(msg string) *runnerpb.AskUserResponse {

@@ -364,6 +364,7 @@ An agent can start other agents as **subagents** to do work in parallel (researc
 *   **Team restriction.** `--agent` must be an agent on the caller's current team, the same rule as `call-peer`/`find-peer`. A target agent whose worktree root differs from the spawn tree's is refused. `--model` may override the model per spawn (e.g. a cheaper one).
 *   **Nesting.** Subagents may spawn subagents. The depth limit of 4 (the root agent counts as 1) is one counter shared with `call-peer` chains, so mixing the two cannot get around it.
 *   **Fan-out.** At most 4 children of one parent run at the same time (a spawn beyond that is refused with a limit error; restarting an idle child with `subagent send` counts toward the same cap).
+*   **`ask-user`.** The agent config field `ask_user` (`allow` | `deny`) gates the sandbox `ask-user` command; unset, it is `allow` for a root chat and `deny` for a subagent chat (nobody watches a child chat), and a denied call fails at once with an error and no chat message instead of blocking. A denied subagent should end its turn with the question as its final output (the parent reads it via `subagent wait`/`status`) or send a non-blocking `subagent reply`; the `QUESTION:` last-line form is only the convention of [examples/subagent-team](examples/subagent-team). Workflow `human` nodes are not affected.
 
 ### The `subagent` CLI
 

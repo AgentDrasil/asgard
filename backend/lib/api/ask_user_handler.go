@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
+	"github.com/AgentDrasil/asgard/pkg/agentspec"
 )
 
 type askUserWaiter struct {
@@ -77,6 +78,26 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 
 	if _, aerr := s.authorizeSession(r, req.ChatID); aerr != nil {
 		writeJSONError(w, aerr.status, aerr.msg)
+		return
+	}
+
+	var cfg *agentspec.AgentConfig
+	name, runnerID := req.AgentName, ""
+	if s.repo != nil {
+		if sess, _ := s.repo.GetSessionMeta(req.ChatID); sess != nil {
+			runnerID = sess.RunnerNodeID
+			if name == "" {
+				name = sess.CurrentAgent
+			}
+		}
+	}
+	if name != "" {
+		if a, err := s.findAgentFor(runnerID, name); err == nil && a != nil {
+			cfg = &a.Config
+		}
+	}
+	if msg := s.askUserRefusal(req.ChatID, cfg); msg != "" {
+		writeJSONError(w, http.StatusForbidden, msg)
 		return
 	}
 

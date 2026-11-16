@@ -1004,3 +1004,137 @@ func TestCallbackHoldMergeLockEndsWithRun(t *testing.T) {
 	require.NoError(t, err)
 	rel(false)
 }
+
+func TestCallbackAskUserPolicy(t *testing.T) {
+	const (
+		childChat  = "chat-child"
+		noAgent    = agentspec.AskUserPolicy("!none")
+		otherAgent = agentspec.AskUserPolicy("!other")
+	)
+	alpha := func(p agentspec.AskUserPolicy) *agentspec.Agent {
+		return &agentspec.Agent{Config: agentspec.AgentConfig{ID: "alpha", Name: "alpha", AskUser: p}}
+	}
+	tests := []struct {
+		name     string
+		policy   agentspec.AskUserPolicy
+		child    bool
+		wantDeny bool
+		wantSub  string
+	}{
+		{"subagent default denies", "", true, true, "subagents default to deny"},
+		{"subagent explicit deny", agentspec.AskUserDeny, true, true, "subagent reply"},
+		{"root explicit deny", agentspec.AskUserDeny, false, true, "ask_user: deny"},
+		{"root default allows", "", false, false, ""},
+		{"unknown agent in subagent denies", noAgent, true, true, "subagents default to deny"},
+		{"unknown agent in root allows", noAgent, false, false, ""},
+		// The run's agent (call-peer style) differs from the session's CurrentAgent.
+		{"run agent differs from current agent", otherAgent, true, true, "subagents default to deny"},
+		{"run agent explicit allow, current agent unknown", agentspec.AskUserAllow + "-peer", true, false, ""},
+		{"subagent explicit allow", agentspec.AskUserAllow, true, false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rig *callbackRig
+			runAgent := "alpha"
+			switch tt.policy {
+			case noAgent:
+				rig = newCallbackRig(t)
+			case otherAgent:
+				// "alpha" is the session's CurrentAgent; the run is "peer" with no policy.
+				rig = newCallbackRig(t, alpha(agentspec.AskUserAllow), &agentspec.Agent{Config: agentspec.AgentConfig{ID: "peer", Name: "peer"}})
+				runAgent = "peer"
+			case agentspec.AskUserAllow + "-peer":
+				rig = newCallbackRig(t, &agentspec.Agent{Config: agentspec.AgentConfig{ID: "peer", Name: "peer", AskUser: agentspec.AskUserAllow}})
+				runAgent = "peer"
+			default:
+				rig = newCallbackRig(t, alpha(tt.policy))
+			}
+			chat := rigChat
+			if tt.child {
+				chat = childChat
+				require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: childChat, CurrentAgent: "alpha", ParentChatID: rigChat}))
+				rig.runs.add(runnerhub.RunInfo{RunID: "run-child", NodeID: rigNode, ChatID: childChat, AgentID: runAgent, Done: make(chan struct{})})
+			}
+			runID := map[bool]string{false: rigRun, true: "run-child"}[tt.child]
+			sub, _, cancel := rig.events.Subscribe(chat, 0)
+			t.Cleanup(cancel)
+
+			type result struct {
+				resp *runnerpb.AskUserResponse
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				resp, err := rig.svc.AskUser(rig.ctx(), &runnerpb.AskUserRequest{Meta: meta(runID, 1), Question: "q?", MessageId: "ask-p"})
+				done <- result{resp, err}
+			}()
+
+			if tt.wantDeny {
+				select {
+				case r := <-done:
+					require.NoError(t, r.err)
+					assert.Contains(t, r.resp.GetError(), "ask-user is disabled")
+					assert.Contains(t, r.resp.GetError(), tt.wantSub)
+					assert.Empty(t, r.resp.GetReply())
+				case <-time.After(5 * time.Second):
+					t.Fatal("denied AskUser did not return at once")
+				}
+				assert.Empty(t, rig.messages(t, chat), "no ask_user message may be appended")
+				select {
+				case ev := <-sub:
+					t.Fatalf("unexpected session event: %+v", ev)
+				default:
+				}
+				return
+			}
+			msg := waitAskMessage(t, sub)
+			assert.Equal(t, "ask_user", msg.Role)
+			replyToAsk(t, rig.server, chat, "ask-p", "go")
+			select {
+			case r := <-done:
+				require.NoError(t, r.err)
+				assert.Equal(t, "go", r.resp.GetReply())
+				assert.Empty(t, r.resp.GetError())
+			case <-time.After(5 * time.Second):
+				t.Fatal("AskUser did not return after the reply")
+			}
+		})
+	}
+}
+
+func TestCallbackAskUserFailsClosedOnSessionReadError(t *testing.T) {
+	t.Run("default denies", func(t *testing.T) {
+		rig := newCallbackRig(t, &agentspec.Agent{Config: agentspec.AgentConfig{ID: "alpha", Name: "alpha"}})
+		// A repo on a database without the schema: every read errors.
+		rig.server.repo = dbmodels.NewSessionRepository(db.NewDBForTest(t))
+		resp, err := rig.svc.AskUser(rig.ctx(), &runnerpb.AskUserRequest{Meta: meta(rigRun, 1), Question: "q?"})
+		require.NoError(t, err)
+		assert.Contains(t, resp.GetError(), "could not determine chat")
+	})
+	t.Run("explicit allow proceeds", func(t *testing.T) {
+		assert.Empty(t, (&Server{repo: dbmodels.NewSessionRepository(db.NewDBForTest(t))}).
+			askUserRefusal("c", &agentspec.AgentConfig{AskUser: agentspec.AskUserAllow}))
+	})
+}
+
+func TestHandleAskUserRefusesInChildChat(t *testing.T) {
+	rig := newCallbackRig(t)
+	require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{ChatID: "chat-kid", CurrentAgent: "alpha", ParentChatID: rigChat}))
+	sub, _, cancel := rig.events.Subscribe("chat-kid", 0)
+	t.Cleanup(cancel)
+
+	body, err := json.Marshal(AskUserRequest{ChatID: "chat-kid", Question: "q?", MessageID: "m1"})
+	require.NoError(t, err)
+	rr := httptest.NewRecorder()
+	rig.server.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/ask-user", bytes.NewReader(body)))
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	var resp AskUserResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	assert.Contains(t, resp.Error, "ask-user is disabled")
+	assert.Empty(t, rig.messages(t, "chat-kid"))
+	select {
+	case ev := <-sub:
+		t.Fatalf("unexpected event %+v", ev)
+	default:
+	}
+}

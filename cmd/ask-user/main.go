@@ -80,6 +80,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	client, err := sandboxsock.New(0)
 	if err != nil {
 		log.Error().Err(err).Msg("Error preparing ask-user client")
+		_, _ = fmt.Fprintf(stderr, "ask-user: cannot prepare client: %v\n", err)
 		return 1
 	}
 
@@ -92,6 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Error connecting to ask-user endpoint")
+		_, _ = fmt.Fprintf(stderr, "ask-user: cannot reach the runner: %v\n", err)
 		return 1
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -99,22 +101,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error().Err(err).Msg("Error reading response body from ask-user endpoint")
+		_, _ = fmt.Fprintf(stderr, "ask-user: cannot read the response: %v\n", err)
 		return 1
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Error().Int("status", resp.StatusCode).Str("body", string(respBody)).Msg("Error response from ask-user endpoint")
+		_, _ = fmt.Fprintf(stderr, "ask-user failed: HTTP %d: %s\n", resp.StatusCode, strings.TrimSpace(string(respBody)))
 		return 1
 	}
 
 	var askResp sandboxsock.AskUserResponse
 	if err := json.Unmarshal(respBody, &askResp); err != nil {
 		log.Error().Err(err).Str("body", string(respBody)).Msg("Error decoding response from ask-user endpoint")
+		_, _ = fmt.Fprintf(stderr, "ask-user: invalid response: %v\n", err)
 		return 1
 	}
 
 	if askResp.Error != "" {
 		log.Error().Str("error", askResp.Error).Msg("Ask-user request error")
+		_, _ = fmt.Fprintln(stderr, "ask-user: "+askResp.Error)
 		return 1
 	}
 

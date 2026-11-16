@@ -72,7 +72,7 @@ This example does not support worktree chats as-is. A read-only child in a workt
 
 ## Known limitations
 
-- Subagents can currently call ask-user, and it would block in a child chat the user is not watching. The prompts forbid it.
+- Subagents default to `ask_user: deny`: a subagent's `ask-user` call fails at once instead of blocking in a child chat the user is not watching. The prompts still tell them to use the `QUESTION:` protocol.
 - `subagent reply` reaches only the parent, so questions are relayed hop by hop (impler -> lead -> architect).
 - Writable implers serialize on the checkout lock; there is no per-subagent worktree.
 

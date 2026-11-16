@@ -12,6 +12,16 @@ import (
 
 var idRegex = regexp.MustCompile("^[a-z0-9-_]+$")
 
+// AskUserPolicy is the per-agent policy for the sandbox ask-user command.
+type AskUserPolicy string
+
+const (
+	// AskUserAllow lets the agent ask the user and block for the reply.
+	AskUserAllow AskUserPolicy = "allow"
+	// AskUserDeny refuses ask-user calls at once.
+	AskUserDeny AskUserPolicy = "deny"
+)
+
 type LockMode string
 
 const (
@@ -413,6 +423,11 @@ type AgentConfig struct {
 	// LockMode controls file locking mode: "exclusive" (default) or "readonly".
 	LockMode LockMode `yaml:"lock_mode,omitempty" json:"lock_mode,omitempty"`
 
+	// AskUser sets whether the agent may block on the sandbox ask-user
+	// command: "allow" or "deny". Empty means the default, which depends on
+	// the chat (see EffectiveAskUser).
+	AskUser AskUserPolicy `yaml:"ask_user,omitempty" json:"ask_user,omitempty"`
+
 	// Worktree optionally offers per-chat git worktree isolation.
 	Worktree WorktreeConfig `yaml:"worktree,omitempty" json:"worktree,omitempty"`
 
@@ -429,6 +444,19 @@ type AgentConfig struct {
 	// "resume" (default): reuse the previous session ID stored in DB.
 	// "fresh": always start a new session; do not persist the returned session ID.
 	SessionMode string `yaml:"session_mode"`
+}
+
+// EffectiveAskUser resolves the ask-user policy for a chat. An explicit
+// setting wins; otherwise a root chat allows and a subagent chat (isSubagent)
+// denies, as nobody watches a child chat. A nil cfg uses the default.
+func (cfg *AgentConfig) EffectiveAskUser(isSubagent bool) AskUserPolicy {
+	if cfg != nil && cfg.AskUser != "" {
+		return cfg.AskUser
+	}
+	if isSubagent {
+		return AskUserDeny
+	}
+	return AskUserAllow
 }
 
 func (cfg *AgentConfig) EffectiveLockMode() LockMode {
@@ -539,6 +567,13 @@ func (cfg *AgentConfig) ValidateWithCLIs(supportedCLIs map[string][]string) erro
 
 	if cfg.IsMainAgent() && len(cfg.RunDirs) == 0 {
 		return fmt.Errorf("main_agent requires at least one run_dir")
+	}
+
+	switch cfg.AskUser {
+	case "", AskUserAllow, AskUserDeny:
+		// valid
+	default:
+		return fmt.Errorf("invalid ask_user: %q, must be %q or %q", cfg.AskUser, AskUserAllow, AskUserDeny)
 	}
 
 	switch cfg.LockMode {
