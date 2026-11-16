@@ -534,6 +534,26 @@ func (c *callbackService) ListSubagents(ctx context.Context, req *runnerpb.ListS
 	return resp.(*runnerpb.ListSubagentsResponse), nil
 }
 
+// SubagentTree implements runnerpb.AgentCallbackServiceServer. The tree is
+// derived from the calling run's chat, never from the request.
+func (c *callbackService) SubagentTree(ctx context.Context, req *runnerpb.SubagentTreeRequest) (*runnerpb.SubagentTreeResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "subagent_tree", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		nodes, truncated, err := c.s.SubagentTree(info.ChatID)
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		out := &runnerpb.SubagentTreeResponse{Truncated: truncated}
+		for _, n := range nodes {
+			out.Nodes = append(out.Nodes, &runnerpb.SubagentTreeNode{Info: subagentInfoPB(n.Info), Depth: int32(n.Depth), Self: n.Self})
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.SubagentTreeResponse), nil
+}
+
 // SubagentStatus implements runnerpb.AgentCallbackServiceServer.
 func (c *callbackService) SubagentStatus(ctx context.Context, req *runnerpb.SubagentStatusRequest) (*runnerpb.SubagentStatusResponse, error) {
 	resp, err := c.run(ctx, req.GetMeta(), "subagent_status", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
@@ -583,12 +603,12 @@ func (c *callbackService) SendToSubagent(ctx context.Context, req *runnerpb.Send
 // it ends with the calling run (the callback context).
 func (c *callbackService) WaitSubagents(ctx context.Context, req *runnerpb.WaitSubagentsRequest) (*runnerpb.WaitSubagentsResponse, error) {
 	resp, err := c.run(ctx, req.GetMeta(), "wait_subagents", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
-		results, err := c.s.WaitSubagents(fctx, info.ChatID, req.GetIds(), req.GetAny(), time.Duration(req.GetTimeoutMs())*time.Millisecond)
+		outcome, err := c.s.WaitSubagentsOutcome(fctx, info.ChatID, info.RunID, req.GetIds(), req.GetAny(), time.Duration(req.GetTimeoutMs())*time.Millisecond)
 		if err != nil {
 			return nil, subagentStatusErr(err)
 		}
-		out := &runnerpb.WaitSubagentsResponse{}
-		for _, r := range results {
+		out := &runnerpb.WaitSubagentsResponse{WokenBy: outcome.WokenBy, CheckoutHeldBy: outcome.CheckoutHeldBy}
+		for _, r := range outcome.Results {
 			out.Results = append(out.Results, &runnerpb.SubagentWaitResult{
 				Subagent:     subagentInfoPB(r.Info),
 				StillRunning: r.StillRunning,

@@ -46,6 +46,7 @@ type fakeCallbacks struct {
 	subErr  error
 	spawns  []*runnerpb.SpawnSubagentRequest
 	lists   []*runnerpb.ListSubagentsRequest
+	trees   []*runnerpb.SubagentTreeRequest
 	stats   []*runnerpb.SubagentStatusRequest
 	kills   []*runnerpb.KillSubagentRequest
 	sends   []*runnerpb.SendToSubagentRequest
@@ -71,6 +72,19 @@ func (f *fakeCallbacks) ListSubagents(_ context.Context, req *runnerpb.ListSubag
 		return nil, f.subErr
 	}
 	return &runnerpb.ListSubagentsResponse{Subagents: []*runnerpb.SubagentInfo{{Id: "child-1", Label: "l", Agent: "beta", Model: "m", Readonly: true, State: "running", LastActivityUnixMs: 42}}}, nil
+}
+
+func (f *fakeCallbacks) SubagentTree(_ context.Context, req *runnerpb.SubagentTreeRequest, _ ...grpc.CallOption) (*runnerpb.SubagentTreeResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.trees = append(f.trees, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.SubagentTreeResponse{Nodes: []*runnerpb.SubagentTreeNode{
+		{Info: &runnerpb.SubagentInfo{Id: "root-1", Agent: "alpha", State: "running"}},
+		{Info: &runnerpb.SubagentInfo{Id: "child-1", ParentChatId: "root-1", Label: "l", Agent: "beta", Readonly: true, State: "done"}, Depth: 1, Self: true},
+	}, Truncated: true}, nil
 }
 
 func (f *fakeCallbacks) SubagentStatus(_ context.Context, req *runnerpb.SubagentStatusRequest, _ ...grpc.CallOption) (*runnerpb.SubagentStatusResponse, error) {
@@ -113,7 +127,7 @@ func (f *fakeCallbacks) WaitSubagents(_ context.Context, req *runnerpb.WaitSubag
 	return &runnerpb.WaitSubagentsResponse{Results: []*runnerpb.SubagentWaitResult{
 		{Subagent: &runnerpb.SubagentInfo{Id: "c1", State: "done", Summary: "all good"}, Notes: "see /shared"},
 		{Subagent: &runnerpb.SubagentInfo{Id: "c2", State: "running"}, StillRunning: true},
-	}}, nil
+	}, WokenBy: []string{"subagent c1 (l)"}, CheckoutHeldBy: "c2"}, nil
 }
 
 func (f *fakeCallbacks) ReplyToParent(_ context.Context, req *runnerpb.ReplyToParentRequest, _ ...grpc.CallOption) (*runnerpb.ReplyToParentResponse, error) {

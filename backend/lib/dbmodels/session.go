@@ -1239,3 +1239,48 @@ func (r *SessionRepository) AppendArtifacts(chatID string, artifactPaths []strin
 		return tx.Save(&session).Error
 	})
 }
+
+// SpawnRootID returns the root of the spawn tree chatID belongs to: its
+// topmost existing ancestor (chatID itself without a parent). One query.
+func (r *SessionRepository) SpawnRootID(chatID string) (string, error) {
+	table, err := r.sessionTable()
+	if err != nil {
+		return "", err
+	}
+	var root string
+	err = r.db.Raw(`WITH RECURSIVE up(chat_id, parent_chat_id, d) AS (
+SELECT chat_id, parent_chat_id, 0 FROM `+table+` WHERE chat_id = ?
+UNION ALL
+SELECT s.chat_id, s.parent_chat_id, up.d + 1 FROM `+table+` s JOIN up ON s.chat_id = up.parent_chat_id WHERE up.d < 1024
+) SELECT chat_id FROM up ORDER BY d DESC LIMIT 1`, chatID).Scan(&root).Error
+	return root, err
+}
+
+// SpawnTreeSessions returns rootID and all its descendants (at most limit
+// rows, oldest first) in one query. truncated is true when more exist.
+func (r *SessionRepository) SpawnTreeSessions(rootID string, limit int) (sessions []Session, truncated bool, err error) {
+	table, err := r.sessionTable()
+	if err != nil {
+		return nil, false, err
+	}
+	err = r.db.Raw(`WITH RECURSIVE down(chat_id) AS (
+SELECT chat_id FROM `+table+` WHERE chat_id = ?
+UNION
+SELECT s.chat_id FROM `+table+` s JOIN down ON s.parent_chat_id = down.chat_id
+) SELECT * FROM `+table+` WHERE chat_id IN (SELECT chat_id FROM down) ORDER BY created_at, chat_id LIMIT ?`, rootID, limit+1).Scan(&sessions).Error
+	if err != nil {
+		return nil, false, err
+	}
+	if len(sessions) > limit {
+		return sessions[:limit], true, nil
+	}
+	return sessions, false, nil
+}
+
+func (r *SessionRepository) sessionTable() (string, error) {
+	stmt := &gorm.Statement{DB: r.db}
+	if err := stmt.Parse(&Session{}); err != nil {
+		return "", err
+	}
+	return stmt.Schema.Table, nil
+}

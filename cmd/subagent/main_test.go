@@ -318,3 +318,71 @@ func TestReplyAndWaitUsageErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestTreeMarksSelfAndPrintsJSON(t *testing.T) {
+	tree := sandboxsock.SubagentTreeResponse{Nodes: []sandboxsock.SubagentTreeNode{
+		{ID: "r1", Agent: "lead", State: "idle"},
+		{ID: "c1", ParentID: "r1", Agent: "reviewer", Label: "rev", State: "running", Readonly: true, Depth: 1, Self: true},
+		{ID: "g1", ParentID: "c1", Agent: "coder", State: "done", Depth: 2},
+	}}
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, sandboxsock.PathSubagentTree, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(tree)
+	}))
+
+	code, stdout, stderr := runCLI("tree")
+	require.Equal(t, 0, code, stderr)
+	assert.Regexp(t, `ID\s+PARENT\s+AGENT\s+LABEL\s+STATE\s+MODE\s+DEPTH`, stdout)
+	assert.Regexp(t, `(?m)^\s+r1\s+-\s+lead\s+-\s+idle\s+-\s+0$`, stdout)
+	assert.Regexp(t, `(?m)^\*\s+c1\s+r1\s+reviewer\s+rev\s+running\s+readonly\s+1$`, stdout)
+	assert.Regexp(t, `(?m)^\s+g1\s+c1\s+coder\s+-\s+done\s+writable\s+2$`, stdout)
+	assert.Contains(t, stdout, "$ASGARD_CHAT_ID")
+
+	code, stdout, _ = runCLI("tree", "--json")
+	require.Equal(t, 0, code)
+	var got sandboxsock.SubagentTreeResponse
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, tree, got)
+
+	code, _, _ = runCLI("tree", "x")
+	assert.Equal(t, exitUsage, code)
+}
+
+func TestWaitReportsWakeByMessage(t *testing.T) {
+	resp := sandboxsock.SubagentWaitResponse{
+		Results:        []sandboxsock.SubagentWaitResult{{Subagent: sandboxsock.SubagentInfo{ID: "c1", State: "running"}, StillRunning: true}},
+		WokenByMessage: true,
+		MessageFrom:    []string{"subagent c1 (rev)"},
+	}
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	code, stdout, _ := runCLI("wait", "c1")
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout, "c1 (-): still_running\n")
+	assert.Contains(t, stdout, "note: a message from subagent c1 (rev) arrived; read it, then call wait again\n")
+	code, stdout, _ = runCLI("wait", "--json")
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout, `"woken_by_message": true`)
+}
+
+func TestWaitReportsCheckoutHeldAndTreeTruncated(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == sandboxsock.PathSubagentTree {
+			_ = json.NewEncoder(w).Encode(sandboxsock.SubagentTreeResponse{Nodes: []sandboxsock.SubagentTreeNode{{ID: "r", Agent: "a", State: "queued", Self: true}}, Truncated: true})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentWaitResponse{
+			Results:        []sandboxsock.SubagentWaitResult{{Subagent: sandboxsock.SubagentInfo{ID: "c1", State: "running"}, StillRunning: true}},
+			WokenByMessage: true, MessageFrom: []string{"subagent c1"}, CheckoutHeldBy: "c1",
+		})
+	}))
+	_, stdout, _ := runCLI("wait")
+	assert.Contains(t, stdout, "note: a writable subagent c1 holds the checkout; do not modify files, reply/send and wait again\n")
+	_, stdout, _ = runCLI("wait", "--json")
+	assert.Contains(t, stdout, `"checkout_held_by": "c1"`)
+	_, stdout, _ = runCLI("tree")
+	assert.Contains(t, stdout, "truncated:")
+	assert.Regexp(t, `\*\s+r\s+-\s+a\s+-\s+queued`, stdout)
+}

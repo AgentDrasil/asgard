@@ -69,6 +69,10 @@ const (
 	SubagentStateDone    = "done"
 	SubagentStateFailed  = "failed"
 	SubagentStateKilled  = "killed"
+	// SubagentStateIdle is the state of the root chat of a spawn tree that is
+	// neither running nor queued (SubagentTree only). The root can also be
+	// "queued" (waiting for the checkout lock); that is not remapped.
+	SubagentStateIdle = "idle"
 )
 
 // SpawnSubagentRequest describes a spawn. CallerChat and CallerAgent come from
@@ -277,6 +281,79 @@ func (s *Server) ListSubagents(callerChat string) ([]SubagentInfo, error) {
 	return out, nil
 }
 
+// SubagentTreeNode is one chat of a spawn tree.
+type SubagentTreeNode struct {
+	// Info is the chat; the state of the root is running or idle.
+	Info SubagentInfo
+	// Depth is 0 for the root.
+	Depth int
+	// Self marks the caller's own chat.
+	Self bool
+}
+
+// SubagentTree lists the whole spawn tree callerChat belongs to, depth first:
+// its root chat and all descendants of the root. The tree is derived from
+// callerChat alone, so a chat of another tree is never visible. The tree is
+// loaded in two queries (root, then the whole tree); truncated is true when
+// it exceeds maxSubagentDescendants chats and the list is incomplete.
+func (s *Server) SubagentTree(callerChat string) (nodes []SubagentTreeNode, truncated bool, err error) {
+	if s.repo == nil {
+		return nil, false, subagentErr(SubagentUnavailable, "database unavailable in degraded mode")
+	}
+	caller, err := s.repo.GetSessionMeta(callerChat)
+	if err != nil {
+		return nil, false, subagentErr(SubagentInternal, "failed to get session: %v", err)
+	}
+	if caller == nil {
+		return nil, false, subagentErr(SubagentNotFound, "caller chat not found")
+	}
+	rootID, err := s.repo.SpawnRootID(callerChat)
+	if err != nil || rootID == "" {
+		return nil, false, subagentErr(SubagentInternal, "failed to find the root of the spawn tree: %v", err)
+	}
+	sessions, truncated, err := s.repo.SpawnTreeSessions(rootID, maxSubagentDescendants)
+	if err != nil {
+		return nil, false, subagentErr(SubagentInternal, "failed to list the spawn tree: %v", err)
+	}
+	byID := make(map[string]*dbmodels.Session, len(sessions))
+	children := map[string][]*dbmodels.Session{}
+	for i := range sessions {
+		sess := &sessions[i]
+		byID[sess.ChatID] = sess
+		if sess.ChatID != rootID {
+			children[sess.ParentChatID] = append(children[sess.ParentChatID], sess)
+		}
+	}
+	root := byID[rootID]
+	if root == nil {
+		return nil, false, subagentErr(SubagentInternal, "the root chat of the spawn tree disappeared")
+	}
+	visited := map[string]bool{}
+	var walk func(sess *dbmodels.Session, depth int)
+	walk = func(sess *dbmodels.Session, depth int) {
+		if visited[sess.ChatID] {
+			return
+		}
+		visited[sess.ChatID] = true
+		info := s.subagentInfo(sess)
+		if depth == 0 {
+			// The root is no subagent: its parent (a deleted chat) and spawn
+			// flags mean nothing. It is running or queued (waiting for the
+			// checkout lock), otherwise idle.
+			info.ParentChatID, info.Readonly = "", false
+			if info.State != SubagentStateRunning && info.State != SubagentStateQueued {
+				info.State = SubagentStateIdle
+			}
+		}
+		nodes = append(nodes, SubagentTreeNode{Info: info, Depth: depth, Self: sess.ChatID == callerChat})
+		for _, c := range children[sess.ChatID] {
+			walk(c, depth+1)
+		}
+	}
+	walk(root, 0)
+	return nodes, truncated, nil
+}
+
 // SubagentStatus reports one subagent of callerChat or of its descendants.
 func (s *Server) SubagentStatus(callerChat, childID string) (SubagentInfo, error) {
 	sess, err := s.ownedSubagent(callerChat, childID)
@@ -382,7 +459,10 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 	prompt := fmt.Sprintf("[message from parent agent %s]\n%s", senderName, text)
 
 	// A running turn that can take input gets the message right away.
-	if s.tryInject(childID, target.Config.ID, prompt) {
+	if run, newTurn, ok := s.tryInjectRun(childID, target.Config.ID, prompt); ok {
+		if !newTurn {
+			s.notifyInbox(childID, run, "parent agent "+senderName)
+		}
 		return SubagentDeliveryInjected, nil
 	}
 
@@ -441,30 +521,38 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 // CLI takes live input, and records it in the transcript. False means nothing
 // was injected and the caller falls back to the normal trigger path.
 func (s *Server) tryInject(chatID, agentID, prompt string) bool {
+	_, _, ok := s.tryInjectRun(chatID, agentID, prompt)
+	return ok
+}
+
+// tryInjectRun is tryInject that also returns the run the message went into
+// and whether it became the prompt of a new turn of an idle-held chat (the
+// chat read it for certain, so it is not announced as unread).
+func (s *Server) tryInjectRun(chatID, agentID, prompt string) (runID string, newTurn, ok bool) {
 	if s.activeRuns == nil || s.injector == nil {
-		return false
+		return "", false, false
 	}
 	nodeID, runID, ok := s.activeRuns.Lookup(chatID, agentID)
 	if !ok {
-		return false
+		return "", false, false
 	}
 	// A parent waiting between turns for its children must give up its
 	// waiting mark before a new turn can write; when it cannot, the message
 	// is queued instead.
-	ready, done := s.prepareHeldInject(chatID)
+	ready, fromIdle, done := s.prepareHeldInjectIdle(chatID)
 	if !ready {
-		return false
+		return "", false, false
 	}
 	injected, idleGen, err := s.inject(context.WithoutCancel(s.Context()), nodeID, runID, prompt)
 	done(injected, idleGen)
 	if injected {
 		s.recordInjectedMessage(chatID, prompt)
-		return true
+		return runID, fromIdle, true
 	}
 	if err != nil && !errors.Is(err, runnerhub.ErrUnknownRun) && !errors.Is(err, runnerhub.ErrRunnerOffline) {
 		log.Warn().Err(err).Str("chat_id", chatID).Msg("subagent inject failed, queueing the message instead")
 	}
-	return false
+	return "", false, false
 }
 
 // recordInjectedMessage shows an injected message in the child's transcript,

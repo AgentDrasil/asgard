@@ -142,6 +142,9 @@ func TestSubagentWaitRelaysRequestAndResults(t *testing.T) {
 	assert.Equal(t, "done", out.Results[0].Subagent.State)
 	assert.Equal(t, "see /shared", out.Results[0].Notes)
 	assert.True(t, out.Results[1].StillRunning)
+	assert.True(t, out.WokenByMessage)
+	assert.Equal(t, []string{"subagent c1 (l)"}, out.MessageFrom)
+	assert.Equal(t, "c2", out.CheckoutHeldBy)
 	require.Len(t, fake.waits, 1)
 	assert.Equal(t, rig.srv.sr.GetRunId(), fake.waits[0].GetMeta().GetRunId())
 	assert.Equal(t, []string{"c1", "c2"}, fake.waits[0].GetIds())
@@ -152,6 +155,24 @@ func TestSubagentWaitRelaysRequestAndResults(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, code)
 	code, _ = rig.post(t, sandboxsock.PathSubagentWait, sandboxsock.SubagentWaitRequest{TimeoutMs: -1})
 	assert.Equal(t, http.StatusBadRequest, code)
+}
+
+func TestSubagentTreeRelaysRunIdentity(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	resp, err := rig.client.Get("http://asgard" + sandboxsock.PathSubagentTree + "?chat_id=evil")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var tree sandboxsock.SubagentTreeResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&tree))
+	assert.Equal(t, []sandboxsock.SubagentTreeNode{
+		{ID: "root-1", Agent: "alpha", State: "running"},
+		{ID: "child-1", ParentID: "root-1", Agent: "beta", Label: "l", State: "done", Readonly: true, Depth: 1, Self: true},
+	}, tree.Nodes)
+	assert.True(t, tree.Truncated)
+	require.Len(t, fake.trees, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.trees[0].GetMeta().GetRunId())
 }
 
 func TestSubagentReplyRelaysTextWithRunIdentity(t *testing.T) {

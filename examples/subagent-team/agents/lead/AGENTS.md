@@ -75,3 +75,4 @@ Answer from `decisions.md`, or ask your parent as above. Reply with `subagent se
 - Subagents never merge. If the chat is in a worktree, only the owner merges.
 - `subagent list` / `status <id>` to check; `subagent kill <id>` if stuck.
 - Finish notices also arrive automatically; wait with the 300s loop above, do not busy-poll.
+- A `subagent reply` from a child ends your `wait` early with `note: a message from ... arrived`: read it, then call `wait` again. If any `wait` output (also after a timeout or `--any`) says `a writable subagent <id> holds the checkout`, do not modify any file until you have called `wait` again (only read, `subagent reply`/`send`).

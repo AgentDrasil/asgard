@@ -15,7 +15,7 @@ A child that needs an answer ends its turn with a LAST line `QUESTION: <q>` (sho
 subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'
 ```
 
-If it asks, answer with `subagent send <id> -- "<answer>"` (resume keeps its context), append the Q&A to `decisions.md`, and wait again. A `subagent reply` from a child is FYI; read it whenever a wait returns.
+If it asks, answer with `subagent send <id> -- "<answer>"` (resume keeps its context), append the Q&A to `decisions.md`, and wait again. A `subagent reply` from a child is FYI; it ends your `wait` early with a note that a message arrived: read it, then wait again. If any wait output (early wake, timeout or `--any`) says `a writable subagent <id> holds the checkout`, do not modify files (only read, `reply`/`send`) until you call `wait` again.
 
 ## Shell state
 

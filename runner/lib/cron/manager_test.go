@@ -87,6 +87,10 @@ func (f *fakeCallbacks) ListSubagents(ctx context.Context, in *runnerpb.ListSuba
 	return &runnerpb.ListSubagentsResponse{}, nil
 }
 
+func (f *fakeCallbacks) SubagentTree(ctx context.Context, in *runnerpb.SubagentTreeRequest, opts ...grpc.CallOption) (*runnerpb.SubagentTreeResponse, error) {
+	return &runnerpb.SubagentTreeResponse{}, nil
+}
+
 func (f *fakeCallbacks) SubagentStatus(ctx context.Context, in *runnerpb.SubagentStatusRequest, opts ...grpc.CallOption) (*runnerpb.SubagentStatusResponse, error) {
 	return &runnerpb.SubagentStatusResponse{}, nil
 }

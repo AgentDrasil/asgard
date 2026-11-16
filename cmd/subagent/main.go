@@ -38,12 +38,14 @@ Commands:
         Start a subagent and print its id; it returns immediately.
   list [--json]
         List your subagents.
+  tree [--json]
+        List every chat of your spawn tree (the root chat and all its descendants), depth first: id, parent id (- for the root), agent, label, state, mode, depth. Your own row is marked with *; your own chat id is also $ASGARD_CHAT_ID. Any chat of the tree may call it.
   status <id> [--json]
         Show the state (queued, running, done, failed, killed) of a subagent and the tail of its last output.
   send <id> [--json] -- <text>
         Message a subagent: "injected" into its running turn (claude/agy), "queued" behind its current turn, or "started" as a new turn of an idle one.
   wait [<id>...] [--any|--all] [--timeout <dur>] [--json]
-        Block until the subagents finish (all of them by default, or the first with --any; no ids means all your running subagents) or the timeout (default and maximum 300s) passes. Prints each one's state and output tail, or still_running. Finished subagents are also reported to you without waiting.
+        Block until the subagents finish (all of them by default, or the first with --any; no ids means all your running subagents) or the timeout (default and maximum 300s) passes. Prints each one's state and output tail, or still_running. It also returns early, with a note (JSON woken_by_message), when a message from another agent arrives: read it, then call wait again. Finished subagents are also reported to you without waiting.
   reply [--json] -- <text>
         Subagents only: message the agent that spawned you; it is injected into its running turn or runs as its next turn.
   kill <id> [--json]
@@ -69,6 +71,7 @@ type command func(ctx context.Context, c *cli, args []string) int
 var commands = map[string]command{
 	"spawn":  cmdSpawn,
 	"list":   cmdList,
+	"tree":   cmdTree,
 	"status": cmdStatus,
 	"send":   cmdSend,
 	"wait":   cmdWait,
@@ -288,6 +291,51 @@ func cmdList(ctx context.Context, c *cli, args []string) int {
 	return exitOK
 }
 
+func cmdTree(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("tree", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 || p.hasRest {
+		return c.usageError("tree takes no arguments")
+	}
+	var out sandboxsock.SubagentTreeResponse
+	if !c.call(ctx, sandboxsock.PathSubagentTree, nil, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	tw := tabwriter.NewWriter(c.stdout, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "\tID\tPARENT\tAGENT\tLABEL\tSTATE\tMODE\tDEPTH")
+	for _, n := range out.Nodes {
+		you := ""
+		if n.Self {
+			you = "*"
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", you, n.ID, dash(n.ParentID), n.Agent, dash(n.Label), n.State, treeMode(n), n.Depth)
+	}
+	_ = tw.Flush()
+	_, _ = fmt.Fprintln(c.stdout, "\n* is you ($ASGARD_CHAT_ID)")
+	if out.Truncated {
+		_, _ = fmt.Fprintln(c.stdout, "truncated: the tree is larger than the backend's cap; this list is incomplete")
+	}
+	return exitOK
+}
+
+// treeMode is the mode of a tree row; the root has none.
+func treeMode(n sandboxsock.SubagentTreeNode) string {
+	if n.ParentID == "" {
+		return "-"
+	}
+	if n.Readonly {
+		return "readonly"
+	}
+	return "writable"
+}
+
 // idArg is the single id argument of status and kill.
 func (c *cli) idArg(name string, p parsed) (string, int, bool) {
 	if p.hasRest || len(p.positional) != 1 {
@@ -402,6 +450,14 @@ func cmdWait(ctx context.Context, c *cli, args []string) int {
 		_, _ = fmt.Fprintln(c.stdout, "no running subagents to wait for")
 		return exitOK
 	}
+	defer func() {
+		if out.WokenByMessage {
+			_, _ = fmt.Fprintf(c.stdout, "note: a message from %s arrived; read it, then call wait again\n", strings.Join(out.MessageFrom, ", "))
+		}
+		if out.CheckoutHeldBy != "" {
+			_, _ = fmt.Fprintf(c.stdout, "note: a writable subagent %s holds the checkout; do not modify files, reply/send and wait again\n", out.CheckoutHeldBy)
+		}
+	}()
 	for _, r := range out.Results {
 		s := r.Subagent
 		state := s.State

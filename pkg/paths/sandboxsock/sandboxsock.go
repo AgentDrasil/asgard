@@ -33,6 +33,7 @@ const (
 	// Subagent routes. Later subcommands (send, wait, reply) add theirs here.
 	PathSubagentSpawn  = "/subagent/spawn"
 	PathSubagentList   = "/subagent/list"
+	PathSubagentTree   = "/subagent/tree"
 	PathSubagentStatus = "/subagent/status"
 	PathSubagentKill   = "/subagent/kill"
 	PathSubagentSend   = "/subagent/send"
@@ -125,6 +126,13 @@ type SubagentWaitResult struct {
 // SubagentWaitResponse is the answer of POST /subagent/wait.
 type SubagentWaitResponse struct {
 	Results []SubagentWaitResult `json:"results"`
+	// WokenByMessage is true when the wait ended early because a message from
+	// another agent arrived; MessageFrom names the senders.
+	WokenByMessage bool     `json:"woken_by_message,omitempty"`
+	MessageFrom    []string `json:"message_from,omitempty"`
+	// CheckoutHeldBy is, while a waited subagent is still running, a descendant that holds the
+	// checkout lock: the caller must not modify files until it is released.
+	CheckoutHeldBy string `json:"checkout_held_by,omitempty"`
 }
 
 // SubagentReplyRequest is the body of POST /subagent/reply.
@@ -154,6 +162,28 @@ type SubagentInfo struct {
 // SubagentListResponse is the answer of GET /subagent/list.
 type SubagentListResponse struct {
 	Subagents []SubagentInfo `json:"subagents"`
+}
+
+// SubagentTreeNode is one chat of the caller's spawn tree. ParentID is empty
+// for the root, whose State is running, queued (waiting for the checkout lock) or idle; Depth is 0 for the root; Self
+// marks the caller's own chat.
+type SubagentTreeNode struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Agent    string `json:"agent"`
+	Label    string `json:"label,omitempty"`
+	State    string `json:"state"`
+	Readonly bool   `json:"readonly,omitempty"`
+	Depth    int    `json:"depth"`
+	Self     bool   `json:"self,omitempty"`
+}
+
+// SubagentTreeResponse is the answer of GET /subagent/tree, depth first.
+type SubagentTreeResponse struct {
+	Nodes []SubagentTreeNode `json:"nodes"`
+	// Truncated is true when the tree is larger than the backend's cap and the
+	// list is incomplete.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // SubagentStatusResponse is the answer of POST /subagent/status.

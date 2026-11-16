@@ -342,28 +342,37 @@ func (s *Server) setHeldStatus(chatID, agentID string, waiting bool) {
 // injected, the idle generation aw replied with (0: unknown); reports up to it
 // predate the message and become stale.
 func (s *Server) prepareHeldInject(chatID string) (ok bool, done func(injected bool, replyGen uint64)) {
+	ok, _, done = s.prepareHeldInjectIdle(chatID)
+	return ok, done
+}
+
+// prepareHeldInjectIdle is prepareHeldInject that also reports whether it took
+// the process out of idle: the injected message then is the prompt of a new
+// turn, which the chat reads for certain.
+func (s *Server) prepareHeldInjectIdle(chatID string) (ok, fromIdle bool, done func(injected bool, replyGen uint64)) {
 	b := &s.holds
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	st := b.m[chatID]
 	if st == nil {
-		return true, func(bool, uint64) {}
+		return true, false, func(bool, uint64) {}
 	}
 	if st.idle {
 		s.releaseWaitMark(chatID, st.reg)
 		if s.chatMarked(chatID) {
 			// Still marked: a writable descendant holds the checkout.
 			s.holdWaitMark(chatID, st.reg)
-			return false, nil
+			return false, false, nil
 		}
 		// The idle generation st.lastGen is the one this injection ends;
 		// reports up to it are stale from here on.
 		st.idle, st.succ = false, 0
 		st.fromIdle = true
 		s.setHeldStatus(chatID, st.agentID, false)
+		fromIdle = true
 	}
 	st.inflight++
-	return true, func(injected bool, replyGen uint64) {
+	return true, fromIdle, func(injected bool, replyGen uint64) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if b.m[chatID] != st {

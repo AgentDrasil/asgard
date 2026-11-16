@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,12 +53,101 @@ type SubagentWaitResult struct {
 // waitReg is one blocked `subagent wait`.
 type waitReg struct {
 	chat string // the waiting (calling) chat
+	// run is the run of the caller (call-peer nests several runs in one chat);
+	// empty matches messages for any run of the chat.
+	run  string
 	ids  map[string]bool
 	wake chan struct{}
 
 	mu      sync.Mutex
 	closed  bool
 	claimed map[string]bool
+	// inbox are the senders of the messages that arrived while the wait
+	// blocked (see notifyInbox); several messages end the wait once.
+	inbox []string
+}
+
+// takeInbox returns the senders of the messages that arrived so far.
+func (r *waitReg) takeInbox() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.inbox)
+}
+
+// notify records a message from sender; false when the wait is over already.
+func (r *waitReg) notify(sender string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	if !slices.Contains(r.inbox, sender) {
+		r.inbox = append(r.inbox, sender)
+	}
+	return true
+}
+
+// unreadInbox records messages injected into a run of a chat that no wait has
+// reported yet: a wait that registers right after the injection still sees
+// them. seq counts the messages recorded.
+type unreadInbox struct {
+	run     string
+	seq     uint64
+	senders []string
+}
+
+// takeUnreadLocked removes and returns the senders of the unread messages of
+// chat for run (all runs of the chat when run is empty). g.mu is held.
+func (g *subagentSignals) takeUnreadLocked(chat, run string) []string {
+	var out []string
+	for r, u := range g.unread[chat] {
+		if run != "" && run != r {
+			continue
+		}
+		for _, snd := range u.senders {
+			if !slices.Contains(out, snd) {
+				out = append(out, snd)
+			}
+		}
+		delete(g.unread[chat], r)
+	}
+	if len(g.unread[chat]) == 0 {
+		delete(g.unread, chat)
+	}
+	return out
+}
+
+// notifyInbox is the per-chat "inbox event": a message from another agent
+// (sender names it, e.g. "subagent <id> (<label>)") was injected into the live
+// turn of run in chat. It wakes every blocked `subagent wait` of that run
+// (waits without a run match any), which returns early and tells its caller
+// to read the message, and it is recorded as unread until a wait reports it
+// or the chat's run starts or ends, so a wait registering a moment later
+// returns at once. Queued deliveries are not announced: there is nothing to
+// read in the current turn. Several messages count as one wake, and only
+// messages between agents notify (finish pushes are not messages).
+func (s *Server) notifyInbox(chat, run, sender string) {
+	g := &s.subagentSig
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.initLocked()
+	for reg := range g.waits {
+		if reg.chat == chat && (reg.run == "" || reg.run == run) && reg.notify(sender) {
+			reg.signal()
+		}
+	}
+	if g.unread[chat] == nil {
+		g.unread[chat] = map[string]*unreadInbox{}
+	}
+	u := g.unread[chat][run]
+	if u == nil {
+		u = &unreadInbox{run: run}
+		g.unread[chat][run] = u
+	}
+	u.seq++
+	if !slices.Contains(u.senders, sender) {
+		u.senders = append(u.senders, sender)
+	}
 }
 
 func (r *waitReg) signal() {
@@ -77,6 +167,12 @@ func (r *waitReg) claim(child string) bool {
 	}
 	r.claimed[child] = true
 	return true
+}
+
+func (r *waitReg) claimedLocked(child string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claimed[child]
 }
 
 func (r *waitReg) close() {
@@ -115,6 +211,11 @@ type subagentSignals struct {
 	// marker it survives until the chat starts a run that no subagent push or
 	// reply triggered, so a late finish push or reply cannot restart the chat.
 	stopped map[string]bool
+	// unread is the per-chat record of injected messages no wait reported yet.
+	unread map[string]map[string]*unreadInbox
+	// reported are children a returned wait reported as finished although
+	// their release had not been handled yet: that release must not push them.
+	reported map[string]bool
 }
 
 // markStopped records that chatID was stopped.
@@ -152,6 +253,8 @@ func (g *subagentSignals) forget(chatID string) {
 	delete(g.queuedPush, chatID)
 	delete(g.quiet, chatID)
 	delete(g.stopped, chatID)
+	delete(g.unread, chatID)
+	delete(g.reported, chatID)
 	g.pubMu.Lock()
 	delete(g.pubSeq, chatID)
 	g.pubMu.Unlock()
@@ -166,6 +269,8 @@ func (g *subagentSignals) initLocked() {
 		g.lastPushed = map[string]uint64{}
 		g.queuedPush = map[string]string{}
 		g.stopped = map[string]bool{}
+		g.unread = map[string]map[string]*unreadInbox{}
+		g.reported = map[string]bool{}
 	}
 }
 
@@ -283,6 +388,10 @@ func (s *Server) clearQuiet(chatID string) {
 	g := &s.subagentSig
 	g.mu.Lock()
 	delete(g.quiet, chatID)
+	// Messages of the previous run are not for the new one, and a child that
+	// runs again is not reported as finished any more.
+	delete(g.unread, chatID)
+	delete(g.reported, chatID)
 	g.mu.Unlock()
 }
 
@@ -307,6 +416,12 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 	if finished && !stale {
 		quiet = g.quiet[chatID]
 		delete(g.quiet, chatID)
+		// A wait that returned before this release was handled reported the
+		// finish already.
+		if g.reported[chatID] {
+			quiet = true
+			delete(g.reported, chatID)
+		}
 	}
 	// A blocked wait of the parent that covers the chat takes over reporting
 	// it. Claiming happens here, in the same step that wakes the wait, so a
@@ -324,6 +439,10 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 	// The run is over, so no blocked wait of it is left to keep a mark; a new
 	// run of the chat that already started keeps the marks it set.
 	_, running := s.activeExecutions.Load(chatID)
+	if !running {
+		// Unread messages were for the run that just ended.
+		delete(g.unread, chatID)
+	}
 	if holders, ok := g.marked[chatID]; ok && s.dirLocks != nil && !running {
 		if len(holders) == 0 {
 			g.pending.Add(-1)
@@ -471,7 +590,7 @@ func (s *Server) pushSubagentFinishedOnce(chatID string, final bool) (retry bool
 		text += " " + tail
 	}
 	text += fmt.Sprintf("; full output: see `subagent status %s` or /shared", chatID)
-	_, err = s.deliverToParent(s.Context(), parent, text, "subagent-finished", true)
+	_, err = s.deliverToParent(s.Context(), parent, text, "subagent-finished", true, "")
 	if err == nil {
 		return false
 	}
@@ -544,7 +663,9 @@ func labelSuffix(label string) string {
 // (queued behind the running turn, or started when it is idle). With coalesce,
 // a notification already queued absorbs text instead of taking another slot.
 // ctx is the sender's run; once it is done nothing is delivered.
-func (s *Server) deliverToParent(ctx context.Context, parent *dbmodels.Session, text, source string, coalesce bool) (string, error) {
+// A non-empty sender announces an injected delivery to the parent's blocked
+// waits (see notifyInbox).
+func (s *Server) deliverToParent(ctx context.Context, parent *dbmodels.Session, text, source string, coalesce bool, sender string) (string, error) {
 	if s.sessionStopInProgress(parent.ChatID) {
 		return "", subagentErr(SubagentDenied, "the parent chat is being stopped")
 	}
@@ -566,8 +687,13 @@ func (s *Server) deliverToParent(ctx context.Context, parent *dbmodels.Session, 
 			}
 		}
 	}
-	if runAgent != "" && s.tryInject(parent.ChatID, runAgent, text) {
-		return SubagentDeliveryInjected, nil
+	if runAgent != "" {
+		if run, newTurn, ok := s.tryInjectRun(parent.ChatID, runAgent, text); ok {
+			if sender != "" && !newTurn {
+				s.notifyInbox(parent.ChatID, run, sender)
+			}
+			return SubagentDeliveryInjected, nil
+		}
 	}
 	if ctx.Err() != nil {
 		return "", subagentErr(SubagentDenied, "the sender is being stopped")
@@ -651,17 +777,38 @@ func (s *Server) mergeQueuedPush(chatID, text string) bool {
 
 // ---- wait -----------------------------------------------------------------
 
-// WaitSubagents blocks until the given subagents of callerChat (or of its
+// SubagentWaitOutcome is the answer of WaitSubagentsOutcome.
+type SubagentWaitOutcome struct {
+	Results []SubagentWaitResult
+	// WokenBy names the senders of messages that arrived during the wait and
+	// ended it early; empty when the wait ended for another reason.
+	WokenBy []string
+	// CheckoutHeldBy is, when a result is still running, the descendant that
+	// holds the checkout lock it took while the caller waited ("" when none
+	// does). The caller's turn goes on, so it must not modify files meanwhile.
+	CheckoutHeldBy string
+}
+
+// WaitSubagents is WaitSubagentsOutcome without the wake information.
+func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []string, anyOf bool, timeout time.Duration) ([]SubagentWaitResult, error) {
+	o, err := s.WaitSubagentsOutcome(ctx, callerChat, "", ids, anyOf, timeout)
+	return o.Results, err
+}
+
+// WaitSubagentsOutcome blocks until the given subagents of callerChat (or of its
 // descendants) finished, or, with anyOf, until one did, or until timeout
 // passes (capped at maxSubagentWait; zero means the default). Without ids it
 // waits for all running direct children. Every wait reports each subagent: its
 // state and output tail, or StillRunning. It ends early, with a denial, when
 // ctx (the caller's run) is done. While it blocks, callerChat is marked as
 // waiting on its descendants in the dir lock, so its writable subagents can
-// take the checkout.
-func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []string, anyOf bool, timeout time.Duration) ([]SubagentWaitResult, error) {
+// take the checkout. It also ends early, with WokenBy set, when a message from
+// another agent (a subagent reply, a send from the parent) is injected into
+// the turn of callerRun (any run of callerChat when empty) meanwhile or since
+// the run last looked, and, while a subagent still runs at the return, reports a descendant that holds the checkout.
+func (s *Server) WaitSubagentsOutcome(ctx context.Context, callerChat, callerRun string, ids []string, anyOf bool, timeout time.Duration) (SubagentWaitOutcome, error) {
 	if s.repo == nil {
-		return nil, subagentErr(SubagentUnavailable, "database unavailable in degraded mode")
+		return SubagentWaitOutcome{}, subagentErr(SubagentUnavailable, "database unavailable in degraded mode")
 	}
 	if timeout <= 0 {
 		timeout = defaultSubagentWait
@@ -670,21 +817,28 @@ func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []str
 
 	var order []string
 	seen := map[string]bool{}
+	// direct are the waited children whose parent is callerChat: only their
+	// finish can be claimed by this wait (a grandchild's finish is pushed to
+	// its own parent), so only they may be flagged as reported.
+	direct := map[string]bool{}
 	if len(ids) == 0 {
 		children, err := s.ListSubagents(callerChat)
 		if err != nil {
-			return nil, err
+			return SubagentWaitOutcome{}, err
 		}
 		for _, c := range children {
 			if c.State == SubagentStateRunning || c.State == SubagentStateQueued {
 				order = append(order, c.ID)
+				direct[c.ID] = true
 			}
 		}
 	} else {
 		for _, id := range ids {
-			if _, err := s.ownedSubagent(callerChat, id); err != nil {
-				return nil, err
+			sess, err := s.ownedSubagent(callerChat, id)
+			if err != nil {
+				return SubagentWaitOutcome{}, err
 			}
+			direct[id] = sess.ParentChatID == callerChat
 			if !seen[id] {
 				seen[id] = true
 				order = append(order, id)
@@ -692,11 +846,12 @@ func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []str
 		}
 	}
 	if len(order) == 0 {
-		return []SubagentWaitResult{}, nil
+		return SubagentWaitOutcome{Results: []SubagentWaitResult{}}, nil
 	}
 
 	reg := &waitReg{
 		chat:    callerChat,
+		run:     callerRun,
 		ids:     map[string]bool{},
 		wake:    make(chan struct{}, 1),
 		claimed: map[string]bool{},
@@ -708,12 +863,37 @@ func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []str
 	g.mu.Lock()
 	g.initLocked()
 	g.waits[reg] = struct{}{}
+	// Messages injected since the run last looked wake this wait at once.
+	reg.inbox = g.takeUnreadLocked(callerChat, callerRun)
 	g.mu.Unlock()
-	defer func() {
-		reg.close()
+	// endWait closes the registration and consumes what it reported. It is
+	// one step under the lock, so a message or finish is either in this
+	// wait's answer or left for the next wait or the push, never both.
+	ended := false
+	endWait := func(flagReported bool) {
 		g.mu.Lock()
+		defer g.mu.Unlock()
+		if ended {
+			return
+		}
+		ended = true
+		reg.close()
 		delete(g.waits, reg)
-		g.mu.Unlock()
+		g.takeUnreadLocked(callerChat, callerRun)
+		for id := range reg.ids {
+			if !flagReported {
+				break
+			}
+			// A child this wait did not claim may finish before its release is
+			// handled; the release must not push what the answer reports. The
+			// flag of a child that turns out to be running is dropped below.
+			if direct[id] && !reg.claimedLocked(id) {
+				g.reported[id] = true
+			}
+		}
+	}
+	defer func() {
+		endWait(false)
 		s.releaseWaitMark(callerChat, reg)
 	}()
 
@@ -730,34 +910,49 @@ func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []str
 		return finished == len(order)
 	}
 
-	if !satisfied() {
+	if !satisfied() && len(reg.takeInbox()) == 0 {
 		s.holdWaitMark(callerChat, reg)
 		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 	loop:
-		for !satisfied() {
+		for !satisfied() && len(reg.takeInbox()) == 0 {
 			select {
 			case <-reg.wake:
 			case <-timer.C:
 				break loop
 			case <-ctx.Done():
-				return nil, subagentErr(SubagentDenied, "the caller's run ended")
+				return SubagentWaitOutcome{}, subagentErr(SubagentDenied, "the caller's run ended")
 			}
 		}
 	}
 	// From here on a finish is no longer handed to this wait but pushed, and
 	// every child that finished until now is in the answer.
-	reg.close()
+	endWait(true)
+	wokenBy := reg.takeInbox()
 
 	out := make([]SubagentWaitResult, 0, len(order))
 	for _, id := range order {
 		sess, err := s.repo.GetSessionMeta(id)
 		if err != nil || sess == nil {
+			// Not reported, so its release must push as usual.
+			g.mu.Lock()
+			delete(g.reported, id)
+			g.mu.Unlock()
 			continue
 		}
 		info := s.subagentInfo(sess)
 		res := SubagentWaitResult{Info: info}
-		if s.childFinished(id) {
+		finished := s.childFinished(id)
+		if !finished {
+			// Not finished: its finish is pushed as usual. Decided under the
+			// lock so a release cannot slip between the check and the flag.
+			g.mu.Lock()
+			if finished = s.childFinished(id); !finished {
+				delete(g.reported, id)
+			}
+			g.mu.Unlock()
+		}
+		if finished {
 			info.Summary = s.lastOutputTail(id, waitSummaryBytes)
 			res.Info = info
 			res.Notes = subagentOutputNote
@@ -766,7 +961,31 @@ func (s *Server) WaitSubagents(ctx context.Context, callerChat string, ids []str
 		}
 		out = append(out, res)
 	}
-	return out, nil
+	outcome := SubagentWaitOutcome{Results: out, WokenBy: wokenBy}
+	for _, r := range out {
+		if r.StillRunning {
+			// The caller's turn goes on while a child still runs (early wake,
+			// timeout or --any): tell it when a child holds the checkout.
+			outcome.CheckoutHeldBy = s.checkoutHolderBelow(callerChat)
+			break
+		}
+	}
+	return outcome, nil
+}
+
+// checkoutHolderBelow returns a descendant of chat that holds the checkout
+// lock, or "".
+func (s *Server) checkoutHolderBelow(chat string) string {
+	if s.dirLocks == nil {
+		return ""
+	}
+	ids, _ := s.descendantChats(chat)
+	for _, id := range ids {
+		if st := s.dirLockStatus(id); st != nil && st.IsLocked {
+			return id
+		}
+	}
+	return ""
 }
 
 // ---- reply ----------------------------------------------------------------
@@ -808,5 +1027,5 @@ func (s *Server) ReplyToParent(ctx context.Context, callerChat, text string) (st
 		return "", subagentErr(SubagentDenied, "the subagent is being stopped")
 	}
 	prompt := fmt.Sprintf("[message from subagent %s%s]\n%s", callerChat, labelSuffix(sess.SpawnLabel), text)
-	return s.deliverToParent(ctx, parent, prompt, "subagent-reply", false)
+	return s.deliverToParent(ctx, parent, prompt, "subagent-reply", false, fmt.Sprintf("subagent %s%s", callerChat, labelSuffix(sess.SpawnLabel)))
 }

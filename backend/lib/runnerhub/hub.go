@@ -584,6 +584,14 @@ func (p callbackProxy) ListSubagents(ctx context.Context, req *runnerpb.ListSuba
 	return cb.ListSubagents(ctx, req)
 }
 
+func (p callbackProxy) SubagentTree(ctx context.Context, req *runnerpb.SubagentTreeRequest) (*runnerpb.SubagentTreeResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.SubagentTree(ctx, req)
+}
+
 func (p callbackProxy) SubagentStatus(ctx context.Context, req *runnerpb.SubagentStatusRequest) (*runnerpb.SubagentStatusResponse, error) {
 	cb := p.h.currentCallbacks()
 	if cb == nil {

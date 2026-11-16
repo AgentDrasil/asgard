@@ -40,7 +40,7 @@ The root counts as depth 1, so reviewer sits exactly at the limit of 4 (the coun
 | reviewer | none | writes its lens file; no questions |
 | review-lead | lead | `summary.md` with `VERDICT:` on line 1 |
 
-`QUESTION:` protocol: a child that needs an answer ends its turn with a LAST line `QUESTION: <q>` (keep it short, details in `/shared`; status keeps only the tail of the output). Its finish wakes the parent's `subagent wait` at once. After every `wait` and every pushed finish notice the parent runs `subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'`, (the last non-blank line; the tail printed by `wait` shows it too), answers with `subagent send <id> -- ...` (`session_mode: resume` keeps the child's context) and waits again. Waiting loops use `--timeout 300s`; a non-blocking `subagent reply` is FYI and is read whenever a wait returns. A lead that has a question for architect must have no running children.
+`QUESTION:` protocol: a child that needs an answer ends its turn with a LAST line `QUESTION: <q>` (keep it short, details in `/shared`; status keeps only the tail of the output). Its finish wakes the parent's `subagent wait` at once. After every `wait` and every pushed finish notice the parent runs `subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'`, (the last non-blank line; the tail printed by `wait` shows it too), answers with `subagent send <id> -- ...` (`session_mode: resume` keeps the child's context) and waits again. Waiting loops use `--timeout 300s`; a non-blocking `subagent reply` is FYI: it also ends a blocked `wait` early (the result says a message arrived), so read it and wait again. A lead that has a question for architect must have no running children.
 
 Before asking, every agent reads `/shared/design/<topic>/decisions.md`. architect appends every Q&A to it.
 
@@ -62,7 +62,7 @@ Copy `agents/*` into your `etcd-tree/agents/` and run `just publish` (`cfgctl pu
 
 - Only `architect` is a main agent and has `run_dirs`; subagents work in their parent's checkout.
 - architect commits `docs/design/<topic>.md` before spawning lead, edits only the `/shared` copies while lead runs, then syncs and commits the checkout copy at the end. impler stages only its own files.
-- Writable `lead` and `impler` take the checkout lock only while their parent waits (`subagent wait`) or is idle-held.
+- Writable `lead` and `impler` take the checkout lock only while their parent waits (`subagent wait`) or is idle-held. A `wait` that returns while a child still runs (message, timeout, `--any`) can leave such a child holding the checkout: the output says so (`checkout_held_by`), and the parent must not modify files until it waits again.
 - `review-lead`, `reviewer` and `researcher` use `lock_mode: readonly`; still pass `--readonly` so the UI badge shows it.
 - All agents use `session_mode: resume`: each spawn is a new chat anyway, and resume keeps context when a parent `send`s a follow-up or answer.
 

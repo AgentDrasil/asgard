@@ -17,6 +17,7 @@ import (
 func (s *statusServer) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentSpawn, s.handleSubagentSpawn)
 	mux.HandleFunc("GET "+sandboxsock.PathSubagentList, s.handleSubagentList)
+	mux.HandleFunc("GET "+sandboxsock.PathSubagentTree, s.handleSubagentTree)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentStatus, s.handleSubagentStatus)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentKill, s.handleSubagentKill)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentSend, s.handleSubagentSend)
@@ -119,6 +120,37 @@ func (s *statusServer) handleSubagentList(w http.ResponseWriter, r *http.Request
 	out := sandboxsock.SubagentListResponse{Subagents: []sandboxsock.SubagentInfo{}}
 	for _, i := range resp.GetSubagents() {
 		out.Subagents = append(out.Subagents, subagentInfoJSON(i))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *statusServer) handleSubagentTree(w http.ResponseWriter, r *http.Request) {
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.SubagentTreeResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.SubagentTree(ctx, &runnerpb.SubagentTreeRequest{Meta: s.meta(seq)})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-tree", err)
+		return
+	}
+	out := sandboxsock.SubagentTreeResponse{Nodes: []sandboxsock.SubagentTreeNode{}, Truncated: resp.GetTruncated()}
+	for _, n := range resp.GetNodes() {
+		i := n.GetInfo()
+		out.Nodes = append(out.Nodes, sandboxsock.SubagentTreeNode{
+			ID:       i.GetId(),
+			ParentID: i.GetParentChatId(),
+			Agent:    i.GetAgent(),
+			Label:    i.GetLabel(),
+			State:    i.GetState(),
+			Readonly: i.GetReadonly(),
+			Depth:    int(n.GetDepth()),
+			Self:     n.GetSelf(),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -250,6 +282,11 @@ func (s *statusServer) handleSubagentWait(w http.ResponseWriter, r *http.Request
 			StillRunning: res.GetStillRunning(),
 			Notes:        res.GetNotes(),
 		})
+	}
+	out.CheckoutHeldBy = resp.GetCheckoutHeldBy()
+	if len(resp.GetWokenBy()) > 0 {
+		out.WokenByMessage = true
+		out.MessageFrom = resp.GetWokenBy()
 	}
 	writeJSON(w, http.StatusOK, out)
 }

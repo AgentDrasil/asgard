@@ -414,6 +414,9 @@ service AgentCallbackService {
   // database) or Internal.
   rpc SpawnSubagent(SpawnSubagentRequest) returns (SpawnSubagentResponse);
   rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
+  // SubagentTree lists every chat of the caller's spawn tree (root and all
+  // descendants), derived from the calling run's chat.
+  rpc SubagentTree(SubagentTreeRequest) returns (SubagentTreeResponse);
   rpc SubagentStatus(SubagentStatusRequest) returns (SubagentStatusResponse);
   rpc KillSubagent(KillSubagentRequest) returns (KillSubagentResponse);
   // SendToSubagent delivers a message to a subagent: injected into its running
@@ -530,6 +533,26 @@ message ListSubagentsResponse {
   repeated SubagentInfo subagents = 1;
 }
 
+message SubagentTreeRequest {
+  CallMeta meta = 1;
+}
+message SubagentTreeNode {
+  // info.parent_chat_id is empty for the root of the tree. For the root,
+  // info.state is running, queued (it waits for the checkout lock) or idle.
+  SubagentInfo info = 1;
+  // depth is 0 for the root, 1 for its children, and so on.
+  int32 depth = 2;
+  // self marks the calling chat.
+  bool self = 3;
+}
+message SubagentTreeResponse {
+  // nodes are in depth-first order, the root first.
+  repeated SubagentTreeNode nodes = 1;
+  // truncated is true when the list is incomplete: the tree is larger than
+  // the backend's cap.
+  bool truncated = 2;
+}
+
 message SubagentStatusRequest {
   CallMeta meta = 1;
   string id = 2;
@@ -576,6 +599,13 @@ message SubagentWaitResult {
 }
 message WaitSubagentsResponse {
   repeated SubagentWaitResult results = 1;
+  // woken_by names the senders (e.g. "subagent <id> (<label>)") of messages
+  // that arrived during the wait and ended it early; empty otherwise.
+  repeated string woken_by = 2;
+  // checkout_held_by is, while a waited subagent is still running, a descendant that holds the
+  // checkout lock (taken while the caller waited); the caller must not modify
+  // files until it is released. Empty otherwise.
+  string checkout_held_by = 3;
 }
 
 message ReplyToParentRequest {
