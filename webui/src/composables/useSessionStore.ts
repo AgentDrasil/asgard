@@ -30,6 +30,7 @@ import {
 } from "../lib/api";
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
+import { mergeSubagentArtifacts } from "../utils/artifactSources";
 import { t } from "../i18n";
 import { useToast } from "./useToast";
 
@@ -204,6 +205,64 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
   };
 
+  // handleSubagentArtifactEvent adds what a descendant subagent produced to the
+  // active chat's list (published on the streams of all its ancestors).
+  // Events that arrive while the session is still loading (the stream connects
+  // before the session is fetched) are kept and applied once it is there.
+  const MAX_PENDING_SUBAGENT_ARTIFACTS = 200;
+  let pendingSubagentArtifacts: SessionEvent[] = [];
+  // Session fetches in flight, by chat id: an event for the active chat that
+  // arrives while its fetch runs may be missing from the fetched snapshot,
+  // which would then replace the chat. A stale fetch of another chat (the user
+  // switched meanwhile) does not hold back the active chat's events.
+  const fetchesInFlight = new Map<string, number>();
+  const fetchingActiveSession = () =>
+    !!activeSessionId.value && (fetchesInFlight.get(activeSessionId.value) ?? 0) > 0;
+
+  const fetchActiveSession = async (id: string) => {
+    fetchesInFlight.set(id, (fetchesInFlight.get(id) ?? 0) + 1);
+    let ok = false;
+    try {
+      const session = await getSession(id);
+      ok = true;
+      return session;
+    } finally {
+      const n = (fetchesInFlight.get(id) ?? 1) - 1;
+      if (n > 0) fetchesInFlight.set(id, n);
+      else fetchesInFlight.delete(id);
+      // A failed fetch replaces nothing: apply what it held back. A successful
+      // one is flushed by its caller after the snapshot is assigned.
+      if (!ok && !fetchingActiveSession()) flushPendingSubagentArtifacts();
+    }
+  };
+
+  const applySubagentArtifactEvent = (ev: SessionEvent) => {
+    if (!activeSession.value) return;
+    activeSession.value.subagentArtifacts = mergeSubagentArtifacts(
+      activeSession.value.subagentArtifacts,
+      ev.payload,
+    );
+  };
+
+  const flushPendingSubagentArtifacts = () => {
+    const pending = pendingSubagentArtifacts;
+    pendingSubagentArtifacts = [];
+    for (const ev of pending) {
+      if (!ev.chatId || ev.chatId === activeSessionId.value) applySubagentArtifactEvent(ev);
+    }
+  };
+
+  const handleSubagentArtifactEvent = (ev: SessionEvent) => {
+    if (ev.chatId && ev.chatId !== activeSessionId.value) return;
+    if (!activeSession.value || fetchingActiveSession()) {
+      if (pendingSubagentArtifacts.length < MAX_PENDING_SUBAGENT_ARTIFACTS) {
+        pendingSubagentArtifacts.push(ev);
+      }
+      return;
+    }
+    applySubagentArtifactEvent(ev);
+  };
+
   const handleSessionDoneEvent = (ev: SessionEvent) => {
     if (ev.chatId === activeSessionId.value) {
       isRunning.value = false;
@@ -229,9 +288,11 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
   const handleSessionResyncEvent = async (ev: SessionEvent) => {
     if (ev.chatId === activeSessionId.value && activeSessionId.value) {
-      const session = await getSession(activeSessionId.value);
+      const session = await fetchActiveSession(activeSessionId.value);
+      if (!session || activeSessionId.value !== ev.chatId) flushPendingSubagentArtifacts();
       if (session && activeSessionId.value === ev.chatId) {
         activeSession.value = session;
+        flushPendingSubagentArtifacts();
         queuedMessages.value = session.queuedMessages || [];
         const snapshotMsgs = session.messages || [];
         const pendingOptimistic = rawMessages.value.filter(
@@ -307,6 +368,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     onResync: handleSessionResyncEvent,
     onQueue: handleSessionQueueEvent,
     onSubagent: handleSessionSubagentEvent,
+    onSubagentArtifact: handleSubagentArtifactEvent,
   });
 
   const openSession = async (id: string) => {
@@ -316,6 +378,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     const myGen = ++loadGen;
 
     if (isNewSession) {
+      pendingSubagentArtifacts = [];
       activeSession.value = null;
       rawMessages.value = [];
       artifacts.value = [];
@@ -329,11 +392,13 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     // Connect SSE stream immediately
     events.connect(id);
 
-    const session = await getSession(id);
+    const session = await fetchActiveSession(id);
     if (myGen !== loadGen) return;
+    if (!session) flushPendingSubagentArtifacts();
 
     if (session) {
       activeSession.value = session;
+      flushPendingSubagentArtifacts();
       queuedMessages.value = session.queuedMessages || [];
 
       const snapshotMsgs = session.messages || [];

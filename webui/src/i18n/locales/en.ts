@@ -773,6 +773,7 @@ export const en = {
     refreshTree: "Refresh File Tree",
     dragToResizeSidebar: "Drag to resize File Tree sidebar",
     resizeSidebarLabel: "Resize file tree sidebar",
+    sharedScopeOption: "/shared (subagent tree)",
     selectDirectoryScopeAria: "Select directory scope",
     searchFilesPlaceholder: "Search files...",
     loadingFiles: "Loading files...",

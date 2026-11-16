@@ -440,4 +440,87 @@ describe("ArtifactViewer.vue", () => {
 
     app.unmount();
   });
+
+  it("opens an artifact of a subagent with the subagent's session id and labels it", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        path: "/tmp/out/report.png",
+        name: "report.png",
+        ext: "png",
+        size: 10,
+        content: "",
+        isBinary: true,
+        updatedAt: "2026-08-31T10:00:00Z",
+      }),
+    } as Response);
+    const key = "subagent:child-9:/tmp/out/report.png";
+
+    const app = createApp({
+      render() {
+        return h(ArtifactViewer, {
+          sessionId: "parent-1",
+          activeFilePath: key,
+          modifiedFiles: ["/tmp/own.txt", key],
+          sources: { [key]: { chatId: "child-9", label: "tester", agent: "coder" } },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(root.querySelector(".media-viewer")).not.toBeNull();
+    });
+    expect(String(fetchSpy.mock.calls[0][0])).toContain(
+      "/api/v1/workspace/file?session_id=child-9&path=%2Ftmp%2Fout%2Freport.png",
+    );
+    expect(root.querySelector("img")?.getAttribute("src")).toBe(
+      "/api/v1/workspace/file?session_id=child-9&path=%2Ftmp%2Fout%2Freport.png&raw=1",
+    );
+    const options = Array.from(root.querySelectorAll("option")).map((o) => o.textContent?.trim());
+    expect(options).toEqual(["/tmp/own.txt", "[tester] /tmp/out/report.png"]);
+
+    app.unmount();
+  });
+
+  it("opens a /shared artifact with the viewed chat's session id", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        path: "/shared/plan.md",
+        name: "plan.md",
+        ext: "md",
+        size: 5,
+        content: "# plan",
+        updatedAt: "2026-08-31T10:00:00Z",
+      }),
+    } as Response);
+
+    const app = createApp({
+      render() {
+        return h(ArtifactViewer, {
+          sessionId: "parent-1",
+          activeFilePath: "/shared/plan.md",
+          modifiedFiles: ["/shared/plan.md"],
+          sources: { "/shared/plan.md": { chatId: "child-9", label: "planner" } },
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    expect(String(fetchSpy.mock.calls[0][0])).toContain(
+      "session_id=parent-1&path=%2Fshared%2Fplan.md",
+    );
+    await vi.waitFor(() => {
+      expect(root.textContent).toContain("plan");
+    });
+    expect(root.querySelector("option")?.textContent?.trim()).toBe("[planner] /shared/plan.md");
+
+    app.unmount();
+  });
 });

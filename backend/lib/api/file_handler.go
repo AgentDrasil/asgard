@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 )
 
@@ -57,7 +58,25 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		sessionModifiedFiles = sess.Artifacts
 	}
 
-	fs, ferr := s.chatFS(sessionID)
+	scope := r.URL.Query().Get("scope")
+	readPath, readRunDir := reqPath, storedRunDir
+	var fs runnerfs.FS
+	var ferr error
+	if canon, shared, serr := sharedRequest(reqPath, scope); shared {
+		if serr != nil {
+			writeFSError(w, serr)
+			return
+		}
+		// /shared belongs to the whole spawn tree: it is read from the root
+		// chat's directory, and any artifact of the tree's chats authorizes it.
+		fs, ferr = s.sharedFS(sessionID, sess)
+		readPath, readRunDir, scope = canon, "", agents.SharedNS
+		if ferr == nil {
+			sessionModifiedFiles = s.sharedTreeArtifacts(sess, sessionModifiedFiles)
+		}
+	} else {
+		fs, ferr = s.chatFS(sessionID)
+	}
 	if ferr != nil {
 		writeFSError(w, ferr)
 		return
@@ -69,7 +88,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		authRunDir = NormalizeSessionRunDir(storedRunDir, sessionID)
 	}
 
-	candidates := agents.AuthCandidates(reqPath, r.URL.Query().Get("scope"), sessionID)
+	candidates := agents.AuthCandidates(reqPath, scope, sessionID)
 	for _, c := range candidates {
 		if c.Ns != "" {
 			continue
@@ -105,7 +124,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	isRaw = rawParam == "1" || strings.EqualFold(rawParam, "true")
 
 	f, err := fs.Open(r.Context(), runnerfs.ReadRequest{
-		RunDir: storedRunDir, Path: reqPath, Scope: r.URL.Query().Get("scope"), Raw: isRaw,
+		RunDir: readRunDir, Path: readPath, Scope: scope, Raw: isRaw,
 	})
 	if err != nil {
 		writeFSError(w, err)
@@ -113,7 +132,7 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = f.Close() }()
 
-	if !isPathAuthorized(f.Path, sessionModifiedFiles, authRunDir, sessionID, f.Namespace()) {
+	if !isPathAuthorized(f.Path, sessionModifiedFiles, authRunDir, sessionID, resolvedNamespace(f.Header, scope)) {
 		writeJSONError(w, http.StatusForbidden, "access denied: file not authorized in session")
 		return
 	}
@@ -166,6 +185,20 @@ func isPathAuthorized(authPath string, allowedFiles []string, runDir, sessionID 
 		}
 		cleanAllowed := filepath.Clean(allowed)
 
+		if ns == agents.SharedNS {
+			// Only explicit /shared entries authorize /shared paths.
+			if ok, sub := agents.ResolveSharedPath(cleanAllowed, ""); ok {
+				canon := "/shared"
+				if sub != "" {
+					canon += "/" + sub
+				}
+				if cleanAuth == canon {
+					return true
+				}
+			}
+			continue
+		}
+
 		if ns != "" {
 			// Check if cleanAllowed is explicit namespace path
 			if isAllowedNs, normAllowedNs := NormalizeScopedPathForAuth(cleanAllowed, sessionID, ns); isAllowedNs {
@@ -215,4 +248,41 @@ func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// sharedTreeArtifacts adds the /shared artifacts of every chat of the spawn tree
+// sess belongs to (the tree's root and all its descendants) to own: a file a
+// subagent put in /shared may be opened from any chat of the tree.
+func (s *Server) sharedTreeArtifacts(sess *dbmodels.Session, own []string) []string {
+	if sess == nil || s.repo == nil {
+		return own
+	}
+	root, err := s.spawnRoot(sess)
+	if err != nil {
+		return own
+	}
+	members, _, err := s.repo.SpawnDescendants(root, maxSubagentDescendants)
+	if err != nil {
+		return own
+	}
+	out := append([]string(nil), own...)
+	for _, m := range members {
+		for _, a := range m.Artifacts {
+			if ok, _ := agents.ResolveSharedPath(a, ""); ok {
+				out = append(out, a)
+			}
+		}
+	}
+	return out
+}
+
+// resolvedNamespace is the namespace a file was resolved in: the namespace its
+// display path looks like, unless the request named another scope explicitly
+// (a workspace file called /shared/x is a workspace file, not /shared).
+func resolvedNamespace(h runnerfs.Header, scope string) string {
+	ns := h.Namespace()
+	if ns == agents.SharedNS && scope != "" && scope != agents.SharedNS {
+		return ""
+	}
+	return ns
 }

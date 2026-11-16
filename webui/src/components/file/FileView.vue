@@ -23,6 +23,8 @@ const props = defineProps<{
   /** Initial file path to display. Alternatively provided via v-model:selectedFilePath */
   initialFilePath?: string | null;
   isTerminalOpen?: boolean;
+  /** The chat belongs to a spawn tree, so it has a /shared directory. */
+  hasShared?: boolean;
 }>();
 
 const isFileTreeOpen = defineModel<boolean>("isFileTreeOpen", { default: true });
@@ -119,7 +121,7 @@ watch(selectedFilePath, (newPath) => {
 
 const currentScope = computed<FileScope | undefined>(() => {
   const scope = route.query.scope;
-  if (scope === "workspace" || scope === "tmp" || scope === "session") {
+  if (scope === "workspace" || scope === "tmp" || scope === "session" || scope === "shared") {
     return scope;
   }
   return undefined;
@@ -320,6 +322,7 @@ const breadcrumbParts = computed(() => {
         <FileTreeSidebar
           :sessionId="sessionId"
           :runDir="runDir"
+          :hasShared="hasShared"
           :selectedPath="selectedFilePath"
           :commentedFiles="commentedFileList"
           @select-file="handleSelectFile"

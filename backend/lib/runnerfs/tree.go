@@ -339,6 +339,23 @@ func (l Local) Search(ctx context.Context, req SearchRequest) ([]SearchHit, erro
 	query := strings.ToLower(req.Query)
 	visited := make(map[[2]uint64]bool)
 
+	if req.Scope == agents.SharedNS {
+		// Only the tree's scratch dir (a missing one holds nothing).
+		fd, err := l.namespaceRoot(agents.SharedNS, false)
+		if err != nil {
+			if CodeOf(err) == CodeNotFound {
+				return []SearchHit{}, nil
+			}
+			return nil, err
+		}
+		defer func() { _ = unix.Close(fd) }()
+		hits := scan(ctx, fd, agents.SharedNS, "/shared", query, limit, visited)
+		if hits == nil {
+			hits = []SearchHit{}
+		}
+		return hits, nil
+	}
+
 	var wsfd = -1
 	wsReal := ""
 	if fd, _, err := l.openWorkspace(req.RunDir, false); err == nil {

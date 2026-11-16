@@ -17,6 +17,7 @@ import QueuedMessageCard from "./chat/QueuedMessageCard.vue";
 import SubagentsPanel from "./chat/SubagentsPanel.vue";
 import { subagentLabel } from "../utils/sessionTree";
 import ArtifactViewer from "./ArtifactViewer.vue";
+import type { ArtifactSource } from "../utils/artifactSources";
 import { t } from "../i18n";
 import { formatLockTooltip, formatWaitingBannerText } from "../utils/dirLockUtils";
 
@@ -44,6 +45,7 @@ const props = withDefaults(
     isDetailsOpen?: boolean;
     isTerminalOpen?: boolean;
     modifiedFiles?: string[];
+    artifactSources?: Record<string, ArtifactSource>;
     activeArtifactPath?: string | null;
     isArtifactDrawerOpen?: boolean;
     workingAgentLabel?: string | null;
@@ -66,6 +68,7 @@ const props = withDefaults(
     isDetailsOpen: true,
     isTerminalOpen: false,
     modifiedFiles: () => [],
+    artifactSources: () => ({}),
     activeArtifactPath: null,
     isArtifactDrawerOpen: false,
     workingAgentLabel: null,
@@ -760,6 +763,7 @@ onUnmounted(() => {
           :sessionId="sessionId || ''"
           :activeFilePath="activeArtifactPath"
           :modifiedFiles="modifiedFiles"
+          :sources="artifactSources"
           :isExpanded="isArtifactExpanded"
           @close="emit('toggle-artifact-drawer')"
           @select-file="(f) => emit('select-artifact', f)"

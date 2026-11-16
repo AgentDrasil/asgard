@@ -42,7 +42,7 @@ func (s *Service) Search(ctx context.Context, req *runnerpb.SearchRequest) (*run
 	if err != nil {
 		return nil, grpcErr(err)
 	}
-	hits, err := s.fsFor(req.GetSessionId()).Search(ctx, runnerfs.SearchRequest{RunDir: rd, Query: req.GetQuery(), Limit: int(req.GetLimit())})
+	hits, err := s.fsFor(req.GetSessionId()).Search(ctx, runnerfs.SearchRequest{RunDir: rd, Query: req.GetQuery(), Limit: int(req.GetLimit()), Scope: runnerfs.ScopeFromProto(req.GetScope())})
 	if err != nil {
 		return nil, grpcErr(err)
 	}

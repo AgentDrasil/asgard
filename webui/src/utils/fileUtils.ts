@@ -405,6 +405,16 @@ export function isSessionScopePath(path?: string | null): boolean {
 }
 
 /**
+ * Checks whether a given path belongs to the /shared namespace, the scratch
+ * directory of a spawn tree (/shared and its subpaths).
+ */
+export function isSharedScopePath(path?: string | null): boolean {
+  if (!path) return false;
+  const clean = path.replace(/\\/g, "/").trim();
+  return clean === "/shared" || clean.startsWith("/shared/");
+}
+
+/**
  * Checks whether a given runDir corresponds to the session temporary directory (/tmp, tmp, /tmp/session-id, tmp/session-id, /home/<user>/asgard/data/tmp/<sessionId>, etc.).
  */
 export function isSessionTmpDir(runDir?: string | null, sessionId?: string | null): boolean {

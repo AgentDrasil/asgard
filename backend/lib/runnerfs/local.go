@@ -322,7 +322,18 @@ func (l Local) resolvePath(reqPath, scope, runDir string, write, create bool) (r
 		// Explicit namespace path: no workspace needed.
 		ns := cands[0].Ns
 		var sub string
-		if ok, s := agents.ResolveSessionScopedPath(clean, l.ChatID, ns); ok {
+		if ns == agents.SharedNS {
+			// The shared dir of the spawn tree whose root chat is l.ChatID
+			// (the backend addresses it through the root chat's FS). It is
+			// read-only here: the sandboxes write it, not the file API.
+			if write {
+				return -1, "", "", Errf(CodeDenied, "access denied: /shared is read-only")
+			}
+			_, sub = agents.ResolveSharedPath(reqPath, scope)
+			if agents.SharedSubEscapes(sub) {
+				return -1, "", "", Errf(CodeDenied, "access denied: path escapes the shared directory")
+			}
+		} else if ok, s := agents.ResolveSessionScopedPath(clean, l.ChatID, ns); ok {
 			sub = s
 		} else if ok, s := agents.RelativeScopedPrefixedPath(clean, l.ChatID, ns); ok {
 			sub = s

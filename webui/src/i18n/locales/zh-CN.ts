@@ -760,6 +760,7 @@ export const zhCN: MessageSchema = {
     refreshTree: "刷新文件树",
     dragToResizeSidebar: "拖动调整文件树侧边栏宽度",
     resizeSidebarLabel: "调整文件树侧边栏宽度",
+    sharedScopeOption: "/shared（子代理共享目录）",
     selectDirectoryScopeAria: "选择目录范围",
     searchFilesPlaceholder: "搜索文件...",
     loadingFiles: "正在加载文件...",

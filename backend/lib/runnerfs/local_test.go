@@ -419,3 +419,106 @@ func TestLocalMkdirReadonlyVeto(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(ro, "new"))
 	require.NoError(t, fs.Mkdir(t.Context(), PathRef{RunDir: rw, Path: "new", Scope: "workspace"}, ""))
 }
+
+func TestLocalSharedNamespace(t *testing.T) {
+	_, _, outside := confinedFS(t)
+	const root = "rootchat"
+	dir := runnerpaths.SharedChatDir(root)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("shared a"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "b.md"), []byte("b"), 0o644))
+	other := runnerpaths.SharedChatDir("otherroot")
+	require.NoError(t, os.MkdirAll(other, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(other, "x.txt"), []byte("other"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "host.txt"), []byte("host"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "link")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "host.txt"), filepath.Join(dir, "flink")))
+
+	// The FS of the tree's root chat serves it; confined and unconfined alike.
+	for name, fs := range map[string]Local{
+		"confined": NewConfined(root, func(bool) []string { return nil }, nil),
+		"dev":      NewLocal(root),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := fs.Open(t.Context(), ReadRequest{Path: "/shared/a.txt", Scope: "shared"})
+			require.NoError(t, err)
+			data, _ := io.ReadAll(f)
+			_ = f.Close()
+			assert.Equal(t, "shared a", string(data))
+			assert.Equal(t, "/shared/a.txt", f.Path)
+			assert.Equal(t, "shared", f.Namespace())
+
+			// Relative to the root with scope shared; no scope needed for /shared/...
+			f, err = fs.Open(t.Context(), ReadRequest{Path: "sub/b.md", Scope: "shared"})
+			require.NoError(t, err)
+			_ = f.Close()
+			f, err = fs.Open(t.Context(), ReadRequest{Path: "/shared/sub/b.md"})
+			require.NoError(t, err)
+			_ = f.Close()
+
+			tree, err := fs.Tree(t.Context(), TreeRequest{Path: "/shared", Scope: "shared"})
+			require.NoError(t, err)
+			var got []string
+			for _, e := range tree.Entries {
+				got = append(got, e.Path)
+			}
+			assert.Equal(t, []string{"/shared/sub", "/shared/a.txt", "/shared/flink", "/shared/link"}, got)
+			assert.Equal(t, "/shared", tree.Path)
+			tree, err = fs.Tree(t.Context(), TreeRequest{Path: "/shared/sub"})
+			require.NoError(t, err)
+			require.Len(t, tree.Entries, 1)
+			assert.Equal(t, "/shared/sub/b.md", tree.Entries[0].Path)
+
+			hits, err := fs.Search(t.Context(), SearchRequest{Scope: "shared", Query: "B.MD"})
+			require.NoError(t, err)
+			require.Len(t, hits, 1)
+			assert.Equal(t, "/shared/sub/b.md", hits[0].Path)
+			assert.Equal(t, "shared", hits[0].Scope)
+			hits, err = fs.Search(t.Context(), SearchRequest{Scope: "shared"})
+			require.NoError(t, err)
+			for _, h := range hits {
+				assert.NotContains(t, h.Path, "host")
+				assert.NotContains(t, h.Path, "x.txt")
+			}
+
+			// Escapes: dotdot (also via other tree), symlinks, writes.
+			for _, p := range []string{"../otherroot/x.txt", "a/../../otherroot/x.txt", "link/host.txt", "flink"} {
+				_, err := fs.Open(t.Context(), ReadRequest{Path: p, Scope: "shared"})
+				assert.Error(t, err, p)
+			}
+			_, err = fs.Open(t.Context(), ReadRequest{Path: "/shared/link/host.txt"})
+			assert.Error(t, err)
+			_, err = fs.Tree(t.Context(), TreeRequest{Path: "/shared/link"})
+			assert.Error(t, err)
+			// Another tree's file is not reachable by any path form.
+			f, err = fs.Open(t.Context(), ReadRequest{Path: "/shared/otherroot/x.txt"})
+			if err == nil {
+				_ = f.Close()
+			}
+			assert.Error(t, err)
+
+			_, err = fs.WriteFile(t.Context(), WriteRequest{Ref: PathRef{Path: "/shared/new.txt"}, Mkdir: true}, strings.NewReader("x"))
+			assert.Equal(t, CodeDenied, CodeOf(err))
+			assert.NoFileExists(t, filepath.Join(dir, "new.txt"))
+			_, err = fs.WriteFile(t.Context(), WriteRequest{Ref: PathRef{Path: "new.txt", Scope: "shared"}}, strings.NewReader("x"))
+			assert.Error(t, err)
+			assert.Equal(t, CodeDenied, CodeOf(fs.Remove(t.Context(), PathRef{Path: "/shared/a.txt"}, false, "")))
+			assert.FileExists(t, filepath.Join(dir, "a.txt"))
+		})
+	}
+
+	// A chat without a shared dir gets not found, and an empty search.
+	none := NewConfined("lonely", func(bool) []string { return nil }, nil)
+	_, err := none.Tree(t.Context(), TreeRequest{Path: "/shared", Scope: "shared"})
+	assert.Equal(t, CodeNotFound, CodeOf(err))
+	_, err = none.Open(t.Context(), ReadRequest{Path: "/shared/a.txt"})
+	assert.Equal(t, CodeNotFound, CodeOf(err))
+	hits, err := none.Search(t.Context(), SearchRequest{Scope: "shared"})
+	require.NoError(t, err)
+	assert.Empty(t, hits)
+}
+
+func TestScopeProtoShared(t *testing.T) {
+	assert.Equal(t, runnerpb.FileScope_FILE_SCOPE_SHARED, ScopeToProto("shared"))
+	assert.Equal(t, "shared", ScopeFromProto(runnerpb.FileScope_FILE_SCOPE_SHARED))
+}

@@ -216,6 +216,12 @@ type AuthCandidate struct {
 // authorizes against these before it asks the runner for anything.
 func AuthCandidates(reqPath, scope, sessionID string) []AuthCandidate {
 	clean := filepath.Clean(reqPath)
+	if ok, sub := ResolveSharedPath(reqPath, scope); ok {
+		if sub == "" {
+			return []AuthCandidate{{SharedNS, "/shared"}}
+		}
+		return []AuthCandidate{{SharedNS, "/shared/" + sub}}
+	}
 	for _, ns := range []string{"tmp", "session"} {
 		canon := func(sub string) string {
 			sub = filepath.Clean(sub)

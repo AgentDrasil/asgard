@@ -245,6 +245,12 @@ const announcement = computed(() => {
                   >
                     session
                   </span>
+                  <span
+                    v-else-if="file.scope === 'shared' || file.path.startsWith('/shared/')"
+                    class="badge badge-xs badge-neutral text-[10px] px-1 py-0 h-4 font-mono text-base-content/70"
+                  >
+                    shared
+                  </span>
                 </div>
                 <span
                   v-if="getDirName(file.path)"

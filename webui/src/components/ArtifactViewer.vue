@@ -13,6 +13,7 @@ import MediaViewer from "./common/MediaViewer.vue";
 import CsvViewer from "./common/CsvViewer.vue";
 import A2UIRenderer from "./a2ui/A2UIRenderer.vue";
 import { isA2UIManifest, parseA2UIManifest } from "../utils/a2uiUtils";
+import { parseArtifactKey, type ArtifactSource } from "../utils/artifactSources";
 
 const { t } = useI18n();
 const { highlightBlock } = useShiki();
@@ -21,11 +22,15 @@ const props = withDefaults(
   defineProps<{
     sessionId: string;
     activeFilePath: string | null;
+    /** Artifact keys: plain paths of the chat, see utils/artifactSources.ts. */
     modifiedFiles: string[];
+    /** The subagent that produced a key, for artifacts of descendant subagents. */
+    sources?: Record<string, ArtifactSource>;
     isExpanded?: boolean;
   }>(),
   {
     isExpanded: false,
+    sources: () => ({}),
   },
 );
 
@@ -89,9 +94,20 @@ const isMediaPreview = computed(() => {
   return cat === "image" || cat === "video" || cat === "audio" || cat === "pdf" || cat === "binary";
 });
 
+// An artifact of a descendant subagent is served by the subagent's own chat.
+// A key resolves to a foreign chat only when it is a known source: an
+// agent-written workspace file may be named like a key.
+function resolveTarget(key: string | null | undefined) {
+  const parsed = parseArtifactKey(key);
+  if (parsed.sessionId && key && props.sources[key]?.chatId === parsed.sessionId) return parsed;
+  return { sessionId: null, path: key || "" };
+}
+const activeTarget = computed(() => resolveTarget(props.activeFilePath));
+const activeSessionId = computed(() => activeTarget.value.sessionId || props.sessionId);
+
 const rawUrl = computed(() => {
-  if (!props.sessionId || !fileData.value?.path) return "";
-  return getRawWorkspaceFileUrl(props.sessionId, fileData.value.path);
+  if (!activeSessionId.value || !fileData.value?.path) return "";
+  return getRawWorkspaceFileUrl(activeSessionId.value, fileData.value.path);
 });
 
 const highlightedArtifactContent = computed(() => {
@@ -122,14 +138,24 @@ function formatPath(path: string): string {
   return path.replace(/^\/home\/[^/]+/, "~");
 }
 
-async function fetchFile(path: string) {
-  if (!path || !props.sessionId) return;
+// optionLabel is the dropdown text of an artifact key: the path, prefixed with
+// the subagent that produced it.
+function optionLabel(key: string): string {
+  const path = formatPath(resolveTarget(key).path);
+  const src = props.sources[key];
+  return src ? `[${src.label}] ${path}` : path;
+}
+
+async function fetchFile(key: string) {
+  const { sessionId: ownerId, path } = resolveTarget(key);
+  const sessionId = ownerId || props.sessionId;
+  if (!path || !sessionId) return;
   loading.value = true;
   errorMsg.value = null;
 
   try {
     const res = await apiFetch(
-      `/api/v1/workspace/file?session_id=${encodeURIComponent(props.sessionId)}&path=${encodeURIComponent(path)}`,
+      `/api/v1/workspace/file?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
     );
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
@@ -219,7 +245,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         <div class="relative flex-1 min-w-0">
           <div class="relative flex items-center w-full">
             <Icon
-              :icon="getFileIcon(undefined, activeFilePath || '')"
+              :icon="getFileIcon(undefined, activeTarget.path)"
               class="absolute left-2.5 h-4 w-4 shrink-0 text-emerald-500 pointer-events-none z-10"
             />
             <select
@@ -229,7 +255,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
               :title="t('viewers.selectFileToPreview')"
             >
               <option v-for="file in modifiedFiles" :key="file" :value="file">
-                {{ formatPath(file) }}
+                {{ optionLabel(file) }}
               </option>
             </select>
           </div>
@@ -456,7 +482,7 @@ watch([() => fileData.value, markdownViewMode, csvViewMode, a2uiViewMode], () =>
         >
           <A2UIRenderer
             :manifest="parsedA2UIManifest"
-            :sessionId="sessionId"
+            :sessionId="activeSessionId"
             :manifestPath="fileData.path"
           />
         </div>

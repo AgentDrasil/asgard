@@ -61,8 +61,8 @@ const (
 	chunkSize = 256 * 1024
 )
 
-// ReadRequest selects a file for reading. Scope is "", "workspace", "tmp" or
-// "session" like the HTTP handlers' scope parameter.
+// ReadRequest selects a file for reading. Scope is "", "workspace", "tmp",
+// "session" or "shared" like the HTTP handlers' scope parameter.
 type ReadRequest struct {
 	// RunDir is the chat's stored run dir (empty: the runner's cwd).
 	RunDir string
@@ -85,10 +85,10 @@ type Header struct {
 	Mime     string
 }
 
-// Namespace returns "tmp" or "session" for namespaced display paths and ""
-// for workspace paths.
+// Namespace returns "tmp", "session" or "shared" for namespaced display paths
+// and "" for workspace paths.
 func (h Header) Namespace() string {
-	for _, ns := range []string{"tmp", "session"} {
+	for _, ns := range []string{"tmp", "session", "shared"} {
 		if h.Path == "/"+ns || len(h.Path) > len(ns)+2 && h.Path[:len(ns)+2] == "/"+ns+"/" {
 			return ns
 		}
@@ -198,10 +198,13 @@ type TreeResult struct {
 
 // SearchRequest searches the workspace, tmp and session dirs by path
 // substring. Limit is clamped to 1..MaxSearchLimit (0: DefaultSearchLimit).
+// Scope "shared" searches only the spawn tree scratch directory of the FS's
+// chat (which must be the tree's root chat), hits prefixed /shared.
 type SearchRequest struct {
 	RunDir string
 	Query  string
 	Limit  int
+	Scope  string
 }
 
 // SearchHit is one matching file.
@@ -210,7 +213,7 @@ type SearchHit struct {
 	Name  string
 	Ext   string
 	Size  int64
-	Scope string // "workspace" | "tmp" | "session"
+	Scope string // "workspace" | "tmp" | "session" | "shared"
 }
 
 // SubdirsRequest lists the visible subdirectories of an absolute directory.

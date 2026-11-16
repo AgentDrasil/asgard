@@ -558,6 +558,9 @@ func recordStatusUpdate(server *Server, repo *dbmodels.SessionRepository, chatID
 				Type:    "artifact",
 				Payload: map[string]any{"artifacts": artifactFiles},
 			})
+			if sess, merr := repo.GetSessionMeta(chatID); merr == nil {
+				server.publishSubagentArtifacts(sess, artifactFiles)
+			}
 		}
 	}
 	if update.Content == "" {

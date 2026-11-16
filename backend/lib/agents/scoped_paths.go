@@ -35,12 +35,55 @@ func GetSessionScopedBaseDir(ns string, chatID string) string {
 }
 
 // scopedNsHostRoot maps a sandbox namespace to its host root directory:
-// "tmp" → /session-data/tmp, "session" → /session-data/sessions.
+// "tmp" → /session-data/tmp, "session" → /session-data/sessions and
+// "shared" → /session-data/shared (whose per-tree directories are named by the
+// spawn tree's root chat, so the chat id of the "shared" namespace is the root
+// chat id, see runnerpaths.SharedChatDir).
 func scopedNsHostRoot(ns string) string {
-	if ns == "session" {
+	switch ns {
+	case "session":
 		return runnerpaths.SessionsDir()
+	case "shared":
+		return runnerpaths.SharedDir()
 	}
 	return runnerpaths.TmpDir()
+}
+
+// SharedNS is the namespace of a spawn tree's scratch directory (/shared).
+const SharedNS = "shared"
+
+// ResolveSharedPath reports whether reqPath addresses the /shared namespace and
+// returns its cleaned sub path ("" for the root). The explicit form is /shared
+// or /shared/... (only with scope "" or "shared"); with scope "shared" any other path is taken relative to the
+// shared root (an absolute one has its leading slash dropped, so it can only
+// ever name something inside it). Unlike the per-chat namespaces there are no
+// session id placeholders, and a sub path may still start with ".." (a
+// relative path that climbs out): callers must refuse it.
+func ResolveSharedPath(reqPath, scope string) (bool, string) {
+	// An explicit scope for another namespace wins over the path's look.
+	if scope != "" && scope != SharedNS {
+		return false, ""
+	}
+	clean := filepath.Clean(reqPath)
+	if clean == "/shared" {
+		return true, ""
+	}
+	if sub, ok := strings.CutPrefix(clean, "/shared/"); ok {
+		return true, sub
+	}
+	if scope != SharedNS {
+		return false, ""
+	}
+	if reqPath == "" || clean == "." {
+		return true, ""
+	}
+	return true, strings.TrimLeft(clean, "/")
+}
+
+// SharedSubEscapes reports whether a sub path from ResolveSharedPath climbs out
+// of the shared root.
+func SharedSubEscapes(sub string) bool {
+	return sub == ".." || strings.HasPrefix(sub, "../")
 }
 
 // NormalizeSessionRunDir normalizes the given run directory for a session.

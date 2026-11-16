@@ -251,7 +251,19 @@ func (e *SingleAgentExecutor) recordUpdate(chatID string, update AgentStatusUpda
 		}
 		return
 	}
-	recordStatusUpdate(e.server, e.repo, chatID, update, &e.agent.Config, workspaceDir)
+	cfg := &e.agent.Config
+	if !update.ArtifactsKnown && e.repo != nil && e.server != nil && len(toStringSlice(update.Metadata["target_files"])) > 0 {
+		// The backend classifies the artifacts itself (no runner did): /shared
+		// counts only for a run that has the tree's directory mounted.
+		if sess, err := e.repo.GetSessionMeta(chatID); err == nil && sess != nil {
+			if shared, serr := e.sharedChat(sess); serr == nil && shared != "" {
+				c := e.agent.Config
+				c.SharedChatID = shared
+				cfg = &c
+			}
+		}
+	}
+	recordStatusUpdate(e.server, e.repo, chatID, update, cfg, workspaceDir)
 }
 
 // publishRunEvent feeds a runner's RunEvent into the status path POST

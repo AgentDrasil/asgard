@@ -254,3 +254,47 @@ func fakeSSH(t *testing.T) {
 }
 
 func sshURL(p string) string { return "ssh://localhost" + p }
+
+func TestSharedScopeOverGRPC(t *testing.T) {
+	cl, _ := startService(t, Options{})
+	const root = "rootchat"
+	dir := runnerpaths.SharedChatDir(root)
+	put(t, filepath.Join(dir, "a.txt"), "shared a")
+	put(t, filepath.Join(dir, "sub", "b.md"), "b")
+	put(t, filepath.Join(runnerpaths.SharedChatDir("other"), "x.txt"), "other")
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(dir, "link")))
+
+	// The session id is the tree's root chat.
+	tr, err := cl.Tree(t.Context(), &runnerpb.TreeRequest{SessionId: root, Path: "/shared", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED})
+	require.NoError(t, err)
+	var paths []string
+	for _, e := range tr.GetEntries() {
+		paths = append(paths, e.GetPath())
+	}
+	assert.Equal(t, []string{"/shared/sub", "/shared/a.txt", "/shared/link"}, paths)
+
+	stream, err := cl.ReadFile(t.Context(), &runnerpb.ReadFileRequest{SessionId: root, Path: "/shared/a.txt", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED})
+	require.NoError(t, err)
+	info, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "/shared/a.txt", info.GetInfo().GetPath())
+	data, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "shared a", string(data.GetData()))
+
+	sr, err := cl.Search(t.Context(), &runnerpb.SearchRequest{SessionId: root, Query: "b.md", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED})
+	require.NoError(t, err)
+	require.Len(t, sr.GetFiles(), 1)
+	assert.Equal(t, "/shared/sub/b.md", sr.GetFiles()[0].GetPath())
+	assert.Equal(t, runnerpb.FileScope_FILE_SCOPE_SHARED, sr.GetFiles()[0].GetScope())
+
+	for name, req := range map[string]*runnerpb.TreeRequest{
+		"dotdot":         {SessionId: root, Path: "../other", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED},
+		"symlink escape": {SessionId: root, Path: "/shared/link", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED},
+	} {
+		_, err := cl.Tree(t.Context(), req)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err), name)
+	}
+	_, err = cl.Tree(t.Context(), &runnerpb.TreeRequest{SessionId: "nobody", Path: "/shared", Scope: runnerpb.FileScope_FILE_SCOPE_SHARED})
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}

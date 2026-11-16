@@ -87,6 +87,10 @@ const (
 	FileScope_FILE_SCOPE_SESSION     FileScope = 3
 	// ABSOLUTE: a runner-absolute path (e.g. an agent run_dir like /workspace).
 	FileScope_FILE_SCOPE_ABSOLUTE FileScope = 4
+	// SHARED: the spawn tree's scratch directory (/shared in the sandboxes).
+	// The request's session_id is the ROOT chat of the tree (the backend
+	// derives it), whose dir /session-data/shared/<session_id> is addressed.
+	FileScope_FILE_SCOPE_SHARED FileScope = 5
 )
 
 // Enum value maps for FileScope.
@@ -97,6 +101,7 @@ var (
 		2: "FILE_SCOPE_TMP",
 		3: "FILE_SCOPE_SESSION",
 		4: "FILE_SCOPE_ABSOLUTE",
+		5: "FILE_SCOPE_SHARED",
 	}
 	FileScope_value = map[string]int32{
 		"FILE_SCOPE_UNSPECIFIED": 0,
@@ -104,6 +109,7 @@ var (
 		"FILE_SCOPE_TMP":         2,
 		"FILE_SCOPE_SESSION":     3,
 		"FILE_SCOPE_ABSOLUTE":    4,
+		"FILE_SCOPE_SHARED":      5,
 	}
 )
 
@@ -6147,7 +6153,10 @@ type SearchRequest struct {
 	Query     string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	Limit     int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	// run_dir is the explicit workspace directory on the runner.
-	RunDir        *DirRef `protobuf:"bytes,4,opt,name=run_dir,json=runDir,proto3" json:"run_dir,omitempty"`
+	RunDir *DirRef `protobuf:"bytes,4,opt,name=run_dir,json=runDir,proto3" json:"run_dir,omitempty"`
+	// scope SHARED searches only the shared dir of the tree rooted at
+	// session_id; otherwise the chat's workspace, tmp and session dirs.
+	Scope         FileScope `protobuf:"varint,5,opt,name=scope,proto3,enum=asgard.runner.v1.FileScope" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6208,6 +6217,13 @@ func (x *SearchRequest) GetRunDir() *DirRef {
 		return x.RunDir
 	}
 	return nil
+}
+
+func (x *SearchRequest) GetScope() FileScope {
+	if x != nil {
+		return x.Scope
+	}
+	return FileScope_FILE_SCOPE_UNSPECIFIED
 }
 
 type FileSearchResult struct {
@@ -10089,13 +10105,14 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\rReadFileChunk\x120\n" +
 	"\x04info\x18\x01 \x01(\v2\x1a.asgard.runner.v1.FileInfoH\x00R\x04info\x12\x14\n" +
 	"\x04data\x18\x02 \x01(\fH\x00R\x04dataB\t\n" +
-	"\apayload\"\x8d\x01\n" +
+	"\apayload\"\xc0\x01\n" +
 	"\rSearchRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x121\n" +
-	"\arun_dir\x18\x04 \x01(\v2\x18.asgard.runner.v1.DirRefR\x06runDir\"\x93\x01\n" +
+	"\arun_dir\x18\x04 \x01(\v2\x18.asgard.runner.v1.DirRefR\x06runDir\x121\n" +
+	"\x05scope\x18\x05 \x01(\x0e2\x1b.asgard.runner.v1.FileScopeR\x05scope\"\x93\x01\n" +
 	"\x10FileSearchResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -10358,13 +10375,14 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\x06usages\x18\x01 \x03(\v2\x1c.asgard.runner.v1.ModelUsageR\x06usages*?\n" +
 	"\vAgentSource\x12\x17\n" +
 	"\x13AGENT_SOURCE_GLOBAL\x10\x00\x12\x17\n" +
-	"\x13AGENT_SOURCE_RUNNER\x10\x01*\x86\x01\n" +
+	"\x13AGENT_SOURCE_RUNNER\x10\x01*\x9d\x01\n" +
 	"\tFileScope\x12\x1a\n" +
 	"\x16FILE_SCOPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14FILE_SCOPE_WORKSPACE\x10\x01\x12\x12\n" +
 	"\x0eFILE_SCOPE_TMP\x10\x02\x12\x16\n" +
 	"\x12FILE_SCOPE_SESSION\x10\x03\x12\x17\n" +
-	"\x13FILE_SCOPE_ABSOLUTE\x10\x042f\n" +
+	"\x13FILE_SCOPE_ABSOLUTE\x10\x04\x12\x15\n" +
+	"\x11FILE_SCOPE_SHARED\x10\x052f\n" +
 	"\x12NodeControlService\x12P\n" +
 	"\aConnect\x12\x1f.asgard.runner.v1.RunnerMessage\x1a .asgard.runner.v1.BackendMessage(\x010\x012\x8d\x13\n" +
 	"\x14AgentCallbackService\x12N\n" +
@@ -10642,138 +10660,139 @@ var file_pkg_runnerpb_runner_proto_depIdxs = []int32{
 	1,   // 65: asgard.runner.v1.DirRef.scope:type_name -> asgard.runner.v1.FileScope
 	84,  // 66: asgard.runner.v1.ReadFileChunk.info:type_name -> asgard.runner.v1.FileInfo
 	83,  // 67: asgard.runner.v1.SearchRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	1,   // 68: asgard.runner.v1.FileSearchResult.scope:type_name -> asgard.runner.v1.FileScope
-	87,  // 69: asgard.runner.v1.SearchResponse.files:type_name -> asgard.runner.v1.FileSearchResult
-	89,  // 70: asgard.runner.v1.PutAttachmentChunk.header:type_name -> asgard.runner.v1.AttachmentHeader
-	83,  // 71: asgard.runner.v1.GitDiffRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	83,  // 72: asgard.runner.v1.GitLogRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	96,  // 73: asgard.runner.v1.GitLogResponse.commits:type_name -> asgard.runner.v1.GitCommit
-	83,  // 74: asgard.runner.v1.GitSessionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	83,  // 75: asgard.runner.v1.TtydOpen.working_dir:type_name -> asgard.runner.v1.DirRef
-	104, // 76: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
-	105, // 77: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
-	106, // 78: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
-	83,  // 79: asgard.runner.v1.PathRef.run_dir:type_name -> asgard.runner.v1.DirRef
-	1,   // 80: asgard.runner.v1.PathRef.scope:type_name -> asgard.runner.v1.FileScope
-	108, // 81: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
-	108, // 82: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
-	111, // 83: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
-	108, // 84: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
-	108, // 85: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
-	108, // 86: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
-	83,  // 87: asgard.runner.v1.RunCommandRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	83,  // 88: asgard.runner.v1.RunCommandRequest.tmp:type_name -> asgard.runner.v1.DirRef
-	14,  // 89: asgard.runner.v1.RunCommandExit.artifacts:type_name -> asgard.runner.v1.Artifact
-	122, // 90: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
-	122, // 91: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
-	121, // 92: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
-	83,  // 93: asgard.runner.v1.RunFunctionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
-	83,  // 94: asgard.runner.v1.OrphanTmpSweep.dir:type_name -> asgard.runner.v1.DirRef
-	126, // 95: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
-	128, // 96: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
-	2,   // 97: asgard.runner.v1.QueryQuotaRequest.targets:type_name -> asgard.runner.v1.Target
-	132, // 98: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
-	131, // 99: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
-	133, // 100: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
-	134, // 101: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
-	11,  // 102: asgard.runner.v1.Register.SupportedClisEntry.value:type_name -> asgard.runner.v1.ModelList
-	5,   // 103: asgard.runner.v1.NodeControlService.Connect:input_type -> asgard.runner.v1.RunnerMessage
-	26,  // 104: asgard.runner.v1.AgentCallbackService.AskUser:input_type -> asgard.runner.v1.AskUserRequest
-	28,  // 105: asgard.runner.v1.AgentCallbackService.CallPeer:input_type -> asgard.runner.v1.CallPeerRequest
-	30,  // 106: asgard.runner.v1.AgentCallbackService.FindPeer:input_type -> asgard.runner.v1.FindPeerRequest
-	32,  // 107: asgard.runner.v1.AgentCallbackService.SpawnSubagent:input_type -> asgard.runner.v1.SpawnSubagentRequest
-	35,  // 108: asgard.runner.v1.AgentCallbackService.ListSubagents:input_type -> asgard.runner.v1.ListSubagentsRequest
-	37,  // 109: asgard.runner.v1.AgentCallbackService.SubagentTree:input_type -> asgard.runner.v1.SubagentTreeRequest
-	40,  // 110: asgard.runner.v1.AgentCallbackService.SubagentStatus:input_type -> asgard.runner.v1.SubagentStatusRequest
-	42,  // 111: asgard.runner.v1.AgentCallbackService.KillSubagent:input_type -> asgard.runner.v1.KillSubagentRequest
-	44,  // 112: asgard.runner.v1.AgentCallbackService.SendToSubagent:input_type -> asgard.runner.v1.SendToSubagentRequest
-	46,  // 113: asgard.runner.v1.AgentCallbackService.WaitSubagents:input_type -> asgard.runner.v1.WaitSubagentsRequest
-	49,  // 114: asgard.runner.v1.AgentCallbackService.ReplyToParent:input_type -> asgard.runner.v1.ReplyToParentRequest
-	51,  // 115: asgard.runner.v1.AgentCallbackService.AskSubagent:input_type -> asgard.runner.v1.AskSubagentRequest
-	53,  // 116: asgard.runner.v1.AgentCallbackService.AnswerSubagent:input_type -> asgard.runner.v1.AnswerSubagentRequest
-	55,  // 117: asgard.runner.v1.AgentCallbackService.SubagentQuestions:input_type -> asgard.runner.v1.SubagentQuestionsRequest
-	58,  // 118: asgard.runner.v1.AgentCallbackService.AddSubagentRoute:input_type -> asgard.runner.v1.AddSubagentRouteRequest
-	60,  // 119: asgard.runner.v1.AgentCallbackService.RemoveSubagentRoute:input_type -> asgard.runner.v1.RemoveSubagentRouteRequest
-	62,  // 120: asgard.runner.v1.AgentCallbackService.ListSubagentRoutes:input_type -> asgard.runner.v1.ListSubagentRoutesRequest
-	66,  // 121: asgard.runner.v1.AgentCallbackService.RecordMetrics:input_type -> asgard.runner.v1.RecordMetricsRequest
-	68,  // 122: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:input_type -> asgard.runner.v1.GetUserProxyKeysRequest
-	71,  // 123: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:input_type -> asgard.runner.v1.InitWorkflowSessionRequest
-	73,  // 124: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:input_type -> asgard.runner.v1.ReportWorkflowEventRequest
-	75,  // 125: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:input_type -> asgard.runner.v1.WorkflowRunStartRequest
-	77,  // 126: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:input_type -> asgard.runner.v1.WorkflowRunSettleRequest
-	23,  // 127: asgard.runner.v1.AgentCallbackService.HoldMergeLock:input_type -> asgard.runner.v1.HoldMergeLockRequest
-	80,  // 128: asgard.runner.v1.RunnerService.Tree:input_type -> asgard.runner.v1.TreeRequest
-	82,  // 129: asgard.runner.v1.RunnerService.ReadFile:input_type -> asgard.runner.v1.ReadFileRequest
-	86,  // 130: asgard.runner.v1.RunnerService.Search:input_type -> asgard.runner.v1.SearchRequest
-	90,  // 131: asgard.runner.v1.RunnerService.PutAttachment:input_type -> asgard.runner.v1.PutAttachmentChunk
-	92,  // 132: asgard.runner.v1.RunnerService.GetAttachment:input_type -> asgard.runner.v1.GetAttachmentRequest
-	93,  // 133: asgard.runner.v1.RunnerService.GitDiff:input_type -> asgard.runner.v1.GitDiffRequest
-	95,  // 134: asgard.runner.v1.RunnerService.GitLog:input_type -> asgard.runner.v1.GitLogRequest
-	98,  // 135: asgard.runner.v1.RunnerService.GitPush:input_type -> asgard.runner.v1.GitSessionRequest
-	98,  // 136: asgard.runner.v1.RunnerService.GitPull:input_type -> asgard.runner.v1.GitSessionRequest
-	100, // 137: asgard.runner.v1.RunnerService.Subdirs:input_type -> asgard.runner.v1.SubdirsRequest
-	102, // 138: asgard.runner.v1.RunnerService.Glob:input_type -> asgard.runner.v1.GlobRequest
-	107, // 139: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
-	109, // 140: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
-	112, // 141: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
-	114, // 142: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
-	116, // 143: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
-	118, // 144: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
-	120, // 145: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
-	124, // 146: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
-	127, // 147: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
-	130, // 148: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
-	6,   // 149: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
-	27,  // 150: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
-	29,  // 151: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
-	31,  // 152: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
-	33,  // 153: asgard.runner.v1.AgentCallbackService.SpawnSubagent:output_type -> asgard.runner.v1.SpawnSubagentResponse
-	36,  // 154: asgard.runner.v1.AgentCallbackService.ListSubagents:output_type -> asgard.runner.v1.ListSubagentsResponse
-	39,  // 155: asgard.runner.v1.AgentCallbackService.SubagentTree:output_type -> asgard.runner.v1.SubagentTreeResponse
-	41,  // 156: asgard.runner.v1.AgentCallbackService.SubagentStatus:output_type -> asgard.runner.v1.SubagentStatusResponse
-	43,  // 157: asgard.runner.v1.AgentCallbackService.KillSubagent:output_type -> asgard.runner.v1.KillSubagentResponse
-	45,  // 158: asgard.runner.v1.AgentCallbackService.SendToSubagent:output_type -> asgard.runner.v1.SendToSubagentResponse
-	48,  // 159: asgard.runner.v1.AgentCallbackService.WaitSubagents:output_type -> asgard.runner.v1.WaitSubagentsResponse
-	50,  // 160: asgard.runner.v1.AgentCallbackService.ReplyToParent:output_type -> asgard.runner.v1.ReplyToParentResponse
-	52,  // 161: asgard.runner.v1.AgentCallbackService.AskSubagent:output_type -> asgard.runner.v1.AskSubagentResponse
-	54,  // 162: asgard.runner.v1.AgentCallbackService.AnswerSubagent:output_type -> asgard.runner.v1.AnswerSubagentResponse
-	57,  // 163: asgard.runner.v1.AgentCallbackService.SubagentQuestions:output_type -> asgard.runner.v1.SubagentQuestionsResponse
-	59,  // 164: asgard.runner.v1.AgentCallbackService.AddSubagentRoute:output_type -> asgard.runner.v1.AddSubagentRouteResponse
-	61,  // 165: asgard.runner.v1.AgentCallbackService.RemoveSubagentRoute:output_type -> asgard.runner.v1.RemoveSubagentRouteResponse
-	64,  // 166: asgard.runner.v1.AgentCallbackService.ListSubagentRoutes:output_type -> asgard.runner.v1.ListSubagentRoutesResponse
-	67,  // 167: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
-	69,  // 168: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
-	72,  // 169: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
-	74,  // 170: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
-	76,  // 171: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
-	78,  // 172: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
-	24,  // 173: asgard.runner.v1.AgentCallbackService.HoldMergeLock:output_type -> asgard.runner.v1.HoldMergeLockResponse
-	81,  // 174: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
-	85,  // 175: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
-	88,  // 176: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
-	91,  // 177: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
-	85,  // 178: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
-	94,  // 179: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
-	97,  // 180: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
-	99,  // 181: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
-	99,  // 182: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
-	101, // 183: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
-	103, // 184: asgard.runner.v1.RunnerService.Glob:output_type -> asgard.runner.v1.GlobResponse
-	107, // 185: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
-	110, // 186: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
-	113, // 187: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
-	115, // 188: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
-	117, // 189: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
-	119, // 190: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
-	123, // 191: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
-	125, // 192: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
-	129, // 193: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
-	135, // 194: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
-	149, // [149:195] is the sub-list for method output_type
-	103, // [103:149] is the sub-list for method input_type
-	103, // [103:103] is the sub-list for extension type_name
-	103, // [103:103] is the sub-list for extension extendee
-	0,   // [0:103] is the sub-list for field type_name
+	1,   // 68: asgard.runner.v1.SearchRequest.scope:type_name -> asgard.runner.v1.FileScope
+	1,   // 69: asgard.runner.v1.FileSearchResult.scope:type_name -> asgard.runner.v1.FileScope
+	87,  // 70: asgard.runner.v1.SearchResponse.files:type_name -> asgard.runner.v1.FileSearchResult
+	89,  // 71: asgard.runner.v1.PutAttachmentChunk.header:type_name -> asgard.runner.v1.AttachmentHeader
+	83,  // 72: asgard.runner.v1.GitDiffRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	83,  // 73: asgard.runner.v1.GitLogRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	96,  // 74: asgard.runner.v1.GitLogResponse.commits:type_name -> asgard.runner.v1.GitCommit
+	83,  // 75: asgard.runner.v1.GitSessionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	83,  // 76: asgard.runner.v1.TtydOpen.working_dir:type_name -> asgard.runner.v1.DirRef
+	104, // 77: asgard.runner.v1.TtydFrame.open:type_name -> asgard.runner.v1.TtydOpen
+	105, // 78: asgard.runner.v1.TtydFrame.resize:type_name -> asgard.runner.v1.TtydResize
+	106, // 79: asgard.runner.v1.TtydFrame.exit:type_name -> asgard.runner.v1.TtydExit
+	83,  // 80: asgard.runner.v1.PathRef.run_dir:type_name -> asgard.runner.v1.DirRef
+	1,   // 81: asgard.runner.v1.PathRef.scope:type_name -> asgard.runner.v1.FileScope
+	108, // 82: asgard.runner.v1.StatRequest.ref:type_name -> asgard.runner.v1.PathRef
+	108, // 83: asgard.runner.v1.WriteFileHeader.ref:type_name -> asgard.runner.v1.PathRef
+	111, // 84: asgard.runner.v1.WriteFileChunk.header:type_name -> asgard.runner.v1.WriteFileHeader
+	108, // 85: asgard.runner.v1.AppendFileRequest.ref:type_name -> asgard.runner.v1.PathRef
+	108, // 86: asgard.runner.v1.RemoveRequest.ref:type_name -> asgard.runner.v1.PathRef
+	108, // 87: asgard.runner.v1.MkdirRequest.ref:type_name -> asgard.runner.v1.PathRef
+	83,  // 88: asgard.runner.v1.RunCommandRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	83,  // 89: asgard.runner.v1.RunCommandRequest.tmp:type_name -> asgard.runner.v1.DirRef
+	14,  // 90: asgard.runner.v1.RunCommandExit.artifacts:type_name -> asgard.runner.v1.Artifact
+	122, // 91: asgard.runner.v1.RunCommandFrame.stdout:type_name -> asgard.runner.v1.StreamData
+	122, // 92: asgard.runner.v1.RunCommandFrame.stderr:type_name -> asgard.runner.v1.StreamData
+	121, // 93: asgard.runner.v1.RunCommandFrame.exit:type_name -> asgard.runner.v1.RunCommandExit
+	83,  // 94: asgard.runner.v1.RunFunctionRequest.run_dir:type_name -> asgard.runner.v1.DirRef
+	83,  // 95: asgard.runner.v1.OrphanTmpSweep.dir:type_name -> asgard.runner.v1.DirRef
+	126, // 96: asgard.runner.v1.CleanupRequest.orphan_tmp_sweeps:type_name -> asgard.runner.v1.OrphanTmpSweep
+	128, // 97: asgard.runner.v1.CleanupResponse.failures:type_name -> asgard.runner.v1.CleanupFailure
+	2,   // 98: asgard.runner.v1.QueryQuotaRequest.targets:type_name -> asgard.runner.v1.Target
+	132, // 99: asgard.runner.v1.AccountBalance.balance_infos:type_name -> asgard.runner.v1.BalanceInfo
+	131, // 100: asgard.runner.v1.ModelUsage.limits:type_name -> asgard.runner.v1.QuotaLimit
+	133, // 101: asgard.runner.v1.ModelUsage.balance:type_name -> asgard.runner.v1.AccountBalance
+	134, // 102: asgard.runner.v1.QueryQuotaResponse.usages:type_name -> asgard.runner.v1.ModelUsage
+	11,  // 103: asgard.runner.v1.Register.SupportedClisEntry.value:type_name -> asgard.runner.v1.ModelList
+	5,   // 104: asgard.runner.v1.NodeControlService.Connect:input_type -> asgard.runner.v1.RunnerMessage
+	26,  // 105: asgard.runner.v1.AgentCallbackService.AskUser:input_type -> asgard.runner.v1.AskUserRequest
+	28,  // 106: asgard.runner.v1.AgentCallbackService.CallPeer:input_type -> asgard.runner.v1.CallPeerRequest
+	30,  // 107: asgard.runner.v1.AgentCallbackService.FindPeer:input_type -> asgard.runner.v1.FindPeerRequest
+	32,  // 108: asgard.runner.v1.AgentCallbackService.SpawnSubagent:input_type -> asgard.runner.v1.SpawnSubagentRequest
+	35,  // 109: asgard.runner.v1.AgentCallbackService.ListSubagents:input_type -> asgard.runner.v1.ListSubagentsRequest
+	37,  // 110: asgard.runner.v1.AgentCallbackService.SubagentTree:input_type -> asgard.runner.v1.SubagentTreeRequest
+	40,  // 111: asgard.runner.v1.AgentCallbackService.SubagentStatus:input_type -> asgard.runner.v1.SubagentStatusRequest
+	42,  // 112: asgard.runner.v1.AgentCallbackService.KillSubagent:input_type -> asgard.runner.v1.KillSubagentRequest
+	44,  // 113: asgard.runner.v1.AgentCallbackService.SendToSubagent:input_type -> asgard.runner.v1.SendToSubagentRequest
+	46,  // 114: asgard.runner.v1.AgentCallbackService.WaitSubagents:input_type -> asgard.runner.v1.WaitSubagentsRequest
+	49,  // 115: asgard.runner.v1.AgentCallbackService.ReplyToParent:input_type -> asgard.runner.v1.ReplyToParentRequest
+	51,  // 116: asgard.runner.v1.AgentCallbackService.AskSubagent:input_type -> asgard.runner.v1.AskSubagentRequest
+	53,  // 117: asgard.runner.v1.AgentCallbackService.AnswerSubagent:input_type -> asgard.runner.v1.AnswerSubagentRequest
+	55,  // 118: asgard.runner.v1.AgentCallbackService.SubagentQuestions:input_type -> asgard.runner.v1.SubagentQuestionsRequest
+	58,  // 119: asgard.runner.v1.AgentCallbackService.AddSubagentRoute:input_type -> asgard.runner.v1.AddSubagentRouteRequest
+	60,  // 120: asgard.runner.v1.AgentCallbackService.RemoveSubagentRoute:input_type -> asgard.runner.v1.RemoveSubagentRouteRequest
+	62,  // 121: asgard.runner.v1.AgentCallbackService.ListSubagentRoutes:input_type -> asgard.runner.v1.ListSubagentRoutesRequest
+	66,  // 122: asgard.runner.v1.AgentCallbackService.RecordMetrics:input_type -> asgard.runner.v1.RecordMetricsRequest
+	68,  // 123: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:input_type -> asgard.runner.v1.GetUserProxyKeysRequest
+	71,  // 124: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:input_type -> asgard.runner.v1.InitWorkflowSessionRequest
+	73,  // 125: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:input_type -> asgard.runner.v1.ReportWorkflowEventRequest
+	75,  // 126: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:input_type -> asgard.runner.v1.WorkflowRunStartRequest
+	77,  // 127: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:input_type -> asgard.runner.v1.WorkflowRunSettleRequest
+	23,  // 128: asgard.runner.v1.AgentCallbackService.HoldMergeLock:input_type -> asgard.runner.v1.HoldMergeLockRequest
+	80,  // 129: asgard.runner.v1.RunnerService.Tree:input_type -> asgard.runner.v1.TreeRequest
+	82,  // 130: asgard.runner.v1.RunnerService.ReadFile:input_type -> asgard.runner.v1.ReadFileRequest
+	86,  // 131: asgard.runner.v1.RunnerService.Search:input_type -> asgard.runner.v1.SearchRequest
+	90,  // 132: asgard.runner.v1.RunnerService.PutAttachment:input_type -> asgard.runner.v1.PutAttachmentChunk
+	92,  // 133: asgard.runner.v1.RunnerService.GetAttachment:input_type -> asgard.runner.v1.GetAttachmentRequest
+	93,  // 134: asgard.runner.v1.RunnerService.GitDiff:input_type -> asgard.runner.v1.GitDiffRequest
+	95,  // 135: asgard.runner.v1.RunnerService.GitLog:input_type -> asgard.runner.v1.GitLogRequest
+	98,  // 136: asgard.runner.v1.RunnerService.GitPush:input_type -> asgard.runner.v1.GitSessionRequest
+	98,  // 137: asgard.runner.v1.RunnerService.GitPull:input_type -> asgard.runner.v1.GitSessionRequest
+	100, // 138: asgard.runner.v1.RunnerService.Subdirs:input_type -> asgard.runner.v1.SubdirsRequest
+	102, // 139: asgard.runner.v1.RunnerService.Glob:input_type -> asgard.runner.v1.GlobRequest
+	107, // 140: asgard.runner.v1.RunnerService.Ttyd:input_type -> asgard.runner.v1.TtydFrame
+	109, // 141: asgard.runner.v1.RunnerService.Stat:input_type -> asgard.runner.v1.StatRequest
+	112, // 142: asgard.runner.v1.RunnerService.WriteFile:input_type -> asgard.runner.v1.WriteFileChunk
+	114, // 143: asgard.runner.v1.RunnerService.AppendFile:input_type -> asgard.runner.v1.AppendFileRequest
+	116, // 144: asgard.runner.v1.RunnerService.Remove:input_type -> asgard.runner.v1.RemoveRequest
+	118, // 145: asgard.runner.v1.RunnerService.Mkdir:input_type -> asgard.runner.v1.MkdirRequest
+	120, // 146: asgard.runner.v1.RunnerService.RunCommand:input_type -> asgard.runner.v1.RunCommandRequest
+	124, // 147: asgard.runner.v1.RunnerService.RunFunction:input_type -> asgard.runner.v1.RunFunctionRequest
+	127, // 148: asgard.runner.v1.RunnerService.Cleanup:input_type -> asgard.runner.v1.CleanupRequest
+	130, // 149: asgard.runner.v1.RunnerService.QueryQuota:input_type -> asgard.runner.v1.QueryQuotaRequest
+	6,   // 150: asgard.runner.v1.NodeControlService.Connect:output_type -> asgard.runner.v1.BackendMessage
+	27,  // 151: asgard.runner.v1.AgentCallbackService.AskUser:output_type -> asgard.runner.v1.AskUserResponse
+	29,  // 152: asgard.runner.v1.AgentCallbackService.CallPeer:output_type -> asgard.runner.v1.CallPeerResponse
+	31,  // 153: asgard.runner.v1.AgentCallbackService.FindPeer:output_type -> asgard.runner.v1.FindPeerResponse
+	33,  // 154: asgard.runner.v1.AgentCallbackService.SpawnSubagent:output_type -> asgard.runner.v1.SpawnSubagentResponse
+	36,  // 155: asgard.runner.v1.AgentCallbackService.ListSubagents:output_type -> asgard.runner.v1.ListSubagentsResponse
+	39,  // 156: asgard.runner.v1.AgentCallbackService.SubagentTree:output_type -> asgard.runner.v1.SubagentTreeResponse
+	41,  // 157: asgard.runner.v1.AgentCallbackService.SubagentStatus:output_type -> asgard.runner.v1.SubagentStatusResponse
+	43,  // 158: asgard.runner.v1.AgentCallbackService.KillSubagent:output_type -> asgard.runner.v1.KillSubagentResponse
+	45,  // 159: asgard.runner.v1.AgentCallbackService.SendToSubagent:output_type -> asgard.runner.v1.SendToSubagentResponse
+	48,  // 160: asgard.runner.v1.AgentCallbackService.WaitSubagents:output_type -> asgard.runner.v1.WaitSubagentsResponse
+	50,  // 161: asgard.runner.v1.AgentCallbackService.ReplyToParent:output_type -> asgard.runner.v1.ReplyToParentResponse
+	52,  // 162: asgard.runner.v1.AgentCallbackService.AskSubagent:output_type -> asgard.runner.v1.AskSubagentResponse
+	54,  // 163: asgard.runner.v1.AgentCallbackService.AnswerSubagent:output_type -> asgard.runner.v1.AnswerSubagentResponse
+	57,  // 164: asgard.runner.v1.AgentCallbackService.SubagentQuestions:output_type -> asgard.runner.v1.SubagentQuestionsResponse
+	59,  // 165: asgard.runner.v1.AgentCallbackService.AddSubagentRoute:output_type -> asgard.runner.v1.AddSubagentRouteResponse
+	61,  // 166: asgard.runner.v1.AgentCallbackService.RemoveSubagentRoute:output_type -> asgard.runner.v1.RemoveSubagentRouteResponse
+	64,  // 167: asgard.runner.v1.AgentCallbackService.ListSubagentRoutes:output_type -> asgard.runner.v1.ListSubagentRoutesResponse
+	67,  // 168: asgard.runner.v1.AgentCallbackService.RecordMetrics:output_type -> asgard.runner.v1.RecordMetricsResponse
+	69,  // 169: asgard.runner.v1.AgentCallbackService.GetUserProxyKeys:output_type -> asgard.runner.v1.GetUserProxyKeysResponse
+	72,  // 170: asgard.runner.v1.AgentCallbackService.InitWorkflowSession:output_type -> asgard.runner.v1.InitWorkflowSessionResponse
+	74,  // 171: asgard.runner.v1.AgentCallbackService.ReportWorkflowEvent:output_type -> asgard.runner.v1.ReportWorkflowEventResponse
+	76,  // 172: asgard.runner.v1.AgentCallbackService.WorkflowRunStart:output_type -> asgard.runner.v1.WorkflowRunStartResponse
+	78,  // 173: asgard.runner.v1.AgentCallbackService.WorkflowRunSettle:output_type -> asgard.runner.v1.WorkflowRunSettleResponse
+	24,  // 174: asgard.runner.v1.AgentCallbackService.HoldMergeLock:output_type -> asgard.runner.v1.HoldMergeLockResponse
+	81,  // 175: asgard.runner.v1.RunnerService.Tree:output_type -> asgard.runner.v1.TreeResponse
+	85,  // 176: asgard.runner.v1.RunnerService.ReadFile:output_type -> asgard.runner.v1.ReadFileChunk
+	88,  // 177: asgard.runner.v1.RunnerService.Search:output_type -> asgard.runner.v1.SearchResponse
+	91,  // 178: asgard.runner.v1.RunnerService.PutAttachment:output_type -> asgard.runner.v1.PutAttachmentResponse
+	85,  // 179: asgard.runner.v1.RunnerService.GetAttachment:output_type -> asgard.runner.v1.ReadFileChunk
+	94,  // 180: asgard.runner.v1.RunnerService.GitDiff:output_type -> asgard.runner.v1.GitDiffFile
+	97,  // 181: asgard.runner.v1.RunnerService.GitLog:output_type -> asgard.runner.v1.GitLogResponse
+	99,  // 182: asgard.runner.v1.RunnerService.GitPush:output_type -> asgard.runner.v1.GitOpResponse
+	99,  // 183: asgard.runner.v1.RunnerService.GitPull:output_type -> asgard.runner.v1.GitOpResponse
+	101, // 184: asgard.runner.v1.RunnerService.Subdirs:output_type -> asgard.runner.v1.SubdirsResponse
+	103, // 185: asgard.runner.v1.RunnerService.Glob:output_type -> asgard.runner.v1.GlobResponse
+	107, // 186: asgard.runner.v1.RunnerService.Ttyd:output_type -> asgard.runner.v1.TtydFrame
+	110, // 187: asgard.runner.v1.RunnerService.Stat:output_type -> asgard.runner.v1.StatResponse
+	113, // 188: asgard.runner.v1.RunnerService.WriteFile:output_type -> asgard.runner.v1.WriteFileResponse
+	115, // 189: asgard.runner.v1.RunnerService.AppendFile:output_type -> asgard.runner.v1.AppendFileResponse
+	117, // 190: asgard.runner.v1.RunnerService.Remove:output_type -> asgard.runner.v1.RemoveResponse
+	119, // 191: asgard.runner.v1.RunnerService.Mkdir:output_type -> asgard.runner.v1.MkdirResponse
+	123, // 192: asgard.runner.v1.RunnerService.RunCommand:output_type -> asgard.runner.v1.RunCommandFrame
+	125, // 193: asgard.runner.v1.RunnerService.RunFunction:output_type -> asgard.runner.v1.RunFunctionResponse
+	129, // 194: asgard.runner.v1.RunnerService.Cleanup:output_type -> asgard.runner.v1.CleanupResponse
+	135, // 195: asgard.runner.v1.RunnerService.QueryQuota:output_type -> asgard.runner.v1.QueryQuotaResponse
+	150, // [150:196] is the sub-list for method output_type
+	104, // [104:150] is the sub-list for method input_type
+	104, // [104:104] is the sub-list for extension type_name
+	104, // [104:104] is the sub-list for extension extendee
+	0,   // [0:104] is the sub-list for field type_name
 }
 
 func init() { file_pkg_runnerpb_runner_proto_init() }

@@ -873,6 +873,10 @@ enum FileScope {
   FILE_SCOPE_SESSION = 3;
   // ABSOLUTE: a runner-absolute path (e.g. an agent run_dir like /workspace).
   FILE_SCOPE_ABSOLUTE = 4;
+  // SHARED: the spawn tree's scratch directory (/shared in the sandboxes).
+  // The request's session_id is the ROOT chat of the tree (the backend
+  // derives it), whose dir /session-data/shared/<session_id> is addressed.
+  FILE_SCOPE_SHARED = 5;
 }
 
 message FileTreeEntry {
@@ -949,6 +953,9 @@ message SearchRequest {
   int32 limit = 3;
   // run_dir is the explicit workspace directory on the runner.
   DirRef run_dir = 4;
+  // scope SHARED searches only the shared dir of the tree rooted at
+  // session_id; otherwise the chat's workspace, tmp and session dirs.
+  FileScope scope = 5;
 }
 message FileSearchResult {
   string path = 1;

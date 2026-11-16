@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
 import ChatInput from "../components/ChatInput.vue";
@@ -15,6 +15,7 @@ import type {
   DirLockStatus,
   ChatSession,
 } from "../types";
+import { subagentArtifactEntries, type ArtifactSource } from "../utils/artifactSources";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
 const router = useRouter();
@@ -69,6 +70,8 @@ const isVCSSidebarOpen = defineModel<boolean>("isVCSSidebarOpen", { default: tru
 // Artifacts state management
 const activeArtifactPath = ref<string | null>(null);
 const modifiedFiles = ref<string[]>([]);
+// Who produced the artifacts that came from a descendant subagent (by key).
+const artifactSources = ref<Record<string, ArtifactSource>>({});
 
 const emit = defineEmits<{
   (e: "send", text: string, attachments?: Attachment[]): void;
@@ -114,6 +117,11 @@ function syncArtifactFiles() {
     }
   }
 
+  // 3. Artifacts of descendant subagents (own artifacts win on a duplicate)
+  const fromSubagents = subagentArtifactEntries(props.session?.subagentArtifacts, currentFiles);
+  currentFiles.push(...fromSubagents.keys);
+  artifactSources.value = fromSubagents.sources;
+
   modifiedFiles.value = currentFiles;
 
   // Keep activeArtifactPath valid for current session's files
@@ -128,6 +136,7 @@ watch(
   () => props.sessionId,
   () => {
     modifiedFiles.value = [];
+    artifactSources.value = {};
     activeArtifactPath.value = null;
     isArtifactDrawerOpen.value = false;
     syncArtifactFiles();
@@ -137,11 +146,17 @@ watch(
 
 // Collect modified files from messages & session artifacts
 watch(
-  [() => props.messages, () => props.artifacts],
+  [() => props.messages, () => props.artifacts, () => props.session?.subagentArtifacts],
   () => {
     syncArtifactFiles();
   },
   { deep: true, immediate: true },
+);
+
+// Whether the chat runs with a /shared directory is decided by the backend
+// (session JSON); a subagent just seen in the list also implies it.
+const hasSharedDir = computed(
+  () => !!props.session?.hasShared || !!props.session?.parentChatId || props.subagents.length > 0,
 );
 
 function handleOpenArtifact(file: string) {
@@ -218,6 +233,7 @@ function navigateToVcs(gitRoot?: string) {
         :runDir="runDir"
         :gitRoot="gitRoot"
         :isTerminalOpen="isTerminalOpen"
+        :hasShared="hasSharedDir"
         v-model:isFileTreeOpen="isFileTreeOpen"
         v-model:chatInputText="chatInputText"
         v-model:selectedFilePath="selectedFilePath"
@@ -239,6 +255,7 @@ function navigateToVcs(gitRoot?: string) {
         :sessionId="sessionId"
         :isTerminalOpen="isTerminalOpen"
         :modifiedFiles="modifiedFiles"
+        :artifactSources="artifactSources"
         :activeArtifactPath="activeArtifactPath"
         :isArtifactDrawerOpen="isArtifactDrawerOpen"
         :workingAgentLabel="workingAgentLabel"

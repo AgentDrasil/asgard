@@ -40,6 +40,11 @@ type ChatSession struct {
 	SpawnLabel     string `json:"spawnLabel,omitempty"`
 	SpawnedByAgent string `json:"spawnedByAgent,omitempty"`
 	SpawnReadonly  bool   `json:"spawnReadonly,omitempty"`
+	// SubagentArtifacts are the artifacts of the chat's descendant subagents
+	// (single-chat responses only).
+	SubagentArtifacts []SubagentArtifacts `json:"subagentArtifacts,omitempty"`
+	// HasShared: the chat runs with a /shared directory (single-chat responses only).
+	HasShared bool `json:"hasShared,omitempty"`
 	// SubagentState is running|queued|done|failed|killed.
 	SubagentState string `json:"subagentState,omitempty"`
 	// WaitingSubagents: the chat is between turns, held open for its subagents.
@@ -237,6 +242,8 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	chatSession = s.withSubagentFields(chatSession, sess)
 	chatSession.WaitingSubagents = s.isIdleHeld(sess.ChatID)
+	chatSession.SubagentArtifacts = s.descendantArtifacts(sess.ChatID)
+	chatSession.HasShared = s.chatHasShared(sess)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(chatSession)
 }

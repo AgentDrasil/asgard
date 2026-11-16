@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 )
 
@@ -43,7 +44,7 @@ type FileSearchResult struct {
 	Name  string `json:"name"`
 	Ext   string `json:"ext"`
 	Size  int64  `json:"size"`
-	Scope string `json:"scope,omitempty"` // "workspace" | "tmp" | "session"
+	Scope string `json:"scope,omitempty"` // "workspace" | "tmp" | "session" | "shared"
 }
 
 type FileSearchResponse struct {
@@ -88,6 +89,23 @@ func needsWorkspace(reqPath, scope, sessionID string) bool {
 	return false
 }
 
+// sharedFSFor resolves what a /shared request needs: the FS of the spawn tree's
+// root chat, after the session ownership check. It answers the error itself and
+// returns ok=false when the request is over.
+func (s *Server) sharedFSFor(w http.ResponseWriter, r *http.Request, sessionID string) (runnerfs.FS, bool) {
+	sess, aerr := s.authorizeSession(r, sessionID)
+	if aerr != nil {
+		writeJSONError(w, aerr.status, aerr.msg)
+		return nil, false
+	}
+	fs, err := s.sharedFS(sessionID, sess)
+	if err != nil {
+		writeFSError(w, err)
+		return nil, false
+	}
+	return fs, true
+}
+
 // workspaceFS resolves what a files request needs: the chat's FS and its
 // (normalized) run dir, after the backend-side run dir check. It answers the
 // error itself and returns ok=false when the request is over.
@@ -129,9 +147,23 @@ func (s *Server) handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	subPath := r.URL.Query().Get("path")
 	scope := r.URL.Query().Get("scope")
 
-	fs, runDir, ok := s.workspaceFS(w, r, sessionID, needsWorkspace(subPath, scope, sessionID))
-	if !ok {
-		return
+	var fs runnerfs.FS
+	var runDir string
+	if canon, shared, serr := sharedRequest(subPath, scope); shared {
+		if serr != nil {
+			writeFSError(w, serr)
+			return
+		}
+		var ok bool
+		if fs, ok = s.sharedFSFor(w, r, sessionID); !ok {
+			return
+		}
+		subPath, scope = canon, agents.SharedNS
+	} else {
+		var ok bool
+		if fs, runDir, ok = s.workspaceFS(w, r, sessionID, needsWorkspace(subPath, scope, sessionID)); !ok {
+			return
+		}
 	}
 	res, err := fs.Tree(r.Context(), runnerfs.TreeRequest{RunDir: runDir, Path: subPath, Scope: scope})
 	if err != nil {
@@ -163,9 +195,23 @@ func (s *Server) handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, r, sessionID, needsWorkspace(filePath, scope, sessionID))
-	if !ok {
-		return
+	var fs runnerfs.FS
+	var runDir string
+	if canon, shared, serr := sharedRequest(filePath, scope); shared {
+		if serr != nil {
+			writeFSError(w, serr)
+			return
+		}
+		var ok bool
+		if fs, ok = s.sharedFSFor(w, r, sessionID); !ok {
+			return
+		}
+		filePath, scope = canon, agents.SharedNS
+	} else {
+		var ok bool
+		if fs, runDir, ok = s.workspaceFS(w, r, sessionID, needsWorkspace(filePath, scope, sessionID)); !ok {
+			return
+		}
 	}
 
 	rawParam := r.URL.Query().Get("raw")
@@ -225,11 +271,6 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fs, runDir, ok := s.workspaceFS(w, r, sessionID, true)
-	if !ok {
-		return
-	}
-
 	limit := 50
 	if parsed, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
 		limit = parsed
@@ -239,11 +280,50 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 	} else if limit > 100 {
 		limit = 100
 	}
+	query := r.URL.Query().Get("query")
 
-	hits, err := fs.Search(r.Context(), runnerfs.SearchRequest{RunDir: runDir, Query: r.URL.Query().Get("query"), Limit: limit})
-	if err != nil {
-		writeFSError(w, err)
-		return
+	var hits []runnerfs.SearchHit
+	if r.URL.Query().Get("scope") == agents.SharedNS {
+		// Only the spawn tree's /shared directory.
+		fs, ok := s.sharedFSFor(w, r, sessionID)
+		if !ok {
+			return
+		}
+		shared, err := fs.Search(r.Context(), runnerfs.SearchRequest{Query: query, Limit: limit, Scope: agents.SharedNS})
+		if err != nil {
+			writeFSError(w, err)
+			return
+		}
+		hits = onlySharedHits(shared)
+	} else {
+		// A chat that runs with a /shared directory reserves a quarter of the
+		// limit for its files, so they are not starved by workspace hits.
+		var sess *dbmodels.Session
+		if s.repo != nil {
+			sess, _ = s.repo.GetSessionMeta(sessionID)
+		}
+		// Nothing is reserved at limit 1 (the main search needs at least 1).
+		withShared := limit >= 2 && s.chatHasShared(sess)
+		mainLimit := limit
+		if withShared {
+			mainLimit = limit - max(limit/4, 1)
+		}
+		fs, runDir, ok := s.workspaceFS(w, r, sessionID, true)
+		if !ok {
+			return
+		}
+		var err error
+		if hits, err = fs.Search(r.Context(), runnerfs.SearchRequest{RunDir: runDir, Query: query, Limit: mainLimit}); err != nil {
+			writeFSError(w, err)
+			return
+		}
+		// Best effort: a failing lookup must not fail the search.
+		if rest := limit - len(hits); withShared && rest > 0 {
+			hits = append(hits, s.searchSharedBestEffort(r, sessionID, sess, query, rest)...)
+		}
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
 	}
 	results := make([]FileSearchResult, 0, len(hits))
 	for _, h := range hits {
@@ -253,4 +333,31 @@ func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(FileSearchResponse{Files: results})
+}
+
+// onlySharedHits keeps the hits that really come from /shared. A runner that
+// predates the shared scope ignores it and answers with the root chat's
+// workspace, tmp and session hits, which must not show up as shared files.
+func onlySharedHits(hits []runnerfs.SearchHit) []runnerfs.SearchHit {
+	out := make([]runnerfs.SearchHit, 0, len(hits))
+	for _, h := range hits {
+		if h.Scope == agents.SharedNS && strings.HasPrefix(h.Path, "/shared/") {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// searchSharedBestEffort searches the /shared directory of the session's spawn
+// tree, returning nothing on any failure.
+func (s *Server) searchSharedBestEffort(r *http.Request, sessionID string, sess *dbmodels.Session, query string, limit int) []runnerfs.SearchHit {
+	fs, err := s.sharedFS(sessionID, sess)
+	if err != nil {
+		return nil
+	}
+	hits, err := fs.Search(r.Context(), runnerfs.SearchRequest{Query: query, Limit: limit, Scope: agents.SharedNS})
+	if err != nil {
+		return nil
+	}
+	return onlySharedHits(hits)
 }

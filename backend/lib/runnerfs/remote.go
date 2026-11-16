@@ -36,6 +36,8 @@ func ScopeToProto(scope string) runnerpb.FileScope {
 		return runnerpb.FileScope_FILE_SCOPE_TMP
 	case "session":
 		return runnerpb.FileScope_FILE_SCOPE_SESSION
+	case "shared":
+		return runnerpb.FileScope_FILE_SCOPE_SHARED
 	}
 	return runnerpb.FileScope_FILE_SCOPE_UNSPECIFIED
 }
@@ -49,6 +51,8 @@ func ScopeFromProto(s runnerpb.FileScope) string {
 		return "tmp"
 	case runnerpb.FileScope_FILE_SCOPE_SESSION:
 		return "session"
+	case runnerpb.FileScope_FILE_SCOPE_SHARED:
+		return "shared"
 	}
 	return ""
 }
@@ -360,6 +364,7 @@ func (r Remote) Tree(ctx context.Context, req TreeRequest) (TreeResult, error) {
 func (r Remote) Search(ctx context.Context, req SearchRequest) ([]SearchHit, error) {
 	resp, err := r.Client.Search(ctx, &runnerpb.SearchRequest{
 		SessionId: r.ChatID, Query: req.Query, Limit: int32(req.Limit), RunDir: RunDirRef(r.ChatID, req.RunDir),
+		Scope: ScopeToProto(req.Scope),
 	})
 	if err != nil {
 		return nil, ToError(err)

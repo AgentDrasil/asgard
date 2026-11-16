@@ -1851,4 +1851,124 @@ describe("useSessionStore", () => {
       expect(store.messages.value.some((m) => m.role === "error")).toBe(false);
     });
   });
+
+  describe("subagent_artifact buffering", () => {
+    const sess = (id: string, extra: Partial<ChatSession> = {}): ChatSession => ({
+      chatID: id,
+      title: id,
+      currentAgent: "agent-1",
+      runDir: "/ws",
+      messages: [],
+      ...extra,
+    });
+    const ev = (chatId: string, child: string, file: string) => ({
+      eventId: 1,
+      chatId,
+      type: "subagent_artifact",
+      timestamp: 1,
+      payload: { id: child, label: "kid", artifacts: [file] },
+    });
+    const deferred = <T>() => {
+      let resolve!: (v: T) => void;
+      const promise = new Promise<T>((r) => (resolve = r));
+      return { promise, resolve };
+    };
+    const sources = () => MockEventSource.instances[MockEventSource.instances.length - 1];
+
+    it("keeps an event that arrives while the session is being fetched", async () => {
+      const d = deferred<ChatSession>();
+      vi.spyOn(api, "getSession").mockReturnValue(d.promise);
+      const store = useSessionStore({ agents: ref<AgentInfo[]>([]) });
+      const opening = store.openSession("s1");
+      sources().emit("subagent_artifact", ev("s1", "k1", "/tmp/a"));
+      d.resolve(sess("s1"));
+      await opening;
+      expect(store.activeSession.value?.subagentArtifacts).toEqual([
+        { chatId: "k1", label: "kid", agent: undefined, artifacts: ["/tmp/a"] },
+      ]);
+    });
+
+    it("keeps it across a reopen or resync fetch that replaces the loaded chat", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue(sess("s1"));
+      const store = useSessionStore({ agents: ref<AgentInfo[]>([]) });
+      await store.openSession("s1");
+
+      // The chat is already loaded: a plain event applies directly.
+      sources().emit("subagent_artifact", ev("s1", "k1", "/tmp/a"));
+      expect(store.activeSession.value?.subagentArtifacts?.[0].artifacts).toEqual(["/tmp/a"]);
+
+      // A resync fetch is in flight: an event now is not in its snapshot.
+      const d = deferred<ChatSession>();
+      spy.mockReturnValueOnce(d.promise);
+      sources().emit("resync", { eventId: 2, chatId: "s1", type: "resync", timestamp: 2 });
+      sources().emit("subagent_artifact", ev("s1", "k2", "/tmp/b"));
+      d.resolve(sess("s1"));
+      await vi.waitFor(() => {
+        expect(store.activeSession.value?.subagentArtifacts?.map((s) => s.chatId)).toEqual(["k2"]);
+      });
+
+      // Same for reopening the same chat.
+      const d2 = deferred<ChatSession>();
+      spy.mockReturnValueOnce(d2.promise);
+      const reopening = store.openSession("s1");
+      sources().emit("subagent_artifact", ev("s1", "k3", "/tmp/c"));
+      d2.resolve(
+        sess("s1", { subagentArtifacts: [{ chatId: "k1", label: "kid", artifacts: ["/tmp/a"] }] }),
+      );
+      await reopening;
+      expect(store.activeSession.value?.subagentArtifacts?.map((s) => s.chatId)).toEqual([
+        "k1",
+        "k3",
+      ]);
+    });
+
+    it("drops buffered events when another chat is opened", async () => {
+      const d = deferred<ChatSession>();
+      const spy = vi.spyOn(api, "getSession").mockReturnValueOnce(d.promise);
+      const store = useSessionStore({ agents: ref<AgentInfo[]>([]) });
+      const first = store.openSession("s1");
+      sources().emit("subagent_artifact", ev("s1", "k1", "/tmp/a"));
+      spy.mockResolvedValueOnce(sess("s2"));
+      await store.openSession("s2");
+      d.resolve(sess("s1"));
+      await first;
+      expect(store.activeSessionId.value).toBe("s2");
+      expect(store.activeSession.value?.subagentArtifacts).toBeUndefined();
+    });
+
+    it("does not hold back the active chat's events behind a stale fetch of another chat", async () => {
+      const slow = deferred<ChatSession>();
+      const spy = vi.spyOn(api, "getSession").mockReturnValueOnce(slow.promise);
+      const store = useSessionStore({ agents: ref<AgentInfo[]>([]) });
+      const first = store.openSession("s1");
+      spy.mockResolvedValueOnce(sess("s2"));
+      await store.openSession("s2");
+
+      // s1's fetch is still in flight; s2 is loaded, so its events apply now.
+      sources().emit("subagent_artifact", ev("s2", "k1", "/tmp/a"));
+      expect(store.activeSession.value?.subagentArtifacts?.map((s) => s.chatId)).toEqual(["k1"]);
+
+      slow.resolve(sess("s1"));
+      await first;
+      expect(store.activeSessionId.value).toBe("s2");
+      expect(store.activeSession.value?.subagentArtifacts?.map((s) => s.chatId)).toEqual(["k1"]);
+    });
+
+    it("applies events held back by a failed resync fetch", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue(sess("s1"));
+      const store = useSessionStore({ agents: ref<AgentInfo[]>([]) });
+      await store.openSession("s1");
+
+      // getSession reports a failure as null.
+      const d = deferred<ChatSession | null>();
+      spy.mockReturnValueOnce(d.promise);
+      sources().emit("resync", { eventId: 2, chatId: "s1", type: "resync", timestamp: 2 });
+      sources().emit("subagent_artifact", ev("s1", "k1", "/tmp/a"));
+      expect(store.activeSession.value?.subagentArtifacts).toBeUndefined();
+      d.resolve(null);
+      await vi.waitFor(() => {
+        expect(store.activeSession.value?.subagentArtifacts?.map((s) => s.chatId)).toEqual(["k1"]);
+      });
+    });
+  });
 });

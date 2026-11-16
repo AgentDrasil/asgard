@@ -64,7 +64,12 @@ func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir s
 		}
 	}
 
-	// 2. Sandbox temp/session files (/tmp/, .tmp/, /session/ or .session/) outside the workspace are always artifacts.
+	// 2. Sandbox temp/session files (/tmp/, .tmp/, /session/ or .session/)
+	// outside the workspace are always artifacts, and so is /shared when the
+	// run has a spawn tree scratch directory mounted there.
+	if config != nil && config.SharedChatID != "" && (cleanTarget == "/shared" || strings.HasPrefix(cleanTarget, "/shared/")) {
+		return true
+	}
 	if trimmedTarget == "/tmp" || strings.HasPrefix(trimmedTarget, "/tmp/") ||
 		trimmedTarget == ".tmp" || strings.HasPrefix(trimmedTarget, ".tmp/") ||
 		trimmedTarget == "/session" || strings.HasPrefix(trimmedTarget, "/session/") ||
@@ -95,10 +100,24 @@ func IsArtifact(targetPath string, config *agentspec.AgentConfig, workspaceDir s
 
 // ViewerArtifactPath converts a host or sandbox artifact path into the form the
 // file API accepts: paths under tmpDir become /tmp/<rel>, paths under sessionDir
-// become /session/<rel>, .tmp/.session prefixes are canonicalised and anything
-// else is returned unchanged.
+// become /session/<rel>, .tmp/.session prefixes are canonicalised, /shared/<rel>
+// is kept as is and anything else is returned unchanged.
 func ViewerArtifactPath(path, tmpDir, sessionDir string) string {
+	return ViewerArtifactPathShared(path, tmpDir, sessionDir, "")
+}
+
+// ViewerArtifactPathShared is ViewerArtifactPath that also maps a host path
+// under sharedDir (the spawn tree's scratch directory) to /shared/<rel>.
+func ViewerArtifactPathShared(path, tmpDir, sessionDir, sharedDir string) string {
 	clean := filepath.Clean(path)
+	if sharedDir != "" {
+		if rel, err := filepath.Rel(filepath.Clean(sharedDir), clean); err == nil && !strings.HasPrefix(rel, "..") {
+			if rel == "." {
+				return "/shared"
+			}
+			return filepath.Join("/shared", rel)
+		}
+	}
 	if tmpDir != "" {
 		if rel, err := filepath.Rel(filepath.Clean(tmpDir), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 			return filepath.Join("/tmp", rel)
@@ -121,7 +140,8 @@ func ViewerArtifactPath(path, tmpDir, sessionDir string) string {
 	if clean == ".session" {
 		return "/session"
 	}
-	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" || strings.HasPrefix(clean, "/session/") || clean == "/session" {
+	if strings.HasPrefix(clean, "/tmp/") || clean == "/tmp" || strings.HasPrefix(clean, "/session/") || clean == "/session" ||
+		strings.HasPrefix(clean, "/shared/") || clean == "/shared" {
 		return clean
 	}
 	return path

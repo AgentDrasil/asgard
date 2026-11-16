@@ -9,6 +9,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
 	"github.com/AgentDrasil/asgard/backend/lib/agents/run"
+	"github.com/AgentDrasil/asgard/backend/lib/dbmodels"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
@@ -37,6 +38,67 @@ func (s *Server) chatFS(chatID string) (runnerfs.FS, error) {
 		return nil, err
 	}
 	return runnerfs.NewRemote(client, chatID), nil
+}
+
+// sharedRoot is the root chat of the spawn tree sessionID belongs to: the chat
+// whose /shared directory the whole tree uses. It is derived from the session
+// alone, never from a request parameter, so a chat can only ever reach its own
+// tree's directory. sess may be nil (no database: the chat is its own root).
+func (s *Server) sharedRoot(sessionID string, sess *dbmodels.Session) (string, error) {
+	if sess == nil || s.repo == nil {
+		return sessionID, nil
+	}
+	root, err := s.spawnRoot(sess)
+	if err != nil {
+		return "", runnerfs.Errf(runnerfs.CodeInternal, "failed to find the root of the spawn tree: %v", err)
+	}
+	if !IsValidChatID(root) {
+		return "", runnerfs.Errf(runnerfs.CodeBadRequest, "invalid session id")
+	}
+	return root, nil
+}
+
+// sharedFS returns the file access surface of the /shared directory of the
+// spawn tree sessionID belongs to: the FS of the tree's root chat, reached on
+// the runner sessionID is bound to (a child runs where its parent runs).
+func (s *Server) sharedFS(sessionID string, sess *dbmodels.Session) (runnerfs.FS, error) {
+	root, err := s.sharedRoot(sessionID, sess)
+	if err != nil {
+		return nil, err
+	}
+	if s.fsResolver != nil {
+		return s.fsResolver(root)
+	}
+	if s.runnerClient == nil {
+		return runnerfs.NewLocal(root), nil
+	}
+	node, err := s.chatRunner(sessionID)
+	if err != nil {
+		return nil, runnerfs.Errf(runnerfs.CodeBadRequest, "%v", err)
+	}
+	client, err := s.nodeClient(node)
+	if err != nil {
+		return nil, err
+	}
+	return runnerfs.NewRemote(client, root), nil
+}
+
+// sharedRequest reports whether a files request addresses /shared (an explicit
+// /shared path, or scope "shared") and returns the canonical /shared/<rel> path.
+// An explicit scope for another namespace (tmp, session, workspace) wins over
+// the path's look. A path that climbs out of the shared directory is an error (403).
+func sharedRequest(reqPath, scope string) (canon string, shared bool, err error) {
+	ok, sub := agents.ResolveSharedPath(reqPath, scope)
+	if !ok {
+		return "", false, nil
+	}
+	if agents.SharedSubEscapes(sub) {
+		return "", true, runnerfs.Errf(runnerfs.CodeDenied, "access denied: path escapes the shared directory")
+	}
+	if sub == "" {
+		return "/shared", true, nil
+	}
+	return "/shared/" + sub, true, nil
 }
 
 // runnerClientFunc returns the RunnerService client of an online runner.

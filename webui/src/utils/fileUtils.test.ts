@@ -15,6 +15,7 @@ import {
   isSessionTmpDir,
   isTmpScopePath,
   isSessionScopePath,
+  isSharedScopePath,
 } from "./fileUtils";
 
 describe("fileUtils", () => {
@@ -323,6 +324,19 @@ describe("fileUtils", () => {
       expect(isTmpScopePath("/session/file.txt")).toBe(false);
       expect(isTmpScopePath("tmpother/file.txt")).toBe(false);
       expect(isTmpScopePath("src/main.go")).toBe(false);
+    });
+  });
+
+  describe("isSharedScopePath", () => {
+    it("matches /shared namespace paths only", () => {
+      expect(isSharedScopePath("/shared")).toBe(true);
+      expect(isSharedScopePath("/shared/out/r.md")).toBe(true);
+      expect(isSharedScopePath("\\shared\\r.md")).toBe(true);
+      expect(isSharedScopePath("shared/r.md")).toBe(false);
+      expect(isSharedScopePath("/sharedother/r.md")).toBe(false);
+      expect(isSharedScopePath("/tmp/shared")).toBe(false);
+      expect(isSharedScopePath(null)).toBe(false);
+      expect(isSharedScopePath("")).toBe(false);
     });
   });
 

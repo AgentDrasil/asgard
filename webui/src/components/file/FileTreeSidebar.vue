@@ -6,7 +6,12 @@ import { getFileTree } from "../../lib/api";
 import { useI18n } from "vue-i18n";
 import { formatPath } from "../../utils/agentUtils";
 import { useResizeHandle } from "../../composables/useResizeHandle";
-import { isSessionTmpDir, isTmpScopePath, isSessionScopePath } from "../../utils/fileUtils";
+import {
+  isSessionTmpDir,
+  isTmpScopePath,
+  isSessionScopePath,
+  isSharedScopePath,
+} from "../../utils/fileUtils";
 import type { FileTreeEntry } from "../../types";
 
 const { t } = useI18n();
@@ -17,6 +22,8 @@ const props = defineProps<{
   selectedPath: string | null;
   commentedFiles: string[];
   loading?: boolean;
+  /** The chat belongs to a spawn tree, so /shared can be browsed. */
+  hasShared?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -31,11 +38,14 @@ const treeError = ref("");
 const treeVersion = ref(0);
 let treeReqId = 0;
 
-const activeRootScope = ref<"workdir" | "tmp" | "session">("workdir");
+const activeRootScope = ref<"workdir" | "tmp" | "session" | "shared">("workdir");
 
 const hasSeparateTmp = computed(() => {
   return !isSessionTmpDir(props.runDir, props.sessionId);
 });
+
+// The root selector is shown when there is more than the workspace to browse.
+const showRootSelect = computed(() => hasSeparateTmp.value || !!props.hasShared);
 
 const workspaceName = computed(() => {
   if (!props.runDir) return t("sidebar.defaultWorkspace");
@@ -43,23 +53,32 @@ const workspaceName = computed(() => {
   return parts[parts.length - 1] || formatPath(props.runDir) || props.runDir;
 });
 
-// If selectedPath points inside tmp/session, automatically switch activeRootScope if separate
+// If selectedPath points inside tmp/session/shared, automatically switch activeRootScope
 watch(
-  () => props.selectedPath,
-  (newPath) => {
-    if (!hasSeparateTmp.value || !newPath) return;
-    if (isTmpScopePath(newPath) || isSessionScopePath(newPath)) {
-      const target = isSessionScopePath(newPath) ? "session" : "tmp";
-      if (activeRootScope.value !== target) {
-        activeRootScope.value = target;
-      }
-    } else {
-      if (activeRootScope.value !== "workdir") {
-        activeRootScope.value = "workdir";
-      }
+  () => [props.selectedPath, props.hasShared] as const,
+  ([newPath]) => {
+    if (!showRootSelect.value || !newPath) return;
+    let target: "workdir" | "tmp" | "session" | "shared" = "workdir";
+    if (props.hasShared && isSharedScopePath(newPath)) {
+      target = "shared";
+    } else if (hasSeparateTmp.value && isSessionScopePath(newPath)) {
+      target = "session";
+    } else if (hasSeparateTmp.value && isTmpScopePath(newPath)) {
+      target = "tmp";
+    }
+    if (activeRootScope.value !== target) {
+      activeRootScope.value = target;
     }
   },
   { immediate: true },
+);
+
+// Leaving a spawn tree's scope when /shared is no longer offered.
+watch(
+  () => props.hasShared,
+  (has) => {
+    if (!has && activeRootScope.value === "shared") activeRootScope.value = "workdir";
+  },
 );
 
 async function loadTree() {
@@ -73,6 +92,8 @@ async function loadTree() {
       rootPath = "/tmp";
     } else if (activeRootScope.value === "session") {
       rootPath = "/session";
+    } else if (activeRootScope.value === "shared") {
+      rootPath = "/shared";
     }
     const entries = await getFileTree(props.sessionId, rootPath);
     if (currentReq !== treeReqId) return;
@@ -183,7 +204,7 @@ onUnmounted(() => {
         class="p-2 bg-base-200 border-b border-base-300 flex items-center justify-between gap-2 shrink-0"
       >
         <div
-          v-if="!hasSeparateTmp"
+          v-if="!showRootSelect"
           class="flex items-center gap-1.5 min-w-0 font-mono text-xs pl-0.5"
         >
           <Icon icon="octicon:file-directory-fill-24" class="h-4 w-4 text-warning shrink-0" />
@@ -204,7 +225,9 @@ onUnmounted(() => {
                 ? 'text-info'
                 : activeRootScope === 'session'
                   ? 'text-success'
-                  : 'text-warning'
+                  : activeRootScope === 'shared'
+                    ? 'text-accent'
+                    : 'text-warning'
             "
             class="h-4 w-4 shrink-0"
           />
@@ -214,8 +237,9 @@ onUnmounted(() => {
             :aria-label="t('files.selectDirectoryScopeAria')"
           >
             <option value="workdir">{{ workspaceName }}</option>
-            <option value="tmp">/tmp (session)</option>
-            <option value="session">/session (session)</option>
+            <option v-if="hasSeparateTmp" value="tmp">/tmp (session)</option>
+            <option v-if="hasSeparateTmp" value="session">/session (session)</option>
+            <option v-if="hasShared" value="shared">{{ t("files.sharedScopeOption") }}</option>
           </select>
         </div>
 

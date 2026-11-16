@@ -1285,6 +1285,29 @@ SELECT s.chat_id FROM `+table+` s JOIN down ON s.parent_chat_id = down.chat_id
 	return sessions, false, nil
 }
 
+// SpawnDescendants is SpawnTreeSessions without the heavy columns: chatID and
+// all its descendants (at most limit rows, oldest first) with only the fields
+// needed to list who produced which artifact (chat id, parent, agent, title,
+// spawn label, artifacts).
+func (r *SessionRepository) SpawnDescendants(chatID string, limit int) (sessions []Session, truncated bool, err error) {
+	table, err := r.sessionTable()
+	if err != nil {
+		return nil, false, err
+	}
+	err = r.db.Raw(`WITH RECURSIVE down(chat_id) AS (
+SELECT chat_id FROM `+table+` WHERE chat_id = ?
+UNION
+SELECT s.chat_id FROM `+table+` s JOIN down ON s.parent_chat_id = down.chat_id
+) SELECT chat_id, parent_chat_id, current_agent, title, spawn_label, artifacts FROM `+table+` WHERE chat_id IN (SELECT chat_id FROM down) ORDER BY created_at, chat_id LIMIT ?`, chatID, limit+1).Scan(&sessions).Error
+	if err != nil {
+		return nil, false, err
+	}
+	if len(sessions) > limit {
+		return sessions[:limit], true, nil
+	}
+	return sessions, false, nil
+}
+
 func (r *SessionRepository) sessionTable() (string, error) {
 	stmt := &gorm.Statement{DB: r.db}
 	if err := stmt.Parse(&Session{}); err != nil {

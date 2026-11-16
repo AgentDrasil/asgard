@@ -107,6 +107,10 @@ export interface ChatSession {
   updatedAt?: string;
   messages?: ChatMessage[];
   artifacts?: string[];
+  /** Artifacts of the chat's descendant subagents, per subagent chat. */
+  subagentArtifacts?: SubagentArtifacts[];
+  /** The chat runs with a /shared directory (subagent, subagent parent or team chat). */
+  hasShared?: boolean;
   queuedMessages?: QueuedMessage[];
   dirLock?: DirLockStatus;
   /** Subagent chats only: the chat that spawned this one. */
@@ -117,6 +121,16 @@ export interface ChatSession {
   subagentState?: SubagentState;
   /** The chat is between turns, held open while its subagents run. */
   waitingSubagents?: boolean;
+}
+
+/** The artifacts one descendant subagent chat produced (opened with its chatId). */
+export interface SubagentArtifacts {
+  chatId: string;
+  label: string;
+  agent?: string;
+  artifacts: string[];
+  /** The chat has more artifacts than listed. */
+  truncated?: boolean;
 }
 
 export interface WorkflowRunSummary {
@@ -224,7 +238,16 @@ export interface SessionStatusPayload {
 export interface SessionEvent {
   eventId: number;
   chatId: string;
-  type: "message" | "status" | "title" | "artifact" | "done" | "resync" | "queue" | "subagent";
+  type:
+    | "message"
+    | "status"
+    | "title"
+    | "artifact"
+    | "done"
+    | "resync"
+    | "queue"
+    | "subagent"
+    | "subagent_artifact";
   message?: ChatMessage;
   payload?: SessionStatusPayload | Record<string, any>;
   timestamp: number;
@@ -279,7 +302,7 @@ export interface WorkspaceFileContent {
   updatedAt: string;
 }
 
-export type FileScope = "workspace" | "tmp" | "session";
+export type FileScope = "workspace" | "tmp" | "session" | "shared";
 
 export interface FileSearchResult {
   path: string;

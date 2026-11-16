@@ -11,7 +11,7 @@ import (
 // StatusArtifact is an artifact file named by an agent status update.
 type StatusArtifact struct {
 	// ViewerPath is the form the file API accepts (/tmp/<rel>, /session/<rel>,
-	// workspace-relative or absolute).
+	// /shared/<rel>, workspace-relative or absolute).
 	ViewerPath string
 	// HostPath is the file's absolute path on the machine running the agent.
 	HostPath string
@@ -26,6 +26,12 @@ type StatusArtifact struct {
 func StatusArtifacts(chatID string, targetFiles []string, agentConfig *agentspec.AgentConfig, workspaceDir string) []StatusArtifact {
 	baseTmp := GetSessionTmpBaseDir(chatID)
 	baseSession := GetSessionScopedBaseDir("session", chatID)
+	// /shared is the run's spawn tree scratch directory; without one (no
+	// SharedChatID) the sandbox has no /shared and the path stays as written.
+	baseShared := ""
+	if agentConfig != nil && agentConfig.SharedChatID != "" {
+		baseShared = GetSessionScopedBaseDir(SharedNS, agentConfig.SharedChatID)
+	}
 	isRunDirSessionTmp := (workspaceDir != "" && (workspaceDir == baseTmp || NormalizeSessionRunDir(workspaceDir, chatID) == baseTmp))
 
 	var artifacts []StatusArtifact
@@ -92,11 +98,17 @@ func StatusArtifacts(chatID string, targetFiles []string, agentConfig *agentspec
 			}
 		}
 
+		// An unsandboxed run names the scratch dir by its host path.
+		if baseShared != "" && filepath.IsAbs(processedPath) {
+			if v := ViewerArtifactPathShared(processedPath, "", "", baseShared); v == "/shared" || strings.HasPrefix(v, "/shared/") {
+				processedPath = v
+			}
+		}
 		if IsArtifact(processedPath, agentConfig, workspaceDir) {
-			normalizedViewerPath := ViewerArtifactPath(processedPath, baseTmp, baseSession)
+			normalizedViewerPath := ViewerArtifactPathShared(processedPath, baseTmp, baseSession, baseShared)
 			artifacts = append(artifacts, StatusArtifact{
 				ViewerPath: normalizedViewerPath,
-				HostPath:   statusArtifactHostPath(normalizedViewerPath, workspaceDir, baseTmp, baseSession),
+				HostPath:   statusArtifactHostPath(normalizedViewerPath, workspaceDir, baseTmp, baseSession, baseShared),
 			})
 		}
 	}
@@ -104,8 +116,11 @@ func StatusArtifacts(chatID string, targetFiles []string, agentConfig *agentspec
 }
 
 // statusArtifactHostPath maps a viewer path onto the agent machine's filesystem.
-func statusArtifactHostPath(viewer, workspaceDir, baseTmp, baseSession string) string {
-	for _, m := range []struct{ prefix, base string }{{"/tmp", baseTmp}, {"/session", baseSession}} {
+func statusArtifactHostPath(viewer, workspaceDir, baseTmp, baseSession, baseShared string) string {
+	for _, m := range []struct{ prefix, base string }{{"/tmp", baseTmp}, {"/session", baseSession}, {"/shared", baseShared}} {
+		if m.base == "" {
+			continue
+		}
 		if viewer == m.prefix {
 			return m.base
 		}
