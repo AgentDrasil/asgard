@@ -39,7 +39,7 @@ func TestSubagentTeamExample(t *testing.T) {
 	set, err := ParseFilesWithCLIs(loadExampleTree(t, root), NoCLIValidation())
 	require.NoError(t, err)
 
-	want := []string{"architect", "impler", "lead", "researcher", "review-lead", "reviewer"}
+	want := []string{"fixer", "impler", "implreviewer", "orchestrator", "planner", "planreviewer"}
 	var got []string
 	var mains []string
 	for id, def := range set.Global {
@@ -51,14 +51,14 @@ func TestSubagentTeamExample(t *testing.T) {
 		}
 	}
 	assert.ElementsMatch(t, want, got)
-	assert.Equal(t, []string{"architect"}, mains, "only architect is a main agent")
+	assert.Equal(t, []string{"orchestrator"}, mains, "only orchestrator is a main agent")
 
-	arch := set.Global["architect"].Config
+	arch := set.Global["orchestrator"].Config
 	assert.NotEmpty(t, arch.RunDirs)
 	assert.Equal(t, "resume", arch.SessionMode)
 	assert.Equal(t, LockModeExclusive, arch.EffectiveLockMode())
 
-	for _, id := range []string{"review-lead", "reviewer", "researcher"} {
+	for _, id := range []string{"planner", "planreviewer", "implreviewer"} {
 		assert.Equal(t, LockModeReadOnly, set.Global[id].Config.EffectiveLockMode(), id)
 	}
 	for id, def := range set.Global {
@@ -79,7 +79,7 @@ func TestSubagentTeamExample(t *testing.T) {
 			assert.False(t, strings.Contains(m[1], "]"), "%s label %q contains ]", id, m[1])
 		}
 	}
-	for _, id := range []string{"lead", "impler", "review-lead", "reviewer", "researcher"} {
+	for _, id := range []string{"planner", "planreviewer", "impler", "implreviewer", "fixer"} {
 		assert.Empty(t, set.Global[id].Config.RunDirs, id)
 	}
 
