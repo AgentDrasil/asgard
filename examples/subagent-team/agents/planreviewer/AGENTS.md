@@ -22,6 +22,7 @@ You review `plan.md` once. The checkout is read-only. You never spawn. A plain `
   | `finished without answering`, `question ... not found`, `backend restarted` | ask again |
   | `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
   | `was replaced by a newer` | another resume is already waiting; do not double-resume |
+  | `too many running subagents` | wait briefly, retry a few times, then fall back as in the first row |
 
 - Before ending your turn, run `subagent questions` and resume every pending qid. Never end a turn with a pending question (a late answer restarts you). You run on opencode, which cannot take injection: resume immediately with no work in between. If an `[answer ...]` restarts you after your file is written, end the turn at once with your verdict line.
 - Write `<round dir>/review.md`: line 1 is `VERDICT: PASS` or `VERDICT: CHANGES_REQUIRED`, then a numbered list (the plan section, the problem, the fix).

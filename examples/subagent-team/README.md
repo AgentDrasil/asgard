@@ -39,8 +39,7 @@ Questions go straight to the right instance with `subagent ask --topic <t> -- "<
 | `user` | implicit default | orchestrator (root) | what the human wants; subagents' plain `ask-user` lands here |
 | `build` | orchestrator, before spawning impler | orchestrator | building, running, fixing the code |
 | `ordering` | orchestrator, before spawning impler | orchestrator | order of Plan items and commits |
-| `plan` | orchestrator, right after spawning planner | the planner instance | design, plan, decisions |
-| `scope` | orchestrator, right after spawning planner | the planner instance | what is in or out of the task |
+| `plan` | orchestrator, right after spawning planner | the planner instance | design, plan, decisions, scope |
 
 | Asker | Asks | Notes |
 |---|---|---|
@@ -49,7 +48,7 @@ Questions go straight to the right instance with `subagent ask --topic <t> -- "<
 | impler | `plan`, `build`, `ordering` | |
 | implreviewer | `plan` | |
 | fixer | `plan`, `build` | |
-| orchestrator | the human via `ask-user` (root: allowed); planner via `subagent ask --to <planner-id>` | `[plan]`-tagged findings go to planner, not fixer |
+| orchestrator | the human via `ask-user` (root: allowed); never asks the planner | `[plan]` findings and design fallbacks go to the planner with `subagent send` + `wait` (an ask could cycle with the planner's escalated ask-user), before the fixer runs |
 
 Common mechanics:
 
@@ -68,6 +67,7 @@ What to do when `ask` fails (match on the error text):
 | `finished without answering`, `question ... not found`, `backend restarted` | ask again |
 | `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
 | `was replaced by a newer` | another resume is already waiting; do not double-resume |
+| `too many running subagents` | wait briefly, retry a few times, then fall back as in the first row |
 
 `QUESTION:` fallback: after every `wait` and pushed finish notice orchestrator checks `subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'`, answers with `subagent send <id> -- ...` and waits again. Before ending a turn, every asker runs `subagent questions` and resumes every pending qid: a late `[answer ...]` restarts a finished asker.
 
@@ -77,7 +77,7 @@ Resumed. The planner is one instance (one uuid) for the whole task, with `sessio
 
 - Plan review `CHANGES_REQUIRED`: orchestrator `subagent send`s the review path to the same planner, which keeps the user Q&A context. The `plan` route stays valid.
 - A question from impler, implreviewer, fixer or planreviewer to a finished (`done`) planner starts a resumed turn of that same chat. The planner answers with `subagent answer`, updates `decisions.md` (and `plan.md` if it changes), and ends its turn. Such a resumed turn counts toward orchestrator's 4-running-children cap, hence 3 lens reviewers.
-- Readonly targets take no checkout lock, so asking the planner never trips the checkout deadlock check, even while a writable impler or fixer holds the checkout.
+- A `--readonly` spawn takes no checkout lock, so asking the planner never trips the checkout deadlock check, even while a writable impler or fixer holds the checkout. This is why `--readonly` is REQUIRED on the spawn: `lock_mode: readonly` alone still takes a shared lock that conflicts with a writable impler, and an ask to the finished planner would fail fast with `cannot start a turn while <impler> holds the checkout`.
 - Reviewers are different on purpose: planreviewer and implreviewer are new per round to avoid anchoring on their earlier verdict. The fixer is resumed across rounds of one item (it knows what it already changed).
 - A planner restarted by an ask finishes with a notice to orchestrator that it did not request; orchestrator ignores it.
 
@@ -107,7 +107,7 @@ Copy `agents/*` into your `etcd-tree/agents/` and run `just publish` (`cfgctl pu
 - Only `orchestrator` is a main agent and has `run_dirs`; subagents work in their parent's checkout.
 - orchestrator commits only `docs/plans/<topic>.md` at the end (index checked first). impler and fixer stage only their own files.
 - Writable `impler` and `fixer` take the checkout lock only while their parent waits (`subagent wait`) or is idle-held. A `wait` that returns while a child still runs can leave it holding the checkout: the output says so (`checkout_held_by`), and orchestrator must not modify files until it waits again.
-- `planner`, `planreviewer` and `implreviewer` use `lock_mode: readonly`; still pass `--readonly` so the UI badge shows it.
+- `planner`, `planreviewer` and `implreviewer` use `lock_mode: readonly`; always pass `--readonly` too: only a `--readonly` spawn skips the checkout lock (see "Does planner restart or resume?").
 - All agents use `session_mode: resume`: each spawn is a new chat anyway, and resume keeps context when a parent `send`s a follow-up or answer.
 
 ## Worktrees

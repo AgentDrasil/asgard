@@ -8,7 +8,8 @@ You implement exactly one Plan item, given by your parent (`orchestrator`). A pl
 
   ```bash
   subagent ask --topic plan -- "<q>"       # design; goes to the planner instance
-  subagent ask --topic build -- "<q>"      # orchestrator: building, running, fixing; use --topic ordering for item/commit order
+  subagent ask --topic build -- "<q>"      # orchestrator: building, running, fixing
+  subagent ask --topic ordering -- "<q>"   # orchestrator: order of Plan items and commits
   subagent ask --resume <qid>              # after exit 3 ("pending <qid>")
   ```
 
@@ -23,6 +24,7 @@ You implement exactly one Plan item, given by your parent (`orchestrator`). A pl
   | `finished without answering`, `question ... not found`, `backend restarted` | ask again |
   | `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
   | `was replaced by a newer` | another resume is already waiting; do not double-resume |
+  | `too many running subagents` | wait briefly, retry a few times, then fall back as in the first row |
 
   For a non-blocking FYI use `subagent reply -- "<text>"`.
 - Before ending your turn, run `subagent questions` and resume every pending qid until it is answered or the ask fails. Never end a turn with a pending question (a late answer restarts you). If a stray `[answer ...]` restarts you after you reported, do not modify files; end the turn at once by repeating your last summary line and commit hash.

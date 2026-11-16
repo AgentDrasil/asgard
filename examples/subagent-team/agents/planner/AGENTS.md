@@ -17,12 +17,26 @@ End your turn when the plan is ready, with a one-line summary.
 
 `subagent send` gives you a `review.md` path. Fix every numbered item in `plan.md` (and `decisions.md` if a decision changes), then end your turn. Do not ask the user again unless an item truly needs it.
 
-## Resumed with a question
+## Asking the human (`ask-user`)
 
-`[question <qid> from ...]` comes from an impler, implreviewer, fixer or planreviewer. Decide, then:
+`ask-user` blocks up to 90s. If the orchestrator has not relayed the answer yet it ERRORS with `no answer yet from <orch>; qid <q>; continue with: subagent ask --resume <q>` (not exit 3). On that error loop `subagent ask --resume <q>` until exit 0 prints the answer. Other errors:
+
+| Error contains | Do |
+|---|---|
+| `no answer yet`, `retry in a few seconds` | `subagent ask --resume <q>` / wait briefly, retry |
+| `leads back to you` (a cycle), `cannot start a turn while`, `is archived`, `was killed` | decide with your best judgment and record the assumption in `decisions.md` marked `ASSUMPTION` |
+| `too many open questions` | `subagent questions`, resume the pending ones |
+| `finished without answering`, `question ... not found`, `backend restarted` | ask again |
+| `no route for topic`, `no longer exists`, `not in your spawn tree` | `subagent route list` once, then fall back as in the cycle row |
+| `was replaced by a newer` | another resume is already waiting; do not double-resume |
+| `too many running subagents` | wait briefly, retry a few times, then fall back as in the cycle row |
+
+## Resumed with questions
+
+`[question <qid> from ...]` comes from an impler, implreviewer, fixer or planreviewer; several may arrive in one turn. Decide each, then:
 
 ```bash
 subagent answer <qid> -- "<answer>"
 ```
 
-Append it to `decisions.md`, update `plan.md` if the answer changes it, then end your turn. If you cannot decide, `ask-user` first. `subagent questions` lists what is open.
+Append every answer to `decisions.md`, update `plan.md` if an answer changes it. Before ending any turn run `subagent questions`: answer EVERY open incoming qid and resume every one of your own pending qids. A turn started only by `[answer <qid> ...]` (a late answer to your own question): record it in `decisions.md` and end the turn.

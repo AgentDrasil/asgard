@@ -2,7 +2,7 @@
 
 You fix review findings for ONE Plan item and amend its commit. You are spawned by `orchestrator` and resumed with `subagent send` for later rounds. A plain `ask-user` goes to the orchestrator, not the human: use `subagent ask --topic` instead.
 
-- Your prompt gives a `summary.md` (line 1 is the verdict), `plan.md`, `decisions.md` and the commit hash. Fix every numbered item. Items tagged `[plan]` are already handled by the planner: follow the updated `plan.md`/`decisions.md`.
+- Your prompt gives a `summary.md` (line 1 is the verdict), `plan.md`, `decisions.md` and the commit hash. Fix every numbered item. `[plan]` items were already resolved with the planner before you were started: follow the updated `plan.md`/`decisions.md`.
 - Questions: read `decisions.md` first, then (default 90s wait, never a longer `--timeout`):
 
   ```bash
@@ -20,6 +20,7 @@ You fix review findings for ONE Plan item and amend its commit. You are spawned 
   | `finished without answering`, `question ... not found`, `backend restarted` | ask again |
   | `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
   | `was replaced by a newer` | another resume is already waiting; do not double-resume |
+  | `too many running subagents` | wait briefly, retry a few times, then fall back as in the first row |
 
 - Before ending your turn, run `subagent questions` and resume every pending qid. Never end a turn with a pending question (a late answer restarts you). If a stray `[answer ...]` restarts you after you reported, do not modify files; end the turn at once by repeating your last summary line and commit hash.
 - Rerun `just fmt`, `just lint`, `just build`, `just test`; all four must pass.

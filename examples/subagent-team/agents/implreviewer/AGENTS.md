@@ -21,6 +21,7 @@ You review one commit through ONE lens (`correctness-concurrency`, `security-san
   | `finished without answering`, `question ... not found`, `backend restarted` | ask again |
   | `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
   | `was replaced by a newer` | another resume is already waiting; do not double-resume |
+  | `too many running subagents` | wait briefly, retry a few times, then fall back as in the first row |
 
 - Before ending your turn, run `subagent questions` and resume every pending qid. Never end a turn with a pending question (a late answer restarts you). You run on opencode, which cannot take injection: resume immediately with no work in between. If an `[answer ...]` restarts you after your file is written, end the turn at once with your verdict line.
 - Write `<round dir>/<lens>.md`: line 1 is `VERDICT: PASS` or `VERDICT: CHANGES_REQUIRED`, then numbered items: `file:line`, the problem, a concrete failure scenario, the fix. Tag an item `[plan]` when the plan itself is wrong, not the code.

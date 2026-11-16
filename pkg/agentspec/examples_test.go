@@ -65,6 +65,14 @@ func TestSubagentTeamExample(t *testing.T) {
 		assert.Equal(t, "resume", def.Config.SessionMode, id)
 	}
 
+	for id, def := range set.Global {
+		if id == "orchestrator" {
+			continue
+		}
+		assert.Empty(t, string(def.Config.AskUser), "%s: ask_user must be unset so the subagent default (escalate) applies", id)
+		assert.NotEqual(t, AskUserDeny, def.Config.EffectiveAskUser(false), id)
+	}
+
 	agentRe := regexp.MustCompile(`--agent (\S+)`)
 	labelRe := regexp.MustCompile(`--label "([^"]*)"`)
 	for id, def := range set.Global {
@@ -90,8 +98,8 @@ func TestSubagentTeamExample(t *testing.T) {
 	// One command: the spawn line plus backslash-continued lines, then `-- "<prompt>"`.
 	spawnRe := regexp.MustCompile(`subagent spawn --agent (\S+)[^\n]*?(?:\\\n[^\n]*?)*-- \\?\n?\s*"((?:[^"\\]|\\.)*)"`)
 	spawnCountRe := regexp.MustCompile(`subagent spawn --agent`)
-	askRe := regexp.MustCompile(`(?:subagent )?ask [^\n]*?--topic ([a-z0-9][a-z0-9_-]*)`)
-	routeRe := regexp.MustCompile(`route add --topic ([a-z0-9][a-z0-9_-]*)`)
+	askRe := regexp.MustCompile(`(?:subagent )?ask [^\n]*?--topic ([a-z0-9](?:[a-z0-9._:-]*[a-z0-9])?)`)
+	routeRe := regexp.MustCompile(`route add --topic ([a-z0-9](?:[a-z0-9._:-]*[a-z0-9])?)`)
 	timeoutRe := regexp.MustCompile(`--timeout[ =](\d+)(ms|s|m|h)?`)
 
 	parents := map[string][]string{}
@@ -111,6 +119,9 @@ func TestSubagentTeamExample(t *testing.T) {
 			child := doc[m[2]:m[3]]
 			body := doc[m[4]:m[5]]
 			parents[child] = append(parents[child], id)
+			if tc, ok := set.Global[child]; ok && tc.Config.EffectiveLockMode() == LockModeReadOnly {
+				assert.Contains(t, doc[m[0]:m[4]], "--readonly", "%s spawns readonly agent %s without --readonly (only a --readonly spawn skips the checkout lock)", id, child)
+			}
 			for _, a := range askRe.FindAllStringSubmatch(body, -1) {
 				asks[child] = append(asks[child], a[1])
 			}
@@ -150,4 +161,30 @@ func TestSubagentTeamExample(t *testing.T) {
 			assert.True(t, covered(id, topic, 0), "%s asks topic %q not registered by an ancestor on every path", id, topic)
 		}
 	}
+
+	// (c) no dead routes: every registered topic is asked by some other agent.
+	asked := map[string]bool{}
+	for _, topics := range asks {
+		for _, topic := range topics {
+			asked[topic] = true
+		}
+	}
+	for id, topics := range registers {
+		for topic := range topics {
+			assert.True(t, asked[topic], "%s registers route %q that nobody asks", id, topic)
+		}
+	}
+
+	// (d) at most 3 spawns between consecutive waits keeps one fan-out slot free.
+	spawns, maxRun := 0, 0
+	for _, line := range strings.Split(string(set.Global["orchestrator"].Files["AGENTS.md"]), "\n") {
+		switch {
+		case strings.Contains(line, "subagent wait"):
+			spawns = 0
+		case strings.Contains(line, "subagent spawn"):
+			spawns++
+			maxRun = max(maxRun, spawns)
+		}
+	}
+	assert.LessOrEqual(t, maxRun, 3, "orchestrator spawns more than 3 children between waits")
 }
