@@ -30,21 +30,50 @@ The root counts as depth 1, so reviewer sits exactly at the limit of 4 (the coun
 
 ## Who talks to whom
 
-| From | To | How |
+Questions go straight to the right instance with `subagent ask --topic <t> -- "<q>"`, not hop by hop through the parent. Each spawner registers routes on its own chat before it spawns, with `subagent route add --topic <t> --to $ASGARD_CHAT_ID --note "..."`. A route maps a topic to a chat uuid, never to a role: two leads (or architects) in different subtrees each resolve the topic to their own instance, and `subagent route list` shows the effective table. A topic resolves through the asker's ancestors, nearest definition wins.
+
+| Topic | Registered by | Points to | Ask it |
+|---|---|---|---|
+| `user` | implicit default | architect (root) | what the human wants; subagents' plain `ask-user` lands here too |
+| `design` | architect, before the first spawn | architect | layout, API, behavior decisions |
+| `scope` | architect, before the first spawn | architect | what is in or out of the task |
+| `build` | lead, before spawning impler | that lead | building, running, fixing the code |
+| `ordering` | lead, before spawning impler | that lead | order of Plan items and commits |
+| `review` | review-lead, before spawning reviewers | that review-lead | review scope and lens questions |
+
+| Asker | Asks | Notes |
 |---|---|---|
-| user | architect | chat / ask-user; the only user-facing agent |
-| architect | user | alignment (step 1) and true scope changes (ask-user) |
-| lead | architect | design / spec / scope question: end turn with last line `QUESTION: <q>`; architect answers with `subagent send` |
-| impler | lead | `QUESTION: <q>` (or non-blocking `subagent reply`); lead answers, asking architect if it is a design question |
-| researcher | architect | best guess, optional `subagent reply`; `QUESTION:` only if blocked |
-| reviewer | none | writes its lens file; no questions |
-| review-lead | lead | `summary.md` with `VERDICT:` on line 1 |
+| impler | `design` (architect directly), `build`, `ordering` (lead) | |
+| researcher | `design` | continues on a best guess meanwhile |
+| reviewer | `design`, `review` | at the depth limit; ask only, never spawn |
+| lead, review-lead | `design`, `scope` | |
+| architect | the human, via ask-user | only for true scope changes; it is the root, so ask-user is allowed |
+| review-lead | `summary.md` | `VERDICT:` on line 1, read by lead; not a question |
 
-`QUESTION:` protocol: a child that needs an answer ends its turn with a LAST line `QUESTION: <q>` (keep it short, details in `/shared`; status keeps only the tail of the output). Its finish wakes the parent's `subagent wait` at once. After every `wait` and every pushed finish notice the parent runs `subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'`, (the last non-blank line; the tail printed by `wait` shows it too), answers with `subagent send <id> -- ...` (`session_mode: resume` keeps the child's context) and waits again. Waiting loops use `--timeout 300s`; a non-blocking `subagent reply` is FYI: it also ends a blocked `wait` early (the result says a message arrived), so read it and wait again. A lead that has a question for architect must have no running children.
+Flow:
 
-Before asking, every agent reads `/shared/design/<topic>/decisions.md`. architect appends every Q&A to it.
+- Before asking, read `/shared/design/<topic>/decisions.md`.
+- `subagent ask --topic design -- "<q>"` blocks for the 90s default. Exit 3 prints `pending <qid>`; continue with `subagent ask --resume <qid>` and do other work in between if there is any.
+- The target gets `[question <qid> from ...]`, which wakes its `subagent wait` (`woken_by_message`). It answers with `subagent answer <qid> -- "<text>"`; `subagent questions` lists what is open. architect appends every Q&A to `decisions.md`.
+- Claude Code's Bash tool kills a command at 120s: use the 90s default or `--timeout 90s` for `wait` and `ask`, never `300s`.
+- Subagents do not set `ask_user` in their configs: the platform default sends a subagent's plain `ask-user` to its `user` route (architect, not the human). The prompts still say to prefer `ask --topic`.
 
-Shell variables do not survive between Bash calls, so spawners note each printed id, use it literally in later calls, and append `<label> <id>` to `/shared/<role>/ids.txt` to recover ids.
+What to do when `ask` fails (match on the error text):
+
+| Error contains | Do |
+|---|---|
+| `cannot start a turn while`, `leads back to you`, `is archived`, `was killed` | fallback: end the turn with a LAST line `QUESTION: <q>` |
+| `retry in a few seconds` | wait briefly and retry |
+| `too many open questions` | `subagent questions`, resume the pending ones |
+| `finished without answering`, `question ... not found`, `backend restarted` | ask again |
+| `no route for topic`, `no longer exists`, `not in your spawn tree` | run `subagent route list` once, then fall back as in the first row |
+| `was replaced by a newer` | another resume is already waiting; do not double-resume |
+
+`QUESTION:` fallback: the asker ends its turn with a LAST line `QUESTION: <q>`. After every `wait` and pushed finish notice the parent checks `subagent status <id> | awk 'NF{l=$0} END{print l}' | grep -E '^[[:space:]]*QUESTION:'`, answers with `subagent send <id> -- ...` and waits again. A lead with a question for architect has no running children when it does this.
+
+Before ending a turn, every asker runs `subagent questions` and resumes every pending qid: a late `[answer ...]` restarts a finished asker.
+
+Ids: shell variables do not survive between Bash calls, so write ids literally. `subagent tree` lists every instance with uuid and label (your row is marked `*`; your own id is `$ASGARD_CHAT_ID`).
 
 ## /shared namespacing
 
@@ -72,10 +101,12 @@ This example does not support worktree chats as-is. A read-only child in a workt
 
 ## Known limitations
 
-- Subagents default to `ask_user: escalate`: a subagent's `ask-user` call is forwarded to the chat its `user` route resolves to, which is the root chat (the architect) unless a route overrides it, and blocks up to 90s for that chat's answer instead of waiting on a user who is not watching the child chat. The prompts still tell them to use the `QUESTION:` protocol.
-- `subagent reply` reaches only the parent, so questions are relayed hop by hop (impler -> lead -> architect).
-- Writable implers serialize on the checkout lock; there is no per-subagent worktree.
+- Writable implers serialize on the checkout lock; there is no per-subagent worktree (see Worktrees).
+- reviewer sits at depth 4, the limit.
+- architect, lead and review-lead must not end their turn while children run: an idle-held target cannot take a question while a writable descendant holds the checkout, so every ask toward it fails fast. They stay in `subagent wait --timeout 90s` calls within one turn.
+- A question cannot be withdrawn. If the asker ends its turn with it pending, the late `[answer ...]` restarts the finished asker (impler, researcher, reviewer) for a stray turn. Askers resume every pending qid before ending, and ignore a stray answer.
+- Open questions live in backend memory: a restart loses them, and `ask --resume` then fails with not-found. Re-ask.
 
 ## Validation
 
-`pkg/agentspec/examples_test.go` parses every agent with `agentspec.ParseFilesWithCLIs(..., NoCLIValidation())` and checks team consistency. Model names are not checked against a live runner.
+`pkg/agentspec/examples_test.go` parses every agent with `agentspec.ParseFilesWithCLIs(..., NoCLIValidation())` and checks team consistency, that every `ask --topic` is registered by an ancestor's `route add` (or is `user`), and that no snippet uses a `--timeout` above 90s. Model names are not checked against a live runner.
