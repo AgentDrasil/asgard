@@ -23,6 +23,9 @@ func (s *statusServer) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentSend, s.handleSubagentSend)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentWait, s.handleSubagentWait)
 	mux.HandleFunc("POST "+sandboxsock.PathSubagentReply, s.handleSubagentReply)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentAsk, s.handleSubagentAsk)
+	mux.HandleFunc("POST "+sandboxsock.PathSubagentAnswer, s.handleSubagentAnswer)
+	mux.HandleFunc("GET "+sandboxsock.PathSubagentQuestions, s.handleSubagentQuestions)
 }
 
 // failSubagent reports a failed subagent call with an HTTP status that
@@ -319,4 +322,109 @@ func (s *statusServer) handleSubagentReply(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, sandboxsock.SubagentReplyResponse{Delivery: resp.GetDelivery()})
+}
+
+func (s *statusServer) handleSubagentAsk(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentAskRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	to, resume, text := clean(req.To), clean(req.ResumeQID), clean(req.Text)
+	if len(to) > maxMessageID || len(resume) > maxMessageID || req.TimeoutMs < 0 {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "invalid chat id, question id or timeout"})
+		return
+	}
+	switch {
+	case resume != "" && (to != "" || text != ""):
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "resume takes a question id only"})
+		return
+	case resume == "" && (to == "" || strings.TrimSpace(text) == ""):
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a chat id and a question are required"})
+		return
+	}
+	if len(text) > maxCallText {
+		http.Error(w, "question too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.AskSubagentResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.AskSubagent(ctx, &runnerpb.AskSubagentRequest{Meta: s.meta(seq), To: to, Text: text, TimeoutMs: req.TimeoutMs, ResumeQid: resume})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-ask", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentAskResponse{QID: resp.GetQid(), State: resp.GetState(), Answer: resp.GetAnswer()})
+}
+
+func (s *statusServer) handleSubagentAnswer(w http.ResponseWriter, r *http.Request) {
+	var req sandboxsock.SubagentAnswerRequest
+	if !decodeCall(w, r, &req) {
+		return
+	}
+	qid, text := clean(req.QID), clean(req.Text)
+	if qid == "" || len(qid) > maxMessageID || strings.TrimSpace(text) == "" {
+		writeJSON(w, http.StatusBadRequest, sandboxsock.ErrorResponse{Error: "a valid question id and an answer are required"})
+		return
+	}
+	if len(text) > maxCallText {
+		http.Error(w, "answer too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.AnswerSubagentResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.AnswerSubagent(ctx, &runnerpb.AnswerSubagentRequest{Meta: s.meta(seq), Qid: qid, Text: text})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-answer", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sandboxsock.SubagentAnswerResponse{Delivery: resp.GetDelivery()})
+}
+
+func questionInfoJSON(q *runnerpb.SubagentQuestion) sandboxsock.SubagentQuestionInfo {
+	return sandboxsock.SubagentQuestionInfo{
+		QID:        q.GetQid(),
+		FromChatID: q.GetFromChatId(),
+		FromAgent:  q.GetFromAgent(),
+		FromLabel:  q.GetFromLabel(),
+		CreatedMs:  q.GetCreatedUnixMs(),
+		FirstLine:  q.GetFirstLine(),
+		ToChatID:   q.GetToChatId(),
+		State:      q.GetState(),
+	}
+}
+
+func (s *statusServer) handleSubagentQuestions(w http.ResponseWriter, r *http.Request) {
+	seq := s.nextCallSeq()
+	ctx, cancel := s.callContext(r)
+	defer cancel()
+
+	var resp *runnerpb.SubagentQuestionsResponse
+	err := s.callBackend(ctx, func(ctx context.Context, cb runnerpb.AgentCallbackServiceClient) (err error) {
+		resp, err = cb.SubagentQuestions(ctx, &runnerpb.SubagentQuestionsRequest{Meta: s.meta(seq)})
+		return err
+	})
+	if err != nil {
+		s.failSubagent(w, ctx, "subagent-questions", err)
+		return
+	}
+	out := sandboxsock.SubagentQuestionsResponse{Incoming: []sandboxsock.SubagentQuestionInfo{}, Outgoing: []sandboxsock.SubagentQuestionInfo{}}
+	for _, q := range resp.GetIncoming() {
+		out.Incoming = append(out.Incoming, questionInfoJSON(q))
+	}
+	for _, q := range resp.GetOutgoing() {
+		out.Outgoing = append(out.Outgoing, questionInfoJSON(q))
+	}
+	writeJSON(w, http.StatusOK, out)
 }

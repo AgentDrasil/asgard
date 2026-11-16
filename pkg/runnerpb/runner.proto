@@ -427,6 +427,15 @@ service AgentCallbackService {
   rpc WaitSubagents(WaitSubagentsRequest) returns (WaitSubagentsResponse);
   // ReplyToParent delivers a message from a subagent to the chat that spawned it.
   rpc ReplyToParent(ReplyToParentRequest) returns (ReplyToParentResponse);
+  // AskSubagent asks a chat of the caller's spawn tree a question and blocks
+  // until it answers or the timeout (capped by the backend) passes; with
+  // resume_qid it keeps waiting for an earlier question. AnswerSubagent answers
+  // a question addressed to the caller; SubagentQuestions lists the open
+  // questions addressed to the caller and the caller's own pending ones. The
+  // question store is in memory: a backend restart drops open questions.
+  rpc AskSubagent(AskSubagentRequest) returns (AskSubagentResponse);
+  rpc AnswerSubagent(AnswerSubagentRequest) returns (AnswerSubagentResponse);
+  rpc SubagentQuestions(SubagentQuestionsRequest) returns (SubagentQuestionsResponse);
   rpc RecordMetrics(RecordMetricsRequest) returns (RecordMetricsResponse);
   rpc GetUserProxyKeys(GetUserProxyKeysRequest) returns (GetUserProxyKeysResponse);
   // Runner-initiated workflow execution callbacks
@@ -615,6 +624,58 @@ message ReplyToParentRequest {
 message ReplyToParentResponse {
   // delivery is "injected", "queued" or "started", like SendToSubagent.
   string delivery = 1;
+}
+
+message AskSubagentRequest {
+  CallMeta meta = 1;
+  // to is the chat id of the chat to ask (any other chat of the caller's spawn
+  // tree). Empty with resume_qid.
+  string to = 2;
+  string text = 3;
+  // timeout_ms is the longest wait; 0 means the default. The backend caps it.
+  int64 timeout_ms = 4;
+  // resume_qid keeps waiting for a question the caller asked earlier.
+  string resume_qid = 5;
+}
+message AskSubagentResponse {
+  string qid = 1;
+  // state is "answered" (answer is set) or "pending" (the timeout passed).
+  string state = 2;
+  string answer = 3;
+}
+
+message AnswerSubagentRequest {
+  CallMeta meta = 1;
+  string qid = 2;
+  string text = 3;
+}
+message AnswerSubagentResponse {
+  // delivery is "unblocked" (the asker was blocked on the question and got the
+  // answer through that call), or, when it was not, how the answer message
+  // reached the asker chat: "injected", "queued", "started", or "stored" (kept
+  // for `subagent ask --resume` only; the message could not be delivered).
+  string delivery = 1;
+}
+
+message SubagentQuestionsRequest {
+  CallMeta meta = 1;
+}
+// SubagentQuestion is one question: an incoming one (addressed to the caller;
+// from_* and first_line are set) or an outgoing one (asked by the caller; to_chat_id and state are set).
+message SubagentQuestion {
+  string qid = 1;
+  string from_chat_id = 2;
+  string from_agent = 3;
+  string from_label = 4;
+  int64 created_unix_ms = 5;
+  string first_line = 6;
+  string to_chat_id = 7;
+  // state of an outgoing question: "pending" or "answered" (not picked up yet).
+  string state = 8;
+}
+message SubagentQuestionsResponse {
+  repeated SubagentQuestion incoming = 1;
+  repeated SubagentQuestion outgoing = 2;
 }
 
 // MetricsEvent mirrors pkg/metrics.Event.

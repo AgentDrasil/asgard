@@ -412,6 +412,47 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (func(keepUnc
 	}
 }
 
+// Blocker reports, without queueing or changing anything, which chat would
+// stop Acquire(req) from being granted right now: the holder (or the earlier
+// waiter) it conflicts with, honoring the ancestor bypass of waiting chats. A
+// chat that re-enters its own lock is blocked only by a subagent that holds
+// one, like Acquire. blocked is false when req would be granted at once (or
+// takes no lock).
+func (m *Manager) Blocker(req AcquireRequest) (chatID string, blocked bool) {
+	dirs := make([]string, 0, len(req.Dirs))
+	for _, d := range req.Dirs {
+		if d != "" {
+			dirs = append(dirs, filepath.Clean(d))
+		}
+	}
+	slices.Sort(dirs)
+	req.Dirs = slices.Compact(dirs)
+	if req.Mode == "" {
+		req.Mode = ModeExclusive
+	}
+	if len(req.Dirs) == 0 {
+		return "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.holders[req.ChatID] != nil {
+		for id, h := range m.holders {
+			if id != req.ChatID && slices.Contains(h.ancestors, req.ChatID) {
+				return baseChatID(id), true
+			}
+		}
+		return "", false
+	}
+	conflicts, holder, _ := m.findConflictLocked(req)
+	if !conflicts {
+		return "", false
+	}
+	if holder == nil {
+		return "", true
+	}
+	return baseChatID(holder.chatID), true
+}
+
 // AcquireMerge takes the exclusive lock on the main checkout dir (req.Dirs) for
 // chatID's merge, queueing FIFO behind any chat, worktree or not, that holds or
 // awaits it. req.ChatID is the worktree chat; req.Mode is ignored. The returned

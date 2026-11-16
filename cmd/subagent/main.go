@@ -26,6 +26,9 @@ const (
 	exitOK    = 0
 	exitError = 1
 	exitUsage = 2
+	// exitPending is "still waiting": an ask timed out without an answer. The
+	// question stays open; `subagent ask --resume <qid>` keeps waiting for it.
+	exitPending = 3
 )
 
 // stateQueued is the state of a writable subagent that waits for the workspace.
@@ -45,11 +48,21 @@ Commands:
   send <id> [--json] -- <text>
         Message a subagent: "injected" into its running turn (claude/agy), "queued" behind its current turn, or "started" as a new turn of an idle one.
   wait [<id>...] [--any|--all] [--timeout <dur>] [--json]
-        Block until the subagents finish (all of them by default, or the first with --any; no ids means all your running subagents) or the timeout (default and maximum 300s) passes. Prints each one's state and output tail, or still_running. It also returns early, with a note (JSON woken_by_message), when a message from another agent arrives: read it, then call wait again. Finished subagents are also reported to you without waiting.
+        Block until the subagents finish (all of them by default, or the first with --any; no ids means all your running subagents) or the timeout (default 90s, maximum 300s; your tool timeout must be longer) passes. Prints each one's state and output tail, or still_running. It also returns early, with a note (JSON woken_by_message), when a message from another agent arrives: read it, then call wait again. Finished subagents are also reported to you without waiting.
   reply [--json] -- <text>
         Subagents only: message the agent that spawned you; it is injected into its running turn or runs as its next turn.
   kill <id> [--json]
         Stop a subagent and all subagents below it.
+  ask --to <chat-id> [--timeout <dur>] [--json] -- <question>
+        Ask another chat of your spawn tree (find ids with "tree") and block until it answers: the answer is printed and the exit code is 0. At the timeout (default 90s, maximum 300s) it prints "pending <qid>" and exits with 3; the question stays open. Your tool/command timeout must be longer than --timeout, or the call is killed while blocked.
+  ask --resume <qid> [--timeout <dur>] [--json]
+        Keep waiting for a question you asked earlier; returns at once when the answer arrived meanwhile.
+  answer <qid> [--json] -- <text>
+        Answer a question addressed to you (see "questions"; the question message names its id). Only once.
+  questions [--json]
+        List the open questions addressed to you and the questions you asked that are still pending.
+
+Exit codes: 0 ok, 1 error, 2 usage, 3 still waiting (ask timed out; resume it).
 `
 
 func main() {
@@ -77,6 +90,10 @@ var commands = map[string]command{
 	"wait":   cmdWait,
 	"reply":  cmdReply,
 	"kill":   cmdKill,
+
+	"ask":       cmdAsk,
+	"answer":    cmdAnswer,
+	"questions": cmdQuestions,
 }
 
 // run executes subagent (args includes the program name) and returns the exit
@@ -419,7 +436,7 @@ func cmdWait(ctx context.Context, c *cli, args []string) int {
 	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
 	anyOf := fs.Bool("any", false, "return when one subagent finished")
 	all := fs.Bool("all", false, "wait for all subagents (default)")
-	timeout := fs.String("timeout", "", "longest wait, e.g. 90s (default and maximum 300s)")
+	timeout := fs.String("timeout", "", "longest wait, e.g. 120s (default 90s, maximum 300s)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	p, code, ok := c.parseFlags(fs, args)
 	if !ok {
@@ -559,4 +576,133 @@ func (c *cli) ago(ms int64) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+func cmdAsk(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("ask", flag.ContinueOnError)
+	to := fs.String("to", "", "chat id to ask")
+	resume := fs.String("resume", "", "question id to keep waiting for")
+	timeout := fs.String("timeout", "", "longest wait, e.g. 60s (default 90s, maximum 300s)")
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 {
+		return c.usageError("unexpected argument %q (put the question after --)", p.positional[0])
+	}
+	req := sandboxsock.SubagentAskRequest{}
+	switch {
+	case *resume != "":
+		if *to != "" || p.hasRest {
+			return c.usageError("ask --resume takes a question id only, no --to or question")
+		}
+		req.ResumeQID = *resume
+	default:
+		text := strings.Join(p.rest, " ")
+		if *to == "" || !p.hasRest || strings.TrimSpace(text) == "" {
+			return c.usageError("ask needs --to <chat-id> and the question after --, or --resume <qid>")
+		}
+		req.To, req.Text = *to, text
+	}
+	if *timeout != "" {
+		d, err := parseTimeout(*timeout)
+		if err != nil {
+			return c.usageError("%v", err)
+		}
+		req.TimeoutMs = d.Milliseconds()
+	}
+	var out sandboxsock.SubagentAskResponse
+	if !c.call(ctx, sandboxsock.PathSubagentAsk, req, &out) {
+		return exitError
+	}
+	pending := out.State != sandboxsock.QuestionAnswered
+	if *asJSON {
+		if rc := c.printJSON(out); rc != exitOK {
+			return rc
+		}
+	} else if pending {
+		_, _ = fmt.Fprintf(c.stdout, "pending %s\n", out.QID)
+	} else {
+		_, _ = fmt.Fprintln(c.stdout, strings.TrimRight(out.Answer, "\n"))
+	}
+	if pending {
+		_, _ = fmt.Fprintf(c.stderr, "subagent: no answer yet; keep waiting with: subagent ask --resume %s\n", out.QID)
+		return exitPending
+	}
+	return exitOK
+}
+
+func cmdAnswer(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("answer", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if !p.hasRest || len(p.positional) != 1 {
+		return c.usageError("answer needs one question id and the answer after --")
+	}
+	text := strings.Join(p.rest, " ")
+	if strings.TrimSpace(text) == "" {
+		return c.usageError("answer needs an answer after --")
+	}
+	var out sandboxsock.SubagentAnswerResponse
+	if !c.call(ctx, sandboxsock.PathSubagentAnswer, sandboxsock.SubagentAnswerRequest{QID: p.positional[0], Text: text}, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	_, _ = fmt.Fprintln(c.stdout, out.Delivery)
+	return exitOK
+}
+
+func cmdQuestions(ctx context.Context, c *cli, args []string) int {
+	fs := flag.NewFlagSet("questions", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	p, code, ok := c.parseFlags(fs, args)
+	if !ok {
+		return code
+	}
+	if len(p.positional) > 0 || p.hasRest {
+		return c.usageError("questions takes no arguments")
+	}
+	var out sandboxsock.SubagentQuestionsResponse
+	if !c.call(ctx, sandboxsock.PathSubagentQuestions, nil, &out) {
+		return exitError
+	}
+	if *asJSON {
+		return c.printJSON(out)
+	}
+	if len(out.Incoming) == 0 && len(out.Outgoing) == 0 {
+		_, _ = fmt.Fprintln(c.stdout, "no open questions")
+		return exitOK
+	}
+	if len(out.Incoming) > 0 {
+		_, _ = fmt.Fprintln(c.stdout, "addressed to you (answer with: subagent answer <qid> -- <text>):")
+		tw := tabwriter.NewWriter(c.stdout, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "QID\tFROM\tAGE\tQUESTION")
+		for _, q := range out.Incoming {
+			from := q.FromChatID
+			if q.FromLabel != "" {
+				from += " (" + q.FromLabel + ")"
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", q.QID, from, c.ago(q.CreatedMs), q.FirstLine)
+		}
+		_ = tw.Flush()
+	}
+	if len(out.Outgoing) > 0 {
+		if len(out.Incoming) > 0 {
+			_, _ = fmt.Fprintln(c.stdout)
+		}
+		_, _ = fmt.Fprintln(c.stdout, "asked by you (keep waiting with: subagent ask --resume <qid>):")
+		tw := tabwriter.NewWriter(c.stdout, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "QID\tTO\tSTATE")
+		for _, q := range out.Outgoing {
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", q.QID, q.ToChatID, q.State)
+		}
+		_ = tw.Flush()
+	}
+	return exitOK
 }

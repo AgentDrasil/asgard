@@ -632,6 +632,30 @@ func (p callbackProxy) ReplyToParent(ctx context.Context, req *runnerpb.ReplyToP
 	return cb.ReplyToParent(ctx, req)
 }
 
+func (p callbackProxy) AskSubagent(ctx context.Context, req *runnerpb.AskSubagentRequest) (*runnerpb.AskSubagentResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.AskSubagent(ctx, req)
+}
+
+func (p callbackProxy) AnswerSubagent(ctx context.Context, req *runnerpb.AnswerSubagentRequest) (*runnerpb.AnswerSubagentResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.AnswerSubagent(ctx, req)
+}
+
+func (p callbackProxy) SubagentQuestions(ctx context.Context, req *runnerpb.SubagentQuestionsRequest) (*runnerpb.SubagentQuestionsResponse, error) {
+	cb := p.h.currentCallbacks()
+	if cb == nil {
+		return nil, status.Error(codes.Unavailable, "callbacks not installed")
+	}
+	return cb.SubagentQuestions(ctx, req)
+}
+
 func (p callbackProxy) RecordMetrics(ctx context.Context, req *runnerpb.RecordMetricsRequest) (*runnerpb.RecordMetricsResponse, error) {
 	return p.h.currentCallbacks().RecordMetrics(ctx, req)
 }

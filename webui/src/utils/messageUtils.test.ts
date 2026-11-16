@@ -148,6 +148,37 @@ describe("parseInterAgentMessage", () => {
     });
   });
 
+  it("parses a question with its id, sender and the answer hint in the body", () => {
+    const text =
+      "[question q-1 from Reviewer c-2 (rev)]\nwhich branch?\nAnswer with: subagent answer q-1 -- <text>";
+    expect(parseInterAgentMessage(text)).toEqual({
+      kind: "question",
+      qid: "q-1",
+      from: "Reviewer c-2 (rev)",
+      body: "which branch?\nAnswer with: subagent answer q-1 -- <text>",
+    });
+  });
+
+  it("parses a question and an answer without a label", () => {
+    expect(parseInterAgentMessage("[question q-1 from Lead c-0]\nok?")).toEqual({
+      kind: "question",
+      qid: "q-1",
+      from: "Lead c-0",
+      body: "ok?",
+    });
+    expect(parseInterAgentMessage("[answer q-1 from Reviewer c-2 (rev)]\nmain")).toEqual({
+      kind: "answer",
+      qid: "q-1",
+      from: "Reviewer c-2 (rev)",
+      body: "main",
+    });
+  });
+
+  it("does not take a question or answer that is not at the start", () => {
+    expect(parseInterAgentMessage("see [question q-1 from A c]\nx")).toBeNull();
+    expect(parseInterAgentMessage("[question q-1]\nx")).toBeNull();
+  });
+
   it("leaves ordinary text alone", () => {
     expect(parseInterAgentMessage("hello [message from parent agent x]")).toBeNull();
     expect(parseInterAgentMessage("")).toBeNull();

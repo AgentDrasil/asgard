@@ -95,12 +95,17 @@ export function getMessageArtifactFiles(msg: ChatMessage): string[] {
   return msg.artifactFiles || [];
 }
 
-export type InterAgentKind = "parent" | "subagent" | "finished";
+export type InterAgentKind = "parent" | "subagent" | "finished" | "question" | "answer";
 
 export interface InterAgentMessage {
   kind: InterAgentKind;
-  /** Who sent it: the parent agent's name, or the subagent's "id (label)". */
+  /**
+   * Who sent it: the parent agent's name, the subagent's "id (label)", or for a
+   * question/answer "<agent> <chat-id> (<label>)".
+   */
   from: string;
+  /** For "question" and "answer": the question id. */
+  qid?: string;
   /** For "finished": the child's final state (done, failed, killed). */
   state?: string;
   /** The message without its bracketed prefix. */
@@ -112,6 +117,8 @@ export interface InterAgentMessage {
 //   [message from parent agent X]\n<text>
 //   [message from subagent <id> (<label>)]\n<text>
 //   [subagent <id> (<label>) finished: <state>] <summary>
+//   [question <qid> from <agent> <chat-id> (<label>)]\n<text>\nAnswer with: ...
+//   [answer <qid> from <agent> <chat-id> (<label>)]\n<text>
 export function parseInterAgentMessage(content: string): InterAgentMessage | null {
   let m = /^\[message from parent agent ([^\]\n]+)\]\s*/.exec(content);
   if (m) return { kind: "parent", from: m[1], body: content.slice(m[0].length) };
@@ -119,5 +126,14 @@ export function parseInterAgentMessage(content: string): InterAgentMessage | nul
   if (m) return { kind: "subagent", from: m[1], body: content.slice(m[0].length) };
   m = /^\[subagent ([^\]\n]+?) finished: (\w+)\]\s*/.exec(content);
   if (m) return { kind: "finished", from: m[1], state: m[2], body: content.slice(m[0].length) };
+  m = /^\[(question|answer) (\S+) from ([^\]\n]+)\]\s*/.exec(content);
+  if (m) {
+    return {
+      kind: m[1] as "question" | "answer",
+      qid: m[2],
+      from: m[3],
+      body: content.slice(m[0].length),
+    };
+  }
   return null;
 }

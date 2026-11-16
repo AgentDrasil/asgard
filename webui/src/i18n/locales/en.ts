@@ -955,6 +955,8 @@ export const en = {
       parent: "from parent",
       subagent: "from subagent",
       finished: "subagent finished",
+      question: "question from",
+      answer: "answer from",
     },
   },
   dirlock: {

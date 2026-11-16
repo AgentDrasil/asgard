@@ -386,3 +386,133 @@ func TestWaitReportsCheckoutHeldAndTreeTruncated(t *testing.T) {
 	assert.Contains(t, stdout, "truncated:")
 	assert.Regexp(t, `\*\s+r\s+-\s+a\s+-\s+queued`, stdout)
 }
+
+func TestAskPostsQuestionAndPrintsTheAnswer(t *testing.T) {
+	var got sandboxsock.SubagentAskRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, sandboxsock.PathSubagentAsk, r.URL.Path)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAskResponse{QID: "q-1", State: sandboxsock.QuestionAnswered, Answer: "main\nplease"})
+	}))
+
+	code, stdout, stderr := runCLI("ask", "--to", "c-2", "--timeout", "90s", "--", "which", "--branch?")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Equal(t, "main\nplease\n", stdout)
+	assert.Equal(t, sandboxsock.SubagentAskRequest{To: "c-2", Text: "which --branch?", TimeoutMs: 90000}, got)
+
+	code, stdout, _ = runCLI("ask", "--json", "--to", "c-2", "--", "x")
+	require.Equal(t, exitOK, code)
+	assert.JSONEq(t, `{"qid":"q-1","state":"answered","answer":"main\nplease"}`, stdout)
+}
+
+func TestAskTimeoutPrintsPendingAndExitsWith3(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAskResponse{QID: "q-9", State: sandboxsock.QuestionPending})
+	}))
+	code, stdout, stderr := runCLI("ask", "--to", "c-2", "--", "x")
+	assert.Equal(t, exitPending, code)
+	assert.Equal(t, 3, exitPending)
+	assert.Equal(t, "pending q-9\n", stdout)
+	assert.Contains(t, stderr, "subagent ask --resume q-9")
+
+	code, stdout, _ = runCLI("ask", "--json", "--resume", "q-9")
+	assert.Equal(t, exitPending, code)
+	assert.JSONEq(t, `{"qid":"q-9","state":"pending"}`, stdout)
+}
+
+func TestAskResumeSendsOnlyTheQuestionID(t *testing.T) {
+	var got sandboxsock.SubagentAskRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAskResponse{QID: "q-9", State: sandboxsock.QuestionAnswered, Answer: "done"})
+	}))
+	code, stdout, stderr := runCLI("ask", "--resume", "q-9", "--timeout", "45")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Equal(t, "done\n", stdout)
+	assert.Equal(t, sandboxsock.SubagentAskRequest{ResumeQID: "q-9", TimeoutMs: 45000}, got)
+}
+
+func TestAskErrorsAreExplained(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(sandboxsock.ErrorResponse{Error: "target c-2 was killed"})
+	}))
+	code, stdout, stderr := runCLI("ask", "--to", "c-2", "--", "x")
+	assert.Equal(t, exitError, code)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "unavailable: target c-2 was killed")
+}
+
+func TestAskAndAnswerUsageErrors(t *testing.T) {
+	t.Setenv(sandboxsock.EnvURL, "unix:///nonexistent/asgard.sock")
+	tests := map[string][]string{
+		"ask without target":       {"ask", "--", "x"},
+		"ask without question":     {"ask", "--to", "c"},
+		"ask blank question":       {"ask", "--to", "c", "--", " "},
+		"ask positional":           {"ask", "--to", "c", "x", "--", "y"},
+		"ask resume with target":   {"ask", "--resume", "q", "--to", "c"},
+		"ask resume with question": {"ask", "--resume", "q", "--", "x"},
+		"ask bad timeout":          {"ask", "--to", "c", "--timeout", "soon", "--", "x"},
+		"ask nothing":              {"ask"},
+		"answer without text":      {"answer", "q"},
+		"answer without id":        {"answer", "--", "x"},
+		"answer blank":             {"answer", "q", "--", " "},
+		"questions with args":      {"questions", "x"},
+	}
+	for name, args := range tests {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(args...)
+			assert.Equal(t, exitUsage, code)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Usage: subagent")
+		})
+	}
+}
+
+func TestAnswerPostsTextAndPrintsDelivery(t *testing.T) {
+	var got sandboxsock.SubagentAnswerRequest
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, sandboxsock.PathSubagentAnswer, r.URL.Path)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentAnswerResponse{Delivery: "unblocked"})
+	}))
+	code, stdout, stderr := runCLI("answer", "q-1", "--", "use", "main")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Equal(t, "unblocked\n", stdout)
+	assert.Equal(t, sandboxsock.SubagentAnswerRequest{QID: "q-1", Text: "use main"}, got)
+}
+
+func TestQuestionsTableAndJSON(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, sandboxsock.PathSubagentQuestions, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentQuestionsResponse{
+			Incoming: []sandboxsock.SubagentQuestionInfo{{QID: "q-1", FromChatID: "c-1", FromLabel: "lead", CreatedMs: time.Now().Add(-30 * time.Second).UnixMilli(), FirstLine: "which branch?"}},
+			Outgoing: []sandboxsock.SubagentQuestionInfo{{QID: "q-2", ToChatID: "c-2", State: "pending"}},
+		})
+	}))
+	code, stdout, stderr := runCLI("questions")
+	require.Equal(t, exitOK, code, stderr)
+	assert.Contains(t, stdout, "q-1")
+	assert.Contains(t, stdout, "c-1 (lead)")
+	assert.Contains(t, stdout, "which branch?")
+	assert.Contains(t, stdout, "q-2")
+	assert.Contains(t, stdout, "pending")
+
+	code, stdout, _ = runCLI("questions", "--json")
+	require.Equal(t, exitOK, code)
+	var out sandboxsock.SubagentQuestionsResponse
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	assert.Len(t, out.Incoming, 1)
+	assert.Len(t, out.Outgoing, 1)
+}
+
+func TestQuestionsEmpty(t *testing.T) {
+	socktest.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sandboxsock.SubagentQuestionsResponse{})
+	}))
+	code, stdout, _ := runCLI("questions")
+	require.Equal(t, exitOK, code)
+	assert.Equal(t, "no open questions\n", stdout)
+}

@@ -190,3 +190,87 @@ func TestSubagentReplyRelaysTextWithRunIdentity(t *testing.T) {
 	code, _ = rig.post(t, sandboxsock.PathSubagentReply, sandboxsock.SubagentReplyRequest{Text: " "})
 	assert.Equal(t, http.StatusBadRequest, code)
 }
+
+func TestSubagentAskRelaysWithRunIdentity(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentAsk, map[string]any{"to": "c-2", "text": "which branch?", "timeout_ms": 90000, "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var out sandboxsock.SubagentAskResponse
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, sandboxsock.SubagentAskResponse{QID: "q-1", State: sandboxsock.QuestionPending}, out)
+	require.Len(t, fake.asksSub, 1)
+	got := fake.asksSub[0]
+	assert.Equal(t, rig.srv.sr.GetRunId(), got.GetMeta().GetRunId())
+	assert.NotZero(t, got.GetMeta().GetCallSeq())
+	assert.Equal(t, "c-2", got.GetTo())
+	assert.Equal(t, "which branch?", got.GetText())
+	assert.EqualValues(t, 90000, got.GetTimeoutMs())
+
+	code, body = rig.post(t, sandboxsock.PathSubagentAsk, sandboxsock.SubagentAskRequest{ResumeQID: "q-1"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, sandboxsock.SubagentAskResponse{QID: "q-1", State: sandboxsock.QuestionAnswered, Answer: "resumed"}, out)
+	require.Len(t, fake.asksSub, 2)
+	assert.Equal(t, "q-1", fake.asksSub[1].GetResumeQid())
+	assert.NotEqual(t, got.GetMeta().GetCallSeq(), fake.asksSub[1].GetMeta().GetCallSeq())
+}
+
+func TestSubagentAskRejectsBadRequests(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	for name, req := range map[string]sandboxsock.SubagentAskRequest{
+		"no target":          {Text: "x"},
+		"blank question":     {To: "c", Text: " "},
+		"resume with target": {To: "c", ResumeQID: "q"},
+		"resume with text":   {Text: "x", ResumeQID: "q"},
+		"negative timeout":   {To: "c", Text: "x", TimeoutMs: -1},
+		"oversized id":       {To: string(make([]byte, 500)), Text: "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, _ := rig.post(t, sandboxsock.PathSubagentAsk, req)
+			assert.Equal(t, http.StatusBadRequest, code)
+		})
+	}
+	assert.Empty(t, fake.asksSub)
+}
+
+func TestSubagentAnswerAndQuestionsRelay(t *testing.T) {
+	fake := &fakeCallbacks{}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentAnswer, map[string]any{"qid": "q-1", "text": "main", "chat_id": "evil"})
+	require.Equal(t, http.StatusOK, code, string(body))
+	var ans sandboxsock.SubagentAnswerResponse
+	require.NoError(t, json.Unmarshal(body, &ans))
+	assert.Equal(t, "unblocked", ans.Delivery)
+	require.Len(t, fake.answers, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.answers[0].GetMeta().GetRunId())
+	assert.Equal(t, "q-1", fake.answers[0].GetQid())
+	assert.Equal(t, "main", fake.answers[0].GetText())
+	code, _ = rig.post(t, sandboxsock.PathSubagentAnswer, sandboxsock.SubagentAnswerRequest{QID: "q-1", Text: " "})
+	assert.Equal(t, http.StatusBadRequest, code)
+	code, _ = rig.post(t, sandboxsock.PathSubagentAnswer, sandboxsock.SubagentAnswerRequest{Text: "x"})
+	assert.Equal(t, http.StatusBadRequest, code)
+
+	resp, err := rig.client.Get("http://asgard" + sandboxsock.PathSubagentQuestions)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var qs sandboxsock.SubagentQuestionsResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&qs))
+	assert.Equal(t, []sandboxsock.SubagentQuestionInfo{{QID: "q-1", FromChatID: "c-1", FromAgent: "Lead", FromLabel: "l", CreatedMs: 42, FirstLine: "which branch?"}}, qs.Incoming)
+	assert.Equal(t, []sandboxsock.SubagentQuestionInfo{{QID: "q-2", ToChatID: "c-2", State: "pending"}}, qs.Outgoing)
+	require.Len(t, fake.qs, 1)
+	assert.Equal(t, rig.srv.sr.GetRunId(), fake.qs[0].GetMeta().GetRunId())
+}
+
+func TestSubagentAskMapsBackendCodes(t *testing.T) {
+	fake := &fakeCallbacks{subErr: status.Error(codes.FailedPrecondition, "target c-2 was killed")}
+	rig := newCallbackRig(t, context.Background(), fake, nil)
+	code, body := rig.post(t, sandboxsock.PathSubagentAsk, sandboxsock.SubagentAskRequest{To: "c-2", Text: "x"})
+	assert.Equal(t, http.StatusServiceUnavailable, code)
+	var e sandboxsock.ErrorResponse
+	require.NoError(t, json.Unmarshal(body, &e))
+	assert.Equal(t, "target c-2 was killed", e.Error)
+	assert.Len(t, fake.asksSub, 1, "a permanent backend answer is not retried")
+}

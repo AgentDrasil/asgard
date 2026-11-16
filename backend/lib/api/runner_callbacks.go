@@ -44,6 +44,14 @@ const (
 	maxInFlightTotal  = 256
 	// callbackMaxBytes bounds the total size of the cached results.
 	callbackMaxBytes = 64 << 20
+	// maxBlockingCalls bounds the calls that block for long (ask, resume and
+	// wait, up to 300s each) out of the maxInFlightTotal slots, so a tree of
+	// agents waiting on each other cannot starve ask-user, call-peer and the
+	// short calls.
+	maxBlockingCalls = 128
+	// maxBlockingPerTree bounds the blocked calls of one spawn tree, so one tree
+	// cannot take all of maxBlockingCalls.
+	maxBlockingPerTree = 32
 	// maxMetricsEvents bounds one RecordMetrics batch.
 	maxMetricsEvents = 1000
 	// maxCallbackText caps the reply and peer output sent to a runner; the
@@ -72,7 +80,17 @@ type callbackService struct {
 	bytes     int
 	inFlight  map[string]int // executing calls per run_id
 	inTotal   int
+	blocking  int            // executing blocking calls (see maxBlockingCalls)
+	treeBlock map[string]int // executing blocking calls per spawn tree root
 	now       func() time.Time
+	// maxBlocking and maxBlockingTree override the constants (tests; 0: default).
+	maxBlocking, maxBlockingTree int
+}
+
+// callOpts tune how a call is run.
+type callOpts struct {
+	// blocking marks a call that blocks for long; it counts toward maxBlockingCalls.
+	blocking bool
 }
 
 type callKey struct {
@@ -82,6 +100,10 @@ type callKey struct {
 
 type callEntry struct {
 	kind       string
+	blocking   bool
+	root       string // spawn tree root of a blocking call
+	attached   int    // RPCs waiting for the result right now; decides "delivered"
+	end        callEndHook
 	done       chan struct{}
 	resp       proto.Message
 	err        error
@@ -105,6 +127,54 @@ type callFunc func(ctx context.Context, info runnerhub.RunInfo) (proto.Message, 
 
 // run validates the call, then executes fn once per (run_id, call_seq).
 func (c *callbackService) run(ctx context.Context, meta *runnerpb.CallMeta, kind string, fn callFunc) (proto.Message, error) {
+	return c.runWith(ctx, meta, kind, callOpts{}, fn)
+}
+
+// callEndHook lets a call learn how it ended: the function registers it with
+// onCallEnd and is told, once, whether its result reached an attached RPC.
+type callEndHook struct {
+	mu        sync.Mutex
+	fn        func(delivered bool) proto.Message
+	finished  bool
+	delivered bool
+}
+
+type callEndKey struct{}
+
+// onCallEnd registers fn to run when the callback call of ctx ends; it runs at
+// once when the call ended already. A non-nil message it returns replaces the
+// cached response of the call (see execute). ctx must be the one the call
+// function got.
+func onCallEnd(ctx context.Context, fn func(delivered bool) proto.Message) {
+	e, _ := ctx.Value(callEndKey{}).(*callEntry)
+	if e == nil {
+		return
+	}
+	h := &e.end
+	h.mu.Lock()
+	if h.finished {
+		d := h.delivered
+		h.mu.Unlock()
+		fn(d)
+		return
+	}
+	h.fn = fn
+	h.mu.Unlock()
+}
+
+func (h *callEndHook) finish(delivered bool) proto.Message {
+	h.mu.Lock()
+	h.finished, h.delivered = true, delivered
+	fn := h.fn
+	h.mu.Unlock()
+	if fn != nil {
+		return fn(delivered)
+	}
+	return nil
+}
+
+// runWith is run with options.
+func (c *callbackService) runWith(ctx context.Context, meta *runnerpb.CallMeta, kind string, opts callOpts, fn callFunc) (proto.Message, error) {
 	runID, seq := meta.GetRunId(), meta.GetCallSeq()
 	if runID == "" || seq == 0 {
 		return nil, status.Error(codes.InvalidArgument, "meta.run_id and meta.call_seq are required")
@@ -118,6 +188,15 @@ func (c *callbackService) run(ctx context.Context, meta *runnerpb.CallMeta, kind
 		return nil, status.Error(codes.FailedPrecondition, "run is not active on this runner")
 	}
 
+	root := ""
+	if opts.blocking && c.s.repo != nil {
+		if r, err := c.s.repo.SpawnRootID(info.ChatID); err == nil && r != "" {
+			root = r
+		} else {
+			// Do not pool unrelated trees into one bucket on a lookup error.
+			root = info.ChatID
+		}
+	}
 	key := callKey{runID: runID, seq: seq}
 	c.mu.Lock()
 	e := c.calls[key]
@@ -130,23 +209,63 @@ func (c *callbackService) run(ctx context.Context, meta *runnerpb.CallMeta, kind
 			c.mu.Unlock()
 			return nil, status.Error(codes.ResourceExhausted, "too many concurrent callback calls")
 		}
+		if opts.blocking && c.blocking >= c.blockingCap() {
+			c.mu.Unlock()
+			return nil, status.Error(codes.ResourceExhausted, "too many blocked ask/wait calls on this backend; retry in a few seconds")
+		}
+		if opts.blocking && c.treeBlock[root] >= c.treeCap() {
+			c.mu.Unlock()
+			return nil, status.Error(codes.ResourceExhausted, "too many blocked ask/wait calls in this spawn tree; end some waits or retry in a few seconds")
+		}
 		c.inFlight[runID]++
 		c.inTotal++
+		if opts.blocking {
+			c.blocking++
+			if c.treeBlock == nil {
+				c.treeBlock = map[string]int{}
+			}
+			c.treeBlock[root]++
+		}
 		c.sweepLocked()
-		e = &callEntry{kind: kind, done: make(chan struct{})}
+		e = &callEntry{kind: kind, done: make(chan struct{}), blocking: opts.blocking, root: root}
 		c.calls[key] = e
 		go c.execute(e, info, fn)
 	}
+	e.attached++
 	c.mu.Unlock()
 
+	// An RPC counts as attached until its own context is done (or it got the
+	// result), so a result produced for an RPC that is being cancelled is not
+	// taken as delivered.
 	select {
 	case <-e.done:
-		return e.resp, e.err
+		c.mu.Lock()
+		e.attached--
+		resp, err := e.resp, e.err
+		c.mu.Unlock()
+		return resp, err
 	case <-ctx.Done():
 		// The runner went away (or gave up); the call keeps running for the
-		// retry to attach to, until the run ends.
+		// retry to attach to, until its own timeout or the run ends.
+		c.mu.Lock()
+		e.attached--
+		c.mu.Unlock()
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}
+}
+
+func (c *callbackService) blockingCap() int {
+	if c.maxBlocking > 0 {
+		return c.maxBlocking
+	}
+	return maxBlockingCalls
+}
+
+func (c *callbackService) treeCap() int {
+	if c.maxBlockingTree > 0 {
+		return c.maxBlockingTree
+	}
+	return maxBlockingPerTree
 }
 
 // execute runs fn detached from any RPC; the call is cancelled when its run
@@ -154,6 +273,7 @@ func (c *callbackService) run(ctx context.Context, meta *runnerpb.CallMeta, kind
 func (c *callbackService) execute(e *callEntry, info runnerhub.RunInfo, fn callFunc) {
 	ctx, cancel := context.WithCancel(c.s.ctx)
 	defer cancel()
+	ctx = context.WithValue(ctx, callEndKey{}, e)
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
@@ -201,12 +321,28 @@ func (c *callbackService) execute(e *callEntry, info runnerhub.RunInfo, fn callF
 		delete(c.inFlight, info.RunID)
 	}
 	c.inTotal--
+	if e.blocking {
+		c.blocking--
+		if c.treeBlock[e.root]--; c.treeBlock[e.root] <= 0 {
+			delete(c.treeBlock, e.root)
+		}
+	}
+	// Delivered only while an RPC still waits for the result.
+	delivered := o.err == nil && e.attached > 0
 	if o.resp != nil {
 		e.size = proto.Size(o.resp)
 		c.bytes += e.size
 	}
 	c.evictLocked(true)
 	c.mu.Unlock()
+	// A call that took back its result (nobody received it) swaps the cached
+	// response, so a retry that attaches later does not get it a second time.
+	if repl := e.end.finish(delivered); repl != nil {
+		c.mu.Lock()
+		c.bytes += proto.Size(repl) - e.size
+		e.resp, e.size = repl, proto.Size(repl)
+		c.mu.Unlock()
+	}
 	close(e.done)
 }
 
@@ -323,7 +459,7 @@ func (s *Server) askUserRefusal(chatID string, cfg *agentspec.AgentConfig) strin
 	if cfg == nil || cfg.AskUser == "" {
 		reason = base + "; subagents default to deny). "
 	}
-	return reason + "Do not wait for the user. If you need an answer from your parent, end your turn with the question as your final output (your parent reads it via `subagent wait`/`status`), or send a non-blocking `subagent reply`."
+	return reason + "Do not wait for the user. If you need an answer from your parent, end your turn with the question as your final output (your parent reads it via `subagent wait`/`status`), or send a non-blocking `subagent reply`. To get an answer from a specific agent of your spawn tree and wait for it, use `subagent ask --to <chat-id> -- <question>` (find chat ids with `subagent tree`)."
 }
 
 func askUserError(msg string) *runnerpb.AskUserResponse {
@@ -602,7 +738,7 @@ func (c *callbackService) SendToSubagent(ctx context.Context, req *runnerpb.Send
 // WaitSubagents implements runnerpb.AgentCallbackServiceServer. It blocks, so
 // it ends with the calling run (the callback context).
 func (c *callbackService) WaitSubagents(ctx context.Context, req *runnerpb.WaitSubagentsRequest) (*runnerpb.WaitSubagentsResponse, error) {
-	resp, err := c.run(ctx, req.GetMeta(), "wait_subagents", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+	resp, err := c.runWith(ctx, req.GetMeta(), "wait_subagents", callOpts{blocking: true}, func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
 		outcome, err := c.s.WaitSubagentsOutcome(fctx, info.ChatID, info.RunID, req.GetIds(), req.GetAny(), time.Duration(req.GetTimeoutMs())*time.Millisecond)
 		if err != nil {
 			return nil, subagentStatusErr(err)
@@ -637,6 +773,82 @@ func (c *callbackService) ReplyToParent(ctx context.Context, req *runnerpb.Reply
 		return nil, err
 	}
 	return resp.(*runnerpb.ReplyToParentResponse), nil
+}
+
+// AskSubagent implements runnerpb.AgentCallbackServiceServer. The asker is the
+// calling run's chat. It blocks until the answer or the timeout, so it ends
+// with the calling run (the callback context).
+func (c *callbackService) AskSubagent(ctx context.Context, req *runnerpb.AskSubagentRequest) (*runnerpb.AskSubagentResponse, error) {
+	resp, err := c.runWith(ctx, req.GetMeta(), "ask_subagent", callOpts{blocking: true}, func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
+		var out AskOutcome
+		var err error
+		if req.GetResumeQid() != "" {
+			out, err = c.s.ResumeQuestion(fctx, info.ChatID, req.GetResumeQid(), timeout)
+		} else {
+			out, err = c.s.AskSubagent(fctx, info.ChatID, info.AgentID, req.GetTo(), req.GetText(), timeout)
+		}
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		state := QuestionStatePending
+		if out.Answered {
+			state = QuestionStateAnswered
+		}
+		return &runnerpb.AskSubagentResponse{Qid: out.QID, State: state, Answer: capText(out.Answer)}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.AskSubagentResponse), nil
+}
+
+// AnswerSubagent implements runnerpb.AgentCallbackServiceServer. The answerer
+// is the calling run's chat.
+func (c *callbackService) AnswerSubagent(ctx context.Context, req *runnerpb.AnswerSubagentRequest) (*runnerpb.AnswerSubagentResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "answer_subagent", func(fctx context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		delivery, err := c.s.AnswerQuestion(fctx, info.ChatID, info.AgentID, req.GetQid(), req.GetText())
+		if err != nil {
+			return nil, subagentStatusErr(err)
+		}
+		return &runnerpb.AnswerSubagentResponse{Delivery: delivery}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.AnswerSubagentResponse), nil
+}
+
+// SubagentQuestions implements runnerpb.AgentCallbackServiceServer.
+func (c *callbackService) SubagentQuestions(ctx context.Context, req *runnerpb.SubagentQuestionsRequest) (*runnerpb.SubagentQuestionsResponse, error) {
+	resp, err := c.run(ctx, req.GetMeta(), "subagent_questions", func(_ context.Context, info runnerhub.RunInfo) (proto.Message, error) {
+		in, out := c.s.Questions(info.ChatID)
+		pb := &runnerpb.SubagentQuestionsResponse{}
+		for _, q := range in {
+			pb.Incoming = append(pb.Incoming, questionInfoPB(q))
+		}
+		for _, q := range out {
+			pb.Outgoing = append(pb.Outgoing, questionInfoPB(q))
+		}
+		return pb, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*runnerpb.SubagentQuestionsResponse), nil
+}
+
+func questionInfoPB(q QuestionInfo) *runnerpb.SubagentQuestion {
+	return &runnerpb.SubagentQuestion{
+		Qid:           q.QID,
+		FromChatId:    q.FromChatID,
+		FromAgent:     q.FromAgent,
+		FromLabel:     q.FromLabel,
+		CreatedUnixMs: q.Created.UnixMilli(),
+		FirstLine:     q.FirstLine,
+		ToChatId:      q.ToChatID,
+		State:         q.State,
+	}
 }
 
 // RecordMetrics implements runnerpb.AgentCallbackServiceServer.

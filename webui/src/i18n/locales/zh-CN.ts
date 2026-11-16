@@ -942,6 +942,8 @@ export const zhCN: MessageSchema = {
       parent: "来自父代理",
       subagent: "来自子代理",
       finished: "子代理已完成",
+      question: "提问来自",
+      answer: "回答来自",
     },
   },
   dirlock: {

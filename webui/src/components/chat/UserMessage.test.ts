@@ -184,6 +184,19 @@ describe("UserMessage.vue", () => {
     expect(done.badge).toContain("subagent finished");
     expect(done.badge).toContain("done");
     expect(done.text).toContain("all good");
+
+    const question = render(
+      "[question q-1 from Reviewer c-2 (rev)]\nwhich branch?\nAnswer with: subagent answer q-1 -- <text>",
+    );
+    expect(question.badge).toContain("question from");
+    expect(question.badge).toContain("Reviewer c-2 (rev)");
+    expect(question.text).toContain("which branch?");
+    expect(question.text).not.toContain("[question q-1");
+
+    const answer = render("[answer q-1 from Reviewer c-2 (rev)]\nmain");
+    expect(answer.badge).toContain("answer from");
+    expect(answer.text).toContain("main");
+    expect(answer.text).not.toContain("[answer q-1");
   });
 
   it("does not badge an ordinary user message", () => {

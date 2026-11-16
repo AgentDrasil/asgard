@@ -442,6 +442,24 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 	if len(text) > maxSubagentMessageBytes {
 		return "", subagentErr(SubagentInvalid, "message too large (limit %d bytes)", maxSubagentMessageBytes)
 	}
+	senderName := callerAgent
+	if a, _ := s.findAgentFor(child.RunnerNodeID, callerAgent); a != nil {
+		senderName = a.Config.Name
+	}
+	prompt := fmt.Sprintf("[message from parent agent %s]\n%s", senderName, text)
+	return s.deliverToChat(ctx, callerChat, callerAgent, child, prompt, "subagent-send", "parent agent "+senderName)
+}
+
+// deliverToChat hands prompt from callerChat (running callerAgent) to the chat
+// target: injected into its running (or idle-held) turn when its CLI takes
+// live input, otherwise through the normal trigger path, queued behind the
+// running turn or as a new turn that resumes the chat's CLI session. A new turn
+// of an idle subagent counts toward its parent's running-children cap. sender
+// names the sender for the target's blocked waits (an injected delivery wakes
+// them, see notifyInbox); source tags the trigger. ctx is the caller's run:
+// once it is done nothing is started.
+func (s *Server) deliverToChat(ctx context.Context, callerChat, callerAgent string, child *dbmodels.Session, prompt, source, sender string) (string, error) {
+	childID := child.ChatID
 	if s.sessionStopInProgress(callerChat) || s.sessionStopInProgress(childID) {
 		return "", subagentErr(SubagentDenied, "the subagent or its caller is being stopped")
 	}
@@ -452,16 +470,11 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 	if target == nil || target.Config.Type == "workflow" {
 		return "", subagentErr(SubagentNotFound, "the agent of subagent %q is not available", childID)
 	}
-	senderName := callerAgent
-	if a, _ := s.findAgentFor(child.RunnerNodeID, callerAgent); a != nil {
-		senderName = a.Config.Name
-	}
-	prompt := fmt.Sprintf("[message from parent agent %s]\n%s", senderName, text)
 
 	// A running turn that can take input gets the message right away.
 	if run, newTurn, ok := s.tryInjectRun(childID, target.Config.ID, prompt); ok {
 		if !newTurn {
-			s.notifyInbox(childID, run, "parent agent "+senderName)
+			s.notifyInbox(childID, run, sender)
 		}
 		return SubagentDeliveryInjected, nil
 	}
@@ -491,7 +504,7 @@ func (s *Server) SendToSubagent(ctx context.Context, callerChat, callerAgent, ch
 		RunnerID: child.RunnerNodeID,
 		RunDir:   child.RunDir,
 		Metadata: map[string]any{
-			"source":          "subagent-send",
+			"source":          source,
 			"caller_agent_id": callerAgent,
 			"parent_chat_id":  callerChat,
 		},

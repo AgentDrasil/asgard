@@ -138,6 +138,9 @@ const (
 	AgentCallbackService_SendToSubagent_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/SendToSubagent"
 	AgentCallbackService_WaitSubagents_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/WaitSubagents"
 	AgentCallbackService_ReplyToParent_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/ReplyToParent"
+	AgentCallbackService_AskSubagent_FullMethodName         = "/asgard.runner.v1.AgentCallbackService/AskSubagent"
+	AgentCallbackService_AnswerSubagent_FullMethodName      = "/asgard.runner.v1.AgentCallbackService/AnswerSubagent"
+	AgentCallbackService_SubagentQuestions_FullMethodName   = "/asgard.runner.v1.AgentCallbackService/SubagentQuestions"
 	AgentCallbackService_RecordMetrics_FullMethodName       = "/asgard.runner.v1.AgentCallbackService/RecordMetrics"
 	AgentCallbackService_GetUserProxyKeys_FullMethodName    = "/asgard.runner.v1.AgentCallbackService/GetUserProxyKeys"
 	AgentCallbackService_InitWorkflowSession_FullMethodName = "/asgard.runner.v1.AgentCallbackService/InitWorkflowSession"
@@ -176,6 +179,15 @@ type AgentCallbackServiceClient interface {
 	WaitSubagents(ctx context.Context, in *WaitSubagentsRequest, opts ...grpc.CallOption) (*WaitSubagentsResponse, error)
 	// ReplyToParent delivers a message from a subagent to the chat that spawned it.
 	ReplyToParent(ctx context.Context, in *ReplyToParentRequest, opts ...grpc.CallOption) (*ReplyToParentResponse, error)
+	// AskSubagent asks a chat of the caller's spawn tree a question and blocks
+	// until it answers or the timeout (capped by the backend) passes; with
+	// resume_qid it keeps waiting for an earlier question. AnswerSubagent answers
+	// a question addressed to the caller; SubagentQuestions lists the open
+	// questions addressed to the caller and the caller's own pending ones. The
+	// question store is in memory: a backend restart drops open questions.
+	AskSubagent(ctx context.Context, in *AskSubagentRequest, opts ...grpc.CallOption) (*AskSubagentResponse, error)
+	AnswerSubagent(ctx context.Context, in *AnswerSubagentRequest, opts ...grpc.CallOption) (*AnswerSubagentResponse, error)
+	SubagentQuestions(ctx context.Context, in *SubagentQuestionsRequest, opts ...grpc.CallOption) (*SubagentQuestionsResponse, error)
 	RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(ctx context.Context, in *GetUserProxyKeysRequest, opts ...grpc.CallOption) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -307,6 +319,36 @@ func (c *agentCallbackServiceClient) ReplyToParent(ctx context.Context, in *Repl
 	return out, nil
 }
 
+func (c *agentCallbackServiceClient) AskSubagent(ctx context.Context, in *AskSubagentRequest, opts ...grpc.CallOption) (*AskSubagentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AskSubagentResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_AskSubagent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) AnswerSubagent(ctx context.Context, in *AnswerSubagentRequest, opts ...grpc.CallOption) (*AnswerSubagentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnswerSubagentResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_AnswerSubagent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentCallbackServiceClient) SubagentQuestions(ctx context.Context, in *SubagentQuestionsRequest, opts ...grpc.CallOption) (*SubagentQuestionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubagentQuestionsResponse)
+	err := c.cc.Invoke(ctx, AgentCallbackService_SubagentQuestions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentCallbackServiceClient) RecordMetrics(ctx context.Context, in *RecordMetricsRequest, opts ...grpc.CallOption) (*RecordMetricsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RecordMetricsResponse)
@@ -415,6 +457,15 @@ type AgentCallbackServiceServer interface {
 	WaitSubagents(context.Context, *WaitSubagentsRequest) (*WaitSubagentsResponse, error)
 	// ReplyToParent delivers a message from a subagent to the chat that spawned it.
 	ReplyToParent(context.Context, *ReplyToParentRequest) (*ReplyToParentResponse, error)
+	// AskSubagent asks a chat of the caller's spawn tree a question and blocks
+	// until it answers or the timeout (capped by the backend) passes; with
+	// resume_qid it keeps waiting for an earlier question. AnswerSubagent answers
+	// a question addressed to the caller; SubagentQuestions lists the open
+	// questions addressed to the caller and the caller's own pending ones. The
+	// question store is in memory: a backend restart drops open questions.
+	AskSubagent(context.Context, *AskSubagentRequest) (*AskSubagentResponse, error)
+	AnswerSubagent(context.Context, *AnswerSubagentRequest) (*AnswerSubagentResponse, error)
+	SubagentQuestions(context.Context, *SubagentQuestionsRequest) (*SubagentQuestionsResponse, error)
 	RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error)
 	GetUserProxyKeys(context.Context, *GetUserProxyKeysRequest) (*GetUserProxyKeysResponse, error)
 	// Runner-initiated workflow execution callbacks
@@ -468,6 +519,15 @@ func (UnimplementedAgentCallbackServiceServer) WaitSubagents(context.Context, *W
 }
 func (UnimplementedAgentCallbackServiceServer) ReplyToParent(context.Context, *ReplyToParentRequest) (*ReplyToParentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplyToParent not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) AskSubagent(context.Context, *AskSubagentRequest) (*AskSubagentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AskSubagent not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) AnswerSubagent(context.Context, *AnswerSubagentRequest) (*AnswerSubagentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AnswerSubagent not implemented")
+}
+func (UnimplementedAgentCallbackServiceServer) SubagentQuestions(context.Context, *SubagentQuestionsRequest) (*SubagentQuestionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubagentQuestions not implemented")
 }
 func (UnimplementedAgentCallbackServiceServer) RecordMetrics(context.Context, *RecordMetricsRequest) (*RecordMetricsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordMetrics not implemented")
@@ -709,6 +769,60 @@ func _AgentCallbackService_ReplyToParent_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentCallbackService_AskSubagent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AskSubagentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).AskSubagent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_AskSubagent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).AskSubagent(ctx, req.(*AskSubagentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_AnswerSubagent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnswerSubagentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).AnswerSubagent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_AnswerSubagent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).AnswerSubagent(ctx, req.(*AnswerSubagentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentCallbackService_SubagentQuestions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubagentQuestionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentCallbackServiceServer).SubagentQuestions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentCallbackService_SubagentQuestions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentCallbackServiceServer).SubagentQuestions(ctx, req.(*SubagentQuestionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AgentCallbackService_RecordMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecordMetricsRequest)
 	if err := dec(in); err != nil {
@@ -878,6 +992,18 @@ var AgentCallbackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReplyToParent",
 			Handler:    _AgentCallbackService_ReplyToParent_Handler,
+		},
+		{
+			MethodName: "AskSubagent",
+			Handler:    _AgentCallbackService_AskSubagent_Handler,
+		},
+		{
+			MethodName: "AnswerSubagent",
+			Handler:    _AgentCallbackService_AnswerSubagent_Handler,
+		},
+		{
+			MethodName: "SubagentQuestions",
+			Handler:    _AgentCallbackService_SubagentQuestions_Handler,
 		},
 		{
 			MethodName: "RecordMetrics",

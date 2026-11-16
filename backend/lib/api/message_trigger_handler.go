@@ -206,7 +206,7 @@ func (s *Server) triggerMessage(stopWith context.Context, authReq *http.Request,
 
 	// Anything but a subagent's push or reply is a reason to run the chat: it
 	// ends the hold a stop put on subagent messages.
-	if src, _ := req.Metadata["source"].(string); src != "subagent-finished" && src != "subagent-reply" {
+	if src, _ := req.Metadata["source"].(string); src != "subagent-finished" && src != "subagent-reply" && src != "subagent-ask" && src != "subagent-answer" {
 		s.clearStopped(chatID)
 	}
 

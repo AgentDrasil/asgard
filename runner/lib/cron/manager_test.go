@@ -107,6 +107,18 @@ func (f *fakeCallbacks) ReplyToParent(ctx context.Context, in *runnerpb.ReplyToP
 	return &runnerpb.ReplyToParentResponse{}, nil
 }
 
+func (f *fakeCallbacks) AskSubagent(ctx context.Context, in *runnerpb.AskSubagentRequest, opts ...grpc.CallOption) (*runnerpb.AskSubagentResponse, error) {
+	return &runnerpb.AskSubagentResponse{}, nil
+}
+
+func (f *fakeCallbacks) AnswerSubagent(ctx context.Context, in *runnerpb.AnswerSubagentRequest, opts ...grpc.CallOption) (*runnerpb.AnswerSubagentResponse, error) {
+	return &runnerpb.AnswerSubagentResponse{}, nil
+}
+
+func (f *fakeCallbacks) SubagentQuestions(ctx context.Context, in *runnerpb.SubagentQuestionsRequest, opts ...grpc.CallOption) (*runnerpb.SubagentQuestionsResponse, error) {
+	return &runnerpb.SubagentQuestionsResponse{}, nil
+}
+
 func (f *fakeCallbacks) SendToSubagent(ctx context.Context, in *runnerpb.SendToSubagentRequest, opts ...grpc.CallOption) (*runnerpb.SendToSubagentResponse, error) {
 	return &runnerpb.SendToSubagentResponse{}, nil
 }

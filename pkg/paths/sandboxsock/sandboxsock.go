@@ -39,8 +39,12 @@ const (
 	PathSubagentSend   = "/subagent/send"
 	PathSubagentWait   = "/subagent/wait"
 	PathSubagentReply  = "/subagent/reply"
-	PathMetrics        = "/metrics"
-	PathMerge          = "/merge"
+	// Questions between chats of one spawn tree (ask blocks until answered).
+	PathSubagentAsk       = "/subagent/ask"
+	PathSubagentAnswer    = "/subagent/answer"
+	PathSubagentQuestions = "/subagent/questions"
+	PathMetrics           = "/metrics"
+	PathMerge             = "/merge"
 
 	// host is the placeholder request host; the dialer ignores it.
 	host = "http://asgard"
@@ -144,6 +148,62 @@ type SubagentReplyRequest struct {
 // injected, queued or started.
 type SubagentReplyResponse struct {
 	Delivery string `json:"delivery"`
+}
+
+// SubagentAskRequest is the body of POST /subagent/ask. To names the chat to
+// ask; with ResumeQID it is empty and the call keeps waiting for the earlier
+// question. TimeoutMs 0 is the default (the backend caps it).
+type SubagentAskRequest struct {
+	To        string `json:"to,omitempty"`
+	Text      string `json:"text,omitempty"`
+	ResumeQID string `json:"resume_qid,omitempty"`
+	TimeoutMs int64  `json:"timeout_ms,omitempty"`
+}
+
+// Question states reported by POST /subagent/ask.
+const (
+	QuestionAnswered = "answered"
+	QuestionPending  = "pending"
+)
+
+// SubagentAskResponse is the answer of POST /subagent/ask: the answer, or
+// state "pending" when the timeout passed first.
+type SubagentAskResponse struct {
+	QID    string `json:"qid"`
+	State  string `json:"state"`
+	Answer string `json:"answer,omitempty"`
+}
+
+// SubagentAnswerRequest is the body of POST /subagent/answer.
+type SubagentAnswerRequest struct {
+	QID  string `json:"qid"`
+	Text string `json:"text"`
+}
+
+// SubagentAnswerResponse is the answer of POST /subagent/answer. Delivery is
+// unblocked (the asker was blocked and got it through that call), injected,
+// queued, started (message to the asker) or stored (kept for --resume only).
+type SubagentAnswerResponse struct {
+	Delivery string `json:"delivery"`
+}
+
+// SubagentQuestionInfo is one question of GET /subagent/questions. An incoming
+// one has From* and FirstLine; an outgoing one has To and State.
+type SubagentQuestionInfo struct {
+	QID        string `json:"qid"`
+	FromChatID string `json:"from,omitempty"`
+	FromAgent  string `json:"from_agent,omitempty"`
+	FromLabel  string `json:"from_label,omitempty"`
+	CreatedMs  int64  `json:"created_ms"`
+	FirstLine  string `json:"first_line,omitempty"`
+	ToChatID   string `json:"to,omitempty"`
+	State      string `json:"state,omitempty"`
+}
+
+// SubagentQuestionsResponse is the answer of GET /subagent/questions.
+type SubagentQuestionsResponse struct {
+	Incoming []SubagentQuestionInfo `json:"incoming"`
+	Outgoing []SubagentQuestionInfo `json:"outgoing"`
 }
 
 // SubagentInfo describes one subagent. State is running, done, failed or

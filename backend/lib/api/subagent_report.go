@@ -24,8 +24,10 @@ import (
 // the push notification a finished child sends to its parent.
 
 const (
-	// defaultSubagentWait is the wait of `subagent wait` without a timeout.
-	defaultSubagentWait = 300 * time.Second
+	// defaultSubagentWait is the wait of `subagent wait` without a timeout: below
+	// the tool timeout of the usual agent CLIs (Claude Code's Bash tool kills a
+	// command at 120s), so the call is not orphaned. maxSubagentWait still caps it.
+	defaultSubagentWait = 90 * time.Second
 	// maxSubagentWait caps any requested wait.
 	maxSubagentWait = 300 * time.Second
 	// waitSummaryBytes is the output tail reported per finished subagent.
@@ -225,6 +227,8 @@ func (s *Server) markStopped(chatID string) {
 	g.initLocked()
 	g.stopped[chatID] = true
 	g.mu.Unlock()
+	// Questions to or from a stopped chat can no longer be answered or read.
+	s.cancelQuestionsOf(chatID, "killed")
 }
 
 // clearStopped forgets the stopped mark: the chat is run for another reason
@@ -399,6 +403,7 @@ func (s *Server) clearQuiet(chatID string) {
 // that a newer one overtook leaves the finish to the newer one.
 func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 	parentChat, finished := "", false
+	stale := false
 	if s.repo != nil {
 		if sess, err := s.repo.GetSessionMeta(chatID); err == nil && sess != nil && sess.ParentChatID != "" {
 			parentChat = sess.ParentChatID
@@ -409,7 +414,7 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 	g := &s.subagentSig
 	g.mu.Lock()
 	g.initLocked()
-	stale := epoch < g.releaseEpoch[chatID]
+	stale = epoch < g.releaseEpoch[chatID]
 	// The suppression is for the release that ends the chat: an earlier one
 	// (still running, or overtaken) leaves it for that release.
 	quiet := false
@@ -455,6 +460,10 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 		g.lastPushed[chatID] = epoch
 	}
 	g.mu.Unlock()
+	if !stale {
+		// Nobody is left to answer the questions the chat still had open.
+		s.cancelIncomingOnRunEnd(chatID)
+	}
 	if parentChat != "" && !stale {
 		s.publishSubagentState(chatID)
 	}
@@ -478,6 +487,9 @@ func (s *Server) onExecutionReleasedAt(chatID string, epoch uint64) {
 // stopDescendant stops a descendant that is stopped together with the chat
 // above it: nobody above it is left to hear that it was killed.
 func (s *Server) stopDescendant(chatID string) (int, string) {
+	// Whatever the stop code (an idle chat is not "running" but is killed all
+	// the same), its open questions can no longer be answered or read.
+	s.cancelQuestionsOf(chatID, "killed")
 	g := &s.subagentSig
 	g.mu.Lock()
 	g.initLocked()

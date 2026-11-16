@@ -52,6 +52,9 @@ type fakeCallbacks struct {
 	sends   []*runnerpb.SendToSubagentRequest
 	waits   []*runnerpb.WaitSubagentsRequest
 	replies []*runnerpb.ReplyToParentRequest
+	asksSub []*runnerpb.AskSubagentRequest
+	answers []*runnerpb.AnswerSubagentRequest
+	qs      []*runnerpb.SubagentQuestionsRequest
 }
 
 func (f *fakeCallbacks) SpawnSubagent(_ context.Context, req *runnerpb.SpawnSubagentRequest, _ ...grpc.CallOption) (*runnerpb.SpawnSubagentResponse, error) {
@@ -138,6 +141,42 @@ func (f *fakeCallbacks) ReplyToParent(_ context.Context, req *runnerpb.ReplyToPa
 		return nil, f.subErr
 	}
 	return &runnerpb.ReplyToParentResponse{Delivery: "injected"}, nil
+}
+
+func (f *fakeCallbacks) AskSubagent(_ context.Context, req *runnerpb.AskSubagentRequest, _ ...grpc.CallOption) (*runnerpb.AskSubagentResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asksSub = append(f.asksSub, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	if req.GetResumeQid() != "" {
+		return &runnerpb.AskSubagentResponse{Qid: req.GetResumeQid(), State: "answered", Answer: "resumed"}, nil
+	}
+	return &runnerpb.AskSubagentResponse{Qid: "q-1", State: "pending"}, nil
+}
+
+func (f *fakeCallbacks) AnswerSubagent(_ context.Context, req *runnerpb.AnswerSubagentRequest, _ ...grpc.CallOption) (*runnerpb.AnswerSubagentResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answers = append(f.answers, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.AnswerSubagentResponse{Delivery: "unblocked"}, nil
+}
+
+func (f *fakeCallbacks) SubagentQuestions(_ context.Context, req *runnerpb.SubagentQuestionsRequest, _ ...grpc.CallOption) (*runnerpb.SubagentQuestionsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.qs = append(f.qs, req)
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return &runnerpb.SubagentQuestionsResponse{
+		Incoming: []*runnerpb.SubagentQuestion{{Qid: "q-1", FromChatId: "c-1", FromAgent: "Lead", FromLabel: "l", CreatedUnixMs: 42, FirstLine: "which branch?"}},
+		Outgoing: []*runnerpb.SubagentQuestion{{Qid: "q-2", ToChatId: "c-2", State: "pending"}},
+	}, nil
 }
 
 func (f *fakeCallbacks) HoldMergeLock(ctx context.Context, req *runnerpb.HoldMergeLockRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[runnerpb.HoldMergeLockResponse], error) {
