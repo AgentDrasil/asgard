@@ -86,7 +86,7 @@ type streamResult struct {
 //   - "step_update" (tool ACTIVE)          → cb("TOOL", "tool_call",   "name({...params...})")
 //   - "step_update" (tool DONE/ERROR)      → cb("TOOL", "tool_result", "name → output")
 //   - "step_update" (agent_response DONE)  → cb("MODEL","agent_response", accumulated text_delta)
-//   - "result"      → captures response + usage; status ERROR → runErr; onResult (may be nil) fires first
+//   - "result"      → captures response + usage; status ERROR → runErr unless recovered retry with non-empty response; non-ERROR clears runErr; onResult (may be nil) fires first
 func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int, onResult func()) (sessionID, lastContent string, inputTokens, outMaxTokens int, runErr error) {
 	outMaxTokens = maxTokens
 	if outMaxTokens <= 0 {
@@ -196,11 +196,21 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int, onResult func(
 			}
 			lastContent = res.Response
 			if res.Status == "ERROR" {
-				msg := res.Error
-				if msg == "" {
-					msg = "agy run finished with status ERROR"
+				if isRecoveredRetryResult(res) {
+					log.Warn().
+						Str("session_id", sessionID).
+						Str("error", res.Error).
+						Msg("agy/stream: ignoring transient retry error with non-empty response")
+					runErr = nil
+				} else {
+					msg := res.Error
+					if msg == "" {
+						msg = "agy run finished with status ERROR"
+					}
+					runErr = fmt.Errorf("agy run failed: %s", msg)
 				}
-				runErr = fmt.Errorf("agy run failed: %s", msg)
+			} else {
+				runErr = nil
 			}
 			if res.Usage != nil && res.Usage.InputTokens > 0 {
 				// Only fallback to result usage if no step_update usage was observed,
@@ -221,6 +231,16 @@ func parseStream(r io.Reader, cb types.ReportFunc, maxTokens int, onResult func(
 		log.Warn().Err(err).Msg("agy/stream: scanner error")
 	}
 	return
+}
+
+// isRecoveredRetryResult reports whether an agy result marked ERROR actually
+// recovered after a transient retryable error (e.g. malformed function call)
+// and still produced a non-empty final response.
+// Pinned to agy's current "Retries remaining:" wording because streamResult
+// has no structured error code.
+func isRecoveredRetryResult(res *streamResult) bool {
+	return strings.TrimSpace(res.Response) != "" &&
+		strings.Contains(res.Error, "Retries remaining:")
 }
 
 // formatToolCall extracts the primary command or path parameter from ToolInfo

@@ -268,3 +268,68 @@ func TestExtractTargetFiles(t *testing.T) {
 	assert.Nil(t, extractTargetFiles("read_file", &streamToolInfo{Parameters: map[string]any{"Path": "a.go"}}))
 	assert.Nil(t, extractTargetFiles("read", &streamToolInfo{Parameters: map[string]any{"TargetFile": "a.go"}}))
 }
+
+func TestParseStream_ResultErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		ndjson      string
+		wantContent string
+		wantErr     string
+	}{
+		{
+			name: "recovered transient retry error with non-empty response succeeds",
+			ndjson: `{"event":"init","conversation_id":"conv-1"}
+{"event":"result","result":{"conversation_id":"conv-1","status":"ERROR","response":"final answer","error":"Your previous response contained an improperly formatted function call: Malformed function call\nRetries remaining: 3"}}`,
+			wantContent: "final answer",
+		},
+		{
+			name: "retry error with empty response still fails",
+			ndjson: `{"event":"init","conversation_id":"conv-2"}
+{"event":"result","result":{"conversation_id":"conv-2","status":"ERROR","response":"","error":"Malformed function call\nRetries remaining: 0"}}`,
+			wantErr: "agy run failed: Malformed function call",
+		},
+		{
+			name: "retry error with whitespace-only response still fails",
+			ndjson: `{"event":"init","conversation_id":"conv-2b"}
+{"event":"result","result":{"conversation_id":"conv-2b","status":"ERROR","response":"   \n\t  ","error":"Malformed function call\nRetries remaining: 3"}}`,
+			wantErr: "agy run failed: Malformed function call",
+		},
+		{
+			name: "retry error with Retries remaining 0 and non-empty response succeeds",
+			ndjson: `{"event":"init","conversation_id":"conv-2c"}
+{"event":"result","result":{"conversation_id":"conv-2c","status":"ERROR","response":"recovered text","error":"Malformed function call\nRetries remaining: 0"}}`,
+			wantContent: "recovered text",
+		},
+		{
+			name: "fatal non-retry error with response still fails",
+			ndjson: `{"event":"init","conversation_id":"conv-3"}
+{"event":"result","result":{"conversation_id":"conv-3","status":"ERROR","response":"partial","error":"Authentication required"}}`,
+			wantErr: "agy run failed: Authentication required",
+		},
+		{
+			name: "subsequent successful turn clears earlier turn error",
+			ndjson: `{"event":"init","conversation_id":"conv-4"}
+{"event":"result","result":{"conversation_id":"conv-4","status":"ERROR","response":"","error":"first turn failed"}}
+{"event":"result","result":{"conversation_id":"conv-4","status":"SUCCESS","response":"second turn ok"}}`,
+			wantContent: "second turn ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, lastContent, _, _, err := parseStream(strings.NewReader(tt.ndjson), nil, 0, nil)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantContent, lastContent)
+		})
+	}
+}
