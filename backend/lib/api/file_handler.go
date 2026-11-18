@@ -68,11 +68,16 @@ func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// /shared belongs to the whole spawn tree: it is read from the root
-		// chat's directory, and any artifact of the tree's chats authorizes it.
+		// chat's directory, and any chat with /shared enabled may open its
+		// files (even if written via Bash rather than Write).
 		fs, ferr = s.sharedFS(sessionID, sess)
 		readPath, readRunDir, scope = canon, "", agents.SharedNS
 		if ferr == nil {
-			sessionModifiedFiles = s.sharedTreeArtifacts(sess, sessionModifiedFiles)
+			if s.chatHasShared(sess) {
+				sessionModifiedFiles = append(append([]string(nil), sessionModifiedFiles...), canon)
+			} else {
+				sessionModifiedFiles = s.sharedTreeArtifacts(sess, sessionModifiedFiles)
+			}
 		}
 	} else {
 		fs, ferr = s.chatFS(sessionID)

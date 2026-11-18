@@ -273,7 +273,9 @@ func (s *searcher) walk(dfd int, rel string, depth int) bool {
 				continue
 			}
 		} else if e.isDir {
-			if name == ".git" || name == "node_modules" || s.scope == "session" && name == "workflows" {
+			if name == ".git" || name == "node_modules" ||
+				(s.scope == "session" && name == "workflows") ||
+				(s.scope == "tmp" && (name == "fakebash-outputs" || name == ".asgard-ca" || name == "cc-socks")) {
 				continue
 			}
 			if depth >= maxWalkDepth {
@@ -339,9 +341,9 @@ func (l Local) Search(ctx context.Context, req SearchRequest) ([]SearchHit, erro
 	query := strings.ToLower(req.Query)
 	visited := make(map[[2]uint64]bool)
 
-	if req.Scope == agents.SharedNS {
-		// Only the tree's scratch dir (a missing one holds nothing).
-		fd, err := l.namespaceRoot(agents.SharedNS, false)
+	if req.Scope == agents.SharedNS || req.Scope == "tmp" || req.Scope == "session" {
+		// Only the requested namespace dir (a missing one holds nothing).
+		fd, err := l.namespaceRoot(req.Scope, false)
 		if err != nil {
 			if CodeOf(err) == CodeNotFound {
 				return []SearchHit{}, nil
@@ -349,7 +351,7 @@ func (l Local) Search(ctx context.Context, req SearchRequest) ([]SearchHit, erro
 			return nil, err
 		}
 		defer func() { _ = unix.Close(fd) }()
-		hits := scan(ctx, fd, agents.SharedNS, "/shared", query, limit, visited)
+		hits := scan(ctx, fd, req.Scope, "/"+req.Scope, query, limit, visited)
 		if hits == nil {
 			hits = []SearchHit{}
 		}

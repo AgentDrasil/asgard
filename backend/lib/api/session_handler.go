@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -242,8 +243,14 @@ func (s *Server) handleGetSessionByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	chatSession = s.withSubagentFields(chatSession, sess)
 	chatSession.WaitingSubagents = s.isIdleHeld(sess.ChatID)
-	chatSession.SubagentArtifacts = s.descendantArtifacts(sess.ChatID)
 	chatSession.HasShared = s.chatHasShared(sess)
+	syncCtx, syncCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	synced := s.syncSessionArtifacts(syncCtx, sess.ChatID)
+	syncCancel()
+	if len(synced) > 0 {
+		chatSession.Artifacts = append(append([]string(nil), chatSession.Artifacts...), synced...)
+	}
+	chatSession.SubagentArtifacts = s.descendantArtifacts(sess.ChatID)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(chatSession)
 }

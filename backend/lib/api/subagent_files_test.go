@@ -325,13 +325,14 @@ func TestSharedWithoutSpawnTreeIsNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-// An artifact in /shared recorded by one chat of the tree authorizes opening it
-// from any chat of that tree, but never an unrecorded file or another tree's.
+// Any file in /shared is readable from any chat of the same spawn tree (even
+// if written via Bash without an explicit tool artifact), never from another
+// tree or a plain chat without /shared.
 func TestSharedWorkspaceFileAuthorization(t *testing.T) {
 	rig := newSharedRig(t)
 	shared := runnerpaths.SharedChatDir(rig.root)
 	writeFile(t, filepath.Join(shared, "ok.txt"), "authorized")
-	writeFile(t, filepath.Join(shared, "no.txt"), "not an artifact")
+	writeFile(t, filepath.Join(shared, "no.txt"), "written via bash")
 	require.NoError(t, rig.repo.AppendArtifacts(rig.leaf, []string{"/shared/ok.txt"}))
 
 	for _, id := range []string{rig.root, rig.mid, rig.leaf} {
@@ -343,14 +344,16 @@ func TestSharedWorkspaceFileAuthorization(t *testing.T) {
 		assert.Equal(t, "/shared/ok.txt", resp.Path)
 
 		rec = rig.get(t, "/api/v1/workspace/file?"+q("session_id", id, "path", "/shared/no.txt"))
-		assert.Equal(t, http.StatusForbidden, rec.Code, id)
+		require.Equal(t, http.StatusOK, rec.Code, id+rec.Body.String())
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, "written via bash", resp.Content)
+		assert.Equal(t, "/shared/no.txt", resp.Path)
 	}
-	// Another tree does not inherit the authorization.
+	// Another tree does not see this tree's /shared files.
 	rec := rig.get(t, "/api/v1/workspace/file?"+q("session_id", rig.otherChild, "path", "/shared/ok.txt"))
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	// A session-id looking prefix does not alias another file.
-	writeFile(t, filepath.Join(shared, rig.leaf, "ok.txt"), "aliased")
-	rec = rig.get(t, "/api/v1/workspace/file?"+q("session_id", rig.leaf, "path", "/shared/"+rig.leaf+"/ok.txt"))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// A plain chat without /shared is forbidden.
+	rec = rig.get(t, "/api/v1/workspace/file?"+q("session_id", rig.plain, "path", "/shared/ok.txt"))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -574,4 +577,104 @@ func TestResolvedNamespaceHonoursExplicitScope(t *testing.T) {
 	}
 	assert.Equal(t, "tmp", resolvedNamespace(runnerfs.Header{Path: "/tmp/x"}, "workspace"))
 	assert.Equal(t, "", resolvedNamespace(runnerfs.Header{Path: "src/x"}, ""))
+}
+
+func TestSessionJSONListsUnrecordedSharedFiles(t *testing.T) {
+	rig := newSharedRig(t)
+	shared := runnerpaths.SharedChatDir(rig.root)
+	writeFile(t, filepath.Join(shared, "bs", "r1", "gemini.md"), "gemini view")
+	writeFile(t, filepath.Join(shared, "bs", "r1", "claude.md"), "claude view")
+	writeFile(t, filepath.Join(shared, "bs", "brief.md"), "brief")
+	require.NoError(t, rig.repo.AppendArtifacts(rig.leaf, []string{"/shared/bs/r1/gemini.md"}))
+
+	rec := rig.get(t, "/api/sessions/"+rig.root)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var cs ChatSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cs))
+
+	assert.True(t, cs.HasShared)
+	// SubagentArtifacts keeps gemini's attribution for gemini.md.
+	require.Len(t, cs.SubagentArtifacts, 1)
+	assert.Equal(t, []string{"/shared/bs/r1/gemini.md"}, cs.SubagentArtifacts[0].Artifacts)
+	// Unrecorded /shared files (brief.md, claude.md) are merged into Artifacts,
+	// without duplicating gemini.md.
+	assert.ElementsMatch(t, []string{"/shared/bs/brief.md", "/shared/bs/r1/claude.md"}, []string(cs.Artifacts))
+
+	// A plain chat without /shared never lists /shared files.
+	rec = rig.get(t, "/api/sessions/"+rig.plain)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var plainCS ChatSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &plainCS))
+	assert.False(t, plainCS.HasShared)
+	assert.Empty(t, plainCS.Artifacts)
+}
+
+func TestSyncSessionArtifactsOnCompletion(t *testing.T) {
+	rig := newSharedRig(t)
+	shared := runnerpaths.SharedChatDir(rig.root)
+	writeFile(t, filepath.Join(shared, "r1", "gemini.md"), "gemini")
+	writeFile(t, filepath.Join(shared, "r1", "claude.md"), "claude")
+	require.NoError(t, rig.repo.AppendArtifacts(rig.leaf, []string{"/shared/r1/gemini.md"}))
+
+	// Also write user files and internal runtime files in mid's /session and /tmp.
+	midSessDir := runnerpaths.SessionDir(rig.mid)
+	writeFile(t, filepath.Join(midSessDir, "notes.md"), "session note")
+	writeFile(t, filepath.Join(midSessDir, "AW_AGENTS.md"), "contract")
+	writeFile(t, filepath.Join(midSessDir, "messages.jsonl"), "{}")
+
+	midTmpDir := runnerpaths.SessionTmpDir(rig.mid)
+	writeFile(t, filepath.Join(midTmpDir, "scratch.txt"), "tmp scratch")
+	writeFile(t, filepath.Join(midTmpDir, "claude-notes.md"), "user notes")
+	writeFile(t, filepath.Join(midTmpDir, "claude-1000", "state.json"), "{}")
+	writeFile(t, filepath.Join(midTmpDir, ".aw_agents.md"), "internal")
+	writeFile(t, filepath.Join(midTmpDir, "asgard-ssh-agent.sock"), "")
+	writeFile(t, filepath.Join(midTmpDir, "fakebash-outputs", "out.log"), "bash log")
+
+	chRoot, _, cancelRoot := rig.server.eventHub.Subscribe(rig.root, 0)
+	t.Cleanup(cancelRoot)
+	chMid, _, cancelMid := rig.server.eventHub.Subscribe(rig.mid, 0)
+	t.Cleanup(cancelMid)
+
+	synced := rig.server.syncSessionArtifacts(context.Background(), rig.mid)
+	want := []string{"/shared/r1/claude.md", "/session/notes.md", "/tmp/scratch.txt", "/tmp/claude-notes.md"}
+	assert.ElementsMatch(t, want, synced)
+
+	// Only unrecorded /shared, /session, and /tmp user files are appended to rig.mid.
+	midSess, err := rig.repo.GetSessionMeta(rig.mid)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, want, []string(midSess.Artifacts))
+
+	next := func(ch <-chan SessionEvent, typ string) SessionEvent {
+		t.Helper()
+		deadline := time.After(2 * time.Second)
+		for {
+			select {
+			case ev := <-ch:
+				if ev.Type == typ {
+					return ev
+				}
+			case <-deadline:
+				t.Fatalf("no %s event", typ)
+			}
+		}
+	}
+
+	// Both artifact (on mid) and subagent_artifact (on root) events fire.
+	evMid := next(chMid, EventTypeArtifact)
+	assert.ElementsMatch(t, want, evMid.Payload["artifacts"])
+	evRoot := next(chRoot, EventTypeSubagentArtifact)
+	assert.Equal(t, rig.mid, evRoot.Payload["id"])
+	assert.ElementsMatch(t, want, evRoot.Payload["artifacts"])
+
+	// Synced /session and /tmp files are openable via /api/v1/workspace/file.
+	for _, p := range []string{"/session/notes.md", "/tmp/scratch.txt"} {
+		rec := rig.get(t, "/api/v1/workspace/file?"+q("session_id", rig.mid, "path", p))
+		assert.Equal(t, http.StatusOK, rec.Code, p+": "+rec.Body.String())
+	}
+
+	// Running syncSessionArtifacts again is a no-op (idempotent).
+	assert.Empty(t, rig.server.syncSessionArtifacts(context.Background(), rig.mid))
+	midSess, err = rig.repo.GetSessionMeta(rig.mid)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, want, []string(midSess.Artifacts))
 }

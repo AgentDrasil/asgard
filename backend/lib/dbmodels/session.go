@@ -1231,10 +1231,18 @@ func (r *SessionRepository) AppendArtifact(chatID string, artifactPath string) e
 
 // AppendArtifacts appends multiple artifact paths to a session's Artifacts list safely and deduplicated in a single transaction.
 func (r *SessionRepository) AppendArtifacts(chatID string, artifactPaths []string) error {
+	_, err := r.AppendNewArtifacts(chatID, artifactPaths)
+	return err
+}
+
+// AppendNewArtifacts appends deduplicated artifact paths to a session's Artifacts
+// list in a single transaction and returns only the paths newly added.
+func (r *SessionRepository) AppendNewArtifacts(chatID string, artifactPaths []string) ([]string, error) {
 	if chatID == "" || len(artifactPaths) == 0 {
-		return nil
+		return nil, nil
 	}
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	var added []string
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		var session Session
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "chat_id = ?", chatID).Error
 		if err != nil {
@@ -1246,20 +1254,23 @@ func (r *SessionRepository) AppendArtifacts(chatID string, artifactPaths []strin
 			existing[item] = true
 		}
 
-		modified := false
 		for _, item := range artifactPaths {
 			if item != "" && !existing[item] {
 				session.Artifacts = append(session.Artifacts, item)
 				existing[item] = true
-				modified = true
+				added = append(added, item)
 			}
 		}
 
-		if !modified {
+		if len(added) == 0 {
 			return nil
 		}
 		return tx.Save(&session).Error
 	})
+	if err != nil {
+		return nil, err
+	}
+	return added, nil
 }
 
 // SpawnRootID returns the root of the spawn tree chatID belongs to: its

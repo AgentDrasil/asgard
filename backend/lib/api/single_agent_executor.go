@@ -495,6 +495,11 @@ func goGenerateSessionTitle(ctx context.Context, server *Server, client llm.Clie
 // If err == nil and there are still queued messages in repo, it skips marking completed
 // and skips broadcasting done/isRunning=false to avoid status flickering between queued tasks.
 func (e *SingleAgentExecutor) markAgentCompleted(ctx context.Context, chatID string, runErr error) {
+	if e.server != nil {
+		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		e.server.syncSessionArtifacts(syncCtx, chatID)
+		cancel()
+	}
 	if runErr == nil && e.repo != nil {
 		if queued, err := e.repo.GetQueuedMessages(chatID); err == nil && len(queued) > 0 {
 			return
