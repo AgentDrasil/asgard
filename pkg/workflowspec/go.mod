@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/pkg/workflowspec
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/goccy/go-yaml v1.19.2

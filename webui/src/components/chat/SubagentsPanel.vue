@@ -65,8 +65,7 @@ const stateClass = (s: ChatSession) => {
       <span>{{ t("subagents.title") }}</span>
       <span class="font-normal text-base-content/50">
         ({{ subagents.length }}<template v-if="liveCount > 0">, {{ liveCount }} </template
-        ><template v-if="liveCount > 0">{{ t("subagents.state.running") }}</template
-        >)
+        ><template v-if="liveCount > 0">{{ t("subagents.state.running") }}</template>)
       </span>
     </button>
     <ul v-if="!collapsed" class="mt-1 space-y-1 max-h-40 overflow-y-auto">

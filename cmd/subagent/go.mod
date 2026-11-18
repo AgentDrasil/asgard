@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/subagent
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0

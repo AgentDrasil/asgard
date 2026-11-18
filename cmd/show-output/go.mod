@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/show-output
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0

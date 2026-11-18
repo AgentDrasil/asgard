@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/asgard-init
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0

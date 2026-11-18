@@ -1,6 +1,6 @@
 module github.com/AgentDrasil/asgard/cmd/asgard-merge
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/AgentDrasil/asgard/pkg/logger v0.0.0

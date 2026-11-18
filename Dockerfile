@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.27.1
+ARG GO_VERSION=1.27.4
 ARG GOLANGCI_LINT_VERSION=v2.15.0
 ARG PROTOC_VERSION=36.2
 ARG NODE_VERSION=26
@@ -90,7 +90,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     rm -rf /var/lib/apt/lists/*
 
 # Install pnpm (version pinned to match webui/package.json packageManager)
-RUN npm install -g pnpm@12.19.0 && pnpm --version
+RUN npm install -g pnpm@12.21.0 && pnpm --version
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -106,7 +106,7 @@ CMD ["tail", "-f", "/dev/null"]
 # Stage 3: webui-builder
 FROM node:${NODE_VERSION}-alpine AS webui-builder
 
-RUN npm install -g pnpm@12.19.0
+RUN npm install -g pnpm@12.21.0
 
 WORKDIR /webui
 

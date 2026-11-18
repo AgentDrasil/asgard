@@ -5,12 +5,12 @@ on:
     branches: [ main ]
 
 env:
-  GO_VERSION: 1.27.1
+  GO_VERSION: 1.27.4
   GOIMPORTS_VERSION: latest
   GOLANGCI_LINT_VERSION: latest
   CFGCTL_VERSION: latest
   NODE_VERSION: 26
-  PNPM_VERSION: 12.19.0
+  PNPM_VERSION: 12.21.0
 
 jobs:
   backend:
@@ -64,7 +64,7 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Set up pnpm
-      uses: pnpm/setup@v2
+      uses: pnpm/setup@v3
       with:
         version: ${{ env.PNPM_VERSION }}
         runtime: node@${{ env.NODE_VERSION }}
