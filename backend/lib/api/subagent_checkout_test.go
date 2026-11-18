@@ -239,3 +239,28 @@ func TestReadonlySubagentOfPlainChat(t *testing.T) {
 	assert.Empty(t, req.WorktreeChatID)
 	assert.Nil(t, r.server.dirLocks.StatusForChat("ro"))
 }
+
+// A subagent whose config omits run_dirs inherits its session's run directory
+// as the allowlist sent to the runner, without mutating the shared agent.
+func TestSubagentWithoutRunDirsInheritsParentRunDir(t *testing.T) {
+	r := newCheckoutRig(t)
+	r.agent.Config.RunDirs = nil
+	r.agent.Config.Worktree = agentspec.WorktreeConfig{}
+	r.agent.Config.LockMode = agentspec.LockModeReadOnly
+
+	require.NoError(t, r.repo.SaveSession(&dbmodels.Session{ChatID: "parent", CurrentAgent: "da", RunDir: "/workspace/src/ime"}))
+	require.NoError(t, r.repo.SaveSession(&dbmodels.Session{
+		ChatID: "child-no-rundirs", CurrentAgent: "da", RunDir: "/workspace/src/ime",
+		ParentChatID: "parent", SpawnReadonly: true, SpawnDepth: 2,
+	}))
+
+	require.NoError(t, runWithin(t, 5*time.Second, func() error { return r.run(t.Context(), "child-no-rundirs") }))
+	req := <-r.reqs
+	assert.Equal(t, []string{"/workspace/src/ime"}, req.Agent.Config.RunDirs)
+	assert.Empty(t, r.agent.Config.RunDirs, "shared agent config must not be mutated")
+
+	// A top-level chat (no parent) with no run_dirs does not inherit RunDirs.
+	require.NoError(t, runWithin(t, 5*time.Second, func() error { return r.run(t.Context(), "parent") }))
+	req = <-r.reqs
+	assert.Empty(t, req.Agent.Config.RunDirs)
+}

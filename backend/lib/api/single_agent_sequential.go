@@ -134,6 +134,16 @@ func (e *SingleAgentExecutor) executeSequential(
 	}
 	cliCandidates := targetsForCLI(e.agent.Config, targetCLI)
 
+	dispatchAgent := e.agent
+	if len(dispatchAgent.Config.RunDirs) == 0 && session != nil && session.ParentChatID != "" && runDirOpt.IsSome() && runDirOpt.Unwrap() != "" {
+		// Subagents often omit run_dirs so they can work in whatever checkout
+		// their parent owns; pass the inherited run directory as the allowlist
+		// so the runner's resolveRunDir check accepts it.
+		cloned := *dispatchAgent
+		cloned.Config.RunDirs = []string{runDirOpt.Unwrap()}
+		dispatchAgent = &cloned
+	}
+
 	attempt := uint32(0)
 	for {
 		// Reset back to Running only when returning from a suspension so the
@@ -157,7 +167,7 @@ func (e *SingleAgentExecutor) executeSequential(
 			res, err := e.dispatcher.Run(ctx, dispatch.Request{
 				ChatID:     chatID,
 				UserID:     userID,
-				Agent:      e.agent,
+				Agent:      dispatchAgent,
 				Candidates: cliCandidates,
 				Prompt:     prompt,
 				Sessions:   sessions,
