@@ -15,7 +15,7 @@ import ActivityMessage from "./chat/ActivityMessage.vue";
 import AskUserCard from "./chat/AskUserCard.vue";
 import QueuedMessageCard from "./chat/QueuedMessageCard.vue";
 import SubagentsPanel from "./chat/SubagentsPanel.vue";
-import { subagentLabel } from "../utils/sessionTree";
+import { subagentLabel, subagentStateBadgeClass } from "../utils/sessionTree";
 import ArtifactViewer from "./ArtifactViewer.vue";
 import type { ArtifactSource } from "../utils/artifactSources";
 import { t } from "../i18n";
@@ -510,9 +510,11 @@ onUnmounted(() => {
       <span class="badge badge-outline badge-xs" data-testid="subagent-breadcrumb-mode">{{
         session.spawnReadonly ? t("subagents.readonly") : t("subagents.writable")
       }}</span>
-      <span v-if="session.subagentState" class="badge badge-ghost badge-xs">{{
-        t(`subagents.state.${session.subagentState}`)
-      }}</span>
+      <span
+        v-if="session.subagentState"
+        :class="['badge badge-xs font-medium', subagentStateBadgeClass(session.subagentState)]"
+        >{{ t(`subagents.state.${session.subagentState}`) }}</span
+      >
     </div>
 
     <!-- Parent chat: its subagents with live state -->

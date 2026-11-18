@@ -980,3 +980,49 @@ func TestResetOrphanedQuotaSuspensions(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionRepository_CascadeArchiveAndDelete(t *testing.T) {
+	t.Parallel()
+
+	for _, op := range []string{"archive", "delete"} {
+		t.Run(op, func(t *testing.T) {
+			t.Parallel()
+			testDB := db.NewDBForTest(t)
+			require.NoError(t, testDB.AutoMigrate(&Session{}))
+			repo := NewSessionRepository(testDB)
+
+			for _, s := range []*Session{
+				{ChatID: "parent-1", CurrentAgent: "lead", Title: "Parent"},
+				{ChatID: "child-1", ParentChatID: "parent-1", CurrentAgent: "coder", Title: "Child"},
+				{ChatID: "grandchild-1", ParentChatID: "child-1", CurrentAgent: "reviewer", Title: "Grandchild"},
+				{ChatID: "unrelated-1", CurrentAgent: "lead", Title: "Unrelated"},
+			} {
+				require.NoError(t, repo.SaveSession(s))
+			}
+
+			if op == "archive" {
+				require.NoError(t, repo.ArchiveSession("parent-1"))
+				for _, id := range []string{"parent-1", "child-1", "grandchild-1"} {
+					got, err := repo.GetSessionMeta(id)
+					require.NoError(t, err)
+					require.NotNil(t, got)
+					assert.True(t, got.IsArchived, "expected %s to be archived", id)
+				}
+				unrelated, err := repo.GetSessionMeta("unrelated-1")
+				require.NoError(t, err)
+				assert.False(t, unrelated.IsArchived)
+				return
+			}
+
+			require.NoError(t, repo.DeleteSession("parent-1"))
+			for _, id := range []string{"parent-1", "child-1", "grandchild-1"} {
+				got, err := repo.GetSessionMeta(id)
+				require.NoError(t, err)
+				assert.Nil(t, got, "expected %s to be deleted", id)
+			}
+			unrelated, err := repo.GetSessionMeta("unrelated-1")
+			require.NoError(t, err)
+			assert.NotNil(t, unrelated)
+		})
+	}
+}

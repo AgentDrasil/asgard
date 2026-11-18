@@ -1,7 +1,8 @@
 import { ref, type Ref } from "vue";
 import type { RouteLocationNormalizedLoaded, Router } from "vue-router";
-import type { AgentInfo } from "../types";
+import type { AgentInfo, ChatSession } from "../types";
 import { deleteSessionFromLocal, unlockSession } from "../lib/api";
+import { descendantIds } from "../utils/sessionTree";
 import { i18n } from "../i18n";
 import { useToast } from "./useToast";
 
@@ -15,6 +16,7 @@ export function useSessions(
   loadSessions: () => Promise<void>,
   archiveSessionById?: (id: string) => Promise<boolean>,
   unlockSessionById?: (id: string) => Promise<boolean>,
+  sessions?: Ref<ChatSession[]>,
 ) {
   const toast = useToast();
 
@@ -48,9 +50,11 @@ export function useSessions(
   };
 
   const handleDeleteSession = async (id: string) => {
+    const removed = sessions ? descendantIds(sessions.value, id) : new Set([id]);
     await deleteSessionFromLocal(id);
     await loadSessions();
-    if (route.params.id === id || activeSessionId.value === id) {
+    const routeId = typeof route.params.id === "string" ? route.params.id : "";
+    if (removed.has(routeId) || (activeSessionId.value && removed.has(activeSessionId.value))) {
       handleNewChat();
     }
   };

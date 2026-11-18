@@ -365,9 +365,13 @@ func (r *SessionRepository) GetSessionsByRunners(runners []string, includeArchiv
 	return sessions, nil
 }
 
-// ArchiveSession archives a session by chat ID.
+// ArchiveSession archives a session and all of its descendant subagent sessions.
 func (r *SessionRepository) ArchiveSession(chatID string) error {
-	return r.db.Model(&Session{}).Where("chat_id = ?", chatID).Update("is_archived", true).Error
+	ids, err := r.SpawnTreeIDs(chatID)
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&Session{}).Where("chat_id IN ?", ids).Update("is_archived", true).Error
 }
 
 // SearchSessions searches sessions by matching title (case-insensitive substring match).
@@ -434,9 +438,19 @@ func (r *SessionRepository) SearchSessionsByRunners(runners []string, query stri
 	return sessions, nil
 }
 
-// DeleteSession deletes a session by chat ID and removes its session directory.
+// DeleteSession deletes a session and all of its descendant subagent sessions,
+// removing their session directories.
 func (r *SessionRepository) DeleteSession(chatID string) error {
-	return r.deleteSession(chatID, true)
+	ids, err := r.SpawnTreeIDs(chatID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := r.deleteSession(id, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteSessionRecord deletes the chat's database rows only. The chat's
@@ -1306,6 +1320,28 @@ SELECT s.chat_id FROM `+table+` s JOIN down ON s.parent_chat_id = down.chat_id
 		return sessions[:limit], true, nil
 	}
 	return sessions, false, nil
+}
+
+// SpawnTreeIDs returns chatID and all of its descendant subagent chat IDs.
+// If chatID does not exist in the table, it returns []string{chatID}.
+func (r *SessionRepository) SpawnTreeIDs(chatID string) ([]string, error) {
+	table, err := r.sessionTable()
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	err = r.db.Raw(`WITH RECURSIVE down(chat_id, d) AS (
+SELECT chat_id, 0 FROM `+table+` WHERE chat_id = ?
+UNION ALL
+SELECT s.chat_id, down.d + 1 FROM `+table+` s JOIN down ON s.parent_chat_id = down.chat_id WHERE down.d < 1024
+) SELECT DISTINCT chat_id FROM down`, chatID).Pluck("chat_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []string{chatID}, nil
+	}
+	return ids, nil
 }
 
 func (r *SessionRepository) sessionTable() (string, error) {

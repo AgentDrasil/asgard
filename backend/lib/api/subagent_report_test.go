@@ -1019,11 +1019,20 @@ func TestDeleteAndArchiveForgetSubagentState(t *testing.T) {
 	for _, op := range []string{"delete", "archive"} {
 		t.Run(op, func(t *testing.T) {
 			rig, _ := reportRig(t)
+			childID := "child-cascade-1"
+			require.NoError(t, rig.repo.SaveSession(&dbmodels.Session{
+				ChatID:       childID,
+				ParentChatID: rigChat,
+				CurrentAgent: "coder",
+			}))
 			rig.server.bumpReleaseEpoch(rigChat)
 			rig.server.markStopped(rigChat)
+			rig.server.bumpReleaseEpoch(childID)
+			rig.server.markStopped(childID)
 			g := &rig.server.subagentSig
 			g.mu.Lock()
 			g.queuedPush[rigChat] = "m"
+			g.queuedPush[childID] = "c"
 			g.mu.Unlock()
 
 			w := httptest.NewRecorder()
@@ -1037,9 +1046,19 @@ func TestDeleteAndArchiveForgetSubagentState(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			g.mu.Lock()
 			defer g.mu.Unlock()
-			assert.NotContains(t, g.releaseEpoch, rigChat)
-			assert.NotContains(t, g.queuedPush, rigChat)
-			assert.NotContains(t, g.stopped, rigChat)
+			for _, id := range []string{rigChat, childID} {
+				assert.NotContains(t, g.releaseEpoch, id)
+				assert.NotContains(t, g.queuedPush, id)
+				assert.NotContains(t, g.stopped, id)
+			}
+			childMeta, err := rig.repo.GetSessionMeta(childID)
+			require.NoError(t, err)
+			if op == "delete" {
+				assert.Nil(t, childMeta)
+			} else {
+				require.NotNil(t, childMeta)
+				assert.True(t, childMeta.IsArchived)
+			}
 		})
 	}
 }

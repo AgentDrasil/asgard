@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import type { ChatSession } from "../types";
 import { Icon } from "@iconify/vue";
 import { formatLockTooltip } from "../utils/dirLockUtils";
+import { subagentLabel, subagentStateBadgeClass } from "../utils/sessionTree";
 
 const { t } = useI18n();
 
@@ -24,22 +25,18 @@ const props = withDefaults(
 const isSubagent = computed(() => !!props.session.parentChatId);
 const displayTitle = computed(() =>
   isSubagent.value
-    ? props.session.spawnLabel || props.session.title || t("subagents.untitled")
+    ? subagentLabel(props.session, t("subagents.untitled"))
     : props.session.title || t("sidebar.untitledChat"),
 );
-const stateBadgeClass = computed(() => {
-  switch (props.session.subagentState) {
-    case "running":
-      return "badge-info";
-    case "queued":
-      return "badge-warning";
-    case "failed":
-      return "badge-error";
-    case "killed":
-      return "badge-neutral";
-    default:
-      return "badge-success";
-  }
+const stateBadgeClass = computed(() => subagentStateBadgeClass(props.session.subagentState));
+
+const subagentTooltip = computed(() => {
+  if (!isSubagent.value) return displayTitle.value;
+  const mode = props.session.spawnReadonly ? t("subagents.readonly") : t("subagents.writable");
+  const parts = [displayTitle.value];
+  if (props.session.currentAgent) parts.push(props.session.currentAgent);
+  parts.push(mode);
+  return parts.join(" · ");
 });
 
 const lockTooltip = computed(() => {
@@ -150,6 +147,14 @@ const handleArchive = () => {
     :style="depth > 0 ? { paddingLeft: `${Math.min(depth, 4) * 12}px` } : undefined"
     :data-depth="depth"
   >
+    <!-- Tree guide line for nested subagents -->
+    <div
+      v-if="depth > 0"
+      class="absolute top-0 bottom-0 w-px bg-base-content/15 pointer-events-none"
+      :style="{ left: `${Math.min(depth, 4) * 12 - 6}px` }"
+      aria-hidden="true"
+    />
+
     <!-- Action / Delete Background Layer -->
     <div
       class="absolute inset-y-0 right-0 flex items-center justify-center bg-error/15 dark:bg-error/25 rounded-lg"
@@ -171,7 +176,8 @@ const handleArchive = () => {
       @touchend="handleTouchEnd"
       @click="handleClick"
       :class="[
-        'group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium w-full relative gap-2',
+        'group flex items-center justify-between gap-2 px-3 rounded-lg cursor-pointer text-sm font-medium w-full relative',
+        isSubagent ? 'py-2' : 'py-2.5',
         isActive
           ? 'bg-primary text-primary-content'
           : 'bg-base-300 hover:bg-base-200 text-base-content/85',
@@ -179,101 +185,102 @@ const handleArchive = () => {
       ]"
       :style="{ transform: `translateX(${swipeOffset}px)` }"
     >
-      <!-- Directory Lock Indicator / Badge -->
-      <span
-        v-if="session.dirLock?.isWaitingForLock"
-        class="badge badge-warning badge-xs gap-1 shrink-0 px-1.5 py-0.5"
-        :title="lockTooltip"
-        :aria-label="lockTooltip"
-        data-testid="session-waiting-lock-badge"
-      >
-        <Icon icon="lucide:clock" class="h-3 w-3 shrink-0" />
-        <span class="text-[10px] hidden sm:inline">{{ t("dirlock.queuedBadge") }}</span>
-      </span>
-      <span
-        v-else-if="session.dirLock?.isLocked"
-        :class="[
-          'badge badge-xs gap-1 shrink-0 px-1.5 py-0.5',
-          session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
-        ]"
-        :title="lockTooltip"
-        :aria-label="lockTooltip"
-        data-testid="session-locked-badge"
-      >
-        <Icon icon="lucide:lock" class="h-3 w-3 shrink-0" />
-        <span v-if="session.dirLock?.canUnlock" class="text-[10px] hidden sm:inline">{{
-          t("dirlock.uncommittedBadge")
-        }}</span>
-      </span>
-      <button
-        v-if="childCount > 0"
-        type="button"
-        class="shrink-0 flex items-center justify-center h-5 w-5 rounded hover:bg-black/10"
-        :title="collapsed ? t('subagents.expand') : t('subagents.collapse')"
-        :aria-label="collapsed ? t('subagents.expand') : t('subagents.collapse')"
-        :aria-expanded="!collapsed"
-        data-testid="session-toggle-children"
-        @click.stop="emit('toggle-children', session.chatID)"
-      >
-        <Icon
-          icon="mynaui:chevron-down"
-          :class="['h-3.5 w-3.5 fill-current transition-transform', collapsed ? '-rotate-90' : '']"
-        />
-        <span class="text-[10px] ml-0.5">{{ childCount }}</span>
-      </button>
-      <Icon
-        v-if="isSubagent"
-        icon="lucide:git-fork"
-        class="h-3.5 w-3.5 shrink-0 opacity-70"
-        aria-hidden="true"
-      />
-      <span class="truncate min-w-0 select-none flex-1" data-testid="session-title">{{
-        displayTitle
-      }}</span>
-
-      <!-- Subagent details: agent, access mode and state -->
-      <div v-if="isSubagent" class="flex items-center gap-1 shrink-0" data-testid="subagent-badges">
+      <div class="flex items-center gap-1.5 min-w-0 flex-1">
+        <!-- Directory Lock Indicator / Badge -->
         <span
-          class="badge badge-ghost badge-xs max-w-[72px] truncate hidden sm:inline-flex"
-          :title="session.currentAgent"
-          >{{ session.currentAgent }}</span
+          v-if="session.dirLock?.isWaitingForLock"
+          class="badge badge-warning badge-xs gap-1 shrink-0 px-1.5 py-0.5"
+          :title="lockTooltip"
+          :aria-label="lockTooltip"
+          data-testid="session-waiting-lock-badge"
         >
-        <span class="badge badge-outline badge-xs" data-testid="subagent-mode">{{
-          session.spawnReadonly ? t("subagents.readonly") : t("subagents.writable")
-        }}</span>
+          <Icon icon="lucide:clock" class="h-3 w-3 shrink-0" />
+          <span class="text-[10px] hidden sm:inline">{{ t("dirlock.queuedBadge") }}</span>
+        </span>
         <span
-          v-if="session.subagentState"
-          :class="['badge badge-xs', stateBadgeClass]"
-          data-testid="subagent-state"
-          >{{ t(`subagents.state.${session.subagentState}`) }}</span
+          v-else-if="session.dirLock?.isLocked"
+          :class="[
+            'badge badge-xs gap-1 shrink-0 px-1.5 py-0.5',
+            session.dirLock?.canUnlock ? 'badge-accent' : 'badge-ghost',
+          ]"
+          :title="lockTooltip"
+          :aria-label="lockTooltip"
+          data-testid="session-locked-badge"
+        >
+          <Icon icon="lucide:lock" class="h-3 w-3 shrink-0" />
+          <span v-if="session.dirLock?.canUnlock" class="text-[10px] hidden sm:inline">{{
+            t("dirlock.uncommittedBadge")
+          }}</span>
+        </span>
+        <button
+          v-if="childCount > 0"
+          type="button"
+          class="shrink-0 flex items-center justify-center h-5 min-w-5 px-1 gap-0.5 rounded hover:bg-black/10"
+          :title="collapsed ? t('subagents.expand') : t('subagents.collapse')"
+          :aria-label="collapsed ? t('subagents.expand') : t('subagents.collapse')"
+          :aria-expanded="!collapsed"
+          data-testid="session-toggle-children"
+          @click.stop="emit('toggle-children', session.chatID)"
+        >
+          <Icon
+            icon="mynaui:chevron-down"
+            :class="[
+              'h-3.5 w-3.5 fill-current transition-transform',
+              collapsed ? '-rotate-90' : '',
+            ]"
+          />
+          <span class="text-[10px]">{{ childCount }}</span>
+        </button>
+        <Icon
+          v-if="isSubagent"
+          icon="lucide:git-fork"
+          class="h-3.5 w-3.5 shrink-0 opacity-70"
+          aria-hidden="true"
+        />
+        <span
+          :class="['truncate min-w-0 select-none flex-1', isSubagent ? 'text-[13px]' : '']"
+          :title="subagentTooltip"
+          data-testid="session-title"
+          >{{ displayTitle }}</span
         >
       </div>
 
-      <div class="flex items-center gap-1 shrink-0">
+      <span
+        v-if="isSubagent && session.subagentState"
+        :class="['badge badge-xs gap-1 shrink-0 font-medium', stateBadgeClass]"
+        data-testid="subagent-state"
+        ><span
+          v-if="session.subagentState === 'running'"
+          class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"
+          aria-hidden="true"
+        />{{ t(`subagents.state.${session.subagentState}`) }}</span
+      >
+
+      <div class="hidden [@media(pointer:fine)]:group-hover:flex items-center gap-0.5 shrink-0">
         <!-- Desktop Mouse Hover Archive Button -->
         <button
           @click.stop="handleArchive"
           :class="[
-            'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 hidden [@media(pointer:fine)]:flex items-center justify-center',
+            'btn btn-ghost btn-xs p-1 min-h-0 h-5 w-5 flex items-center justify-center',
             isActive
               ? 'text-primary-content hover:bg-white/20'
               : 'text-base-content/70 hover:text-base-content hover:bg-base-100',
           ]"
           :title="t('sidebar.archiveSession')"
         >
-          <Icon icon="mynaui:archive" class="h-4 w-4 fill-current" />
+          <Icon icon="mynaui:archive" class="h-3.5 w-3.5 fill-current" />
         </button>
 
         <!-- Desktop Mouse Hover Delete Button (Only on devices with cursor/mouse precision) -->
         <button
           @click.stop="handleDelete"
           :class="[
-            'btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity p-1 min-h-0 h-6 w-6 hidden [@media(pointer:fine)]:flex items-center justify-center',
+            'btn btn-ghost btn-xs p-1 min-h-0 h-5 w-5 flex items-center justify-center',
             isActive ? 'text-primary-content hover:bg-white/20' : 'text-error hover:bg-error/10',
           ]"
           :title="t('sidebar.deleteSession')"
         >
-          <Icon icon="mynaui:trash-one" class="h-4 w-4 fill-current" />
+          <Icon icon="mynaui:trash-one" class="h-3.5 w-3.5 fill-current" />
         </button>
       </div>
     </div>

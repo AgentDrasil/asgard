@@ -258,6 +258,7 @@ const {
   loadSessions,
   archiveSessionById,
   unlockSessionById,
+  sessions,
 );
 
 const handleNewChat = (closeSidebar?: () => void, agentId?: string, runDir?: string) => {

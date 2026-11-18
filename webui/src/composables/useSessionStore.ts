@@ -31,6 +31,7 @@ import {
 import { useSessionEvents } from "./useSessionEvents";
 import { mergeToolMessages } from "../utils/messageUtils";
 import { mergeSubagentArtifacts } from "../utils/artifactSources";
+import { descendantIds } from "../utils/sessionTree";
 import { t } from "../i18n";
 import { useToast } from "./useToast";
 
@@ -866,8 +867,9 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   const archiveSessionById = async (id: string): Promise<boolean> => {
     const success = await archiveSession(id);
     if (success) {
-      sessions.value = sessions.value.filter((s) => s.chatID !== id);
-      if (activeSessionId.value === id) {
+      const removed = descendantIds(sessions.value, id);
+      sessions.value = sessions.value.filter((s) => !removed.has(s.chatID));
+      if (activeSessionId.value && removed.has(activeSessionId.value)) {
         if (router) {
           await router.push("/dashboard");
         } else {

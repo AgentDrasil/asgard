@@ -52,14 +52,16 @@ describe("SessionList.vue subagent nesting", () => {
     return app;
   };
 
-  it("nests children under the parent with label, mode and state", () => {
+  it("nests children under the parent with label, state and tooltip details", () => {
     const app = mount("list");
     const items = Array.from(root.querySelectorAll("[data-depth]")) as HTMLElement[];
     expect(items.map((i) => i.dataset.depth)).toEqual(["0", "1", "1"]);
-    expect(items[1].querySelector('[data-testid="session-title"]')?.textContent).toBe("review");
-    expect(items[1].querySelector('[data-testid="subagent-mode"]')?.textContent).toBe("read-only");
+    const title1 = items[1].querySelector('[data-testid="session-title"]');
+    expect(title1?.textContent).toBe("review");
+    expect(title1?.getAttribute("title")).toBe("review · reviewer · read-only");
     expect(items[1].querySelector('[data-testid="subagent-state"]')?.textContent).toBe("running");
-    expect(items[2].querySelector('[data-testid="subagent-mode"]')?.textContent).toBe("writable");
+    const title2 = items[2].querySelector('[data-testid="session-title"]');
+    expect(title2?.getAttribute("title")).toBe("edit · coder · writable");
     expect(items[2].querySelector('[data-testid="subagent-state"]')?.textContent).toBe("failed");
     app.unmount();
   });

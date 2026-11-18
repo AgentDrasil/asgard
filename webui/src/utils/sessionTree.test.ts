@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { flattenSessions, rootOf, subagentLabel } from "./sessionTree";
+import {
+  descendantIds,
+  flattenSessions,
+  rootOf,
+  subagentLabel,
+  subagentStateBadgeClass,
+} from "./sessionTree";
 import type { ChatSession } from "../types";
 
 const mk = (chatID: string, parentChatId?: string): ChatSession => ({
@@ -47,5 +53,20 @@ describe("sessionTree", () => {
   it("labels a subagent by label, then title", () => {
     expect(subagentLabel({ ...mk("c"), spawnLabel: "review" }, "x")).toBe("review");
     expect(subagentLabel({ ...mk("c"), title: "" }, "x")).toBe("x");
+  });
+
+  it("maps subagent states to DaisyUI badge classes", () => {
+    expect(subagentStateBadgeClass("running")).toBe("badge-info");
+    expect(subagentStateBadgeClass("queued")).toBe("badge-warning");
+    expect(subagentStateBadgeClass("failed")).toBe("badge-error");
+    expect(subagentStateBadgeClass("killed")).toBe("badge-neutral");
+    expect(subagentStateBadgeClass("done")).toBe("badge-success");
+    expect(subagentStateBadgeClass(undefined)).toBe("badge-success");
+  });
+
+  it("collects root and all descendant subagent IDs", () => {
+    const all = [mk("p"), mk("c1", "p"), mk("g1", "c1"), mk("c2", "p"), mk("other")];
+    expect(descendantIds(all, "p")).toEqual(new Set(["p", "c1", "g1", "c2"]));
+    expect(descendantIds(all, "missing")).toEqual(new Set(["missing"]));
   });
 });

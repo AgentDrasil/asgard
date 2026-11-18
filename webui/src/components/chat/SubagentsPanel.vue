@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { Icon } from "@iconify/vue";
 import { useI18n } from "vue-i18n";
 import type { ChatSession } from "../../types";
-import { subagentLabel } from "../../utils/sessionTree";
+import { subagentLabel, subagentStateBadgeClass } from "../../utils/sessionTree";
 
 const { t } = useI18n();
 
@@ -28,20 +28,7 @@ const liveCount = computed(
 
 const isLive = (s: ChatSession) => s.subagentState === "running" || s.subagentState === "queued";
 
-const stateClass = (s: ChatSession) => {
-  switch (s.subagentState) {
-    case "running":
-      return "badge-info";
-    case "queued":
-      return "badge-warning";
-    case "failed":
-      return "badge-error";
-    case "killed":
-      return "badge-neutral";
-    default:
-      return "badge-success";
-  }
-};
+const stateClass = (s: ChatSession) => subagentStateBadgeClass(s.subagentState);
 </script>
 
 <template>
@@ -76,21 +63,28 @@ const stateClass = (s: ChatSession) => {
         data-testid="subagent-row"
       >
         <span
-          :class="['badge badge-xs shrink-0', stateClass(s)]"
+          :class="['badge badge-xs gap-1 shrink-0 font-medium', stateClass(s)]"
           data-testid="subagent-row-state"
-          >{{ s.subagentState ? t(`subagents.state.${s.subagentState}`) : "" }}</span
+          ><span
+            v-if="s.subagentState === 'running'"
+            class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"
+            aria-hidden="true"
+          />{{ s.subagentState ? t(`subagents.state.${s.subagentState}`) : "" }}</span
         >
         <span
           class="truncate font-medium min-w-0"
           :title="subagentLabel(s, t('subagents.untitled'))"
           >{{ subagentLabel(s, t("subagents.untitled")) }}</span
         >
-        <span class="badge badge-ghost badge-xs shrink-0 max-w-[96px] truncate">{{
-          s.currentAgent
-        }}</span>
-        <span class="badge badge-outline badge-xs shrink-0">{{
+        <span class="badge badge-outline badge-xs shrink-0 opacity-75">{{
           s.spawnReadonly ? t("subagents.readonly") : t("subagents.writable")
         }}</span>
+        <span
+          v-if="s.currentAgent"
+          class="text-base-content/60 truncate max-w-[140px] sm:max-w-[200px] hidden sm:inline"
+          :title="s.currentAgent"
+          >{{ s.currentAgent }}</span
+        >
         <span class="ml-auto flex items-center gap-1 shrink-0">
           <button
             type="button"

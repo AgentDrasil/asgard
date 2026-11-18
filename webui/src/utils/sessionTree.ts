@@ -1,4 +1,4 @@
-import type { ChatSession } from "../types";
+import type { ChatSession, SubagentState } from "../types";
 
 export interface SessionRow {
   session: ChatSession;
@@ -10,6 +10,22 @@ export interface SessionRow {
 // subagentLabel is the name a subagent chat goes by in lists.
 export function subagentLabel(s: ChatSession, fallback: string): string {
   return s.spawnLabel || s.title || fallback;
+}
+
+/** Returns the DaisyUI badge class for a subagent lifecycle state. */
+export function subagentStateBadgeClass(state?: SubagentState): string {
+  switch (state) {
+    case "running":
+      return "badge-info";
+    case "queued":
+      return "badge-warning";
+    case "failed":
+      return "badge-error";
+    case "killed":
+      return "badge-neutral";
+    default:
+      return "badge-success";
+  }
 }
 
 // childrenByParent groups the sessions that have a parent present in the list.
@@ -40,6 +56,20 @@ export function rootOf(s: ChatSession, byId: Map<string, ChatSession>): ChatSess
     cur = byId.get(cur.parentChatId)!;
   }
   return cur;
+}
+
+/** Returns rootId together with all of its descendant subagent chat IDs. */
+export function descendantIds(sessions: ChatSession[], rootId: string): Set<string> {
+  const { children } = indexSessions(sessions);
+  const ids = new Set<string>();
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (ids.has(id)) continue;
+    ids.add(id);
+    for (const kid of children.get(id) ?? []) stack.push(kid.chatID);
+  }
+  return ids;
 }
 
 // flattenSessions lays the sessions out as tree rows: every root followed by

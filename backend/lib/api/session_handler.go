@@ -364,6 +364,14 @@ func (s *Server) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ids, err := s.repo.SpawnTreeIDs(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to resolve subagent sessions: " + err.Error()})
+		return
+	}
+
 	if err := s.repo.ArchiveSession(id); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -371,11 +379,7 @@ func (s *Server) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.subagentSig.forget(id)
-	s.cancelQuestionsOf(id, "archived")
-	if s.dirLocks != nil {
-		s.dirLocks.ForceReleaseChat(id)
-	}
+	s.cleanupRemovedSessions(ids, "archived")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -402,6 +406,14 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ids, err := s.repo.SpawnTreeIDs(chatID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to resolve subagent sessions: " + err.Error()})
+		return
+	}
+
 	if err := s.repo.DeleteSession(chatID); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -409,13 +421,19 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.subagentSig.forget(chatID)
-	s.cancelQuestionsOf(chatID, "deleted")
-	if s.dirLocks != nil {
-		s.dirLocks.ForceReleaseChat(chatID)
-	}
+	s.cleanupRemovedSessions(ids, "deleted")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *Server) cleanupRemovedSessions(ids []string, reason string) {
+	for _, id := range ids {
+		s.subagentSig.forget(id)
+		s.cancelQuestionsOf(id, reason)
+		if s.dirLocks != nil {
+			s.dirLocks.ForceReleaseChat(id)
+		}
+	}
 }
