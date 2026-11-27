@@ -241,7 +241,7 @@ func TestAccountForSandbox_Pinned(t *testing.T) {
 	selectAccount = func(string) (string, bool, error) { return "", false, errors.New("must not be consulted") }
 	sel, err := accountForSandbox("claude", "m", true, map[string]string{"claude": "b"})
 	require.NoError(t, err)
-	assert.Equal(t, accountSel{alias: "b", ok: true, strict: true}, sel)
+	assert.Equal(t, accountSel{alias: "b", ok: true}, sel)
 	// A CLI that is not pinned binds nothing.
 	sel, err = accountForSandbox("agy", "m", true, map[string]string{"claude": "b"})
 	require.NoError(t, err)

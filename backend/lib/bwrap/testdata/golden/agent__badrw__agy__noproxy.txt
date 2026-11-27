@@ -1,0 +1,1 @@
+ERROR: mount readwrite directory "<ROOT>/ws/missing-rw" does not exist: stat <ROOT>/ws/missing-rw: no such file or directory
