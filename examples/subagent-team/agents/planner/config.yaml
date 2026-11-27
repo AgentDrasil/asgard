@@ -1,0 +1,18 @@
+# Subagent spawned by `orchestrator --readonly`. ask_user unset: the platform default for a
+# subagent is escalate, so its plain ask-user goes to the orchestrator, who relays it to the human.
+type: agent
+id: planner
+name: Planner
+description: Aligns requirements with the user, reads the code and writes plan.md and decisions.md to /shared.
+icon: fluent-color:clipboard-task-list-ltr-24
+team: dev
+main_agent: false
+
+cli:
+  - cli: claude
+    model: opus
+  - cli: agy
+    model: gemini-3.7-pro
+
+lock_mode: readonly
+session_mode: resume        # same instance is resumed for plan reviews and questions

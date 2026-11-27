@@ -1,0 +1,16 @@
+# Subagent only: not offered in the UI picker, spawned by `orchestrator` (one per Plan item).
+type: agent
+id: impler
+name: Impler
+description: Implements one Plan item in the parent's checkout and commits it.
+icon: fluent-color:code-24
+team: dev                   # must be on the caller's team
+main_agent: false           # subagent-only; run_dirs not required, it works in the parent's checkout
+
+cli:
+  - cli: agy
+    model: gemini-3.7-flash   # cheap fast model; orchestrator can override with --model
+  - cli: claude
+    model: sonnet
+
+session_mode: resume

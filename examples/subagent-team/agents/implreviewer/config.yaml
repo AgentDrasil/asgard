@@ -1,0 +1,15 @@
+# Subagent only, spawned by `orchestrator --readonly`: three per round, one lens each.
+type: agent
+id: implreviewer
+name: Impl Reviewer
+description: Reviews one commit through one lens and writes a findings file to /shared.
+icon: fluent-color:search-24
+team: dev
+main_agent: false
+
+cli:
+  - cli: opencode
+    model: zai-coding-plan/glm-5.3/high
+
+lock_mode: readonly         # checkout mounted ro, no dir lock -> parallel reviews OK
+session_mode: resume

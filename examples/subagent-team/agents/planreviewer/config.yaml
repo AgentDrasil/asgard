@@ -1,0 +1,15 @@
+# Subagent spawned by `orchestrator --readonly`, a fresh one per plan review round.
+type: agent
+id: planreviewer
+name: Plan Reviewer
+description: Reviews plan.md against the request, decisions and code; writes review.md with a VERDICT.
+icon: fluent-color:search-24
+team: dev
+main_agent: false
+
+cli:
+  - cli: opencode
+    model: zai-coding-plan/glm-5.3/high
+
+lock_mode: readonly
+session_mode: resume

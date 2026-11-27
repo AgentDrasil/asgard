@@ -1,0 +1,16 @@
+# Subagent only, spawned by `orchestrator` (writable): fixes review findings and amends the commit.
+type: agent
+id: fixer
+name: Fixer
+description: Fixes every item of a review summary and amends the Plan item's commit.
+icon: fluent-color:wrench-24
+team: dev
+main_agent: false
+
+cli:
+  - cli: claude
+    model: sonnet
+  - cli: agy
+    model: gemini-3.7-pro
+
+session_mode: resume        # the same fixer is resumed with `subagent send` across rounds

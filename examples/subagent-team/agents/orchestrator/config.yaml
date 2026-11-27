@@ -1,0 +1,21 @@
+# Root of the spawn tree: the chat the user starts. Spawns and controls every other agent.
+# ask_user unset: the platform default for a root chat is allow.
+type: agent
+id: orchestrator
+name: Orchestrator
+description: Spawns planner, plan reviewers, implementers, impl reviewers and fixers; relays planner questions to the human.
+icon: fluent-color:people-team-24
+team: dev
+main_agent: true
+
+cli:
+  - cli: claude
+    model: opus
+  - cli: agy
+    model: gemini-3.7-pro
+
+run_dirs:
+  - /path/to/your/repo
+
+# Writable: it commits docs/plans/<topic>.md into the checkout at the end.
+session_mode: resume
