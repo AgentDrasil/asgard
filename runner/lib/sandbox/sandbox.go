@@ -325,7 +325,7 @@ func (s *Sandbox) GitExec(ctx context.Context, spec runnerfs.GitExecSpec) (*exec
 	if err != nil {
 		return nil, err
 	}
-	cmd.ExtraFiles = []*os.File{spec.WorkTree}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, spec.WorkTree) // fd 3 is the bwrap --args file; the repository is fd 4
 	return cmd, nil
 }
 

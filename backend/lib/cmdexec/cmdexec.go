@@ -72,6 +72,15 @@ func RunDirect(ctx context.Context, command, dir string, env []string, stdout, s
 	return 0, nil
 }
 
+// sandboxCommand builds the bwrap command of RunSandboxed. Only allowlisted
+// variables of env enter the sandbox (bwrap --clearenv), plus ASGARD_CHAT_ID;
+// the runner's own environment (credentials, ETCD_*, ...) is dropped.
+func sandboxCommand(spec SandboxSpec, env []string, sockDir string) (*exec.Cmd, error) {
+	proxyCfg := spec.Proxy
+	proxyCfg.ExtraEnv = append(bwrap.FilterSandboxEnv(env), "ASGARD_CHAT_ID="+spec.ChatID)
+	return bwrap.CommandForCommandExecAt(spec.Dir, spec.Cwd, sockDir, spec.ChatID, spec.ConfigPath, spec.AllowCrossSession, spec.ReadonlyDirs, proxyCfg)
+}
+
 // RunSandboxed runs the command inside a bubblewrap sandbox hosting a
 // fakebashd gRPC daemon: the host dials the socket directory bind-mounted at
 // /fakebash.
@@ -82,10 +91,6 @@ func RunSandboxed(ctx context.Context, spec SandboxSpec, stdout, stderr io.Write
 	}
 	defer func() { _ = os.RemoveAll(sockDir) }()
 
-	sandboxCmd, err := bwrap.CommandForCommandExecAt(spec.Dir, spec.Cwd, sockDir, spec.ChatID, spec.ConfigPath, spec.AllowCrossSession, spec.ReadonlyDirs, spec.Proxy)
-	if err != nil {
-		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
-	}
 	env := spec.Env
 	if env == nil {
 		env = os.Environ()
@@ -94,12 +99,15 @@ func RunSandboxed(ctx context.Context, spec SandboxSpec, stdout, stderr io.Write
 	if cwd == "" {
 		cwd = spec.Dir
 	}
-	sandboxCmd.Env = append(append([]string(nil), env...), "ASGARD_CHAT_ID="+spec.ChatID)
+	sandboxCmd, err := sandboxCommand(spec, env, sockDir)
+	if err != nil {
+		return -1, fmt.Errorf("creating command exec sandbox: %w", err)
+	}
 	sandboxCmd.Stdout = os.Stdout
 	sandboxCmd.Stderr = os.Stderr
 	sandboxCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	if err := sandboxCmd.Start(); err != nil {
+	if err := bwrap.StartCmd(sandboxCmd); err != nil {
 		return -1, fmt.Errorf("starting command exec sandbox: %w", err)
 	}
 	defer func() {
@@ -117,11 +125,7 @@ func RunSandboxed(ctx context.Context, spec SandboxSpec, stdout, stderr io.Write
 	defer func() { _ = conn.Close() }()
 
 	client := pb.NewFakebashServiceClient(conn)
-	stream, err := client.RunCommand(ctx, &pb.CommandRequest{
-		Args: []string{"-c", spec.Command},
-		Cwd:  cwd,
-		Env:  env,
-	})
+	stream, err := client.RunCommand(ctx, sandboxCommandRequest(spec.Command, cwd))
 	if err != nil {
 		return -1, fmt.Errorf("run command stream error: %w", err)
 	}
@@ -154,6 +158,18 @@ func RunSandboxed(ctx context.Context, spec SandboxSpec, stdout, stderr io.Write
 		}
 	}
 	return exitCode, nil
+}
+
+// sandboxCommandRequest builds the request sent to fakebashd. It carries no
+// Env on purpose: fakebashd then runs the command with its own environment,
+// the cleared sandbox environment (allowlisted variables, run identity, proxy
+// dummies). Sending the runner's environment would hand its credentials to the
+// command and replace the proxy's dummy secrets with real ones.
+func sandboxCommandRequest(command, cwd string) *pb.CommandRequest {
+	return &pb.CommandRequest{
+		Args: []string{"-c", command},
+		Cwd:  cwd,
+	}
 }
 
 // dialSocket waits for the sandbox daemon's unix socket to accept connections

@@ -23,6 +23,11 @@ const (
 	// nodes that run without the bubblewrap sandbox ("1" or "true").
 	EnvAllowUnsandboxedCommands = "ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS"
 
+	// EnvSandboxEnvPassthrough lists extra host environment variables (comma
+	// separated names, e.g. GOPROXY,JAVA_HOME) the operator lets into the
+	// sandboxes, which otherwise start from an empty environment.
+	EnvSandboxEnvPassthrough = "ASGARD_RUNNER_SANDBOX_ENV_PASSTHROUGH"
+
 	// Fixed TLS credential paths inside the runner container.
 	DefaultCertsDir = "/certs"
 	EnvCertsDir     = "ASGARD_RUNNER_CERTS_DIR"
@@ -59,6 +64,10 @@ type Bootstrap struct {
 	// commands then always run in the bubblewrap sandbox. Only the operator can
 	// turn it on; a request never can.
 	AllowUnsandboxedCommands bool
+	// SandboxEnvPassthrough are operator-chosen host variable names copied
+	// into the sandboxes (toolchain settings such as GOPROXY). Runner-only and
+	// secret variables are refused regardless. A request can never set this.
+	SandboxEnvPassthrough []string
 }
 
 // ParseBootstrap reads the bootstrap settings from args (flags) with env as
@@ -74,8 +83,14 @@ func ParseBootstrap(args []string, getenv func(string) string) (*Bootstrap, erro
 	fs.StringVar(&b.ServerName, "server-name", getenv(EnvServerName), "expected backend certificate name (default: host of -backend) [$"+EnvServerName+"]")
 	allowUnsandboxed, _ := strconv.ParseBool(getenv(EnvAllowUnsandboxedCommands))
 	fs.BoolVar(&b.AllowUnsandboxedCommands, "allow-unsandboxed-commands", allowUnsandboxed, "let workflow command nodes with sandbox: false run without the sandbox (insecure; development only) [$"+EnvAllowUnsandboxedCommands+"]")
+	passthrough := fs.String("sandbox-env-passthrough", getenv(EnvSandboxEnvPassthrough), "comma-separated host environment variables to pass into the sandboxes [$"+EnvSandboxEnvPassthrough+"]")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	for _, k := range strings.Split(*passthrough, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			b.SandboxEnvPassthrough = append(b.SandboxEnvPassthrough, k)
+		}
 	}
 	if err := b.Validate(); err != nil {
 		return nil, err

@@ -67,6 +67,47 @@ func stripSecretEnv(env []string) []string {
 	return filtered
 }
 
+// runnerOnlyEnvKeys are exact variable names that belong to the runner or carry
+// credentials and must never reach a command run by fakebashd, whatever the
+// client (or the daemon's own environment) hands over.
+var runnerOnlyEnvKeys = map[string]bool{
+	"GEMINI_API_KEY":                 true,
+	"TYPESAFE_API_KEY":               true,
+	"ASGARD_ENCRYPTION_KEY":          true,
+	"ASGARD_KMS_KEY":                 true,
+	"GCP_KMS_KEY":                    true,
+	"GOOGLE_APPLICATION_CREDENTIALS": true,
+}
+
+// runnerOnlyEnvPrefixes are variable name prefixes of runner-only settings.
+var runnerOnlyEnvPrefixes = []string{"ETCD_", "ASGARD_RUNNER_"}
+
+// IsRunnerOnlyEnvKey reports whether key is a runner-only or secret variable.
+func IsRunnerOnlyEnvKey(key string) bool {
+	if runnerOnlyEnvKeys[key] {
+		return true
+	}
+	for _, p := range runnerOnlyEnvPrefixes {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// DropRunnerOnlyEnv removes runner-only and secret variables from env
+// (defense in depth: the sandbox already starts from a cleared environment).
+func DropRunnerOnlyEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if k, _, _ := strings.Cut(e, "="); IsRunnerOnlyEnvKey(k) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // maxMemoryBufferLimit defines the upper bound (1MB) for in-memory buffers in non-passthrough mode.
 // When output exceeds this limit, fakebash immediately transitions to realtime passthrough to
 // maintain O(1) memory overhead.
@@ -409,7 +450,7 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 		cmd.Dir = req.Cwd
 	}
 	if len(req.Env) > 0 {
-		cmd.Env = append([]string(nil), req.Env...)
+		cmd.Env = DropRunnerOnlyEnv(req.Env)
 		// Daemon priority override (R4): ProtectedProxyEnvKeys from fakebashd daemon take precedence over req.Env
 		daemonEnvMap := make(map[string]string)
 		for _, e := range os.Environ() {
@@ -432,7 +473,7 @@ func (s *fakebashServer) RunCommand(req *pb.CommandRequest, stream pb.FakebashSe
 			}
 		}
 	} else {
-		cmd.Env = os.Environ()
+		cmd.Env = DropRunnerOnlyEnv(os.Environ())
 	}
 
 	cmd.WaitDelay = 200 * time.Millisecond

@@ -188,6 +188,8 @@ For every run the runner gives the sandbox a random per-run dummy value under th
 
 When executing an agent, Asgard starts two parallel sandboxes using Bubblewrap:
 
+**Sandbox environment.** Both sandboxes start from an empty environment (`bwrap --clearenv`); the runner's own environment (`ETCD_*`, `ASGARD_RUNNER_*`, API/KMS keys, ...) is no longer inherited. A sandbox sees only `HOME`, `PATH` and `TZ`, an allowlist of host variables (user name, locale and terminal, `XDG_*` base directories, the fakebash tunables, Asgard's own path overrides `AW_CONFIG`, `OPENCODE_AW_CONFIG` and `SIMPLEST_*_PATH`, and the operator's upstream proxy / CA variables), the per-run `ASGARD_*` variables the runner sets on purpose, and the proxy variables. Toolchain variables that are not on the allowlist (`GOPROXY`, `RUSTUP_HOME`, `JAVA_HOME`, `PIP_INDEX_URL`, ...) can be let in by the runner's operator with `-sandbox-env-passthrough` / `ASGARD_RUNNER_SANDBOX_ENV_PASSTHROUGH`; the list comes only from the runner's own configuration, never from a request, and runner-only/secret names (`ETCD_*`, `ASGARD_RUNNER_*`, API keys, KMS settings) and the variables the sandbox enforces (`HOME`, `PATH`, proxy/CA) are refused even if listed. The values are handed to `bwrap` through `--args FD` (an in-memory file), not on its command line, so `ASGARD_RUN_TOKEN` and proxy URLs are not visible in `/proc/<pid>/cmdline` to other users of the runner host.
+
 Both sandboxes bind-mount per-chat directories of the runner host: `/session-data/tmp/<chat-id>` at `/tmp` and `/session-data/sessions/<chat-id>` at `/session` (persistent per-chat scratch space, cleaned up together with the session).
 The `/session` mount stores the per-session message transcript stream (`messages.jsonl`) and workflow execution run outputs and node logs (`workflows/<runID>/`). Each sandbox instance is strictly isolated to its own single session directory (`/session-data/sessions/<chat-id>`), preventing cross-session data leakage while allowing the agent compliant visibility into its own conversational transcript and intermediate workflow artifacts.
 
@@ -299,6 +301,7 @@ TLS 1.3 is required. The runner re-reads its certificate files on every reconnec
 | `-backend` | `ASGARD_RUNNER_BACKEND` | backend registry address `host:port` (required) |
 | `-server-name` | `ASGARD_RUNNER_SERVER_NAME` | name checked in the backend certificate (default: host of `-backend`) |
 | `-allow-unsandboxed-commands` | `ASGARD_RUNNER_ALLOW_UNSANDBOXED_COMMANDS` | **insecure, development only**: lets workflow command nodes with `sandbox: false` run without bubblewrap |
+| `-sandbox-env-passthrough` | `ASGARD_RUNNER_SANDBOX_ENV_PASSTHROUGH` | comma-separated host variable names (e.g. `GOPROXY,RUSTUP_HOME,JAVA_HOME,PIP_INDEX_URL`) copied into the sandboxes; see the "Sandbox environment" section above |
 
 The runner reads TLS certificates from fixed paths inside `/certs`:
 - Client certificate: `/certs/tls.crt` (CN is runner node id)

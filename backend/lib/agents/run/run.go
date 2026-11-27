@@ -172,6 +172,25 @@ func OptionsFromConfig(conf *config.Config) Options {
 	}
 }
 
+// runSandboxEnv assembles the explicit per-run environment of both sandboxes:
+// the run identity and status scope, then opts.Env (e.g. ASGARD_STATUS_URL).
+func runSandboxEnv(agent *agentspec.Agent, chatID string, statusScope StatusScope, opts Options) []string {
+	sandboxEnv := []string{"ASGARD_CHAT_ID=" + chatID}
+	if statusScope.NodeID != "" {
+		sandboxEnv = append(sandboxEnv, "ASGARD_NODE_ID="+statusScope.NodeID)
+	}
+	if statusScope.RunToken != "" {
+		sandboxEnv = append(sandboxEnv, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
+	}
+	if statusScope.Headless {
+		sandboxEnv = append(sandboxEnv, "ASGARD_HEADLESS=1")
+	}
+	if agent != nil {
+		sandboxEnv = append(sandboxEnv, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
+	}
+	return append(sandboxEnv, opts.Env...)
+}
+
 // runTarget executes a single CLI target in its own bubblewrap sandbox.
 func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLITarget, prompt string, session optional.Option[string], runDir string, chatID string, statusScope StatusScope, opts Options) ([]byte, error) {
 	sockDir := runnerpaths.SockDir("fakebash-sock-" + uuid.NewV7().String())
@@ -191,10 +210,19 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 
 	langRules, configPath, proxyCfg := opts.LangRules, opts.ConfigPath, opts.Proxy
 
+	// The sandboxes start from an empty environment (bwrap --clearenv) and the
+	// bwrap processes get a minimal one: only the explicit per-run values
+	// below enter the sandboxes, never the runner's own environment.
+	sandboxEnv := runSandboxEnv(agent, chatID, statusScope, opts)
+	proxyCfg.ExtraEnv = sandboxEnv
+
 	agentSandboxCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, target, prompt, session, runDir, sockDir, chatID, langRules, configPath, proxyCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating command for agent: %w", err)
 	}
+	// Release the --args file on every path, including the early returns below
+	// (StartCmd closes it right after a start).
+	defer bwrap.CloseArgs(agentSandboxCmd)
 
 	// Start the command execution sandbox
 	var agentCfg *agentspec.AgentConfig
@@ -206,31 +234,12 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 		return nil, fmt.Errorf("creating command for command exec: %w", err)
 	}
 
-	agentSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
-	cmdSandboxCmd.Env = append(os.Environ(), "ASGARD_CHAT_ID="+chatID)
-	if statusScope.NodeID != "" {
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_NODE_ID="+statusScope.NodeID)
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_NODE_ID="+statusScope.NodeID)
-	}
-	if statusScope.RunToken != "" {
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_RUN_TOKEN="+statusScope.RunToken)
-	}
-	if statusScope.Headless {
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_HEADLESS=1")
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_HEADLESS=1")
-	}
-	if agent != nil {
-		agentSandboxCmd.Env = append(agentSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
-		cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, "ASGARD_AGENT_ID="+agent.Config.ID, "ASGARD_AGENT_NAME="+agent.Config.Name)
-	}
-	agentSandboxCmd.Env = append(agentSandboxCmd.Env, opts.Env...)
-	cmdSandboxCmd.Env = append(cmdSandboxCmd.Env, opts.Env...)
-
 	cmdSandboxCmd.Stdout = os.Stdout
 	cmdSandboxCmd.Stderr = os.Stderr
 
-	if err := cmdSandboxCmd.Start(); err != nil {
+	defer bwrap.CloseArgs(cmdSandboxCmd)
+
+	if err := bwrap.StartCmd(cmdSandboxCmd); err != nil {
 		return nil, fmt.Errorf("starting command execution sandbox: %w", err)
 	}
 
@@ -239,7 +248,7 @@ func runTarget(ctx context.Context, agent *agentspec.Agent, target agentspec.CLI
 	agentSandboxCmd.Stdout = &stdoutBuf
 	agentSandboxCmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
-	if err := agentSandboxCmd.Start(); err != nil {
+	if err := bwrap.StartCmd(agentSandboxCmd); err != nil {
 		_ = cmdSandboxCmd.Process.Kill()
 		_, _ = cmdSandboxCmd.Process.Wait()
 		return nil, fmt.Errorf("starting agent sandbox command: %w", err)

@@ -1106,3 +1106,13 @@ func TestFakebashd_ParseFailureNotSilentSuccess(t *testing.T) {
 	assert.NotEqual(t, "0", exit)
 	assert.NotEmpty(t, stderr.String())
 }
+
+func TestDropRunnerOnlyEnv(t *testing.T) {
+	t.Parallel()
+	got := DropRunnerOnlyEnv([]string{
+		"PATH=/bin", "ETCD_ENDPOINTS=http://x", "ETCD_PREFIX=/p", "ASGARD_RUNNER_CERTS=/c",
+		"GEMINI_API_KEY=k", "TYPESAFE_API_KEY=k", "ASGARD_ENCRYPTION_KEY=k", "GOOGLE_APPLICATION_CREDENTIALS=/f",
+		"ASGARD_CHAT_ID=c", "ASGARD_RUN_TOKEN=t", "HTTP_PROXY=http://p", "OPENAI_API_KEY=proxy-dummy",
+	})
+	assert.Equal(t, []string{"PATH=/bin", "ASGARD_CHAT_ID=c", "ASGARD_RUN_TOKEN=t", "HTTP_PROXY=http://p", "OPENAI_API_KEY=proxy-dummy"}, got)
+}

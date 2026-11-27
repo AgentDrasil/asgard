@@ -17,6 +17,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 )
 
 // Git safety. The runner executes git outside the agents' sandbox on a
@@ -335,6 +337,21 @@ func vetGitDir(gfd int) error {
 	return walk(wfd, 0, "")
 }
 
+// runCmd runs a command built by command. A GitExec hook's command built by
+// the bwrap package carries its private --args file as the first extra file;
+// exec.Cmd never closes extra files, so bwrap.CloseArgs closes it once started.
+// bwrap.CloseArgs touches only a command whose argv starts with the exact
+// prefix `bwrap --clearenv --args 3`, so the long-lived git dir fd of the
+// no-hook path (and any hook's own fds) stay open.
+func (r *gitRepo) runCmd(cmd *exec.Cmd) error {
+	err := cmd.Start()
+	bwrap.CloseArgs(cmd)
+	if err != nil {
+		return err
+	}
+	return cmd.Wait()
+}
+
 // run executes git in the repo root and returns stdout capped at max bytes
 // (over reports a cut). A nonzero exit is returned as the error.
 func (r *gitRepo) run(ctx context.Context, timeout time.Duration, max int, args ...string) (out []byte, over bool, err error) {
@@ -348,7 +365,7 @@ func (r *gitRepo) run(ctx context.Context, timeout time.Duration, max int, args 
 	stderr.max = 64 << 10
 	cw := &capWriter{max: max}
 	cmd.Stdout, cmd.Stderr = cw, &stderr
-	err = cmd.Run()
+	err = r.runCmd(cmd)
 	if cw.over {
 		return cw.buf.Bytes(), true, nil
 	}
@@ -832,7 +849,7 @@ func (l Local) gitNetwork(ctx context.Context, runDir, sub string) (GitOpResult,
 		return GitOpResult{}, Errf(CodeInternal, "cannot start git: %v", err)
 	}
 	cmd.Stdout, cmd.Stderr = cw, cw
-	runErr := cmd.Run()
+	runErr := r.runCmd(cmd)
 	out, _ := capString(cw.buf.Bytes(), MaxGitError*2)
 	if sub == "push" {
 		// The repository is read-only for git, so it can never update a

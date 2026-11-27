@@ -33,7 +33,7 @@ func TestSharedDirBoundInAgentAndCommandSandboxes(t *testing.T) {
 
 		cmd, err := commandForCommandExec(cfg, runDir, "", "", "child", "", false, nil)
 		require.NoError(t, err)
-		assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", shared, "/shared"), 0, "command sandbox, readonly=%v: %v", readonly, cmd.Args)
+		assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", shared, "/shared"), 0, "command sandbox, readonly=%v: %v", readonly, bwrapArgsOf(cmd))
 	}
 	assert.DirExists(t, shared)
 

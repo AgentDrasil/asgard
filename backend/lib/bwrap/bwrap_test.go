@@ -401,7 +401,7 @@ func TestCommandForCommandExec(t *testing.T) {
 		t.Fatalf("CommandForCommandExec error: %v", err)
 	}
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 
 	expectedTmpDir := runnerpaths.SessionTmpDir("test-chat")
 	if !strings.Contains(argStr, "--die-with-parent") {
@@ -467,7 +467,7 @@ func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false)
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 	assert.NotContains(t, argStr, "--bind "+runnerpaths.DataDir()+" "+runnerpaths.DataDir())
 	assert.Contains(t, argStr, "--tmpfs "+runnerpaths.DataDir())
 
@@ -475,7 +475,7 @@ func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 	cmdAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true)
 	require.NoError(t, err)
 
-	argStrAllow := strings.Join(cmdAllow.Args, " ")
+	argStrAllow := strings.Join(bwrapArgsOf(cmdAllow), " ")
 	assert.NotContains(t, argStrAllow, "--tmpfs "+runnerpaths.DataDir())
 	assert.Contains(t, argStrAllow, "--bind "+runnerpaths.DataDir()+" "+runnerpaths.DataDir())
 
@@ -486,14 +486,14 @@ func TestCommandForCommandExec_CrossSessionMasking(t *testing.T) {
 
 		cmdOutside, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false)
 		require.NoError(t, err)
-		argStrOutside := strings.Join(cmdOutside.Args, " ")
+		argStrOutside := strings.Join(bwrapArgsOf(cmdOutside), " ")
 		// Not under HOME, so no tmpfs mask needed, and not bound
 		assert.NotContains(t, argStrOutside, "--tmpfs "+outsideDir)
 		assert.NotContains(t, argStrOutside, "--bind "+outsideDir+" "+outsideDir)
 
 		cmdOutsideAllow, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", true)
 		require.NoError(t, err)
-		argStrOutsideAllow := strings.Join(cmdOutsideAllow.Args, " ")
+		argStrOutsideAllow := strings.Join(bwrapArgsOf(cmdOutsideAllow), " ")
 		assert.Contains(t, argStrOutsideAllow, "--bind "+outsideDir+" "+outsideDir)
 	})
 }
@@ -521,7 +521,7 @@ func TestCommandForCommandExec_WithProxyAndMasking(t *testing.T) {
 	cmd, err := CommandForCommandExec(tmpDir, "test-sock", "chat-123", "", false, proxyOpt)
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 
 	// 1. Verify masking of ca.key with /dev/null
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
@@ -583,7 +583,7 @@ func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
 	cmd, err := CommandForAgent(agentCfg, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 
 	// 1. Verify masking of ca.key with /dev/null
 	assert.Contains(t, argStr, "--ro-bind /dev/null "+caKeyPath)
@@ -591,11 +591,11 @@ func TestCommandForAgent_NoProxyWithMasking(t *testing.T) {
 	// Verify that the mask for the CA key appears AFTER the ancestorDir bind
 	ancestorBindIdx := -1
 	proxyMaskIdx := -1
-	for i := 0; i < len(cmd.Args)-2; i++ {
-		if cmd.Args[i] == "--bind" && cmd.Args[i+1] == ancestorDir {
+	for i := 0; i < len(bwrapArgsOf(cmd))-2; i++ {
+		if bwrapArgsOf(cmd)[i] == "--bind" && bwrapArgsOf(cmd)[i+1] == ancestorDir {
 			ancestorBindIdx = i
 		}
-		if cmd.Args[i] == "--ro-bind" && cmd.Args[i+1] == "/dev/null" && cmd.Args[i+2] == caKeyPath {
+		if bwrapArgsOf(cmd)[i] == "--ro-bind" && bwrapArgsOf(cmd)[i+1] == "/dev/null" && bwrapArgsOf(cmd)[i+2] == caKeyPath {
 			proxyMaskIdx = i
 		}
 	}
@@ -632,7 +632,7 @@ func TestCommandForAgent_APIKeyInjection(t *testing.T) {
 	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 	assert.Contains(t, argStr, "--setenv TYPESAFE_API_KEY my-typesafe-key")
 	assert.Contains(t, argStr, "--setenv GEMINI_API_KEY my-gemini-key")
 	assert.Contains(t, argStr, "--setenv GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS my-compass-model")
@@ -657,13 +657,13 @@ func TestCommandForAgent_UserProxyEnvVarsInjection(t *testing.T) {
 	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "", proxyOpt)
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 	assert.Contains(t, argStr, "--setenv MY_CUSTOM_TOKEN secret-token-xyz")
 	assert.Contains(t, argStr, "--setenv ANOTHER_API_KEY val-123")
 
 	dashDashIdx := -1
 	myTokenIdx := -1
-	for i, arg := range cmd.Args {
+	for i, arg := range bwrapArgsOf(cmd) {
 		if arg == "--" && dashDashIdx == -1 {
 			dashDashIdx = i
 		}
@@ -690,7 +690,7 @@ func TestCommandForAgent_ClaudeEnv(t *testing.T) {
 	cmd, err := CommandForAgent(nil, "", target, "prompt", optional.None[string](), tmpDir, "sock", "chat-123", "", "")
 	require.NoError(t, err)
 
-	argStr := strings.Join(cmd.Args, " ")
+	argStr := strings.Join(bwrapArgsOf(cmd), " ")
 	assert.Contains(t, argStr, "--bind "+filepath.Join(tmpDir, ".claude")+" "+filepath.Join(tmpDir, ".claude"))
 	assert.Contains(t, argStr, "--setenv CLAUDE_CONFIG_DIR "+filepath.Join(tmpDir, ".claude"))
 	assert.Contains(t, argStr, "--setenv DISABLE_AUTOUPDATER 1")
@@ -710,7 +710,7 @@ func TestCommandForCommandExec_MasksClaudeConfigDir(t *testing.T) {
 
 	cmd, err := CommandForCommandExec(runDir, "sock", "chat-1", "", false)
 	require.NoError(t, err)
-	assert.Contains(t, strings.Join(cmd.Args, " "), "--tmpfs "+claudeDir)
+	assert.Contains(t, strings.Join(bwrapArgsOf(cmd), " "), "--tmpfs "+claudeDir)
 }
 
 func TestCommandForQuery_EphemeralSandboxRunsAw(t *testing.T) {
@@ -721,7 +721,7 @@ func TestCommandForQuery_EphemeralSandboxRunsAw(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 
-	tail := cmd.Args[len(cmd.Args)-4:]
+	tail := bwrapArgsOf(cmd)[len(bwrapArgsOf(cmd))-4:]
 	if strings.Join(tail, " ") != "aw usage --cli claude" {
 		t.Fatalf("unexpected command tail: %v", tail)
 	}
@@ -931,7 +931,7 @@ func TestGitSandboxRuns(t *testing.T) {
 		spec.ChatID = "chat1"
 		cmd, err := CommandForGit(t.Context(), spec)
 		require.NoError(t, err)
-		cmd.ExtraFiles = []*os.File{dir}
+		cmd.ExtraFiles = append(cmd.ExtraFiles, dir)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
@@ -986,20 +986,20 @@ func TestCommandForCommandExecAt_Chdir(t *testing.T) {
 
 	cmd, err := CommandForCommandExecAt(hostDir, "/tmp/sub", "sock", chat, "", false, nil)
 	require.NoError(t, err)
-	chdir := indexOfSeq(cmd.Args, "--chdir", "/tmp/sub")
-	require.GreaterOrEqual(t, chdir, 0, "the sandbox cwd is the in-sandbox path: %v", cmd.Args)
-	assert.Less(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), chdir)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--chdir", hostDir), "the host path does not exist in the sandbox")
+	chdir := indexOfSeq(bwrapArgsOf(cmd), "--chdir", "/tmp/sub")
+	require.GreaterOrEqual(t, chdir, 0, "the sandbox cwd is the in-sandbox path: %v", bwrapArgsOf(cmd))
+	assert.Less(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), chdir)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--chdir", hostDir), "the host path does not exist in the sandbox")
 	// The /tmp mount stays visible.
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
 
 	// A run dir outside HOME is bound at its own path.
 	outside := t.TempDir()
 	cmd, err = CommandForCommandExecAt(outside, outside, "sock", chat, "", false, nil)
 	require.NoError(t, err)
-	bind := indexOfSeq(cmd.Args, "--bind", outside, outside)
+	bind := indexOfSeq(bwrapArgsOf(cmd), "--bind", outside, outside)
 	require.GreaterOrEqual(t, bind, 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", outside), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--chdir", outside), 0)
 }
 
 func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
@@ -1014,10 +1014,10 @@ func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(roHome, "sub"), 0o755))
 	cmd, err := CommandForCommandExecAt(filepath.Join(roHome, "sub"), filepath.Join(roHome, "sub"), "sock", chat, "", false, []string{roHome})
 	require.NoError(t, err)
-	ro := indexOfSeq(cmd.Args, "--ro-bind", roHome, roHome)
-	require.GreaterOrEqual(t, ro, 0, "%v", cmd.Args)
-	assert.Greater(t, ro, homeBind(cmd.Args))
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", filepath.Join(roHome, "sub"), filepath.Join(roHome, "sub")))
+	ro := indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", roHome, roHome)
+	require.GreaterOrEqual(t, ro, 0, "%v", bwrapArgsOf(cmd))
+	assert.Greater(t, ro, homeBind(bwrapArgsOf(cmd)))
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", filepath.Join(roHome, "sub"), filepath.Join(roHome, "sub")))
 
 	// A readonly root outside HOME holding the run dir: never bound rw.
 	roOut := t.TempDir()
@@ -1025,13 +1025,13 @@ func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
 	require.NoError(t, os.MkdirAll(runDir, 0o755))
 	cmd, err = CommandForCommandExecAt(runDir, runDir, "sock", chat, "", false, []string{roOut})
 	require.NoError(t, err)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", runDir, runDir))
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", roOut, roOut))
-	ro = indexOfSeq(cmd.Args, "--ro-bind", roOut, roOut)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", runDir, runDir))
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", roOut, roOut))
+	ro = indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", roOut, roOut)
 	require.GreaterOrEqual(t, ro, 0)
-	assert.Greater(t, ro, homeBind(cmd.Args))
+	assert.Greater(t, ro, homeBind(bwrapArgsOf(cmd)))
 	// ro is bound
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", runDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--chdir", runDir), 0)
 
 	// A writable run dir containing a readonly sub-root: rw bind first, the
 	// ro-bind of the sub-root after it.
@@ -1040,10 +1040,10 @@ func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	cmd, err = CommandForCommandExecAt(rw, rw, "sock", chat, "", false, []string{sub, filepath.Join(rw, "missing")})
 	require.NoError(t, err)
-	rwBind := indexOfSeq(cmd.Args, "--bind", rw, rw)
+	rwBind := indexOfSeq(bwrapArgsOf(cmd), "--bind", rw, rw)
 	require.GreaterOrEqual(t, rwBind, 0)
-	assert.Greater(t, indexOfSeq(cmd.Args, "--ro-bind", sub, sub), rwBind)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--ro-bind", filepath.Join(rw, "missing"), filepath.Join(rw, "missing")), "absent roots are skipped")
+	assert.Greater(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", sub, sub), rwBind)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", filepath.Join(rw, "missing"), filepath.Join(rw, "missing")), "absent roots are skipped")
 
 	// A sibling with the same name prefix is not "beneath" the readonly root.
 	other := roOut + "x"
@@ -1051,7 +1051,7 @@ func TestCommandForCommandExecAt_ReadonlyMounts(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(other) })
 	cmd, err = CommandForCommandExecAt(other, other, "sock", chat, "", false, []string{roOut})
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", other, other), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", other, other), 0)
 }
 
 func TestBuildSandboxArgs_ReadonlyMountsComeAfterEveryReadWriteBind(t *testing.T) {
@@ -1117,18 +1117,18 @@ func TestReadonlyMountsFollowSymlinks(t *testing.T) {
 	// resolved target exists in the sandbox, read-only and not re-bound rw.
 	cmd, err := CommandForCommandExecAt(evProj, evProj, "sock", chat, "", false, []string{link})
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", link, link), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", evReal, evReal), 0)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", evProj, evProj))
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", evProj), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", link, link), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", evReal, evReal), 0)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", evProj, evProj))
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--chdir", evProj), 0)
 
 	// Backend-local shape: the run dir is reached through a symlink into the
 	// readonly root, and must not get a read-write bind either.
 	viaLink := filepath.Join(link, "proj")
 	cmd, err = CommandForCommandExecAt(viaLink, viaLink, "sock", chat, "", false, []string{real})
 	require.NoError(t, err)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", viaLink, viaLink))
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", real, real), 0)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", viaLink, viaLink))
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", real, real), 0)
 }
 
 func TestReadonlyAliasRunDirIsMountedReadOnly(t *testing.T) {
@@ -1141,14 +1141,14 @@ func TestReadonlyAliasRunDirIsMountedReadOnly(t *testing.T) {
 	// exist in the sandbox, read-only, never read-write.
 	cmd, err := CommandForCommandExecAt(alias, alias, "sock", "chat-1", "", false, []string{real})
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", alias, alias), 0, "%v", cmd.Args)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", alias, alias))
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--chdir", alias), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", alias, alias), 0, "%v", bwrapArgsOf(cmd))
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", alias, alias))
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--chdir", alias), 0)
 
 	// Without a readonly root it stays read-write.
 	cmd, err = CommandForCommandExecAt(alias, alias, "sock", "chat-1", "", false, nil)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", alias, alias), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", alias, alias), 0)
 }
 
 func TestBuildSandboxArgs_ReadWriteBindsAliasingReadonlyRootsAreDemoted(t *testing.T) {
@@ -1200,9 +1200,9 @@ func TestReadonlyRootUnderDataRootIsRemountedAfterTheMask(t *testing.T) {
 	// and readonly mounts come after so they win.
 	cmd, err := CommandForCommandExecAt(roElsewhere, roElsewhere, "sock", chat, "", true, []string{roUnder, roElsewhere})
 	require.NoError(t, err)
-	bind := indexOfSeq(cmd.Args, "--bind", runnerpaths.DataDir(), runnerpaths.DataDir())
+	bind := indexOfSeq(bwrapArgsOf(cmd), "--bind", runnerpaths.DataDir(), runnerpaths.DataDir())
 	require.GreaterOrEqual(t, bind, 0)
-	under := indexOfSeq(cmd.Args, "--ro-bind", roUnder, roUnder)
+	under := indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", roUnder, roUnder)
 	require.GreaterOrEqual(t, under, 0)
 	assert.Greater(t, under, bind, "readonly mount comes after cross-session bind")
 
@@ -1497,10 +1497,10 @@ func TestCommandForAgentCommandExec(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verifies fakebashd sandbox mounts
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", roDir, roDir), 0, "fakebashd must receive readonlyDirs")
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", srcDir, srcDir), 0, "fakebashd must bind srcDir")
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", projB, projB), 0, "fakebashd must mask sibling projB")
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", projA, projA), "fakebashd must avoid nested bind on projA")
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", roDir, roDir), 0, "fakebashd must receive readonlyDirs")
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", srcDir, srcDir), 0, "fakebashd must bind srcDir")
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", projB, projB), 0, "fakebashd must mask sibling projB")
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", projA, projA), "fakebashd must avoid nested bind on projA")
 }
 
 func TestReadOnlyLockMode(t *testing.T) {
@@ -1553,21 +1553,21 @@ func TestReadOnlyLockMode(t *testing.T) {
 	require.NoError(t, err)
 
 	// HOME is mounted read-only
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", home, home), 0)
-	assert.Equal(t, -1, indexOfSeq(cmd.Args, "--bind", home, home))
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", home, home), 0)
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmd), "--bind", home, home))
 
 	// RunDirs and runDir are mounted read-only
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", extraRunDir, extraRunDir), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--ro-bind", runDir, runDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", extraRunDir, extraRunDir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--ro-bind", runDir, runDir), 0)
 
 	// /tmp and /session remain writable (--bind)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", runnerpaths.SessionTmpDir(chat), "/tmp"), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", runnerpaths.SessionDir(chat), "/session"), 0)
 
 	// 3. Cross-session access cannot make data root RW in readonly mode
 	cmdAllow, err := CommandForAgentCommandExec(cfg, runDir, "", "sock", chat, "", true)
 	require.NoError(t, err)
-	assert.Equal(t, -1, indexOfSeq(cmdAllow.Args, "--bind", runnerpaths.DataDir(), runnerpaths.DataDir()))
+	assert.Equal(t, -1, indexOfSeq(bwrapArgsOf(cmdAllow), "--bind", runnerpaths.DataDir(), runnerpaths.DataDir()))
 }
 
 func TestAppendSSHSandboxArgs_KnownHosts(t *testing.T) {
@@ -1889,10 +1889,10 @@ func TestBuildSandboxArgs_GlobMountDirs(t *testing.T) {
 	// 2. CommandForAgentCommandExec in RW mode
 	cmd, err := CommandForAgentCommandExec(cfg, runDir, "", "sock", chat, "", false)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", r1Agents, r1Agents), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", r2Agents, r2Agents), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", m1Dir, m1Dir), 0)
-	assert.GreaterOrEqual(t, indexOfSeq(cmd.Args, "--bind", m2Dir, m2Dir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", r1Agents, r1Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", r2Agents, r2Agents), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", m1Dir, m1Dir), 0)
+	assert.GreaterOrEqual(t, indexOfSeq(bwrapArgsOf(cmd), "--bind", m2Dir, m2Dir), 0)
 
 	// 3. ReadOnly mode in buildSandboxArgs
 	cfgRO := &agentspec.AgentConfig{
@@ -1937,7 +1937,7 @@ func TestCheckoutBindFollowsReadonlyMode(t *testing.T) {
 		cmd, err := CommandForAgentCommandExec(cfg, checkout, "", "sock", chat, "", false)
 		require.NoError(t, err)
 
-		for name, args := range map[string][]string{"agent sandbox": agentArgs, "command sandbox": cmd.Args} {
+		for name, args := range map[string][]string{"agent sandbox": agentArgs, "command sandbox": bwrapArgsOf(cmd)} {
 			ro := indexOfSeq(args, "--ro-bind", checkout, checkout) >= 0
 			rw := indexOfSeq(args, "--bind", checkout, checkout) >= 0
 			assert.Equal(t, readonly, ro, "%s readonly=%v: ro-bind of the checkout", name, readonly)
@@ -1958,9 +1958,9 @@ func TestSandboxesAreMarked(t *testing.T) {
 
 	agentCmd, err := CommandForAgent(&agentspec.AgentConfig{}, "", agentspec.CLITarget{CLI: "agy", Model: "m"}, "prompt", optional.None[string](), tmpDir, "sock", "chat-1", "", "")
 	require.NoError(t, err)
-	assert.Contains(t, strings.Join(agentCmd.Args, " "), want, "agent sandbox")
+	assert.Contains(t, strings.Join(bwrapArgsOf(agentCmd), " "), want, "agent sandbox")
 
 	cmdCmd, err := CommandForCommandExec(tmpDir, "sock", "chat-1", "", false)
 	require.NoError(t, err)
-	assert.Contains(t, strings.Join(cmdCmd.Args, " "), want, "command sandbox")
+	assert.Contains(t, strings.Join(bwrapArgsOf(cmdCmd), " "), want, "command sandbox")
 }

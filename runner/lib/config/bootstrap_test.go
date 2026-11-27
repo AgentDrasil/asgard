@@ -80,3 +80,22 @@ func TestParseBootstrapUnsandboxedCommandsIsOptIn(t *testing.T) {
 	assert.True(t, parse(nil, "-allow-unsandboxed-commands"))
 	assert.False(t, parse(map[string]string{EnvAllowUnsandboxedCommands: "1"}, "-allow-unsandboxed-commands=false"))
 }
+
+func TestParseBootstrapSandboxEnvPassthrough(t *testing.T) {
+	createFakeCerts(t)
+	getenv := func(k string) string {
+		switch k {
+		case EnvBackend:
+			return "b:1"
+		case EnvSandboxEnvPassthrough:
+			return "GOPROXY, JAVA_HOME,,"
+		}
+		return ""
+	}
+	b, err := ParseBootstrap(nil, getenv)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"GOPROXY", "JAVA_HOME"}, b.SandboxEnvPassthrough)
+	b, err = ParseBootstrap([]string{"-sandbox-env-passthrough=RUSTUP_HOME"}, getenv)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"RUSTUP_HOME"}, b.SandboxEnvPassthrough)
+}

@@ -312,6 +312,11 @@ type ProxySandboxConfig struct {
 	TypesafeAPIKey string            // TypeSafe API key for Jev System One evaluation
 	GeminiAPIKey   string            // Gemini API key for Level 2 GenAI summarizer
 	CompassModel   string            // Gemini model for command result compass
+	// ExtraEnv are trusted per-run KEY=VALUE variables (run identity,
+	// opts.Env) set inside the sandbox. It rides on this struct because every
+	// sandbox constructor already takes it. Protected keys (HOME, PATH,
+	// ASGARD_SANDBOXED, proxy/CA variables) are ignored.
+	ExtraEnv []string
 }
 
 // appendProxySensitiveMaskArgs masks the Asgard config directory (which holds
@@ -617,10 +622,15 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		return nil, fmt.Errorf("getting user home directory: %w", err)
 	}
 
-	var args []string
+	// Start from an empty environment; see env.go for what is set afterwards.
+	args := []string{"--clearenv"}
 	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
 		return nil, err
+	}
+	args = appendInheritedEnvArgs(args)
+	if len(proxyOpts) > 0 {
+		args = appendExtraEnvArgs(args, proxyOpts[0].ExtraEnv)
 	}
 	if args, err = appendSharedArgs(args, cfg); err != nil {
 		return nil, err
@@ -1038,8 +1048,7 @@ func CommandForAgent(cfg *agentspec.AgentConfig, agentPath string, target agents
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("bwrap", bwrapArgs...)
-	return cmd, nil
+	return newBwrapCmd(context.Background(), bwrapArgs)
 }
 
 // queryConfigPath is where the query sandbox mounts the aw config. It lives
@@ -1082,7 +1091,14 @@ func CommandForQueryWithAccounts(ctx context.Context, accts map[string]string, a
 	}
 	bwrapArgs = append(bwrapArgs, "aw")
 	bwrapArgs = append(bwrapArgs, args...)
-	return exec.CommandContext(ctx, "bwrap", bwrapArgs...), cleanup, nil
+	cmd, err := newBwrapCmd(ctx, bwrapArgs)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	// The cleanup also releases the --args file, for callers that start the
+	// command themselves.
+	return cmd, func() { CloseArgs(cmd); cleanup() }, nil
 }
 
 // RunQuery runs `aw <args...>` in a query sandbox and returns its stdout. It
@@ -1102,7 +1118,13 @@ func RunQueryWithAccounts(ctx context.Context, accts map[string]string, args ...
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err = StartCmd(cmd)
+	if err == nil {
+		err = cmd.Wait()
+	}
+	out := stdout.Bytes()
 	if err != nil {
 		return nil, fmt.Errorf("running sandboxed aw %v: %w: %s", args, err, strings.TrimSpace(stderr.String()))
 	}
@@ -1291,10 +1313,15 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 		return nil, fmt.Errorf("getting user home directory: %w", err)
 	}
 
-	var args []string
+	// Start from an empty environment; see env.go for what is set afterwards.
+	args := []string{"--clearenv"}
 	args, err = appendBaseSandboxArgs(args, home, chatID)
 	if err != nil {
 		return nil, err
+	}
+	args = appendInheritedEnvArgs(args)
+	if len(proxyOpts) > 0 {
+		args = appendExtraEnvArgs(args, proxyOpts[0].ExtraEnv)
 	}
 	if args, err = appendSharedArgs(args, cfg); err != nil {
 		return nil, err
@@ -1579,15 +1606,14 @@ func commandForCommandExec(cfg *agentspec.AgentConfig, runDir string, cwd string
 	args = append(args, "--")
 	args = append(args, "/bin/fakebashd")
 
-	cmd := exec.Command("bwrap", args...)
-	return cmd, nil
+	return newBwrapCmd(context.Background(), args)
 }
 
 // GitSandboxSpec describes one sandboxed git invocation (see GitSandboxArgs).
 type GitSandboxSpec struct {
 	ChatID string
 	// WorkTreeSrc is the bind source of the repository: the runner passes
-	// /proc/self/fd/3 for an inherited directory fd opened beneath an allowed
+	// /proc/self/fd/4 for an inherited directory fd opened beneath an allowed
 	// root, so nothing but that directory is reachable.
 	WorkTreeSrc string
 	// ReadWrite mounts the repository writable (pull); otherwise read-only.
@@ -1621,6 +1647,10 @@ func GitSandboxArgs(spec GitSandboxSpec) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if spec.Network {
+		args = appendUpstreamProxyEnvArgs(args)
+	}
+	args = appendExtraEnvArgs(args, spec.Env)
 	if !spec.Network {
 		args = append(args, "--unshare-net")
 	}
@@ -1650,24 +1680,20 @@ func GitSandboxArgs(spec GitSandboxSpec) ([]string, error) {
 			return nil, err
 		}
 	}
-	for _, kv := range spec.Env {
-		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
-			args = append(args, "--setenv", k, v)
-		}
-	}
 	args = append(args, "--", "git")
 	return append(args, spec.Git...), nil
 }
 
 // CommandForGit returns the bwrap command running git per spec. The caller
-// passes the repository directory as the first extra file (fd 3 of bwrap).
+// appends the repository directory to cmd.ExtraFiles (fd 4 of bwrap; fd 3 is
+// the --args file, see newBwrapCmd).
 func CommandForGit(ctx context.Context, spec GitSandboxSpec) (*exec.Cmd, error) {
-	spec.WorkTreeSrc = "/proc/self/fd/3"
+	spec.WorkTreeSrc = "/proc/self/fd/4"
 	args, err := GitSandboxArgs(spec)
 	if err != nil {
 		return nil, err
 	}
-	return exec.CommandContext(ctx, "bwrap", args...), nil
+	return newBwrapCmd(ctx, args)
 }
 
 // readAccountProfile reads an account's quota profile binding; a variable so

@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/types"
+	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths"
@@ -610,4 +612,36 @@ func TestNoQuotaErrorMentionsPolicyReason(t *testing.T) {
 		{CLI: "claude", Model: "opus", Remaining: 0.08, Enabled: true, Reason: "weekly: 8% remaining"},
 	}}
 	assert.Contains(t, err.Error(), "claude opus: 8% quota remaining (weekly: 8% remaining)")
+}
+
+func TestRunSandboxEnvReachesBothSandboxes(t *testing.T) {
+	tmpDir := setupTestRunEnv(t)
+	agent := newTestAgent(t, tmpDir, []agentspec.CLITarget{{CLI: "agy", Model: "agy-model-high"}})
+	scope := StatusScope{NodeID: "node-7", RunToken: "run-tok", Headless: true}
+	opts := Options{Env: []string{"ASGARD_STATUS_URL=http://status.example/x"}}
+	env := runSandboxEnv(agent, "chat-env", scope, opts)
+
+	proxyCfg := bwrap.ProxySandboxConfig{ExtraEnv: env}
+	agentCmd, err := bwrap.CommandForAgent(&agent.Config, agent.Path, agentspec.CLITarget{CLI: "agy", Model: "agy-model-high"}, "p", optional.None[string](), tmpDir, "sock", "chat-env", "", "", proxyCfg)
+	require.NoError(t, err)
+	execCmd, err := bwrap.CommandForAgentCommandExec(&agent.Config, tmpDir, "", "sock", "chat-env", "", false, proxyCfg)
+	require.NoError(t, err)
+
+	for name, cmd := range map[string]*exec.Cmd{"agent": agentCmd, "command": execCmd} {
+		args := bwrap.ExpandedArgs(cmd)
+		for k, want := range map[string]string{
+			"ASGARD_RUN_TOKEN": "run-tok", "ASGARD_NODE_ID": "node-7",
+			"ASGARD_STATUS_URL": "http://status.example/x", "ASGARD_CHAT_ID": "chat-env",
+			"ASGARD_HEADLESS": "1",
+		} {
+			got := ""
+			for i := 0; i+2 < len(args); i++ {
+				if args[i] == "--setenv" && args[i+1] == k {
+					got = args[i+2]
+				}
+			}
+			assert.Equal(t, want, got, "%s sandbox: %s", name, k)
+		}
+		assert.NotContains(t, strings.Join(cmd.Args, " "), "run-tok", name)
+	}
 }

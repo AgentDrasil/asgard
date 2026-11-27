@@ -42,6 +42,8 @@ func run() error {
 		return err
 	}
 
+	bwrap.SetEnvPassthrough(boot.SandboxEnvPassthrough)
+
 	// Models/usage queries invoke vendor CLIs non-interactively, which can
 	// fire their hooks; run them inside the agent sandbox, not on the host.
 	agentwrapper.SetQueryRunner(bwrap.RunQuery)

@@ -165,7 +165,7 @@ func TestBuildSandboxArgs_Worktree(t *testing.T) {
 
 	cmd, err := commandForCommandExec(cfg, wtDir, "", "", "c1", "", false, nil)
 	require.NoError(t, err)
-	cs := strings.Join(cmd.Args, " ")
+	cs := strings.Join(bwrapArgsOf(cmd), " ")
 	assert.Contains(t, cs, "--ro-bind "+wr.GitDir+" "+wr.GitDir)
 	assert.Contains(t, cs, "--bind "+wr.ObjectsDir+" "+wr.ObjectsDir)
 	assert.Contains(t, cs, "--setenv GIT_OBJECT_DIRECTORY "+wr.ObjectsDir)

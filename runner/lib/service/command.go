@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AgentDrasil/asgard/fakebash"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -220,17 +222,11 @@ type cmdParams struct {
 	env        []string
 }
 
-// filterEnv drops the runner's own settings from the environment commands
-// inherit.
+// filterEnv drops the runner's own settings and secrets (the fakebash
+// runner-only list: ETCD_*, ASGARD_RUNNER_*, API and KMS keys) from the
+// environment commands inherit.
 func filterEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, e := range env {
-		if strings.HasPrefix(e, "ASGARD_RUNNER_") {
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
+	return fakebash.DropRunnerOnlyEnv(env)
 }
 
 // RunCommand implements RunnerService: it runs a workflow command node and

@@ -1098,3 +1098,43 @@ func TestGitPushFallbackAcceptsTheSingleStandardSetup(t *testing.T) {
 	r.knownRemotes = map[string]bool{"origin": true}
 	assert.Equal(t, "refs/remotes/origin/main", r.configuredPushRef(t.Context()))
 }
+
+func TestRunCmdClosesOnlyTheBwrapArgsFile(t *testing.T) {
+	open := func(t *testing.T) *os.File {
+		f, err := os.Open(os.DevNull)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = f.Close() })
+		return f
+	}
+	stillOpen := func(f *os.File) bool {
+		_, err := f.Stat()
+		return err == nil
+	}
+
+	t.Run("bwrap args file is closed", func(t *testing.T) {
+		f := open(t)
+		cmd := exec.Command("true")
+		cmd.Args = []string{"bwrap", "--clearenv", "--args", "3"}
+		cmd.ExtraFiles = []*os.File{f}
+		r := &gitRepo{l: Local{GitExec: func(context.Context, GitExecSpec) (*exec.Cmd, error) { return nil, nil }}}
+		require.NoError(t, r.runCmd(cmd))
+		assert.False(t, stillOpen(f))
+	})
+
+	t.Run("hook command with a long-lived first file keeps it", func(t *testing.T) {
+		f := open(t)
+		cmd := exec.Command("true")
+		cmd.ExtraFiles = []*os.File{f}
+		r := &gitRepo{l: Local{GitExec: func(context.Context, GitExecSpec) (*exec.Cmd, error) { return nil, nil }}}
+		require.NoError(t, r.runCmd(cmd))
+		assert.True(t, stillOpen(f))
+	})
+
+	t.Run("no hook keeps the git dir fd", func(t *testing.T) {
+		f := open(t)
+		cmd := exec.Command("true")
+		cmd.ExtraFiles = []*os.File{f}
+		require.NoError(t, (&gitRepo{}).runCmd(cmd))
+		assert.True(t, stillOpen(f))
+	})
+}

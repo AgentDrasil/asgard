@@ -72,3 +72,45 @@ func TestRunDirectCancelKillsTheProcessGroup(t *testing.T) {
 		return i >= 0 && len(b) > i+2 && b[i+2] == 'Z'
 	}, 10*time.Second, 20*time.Millisecond, "the child of the shell must be killed with its group")
 }
+
+func TestSandboxCommandRequest_CarriesNoEnv(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "real-key")
+	req := sandboxCommandRequest("env", "/work")
+	assert.Equal(t, []string{"-c", "env"}, req.Args)
+	assert.Equal(t, "/work", req.Cwd)
+	assert.Empty(t, req.Env, "runner env must never be sent to fakebashd")
+}
+
+func lastEnv(args []string, key string) (string, bool) {
+	val, found := "", false
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == "--setenv" && args[i+1] == key {
+			val, found = args[i+2], true
+		}
+	}
+	return val, found
+}
+
+func TestSandboxCommandDeliversFilteredEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	spec := SandboxSpec{Dir: dir, ChatID: "chat-w1"}
+	env := []string{"LANG=C", "ASGARD_RUN_TOKEN=tok", "ETCD_ENDPOINTS=e", "GEMINI_API_KEY=k", "SOMETHING=x", "ASGARD_TMP_DIR=/tmp", "ASGARD_SESSION_DIR=/session"}
+	cmd, err := sandboxCommand(spec, env, t.TempDir())
+	require.NoError(t, err)
+	args := bwrap.ExpandedArgs(cmd)
+	for k, want := range map[string]string{
+		"LANG": "C", "ASGARD_RUN_TOKEN": "tok", "ASGARD_CHAT_ID": "chat-w1",
+		"ASGARD_TMP_DIR": "/tmp", "ASGARD_SESSION_DIR": "/session",
+	} {
+		got, ok := lastEnv(args, k)
+		assert.True(t, ok, k)
+		assert.Equal(t, want, got, k)
+	}
+	for _, k := range []string{"ETCD_ENDPOINTS", "GEMINI_API_KEY", "SOMETHING"} {
+		_, ok := lastEnv(args, k)
+		assert.False(t, ok, k)
+	}
+	assert.NotContains(t, strings.Join(cmd.Args, " "), "tok", "values stay off the command line")
+}

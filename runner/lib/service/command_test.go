@@ -670,3 +670,8 @@ func TestRunCommandRefusesMalformedReadonlyMounts(t *testing.T) {
 	assert.Contains(t, o.err.Error(), `"relative/ro"`)
 	assert.False(t, ran)
 }
+
+func TestFilterEnvDropsRunnerOnlyAndSecrets(t *testing.T) {
+	got := filterEnv([]string{"PATH=/bin", "ASGARD_RUNNER_BACKEND=b", "ETCD_ENDPOINTS=e", "GEMINI_API_KEY=k", "ASGARD_ENCRYPTION_KEY=k", "GOPROXY=p"})
+	assert.Equal(t, []string{"PATH=/bin", "GOPROXY=p"}, got)
+}
