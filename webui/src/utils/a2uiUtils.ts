@@ -168,7 +168,7 @@ export function resolveAssetPath(assetPath: string, manifestPath?: string | null
 
 /**
  * Asynchronously loads a workspace file text (CSV or Markdown) by trying relative and direct paths.
- * Reuses the centralized getFileContent client in lib/api.ts for unified error handling.
+ * Reuses the centralized getFileContent client in lib/api/files.ts for unified error handling.
  */
 export async function fetchWorkspaceAsset(
   sessionId: string,

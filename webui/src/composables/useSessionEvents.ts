@@ -60,7 +60,7 @@ export function reconnectDelay(attempt: number): number {
 
 // useSessionEvents owns the whole lifecycle of one session's event stream:
 // last-event-id tracking, resume on reconnect, backoff retry (any auth mode),
-// token recovery via api.ts, and recovery when the tab becomes visible again.
+// token recovery via lib/api/auth.ts, and recovery when the tab becomes visible again.
 export function useSessionEvents(callbacks: SessionEventsCallbacks = {}) {
   const state: Ref<ConnectionState> = ref("closed");
   let eventSource: EventSource | null = null;
@@ -189,7 +189,7 @@ export function useSessionEvents(callbacks: SessionEventsCallbacks = {}) {
   };
 
   // recoverAndReconnect refreshes the session after the stream was rejected
-  // (a 401 is indistinguishable from other CLOSED causes) through api.ts's
+  // (a 401 is indistinguishable from other CLOSED causes) through lib/api/auth.ts's
   // coordinated refresh, then rebuilds the EventSource: the browser's built-in
   // reconnect replays the original URL and therefore the stale token.
   const recoverAndReconnect = async (sessionId: string, myGen: number) => {
