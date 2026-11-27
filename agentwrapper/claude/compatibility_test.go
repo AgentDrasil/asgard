@@ -18,6 +18,9 @@ func skipIfNotE2E(t *testing.T) {
 	if os.Getenv("E2E_TEST") != "true" {
 		t.Skip("Skipping compatibility test; set E2E_TEST=true to run it.")
 	}
+	if os.Getenv("ENABLE_CLAUDE_E2E") != "true" {
+		t.Skip("Skipping Claude compatibility test; set ENABLE_CLAUDE_E2E=true to run it.")
+	}
 }
 
 func TestCompatibility_ToolCallAndResume(t *testing.T) {
