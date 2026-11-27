@@ -47,31 +47,30 @@ func quotaAskMessageID(chatID, agentID string, seq int) string {
 	return id
 }
 
+func toTargetCandidates(cfg agentspec.AgentConfig) []agentwrapper.TargetCandidate {
+	out := make([]agentwrapper.TargetCandidate, len(cfg.CLI))
+	for i, t := range cfg.CLI {
+		out[i] = agentwrapper.TargetCandidate{CLI: t.CLI, Model: t.Model}
+	}
+	return out
+}
+
 // cliForModel returns the CLI of the configured target carrying model, or ""
 // when model is empty or not configured for the agent.
 func cliForModel(cfg agentspec.AgentConfig, model string) string {
-	if model == "" {
-		return ""
-	}
-	for _, t := range cfg.CLI {
-		if t.Model == model {
-			return t.CLI
-		}
-	}
-	return ""
+	return agentwrapper.CLIForModel(toTargetCandidates(cfg), model)
 }
 
 // targetsForCLI filters the configured CLI targets down to those running on
 // cli. An empty cli yields nil so the agent's full list stays in use.
 func targetsForCLI(cfg agentspec.AgentConfig, cli string) []agentspec.CLITarget {
-	if cli == "" {
+	filtered := agentwrapper.FilterTargetsByCLI(toTargetCandidates(cfg), cli)
+	if filtered == nil {
 		return nil
 	}
-	var out []agentspec.CLITarget
-	for _, t := range cfg.CLI {
-		if t.CLI == cli {
-			out = append(out, t)
-		}
+	out := make([]agentspec.CLITarget, len(filtered))
+	for i, t := range filtered {
+		out[i] = agentspec.CLITarget{CLI: t.CLI, Model: t.Model}
 	}
 	return out
 }
@@ -121,17 +120,12 @@ func (e *SingleAgentExecutor) executeSequential(
 
 	// Determine the target CLI to prevent cross-CLI fallback.
 	// Memory/sessions are not portable across different CLIs (e.g. AGY -> Simplest).
-	targetCLI := cliForModel(e.agent.Config, forcedModel.TakeOr(""))
-	if targetCLI == "" && session != nil {
-		targetCLI = cliForModel(e.agent.Config, storedAgentModel(session, e.agent.Config))
+	storedModel := ""
+	if session != nil {
+		storedModel = storedAgentModel(session, e.agent.Config)
 	}
-	// Only a chat with prior history is bound to a CLI. A fresh chat has no
-	// session to preserve, so it keeps the full candidate list and quota
-	// fallback may move on to the next CLI group without asking the user.
-	hasHistory := len(sessions) > 0 || (session != nil && storedAgentModel(session, e.agent.Config) != "")
-	if targetCLI == "" && hasHistory && len(e.agent.Config.CLI) > 0 {
-		targetCLI = e.agent.Config.CLI[0].CLI
-	}
+	hasHistory := len(sessions) > 0 || storedModel != ""
+	targetCLI := agentwrapper.ResolveSessionCLI(toTargetCandidates(e.agent.Config), forcedModel.TakeOr(""), storedModel, hasHistory)
 	cliCandidates := targetsForCLI(e.agent.Config, targetCLI)
 
 	dispatchAgent := e.agent

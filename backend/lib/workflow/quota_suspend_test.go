@@ -446,7 +446,7 @@ func TestBuildQuotaPromptAndOptions(t *testing.T) {
 		AgentID:      "commit-agent",
 		MinThreshold: 0.10,
 		Targets: []run.QuotaTargetStatus{
-			{CLI: "agy", Model: "gemini-3.7-flash-low", Remaining: 0.02, Enabled: true},
+			{CLI: "agy", Model: "gemini-3.7-flash-low", Remaining: 0.02, Enabled: true, Forceable: true},
 			{CLI: "opencode", Model: "zai-coding-plan/glm-5.3-flash/high", Remaining: 0.0, Enabled: true},
 			{CLI: "simplest", Model: "x", Remaining: 0.5, Enabled: false},
 		},
@@ -539,7 +539,7 @@ func TestClassifyQuotaReply(t *testing.T) {
 func TestQuotaPromptAndOptionsHonorPolicyReason(t *testing.T) {
 	nq := &run.NoQuotaError{AgentID: "a", MinThreshold: run.MinAutoQuotaThreshold, Targets: []run.QuotaTargetStatus{
 		{CLI: "claude", Model: "opus", Remaining: 0.08, Enabled: true, Reason: "weekly: 8% remaining"},
-		{CLI: "agy", Model: "gemini", Remaining: 0.05, Enabled: true},
+		{CLI: "agy", Model: "gemini", Remaining: 0.05, Enabled: true, Forceable: true},
 	}}
 	agent := &agentspec.Agent{Config: agentspec.AgentConfig{ID: "a", Name: "A"}}
 

@@ -204,7 +204,10 @@ type TargetQuota struct {
 	Enabled bool `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// reason is set when the account's quota policy rejects the target, and
 	// names the limit that fell below its threshold.
-	Reason        string `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason string `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	// forceable is true when the target can still be selected as an explicit
+	// model override despite falling below the quota threshold.
+	Forceable     bool `protobuf:"varint,6,opt,name=forceable,proto3" json:"forceable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -272,6 +275,13 @@ func (x *TargetQuota) GetReason() string {
 		return x.Reason
 	}
 	return ""
+}
+
+func (x *TargetQuota) GetForceable() bool {
+	if x != nil {
+		return x.Forceable
+	}
+	return false
 }
 
 // NoQuota mirrors the backend's run.NoQuotaError.
@@ -9638,13 +9648,14 @@ const file_pkg_runnerpb_runner_proto_rawDesc = "" +
 	"\x19pkg/runnerpb/runner.proto\x12\x10asgard.runner.v1\"0\n" +
 	"\x06Target\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"\x85\x01\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"\xa3\x01\n" +
 	"\vTargetQuota\x12\x10\n" +
 	"\x03cli\x18\x01 \x01(\tR\x03cli\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x1c\n" +
 	"\tremaining\x18\x03 \x01(\x01R\tremaining\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xcc\x01\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x1c\n" +
+	"\tforceable\x18\x06 \x01(\bR\tforceable\"\xcc\x01\n" +
 	"\aNoQuota\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12%\n" +
 	"\x0eexplicit_model\x18\x02 \x01(\tR\rexplicitModel\x12#\n" +

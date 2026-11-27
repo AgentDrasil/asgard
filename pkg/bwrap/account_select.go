@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -191,61 +190,19 @@ func cachedAccountQuota(cli, alias string) ([]llms.ModelUsage, error) {
 	return usages, err
 }
 
-// stripProvider drops a leading "<provider>/" from a model name.
-func stripProvider(m string) string {
-	if i := strings.Index(m, "/"); i >= 0 {
-		return m[i+1:]
-	}
-	return m
-}
-
-func modelMatches(want, have string) bool {
-	return strings.EqualFold(want, have) || strings.EqualFold(stripProvider(want), stripProvider(have))
-}
-
-// usageExhausted reports whether the account should not serve the model. The
-// quota policy verdict, when the aw query attached one, is authoritative: the
-// account's profile decides per window. Otherwise only a fully used limit
-// counts.
-func usageExhausted(u llms.ModelUsage) bool {
-	if u.Usable != nil {
-		return !*u.Usable
-	}
-	if u.Remaining <= 0 {
-		return true
-	}
-	for _, l := range u.Limits {
-		if l.Remaining <= 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// modelAvailability reports whether usages leave quota for model, and when an
-// exhausted model refreshes (0 if unknown).
-func modelAvailability(usages []llms.ModelUsage, model string) (available bool, refresh int64) {
-	matched := false
-	for _, u := range usages {
-		if !modelMatches(model, u.Model) {
-			continue
-		}
-		matched = true
-		if !usageExhausted(u) {
-			return true, 0
-		}
-		if u.RefreshDate > 0 && (refresh == 0 || u.RefreshDate < refresh) {
-			refresh = u.RefreshDate
-		}
-	}
-	return !matched, refresh
-}
-
 // chooseAccount is the single place where the agent run's account for
 // (cli, model) is chosen; see the strategy comment above.
 func chooseAccount(cli, model string) (string, bool, error) {
+	if pinned := os.Getenv(accountEnvName(cli)); pinned != "" {
+		first, ok, err := selectAccount(cli)
+		if err != nil || !ok {
+			return first, ok, err
+		}
+		sel := agentwrapper.SelectAccount(cli, model, first, nil)
+		return sel.Alias, sel.OK, nil
+	}
 	first, ok, err := selectAccount(cli)
-	if err != nil || !ok || os.Getenv(accountEnvName(cli)) != "" {
+	if err != nil || !ok {
 		return first, ok, err
 	}
 	aliases, err := listAccounts(cli)
@@ -257,33 +214,25 @@ func chooseAccount(cli, model string) (string, bool, error) {
 		return first, ok, nil
 	}
 
-	bestAlias, bestRefresh := "", int64(math.MaxInt64)
-	errored := false
+	states := make([]agentwrapper.AccountQuotaState, 0, len(aliases))
 	for _, alias := range aliases {
-		usages, err := cachedAccountQuota(cli, alias)
-		if err != nil {
-			log.Warn().Err(err).Str("cli", cli).Str("account", alias).Msg("account quota unavailable, skipping it")
-			errored = true
-			continue
+		usages, qerr := cachedAccountQuota(cli, alias)
+		if qerr != nil {
+			log.Warn().Err(qerr).Str("cli", cli).Str("account", alias).Msg("account quota unavailable, skipping it")
 		}
-		avail, refresh := modelAvailability(usages, model)
-		if avail {
-			log.Debug().Str("cli", cli).Str("model", model).Str("account", alias).Msg("selected account with remaining quota")
-			return alias, true, nil
-		}
-		if refresh == 0 {
-			refresh = math.MaxInt64
-		}
-		if bestAlias == "" || refresh < bestRefresh {
-			bestAlias, bestRefresh = alias, refresh
-		}
+		states = append(states, agentwrapper.AccountQuotaState{
+			Alias:  alias,
+			Usages: usages,
+			Err:    qerr,
+		})
 	}
-	if errored {
-		log.Warn().Str("cli", cli).Str("model", model).Str("account", aliases[0]).Msg("no account confirmed available and some quota unknown, using the first account")
-		return aliases[0], true, nil
+	sel := agentwrapper.SelectAccount(cli, model, "", states)
+	ev := log.Debug()
+	if sel.Degraded {
+		ev = log.Warn()
 	}
-	log.Warn().Str("cli", cli).Str("model", model).Str("account", bestAlias).Msg("all accounts exhausted for model, picking the earliest refresh")
-	return bestAlias, true, nil
+	ev.Str("cli", cli).Str("model", model).Str("account", sel.Alias).Str("reason", sel.Reason).Msg("account selected")
+	return sel.Alias, sel.OK, nil
 }
 
 // accountEnvName is the env var that overrides account selection for a CLI.

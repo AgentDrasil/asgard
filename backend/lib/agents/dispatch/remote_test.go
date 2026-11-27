@@ -262,6 +262,28 @@ func TestRun_QuotaRetryLoopUsesFreshRunIDs(t *testing.T) {
 	assert.NotEqual(t, hub.sent[0].GetRunId(), hub.sent[1].GetRunId())
 }
 
+func TestRun_NoQuotaPreservesForceable(t *testing.T) {
+	t.Parallel()
+
+	hub := &fakeHub{handle: &fakeHandle{result: &runnerhub.Result{RunResult: &runnerpb.RunResult{
+		Error: "no quota",
+		NoQuota: &runnerpb.NoQuota{
+			AgentId: "a",
+			Targets: []*runnerpb.TargetQuota{
+				{Cli: "opencode", Model: "m1", Remaining: 0, Enabled: true, Forceable: true, Reason: "5h: 0% remaining"},
+				{Cli: "agy", Model: "g", Remaining: 0.5, Enabled: true, Forceable: false, Reason: "blocked"},
+			},
+		},
+	}}}}
+	_, err := newTestRemote(hub, nil).Run(context.Background(), Request{ChatID: "c", Agent: testAgent(), Attempt: 1})
+	var nq *run.NoQuotaError
+	require.ErrorAs(t, err, &nq)
+	assert.Equal(t, []run.QuotaTargetStatus{
+		{CLI: "opencode", Model: "m1", Remaining: 0, Enabled: true, Forceable: true, Reason: "5h: 0% remaining"},
+		{CLI: "agy", Model: "g", Remaining: 0.5, Enabled: true, Forceable: false, Reason: "blocked"},
+	}, nq.Targets)
+}
+
 func TestRun_RunnerErrorKeepsOutputAndTarget(t *testing.T) {
 	res := okResult("partial")
 	res.RunResult.Error = "agent crashed"

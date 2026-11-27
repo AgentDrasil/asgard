@@ -368,48 +368,9 @@ func CheckTarget(cli string, model string) QuotaCheck {
 	return QuotaCheck{}
 }
 
-// bestMatchingUsage picks, among the entries for model, the one a run should
-// count on: an entry the quota policy accepts wins, then the most remaining.
-func bestMatchingUsage(cli, model string, usages []types.ModelUsage) (best types.ModelUsage, found bool) {
-	accepted := func(u types.ModelUsage) bool { return u.Usable != nil && *u.Usable }
-	for _, u := range usages {
-		if u.IsStatusOnly() || !MatchesModel(cli, model, u.Model) {
-			continue
-		}
-		switch {
-		case !found,
-			accepted(u) && !accepted(best),
-			accepted(u) == accepted(best) && u.Remaining > best.Remaining:
-			best, found = u, true
-		}
-	}
-	return best, found
-}
-
-// bestAccountCheck reports the best account for model. Like account
-// selection, an account that answered but has no entry for the model counts
-// as available, so when the quota policy rejects every account that does have
-// an entry, such an account still makes the target usable. found is false
-// when no account has an entry for the model.
+// bestAccountCheck delegates to BestAccountCheck.
 func bestAccountCheck(cli, model string, accounts []AccountUsage) (QuotaCheck, bool) {
-	var all []types.ModelUsage
-	missing := false
-	for _, a := range accounts {
-		if _, ok := bestMatchingUsage(cli, model, a.Usages); !ok {
-			missing = true
-		}
-		all = append(all, a.Usages...)
-	}
-	best, found := bestMatchingUsage(cli, model, all)
-	if !found {
-		return QuotaCheck{}, false
-	}
-	check := QuotaCheck{Remaining: best.Remaining, Usable: best.Usable, Reason: best.Reason}
-	if missing && best.Usable != nil && !*best.Usable {
-		usable := true
-		check.Usable, check.Reason = &usable, ""
-	}
-	return check, true
+	return BestAccountCheck(cli, model, accounts)
 }
 
 // CheckQuota returns the headline remaining quota fraction of a target.

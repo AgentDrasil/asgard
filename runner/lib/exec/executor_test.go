@@ -185,7 +185,11 @@ func TestExecutorNoQuota(t *testing.T) {
 		ExplicitModel: "m1",
 		MinThreshold:  0.1,
 		PairingNote:   "pair",
-		Targets:       []run.QuotaTargetStatus{{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true, Reason: "weekly: 5% remaining"}, {CLI: "agy", Model: "g", Enabled: false}},
+		Targets: []run.QuotaTargetStatus{
+			{CLI: "opencode", Model: "m1", Remaining: 0.05, Enabled: true, Reason: "weekly: 5% remaining"},
+			{CLI: "agy", Model: "g", Enabled: false},
+			{CLI: "claude", Model: "c1", Remaining: 0, Enabled: true, Forceable: true, Reason: "5h: 0% remaining"},
+		},
 	}
 	fn := func(context.Context, *agentspec.Agent, []agentspec.CLITarget, string, run.SessionMap, optional.Option[string], optional.Option[string], string, run.StatusScope, run.Options) (run.Result, error) {
 		return run.Result{}, fmt.Errorf("wrapped: %w", nq)
@@ -203,11 +207,19 @@ func TestExecutorNoQuota(t *testing.T) {
 	assert.Equal(t, "m1", got.GetExplicitModel())
 	assert.InDelta(t, 0.1, got.GetMinThreshold(), 1e-9)
 	assert.Equal(t, "pair", got.GetPairingNote())
-	require.Len(t, got.GetTargets(), 2)
+	require.Len(t, got.GetTargets(), 3)
 	assert.Equal(t, "opencode", got.GetTargets()[0].GetCli())
 	assert.InDelta(t, 0.05, got.GetTargets()[0].GetRemaining(), 1e-9)
 	assert.Equal(t, "weekly: 5% remaining", got.GetTargets()[0].GetReason())
+	assert.False(t, got.GetTargets()[0].GetForceable())
 	assert.False(t, got.GetTargets()[1].GetEnabled())
+	assert.False(t, got.GetTargets()[1].GetForceable())
+	assert.Equal(t, "claude", got.GetTargets()[2].GetCli())
+	assert.Equal(t, "c1", got.GetTargets()[2].GetModel())
+	assert.InDelta(t, 0.0, got.GetTargets()[2].GetRemaining(), 1e-9)
+	assert.True(t, got.GetTargets()[2].GetEnabled())
+	assert.True(t, got.GetTargets()[2].GetForceable())
+	assert.Equal(t, "5h: 0% remaining", got.GetTargets()[2].GetReason())
 	assert.Nil(t, res.GetSelectedTarget())
 }
 

@@ -31,6 +31,9 @@ message TargetQuota {
   // reason is set when the account's quota policy rejects the target, and
   // names the limit that fell below its threshold.
   string reason = 5;
+  // forceable is true when the target can still be selected as an explicit
+  // model override despite falling below the quota threshold.
+  bool forceable = 6;
 }
 
 // NoQuota mirrors the backend's run.NoQuotaError.

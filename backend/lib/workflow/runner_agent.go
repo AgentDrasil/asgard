@@ -854,8 +854,7 @@ func BuildQuotaPrompt(nq *run.NoQuotaError, agent *agentspec.Agent) string {
 func QuotaOptions(nq *run.NoQuotaError) []string {
 	opts := []string{"Wait for quota recovery, then continue"}
 	for _, t := range nq.Targets {
-		// A target the quota policy rejects would be refused again when forced.
-		if t.Enabled && t.Remaining > 0 && t.Reason == "" {
+		if t.Forceable {
 			opts = append(opts, fmt.Sprintf("Use %s %s", t.CLI, t.Model))
 		}
 	}

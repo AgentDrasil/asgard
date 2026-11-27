@@ -308,38 +308,21 @@ func stderrTail(stderr string) string {
 	return ": " + tail
 }
 
-const MinAutoQuotaThreshold = 0.10 // 10% minimum remaining quota for automatic selection
+const MinAutoQuotaThreshold = agentwrapper.MinAutoQuotaThreshold // 10% minimum remaining quota for automatic selection
 
-// policyReason returns why the quota policy rejects the target, or "" when
-// it does not (no verdict, or an accepting one).
+// policyReason delegates to agentwrapper.PolicyReason.
 func policyReason(c agentwrapper.QuotaCheck) string {
-	if c.Usable == nil || *c.Usable {
-		return ""
-	}
-	if c.Reason != "" {
-		return c.Reason
-	}
-	return "not usable under the quota policy"
+	return agentwrapper.PolicyReason(c)
 }
 
-// explicitUsable reports whether an explicitly selected model may run: the
-// quota policy verdict decides when there is one, otherwise the model only
-// needs some quota left.
+// explicitUsable delegates to agentwrapper.ExplicitUsable.
 func explicitUsable(c agentwrapper.QuotaCheck) bool {
-	if c.Usable != nil {
-		return *c.Usable
-	}
-	return c.Remaining > 0
+	return agentwrapper.ExplicitUsable(c)
 }
 
-// autoSelectable reports whether automatic selection may pick a target. The
-// account's quota policy verdict decides when there is one; otherwise the
-// fixed MinAutoQuotaThreshold applies.
+// autoSelectable delegates to agentwrapper.AutoSelectable.
 func autoSelectable(c agentwrapper.QuotaCheck) bool {
-	if c.Usable != nil {
-		return *c.Usable
-	}
-	return c.Remaining > MinAutoQuotaThreshold
+	return agentwrapper.AutoSelectable(c, MinAutoQuotaThreshold)
 }
 
 // QuotaTargetStatus describes the quota state of one configured CLI target.
@@ -348,6 +331,7 @@ type QuotaTargetStatus struct {
 	Model     string  `json:"model"`
 	Remaining float64 `json:"remaining"`
 	Enabled   bool    `json:"enabled"`
+	Forceable bool    `json:"forceable,omitempty"`
 	// Reason is set when the account's quota policy rejects the target, and
 	// says which limit fell below its threshold.
 	Reason string `json:"reason,omitempty"`
@@ -392,24 +376,21 @@ func (e *NoQuotaError) Error() string {
 	return sb.String()
 }
 
-// quotaStatuses snapshots the quota state of every given CLI target.
-// Disabled providers are recorded without a usage query.
-func quotaStatuses(targets []agentspec.CLITarget, opts Options) []QuotaTargetStatus {
-	statuses := make([]QuotaTargetStatus, 0, len(targets))
-	for _, target := range targets {
-		st := QuotaTargetStatus{
-			CLI:     target.CLI,
-			Model:   target.Model,
-			Enabled: opts.providerEnabled(target.CLI),
+// toQuotaTargetStatuses converts pure agentwrapper.TargetStatus values to
+// run.QuotaTargetStatus.
+func toQuotaTargetStatuses(statuses []agentwrapper.TargetStatus) []QuotaTargetStatus {
+	out := make([]QuotaTargetStatus, len(statuses))
+	for i, s := range statuses {
+		out[i] = QuotaTargetStatus{
+			CLI:       s.CLI,
+			Model:     s.Model,
+			Remaining: s.Remaining,
+			Enabled:   s.Enabled,
+			Forceable: s.Forceable,
+			Reason:    s.Reason,
 		}
-		if st.Enabled {
-			check := agentwrapper.CheckTarget(target.CLI, target.Model)
-			st.Remaining = check.Remaining
-			st.Reason = policyReason(check)
-		}
-		statuses = append(statuses, st)
 	}
-	return statuses
+	return out
 }
 
 // SessionMap maps a CLI name to the session ID that CLI previously opened
@@ -484,57 +465,39 @@ func RunWithOptions(ctx context.Context, agent *agentspec.Agent, candidates []ag
 		return Result{}, fmt.Errorf("no CLI targets configured for agent %s", agent.Config.ID)
 	}
 
-	var selectedTarget *agentspec.CLITarget
-	if modelOpt.IsSome() && modelOpt.Unwrap() != "" {
-		reqModel := modelOpt.Unwrap()
-		for _, target := range targets {
-			if target.Model == reqModel {
-				selectedTarget = &target
-				break
-			}
-		}
-		if selectedTarget == nil {
-			return Result{}, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
-		}
-		if !opts.providerEnabled(selectedTarget.CLI) {
-			return Result{}, fmt.Errorf("provider %q for model %q is disabled in configuration", selectedTarget.CLI, reqModel)
-		}
-		if !explicitUsable(agentwrapper.CheckTarget(selectedTarget.CLI, selectedTarget.Model)) {
-			return Result{}, &NoQuotaError{
-				AgentID:       agent.Config.ID,
-				ExplicitModel: reqModel,
-				MinThreshold:  MinAutoQuotaThreshold,
-				Targets:       quotaStatuses(targets, opts),
-			}
-		}
-	} else {
-		hasEnabledTarget := false
-		var statuses []QuotaTargetStatus
-		for _, target := range targets {
-			if !opts.providerEnabled(target.CLI) {
-				statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Enabled: false})
-				continue
-			}
-			hasEnabledTarget = true
-			check := agentwrapper.CheckTarget(target.CLI, target.Model)
-			statuses = append(statuses, QuotaTargetStatus{CLI: target.CLI, Model: target.Model, Remaining: check.Remaining, Enabled: true, Reason: policyReason(check)})
-			if autoSelectable(check) {
-				selectedTarget = &target
-				break
-			}
-		}
-
-		if selectedTarget == nil {
-			if !hasEnabledTarget {
-				return Result{}, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
-			}
-			return Result{}, &NoQuotaError{
-				AgentID:      agent.Config.ID,
-				MinThreshold: MinAutoQuotaThreshold,
-				Targets:      statuses,
-			}
+	targetCandidates := make([]agentwrapper.TargetCandidate, len(targets))
+	for i, t := range targets {
+		targetCandidates[i] = agentwrapper.TargetCandidate{
+			CLI:     t.CLI,
+			Model:   t.Model,
+			Enabled: opts.providerEnabled(t.CLI),
 		}
 	}
+
+	reqModel := ""
+	if modelOpt.IsSome() {
+		reqModel = modelOpt.Unwrap()
+	}
+
+	sel := agentwrapper.SelectTarget(targetCandidates, reqModel, MinAutoQuotaThreshold, agentwrapper.CheckTarget)
+	if !sel.Selected {
+		if sel.ModelNotFound {
+			return Result{}, fmt.Errorf("selected model %q is not in configured model list for agent %s", reqModel, agent.Config.ID)
+		}
+		if sel.ProviderDisabled {
+			return Result{}, fmt.Errorf("provider %q for model %q is disabled in configuration", sel.Target.CLI, reqModel)
+		}
+		if !sel.HasEnabledTarget {
+			return Result{}, fmt.Errorf("no enabled CLI targets available for agent %s", agent.Config.ID)
+		}
+		return Result{}, &NoQuotaError{
+			AgentID:       agent.Config.ID,
+			ExplicitModel: sel.ExplicitModel,
+			MinThreshold:  MinAutoQuotaThreshold,
+			Targets:       toQuotaTargetStatuses(sel.Statuses),
+		}
+	}
+	selectedTarget := &agentspec.CLITarget{CLI: sel.Target.CLI, Model: sel.Target.Model}
 
 	runDir, err := resolveRunDir(agent, runDirOpt)
 	if err != nil {
