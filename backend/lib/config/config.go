@@ -281,11 +281,7 @@ func (c *Config) SandboxProxyOptions() bwrap.ProxySandboxConfig {
 	if c == nil {
 		return bwrap.ProxySandboxConfig{}
 	}
-	opts := bwrap.ProxySandboxConfig{
-		TypesafeAPIKey: c.GetTypesafeAPIKey(),
-		GeminiAPIKey:   c.GetGeminiAPIKey(),
-		CompassModel:   c.GetGeminiModelForCommandResultCompass(),
-	}
+	var opts bwrap.ProxySandboxConfig
 	c.sandboxProxyMu.RLock()
 	ep := c.sandboxProxy
 	c.sandboxProxyMu.RUnlock()

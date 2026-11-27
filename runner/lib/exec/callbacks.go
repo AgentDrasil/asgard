@@ -48,6 +48,8 @@ func (s *statusServer) registerCallbacks(mux *http.ServeMux) {
 	s.registerSubagentRoutes(mux)
 	mux.HandleFunc("POST "+sandboxsock.PathMetrics, s.handleMetrics)
 	mux.HandleFunc("POST "+sandboxsock.PathMerge, s.handleMerge)
+	mux.HandleFunc("POST "+sandboxsock.PathCompassClassify, s.handleCompassClassify)
+	mux.HandleFunc("POST "+sandboxsock.PathCompassSummarize, s.handleCompassSummarize)
 }
 
 // nextCallSeq allocates the call_seq of a new sandbox call; it increases per
@@ -122,7 +124,18 @@ func (s *statusServer) callContext(r *http.Request) (context.Context, context.Ca
 }
 
 func decodeCall(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCallText+(1<<20))).Decode(v); err != nil {
+	return decodeBounded(w, r, maxCallText+(1<<20), v)
+}
+
+// decodeBounded decodes a JSON body of at most max bytes; a larger one is
+// answered with 413, any other failure with 400.
+func decodeBounded(w http.ResponseWriter, r *http.Request, max int64, v any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, max)).Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return false
 	}

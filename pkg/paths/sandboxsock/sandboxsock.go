@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,6 +50,10 @@ const (
 	PathSubagentRouteList = "/subagent/route/list"
 	PathMetrics           = "/metrics"
 	PathMerge             = "/merge"
+	// Command output compass (fakebash): the runner holds the jev and Gemini
+	// API keys and makes the model calls, so the keys never enter a sandbox.
+	PathCompassClassify  = "/compass/classify"
+	PathCompassSummarize = "/compass/summarize"
 
 	// host is the placeholder request host; the dialer ignores it.
 	host = "http://asgard"
@@ -367,7 +372,26 @@ func (c *Client) PostJSON(ctx context.Context, path string, in any) (*http.Respo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if dl, ok := ctx.Deadline(); ok {
+		if ms := time.Until(dl).Milliseconds(); ms > 0 {
+			req.Header.Set(HeaderDeadlineMs, strconv.FormatInt(ms, 10))
+		}
+	}
 	return c.http.Do(req)
+}
+
+// HeaderDeadlineMs carries the milliseconds the caller still waits for the
+// answer, so the runner does not start work the caller will not see.
+const HeaderDeadlineMs = "X-Asgard-Deadline-Ms"
+
+// DeadlineBudget returns the caller's remaining budget from HeaderDeadlineMs,
+// or 0 when absent or invalid.
+func DeadlineBudget(r *http.Request) time.Duration {
+	ms, err := strconv.ParseInt(r.Header.Get(HeaderDeadlineMs), 10, 64)
+	if err != nil || ms <= 0 {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // Get fetches path; the caller closes the response body.
@@ -377,4 +401,50 @@ func (c *Client) Get(ctx context.Context, path string) (*http.Response, error) {
 		return nil, err
 	}
 	return c.http.Do(req)
+}
+
+// CompassUsage records whether a model was consulted for a compass call and
+// its token cost.
+type CompassUsage struct {
+	Issued bool  `json:"issued"`
+	Tokens int64 `json:"tokens"`
+}
+
+// CompassClassifyRequest is the body of POST /compass/classify: the finished
+// command and a head/tail sample of its output. The runner owns the question
+// asked of the model; the sandbox only supplies data.
+type CompassClassifyRequest struct {
+	Command      string `json:"command"`
+	ExitCode     int    `json:"exit_code"`
+	TotalBytes   int64  `json:"total_bytes"`
+	OutputSample string `json:"output_sample"`
+}
+
+// CompassClassifyResponse is the answer of POST /compass/classify. Enabled is
+// false when the runner has no jev key (the sandbox then keeps the raw
+// output). Strategy is one of keep_raw, drop_on_success, extract_failure,
+// summarize.
+type CompassClassifyResponse struct {
+	Enabled  bool         `json:"enabled"`
+	Strategy string       `json:"strategy,omitempty"`
+	Usage    CompassUsage `json:"usage"`
+}
+
+// CompassSummarizeRequest is the body of POST /compass/summarize. Log is the
+// full output (small outputs) or the inspector extract (large ones).
+type CompassSummarizeRequest struct {
+	Command       string `json:"command"`
+	ExitCode      int    `json:"exit_code"`
+	Strategy      string `json:"strategy"`
+	InspectorMode bool   `json:"inspector_mode,omitempty"`
+	Log           string `json:"log"`
+}
+
+// CompassSummarizeResponse is the answer of POST /compass/summarize. Enabled
+// is false when the runner has no Gemini key; an empty Summary means the
+// sandbox keeps the raw output.
+type CompassSummarizeResponse struct {
+	Enabled bool         `json:"enabled"`
+	Summary string       `json:"summary,omitempty"`
+	Usage   CompassUsage `json:"usage"`
 }

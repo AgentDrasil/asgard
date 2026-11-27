@@ -66,13 +66,12 @@ var inheritedEnvKeys = map[string]bool{
 	"ASGARD_GEMINI_TIMEOUT_MS":     true,
 	"FAKEBASH_OUTPUT_DIR":          true,
 	// Asgard's own path overrides for the binaries that run in the sandbox
-	// (aw, opencode wrapper, simplest). Paths and a model name, no secrets.
-	"AW_CONFIG":                               true,
-	"OPENCODE_AW_CONFIG":                      true,
-	"SIMPLEST_KEY_PATH":                       true,
-	"SIMPLEST_CONFIG_PATH":                    true,
-	"SIMPLEST_MODELS_PATH":                    true,
-	"GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS": true,
+	// (aw, opencode wrapper, simplest). Paths only, no secrets.
+	"AW_CONFIG":            true,
+	"OPENCODE_AW_CONFIG":   true,
+	"SIMPLEST_KEY_PATH":    true,
+	"SIMPLEST_CONFIG_PATH": true,
+	"SIMPLEST_MODELS_PATH": true,
 }
 
 var (

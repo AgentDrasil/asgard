@@ -75,10 +75,18 @@ type statusServer struct {
 	callSeq  atomic.Uint64
 	retryMin time.Duration
 	retryMax time.Duration
+
+	// compass makes the jev / Gemini calls of the sandboxes' command output
+	// compression with the runner's own keys; nil switches the feature off
+	// (the sandbox keeps raw output). compassLimit and compassTimeout bound it.
+	compass        compassBackend
+	compassLimit   *compassLimiter // this run's
+	compassGlobal  *compassLimiter // runner-wide, shared by all runs
+	compassTimeout time.Duration
 }
 
 func newStatusServer(ctx context.Context, sr *runnerpb.StartRun, agent *agentspec.Agent, runDir string, sink conn.Sink) *statusServer {
-	return &statusServer{sr: sr, agent: agent, runDir: runDir, sink: sink, ctx: ctx, retryMin: callRetryMin, retryMax: callRetryMax}
+	return &statusServer{sr: sr, agent: agent, runDir: runDir, sink: sink, ctx: ctx, retryMin: callRetryMin, retryMax: callRetryMax, compassLimit: newCompassLimiter(maxCompassInFlight, compassRunRate, compassRunBurst), compassGlobal: globalCompass}
 }
 
 // serve listens on sockDir/asgard.sock. The returned stop func closes the

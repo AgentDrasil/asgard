@@ -304,14 +304,11 @@ const SandboxedEnv = "ASGARD_SANDBOXED"
 
 // ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.
 type ProxySandboxConfig struct {
-	Enabled        bool
-	ProxyAddr      string            // e.g. "http://127.0.0.1:8082"
-	CACert         string            // Host Asgard CA cert path (absolute)
-	CAKey          string            // Host Asgard CA private key path (absolute)
-	EnvVars        map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
-	TypesafeAPIKey string            // TypeSafe API key for Jev System One evaluation
-	GeminiAPIKey   string            // Gemini API key for Level 2 GenAI summarizer
-	CompassModel   string            // Gemini model for command result compass
+	Enabled   bool
+	ProxyAddr string            // e.g. "http://127.0.0.1:8082"
+	CACert    string            // Host Asgard CA cert path (absolute)
+	CAKey     string            // Host Asgard CA private key path (absolute)
+	EnvVars   map[string]string // Custom environment variables (e.g. dummy secrets) to expose to sandbox
 	// ExtraEnv are trusted per-run KEY=VALUE variables (run identity,
 	// opts.Env) set inside the sandbox. It rides on this struct because every
 	// sandbox constructor already takes it. Protected keys (HOME, PATH,
@@ -837,30 +834,8 @@ func buildSandboxArgsPinned(pins map[string]string, cfg *agentspec.AgentConfig, 
 		args = append(args, "--setenv", "ASGARD_MODEL", target.Model)
 	}
 
-	// Inject TypeSafe Jev API key, Gemini API key, and compass model if available
-	typesafeKey := os.Getenv("TYPESAFE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	compassModel := os.Getenv("GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS")
-	if len(proxyOpts) > 0 {
-		if proxyOpts[0].TypesafeAPIKey != "" {
-			typesafeKey = proxyOpts[0].TypesafeAPIKey
-		}
-		if proxyOpts[0].GeminiAPIKey != "" {
-			geminiKey = proxyOpts[0].GeminiAPIKey
-		}
-		if proxyOpts[0].CompassModel != "" {
-			compassModel = proxyOpts[0].CompassModel
-		}
-	}
-	if typesafeKey != "" {
-		args = append(args, "--setenv", "TYPESAFE_API_KEY", typesafeKey)
-	}
-	if geminiKey != "" {
-		args = append(args, "--setenv", "GEMINI_API_KEY", geminiKey)
-	}
-	if compassModel != "" {
-		args = append(args, "--setenv", "GEMINI_MODEL_FOR_COMMAND_RESULT_COMPASS", compassModel)
-	}
+	// The jev and Gemini keys of fakebash's output compression are never
+	// passed in: the runner makes those calls over the per-run socket.
 
 	spec := agentwrapper.GetSandboxSpec(target.CLI)
 

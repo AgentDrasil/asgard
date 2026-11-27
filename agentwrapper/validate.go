@@ -172,5 +172,5 @@ func ValidateSimplestSetup() error {
 		return nil
 	}
 
-	return fmt.Errorf("simplest setup validation failed: no valid configuration file found and neither GEMINI_API_KEY nor OPENAI_API_KEY is set")
+	return fmt.Errorf("simplest setup validation failed: no valid configuration file found and neither GEMINI_API_KEY nor OPENAI_API_KEY is set; simplest needs a key.yaml (see $SIMPLEST_KEY_PATH, ~/.config/simplest/key.yaml) or a GEMINI_API_KEY / OPENAI_API_KEY added as a personal API key in the WebUI (the sandbox only sees its proxy-masked value); the runner's own keys are not passed into the sandbox")
 }

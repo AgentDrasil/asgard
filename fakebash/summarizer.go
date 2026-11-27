@@ -33,6 +33,7 @@ type GenAISummarizer struct {
 	client  *genai.Client
 	model   string
 	timeout time.Duration
+	apiKey  string
 }
 
 // SummarizerOption allows configuring a GenAISummarizer.
@@ -42,6 +43,15 @@ type SummarizerOption func(*GenAISummarizer)
 func WithGenAIClient(client *genai.Client) SummarizerOption {
 	return func(s *GenAISummarizer) {
 		s.client = client
+	}
+}
+
+// WithGeminiAPIKey sets the Gemini API key explicitly instead of reading
+// GEMINI_API_KEY from the environment. The runner uses it with the key from its
+// configuration.
+func WithGeminiAPIKey(key string) SummarizerOption {
+	return func(s *GenAISummarizer) {
+		s.apiKey = key
 	}
 }
 
@@ -84,7 +94,10 @@ func NewGenAISummarizer(storage Storage, opts ...SummarizerOption) *GenAISummari
 	}
 
 	if s.client == nil {
-		apiKey := os.Getenv("GEMINI_API_KEY")
+		apiKey := s.apiKey
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY")
+		}
 		if apiKey != "" {
 			ctx := context.Background()
 			client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -130,17 +143,32 @@ func (s *GenAISummarizer) Summarize(ctx context.Context, cmd string, exitCode in
 		return payloadStr, ModelUsage{}, nil
 	}
 
-	var inputLog string
-	var inspectorMode bool
+	inputLog, inspectorMode := SummaryInput(payloadStr, totalBytes)
+	text, usage := s.SummarizeLog(ctx, cmd, exitCode, strategy, inputLog, inspectorMode)
+	if text == "" {
+		return payloadStr, usage, nil
+	}
+	return text, usage, nil
+}
 
+// SummaryInput picks what the summarizer is shown: the full payload for small
+// outputs, the inspector extract (failure windows plus head and tail) for large
+// ones.
+func SummaryInput(payload string, totalBytes int64) (inputLog string, inspectorMode bool) {
 	if totalBytes < TenKBThreshold {
-		// Small log (< 10KB): pass full payload directly
-		inputLog = payloadStr
-		inspectorMode = false
-	} else {
-		// Large log (>= 10KB): strict inspector extraction without re-reading storage
-		inputLog = extractInspectorSnippet(payloadStr)
-		inspectorMode = true
+		return payload, false
+	}
+	return extractInspectorSnippet(payload), true
+}
+
+// SummarizeLog is the storage-free half of Summarize, also used by the runner
+// on behalf of a sandbox. It returns the model's summary and usage; an empty
+// summary means the caller should keep the raw output (no client, the call
+// failed or timed out, or the model said nothing).
+func (s *GenAISummarizer) SummarizeLog(ctx context.Context, cmd string, exitCode int, strategy Strategy, inputLog string, inspectorMode bool) (string, ModelUsage) {
+	if s.client == nil {
+		log.Debug().Msg("genai client not available; keeping raw output")
+		return "", ModelUsage{}
 	}
 
 	systemPrompt := `You are a high-signal developer CLI output summarizer.
@@ -175,8 +203,8 @@ Your goal is to extract concise, actionable diagnostic information from the comm
 
 	resp, err := s.client.Models.GenerateContent(evalCtx, s.model, contents, config)
 	if err != nil {
-		log.Debug().Err(err).Str("cmd_id", cmdID).Msg("gemini summarization failed or timed out; falling back to raw payload")
-		return payloadStr, ModelUsage{}, nil
+		log.Debug().Err(err).Msg("gemini summarization failed or timed out; falling back to raw payload")
+		return "", ModelUsage{}
 	}
 
 	usage := ModelUsage{Issued: true}
@@ -186,11 +214,11 @@ Your goal is to extract concise, actionable diagnostic information from the comm
 
 	text := resp.Text()
 	if strings.TrimSpace(text) == "" {
-		log.Debug().Str("cmd_id", cmdID).Msg("gemini returned empty summary; falling back to raw payload")
-		return payloadStr, usage, nil
+		log.Debug().Msg("gemini returned empty summary; falling back to raw payload")
+		return "", usage
 	}
 
-	return text, usage, nil
+	return text, usage
 }
 
 const (

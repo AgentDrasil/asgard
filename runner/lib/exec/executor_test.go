@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 	"github.com/AgentDrasil/asgard/runner/lib/conn"
 )
@@ -413,7 +415,6 @@ func TestExecutor_RunOptions_UserProxyKeys(t *testing.T) {
 		assert.Equal(t, "dummy-GEMINI_API_KEY", opts.Proxy.EnvVars["GEMINI_API_KEY"])
 		assert.Equal(t, "dummy-OPENAI_API_KEY", opts.Proxy.EnvVars["OPENAI_API_KEY"])
 		assert.NotContains(t, opts.Proxy.EnvVars, "NO_HOST", "a key without a host cannot be served")
-		assert.NotEqual(t, "ai-studio-key-789", opts.Proxy.GeminiAPIKey)
 		for _, v := range opts.Proxy.EnvVars {
 			assert.NotContains(t, v, "ai-studio-key-789")
 			assert.NotContains(t, v, "sk-openai-456")
@@ -644,4 +645,40 @@ func TestExecutorControlRunAnsweredNotInjectableRemembered(t *testing.T) {
 	assert.Less(t, time.Since(start), controlRetry, "an answered not_injectable fails at once the next time")
 	close(release)
 	sink.wait(t)
+}
+
+// OnSockDir wires the compass backend from the config getters: the runner's
+// keys decide whether each call is enabled.
+func TestExecutorRunOptionsWiresCompassFromConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
+	// An unknown strategy is answered by the host without any network call,
+	// but only when it has a Gemini summarizer.
+	probe := sandboxsock.CompassSummarizeRequest{Strategy: "bogus", Log: "x"}
+	enabled := func(conf *config.Config) bool {
+		ex := New(Options{})
+		opts, release := ex.runOptions(context.Background(), &runnerpb.StartRun{RunId: "r"}, &agentspec.Agent{}, conf, newRecordingSink(), nil)
+		defer release()
+		sockDir := shortSockDir(t)
+		stop, err := opts.OnSockDir(sockDir, "/proj")
+		require.NoError(t, err)
+		defer stop()
+		c := unixClient(filepath.Join(sockDir, SocketName))
+		post := func(path string, in, out any) {
+			b, err := json.Marshal(in)
+			require.NoError(t, err)
+			resp, err := c.Post("http://asgard"+path, "application/json", bytes.NewReader(b))
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(out))
+		}
+		var sr sandboxsock.CompassSummarizeResponse
+		post(sandboxsock.PathCompassSummarize, probe, &sr)
+		return sr.Enabled
+	}
+
+	assert.False(t, enabled(&config.Config{}), "no keys: compass off")
+	assert.True(t, enabled(&config.Config{GeminiAPIKey: "gem-from-config"}), "the configured Gemini key enables summarize")
 }

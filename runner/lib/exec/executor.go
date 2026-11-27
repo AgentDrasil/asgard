@@ -22,6 +22,7 @@ import (
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/worktree"
+	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
 	"github.com/AgentDrasil/asgard/pkg/paths/sandboxsock"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
@@ -337,6 +338,7 @@ func (e *Executor) runOptions(ctx context.Context, sr *runnerpb.StartRun, agent 
 			srv := newStatusServer(ctx, sr, agent, runDir, sink)
 			srv.callbacks = e.opts.Callbacks
 			srv.worktree = plan
+			srv.compass = fakebash.NewCompassHost(conf.GetTypesafeAPIKey(), conf.GetGeminiAPIKey(), conf.GetGeminiModelForCommandResultCompass())
 			stop, err := srv.serve(sockDir)
 			if err != nil {
 				return nil, err

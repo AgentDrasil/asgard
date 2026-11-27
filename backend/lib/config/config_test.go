@@ -605,7 +605,6 @@ func TestSandboxProxyOptions_Endpoint(t *testing.T) {
 	cfg := &Config{GeminiAPIKey: "gem"}
 	opts := cfg.SandboxProxyOptions()
 	assert.False(t, opts.Enabled, "no proxy endpoint recorded (backend)")
-	assert.Equal(t, "gem", opts.GeminiAPIKey)
 
 	cfg.SetSandboxProxy(&SandboxProxyEndpoint{Addr: "http://127.0.0.1:4000", CACert: "/ca.crt", CAKey: "/ca.key"})
 	opts = cfg.SandboxProxyOptions()
@@ -663,11 +662,6 @@ typesafe_api_key: "test-typesafe-key-123"
 		assert.Equal(t, "gemini-2.5-pro", cfg.GetGeminiModelForCommandResultCompass())
 		assert.Equal(t, "test-typesafe-key-123", cfg.GetTypesafeAPIKey())
 		assert.Equal(t, "test-key", cfg.GetGeminiAPIKey())
-
-		sandboxOpts := cfg.SandboxProxyOptions()
-		assert.Equal(t, "test-typesafe-key-123", sandboxOpts.TypesafeAPIKey)
-		assert.Equal(t, "test-key", sandboxOpts.GeminiAPIKey)
-		assert.Equal(t, "gemini-2.5-pro", sandboxOpts.CompassModel)
 	})
 
 	t.Run("nil config safety", func(t *testing.T) {

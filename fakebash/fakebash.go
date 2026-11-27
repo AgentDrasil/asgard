@@ -343,8 +343,21 @@ func RunClient(args []string) error {
 
 	var pipeline *Pipeline
 	if storage != nil {
-		evaluator := NewJevEvaluator(storage)
-		summarizer := NewGenAISummarizer(storage)
+		// The jev and Gemini keys live on the runner, never in this sandbox:
+		// the model calls go through the per-run socket. Without a usable
+		// socket the pipeline has no evaluator and returns raw output.
+		var evaluator Evaluator
+		var summarizer Summarizer
+		if e, err := NewRemoteEvaluator(storage); err == nil {
+			evaluator = e
+		} else {
+			log.Debug().Err(err).Msg("compass socket unusable; classification disabled")
+		}
+		if s, err := NewRemoteSummarizer(storage); err == nil {
+			summarizer = s
+		} else {
+			log.Debug().Err(err).Msg("compass socket unusable; summarization disabled")
+		}
 		pipeline = NewPipeline(storage, evaluator, summarizer)
 	}
 

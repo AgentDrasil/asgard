@@ -107,11 +107,25 @@ func (e *JevEvaluator) Classify(ctx context.Context, cmd string, exitCode int, c
 		return StrategyKeepRaw, ModelUsage{}, nil
 	}
 
-	var outputSample string
+	outputSample := BuildOutputSample(head, tail, totalBytes)
+	return e.ClassifyOutput(ctx, cmd, exitCode, totalBytes, outputSample, cmdID)
+}
+
+// BuildOutputSample joins the head and tail of an output into the sample the
+// classifier sees.
+func BuildOutputSample(head, tail []byte, totalBytes int64) string {
 	if totalBytes <= 2048 {
-		outputSample = string(head)
-	} else {
-		outputSample = fmt.Sprintf("%s\n... [truncated %d bytes] ...\n%s", string(head), totalBytes-int64(len(head))-int64(len(tail)), string(tail))
+		return string(head)
+	}
+	return fmt.Sprintf("%s\n... [truncated %d bytes] ...\n%s", string(head), totalBytes-int64(len(head))-int64(len(tail)), string(tail))
+}
+
+// ClassifyOutput asks the jev client which strategy fits the finished command.
+// It is the storage-free half of Classify, also used by the runner on behalf of
+// a sandbox. cmdID is only used for logging. Any failure falls back to keep_raw.
+func (e *JevEvaluator) ClassifyOutput(ctx context.Context, cmd string, exitCode int, totalBytes int64, outputSample, cmdID string) (Strategy, ModelUsage, error) {
+	if e.jevClient == nil {
+		return StrategyKeepRaw, ModelUsage{}, nil
 	}
 
 	state := map[string]any{
