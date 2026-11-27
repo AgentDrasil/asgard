@@ -223,6 +223,8 @@ const {
   artifacts,
   queuedMessages,
   isRunning,
+  connectionState,
+  retryConnection,
   waitingSubagents,
   workingAgentLabel,
   isInputBusy,
@@ -763,6 +765,7 @@ const commandList = computed<CommandItem[]>(() => [
           :subagents="activeSubagents"
           :parentSession="activeParentSession"
           :waitingSubagents="waitingSubagents"
+          :connectionState="connectionState"
           :killingIds="killingSubagentIds"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
@@ -797,6 +800,7 @@ const commandList = computed<CommandItem[]>(() => [
           @edit-queued="handleEditQueued"
           @delete-queued="handleDeleteQueued"
           @send-now-queued="handleSendNowQueued"
+          @retry-connection="retryConnection"
           @retry="handleRetryLastUserMessage"
           @open-session="(id: string) => handleSelectSession(id, closeSidebarOnMobile)"
           @kill-subagent="handleKillSubagent"

@@ -246,10 +246,21 @@ func (h *SessionEventHub) Subscribe(chatID string, lastEventID int64) (<-chan Se
 	if lastEventID > 0 {
 		oldestID := t.oldestEventID()
 		newestID := t.newestEventID()
-		if t.count == 0 || lastEventID < oldestID || lastEventID > newestID {
+		// Event ids are consecutive, so a client at oldestID-1 has missed
+		// nothing and gets a plain replay; an empty topic only has nothing to
+		// replay when the client is exactly at its high-water mark.
+		var needResync bool
+		if t.count == 0 {
+			needResync = lastEventID != t.nextEventID
+		} else {
+			needResync = lastEventID < oldestID-1 || lastEventID > newestID
+		}
+		if needResync {
 			// Evicted from ring buffer, empty, or topic was GC'd: notify client to resync
+			// EventID is the topic's high-water mark (never 0, which a browser
+			// would adopt as Last-Event-ID and then neither replay nor resync).
 			sub.ch <- SessionEvent{
-				EventID:   newestID,
+				EventID:   t.nextEventID,
 				ChatID:    chatID,
 				Type:      "resync",
 				Timestamp: time.Now().UnixMilli(),

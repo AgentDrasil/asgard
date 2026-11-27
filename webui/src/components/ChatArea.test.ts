@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createApp, h, nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import ChatArea from "./ChatArea.vue";
 import type { AgentInfo, ChatMessage, QueuedMessage } from "../types";
 import { i18n } from "../i18n";
@@ -599,6 +599,65 @@ describe("ChatArea.vue", () => {
     await nextTick();
 
     expect(unlocked).toBe(true);
+
+    app.unmount();
+  });
+
+  it("shows a status banner only while the event stream is reconnecting", async () => {
+    const connectionState = ref<"open" | "reconnecting">("reconnecting");
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+          connectionState: connectionState.value,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    const banner = root.querySelector('[data-testid="connection-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute("role")).toBe("status");
+    expect(banner?.textContent).toContain("Reconnecting");
+
+    connectionState.value = "open";
+    await nextTick();
+    expect(root.querySelector('[data-testid="connection-banner"]')).toBeNull();
+
+    app.unmount();
+  });
+
+  it("shows a distinct failed banner with a retry button", async () => {
+    let retried = 0;
+    const app = createApp({
+      render() {
+        return h(ChatArea, {
+          messages: dummyMessages,
+          loading: false,
+          activeAgent: dummyAgent,
+          runDir: "/home/user/project",
+          sessionId: "sess-123",
+          connectionState: "failed",
+          onRetryConnection: () => retried++,
+        });
+      },
+    });
+    app.use(i18n);
+    app.mount(root);
+    await nextTick();
+
+    expect(root.querySelector('[data-testid="connection-banner"]')).toBeNull();
+    const banner = root.querySelector('[data-testid="connection-failed-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).not.toContain("Reconnecting");
+    (root.querySelector('[data-testid="connection-retry"]') as HTMLButtonElement).click();
+    expect(retried).toBe(1);
 
     app.unmount();
   });

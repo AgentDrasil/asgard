@@ -207,6 +207,8 @@ export const en = {
     closeNotification: "Close notification",
   },
   chat: {
+    reconnecting: "Connection lost. Reconnecting…",
+    connectionFailed: "Unable to connect to this session's live updates. Reload or retry.",
     voiceInput: "Voice Input",
     startRecording: "Start voice recording",
     stopRecording: "Stop recording",

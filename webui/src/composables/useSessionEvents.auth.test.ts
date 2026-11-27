@@ -119,6 +119,15 @@ async function setAuthEnabled(enabled: boolean) {
   await initAuth();
 }
 
+// Composables bind document/window wake listeners; disconnect them after each
+// test so they cannot react to later tests' events.
+const liveDisconnects: (() => void)[] = [];
+function trackedEvents(...args: Parameters<typeof useSessionEvents>) {
+  const r = useSessionEvents(...args);
+  liveDisconnects.push(r.disconnect);
+  return r;
+}
+
 describe("useSessionEvents auth handling", () => {
   beforeEach(() => {
     MockEventSource.instances = [];
@@ -129,6 +138,7 @@ describe("useSessionEvents auth handling", () => {
   });
 
   afterEach(() => {
+    for (const d of liveDisconnects.splice(0)) d();
     vi.useRealTimers();
     vi.restoreAllMocks();
     delete (globalThis as any).EventSource;
@@ -151,7 +161,7 @@ describe("useSessionEvents auth handling", () => {
   it("omits the token while auth is disabled", async () => {
     await setAuthEnabled(false);
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
 
     expect(MockEventSource.instances).toHaveLength(1);
@@ -162,7 +172,7 @@ describe("useSessionEvents auth handling", () => {
     await setAuthEnabled(true);
     setStoredTokens(TOKENS);
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
 
     expect(MockEventSource.instances).toHaveLength(1);
@@ -171,16 +181,19 @@ describe("useSessionEvents auth handling", () => {
     );
   });
 
-  it("leaves a closed stream alone while auth is disabled", async () => {
+  it("retries a closed stream with backoff while auth is disabled", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
     await setAuthEnabled(false);
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
-    // External-SSO deployments recover through the next apiFetch 401 instead.
-    await vi.waitFor(() => expect(MockEventSource.instances[0].closed).toBe(true));
+    await vi.advanceTimersByTimeAsync(999);
     expect(MockEventSource.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(MockEventSource.instances).toHaveLength(2);
     expect(navigations).toHaveLength(0);
   });
 
@@ -194,7 +207,7 @@ describe("useSessionEvents auth handling", () => {
       return jsonResponse(404);
     });
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
@@ -202,6 +215,44 @@ describe("useSessionEvents auth handling", () => {
     expect(MockEventSource.instances[1].url).toBe(
       "/api/sessions/chat-1/events?access_token=access-2",
     );
+  });
+
+  it("does not refresh on every CLOSED when the failure is not auth related", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    let refreshes = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === "/auth/refresh") {
+        refreshes++;
+        return jsonResponse(200, { ...TOKENS, access_token: "access-2", refresh_token: "r-2" });
+      }
+      return jsonResponse(404);
+    });
+
+    const { connect } = trackedEvents({});
+    connect("chat-1");
+    MockEventSource.instances[0].fail();
+    // The refresh waits out the cross-tab lock settle time, then reconnects at once.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(refreshes).toBe(1);
+
+    // 502 from a proxy: the fresh token is fine, back off without refreshing.
+    MockEventSource.instances[1].fail();
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(MockEventSource.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(MockEventSource.instances).toHaveLength(3);
+
+    MockEventSource.instances[2].fail();
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(MockEventSource.instances).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(MockEventSource.instances).toHaveLength(4);
+    expect(refreshes).toBe(1);
   });
 
   it("sends the user to the provider when the session cannot be refreshed", async () => {
@@ -213,7 +264,7 @@ describe("useSessionEvents auth handling", () => {
       return jsonResponse(404);
     });
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
@@ -227,13 +278,14 @@ describe("useSessionEvents auth handling", () => {
     await setAuthEnabled(true);
     setStoredTokens(TOKENS);
 
+    vi.spyOn(Math, "random").mockReturnValue(1);
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input) === "/auth/refresh")
         return jsonResponse(503, { error: "auth unavailable" });
       return jsonResponse(404);
     });
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
     MockEventSource.instances[0].fail();
 
@@ -241,7 +293,7 @@ describe("useSessionEvents auth handling", () => {
     expect(MockEventSource.instances).toHaveLength(1);
     expect(navigations).toHaveLength(0);
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(MockEventSource.instances).toHaveLength(2);
   });
 
@@ -255,7 +307,7 @@ describe("useSessionEvents auth handling", () => {
       return jsonResponse(404);
     });
 
-    const { connect } = useSessionEvents({});
+    const { connect } = trackedEvents({});
     connect("chat-1");
     const first = MockEventSource.instances[0];
 
@@ -268,5 +320,155 @@ describe("useSessionEvents auth handling", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[1].url).toContain("/api/sessions/chat-2/events");
+  });
+
+  it("tries a refresh again after a transient refresh failure", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    let refreshes = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === "/auth/refresh") {
+        refreshes++;
+        return refreshes === 1
+          ? jsonResponse(503, { error: "auth unavailable" })
+          : jsonResponse(200, { ...TOKENS, access_token: "access-2", refresh_token: "r-2" });
+      }
+      return jsonResponse(404);
+    });
+
+    const { connect } = trackedEvents({});
+    connect("chat-1");
+    MockEventSource.instances[0].fail();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(refreshes).toBe(1);
+
+    MockEventSource.instances[1].fail();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(refreshes).toBe(2);
+    expect(MockEventSource.instances[MockEventSource.instances.length - 1].url).toContain(
+      "access_token=access-2",
+    );
+  });
+
+  it("resets recovery state when switching sessions", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    let refreshes = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === "/auth/refresh") {
+        refreshes++;
+        return jsonResponse(503, { error: "auth unavailable" });
+      }
+      return jsonResponse(404);
+    });
+
+    const { connect } = trackedEvents({});
+    connect("chat-1");
+    MockEventSource.instances[0].fail();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(refreshes).toBe(1);
+
+    connect("chat-2");
+    MockEventSource.instances[MockEventSource.instances.length - 1].fail();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(refreshes).toBe(2);
+  });
+
+  it("rebuilds at once when another tab already rotated the token", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    const { connect } = trackedEvents({});
+    connect("chat-1");
+    setStoredTokens({ ...TOKENS, access_token: "access-9" });
+    MockEventSource.instances[0].fail();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(MockEventSource.instances[1].url).toContain("access_token=access-9");
+  });
+
+  // driveToFailed exhausts the reconnect budget with a non-auth failure
+  // (the token is fresh, so no refresh is attempted along the way).
+  async function driveToFailed(connectFn: (id: string) => void, state: { value: string }) {
+    connectFn("chat-1");
+    for (let i = 0; i < 40 && state.value !== "failed"; i++) {
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      es.fail();
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    expect(state.value).toBe("failed");
+  }
+
+  it("rebuilds with the refreshed token on a wake probe after failed", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    let refreshes = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === "/auth/refresh") {
+        refreshes++;
+        return jsonResponse(200, { ...TOKENS, access_token: "access-2", refresh_token: "r-2" });
+      }
+      return jsonResponse(404);
+    });
+
+    const { connect, state } = trackedEvents({});
+    // The first CLOSED refreshes once; mark that as already spent by driving
+    // to failed, then count refreshes from here.
+    await driveToFailed(connect, state);
+    refreshes = 0;
+    const before = MockEventSource.instances.length;
+
+    // Token goes stale, then the tab wakes up: the probe is rejected, the
+    // refresh succeeds and a stream with the new token is built despite the cap.
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(MockEventSource.instances).toHaveLength(before + 1);
+    MockEventSource.instances[before].fail();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(refreshes).toBe(1);
+    expect(MockEventSource.instances).toHaveLength(before + 2);
+    expect(MockEventSource.instances[before + 1].url).toContain("access_token=access-2");
+
+    // Bounded: a further CLOSED goes back to failed without another refresh.
+    MockEventSource.instances[before + 1].fail();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(state.value).toBe("failed");
+    expect(refreshes).toBe(1);
+    expect(MockEventSource.instances).toHaveLength(before + 2);
+  });
+
+  it("rebuilds at the cap when another tab rotated the token", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await setAuthEnabled(true);
+    setStoredTokens(TOKENS);
+
+    const { connect, state } = trackedEvents({});
+    await driveToFailed(connect, state);
+    const before = MockEventSource.instances.length;
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(MockEventSource.instances).toHaveLength(before + 1);
+    setStoredTokens({ ...TOKENS, access_token: "access-9" });
+    MockEventSource.instances[before].fail();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(MockEventSource.instances).toHaveLength(before + 2);
+    expect(MockEventSource.instances[before + 1].url).toContain("access_token=access-9");
+
+    MockEventSource.instances[before + 1].fail();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(state.value).toBe("failed");
+    expect(MockEventSource.instances).toHaveLength(before + 2);
   });
 });

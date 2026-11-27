@@ -63,6 +63,9 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
   const workingAgentLabel = ref<string | null>(null);
 
   let loadGen = 0;
+  // Bumped whenever a live status/done/ask_user event changes the running
+  // state, so a snapshot fetched before it cannot override it.
+  let runStateGen = 0;
 
   const isInputBusy = computed<boolean>(() => isRunning.value || loading.value);
 
@@ -116,6 +119,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       // status event is emitted. Mirror that here so the composer returns to
       // queue mode as soon as the reply is broadcast.
       const resuming = !!incoming.replied;
+      runStateGen++;
       isRunning.value = resuming;
       loading.value = resuming;
       workingAgentLabel.value = resuming
@@ -154,6 +158,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
 
     if (ev.payload?.isRunning !== undefined) {
+      runStateGen++;
       waitingSubagents.value = !ev.payload.isRunning && ev.payload.waitingSubagents === true;
       const hasUnrepliedAskUser = rawMessages.value.some(
         (m) => m.role === "ask_user" && !m.replied,
@@ -266,6 +271,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
 
   const handleSessionDoneEvent = (ev: SessionEvent) => {
     if (ev.chatId === activeSessionId.value) {
+      runStateGen++;
       isRunning.value = false;
       waitingSubagents.value = false;
       loading.value = false;
@@ -287,26 +293,46 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
   };
 
-  const handleSessionResyncEvent = async (ev: SessionEvent) => {
-    if (ev.chatId === activeSessionId.value && activeSessionId.value) {
+  // refreshActiveSnapshot refetches the open chat and merges it with what the
+  // live stream delivered meanwhile: a message that changed (or arrived) while
+  // the fetch ran is newer than the snapshot and wins; one untouched since the
+  // fetch began is taken from the snapshot (it may carry updates missed during
+  // the gap). Optimistic user messages the server has not echoed are kept, and
+  // a running state set by a status/done event after the fetch began wins.
+  const refreshActiveSnapshot = async (chatId: string) => {
+    if (chatId === activeSessionId.value && activeSessionId.value) {
+      const startMsgs = new Map(rawMessages.value.map((m) => [m.id, m]));
+      const startRunGen = runStateGen;
       const session = await fetchActiveSession(activeSessionId.value);
-      if (!session || activeSessionId.value !== ev.chatId) flushPendingSubagentArtifacts();
-      if (session && activeSessionId.value === ev.chatId) {
+      if (!session || activeSessionId.value !== chatId) flushPendingSubagentArtifacts();
+      if (session && activeSessionId.value === chatId) {
         activeSession.value = session;
         flushPendingSubagentArtifacts();
         queuedMessages.value = session.queuedMessages || [];
         const snapshotMsgs = session.messages || [];
-        const pendingOptimistic = rawMessages.value.filter(
-          (m) =>
-            m.role === "user" &&
-            m.id.startsWith("user-") &&
-            !snapshotMsgs.some((sm) => sm.id === m.id),
-        );
-        rawMessages.value = [...snapshotMsgs, ...pendingOptimistic];
+        const current = new Map(rawMessages.value.map((m) => [m.id, m]));
+        const merged: ChatMessage[] = snapshotMsgs.map((sm) => {
+          const live = current.get(sm.id);
+          return live && startMsgs.get(sm.id) !== live ? { ...sm, ...live } : sm;
+        });
+        const inSnapshot = new Set(snapshotMsgs.map((m) => m.id));
+        for (const m of rawMessages.value) {
+          if (inSnapshot.has(m.id)) continue;
+          const liveOnly = !startMsgs.has(m.id);
+          const optimistic = m.role === "user" && m.id.startsWith("user-");
+          if (liveOnly || optimistic) merged.push(m);
+        }
+        rawMessages.value = merged;
         artifacts.value = session.artifacts ? [...session.artifacts] : [];
         const hasUnrepliedAskUser = rawMessages.value.some(
           (m) => m.role === "ask_user" && !m.replied,
         );
+        if (runStateGen !== startRunGen) {
+          // A live event settled the running state after the fetch began.
+          loading.value = isRunning.value;
+          if (!isRunning.value) workingAgentLabel.value = null;
+          return;
+        }
         const running = !hasUnrepliedAskUser && !!session.isRunning;
         isRunning.value = running;
         waitingSubagents.value = !running && !!session.waitingSubagents;
@@ -317,6 +343,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
       }
     }
   };
+
+  const handleSessionResyncEvent = (ev: SessionEvent) => refreshActiveSnapshot(ev.chatId);
 
   const subagentSeqs = new Map<string, number>();
 
@@ -370,7 +398,19 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     onQueue: handleSessionQueueEvent,
     onSubagent: handleSessionSubagentEvent,
     onSubagentArtifact: handleSubagentArtifactEvent,
+    // A reconnect with no known resume point may have missed events (including
+    // `done`); a resumable one is replayed or answered with `resync` instead.
+    onOpen: ({ reconnected, resumed }) => {
+      if (reconnected && !resumed && activeSessionId.value) {
+        void refreshActiveSnapshot(activeSessionId.value);
+      }
+    },
   });
+  const connectionState = events.state;
+  // retryConnection restarts a stream that gave up (state "failed").
+  const retryConnection = () => {
+    if (activeSessionId.value) events.connect(activeSessionId.value);
+  };
 
   const openSession = async (id: string) => {
     if (!id) return;
@@ -490,6 +530,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     // event, so optimistically flip the session back to running. The done
     // event still clears it when the run actually finishes.
     if (!isRunning.value) {
+      runStateGen++;
       isRunning.value = true;
       loading.value = true;
       if (activeSession.value) {
@@ -647,6 +688,7 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     }
 
     loading.value = true;
+    runStateGen++;
     isRunning.value = true;
     waitingSubagents.value = false;
     workingAgentLabel.value = null;
@@ -911,6 +953,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     workingAgentLabel,
     isInputBusy,
     isStoppingSession,
+    connectionState,
+    retryConnection,
     openSession,
     closeSession,
     loadSessions,

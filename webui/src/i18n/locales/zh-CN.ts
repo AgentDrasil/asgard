@@ -208,6 +208,8 @@ export const zhCN: MessageSchema = {
     closeNotification: "关闭通知",
   },
   chat: {
+    reconnecting: "连接已断开，正在重新连接…",
+    connectionFailed: "无法连接到该会话的实时更新，请重试或刷新页面。",
     voiceInput: "语音输入",
     startRecording: "开始语音输入",
     stopRecording: "停止录音",

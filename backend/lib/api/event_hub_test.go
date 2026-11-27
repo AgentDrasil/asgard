@@ -326,6 +326,7 @@ func TestSessionEventHub_ReplayAfterGC_Resync(t *testing.T) {
 	select {
 	case ev := <-subCh:
 		assert.Equal(t, "resync", ev.Type)
+		assert.Positive(t, ev.EventID, "resync must never carry event id 0")
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for resync event after GC")
 	}
@@ -371,4 +372,92 @@ func TestSessionEventHub_Broadcast(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for broadcast on sub2")
 	}
+}
+
+func TestSessionEventHub_ResyncBoundaries(t *testing.T) {
+	t.Parallel()
+
+	setup := func(t *testing.T) (*SessionEventHub, string, []int64) {
+		hub := NewSessionEventHubWithCapacity(5)
+		t.Cleanup(hub.Close)
+		chatID := "chat-boundary"
+		sub, _, cancel := hub.Subscribe(chatID, 0)
+		for i := 0; i < 8; i++ {
+			hub.Publish(chatID, SessionEvent{Type: "status"})
+		}
+		var ids []int64
+		for i := 0; i < 8; i++ {
+			ids = append(ids, (<-sub).EventID)
+		}
+		cancel()
+		return hub, chatID, ids
+	}
+
+	first := func(t *testing.T, ch <-chan SessionEvent) (SessionEvent, bool) {
+		select {
+		case ev := <-ch:
+			return ev, true
+		case <-time.After(100 * time.Millisecond):
+			return SessionEvent{}, false
+		}
+	}
+
+	t.Run("client just before the oldest buffered event is replayed", func(t *testing.T) {
+		t.Parallel()
+		hub, chatID, ids := setup(t) // buffer holds ids[3..7]
+		ch, _, cancel := hub.Subscribe(chatID, ids[2])
+		t.Cleanup(cancel)
+		ev, ok := first(t, ch)
+		require.True(t, ok)
+		assert.Equal(t, "status", ev.Type)
+		assert.Equal(t, ids[3], ev.EventID)
+	})
+
+	t.Run("client two before the oldest buffered event is resynced", func(t *testing.T) {
+		t.Parallel()
+		hub, chatID, ids := setup(t)
+		ch, _, cancel := hub.Subscribe(chatID, ids[1])
+		t.Cleanup(cancel)
+		ev, ok := first(t, ch)
+		require.True(t, ok)
+		assert.Equal(t, "resync", ev.Type)
+	})
+
+	t.Run("client at the newest event gets nothing", func(t *testing.T) {
+		t.Parallel()
+		hub, chatID, ids := setup(t)
+		ch, _, cancel := hub.Subscribe(chatID, ids[7])
+		t.Cleanup(cancel)
+		_, ok := first(t, ch)
+		assert.False(t, ok)
+	})
+
+	t.Run("client ahead of the newest event is resynced", func(t *testing.T) {
+		t.Parallel()
+		hub, chatID, ids := setup(t)
+		ch, _, cancel := hub.Subscribe(chatID, ids[7]+100)
+		t.Cleanup(cancel)
+		ev, ok := first(t, ch)
+		require.True(t, ok)
+		assert.Equal(t, "resync", ev.Type)
+	})
+
+	t.Run("empty topic resyncs a stale id but not its high-water mark", func(t *testing.T) {
+		t.Parallel()
+		hub := NewSessionEventHubWithCapacity(5)
+		t.Cleanup(hub.Close)
+		stale, _, cancel := hub.Subscribe("chat-empty", 12345)
+		t.Cleanup(cancel)
+		ev, ok := first(t, stale)
+		require.True(t, ok)
+		assert.Equal(t, "resync", ev.Type)
+
+		hub.topicsMu.RLock()
+		next := hub.topics["chat-empty"].nextEventID
+		hub.topicsMu.RUnlock()
+		current, _, cancel2 := hub.Subscribe("chat-empty", next)
+		t.Cleanup(cancel2)
+		_, ok = first(t, current)
+		assert.False(t, ok)
+	})
 }

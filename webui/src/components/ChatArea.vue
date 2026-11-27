@@ -63,6 +63,8 @@ const props = withDefaults(
     /** The chat is between turns, held open while its subagents run. */
     waitingSubagents?: boolean;
     killingIds?: string[];
+    /** Session event stream state; a banner shows while it is not healthy. */
+    connectionState?: "connecting" | "open" | "reconnecting" | "closed" | "failed";
   }>(),
   {
     isDetailsOpen: true,
@@ -91,6 +93,7 @@ const emit = defineEmits<{
   (e: "open-artifact", file: string): void;
   (e: "select-artifact", file: string): void;
   (e: "toggle-terminal"): void;
+  (e: "retry-connection"): void;
   (e: "toggle-sidebar"): void;
   (e: "toggle-artifact-drawer"): void;
   (e: "ask-replied", msgId?: string, text?: string): void;
@@ -548,6 +551,36 @@ onUnmounted(() => {
           @prev="findState.findPrev"
           @close="findState.close"
         />
+
+        <!-- Event stream reconnecting banner -->
+        <div
+          v-if="connectionState === 'reconnecting'"
+          class="bg-warning/15 border-b border-warning/30 px-4 py-1.5 flex items-center gap-2 text-xs sm:text-sm text-warning shrink-0"
+          role="status"
+          data-testid="connection-banner"
+        >
+          <Icon icon="lucide:wifi-off" class="h-4 w-4 shrink-0 animate-pulse" />
+          <span>{{ t("chat.reconnecting") }}</span>
+        </div>
+
+        <!-- Event stream gave up (permanent error) -->
+        <div
+          v-if="connectionState === 'failed'"
+          class="bg-error/15 border-b border-error/30 px-4 py-1.5 flex items-center gap-2 text-xs sm:text-sm text-error shrink-0"
+          role="alert"
+          data-testid="connection-failed-banner"
+        >
+          <Icon icon="lucide:wifi-off" class="h-4 w-4 shrink-0" />
+          <span class="flex-1">{{ t("chat.connectionFailed") }}</span>
+          <button
+            type="button"
+            class="btn btn-xs btn-error btn-outline"
+            data-testid="connection-retry"
+            @click="emit('retry-connection')"
+          >
+            {{ t("common.retry") }}
+          </button>
+        </div>
 
         <!-- Waiting For Lock Banner -->
         <div

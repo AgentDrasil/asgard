@@ -10,6 +10,9 @@ class MockEventSource {
   url: string;
   listeners: Record<string, ((e: any) => void)[]> = {};
   closed = false;
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onerror: ((err: any) => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -710,6 +713,163 @@ describe("useSessionStore", () => {
     await vi.waitFor(() => {
       expect(store.messages.value.some((m) => m.content === "Snapshot msg")).toBe(true);
       expect(store.messages.value.some((m) => m.content === "Optimistic in flight")).toBe(true);
+    });
+  });
+
+  describe("connection recovery", () => {
+    const base = (): ChatSession => ({
+      chatID: "s-conn",
+      title: "Conn",
+      currentAgent: "agent-1",
+      runDir: "/workspace",
+      isRunning: true,
+      messages: [],
+    });
+
+    it("exposes the connection state and refetches after an unresumable reconnect", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue(base());
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+      expect(store.connectionState.value).toBe("open");
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // The stream drops before any event was seen; the backend finished meanwhile.
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      expect(store.connectionState.value).toBe("reconnecting");
+      spy.mockResolvedValue({ ...base(), isRunning: false });
+      es.onopen();
+
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(store.isRunning.value).toBe(false));
+      expect(store.connectionState.value).toBe("open");
+    });
+
+    it("keeps a done that arrives while the snapshot is being fetched", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue(base());
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+
+      let release!: (s: ChatSession) => void;
+      spy.mockImplementationOnce(() => new Promise<ChatSession>((r) => (release = r)));
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      es.onopen(); // unresumable: refetch starts
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+      es.emit("done", { eventId: 5, chatId: "s-conn", type: "done", timestamp: 2 });
+      expect(store.isRunning.value).toBe(false);
+      release({ ...base(), isRunning: true }); // stale snapshot
+      await new Promise((r) => setTimeout(r, 0));
+      expect(store.isRunning.value).toBe(false);
+      expect(store.loading.value).toBe(false);
+    });
+
+    it("keeps an optimistic send running while an idle snapshot is in flight", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue({ ...base(), isRunning: false });
+      vi.spyOn(api, "triggerAgentMessage").mockResolvedValue({
+        status: "accepted",
+        chatId: "s-conn",
+      });
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+
+      let release!: (s: ChatSession) => void;
+      spy.mockImplementationOnce(() => new Promise<ChatSession>((r) => (release = r)));
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      es.onopen();
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+      await store.sendMessage("go");
+      expect(store.isRunning.value).toBe(true);
+      release({ ...base(), isRunning: false }); // snapshot predates the send
+      await new Promise((r) => setTimeout(r, 0));
+      expect(store.isRunning.value).toBe(true);
+      expect(store.loading.value).toBe(true);
+    });
+
+    it("keeps live messages that arrive while the snapshot is being fetched", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue({
+        ...base(),
+        messages: [{ id: "ask-1", role: "ask_user", content: "Q", timestamp: 1 }],
+      });
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+
+      let release!: (s: ChatSession) => void;
+      spy.mockImplementationOnce(() => new Promise<ChatSession>((r) => (release = r)));
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      es.onopen();
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+      es.emit("message", {
+        eventId: 6,
+        chatId: "s-conn",
+        type: "message",
+        timestamp: 2,
+        message: { id: "ask-1", role: "ask_user", content: "Q", timestamp: 1, replied: true },
+      });
+      es.emit("message", {
+        eventId: 7,
+        chatId: "s-conn",
+        type: "message",
+        timestamp: 3,
+        message: { id: "new-1", role: "assistant", content: "live", timestamp: 3 },
+      });
+      release({
+        ...base(),
+        messages: [{ id: "ask-1", role: "ask_user", content: "Q", timestamp: 1 }],
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      const msgs = store.rawMessages.value;
+      expect(msgs.find((m) => m.id === "ask-1")?.replied).toBe(true);
+      expect(msgs.some((m) => m.id === "new-1")).toBe(true);
+    });
+
+    it("takes updates missed during the gap from the snapshot", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue({
+        ...base(),
+        messages: [{ id: "ask-1", role: "ask_user", content: "Q", timestamp: 1 }],
+      });
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      spy.mockResolvedValue({
+        ...base(),
+        isRunning: false,
+        messages: [{ id: "ask-1", role: "ask_user", content: "Q", timestamp: 1, replied: true }],
+      });
+      es.onopen();
+      await vi.waitFor(() =>
+        expect(store.rawMessages.value.find((m) => m.id === "ask-1")?.replied).toBe(true),
+      );
+    });
+
+    it("does not refetch after a resumable reconnect", async () => {
+      const spy = vi.spyOn(api, "getSession").mockResolvedValue(base());
+      const store = useSessionStore();
+      await store.openSession("s-conn");
+      const es = MockEventSource.instances[0] as any;
+      es.onopen();
+      es.emit("message", { eventId: 3, chatId: "s-conn", type: "message", timestamp: 1 });
+      es.readyState = 0;
+      es.onerror(new Event("error"));
+      es.onopen();
+      await Promise.resolve();
+      expect(spy).toHaveBeenCalledTimes(1);
     });
   });
 
