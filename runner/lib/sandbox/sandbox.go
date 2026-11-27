@@ -1,6 +1,6 @@
 // Package sandbox prepares the host side of the runner's sandboxes the way the
 // backend does at startup: the ssh-agent, the credential-masking proxy
-// (backend/lib/proxy, CA under ~/asgard/config/ca) and the sandbox
+// (pkg/proxy, CA under ~/asgard/config/ca) and the sandbox
 // configuration (proxy options, config path to mask) taken from the runner's
 // etcd view. Runs are refused while that setup is not healthy, so a sandbox
 // never starts without its masking.
@@ -24,12 +24,12 @@ import (
 
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
 
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/backend/lib/sshagent"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 	"github.com/AgentDrasil/asgard/pkg/paths"
+	"github.com/AgentDrasil/asgard/pkg/proxy"
 )
 
 // Source is the etcd view the sandbox setup is derived from (config.Remote).

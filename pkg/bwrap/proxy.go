@@ -8,10 +8,10 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/AgentDrasil/asgard/backend/lib/proxy"
 	"github.com/AgentDrasil/asgard/fakebash"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
+	"github.com/AgentDrasil/asgard/pkg/proxy"
 )
 
 // ProxySandboxConfig defines proxy configuration options for Bubblewrap sandbox.

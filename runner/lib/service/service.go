@@ -15,11 +15,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
 	"github.com/AgentDrasil/asgard/pkg/agentspec"
+	"github.com/AgentDrasil/asgard/pkg/cmdexec"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/config"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
+	"github.com/AgentDrasil/asgard/pkg/cmdexec"
 	"github.com/AgentDrasil/asgard/pkg/workflowspec"
 )
 

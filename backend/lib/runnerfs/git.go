@@ -18,7 +18,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 )
 
 // Git safety. The runner executes git outside the agents' sandbox on a

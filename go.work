@@ -17,11 +17,14 @@ use (
 	./fakebash
 	./llms
 	./pkg/agentspec
+	./pkg/bwrap
+	./pkg/cmdexec
 	./pkg/jev
 	./pkg/logger
 	./pkg/metrics
 	./pkg/paths
 	./pkg/pluginsdk
+	./pkg/proxy
 	./pkg/runnerpb
 	./pkg/version
 	./pkg/workflowspec

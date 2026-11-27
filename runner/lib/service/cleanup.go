@@ -13,9 +13,9 @@ import (
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/agentwrapper/accounts"
 	awconfig "github.com/AgentDrasil/asgard/agentwrapper/config"
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
 	"github.com/AgentDrasil/asgard/llms"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 

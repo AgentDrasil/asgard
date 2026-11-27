@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 )
 
 // skipInAsgardSandbox skips tests that spawn a real bash: inside an Asgard

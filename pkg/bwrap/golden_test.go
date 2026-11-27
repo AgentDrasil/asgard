@@ -22,7 +22,7 @@ import (
 // The golden tests pin the complete expanded bwrap argv (including the --args
 // file content) of every exported sandbox constructor over a matrix of inputs,
 // so refactors of the builders can be proven behavior-neutral. Regenerate with
-// UPDATE_GOLDEN=1 go test ./backend/lib/bwrap -run TestGolden.
+// UPDATE_GOLDEN=1 go test ./pkg/bwrap -run TestGolden.
 
 type goldenFixture struct {
 	root      string

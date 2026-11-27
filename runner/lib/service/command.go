@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AgentDrasil/asgard/backend/lib/agents"
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
-	"github.com/AgentDrasil/asgard/backend/lib/cmdexec"
 	"github.com/AgentDrasil/asgard/backend/lib/runnerfs"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
+	"github.com/AgentDrasil/asgard/pkg/cmdexec"
 	"github.com/AgentDrasil/asgard/pkg/runnerpb"
 )
 

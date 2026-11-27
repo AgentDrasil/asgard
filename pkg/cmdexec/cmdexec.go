@@ -21,8 +21,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
 	"github.com/AgentDrasil/asgard/fakebash/pb"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 	runnerpaths "github.com/AgentDrasil/asgard/pkg/paths/runner"
 )
 

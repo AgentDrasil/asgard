@@ -7,7 +7,7 @@ import (
 
 	"github.com/AgentDrasil/asgard/agentwrapper"
 	"github.com/AgentDrasil/asgard/backend/lib/app"
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 
 	// Register notebook workflow functions in the default registry.
 	_ "github.com/AgentDrasil/asgard/plugins/notebook"

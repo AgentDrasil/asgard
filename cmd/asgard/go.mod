@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/AgentDrasil/asgard/agentwrapper v0.0.0
 	github.com/AgentDrasil/asgard/backend v0.0.0
+	github.com/AgentDrasil/asgard/pkg/bwrap v0.0.0
 	github.com/AgentDrasil/asgard/plugins/notebook v0.0.0
 	github.com/rs/zerolog v1.35.1
 )
@@ -26,10 +27,12 @@ require (
 	github.com/AgentDrasil/asgard/fakebash v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/llms v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/agentspec v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/pkg/cmdexec v0.0.0-00010101000000-000000000000 // indirect
 	github.com/AgentDrasil/asgard/pkg/jev v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/metrics v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/paths v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/pluginsdk v0.0.0 // indirect
+	github.com/AgentDrasil/asgard/pkg/proxy v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/runnerpb v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/version v0.0.0 // indirect
 	github.com/AgentDrasil/asgard/pkg/workflowspec v0.0.0 // indirect
@@ -195,11 +198,14 @@ replace (
 	github.com/AgentDrasil/asgard/fakebash => ../../fakebash
 	github.com/AgentDrasil/asgard/llms => ../../llms
 	github.com/AgentDrasil/asgard/pkg/agentspec => ../../pkg/agentspec
+	github.com/AgentDrasil/asgard/pkg/bwrap => ../../pkg/bwrap
+	github.com/AgentDrasil/asgard/pkg/cmdexec => ../../pkg/cmdexec
 	github.com/AgentDrasil/asgard/pkg/jev => ../../pkg/jev
 	github.com/AgentDrasil/asgard/pkg/logger => ../../pkg/logger
 	github.com/AgentDrasil/asgard/pkg/metrics => ../../pkg/metrics
 	github.com/AgentDrasil/asgard/pkg/paths => ../../pkg/paths
 	github.com/AgentDrasil/asgard/pkg/pluginsdk => ../../pkg/pluginsdk
+	github.com/AgentDrasil/asgard/pkg/proxy => ../../pkg/proxy
 	github.com/AgentDrasil/asgard/pkg/runnerpb => ../../pkg/runnerpb
 	github.com/AgentDrasil/asgard/pkg/version => ../../pkg/version
 	github.com/AgentDrasil/asgard/pkg/workflowspec => ../../pkg/workflowspec

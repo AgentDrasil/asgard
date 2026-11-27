@@ -9,7 +9,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/AgentDrasil/asgard/backend/lib/auth"
-	"github.com/AgentDrasil/asgard/backend/lib/bwrap"
+	"github.com/AgentDrasil/asgard/pkg/bwrap"
 	"github.com/AgentDrasil/asgard/pkg/paths"
 )
 
