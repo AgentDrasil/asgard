@@ -7,6 +7,8 @@ import * as api from "../lib/api";
 import * as toastModule from "../composables/useToast";
 import type { AgentInfo } from "../types";
 import { i18n } from "../i18n";
+import { sessionStoreKey } from "../composables/sessionStoreContext";
+import { useSessionStore } from "../composables/useSessionStore";
 
 // Mock @iconify/vue
 vi.mock("@iconify/vue", () => ({
@@ -384,7 +386,6 @@ describe("WelcomeScreen.vue", () => {
           selectedAgentId: "agent-1",
           selectedDir: "/workspace/project",
           prompt: "Start task from NewChatView",
-          loading: false,
           onSubmit: (files?: File[]) => {
             submittedFiles = files;
           },
@@ -392,6 +393,7 @@ describe("WelcomeScreen.vue", () => {
       },
     });
     app.use(i18n);
+    app.provide(sessionStoreKey, useSessionStore());
     app.mount(root);
     await nextTick();
 

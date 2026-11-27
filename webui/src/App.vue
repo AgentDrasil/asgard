@@ -25,7 +25,8 @@ import {
 import { useAgents } from "./composables/useAgents";
 import { useRunners } from "./composables/useRunners";
 import { useSessions } from "./composables/useSessions";
-import { useSessionStore, notifySendNowResult } from "./composables/useSessionStore";
+import { useSessionStore } from "./composables/useSessionStore";
+import { provideSessionStore } from "./composables/sessionStoreContext";
 import { useShortcuts } from "./composables/useShortcuts";
 import { resolveGlobalAction } from "./utils/keybindingUtils";
 
@@ -213,33 +214,18 @@ const handleLogout = () => logout();
 const { agents, selectedAgentId, selectedDir, selectedModel, loadAgents } = useAgents();
 
 // 2. Session Store (Single Source of Truth)
-const store = useSessionStore({ agents, router });
+const store = provideSessionStore(useSessionStore({ agents, router }));
 const {
   sessions,
   activeSessionId,
   activeSession,
-  activeAgent,
   messages,
-  artifacts,
-  queuedMessages,
-  isRunning,
-  connectionState,
-  retryConnection,
-  waitingSubagents,
-  workingAgentLabel,
-  isInputBusy,
   openSession,
   closeSession,
   loadSessions,
   archiveSessionById,
   unlockSessionById,
   sendMessage,
-  stopExecution,
-  updateMessageReply,
-  editQueuedMessage,
-  deleteQueuedMessage,
-  sendingQueuedIds,
-  sendQueuedMessageNow,
 } = store;
 
 // 3. Sessions Navigation & Operations
@@ -432,27 +418,6 @@ onMounted(async () => {
   }
 });
 
-// Subagent chats of the open chat, and the parent when it is a subagent itself.
-const activeSubagents = computed(() =>
-  activeSessionId.value
-    ? sessions.value.filter((s) => s.parentChatId === activeSessionId.value)
-    : [],
-);
-const activeParentSession = computed(() => {
-  const parentId = activeSession.value?.parentChatId;
-  return parentId ? sessions.value.find((s) => s.chatID === parentId) || null : null;
-});
-const killingSubagentIds = ref<string[]>([]);
-const handleKillSubagent = async (id: string) => {
-  if (killingSubagentIds.value.includes(id)) return;
-  killingSubagentIds.value = [...killingSubagentIds.value, id];
-  try {
-    await stopExecution(id);
-  } finally {
-    killingSubagentIds.value = killingSubagentIds.value.filter((x) => x !== id);
-  }
-};
-
 // Only list sessions bound to the selected runner (unbound legacy ones stay visible).
 const visibleSessions = computed(() =>
   runnerMode.value && selectedRunnerId.value
@@ -522,27 +487,10 @@ const handleRetryLastUserMessage = () => {
   }
 };
 
-const handleStopExecution = () => {
-  void stopExecution();
-};
-
-const handleAskReplied = (msgId?: string, text?: string) => {
-  if (msgId && text) {
-    updateMessageReply(msgId, text);
-  }
-};
-
-const handleEditQueued = (id: string, text: string) => {
-  void editQueuedMessage(id, text);
-};
-
-const handleDeleteQueued = (id: string) => {
-  void deleteQueuedMessage(id);
-};
-
-const handleSendNowQueued = async (id: string) => {
-  notifySendNowResult(await sendQueuedMessageNow(id));
-};
+// Only the chat and new-chat views take workspace props from App; every other
+// routed view is self-contained.
+const isChatRoute = computed(() => route.path.startsWith("/chat/"));
+const isNewChatRoute = computed(() => route.path === "/newchat");
 
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value;
@@ -745,47 +693,21 @@ const commandList = computed<CommandItem[]>(() => [
       <router-view v-else v-slot="{ Component }">
         <component
           :is="Component"
+          v-if="isChatRoute"
           :agents="agents"
-          :loading="isInputBusy"
-          :workingAgentLabel="workingAgentLabel"
-          :messages="messages"
-          :artifacts="artifacts"
-          :activeAgent="activeAgent"
           :runDir="activeSession?.runDir || selectedDir"
-          :runnerId="activeSession?.runnerId"
-          :sessionId="activeSessionId || ''"
           :gitRoot="currentGitRoot"
-          :terminalType="terminalType"
-          :queuedMessages="queuedMessages"
-          :sendingQueuedIds="sendingQueuedIds"
-          :isRunning="isRunning"
-          :dirLock="activeSession?.dirLock"
           :isUnlocking="isUnlockingSession"
-          :session="activeSession"
-          :subagents="activeSubagents"
-          :parentSession="activeParentSession"
-          :waitingSubagents="waitingSubagents"
-          :connectionState="connectionState"
-          :killingIds="killingSubagentIds"
           v-model:activeView="activeView"
           v-model:selectedFilePath="selectedFilePath"
           v-model:selectedCommit="selectedCommit"
           v-model:isFileTreeOpen="isFileTreeOpen"
-          v-model:selectedAgentId="selectedAgentId"
-          v-model:selectedDir="selectedDir"
-          v-model:selectedModel="selectedModel"
-          v-model:allowCrossSession="allowCrossSession"
-          v-model:worktree="worktree"
-          v-model:prompt="welcomePrompt"
           v-model:isDetailsOpen="isWorkspaceDetailsOpen"
           v-model:chatInputText="chatInputText"
           v-model:isTerminalOpen="isTerminalOpen"
           v-model:isArtifactDrawerOpen="isArtifactDrawerOpen"
           v-model:isVCSSidebarOpen="isVCSSidebarOpen"
-          @submit="handleStartWelcomeChat"
           @send="handleSendMessage"
-          @stop="handleStopExecution"
-          @archive-session="handleArchiveSession"
           @unlock="handleUnlockSession(activeSessionId || '')"
           @open-diff="
             (gitRoot: string) => {
@@ -796,15 +718,23 @@ const commandList = computed<CommandItem[]>(() => [
           @open-search="openFileSearch"
           @toggle-terminal="toggleTerminal('session')"
           @toggle-sidebar="toggleSidebar"
-          @ask-replied="handleAskReplied"
-          @edit-queued="handleEditQueued"
-          @delete-queued="handleDeleteQueued"
-          @send-now-queued="handleSendNowQueued"
-          @retry-connection="retryConnection"
           @retry="handleRetryLastUserMessage"
           @open-session="(id: string) => handleSelectSession(id, closeSidebarOnMobile)"
-          @kill-subagent="handleKillSubagent"
         />
+        <component
+          :is="Component"
+          v-else-if="isNewChatRoute"
+          :agents="agents"
+          v-model:selectedAgentId="selectedAgentId"
+          v-model:selectedDir="selectedDir"
+          v-model:selectedModel="selectedModel"
+          v-model:allowCrossSession="allowCrossSession"
+          v-model:worktree="worktree"
+          v-model:prompt="welcomePrompt"
+          @submit="handleStartWelcomeChat"
+          @toggle-sidebar="toggleSidebar"
+        />
+        <component :is="Component" v-else @toggle-sidebar="toggleSidebar" />
       </router-view>
       <!-- Hosted here (not in ChatView) so the sidebar terminal works on every page. -->
       <TerminalPanel

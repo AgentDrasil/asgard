@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import WelcomeScreen from "../components/WelcomeScreen.vue";
 import type { AgentInfo } from "../types";
+import { useInjectedSessionStore } from "../composables/sessionStoreContext";
 
 defineProps<{
   agents: AgentInfo[];
-  loading: boolean;
 }>();
+
+const { isInputBusy: loading } = useInjectedSessionStore();
 
 const selectedAgentId = defineModel<string>("selectedAgentId", { required: true });
 const selectedDir = defineModel<string>("selectedDir", { required: true });

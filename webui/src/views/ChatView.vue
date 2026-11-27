@@ -6,56 +6,76 @@ import ChatInput from "../components/ChatInput.vue";
 import WorkflowControlPanel from "../components/chat/WorkflowControlPanel.vue";
 import DiffView from "../components/DiffView.vue";
 import FileView from "../components/file/FileView.vue";
-import type {
-  ChatMessage,
-  AgentInfo,
-  ActiveView,
-  Attachment,
-  QueuedMessage,
-  DirLockStatus,
-  ChatSession,
-} from "../types";
+import type { AgentInfo, ActiveView, Attachment } from "../types";
+import { useInjectedSessionStore } from "../composables/sessionStoreContext";
+import { notifySendNowResult } from "../composables/useSessionStore";
 import { subagentArtifactEntries, type ArtifactSource } from "../utils/artifactSources";
 import { buildChatRoute, buildFilesRoute, buildVcsRoute } from "../utils/routeUtils";
 
 const router = useRouter();
 
-const props = withDefaults(
-  defineProps<{
-    messages: ChatMessage[];
-    artifacts?: string[];
-    loading: boolean;
-    activeAgent: AgentInfo | null;
-    agents?: AgentInfo[];
-    runDir: string;
-    runnerId?: string;
-    sessionId: string;
-    gitRoot: string;
-    terminalType?: "session" | "sidebar";
-    workingAgentLabel?: string | null;
-    queuedMessages?: QueuedMessage[];
-    sendingQueuedIds?: string[];
-    isRunning?: boolean;
-    dirLock?: DirLockStatus;
-    isUnlocking?: boolean;
-    session?: ChatSession | null;
-    subagents?: ChatSession[];
-    parentSession?: ChatSession | null;
-    waitingSubagents?: boolean;
-    killingIds?: string[];
-  }>(),
-  {
-    queuedMessages: () => [],
-    sendingQueuedIds: () => [],
-    isRunning: false,
-    isUnlocking: false,
-    session: null,
-    subagents: () => [],
-    parentSession: null,
-    waitingSubagents: false,
-    killingIds: () => [],
-  },
+// Workspace/UI context owned by App. Everything about the open chat itself
+// (messages, running state, queue, subagents, connection) comes from the
+// injected session store instead of props.
+defineProps<{
+  agents?: AgentInfo[];
+  runDir: string;
+  gitRoot: string;
+  isUnlocking?: boolean;
+}>();
+
+const store = useInjectedSessionStore();
+const {
+  messages,
+  artifacts,
+  activeAgent,
+  workingAgentLabel,
+  queuedMessages,
+  sendingQueuedIds,
+  isRunning,
+  waitingSubagents,
+  connectionState,
+  sessions,
+} = store;
+const loading = store.isInputBusy;
+const session = store.activeSession;
+const sessionId = computed(() => store.activeSessionId.value || "");
+const runnerId = computed(() => session.value?.runnerId);
+const dirLock = computed(() => session.value?.dirLock);
+// Subagent chats of the open chat, and the parent when it is a subagent itself.
+const subagents = computed(() =>
+  sessionId.value ? sessions.value.filter((s) => s.parentChatId === sessionId.value) : [],
 );
+const parentSession = computed(() => {
+  const parentId = session.value?.parentChatId;
+  return parentId ? sessions.value.find((s) => s.chatID === parentId) || null : null;
+});
+
+const killingIds = ref<string[]>([]);
+const handleKillSubagent = async (id: string) => {
+  if (killingIds.value.includes(id)) return;
+  killingIds.value = [...killingIds.value, id];
+  try {
+    await store.stopExecution(id);
+  } finally {
+    killingIds.value = killingIds.value.filter((x) => x !== id);
+  }
+};
+const handleAskReplied = (msgId?: string, text?: string) => {
+  if (msgId && text) store.updateMessageReply(msgId, text);
+};
+const handleStop = () => {
+  void store.stopExecution();
+};
+const handleEditQueued = (id: string, text: string) => {
+  void store.editQueuedMessage(id, text);
+};
+const handleDeleteQueued = (id: string) => {
+  void store.deleteQueuedMessage(id);
+};
+const handleSendNowQueued = async (id: string) => {
+  notifySendNowResult(await store.sendQueuedMessageNow(id));
+};
 
 const activeView = defineModel<ActiveView>("activeView", { default: "chat" });
 const selectedFilePath = defineModel<string | null>("selectedFilePath", { default: null });
@@ -80,24 +100,18 @@ const emit = defineEmits<{
   (e: "toggle-terminal"): void;
   (e: "toggle-sidebar"): void;
   (e: "open-search"): void;
-  (e: "ask-replied", msgId?: string, text?: string): void;
-  (e: "edit-queued", id: string, text: string): void;
-  (e: "delete-queued", id: string): void;
-  (e: "send-now-queued", id: string): void;
-  (e: "stop"): void;
   (e: "retry"): void;
   (e: "unlock"): void;
   (e: "open-session", id: string): void;
-  (e: "kill-subagent", id: string): void;
 }>();
 
-// Helper to collect all artifact files from props.artifacts and props.messages
+// Helper to collect all artifact files from artifacts.value and messages.value
 function syncArtifactFiles() {
   const currentFiles: string[] = [];
 
   // 1. Collect artifacts from session DB model
-  if (props.artifacts && props.artifacts.length > 0) {
-    for (const art of props.artifacts) {
+  if (artifacts.value && artifacts.value.length > 0) {
+    for (const art of artifacts.value) {
       if (art && !currentFiles.includes(art)) {
         currentFiles.push(art);
       }
@@ -105,8 +119,8 @@ function syncArtifactFiles() {
   }
 
   // 2. Collect artifacts from message artifactFiles
-  if (props.messages && props.messages.length > 0) {
-    for (const msg of props.messages) {
+  if (messages.value && messages.value.length > 0) {
+    for (const msg of messages.value) {
       if (msg.artifactFiles && msg.artifactFiles.length > 0) {
         for (const f of msg.artifactFiles) {
           if (f && !currentFiles.includes(f)) {
@@ -118,7 +132,7 @@ function syncArtifactFiles() {
   }
 
   // 3. Artifacts of descendant subagents (own artifacts win on a duplicate)
-  const fromSubagents = subagentArtifactEntries(props.session?.subagentArtifacts, currentFiles);
+  const fromSubagents = subagentArtifactEntries(session.value?.subagentArtifacts, currentFiles);
   currentFiles.push(...fromSubagents.keys);
   artifactSources.value = fromSubagents.sources;
 
@@ -133,7 +147,7 @@ function syncArtifactFiles() {
 
 // Reset artifact states on session switch
 watch(
-  () => props.sessionId,
+  () => sessionId.value,
   () => {
     modifiedFiles.value = [];
     artifactSources.value = {};
@@ -146,7 +160,7 @@ watch(
 
 // Collect modified files from messages & session artifacts
 watch(
-  [() => props.messages, () => props.artifacts, () => props.session?.subagentArtifacts],
+  [() => messages.value, () => artifacts.value, () => session.value?.subagentArtifacts],
   () => {
     syncArtifactFiles();
   },
@@ -156,7 +170,7 @@ watch(
 // Whether the chat runs with a /shared directory is decided by the backend
 // (session JSON); a subagent just seen in the list also implies it.
 const hasSharedDir = computed(
-  () => !!props.session?.hasShared || !!props.session?.parentChatId || props.subagents.length > 0,
+  () => !!session.value?.hasShared || !!session.value?.parentChatId || subagents.value.length > 0,
 );
 
 function handleOpenArtifact(file: string) {
@@ -179,16 +193,16 @@ function toggleArtifactDrawer() {
 }
 
 function navigateToChat() {
-  if (props.sessionId) {
-    router.push(buildChatRoute(props.sessionId));
+  if (sessionId.value) {
+    router.push(buildChatRoute(sessionId.value));
   } else {
     activeView.value = "chat";
   }
 }
 
 function navigateToFiles() {
-  if (props.sessionId) {
-    router.push(buildFilesRoute(props.sessionId, selectedFilePath.value));
+  if (sessionId.value) {
+    router.push(buildFilesRoute(sessionId.value, selectedFilePath.value));
   } else {
     activeView.value = "file";
   }
@@ -198,8 +212,8 @@ function navigateToVcs(gitRoot?: string) {
   if (gitRoot) {
     emit("open-diff", gitRoot);
   }
-  if (props.sessionId) {
-    router.push(buildVcsRoute(props.sessionId, selectedCommit.value, selectedFilePath.value));
+  if (sessionId.value) {
+    router.push(buildVcsRoute(sessionId.value, selectedCommit.value, selectedFilePath.value));
   } else {
     activeView.value = "vcs";
   }
@@ -264,6 +278,7 @@ function navigateToVcs(gitRoot?: string) {
         :isRunning="isRunning"
         :dirLock="dirLock"
         :isUnlocking="isUnlocking"
+        :connectionState="connectionState"
         :session="session"
         :subagents="subagents"
         :parentSession="parentSession"
@@ -277,14 +292,15 @@ function navigateToVcs(gitRoot?: string) {
         @toggle-terminal="emit('toggle-terminal')"
         @toggle-sidebar="emit('toggle-sidebar')"
         @toggle-artifact-drawer="toggleArtifactDrawer"
-        @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
-        @edit-queued="(id, text) => emit('edit-queued', id, text)"
-        @delete-queued="(id) => emit('delete-queued', id)"
-        @send-now-queued="(id) => emit('send-now-queued', id)"
+        @ask-replied="handleAskReplied"
+        @edit-queued="handleEditQueued"
+        @delete-queued="handleDeleteQueued"
+        @send-now-queued="handleSendNowQueued"
+        @retry-connection="store.retryConnection"
         @retry="emit('retry')"
         @unlock="emit('unlock')"
         @open-session="(id) => emit('open-session', id)"
-        @kill-subagent="(id) => emit('kill-subagent', id)"
+        @kill-subagent="handleKillSubagent"
       />
     </div>
 
@@ -298,15 +314,15 @@ function navigateToVcs(gitRoot?: string) {
           :workingAgentLabel="workingAgentLabel"
           :messages="messages"
           :sessionId="sessionId"
-          @ask-replied="(msgId, text) => emit('ask-replied', msgId, text)"
+          @ask-replied="handleAskReplied"
           @open-artifact="(file) => handleOpenArtifact(file)"
-          @stop="emit('stop')"
+          @stop="handleStop"
         />
         <ChatInput
           v-else
           :sessionId="sessionId"
           @send="(text, atts) => emit('send', text, atts)"
-          @stop="emit('stop')"
+          @stop="handleStop"
           :loading="loading"
           :isRunning="isRunning"
           :queuedCount="queuedMessages.length"
