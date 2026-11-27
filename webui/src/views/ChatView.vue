@@ -159,12 +159,20 @@ watch(
 );
 
 // Collect modified files from messages & session artifacts
+// `messages` yields a new array on every change, so it needs no deep watch.
 watch(
-  [() => messages.value, () => artifacts.value, () => session.value?.subagentArtifacts],
+  messages,
   () => {
     syncArtifactFiles();
   },
-  { deep: true, immediate: true },
+  { immediate: true },
+);
+watch(
+  [() => artifacts.value, () => session.value?.subagentArtifacts],
+  () => {
+    syncArtifactFiles();
+  },
+  { deep: true },
 );
 
 // Whether the chat runs with a /shared directory is decided by the backend

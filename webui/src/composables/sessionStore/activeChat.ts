@@ -19,6 +19,7 @@ export function createActiveChat(
     activeSession,
     activeAgent,
     rawMessages,
+    replaceMessage,
     artifacts,
     queuedMessages,
     isRunning,
@@ -140,9 +141,8 @@ export function createActiveChat(
   };
 
   const updateMessageReply = (msgId: string, replyText: string) => {
-    rawMessages.value = rawMessages.value.map((m) =>
-      m.id === msgId ? { ...m, replied: true, replyText } : m,
-    );
+    const existing = rawMessages.value.find((m) => m.id === msgId);
+    if (existing) replaceMessage(msgId, { ...existing, replied: true, replyText });
     // Answering an ask_user resumes the suspended run without a new status
     // event, so optimistically flip the session back to running. The done
     // event still clears it when the run actually finishes.

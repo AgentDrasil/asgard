@@ -109,6 +109,38 @@ describe("useChatScroll", () => {
     expect(hasNewMessages.value).toBe(false);
   });
 
+  it("re-scrolls without a deep watch when the last message is replaced by a grown copy", async () => {
+    const m1: ChatMessage = { id: "1", role: "assistant", content: "a", timestamp: 1 };
+    const messages = ref<ChatMessage[]>([m1]);
+    const { scrollContainerRef } = useChatScroll({
+      messages,
+      sessionId: ref<string | null>("sess-1"),
+      isDetailsOpen: ref<boolean | undefined>(true),
+    });
+    const scrollToMock = vi.fn<(options?: ScrollToOptions) => void>();
+    scrollContainerRef.value = {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+      scrollTo: scrollToMock,
+    } as unknown as HTMLDivElement;
+    await nextTick();
+    scrollToMock.mockClear();
+
+    // Streamed growth: new array holding a new object for the last message.
+    messages.value = [{ ...m1, content: "ab" }];
+    await nextTick();
+    await nextTick();
+    expect(scrollToMock).toHaveBeenCalled();
+
+    scrollToMock.mockClear();
+    // Append: new array with one more message.
+    messages.value = [...messages.value, { id: "2", role: "user", content: "x", timestamp: 2 }];
+    await nextTick();
+    await nextTick();
+    expect(scrollToMock).toHaveBeenCalled();
+  });
+
   it("maintains auto-sticking to bottom during rapid consecutive stream updates", async () => {
     const messages = ref<ChatMessage[]>([]);
     const sessionId = ref<string | null>("sess-1");

@@ -175,27 +175,23 @@ export function useChatScroll(options: UseChatScrollOptions) {
   );
 
   // 2. Messages watcher: auto-scroll if at bottom, otherwise mark hasNewMessages
-  watch(
-    messages,
-    async () => {
-      const el = scrollContainerRef.value;
-      const isAtBottom =
-        switchingSession ||
-        !el ||
-        el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD;
+  watch(messages, async () => {
+    const el = scrollContainerRef.value;
+    const isAtBottom =
+      switchingSession ||
+      !el ||
+      el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD;
 
-      if (isAtBottom) {
-        await nextTick();
-        stickToBottom();
-        checkScrollPosition();
-        hasNewMessages.value = false;
-        scheduleRecheck();
-      } else {
-        hasNewMessages.value = true;
-      }
-    },
-    { deep: true },
-  );
+    if (isAtBottom) {
+      await nextTick();
+      stickToBottom();
+      checkScrollPosition();
+      hasNewMessages.value = false;
+      scheduleRecheck();
+    } else {
+      hasNewMessages.value = true;
+    }
+  });
 
   return {
     scrollContainerRef,

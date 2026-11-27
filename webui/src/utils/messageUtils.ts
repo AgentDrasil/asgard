@@ -26,13 +26,27 @@ export function isToolMessage(msg: ChatMessage | undefined): boolean {
 
 export function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
-  let i = 0;
+  mergeToolMessagesFrom(msgs, 0, out, []);
+  return out;
+}
+
+// mergeToolMessagesFrom merges msgs[from..] and appends the result to `out`.
+// `ends` receives, for every pushed entry, the exclusive raw index at which
+// that entry stops consuming messages. `from` must be a group boundary.
+function mergeToolMessagesFrom(
+  msgs: ChatMessage[],
+  from: number,
+  out: ChatMessage[],
+  ends: number[],
+): void {
+  let i = from;
 
   while (i < msgs.length) {
     const cur = msgs[i];
     if (!isToolMessage(cur)) {
       out.push(cur);
       i += 1;
+      ends.push(i);
       continue;
     }
 
@@ -73,9 +87,35 @@ export function mergeToolMessages(msgs: ChatMessage[]): ChatMessage[] {
 
     mergedMsg.content = items.join(`\n${TOOL_ITEM_DELIMITER}\n`);
     out.push(mergedMsg);
+    ends.push(i);
   }
+}
 
-  return out;
+// createIncrementalToolMerger returns a stateful equivalent of
+// mergeToolMessages. Callers report the lowest raw index whose message was
+// added, replaced or removed since the previous call (0 for "anything may have
+// changed"); entries wholly before it are reused, so a streamed append only
+// re-merges the last tool group. Output is identical to mergeToolMessages.
+export function createIncrementalToolMerger() {
+  let out: ChatMessage[] = [];
+  let ends: number[] = [];
+
+  return (msgs: ChatMessage[], dirtyFrom: number): ChatMessage[] => {
+    // First entry whose consumed range reaches the dirty index (it, or the
+    // lookahead/extension of a tool group, may be affected). Entries ending
+    // before it only depend on unchanged messages.
+    let lo = 0;
+    let hi = ends.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ends[mid] >= dirtyFrom) hi = mid;
+      else lo = mid + 1;
+    }
+    out.length = lo;
+    ends.length = lo;
+    mergeToolMessagesFrom(msgs, lo > 0 ? ends[lo - 1] : 0, out, ends);
+    return out.slice();
+  };
 }
 
 function mergeFiles(target: ChatMessage, source: ChatMessage) {

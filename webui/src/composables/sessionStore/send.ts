@@ -28,6 +28,8 @@ export function createSender(
     activeSessionId,
     activeSession,
     rawMessages,
+    upsertMessage,
+    replaceMessage,
     queuedMessages,
     isRunning,
     waitingSubagents,
@@ -143,7 +145,7 @@ export function createSender(
       timestamp: Date.now(),
       attachments: opts?.attachments,
     };
-    rawMessages.value = [...rawMessages.value, userMsg];
+    upsertMessage(userMsg, () => userMsg);
 
     let createdHere = false;
     if (!currentThreadId) {
@@ -201,10 +203,7 @@ export function createSender(
           const combined = [...(opts?.attachments || []), ...uploadedAttachments];
           const finalAttachments = combined.length > 0 ? combined : undefined;
           userMsg.attachments = finalAttachments;
-          const msgIdx = rawMessages.value.findIndex((m) => m.id === userMsgId);
-          if (msgIdx > -1) {
-            rawMessages.value[msgIdx] = { ...userMsg };
-          }
+          replaceMessage(userMsgId, { ...userMsg });
         }
       } else {
         rawMessages.value = rawMessages.value.filter((m) => m.id !== userMsgId);

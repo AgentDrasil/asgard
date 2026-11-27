@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 import type { Router } from "vue-router";
-import type { AgentInfo, SendNowResult } from "../types";
+import type { AgentInfo, ChatMessage, SendNowResult } from "../types";
 import { t } from "../i18n";
 import { useToast } from "./useToast";
 import { createSessionState, MAX_QUEUED_MESSAGES } from "./sessionStore/state";
@@ -37,7 +37,8 @@ export function useSessionStore(options: SessionStoreOptions = {}) {
     activeSessionId: state.activeSessionId,
     activeSession: state.activeSession,
     activeAgent: state.activeAgent,
-    rawMessages: state.rawMessages,
+    // Read-only view: replace via the store, never mutate in place.
+    rawMessages: state.rawMessages as Readonly<Ref<readonly ChatMessage[]>>,
     messages: state.messages,
     artifacts: state.artifacts,
     queuedMessages: state.queuedMessages,

@@ -23,6 +23,7 @@ export function createConnection(state: SessionState) {
     activeSession,
     activeAgent,
     rawMessages,
+    upsertMessage,
     artifacts,
     queuedMessages,
     isRunning,
@@ -38,14 +39,7 @@ export function createConnection(state: SessionState) {
     if (ev.chatId && ev.chatId !== activeSessionId.value) return;
     const incoming = ev.message;
 
-    const idx = rawMessages.value.findIndex((m) => m.id === incoming.id);
-    if (idx > -1) {
-      const updated = [...rawMessages.value];
-      updated[idx] = { ...updated[idx], ...incoming };
-      rawMessages.value = updated;
-    } else {
-      rawMessages.value = [...rawMessages.value, incoming];
-    }
+    upsertMessage(incoming);
 
     if (incoming.artifactFiles && incoming.artifactFiles.length > 0) {
       mergeArtifactsList(incoming.artifactFiles);

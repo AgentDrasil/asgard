@@ -1,6 +1,6 @@
-import { ref, computed, type Ref } from "vue";
+import { ref, computed, customRef, type Ref } from "vue";
 import type { ChatSession, AgentInfo, ChatMessage, QueuedMessage } from "../../types";
-import { mergeToolMessages } from "../../utils/messageUtils";
+import { createIncrementalToolMerger } from "../../utils/messageUtils";
 
 export const MAX_QUEUED_MESSAGES = 3;
 
@@ -15,8 +15,78 @@ export function createSessionState(agents: Ref<AgentInfo[]>) {
   const activeSession = ref<ChatSession | null>(null);
   const activeAgent = ref<AgentInfo | null>(null);
 
-  const rawMessages = ref<ChatMessage[]>([]);
-  const messages = computed<ChatMessage[]>(() => mergeToolMessages(rawMessages.value));
+  // rawMessages is a shallow ref: assigning a whole new array (filter, map,
+  // snapshot merge, reset) invalidates the merged view from index 0, while
+  // upsertMessage/replaceMessage mutate in place and only invalidate from the
+  // touched index. Messages are never mutated; every update swaps the object
+  // (refreshActiveSnapshot compares object identity to detect live changes).
+  // Contract: the array identity does NOT change on in-place upserts, so
+  // callers must watch `messages` (a new array per change), never rawMessages.
+  // Never mutate rawMessages in place (push/splice); only assign a whole new
+  // array or go through upsertMessage/replaceMessage, which keep idIndex and
+  // dirtyFrom in sync.
+  let rawArray: ChatMessage[] = [];
+  let dirtyFrom = 0;
+  let idIndex: Map<string, number> | null = null;
+  let triggerRaw: () => void = () => {};
+  const rawMessages = customRef<ChatMessage[]>((track, trigger) => {
+    triggerRaw = trigger;
+    return {
+      get() {
+        track();
+        return rawArray;
+      },
+      set(next) {
+        rawArray = next;
+        dirtyFrom = 0;
+        idIndex = null;
+        trigger();
+      },
+    };
+  });
+  const indexOfId = (id: string): number => {
+    if (!idIndex) {
+      idIndex = new Map();
+      for (let i = 0; i < rawArray.length; i++) {
+        if (!idIndex.has(rawArray[i].id)) idIndex.set(rawArray[i].id, i);
+      }
+    }
+    return idIndex.get(id) ?? -1;
+  };
+  const touch = (from: number) => {
+    if (from < dirtyFrom) dirtyFrom = from;
+    triggerRaw();
+  };
+  // Appends `incoming`, or replaces the message with the same id by
+  // `merge(existing)` (a new object). O(1) amortized.
+  const upsertMessage = (
+    incoming: ChatMessage,
+    merge: (existing: ChatMessage) => ChatMessage = (existing) => ({ ...existing, ...incoming }),
+  ) => {
+    const idx = indexOfId(incoming.id);
+    if (idx > -1) {
+      rawArray[idx] = merge(rawArray[idx]);
+      touch(idx);
+    } else {
+      idIndex!.set(incoming.id, rawArray.length);
+      rawArray.push(incoming);
+      touch(rawArray.length - 1);
+    }
+  };
+  // Replaces the message with this id by a new object; no-op when absent.
+  const replaceMessage = (id: string, next: ChatMessage) => {
+    const idx = indexOfId(id);
+    if (idx < 0) return;
+    rawArray[idx] = next;
+    touch(idx);
+  };
+  const mergeIncremental = createIncrementalToolMerger();
+  const messages = computed<ChatMessage[]>(() => {
+    const raw = rawMessages.value;
+    const from = dirtyFrom;
+    dirtyFrom = raw.length;
+    return mergeIncremental(raw, from);
+  });
   const artifacts = ref<string[]>([]);
   const queuedMessages = ref<QueuedMessage[]>([]);
   const canEnqueue = computed<boolean>(() => queuedMessages.value.length < MAX_QUEUED_MESSAGES);
@@ -38,16 +108,13 @@ export function createSessionState(agents: Ref<AgentInfo[]>) {
     if (!content) return;
     const exists = rawMessages.value.some((m) => m.role === "error" && m.content === content);
     if (exists) return;
-    rawMessages.value = [
-      ...rawMessages.value,
-      {
-        id: `error-${crypto.randomUUID()}`,
-        role: "error",
-        content,
-        agentName: agentName || activeAgent.value?.name,
-        timestamp: Date.now(),
-      },
-    ];
+    upsertMessage({
+      id: `error-${crypto.randomUUID()}`,
+      role: "error",
+      content,
+      agentName: agentName || activeAgent.value?.name,
+      timestamp: Date.now(),
+    });
   };
 
   const mergeArtifactsList = (newFiles: string[]) => {
@@ -66,6 +133,8 @@ export function createSessionState(agents: Ref<AgentInfo[]>) {
     activeSession,
     activeAgent,
     rawMessages,
+    upsertMessage,
+    replaceMessage,
     messages,
     artifacts,
     queuedMessages,
